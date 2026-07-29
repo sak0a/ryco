@@ -8,6 +8,8 @@ import type {
   RelayFrame,
   RelayLimits,
 } from "@ryco/contracts/relay";
+import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
+import { prepareRelayMessage } from "@ryco/shared/relayMessageChunks";
 
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
@@ -16,6 +18,7 @@ const version = { protocolMajor: 1, protocolMinor: 2 } as const;
 export interface RelayRpcChannelSession {
   readonly receive: (bytes: Uint8Array) => Promise<boolean>;
   readonly queuedBytes: () => Promise<number>;
+  readonly supportsChunkedMessages: () => boolean;
   readonly close: () => Promise<void>;
 }
 
@@ -131,6 +134,21 @@ export class RelayChannelRegistry {
     }
   }
 
+  /**
+   * How many frames a paused channel may still deliver before it counts as a
+   * slow consumer.
+   *
+   * This used to be 1, on the assumption that one message is one frame. A
+   * message can now arrive as several, so a one-frame grace would kill a
+   * channel mid-message the moment it paused. The bound is the queue budget
+   * rather than RELAY_MAX_RPC_MESSAGE_BYTES: a peer cannot have more than
+   * `maxQueuedBytes` in flight regardless, so this is the tightest allowance
+   * that cannot sever a legitimate message.
+   */
+  #graceFrameAllowance(): number {
+    return Math.ceil(this.#limits.maxQueuedBytes / this.#limits.maxDataChunkBytes) + 1;
+  }
+
   async closeChannel(channelId: RelayChannelId, reason?: RelayCloseReason) {
     const key = channelId as string;
     const entry = this.#channels.get(key);
@@ -201,22 +219,43 @@ export class RelayChannelRegistry {
         effectiveRole: role,
         send: (bytes) => {
           if (entry === undefined || entry.closed || outputSequence > 0xffff_ffff) return false;
+          // Two different failures used to collapse into one close reason. An
+          // oversized frame is a `transfer_limit` — exactly what the inbound
+          // check reports for the identical condition below — while a full
+          // queue is genuine backpressure and stays `slow_consumer`. Reporting
+          // the first as the second makes an application bug ("this node emitted
+          // a frame larger than the negotiated limit") look like a network
+          // problem, which is why it went undiagnosed.
+          // A message larger than one data frame is split across several. All
+          // chunks of one message go into the per-channel FIFO synchronously
+          // here, so they cannot interleave with another message.
+          const prepared = prepareRelayMessage(bytes, {
+            maxChunkBytes: this.#limits.maxDataChunkBytes,
+            maxMessageBytes: Math.min(
+              RELAY_MAX_RPC_MESSAGE_BYTES,
+              this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes,
+            ),
+            peerSupportsChunking: entry.session.supportsChunkedMessages(),
+          });
           const accepted =
-            bytes.byteLength <= this.#limits.maxDataChunkBytes &&
-            this.#sendQueue.enqueueData({
-              type: "data",
-              ...version,
-              channelId: frame.channelId,
-              sequence: outputSequence as RelayDataFrame["sequence"],
-              payload: Uint8Array.from(bytes),
-            });
+            prepared.kind === "ready" &&
+            prepared.payloads.every((payload) =>
+              this.#sendQueue.enqueueData({
+                type: "data",
+                ...version,
+                channelId: frame.channelId,
+                sequence: outputSequence++ as RelayDataFrame["sequence"],
+                payload: Uint8Array.from(payload),
+              }),
+            );
           if (accepted) {
-            outputSequence += 1;
             entry.outboundSequence = outputSequence;
             this.#onOutboundReady();
           } else {
+            const reason: RelayCloseReason =
+              prepared.kind === "error" ? "transfer_limit" : "slow_consumer";
             queueMicrotask(() => {
-              void this.closeChannel(frame.channelId, "slow_consumer").catch(this.#onFatal);
+              void this.closeChannel(frame.channelId, reason).catch(this.#onFatal);
             });
           }
           return accepted;
@@ -275,7 +314,10 @@ export class RelayChannelRegistry {
     }
     if (entry.inboundPaused) {
       entry.graceFrames += 1;
-      if (entry.graceFrames > 1) {
+      // One message can now arrive as many frames, so a one-frame grace would
+      // kill a channel mid-message the instant it paused. Allow a whole
+      // maximum-size message to land, plus one.
+      if (entry.graceFrames > this.#graceFrameAllowance()) {
         await this.closeChannel(frame.channelId, "slow_consumer");
         return;
       }

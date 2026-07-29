@@ -2175,7 +2175,8 @@ function applyEnvironmentOrchestrationEvent(
       return existing
         ? upsertWorktreeState(state, {
             ...existing,
-            title: event.payload.title ?? null,
+            ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+            ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
             updatedAt: event.payload.changedAt,
           })
         : state;

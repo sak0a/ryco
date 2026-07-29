@@ -1,14 +1,39 @@
 import { EnvironmentId } from "@ryco/contracts";
+import {
+  NATIVE_HANDOFF_APPROVE_PATH_SUFFIX,
+  NATIVE_HANDOFF_CANCEL_PATH_SUFFIX,
+  NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX,
+  NATIVE_HANDOFF_REDEEM_PATH,
+  NATIVE_HANDOFF_START_PATH,
+  NativeHandoffApproveResponse,
+  NativeHandoffCancelResponse,
+  NativeHandoffId,
+  NativeHandoffPresentation,
+  NativeHandoffRedeemRequest,
+  NativeHandoffRedeemResponse,
+  NativeHandoffStartRequest,
+  NativeHandoffStartResponse,
+  type NativeHandoffApproveResponse as NativeHandoffApproveResponseType,
+  type NativeHandoffCancelResponse as NativeHandoffCancelResponseType,
+  type NativeHandoffPresentation as NativeHandoffPresentationType,
+  type NativeHandoffRedeemRequest as NativeHandoffRedeemRequestType,
+  type NativeHandoffRedeemResponse as NativeHandoffRedeemResponseType,
+  type NativeHandoffStartRequest as NativeHandoffStartRequestType,
+  type NativeHandoffStartResponse as NativeHandoffStartResponseType,
+} from "@ryco/contracts/native-handoff";
+import { Schema } from "effect";
 
 import type {
   DpopSignerService,
   EndpointService,
   HttpClientService,
+  NativeAuthorizationService,
   PasskeyCeremonyService,
   SessionCredentialsService,
 } from "../platform/index.ts";
 
 import type {
+  HostedAccountSecurity,
   HostedAddPasskeyResult,
   HostedHubNode,
   HostedHubPasskey,
@@ -21,6 +46,7 @@ import {
   validatePasskeyAuthenticationOptions,
   validatePasskeyRegistrationOptions,
 } from "../relay/webauthn.ts";
+import { runNativeHandoff } from "./nativeHandoff.ts";
 
 const JSON_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
 
@@ -69,6 +95,13 @@ const MAX_REVOCATION_REASON_LENGTH = 256;
  */
 const MAX_TOTP_SECRET_LENGTH = 256;
 const MAX_TOTP_PROVISIONING_URI_LENGTH = 2048;
+const MAX_AUTH_EMAIL_LENGTH = 254;
+const MAX_AUTH_PASSWORD_LENGTH = 256;
+const MAX_AUTH_TOTP_LENGTH = 16;
+const MAX_AUTH_RECOVERY_CODE_LENGTH = 128;
+const AUTH_EMAIL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const ACCOUNT_SECURITY_KEYS = new Set(["passwordConfigured", "totpEnrolled", "email"]);
+const ACCOUNT_SECURITY_EMAIL_KEYS = new Set(["address", "verified"]);
 
 /**
  * The provisioning URI is an `otpauth://` key URI (RFC-style, what authenticator
@@ -353,6 +386,20 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function decodeContract<S extends Schema.Top>(
+  schema: S,
+  value: unknown,
+  failure: "invalid_request" | "invalid_response",
+): S["Type"] {
+  try {
+    return Schema.decodeUnknownSync(schema as unknown as Schema.Decoder<unknown>)(value, {
+      onExcessProperty: "error",
+    }) as S["Type"];
+  } catch {
+    throw new HostedHubApiError(failure, failure === "invalid_request" ? 400 : 502);
+  }
+}
+
 function nullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === "number" && Number.isSafeInteger(value));
 }
@@ -437,6 +484,53 @@ function passkeyValue(value: unknown): HostedHubPasskey | null {
 }
 
 /**
+ * Strictly decode the authenticated account-security self-read.
+ *
+ * Unlike the passkey projection, this response is an exact, tiny contract. An
+ * unexpected member is rejected rather than silently carried forward so Hub
+ * credential metadata can never reach a surface by accident.
+ */
+function accountSecurityValue(value: unknown): HostedAccountSecurity | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (
+    keys.length !== ACCOUNT_SECURITY_KEYS.size ||
+    keys.some((key) => !ACCOUNT_SECURITY_KEYS.has(key))
+  ) {
+    return null;
+  }
+  if (typeof record.passwordConfigured !== "boolean" || typeof record.totpEnrolled !== "boolean") {
+    return null;
+  }
+  if (record.email === null) {
+    return {
+      passwordConfigured: record.passwordConfigured,
+      totpEnrolled: record.totpEnrolled,
+      email: null,
+    };
+  }
+  if (typeof record.email !== "object" || Array.isArray(record.email)) return null;
+  const email = record.email as Record<string, unknown>;
+  const emailKeys = Object.keys(email);
+  if (
+    emailKeys.length !== ACCOUNT_SECURITY_EMAIL_KEYS.size ||
+    emailKeys.some((key) => !ACCOUNT_SECURITY_EMAIL_KEYS.has(key)) ||
+    typeof email.address !== "string" ||
+    email.address.length === 0 ||
+    email.address.length > MAX_AUTH_EMAIL_LENGTH ||
+    typeof email.verified !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    passwordConfigured: record.passwordConfigured,
+    totpEnrolled: record.totpEnrolled,
+    email: { address: email.address, verified: email.verified },
+  };
+}
+
+/**
  * The optional fallback-session step-up code.
  *
  * A session minted from a password, a recovery code, or an email recovery link
@@ -465,6 +559,26 @@ function stepUpBody(input: HostedAccountStepUp | undefined): { readonly totpCode
   if (typeof totpCode !== "string") return {};
   const trimmed = totpCode.trim();
   return trimmed.length > 0 ? { totpCode } : {};
+}
+
+function boundedAuthString(value: unknown, maxLength: number): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > maxLength) {
+    throw new HostedHubApiError("invalid_request", 400);
+  }
+  return value;
+}
+
+function fallbackTotpBody(value: unknown): { readonly totpCode?: string } {
+  if (value === undefined || value === null || value === "") return {};
+  return { totpCode: boundedAuthString(value, MAX_AUTH_TOTP_LENGTH) };
+}
+
+function emailTokenValue(value: unknown): string {
+  const token = boundedAuthString(value, 64);
+  if (!AUTH_EMAIL_TOKEN_PATTERN.test(token)) {
+    throw new HostedHubApiError("invalid_request", 400);
+  }
+  return token;
 }
 
 /** The bounded TOTP enrolment secret, or `null` when the value is not one. */
@@ -538,6 +652,8 @@ export interface HostedHubApiDependencies {
   readonly sessionCredentials: SessionCredentialsService;
   /** Required when `sessionCredentials.mode` is `"bearer"`; unused in cookie mode. */
   readonly dpopSigner?: DpopSignerService;
+  /** Preferred bearer sign-in path for dynamic/self-hosted Hub domains. */
+  readonly nativeAuthorization?: NativeAuthorizationService;
 }
 
 export class HostedHubApi {
@@ -546,6 +662,7 @@ export class HostedHubApi {
   readonly #passkeyCeremony: PasskeyCeremonyService;
   readonly #sessionCredentials: SessionCredentialsService;
   readonly #dpopSigner: DpopSignerService | undefined;
+  readonly #nativeAuthorization: NativeAuthorizationService | undefined;
 
   constructor(dependencies: HostedHubApiDependencies) {
     this.#endpoint = dependencies.endpoint;
@@ -553,6 +670,7 @@ export class HostedHubApi {
     this.#passkeyCeremony = dependencies.passkeyCeremony;
     this.#sessionCredentials = dependencies.sessionCredentials;
     this.#dpopSigner = dependencies.dpopSigner;
+    this.#nativeAuthorization = dependencies.nativeAuthorization;
     if (this.#sessionCredentials.mode === "bearer") {
       // Fail closed: a bearer (native) session cannot be presented without a
       // DPoP signer and a token holder, so a misconfigured adapter must not
@@ -612,6 +730,23 @@ export class HostedHubApi {
   }
 
   async signIn(signal?: AbortSignal): Promise<HostedHubSessionResponse> {
+    if (this.#isBearer && this.#nativeAuthorization) {
+      const redeemed = await runNativeHandoff({
+        origin: this.#endpoint.origin(),
+        platform: this.#nativeAuthorization,
+        ...(signal ? { signal } : {}),
+        start: (request, handoffSignal) =>
+          this.#startNativeHandoff(request, handoffSignal) as Promise<unknown>,
+        redeem: (request, handoffSignal) =>
+          this.#redeemNativeHandoff(request, handoffSignal) as Promise<unknown>,
+      });
+      // `runNativeHandoff` validates the full contract and fences stale browser
+      // results before returning. Re-project the account/session through the
+      // long-standing runtime codec, then persist the token last.
+      const response = this.#accountAndSession(redeemed as unknown as Record<string, unknown>);
+      this.#writeBearerToken(redeemed.token);
+      return response;
+    }
     const base = this.#isBearer ? "/api/auth/native/passkey" : "/api/auth/passkey";
     const options = await this.#request(`${base}/options`, {
       method: "POST",
@@ -631,6 +766,198 @@ export class HostedHubApi {
         ...(signal ? { signal } : {}),
       }),
     );
+  }
+
+  async signInWithPassword(
+    input: {
+      readonly email: string;
+      readonly password: string;
+      readonly totpCode?: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    this.#requireCookieTransport();
+    return this.#finishLogin(
+      await this.#request("/api/auth/password", {
+        method: "POST",
+        body: {
+          email: boundedAuthString(input.email, MAX_AUTH_EMAIL_LENGTH),
+          password: boundedAuthString(input.password, MAX_AUTH_PASSWORD_LENGTH),
+          ...fallbackTotpBody(input.totpCode),
+        },
+        ...(signal ? { signal } : {}),
+      }),
+    );
+  }
+
+  async signInWithRecoveryCode(
+    code: string,
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    this.#requireCookieTransport();
+    return this.#finishLogin(
+      await this.#request("/api/auth/recovery", {
+        method: "POST",
+        body: { code: boundedAuthString(code, MAX_AUTH_RECOVERY_CODE_LENGTH) },
+        ...(signal ? { signal } : {}),
+      }),
+    );
+  }
+
+  async requestEmailRecovery(email: string, signal?: AbortSignal): Promise<void> {
+    this.#requireCookieTransport();
+    const result = await this.#request("/api/auth/recovery/email/request", {
+      method: "POST",
+      body: { email: boundedAuthString(email, MAX_AUTH_EMAIL_LENGTH) },
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+  }
+
+  async confirmEmailRecovery(
+    input: { readonly token: string; readonly totpCode?: string },
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    this.#requireCookieTransport();
+    return this.#finishLogin(
+      await this.#request("/api/auth/recovery/email/confirm", {
+        method: "POST",
+        body: {
+          token: emailTokenValue(input.token),
+          ...fallbackTotpBody(input.totpCode),
+        },
+        ...(signal ? { signal } : {}),
+      }),
+    );
+  }
+
+  async confirmEmailVerification(token: string, signal?: AbortSignal): Promise<void> {
+    this.#requireCookieTransport();
+    const result = await this.#request("/api/auth/email/verify", {
+      method: "POST",
+      body: { token: emailTokenValue(token) },
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+  }
+
+  async startNativeHandoff(
+    request: NativeHandoffStartRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffStartResponseType> {
+    return this.#startNativeHandoff(request, signal);
+  }
+
+  async #startNativeHandoff(
+    request: NativeHandoffStartRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffStartResponseType> {
+    if (!this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
+    const body = decodeContract(NativeHandoffStartRequest, request, "invalid_request");
+    return decodeContract(
+      NativeHandoffStartResponse,
+      await this.#request(NATIVE_HANDOFF_START_PATH, {
+        method: "POST",
+        body,
+        dpop: "mint",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async redeemNativeHandoff(
+    request: NativeHandoffRedeemRequestType,
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    const redeemed = await this.#redeemNativeHandoff(request, signal);
+    const response = this.#accountAndSession(redeemed as unknown as Record<string, unknown>);
+    this.#writeBearerToken(redeemed.token);
+    return response;
+  }
+
+  async #redeemNativeHandoff(
+    request: NativeHandoffRedeemRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffRedeemResponseType> {
+    if (!this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
+    const body = decodeContract(NativeHandoffRedeemRequest, request, "invalid_request");
+    return decodeContract(
+      NativeHandoffRedeemResponse,
+      await this.#request(NATIVE_HANDOFF_REDEEM_PATH, {
+        method: "POST",
+        body,
+        dpop: "mint",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async getNativeHandoffPresentation(
+    handoffId: string,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffPresentationType> {
+    this.#requireCookieTransport();
+    const id = decodeContract(NativeHandoffId, handoffId, "invalid_request");
+    return decodeContract(
+      NativeHandoffPresentation,
+      await this.#request(
+        `${NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX}${id}`,
+        signal ? { signal } : {},
+      ),
+      "invalid_response",
+    );
+  }
+
+  async approveNativeHandoff(
+    handoffId: string,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffApproveResponseType> {
+    this.#requireCookieTransport();
+    const id = decodeContract(NativeHandoffId, handoffId, "invalid_request");
+    return decodeContract(
+      NativeHandoffApproveResponse,
+      await this.#request(
+        `${NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX}${id}${NATIVE_HANDOFF_APPROVE_PATH_SUFFIX}`,
+        {
+          method: "POST",
+          body: {},
+          csrf: true,
+          ...(signal ? { signal } : {}),
+        },
+      ),
+      "invalid_response",
+    );
+  }
+
+  async cancelNativeHandoff(
+    handoffId: string,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffCancelResponseType> {
+    this.#requireCookieTransport();
+    const id = decodeContract(NativeHandoffId, handoffId, "invalid_request");
+    return decodeContract(
+      NativeHandoffCancelResponse,
+      await this.#request(
+        `${NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX}${id}${NATIVE_HANDOFF_CANCEL_PATH_SUFFIX}`,
+        {
+          method: "POST",
+          body: {},
+          csrf: true,
+          ...(signal ? { signal } : {}),
+        },
+      ),
+      "invalid_response",
+    );
+  }
+
+  #requireCookieTransport(): void {
+    if (this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
   }
 
   async redeemInvitation(
@@ -692,6 +1019,21 @@ export class HostedHubApi {
       if (!passkey) throw new HostedHubApiError("invalid_response", 502);
       return passkey;
     });
+  }
+
+  /**
+   * Read the signed-in account's bounded credential posture.
+   *
+   * `GET /api/account/security` contains no secret material. The user's own
+   * email address is PII, so this client validates and returns it but never
+   * logs it or includes it in an error.
+   */
+  async getAccountSecurity(signal?: AbortSignal): Promise<HostedAccountSecurity> {
+    const result = accountSecurityValue(
+      await this.#request("/api/account/security", signal ? { signal } : {}),
+    );
+    if (!result) throw new HostedHubApiError("invalid_response", 502);
+    return result;
   }
 
   /**

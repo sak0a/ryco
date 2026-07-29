@@ -1,182 +1,250 @@
 import { useNavigation } from "@react-navigation/native";
-import { useLayoutEffect } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { useHeaderHeight } from "@react-navigation/elements";
+import { useLayoutEffect, useMemo, useReducer, useState } from "react";
+import { Pressable, TextInput, View } from "react-native";
 
-import { AppText as Text } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
-import { EmptyState } from "../../components/EmptyState";
+import type { EnvironmentId, ThreadId } from "@ryco/contracts";
+
+import { HomeModeControl } from "../../components/HomeModeControl";
+import { NewTaskFab } from "../../components/NewTaskFab";
+import { NodeScopeControl } from "../../components/NodeScopeControl";
 import { RycoWordmark } from "../../components/RycoWordmark";
-import { cn } from "../../lib/cn";
+import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
-import type { SidebarThreadSummary } from "@ryco/client-runtime/state/threads";
-import { useHomeThreadGroups } from "../../state/homeData";
+import { useHomeWorkspaceData } from "../../state/homeData";
 import { useStore } from "../../state/threadsRuntime";
-import { WorkspaceConnectionStatus } from "./WorkspaceConnectionStatus";
+import { buildInboxSections, resolveInboxEmptyState } from "../inbox/inboxModel";
+import { InboxScreen } from "../inbox/InboxScreen";
+import { NodesScreen } from "../nodes/NodesScreen";
+import { buildProjectNodeGroups } from "../projects/projectsModel";
+import { ProjectsScreen } from "../projects/ProjectsScreen";
+import { buildHomeChromeModel } from "./homeChromeModel";
+import { createHomeModeState, reduceHomeModeState, type HomeMode } from "./homeMode";
+import { useHomeEnvironments } from "./useHomeEnvironments";
 
-type StatusDotKind = "accent" | "success" | "warning" | "danger" | "idle";
-
-interface ThreadStatus {
-  readonly label: string;
-  readonly dot: StatusDotKind;
-  /** Semantic text color for the quiet trailing status label. */
-  readonly textClassName: string;
-}
-
-// Status is never color-alone (§6): the dot's fill/hollow shape and the trailing
-// label both encode state. Colors resolve through the semantic accent tokens.
-function threadStatus(thread: SidebarThreadSummary): ThreadStatus {
-  if (thread.hasPendingApprovals || thread.hasPendingUserInput) {
-    return { label: "Needs input", dot: "warning", textClassName: "text-warning" };
-  }
-  const status = thread.session?.status;
-  if (thread.latestTurn?.state === "running") {
-    return { label: "Working", dot: "accent", textClassName: "text-accent-strong" };
-  }
-  if (status === "connecting") {
-    return { label: "Connecting", dot: "accent", textClassName: "text-accent-strong" };
-  }
-  if (status === "error" || thread.latestTurn?.state === "error") {
-    return { label: "Error", dot: "danger", textClassName: "text-danger-foreground" };
-  }
-  return { label: "Idle", dot: "idle", textClassName: "text-foreground-tertiary" };
-}
-
-function StatusDot({ kind }: { readonly kind: StatusDotKind }) {
-  if (kind === "idle") {
-    return <View className="h-2.5 w-2.5 rounded-full border border-foreground-tertiary" />;
-  }
-  const fill = cn(
-    "h-2.5 w-2.5 rounded-full",
-    kind === "accent" && "bg-accent",
-    kind === "success" && "bg-success",
-    kind === "warning" && "bg-warning",
-    kind === "danger" && "bg-danger-foreground",
-  );
-  return <View className={fill} />;
-}
-
-// B2 Home. Grouped project/thread list over runtime-A selectors + the workspace
-// connection banner. Cursor rhythm: airy 20pt gutters, thin inset hairlines, a
-// leading status dot, quiet trailing metadata, white-capsule CTA.
 export function HomeScreen() {
   const navigation = useNavigation();
-  const groups = useHomeThreadGroups();
+  const headerHeight = useHeaderHeight();
+  const [home, dispatch] = useReducer(reduceHomeModeState, undefined, () => createHomeModeState());
+  const [searchVisible, setSearchVisible] = useState(false);
   const iconColor = useThemeColor("--color-icon");
+  const placeholderColor = useThemeColor("--color-placeholder");
+  const textColor = useThemeColor("--color-foreground");
+  const { projects, worktrees, threads } = useHomeWorkspaceData();
+  const environments = useHomeEnvironments();
 
-  // Home is the initial route; the pairing/settings surfaces are only reachable
-  // from here. Plain header symbols (no per-icon glass container) — the native
-  // nav bar provides the chrome; the buttons should read as bare icons.
+  const currentQuery = home.queryByMode[home.mode];
+  const currentNodeScope = home.nodeScopeByMode[home.mode];
+  const inboxSections = useMemo(
+    () =>
+      buildInboxSections({
+        projects,
+        worktrees,
+        threads,
+        environments,
+        query: home.queryByMode.inbox,
+        nodeScope: home.nodeScopeByMode.inbox,
+      }),
+    [
+      environments,
+      home.nodeScopeByMode.inbox,
+      home.queryByMode.inbox,
+      projects,
+      threads,
+      worktrees,
+    ],
+  );
+  const projectGroups = useMemo(
+    () =>
+      buildProjectNodeGroups({
+        projects,
+        worktrees,
+        threads,
+        environments,
+        query: home.queryByMode.projects,
+        nodeScope: home.nodeScopeByMode.projects,
+      }),
+    [
+      environments,
+      home.nodeScopeByMode.projects,
+      home.queryByMode.projects,
+      projects,
+      threads,
+      worktrees,
+    ],
+  );
+
+  const chrome = buildHomeChromeModel({ mode: home.mode, searchVisible });
+
+  const openNewTask = () =>
+    navigation.navigate("NewTask", {
+      environmentId: currentNodeScope ?? undefined,
+    });
+
   useLayoutEffect(() => {
     navigation.setOptions({
-      // The brand mark is the environment switcher's entry point: it opens the
-      // Connections sheet, which lists direct saved devices and hosted Hub
-      // nodes as two separate sections.
+      title: chrome.title,
       headerLeft: () => (
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Switch environment"
-          hitSlop={12}
-          className="active:opacity-50"
-          onPress={() => navigation.navigate("Connections")}
+          accessibilityLabel={chrome.headerLeft.accessibilityLabel}
+          className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
+          onPress={() => dispatch({ type: "select-mode", mode: chrome.headerLeftTargetMode })}
         >
           <RycoWordmark compact />
         </Pressable>
       ),
       headerRight: () => (
-        <View className="flex-row items-center gap-6">
+        <View className="flex-row items-center gap-2">
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Pair a device"
-            hitSlop={12}
-            className="active:opacity-50"
-            onPress={() => navigation.navigate("ConnectionsNew")}
+            accessibilityLabel={chrome.headerRight[0].accessibilityLabel}
+            accessibilityState={{ expanded: chrome.searchExpanded }}
+            className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
+            onPress={() => setSearchVisible((visible) => !visible)}
           >
-            <SymbolView name="link" size={20} tintColor={iconColor} type="monochrome" />
+            <SymbolView name="magnifyingglass" size={20} tintColor={iconColor} type="monochrome" />
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Settings"
-            hitSlop={12}
-            className="active:opacity-50"
+            accessibilityLabel={chrome.headerRight[1].accessibilityLabel}
+            className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
             onPress={() => navigation.navigate("SettingsSheet")}
           >
-            <SymbolView name="gearshape" size={22} tintColor={iconColor} type="monochrome" />
+            <SymbolView name="gearshape" size={20} tintColor={iconColor} type="monochrome" />
           </Pressable>
         </View>
       ),
     });
-  }, [navigation, iconColor]);
+  }, [chrome, iconColor, navigation]);
 
-  const openThread = (thread: SidebarThreadSummary) => {
+  const selectMode = (mode: HomeMode) => {
+    dispatch({ type: "select-mode", mode });
+  };
+
+  const openThread = (thread: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+  }) => {
     useStore.getState().setActiveEnvironmentId(thread.environmentId);
     navigation.navigate("Thread", {
       environmentId: thread.environmentId,
-      threadId: thread.id,
+      threadId: thread.threadId,
     });
   };
 
+  const clearFilters = () => {
+    dispatch({ type: "set-query", mode: home.mode, query: "" });
+    dispatch({ type: "set-node-scope", mode: home.mode, environmentId: null });
+  };
+
+  const inboxEmptyState = resolveInboxEmptyState({
+    environmentCount: environments.length,
+    projectCount: projects.length,
+    threadCount: threads.filter((thread) => thread.archivedAt === null).length,
+    hasFilter: home.queryByMode.inbox.length > 0 || home.nodeScopeByMode.inbox !== null,
+  });
+
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      className="flex-1 bg-screen"
-      contentContainerStyle={{ paddingBottom: 40 }}
-    >
-      <WorkspaceConnectionStatus />
-      {groups.length === 0 ? (
-        <View className="items-center gap-7 px-5 py-20">
-          <EmptyState
-            variant="plain"
-            title="No threads yet"
-            detail="Pair an environment and start a thread to see it here."
+    <View className="flex-1 bg-screen" style={{ paddingTop: headerHeight }}>
+      <HomeModeControl mode={home.mode} onSelect={selectMode} />
+      {searchVisible ? (
+        <View className="mx-4 mt-3 flex-row items-center rounded-2xl bg-sidebar-search px-4">
+          <SymbolView
+            name="magnifyingglass"
+            size={16}
+            tintColor={placeholderColor as string}
+            type="monochrome"
           />
-          <Pressable
-            onPress={() => navigation.navigate("ConnectionsNew")}
-            className="rounded-full bg-primary px-7 py-3.5 active:opacity-80"
-          >
-            <Text className="text-base font-ryco-bold text-primary-foreground">Pair a device</Text>
-          </Pressable>
+          <TextInput
+            autoFocus
+            accessibilityLabel={`Search ${chrome.title}`}
+            value={currentQuery}
+            onChangeText={(query) => dispatch({ type: "set-query", mode: home.mode, query })}
+            placeholder={`Search ${chrome.title.toLocaleLowerCase()}`}
+            placeholderTextColor={placeholderColor as string}
+            className="h-11 flex-1 px-3 font-sans text-base"
+            style={{ color: textColor as string }}
+            returnKeyType="search"
+          />
+          {currentQuery ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear search"
+              onPress={() => dispatch({ type: "set-query", mode: home.mode, query: "" })}
+              className="h-11 w-11 items-center justify-center"
+            >
+              <SymbolView
+                name="xmark.circle.fill"
+                size={17}
+                tintColor={placeholderColor as string}
+                type="monochrome"
+              />
+            </Pressable>
+          ) : null}
         </View>
-      ) : (
-        groups.map((group) => (
-          <View key={group.key} className="mt-6">
-            <Text className="px-5 pb-2.5 text-sm font-ryco-medium text-foreground-muted">
-              {group.label}
-            </Text>
-            <View className="mx-5 overflow-hidden rounded-2xl border border-border bg-card">
-              {group.threads.map((thread, index) => {
-                const status = threadStatus(thread);
-                return (
-                  <Pressable
-                    key={thread.id}
-                    onPress={() => openThread(thread)}
-                    className="flex-row items-center px-5 active:bg-subtle"
-                  >
-                    <View className="w-3 items-center justify-center">
-                      <StatusDot kind={status.dot} />
-                    </View>
-                    <View
-                      className={cn(
-                        "ml-3 flex-1 flex-row items-center gap-3 py-4",
-                        index > 0 && "border-t border-border-subtle",
-                      )}
-                    >
-                      <Text
-                        className="flex-1 font-sans text-[17px] leading-[22px] text-foreground"
-                        numberOfLines={1}
-                      >
-                        {thread.title || "Untitled thread"}
-                      </Text>
-                      <Text className={cn("text-xs font-ryco-medium", status.textClassName)}>
-                        {status.label}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ))
-      )}
-    </ScrollView>
+      ) : null}
+      {home.mode !== "nodes" ? (
+        <NodeScopeControl
+          options={environments}
+          selected={currentNodeScope}
+          onSelect={(environmentId) =>
+            dispatch({
+              type: "set-node-scope",
+              mode: home.mode,
+              environmentId,
+            })
+          }
+        />
+      ) : null}
+      <View className="min-h-0 flex-1">
+        {home.mode === "inbox" ? (
+          <InboxScreen
+            sections={inboxSections}
+            emptyState={inboxEmptyState}
+            initialScrollOffset={home.scrollOffsetByMode.inbox}
+            onScrollOffset={(offset) =>
+              dispatch({ type: "set-scroll-offset", mode: "inbox", offset })
+            }
+            onOpenThread={(row) => openThread(row)}
+            onEmptyAction={(state) => {
+              if (state === "connect-node") {
+                selectMode("nodes");
+              } else if (state === "clear-filter") {
+                clearFilters();
+              } else {
+                selectMode("projects");
+              }
+            }}
+          />
+        ) : home.mode === "projects" ? (
+          <ProjectsScreen
+            groups={projectGroups}
+            hasConnections={environments.length > 0}
+            initialScrollOffset={home.scrollOffsetByMode.projects}
+            onScrollOffset={(offset) =>
+              dispatch({ type: "set-scroll-offset", mode: "projects", offset })
+            }
+            onAddProject={() => navigation.navigate("AddProject")}
+            onOpenProject={(row) =>
+              navigation.navigate("Project", {
+                environmentId: row.environmentId,
+                projectId: row.projectId,
+              })
+            }
+            onOpenNodes={() => selectMode("nodes")}
+          />
+        ) : (
+          <NodesScreen
+            query={home.queryByMode.nodes}
+            initialScrollOffset={home.scrollOffsetByMode.nodes}
+            onScrollOffset={(offset) =>
+              dispatch({ type: "set-scroll-offset", mode: "nodes", offset })
+            }
+          />
+        )}
+      </View>
+      <NewTaskFab accessibilityLabel={chrome.newTask.accessibilityLabel} onPress={openNewTask} />
+    </View>
   );
 }

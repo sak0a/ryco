@@ -14,10 +14,10 @@ import type { StatusTone } from "../../components/StatusPill";
  * Native account management for the hosted plane.
  *
  * Every credential operation on this surface is a **direct, DPoP-bound call**
- * through `hostedHubController`. Nothing here opens a browser. The C2 fallback
- * webview (`HostedFallbackSession.ts`) survives, but only as the no-passkey
- * *login* entry point on the sign-in sheet — `/api/account/*` is served to the
- * native transport, so credential *management* has no reason to leave the app.
+ * through `hostedHubController`. Nothing here opens a browser. The sign-in
+ * sheet uses the reviewed system-browser handoff, while `/api/account/*` is
+ * served to the native transport, so credential *management* has no reason to
+ * leave the app.
  *
  * Like `hostedAuthModel.ts` this module is free of `react-native` and of React:
  * the RN packages ship untranspiled Flow that the vp/node runner cannot parse,
@@ -144,6 +144,7 @@ export const isHostedPasskeySessionMessage = createHostedRefusalMatcher(
  */
 export interface HostedAccountActions {
   readonly refreshPasskeys: (options?: { readonly force?: boolean }) => unknown;
+  readonly refreshAccountSecurity: (options?: { readonly force?: boolean }) => unknown;
   readonly addPasskey: (input: {
     readonly passkeyLabel: string | null;
     readonly totpCode?: string;
@@ -479,6 +480,7 @@ export interface HostedAccountActionRow {
 export interface HostedAccountSection {
   readonly id: HostedAccountSectionId;
   readonly title: string;
+  readonly status: string | null;
   readonly footnote: string;
   readonly rows: ReadonlyArray<HostedAccountActionRow>;
 }
@@ -489,6 +491,8 @@ export interface HostedAccountManagementView {
   readonly passkeyRows: ReadonlyArray<HostedPasskeyRow>;
   readonly passkeysEmptyDetail: string | null;
   readonly sections: ReadonlyArray<HostedAccountSection>;
+  readonly securityMessage: string | null;
+  readonly securityRetry: HostedAccountButton | null;
   /** The account store's own message — never re-worded, and never duplicated
    *  onto the screen while the prompt that produced it is still open. */
   readonly errorMessage: string | null;
@@ -540,9 +544,9 @@ const PASSKEY_FOOTNOTE =
 const RECOVERY_FOOTNOTE =
   "Recovery codes are a last resort for getting back in. Generating a new set replaces the old one.";
 const PASSWORD_FOOTNOTE =
-  "A password is a fallback credential. It is weaker than a passkey and never replaces one — and Ryco cannot tell you whether this account already has one set.";
+  "A password is a fallback credential. It is weaker than a passkey and never replaces one.";
 const TOTP_FOOTNOTE =
-  "An authenticator app protects the fallback ways of signing in. Setting one up needs a passkey session on this device. Ryco cannot tell you whether it is already on.";
+  "An authenticator app protects the fallback ways of signing in. Setting one up needs a passkey session on this device.";
 const EMAIL_FOOTNOTE =
   "This Hub has no mail transport configured, so no message will arrive. The request is accepted and recorded either way.";
 
@@ -589,6 +593,8 @@ export function deriveHostedAccountManagementView(
       passkeyRows: [],
       passkeysEmptyDetail: null,
       sections: [],
+      securityMessage: null,
+      securityRetry: null,
       errorMessage: null,
       busy: false,
       prompt: null,
@@ -636,10 +642,32 @@ export function deriveHostedAccountManagementView(
     run: busy ? () => undefined : () => open(id),
   });
 
+  const security = accountState.security;
+  const securityKnown = security !== null;
+  const securityStale = accountState.securityStatus === "stale";
+  const securityMessage =
+    accountState.securityStatus === "loading" || accountState.securityStatus === "idle"
+      ? "Checking which sign-in methods are configured."
+      : securityStale
+        ? securityKnown
+          ? "This account-security state may be out of date."
+          : "Account security could not be loaded."
+        : null;
+  const securityRetry = securityStale
+    ? button("Retry account security", () => {
+        void input.actions.refreshAccountSecurity({ force: true });
+      })
+    : null;
+  const emailFootnote =
+    security === null || security.email === null
+      ? EMAIL_FOOTNOTE
+      : `${security.email.verified ? "Verified" : "Verification pending"} for ${security.email.address}. ${EMAIL_FOOTNOTE}`;
+
   const sections: ReadonlyArray<HostedAccountSection> = [
     {
       id: "passkeys",
       title: "Passkeys",
+      status: null,
       footnote:
         activePasskeys.length === 1
           ? `${PASSKEY_FOOTNOTE} This is the only one left, so it cannot be removed yet.`
@@ -649,6 +677,7 @@ export function deriveHostedAccountManagementView(
     {
       id: "recovery-codes",
       title: "Recovery codes",
+      status: null,
       footnote: RECOVERY_FOOTNOTE,
       rows: [
         row("regenerate-recovery-codes", "Generate new recovery codes", { destructive: true }),
@@ -657,26 +686,53 @@ export function deriveHostedAccountManagementView(
     {
       id: "password",
       title: "Password",
+      status: securityKnown ? (security.passwordConfigured ? "Set" : "Not set") : "Checking…",
       footnote: PASSWORD_FOOTNOTE,
-      rows: [
-        row("set-password", "Set or replace password"),
-        row("remove-password", "Remove password", { destructive: true }),
-      ],
+      rows: !securityKnown
+        ? []
+        : security.passwordConfigured
+          ? [
+              row("set-password", "Change password"),
+              row("remove-password", "Remove password", { destructive: true }),
+            ]
+          : [row("set-password", "Set password")],
     },
     {
       id: "two-factor",
       title: "Two-factor authentication",
+      status: securityKnown ? (security.totpEnrolled ? "On" : "Off") : "Checking…",
       footnote: TOTP_FOOTNOTE,
-      rows: [
-        row("enroll-totp", "Set up an authenticator app"),
-        row("revoke-totp", "Turn off two-factor authentication", { destructive: true }),
-      ],
+      rows: !securityKnown
+        ? []
+        : security.totpEnrolled
+          ? [row("revoke-totp", "Turn off two-factor authentication", { destructive: true })]
+          : [row("enroll-totp", "Set up an authenticator app")],
     },
     {
       id: "email",
       title: "Email",
-      footnote: EMAIL_FOOTNOTE,
-      rows: [row("verify-email", "Send a verification email")],
+      status:
+        security === null
+          ? "Checking…"
+          : security.email === null
+            ? "Not set"
+            : security.email.verified
+              ? "Verified"
+              : "Pending",
+      footnote: emailFootnote,
+      rows:
+        security === null
+          ? []
+          : [
+              row(
+                "verify-email",
+                security.email === null
+                  ? "Send a verification email"
+                  : security.email.verified
+                    ? "Change email address"
+                    : "Resend or change verification email",
+              ),
+            ],
     },
   ];
 
@@ -692,6 +748,8 @@ export function deriveHostedAccountManagementView(
             ? "The passkey list could not be loaded."
             : "Loading your passkeys.",
     sections,
+    securityMessage,
+    securityRetry,
     // An open prompt owns its own error. Publishing it twice makes a single
     // refusal read as two separate failures.
     errorMessage: draft === null ? accountState.errorMessage : null,

@@ -1,11 +1,13 @@
 import { Effect, Queue, Scope } from "effect";
 import type { Layer } from "effect";
 import type { Rpc } from "effect/unstable/rpc";
+import { RelayMessageAssembler } from "@ryco/shared/relayMessageChunks";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 import type { RpcGroup } from "effect/unstable/rpc";
 
 export interface RpcByteSession {
   readonly receive: (bytes: Uint8Array) => Effect.Effect<boolean>;
+  readonly supportsChunkedMessages: () => boolean;
   readonly close: Effect.Effect<void>;
   readonly queuedMessages: Effect.Effect<number>;
   readonly queuedBytes: Effect.Effect<number>;
@@ -27,6 +29,12 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
     const incoming = yield* Queue.dropping<Uint8Array>(capacity);
     const disconnects = yield* Queue.unbounded<number>();
     const parser = RpcSerialization.json.makeUnsafe();
+    // Reassembles messages the peer had to split because they exceeded the
+    // relay data-frame limit. An unchunked payload passes straight through, so
+    // an old peer is unaffected. Reassembly happens BEFORE `parser.decode`, so
+    // the serializer always sees one complete message and a multi-byte UTF-8
+    // sequence split across a frame boundary cannot be mangled.
+    const assembler = new RelayMessageAssembler();
     const clients = new Set<number>([0]);
     let queuedBytes = 0;
 
@@ -38,7 +46,14 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
               Effect.flatMap((bytes) =>
                 Effect.sync(() => {
                   queuedBytes = Math.max(0, queuedBytes - bytes.byteLength);
-                  return parser.decode(bytes);
+                  const assembled = assembler.push(bytes);
+                  if (assembled.kind === "pending") return [];
+                  if (assembled.kind === "error") {
+                    // Fail the session so the channel closes rather than
+                    // silently decoding a half-message.
+                    throw new Error(`Relay message reassembly failed: ${assembled.reason}`);
+                  }
+                  return parser.decode(assembled.message);
                 }).pipe(
                   Effect.flatMap((messages) =>
                     Effect.forEach(messages, (message) => writeRequest(0, message as never), {
@@ -88,6 +103,7 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
       Effect.gen(function* () {
         clients.clear();
         queuedBytes = 0;
+        assembler.reset();
         yield* Queue.offer(disconnects, 0);
         yield* Queue.shutdown(incoming);
         yield* Queue.shutdown(disconnects);
@@ -109,11 +125,15 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
           ),
         );
       },
+      supportsChunkedMessages: () => assembler.peerSupportsChunking,
       close: Effect.sync(() => {
         queuedBytes = 0;
+        assembler.reset();
       }).pipe(Effect.andThen(Queue.shutdown(incoming)), Effect.asVoid),
       queuedMessages: Queue.size(incoming),
-      queuedBytes: Effect.sync(() => queuedBytes),
+      // Includes bytes held by a partially-reassembled message: without this a
+      // peer could hold megabytes that the backpressure logic cannot see.
+      queuedBytes: Effect.sync(() => queuedBytes + assembler.heldBytes),
     } satisfies RpcByteSession;
   }) as Effect.Effect<RpcByteSession, E, Scope.Scope | R>;
 }

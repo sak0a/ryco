@@ -5279,6 +5279,65 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("starts restricted browsing at the access root and hides parent navigation there", async () => {
+    const workspaceAccessRoot = "/allowed/workspace";
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sidebar-add-project-restricted-root" as MessageId,
+        targetText: "sidebar add project restricted root",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          workspaceAccessRoot,
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            addProjectBaseDirectory: "~/Development",
+          },
+        };
+      },
+      resolveRpc: (body) => {
+        if (body._tag === WS_METHODS.filesystemBrowse) {
+          return {
+            parentPath: workspaceAccessRoot,
+            workspaceAccessRoot,
+            entries: [{ name: "project", fullPath: `${workspaceAccessRoot}/project` }],
+          };
+        }
+
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await page.getByTestId("sidebar-add-project-trigger").click();
+
+      const palette = page.getByTestId("command-palette");
+      await palette.getByText("Local folder", { exact: true }).click();
+
+      const browseInput = await waitForCommandPaletteInput(ADD_PROJECT_SUBMENU_PLACEHOLDER);
+      await expect.element(browseInput).toHaveValue(`${workspaceAccessRoot}/`);
+      await expect.element(palette.getByText("..", { exact: true })).not.toBeInTheDocument();
+
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === WS_METHODS.filesystemBrowse &&
+                request.partialPath === `${workspaceAccessRoot}/`,
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("shows create-folder affordances for missing project paths", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

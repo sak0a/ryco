@@ -23,6 +23,46 @@ The connector is disabled by default. Configure it through the server process en
 | `RYCO_HUB_RECONNECT_JITTER_RATIO`  | `0.2`   | 0–0.5                                                 |
 | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` | `false` | Explicit POSIX permissioned-file fallback             |
 
+The three ordinary startup settings also have shared server CLI flags:
+
+| CLI flag                        | Environment fallback               |
+| ------------------------------- | ---------------------------------- |
+| `--hub-connector-enabled`       | `RYCO_HUB_CONNECTOR_ENABLED`       |
+| `--hub-origin <origin>`         | `RYCO_HUB_ORIGIN`                  |
+| `--hub-allow-file-secret-store` | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` |
+
+An explicit CLI flag takes precedence over its corresponding environment variable. If a flag is
+omitted, the environment variable continues to work unchanged. The boolean flags use standard
+presence syntax and support the canonical `--no-hub-connector-enabled` and
+`--no-hub-allow-file-secret-store` forms for explicit `false` overrides.
+
+For example:
+
+```bash
+ryco serve \
+  --hub-connector-enabled \
+  --hub-origin https://hub.example.test \
+  --hub-allow-file-secret-store \
+  --restrict-to-cwd \
+  --host 127.0.0.1 \
+  --port 3774 \
+  --base-dir /path/to/node-state \
+  /allowed/workspace
+```
+
+`--restrict-to-cwd` limits Ryco-managed browsing, project roots, clone destinations, terminal
+starting directories, and generated worktrees to the final positional working directory. The
+directory is resolved canonically at startup, and Ryco rejects direct traversal and symlink escapes.
+The flag is optional and has no environment-variable fallback. If the existing node state contains
+an active project or live worktree outside that root, restricted startup fails without changing the
+persisted data; archive or remove the incompatible state in unrestricted mode, or select a fresh
+`--base-dir`.
+
+`--base-dir` remains the trusted location for node identity, database, logs, and other internal
+state. It is not the accessible workspace root. This application-level restriction does not confine
+commands after a terminal or coding-agent process starts: use a container or operating-system
+sandbox when processes must be unable to read paths outside `/allowed/workspace`.
+
 An invalid enabled configuration fails closed with `configuration_invalid`. There is no implicit
 production origin. Credentials, keys, challenges, signatures, and polling secrets are never
 accepted through command-line arguments, URLs, or exported server settings.

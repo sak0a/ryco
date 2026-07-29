@@ -1,5 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
+
+import {
+  readEnvironmentConnection,
+  subscribeEnvironmentConnections,
+} from "../environments/runtime";
+import { readEnvironmentApiForConnection } from "../environmentApi";
 
 import {
   EMPTY_FILESYSTEM_BROWSE_STATE,
@@ -68,10 +74,25 @@ export function useProjectSearchEntries(
  */
 export function useFilesystemBrowse(input: FilesystemBrowseInput): FilesystemBrowseState {
   const browseKey = resolveFilesystemBrowseKey(input);
+  const environmentConnection = useSyncExternalStore(
+    subscribeEnvironmentConnections,
+    () => (input.environmentId === null ? null : readEnvironmentConnection(input.environmentId)),
+    () => null,
+  );
   const inputRef = useRef(input);
   inputRef.current = input;
 
-  useEffect(() => watchFilesystemBrowse(inputRef.current), [browseKey]);
+  useEffect(() => {
+    const currentInput = inputRef.current;
+    const api =
+      currentInput.environmentId === null
+        ? undefined
+        : readEnvironmentApiForConnection(
+            currentInput.environmentId,
+            environmentConnection?.client ?? null,
+          );
+    return watchFilesystemBrowse(currentInput, api ?? null);
+  }, [browseKey, environmentConnection]);
 
   const state = useAtomValue(getFilesystemBrowseStateAtom(browseKey));
   return browseKey === null ? EMPTY_FILESYSTEM_BROWSE_STATE : state;

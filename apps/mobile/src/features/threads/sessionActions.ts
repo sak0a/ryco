@@ -1,7 +1,10 @@
 import type { EnvironmentApi } from "@ryco/contracts";
 import {
   type ApprovalRequestId,
+  type ModelSelection,
   type ProviderApprovalDecision,
+  type ProviderInteractionMode,
+  type RuntimeMode,
   type ThreadId,
 } from "@ryco/contracts";
 
@@ -19,6 +22,81 @@ export async function interruptThreadTurn(api: EnvironmentApi, threadId: ThreadI
     commandId: newCommandId(),
     threadId,
     createdAt: new Date().toISOString(),
+  });
+}
+
+export async function renameThread(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  title: string,
+): Promise<void> {
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error("Task title cannot be empty.");
+  await api.orchestration.dispatchCommand({
+    type: "thread.meta.update",
+    commandId: newCommandId(),
+    threadId,
+    title: trimmed,
+  });
+}
+
+// Note the asymmetry with `thread.meta.update` above: the mode-set commands
+// REQUIRE `createdAt` and `thread.meta.update` has no such field at all. Adding
+// it to the meta command fails schema validation at the server.
+export async function setThreadRuntimeMode(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  runtimeMode: RuntimeMode,
+): Promise<void> {
+  await api.orchestration.dispatchCommand({
+    type: "thread.runtime-mode.set",
+    commandId: newCommandId(),
+    threadId,
+    runtimeMode,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+export async function setThreadInteractionMode(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  interactionMode: ProviderInteractionMode,
+): Promise<void> {
+  await api.orchestration.dispatchCommand({
+    type: "thread.interaction-mode.set",
+    commandId: newCommandId(),
+    threadId,
+    interactionMode,
+    createdAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Model changes ride `thread.meta.update` — there is no `thread.model.set`.
+ * Note it takes no `createdAt`, unlike the two mode commands above.
+ */
+export async function setThreadModelSelection(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  modelSelection: ModelSelection,
+): Promise<void> {
+  await api.orchestration.dispatchCommand({
+    type: "thread.meta.update",
+    commandId: newCommandId(),
+    threadId,
+    modelSelection,
+  });
+}
+
+export async function setThreadArchived(
+  api: EnvironmentApi,
+  threadId: ThreadId,
+  archived: boolean,
+): Promise<void> {
+  await api.orchestration.dispatchCommand({
+    type: archived ? "thread.archive" : "thread.unarchive",
+    commandId: newCommandId(),
+    threadId,
   });
 }
 

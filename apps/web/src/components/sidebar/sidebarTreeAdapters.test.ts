@@ -7,6 +7,7 @@ import {
   adaptDraftThreadsForSidebarProject,
   adaptProjectForSidebarTree,
   createSidebarProjectDraftThreadsSelector,
+  mergeSidebarThreadsWithDrafts,
 } from "./sidebarTreeAdapters";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -60,6 +61,26 @@ describe("sidebarTreeAdapters", () => {
     expect(draftRows).toEqual([]);
   });
 
+  it("lets a materialized server thread shadow a draft with the same scoped id", () => {
+    const [draftThread] = adaptDraftThreadsForSidebarProject({
+      draftThreadsByThreadKey: {
+        "draft-1": makeDraftThread(),
+      },
+      project: makeSidebarProjectSnapshot(),
+    });
+    expect(draftThread).toBeDefined();
+    const serverThread = {
+      ...draftThread!,
+      draftId: undefined,
+      title: "Materialized thread",
+    };
+
+    const merged = mergeSidebarThreadsWithDrafts([serverThread], [draftThread!]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.title).toBe("Materialized thread");
+  });
+
   it("keeps selector output stable when unrelated project drafts change", () => {
     const project = makeSidebarProjectSnapshot();
     const selector = createSidebarProjectDraftThreadsSelector(project);
@@ -93,6 +114,51 @@ describe("sidebarTreeAdapters", () => {
     expect(withUnrelatedDraft).toBe(first);
     expect(withChangedProjectDraft).not.toBe(first);
     expect(withChangedProjectDraft[0]?.branch).toBe("feature/sidebar-updated");
+  });
+
+  it("synthesizes one original-directory candidate per physical project environment", () => {
+    const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+    const remoteProjectId = ProjectId.make("project-remote");
+    const project = makeSidebarProjectSnapshot();
+    const adapted = adaptProjectForSidebarTree({
+      project: {
+        ...project,
+        groupedProjectCount: 2,
+        memberProjectRefs: [
+          ...project.memberProjectRefs,
+          { environmentId: remoteEnvironmentId, projectId: remoteProjectId },
+        ],
+        memberProjects: [
+          ...project.memberProjects,
+          {
+            ...project.memberProjects[0]!,
+            id: remoteProjectId,
+            environmentId: remoteEnvironmentId,
+            cwd: "/remote/repo/project",
+            environmentLabel: "Remote",
+            physicalProjectKey: "environment-remote:/remote/repo/project",
+          },
+        ],
+      },
+      threads: [],
+      worktrees: [],
+    });
+
+    expect(
+      adapted.worktrees.map((worktree) => ({
+        environmentId: worktree.environmentId,
+        sourceProjectCwd: worktree.sourceProjectCwd,
+      })),
+    ).toEqual([
+      {
+        environmentId,
+        sourceProjectCwd: "/repo/project",
+      },
+      {
+        environmentId: remoteEnvironmentId,
+        sourceProjectCwd: "/remote/repo/project",
+      },
+    ]);
   });
 });
 

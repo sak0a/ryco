@@ -69,6 +69,7 @@ import {
   readPersistedServerRuntimeState,
 } from "./serverRuntimeState.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
+import { WorkspaceAccessPolicyLive } from "./workspace/Layers/WorkspaceAccessPolicy.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
 const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
@@ -128,11 +129,31 @@ const autoBootstrapProjectFromCwdFlag = Flag.boolean("auto-bootstrap-project-fro
   ),
   Flag.optional,
 );
+const restrictToCwdFlag = Flag.boolean("restrict-to-cwd").pipe(
+  Flag.withDescription(
+    "Restrict Ryco-managed workspace paths to the startup working directory (not a process sandbox).",
+  ),
+  Flag.optional,
+);
 const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.withDescription(
     "Emit server-side logs for outbound WebSocket push traffic (equivalent to RYCO_LOG_WS_EVENTS).",
   ),
   Flag.withAlias("log-ws-events"),
+  Flag.optional,
+);
+const hubConnectorEnabledFlag = Flag.boolean("hub-connector-enabled").pipe(
+  Flag.withDescription("Enable the outbound Hub connector (overrides RYCO_HUB_CONNECTOR_ENABLED)."),
+  Flag.optional,
+);
+const hubOriginFlag = Flag.string("hub-origin").pipe(
+  Flag.withDescription("Canonical Hub HTTPS origin (overrides RYCO_HUB_ORIGIN)."),
+  Flag.optional,
+);
+const hubAllowFileSecretStoreFlag = Flag.boolean("hub-allow-file-secret-store").pipe(
+  Flag.withDescription(
+    "Allow the permissioned-file Hub secret-store fallback (overrides RYCO_HUB_ALLOW_FILE_SECRET_STORE).",
+  ),
   Flag.optional,
 );
 const tailscaleServeFlag = Flag.boolean("tailscale-serve").pipe(
@@ -240,7 +261,11 @@ interface CliServerFlags {
   readonly noBrowser: Option.Option<boolean>;
   readonly bootstrapFd: Option.Option<number>;
   readonly autoBootstrapProjectFromCwd: Option.Option<boolean>;
+  readonly restrictToCwd?: Option.Option<boolean>;
   readonly logWebSocketEvents: Option.Option<boolean>;
+  readonly hubConnectorEnabled?: Option.Option<boolean>;
+  readonly hubOrigin?: Option.Option<string>;
+  readonly hubAllowFileSecretStore?: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
 }
@@ -289,7 +314,11 @@ export const resolveServerConfig = (
       noBrowser: flags.noBrowser ?? Option.none(),
       bootstrapFd: flags.bootstrapFd ?? Option.none(),
       autoBootstrapProjectFromCwd: flags.autoBootstrapProjectFromCwd ?? Option.none(),
+      restrictToCwd: flags.restrictToCwd ?? Option.none(),
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
+      hubConnectorEnabled: flags.hubConnectorEnabled ?? Option.none(),
+      hubOrigin: flags.hubOrigin ?? Option.none(),
+      hubAllowFileSecretStore: flags.hubAllowFileSecretStore ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
     } satisfies CliServerFlags;
@@ -350,6 +379,9 @@ export const resolveServerConfig = (
     const rawCwd = Option.getOrElse(normalizedFlags.cwd, () => process.cwd());
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
     yield* fs.makeDirectory(cwd, { recursive: true });
+    const workspaceAccessRoot = Option.getOrElse(normalizedFlags.restrictToCwd, () => false)
+      ? yield* fs.realPath(cwd)
+      : undefined;
     yield* Effect.logDebug("startup config phase prepared cwd", {
       durationMs: Date.now() - startedAt,
       cwd,
@@ -426,22 +458,35 @@ export const resolveServerConfig = (
       () => (mode === "desktop" ? "127.0.0.1" : undefined),
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
-    // Env wins over the bootstrap envelope, matching every other option here.
-    // In the desktop that contest never happens: `backendChildEnv()` strips both
-    // hub variables, so the envelope is the only source. A headless `ryco serve`
-    // sends no envelope, so env stays the only source there.
+    // Explicit flags win over env, and env wins over the bootstrap envelope,
+    // matching every other option here. In the desktop that contest never
+    // happens: `backendChildEnv()` strips the Hub variables, so the envelope is
+    // the only source. A headless `ryco serve` sends no envelope.
     const hubConnector = resolveHubConnectorConfig({
-      enabled:
-        env.hubConnectorEnabled ??
-        (bootstrap?.hubConnectorEnabled === undefined
-          ? undefined
-          : String(bootstrap.hubConnectorEnabled)),
-      origin: env.hubOrigin ?? bootstrap?.hubOrigin,
+      enabled: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.map(normalizedFlags.hubConnectorEnabled, String),
+          Option.fromUndefinedOr(env.hubConnectorEnabled),
+          Option.map(Option.fromUndefinedOr(bootstrap?.hubConnectorEnabled), String),
+        ),
+      ),
+      origin: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          normalizedFlags.hubOrigin,
+          Option.fromUndefinedOr(env.hubOrigin),
+          Option.fromUndefinedOr(bootstrap?.hubOrigin),
+        ),
+      ),
       reconnectBaseMs: env.hubReconnectBaseMs,
       reconnectMaxMs: env.hubReconnectMaxMs,
       reconnectStableMs: env.hubReconnectStableMs,
       reconnectJitterRatio: env.hubReconnectJitterRatio,
-      allowFileSecretStore: env.hubAllowFileSecretStore,
+      allowFileSecretStore: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.map(normalizedFlags.hubAllowFileSecretStore, String),
+          Option.fromUndefinedOr(env.hubAllowFileSecretStore),
+        ),
+      ),
     });
 
     const config: ServerConfigShape = {
@@ -464,6 +509,7 @@ export const resolveServerConfig = (
       mode,
       port,
       cwd,
+      ...(workspaceAccessRoot !== undefined ? { workspaceAccessRoot } : {}),
       baseDir,
       ...derivedPaths,
       serverTracePath,
@@ -498,6 +544,7 @@ const resolveCliAuthConfig = (
       noBrowser: Option.none(),
       bootstrapFd: Option.none(),
       autoBootstrapProjectFromCwd: Option.none(),
+      restrictToCwd: Option.none(),
       logWebSocketEvents: Option.none(),
       tailscaleServeEnabled: Option.none(),
       tailscaleServePort: Option.none(),
@@ -612,6 +659,7 @@ const ProjectAvatarStoreFromConfigLayer = Layer.unwrap(
 );
 
 const ProjectCliRuntimeLive = Layer.mergeAll(
+  WorkspaceAccessPolicyLive,
   WorkspacePathsLive,
   OrchestrationLayerLive.pipe(
     Layer.provideMerge(RepositoryIdentityResolverLive),
@@ -854,7 +902,11 @@ const runProjectMutation = Effect.fn("runProjectMutation")(function* (
     }).pipe(Effect.provide(offlineRuntimeLayer));
   }).pipe(
     Effect.provide(
-      Layer.mergeAll(AuthControlPlaneRuntimeLive, WorkspacePathsLive).pipe(
+      Layer.mergeAll(
+        AuthControlPlaneRuntimeLive,
+        WorkspaceAccessPolicyLive,
+        WorkspacePathsLive,
+      ).pipe(
         Layer.provideMerge(FetchHttpClient.layer),
         Layer.provide(Layer.succeed(ServerConfig, config)),
         Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
@@ -1008,7 +1060,11 @@ const sharedServerCommandFlags = {
   noBrowser: noBrowserFlag,
   bootstrapFd: bootstrapFdFlag,
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
+  restrictToCwd: restrictToCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
+  hubConnectorEnabled: hubConnectorEnabledFlag,
+  hubOrigin: hubOriginFlag,
+  hubAllowFileSecretStore: hubAllowFileSecretStoreFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
 } as const;

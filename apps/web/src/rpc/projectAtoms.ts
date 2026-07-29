@@ -1,4 +1,5 @@
 import type {
+  EnvironmentApi,
   EnvironmentId,
   FilesystemBrowseResult,
   ProjectSearchEntriesResult,
@@ -409,6 +410,7 @@ interface BrowseController {
   hasData: boolean;
   fetching: boolean;
   lastResult: FilesystemBrowseResult | null;
+  readonly subscriberTargets: Map<symbol, EnvironmentApi | null>;
 }
 
 const browseControllers = new Map<string, BrowseController>();
@@ -460,20 +462,19 @@ async function runBrowseController(controller: BrowseController): Promise<void> 
     isPending: true,
   });
 
-  const api = readEnvironmentApi(controller.environmentId);
+  const explicitTarget = Array.from(controller.subscriberTargets.values()).at(-1);
+  const api =
+    explicitTarget === undefined ? readEnvironmentApi(controller.environmentId) : explicitTarget;
   if (!api) {
     if (token !== controller.fetchToken) {
       return;
     }
     controller.fetching = false;
-    controller.hasData = true;
-    controller.lastFetchedAt = Date.now();
-    controller.lastResult = null;
     setFilesystemBrowseState(controller.compositeKey, {
-      data: null,
+      data: current.data,
       isLoading: false,
       isFetching: false,
-      error: null,
+      error: new Error("The environment is temporarily unavailable. Reconnecting…"),
       isPending: false,
     });
     return;
@@ -529,6 +530,7 @@ function ensureBrowseController(resolved: ResolvedFilesystemBrowseInput): Browse
       hasData: false,
       fetching: false,
       lastResult: null,
+      subscriberTargets: new Map(),
     };
     browseControllers.set(resolved.compositeKey, controller);
   }
@@ -577,19 +579,39 @@ export function requestFilesystemBrowse(
   void runBrowseController(controller);
 }
 
-export function watchFilesystemBrowse(input: FilesystemBrowseInput): () => void {
+export function watchFilesystemBrowse(
+  input: FilesystemBrowseInput,
+  api?: EnvironmentApi | null,
+): () => void {
   const resolved = resolveFilesystemBrowseInput(input);
   if (resolved === null) {
     return () => undefined;
   }
 
   const controller = ensureBrowseController(resolved);
+  const subscriber = Symbol("filesystem-browse-subscriber");
+  const previousTarget = Array.from(controller.subscriberTargets.values()).at(-1);
+  if (api !== undefined) {
+    controller.subscriberTargets.set(subscriber, api);
+  }
+  const currentTarget = Array.from(controller.subscriberTargets.values()).at(-1);
+  if (previousTarget !== currentTarget && controller.fetching) {
+    controller.fetchToken += 1;
+    controller.fetching = false;
+  }
   controller.subscriberCount += 1;
   triggerFilesystemBrowseFetch(resolved);
 
   return () => {
     const current = browseControllers.get(resolved.compositeKey);
     if (current && current.subscriberCount > 0) {
+      const targetBeforeRemoval = Array.from(current.subscriberTargets.values()).at(-1);
+      current.subscriberTargets.delete(subscriber);
+      const targetAfterRemoval = Array.from(current.subscriberTargets.values()).at(-1);
+      if (targetBeforeRemoval !== targetAfterRemoval && current.fetching) {
+        current.fetchToken += 1;
+        current.fetching = false;
+      }
       current.subscriberCount -= 1;
     }
   };

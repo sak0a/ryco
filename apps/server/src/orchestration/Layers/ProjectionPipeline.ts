@@ -900,13 +900,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           });
           return;
 
-        case "worktree.metaUpdated":
-          yield* projectionWorktreeRepository.updateMeta({
+        case "worktree.metaUpdated": {
+          const existing = yield* projectionWorktreeRepository.getById({
             worktreeId: event.payload.worktreeId,
-            title: event.payload.title ?? null,
-            updatedAt: event.payload.changedAt,
           });
+          if (Option.isSome(existing)) {
+            yield* projectionWorktreeRepository.upsert({
+              ...existing.value,
+              ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+              ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
+              updatedAt: event.payload.changedAt,
+            });
+          }
           return;
+        }
 
         case "worktree.sourceControlStateUpdated": {
           const existing = yield* projectionWorktreeRepository.getById({

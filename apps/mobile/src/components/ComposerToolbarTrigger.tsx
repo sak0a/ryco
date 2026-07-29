@@ -139,6 +139,11 @@ export function ComposerToolbarButton(props: {
   readonly icon?: ComponentProps<typeof SymbolView>["name"];
   readonly iconNode?: ReactNode;
   readonly label?: string;
+  /** Secondary text after the label, deliberately quieter than it. */
+  readonly suffixLabel?: string;
+  /** Small trailing glyph, e.g. a bolt for fast mode. */
+  readonly suffixIcon?: ComponentProps<typeof SymbolView>["name"];
+  readonly suffixIconColor?: string;
   readonly accessibilityLabel?: string;
   readonly active?: boolean;
   readonly disabled?: boolean;
@@ -240,6 +245,22 @@ export function ComposerToolbarButton(props: {
         >
           {props.label}
         </Text>
+      ) : null}
+      {props.suffixLabel ? (
+        <Text
+          className="shrink-0 text-xs font-ryco-medium text-foreground-tertiary"
+          numberOfLines={1}
+        >
+          {props.suffixLabel}
+        </Text>
+      ) : null}
+      {props.suffixIcon ? (
+        <SymbolView
+          name={props.suffixIcon}
+          size={12}
+          tintColor={props.suffixIconColor ?? (iconSubtle as string)}
+          type="monochrome"
+        />
       ) : null}
       {props.showChevron === false ? null : (
         <SymbolView name="chevron.down" size={11} tintColor={iconTintColor} type="monochrome" />

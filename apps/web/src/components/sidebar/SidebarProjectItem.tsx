@@ -27,7 +27,10 @@ import { isContextMenuPointerDown } from "../Sidebar.logic";
 import { readLocalApi } from "../../localApi";
 import { SidebarWorktreeList, type SidebarThreadGitStatusTarget } from "./SidebarWorktreeList";
 import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
-import { createSidebarProjectDraftThreadsSelector } from "./sidebarTreeAdapters";
+import {
+  createSidebarProjectDraftThreadsSelector,
+  mergeSidebarThreadsWithDrafts,
+} from "./sidebarTreeAdapters";
 import { type SidebarTreeThread } from "./hooks/useSidebarTree";
 import { type SortableProjectHandleProps } from "./SidebarProjectList";
 import { SidebarThreadRow } from "./SidebarThreadRow";
@@ -183,7 +186,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     useRef<ReadonlyMap<string, SidebarThreadSummary>>(sidebarThreadByKey);
   sidebarThreadByKeyRef.current = sidebarThreadByKey;
   const projectThreads = useMemo(
-    () => [...sidebarThreads, ...projectDraftThreads],
+    () => mergeSidebarThreadsWithDrafts(sidebarThreads, projectDraftThreads),
     [projectDraftThreads, sidebarThreads],
   );
   const projectExpanded = useUiStateStore(

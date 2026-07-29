@@ -1,4 +1,4 @@
-import { CommandId, MessageId, ThreadId } from "@ryco/contracts";
+import { CommandId, MessageId, ProjectId, ThreadId, WorktreeId } from "@ryco/contracts";
 
 import { uuidv4 } from "./uuid";
 
@@ -7,4 +7,6 @@ import { uuidv4 } from "./uuid";
 // (expo-crypto randomUUID).
 export const newMessageId = (): MessageId => MessageId.make(uuidv4());
 export const newCommandId = (): CommandId => CommandId.make(uuidv4());
+export const newProjectId = (): ProjectId => ProjectId.make(uuidv4());
 export const newThreadId = (): ThreadId => ThreadId.make(uuidv4());
+export const newWorktreeId = (): WorktreeId => WorktreeId.make(`worktree-${uuidv4()}`);

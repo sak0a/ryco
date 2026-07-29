@@ -2,6 +2,7 @@ import type {
   DpopSignerService,
   EndpointService,
   HttpClientService,
+  NativeAuthorizationService,
   PasskeyCeremonyService,
   SessionCredentialsService,
 } from "../platform/index.ts";
@@ -54,6 +55,8 @@ export interface HostedRuntimeConfiguration {
    * per-request DPoP proof. Omitted (undefined) in cookie mode, which web uses.
    */
   readonly dpopSigner?: DpopSignerService;
+  /** Preferred system-browser sign-in for bearer/native clients. */
+  readonly nativeAuthorization?: NativeAuthorizationService;
   readonly nodeLifecycle: HostedNodeLifecycle;
   readonly timers: HostedRuntimeTimers;
   readonly isForeground: () => boolean;

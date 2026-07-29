@@ -712,6 +712,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           worktreeId: command.worktreeId,
           ...(command.title !== undefined ? { title: command.title } : {}),
+          ...(command.branch !== undefined ? { branch: command.branch } : {}),
           changedAt: command.changedAt,
         },
       };

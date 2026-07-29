@@ -5,8 +5,10 @@ import {
   CheckIcon,
   CopyIcon,
   KeyRoundIcon,
+  LifeBuoyIcon,
   Loader2Icon,
   LogOutIcon,
+  MailIcon,
   RefreshCwIcon,
   ServerIcon,
   ShieldCheckIcon,
@@ -41,6 +43,7 @@ import {
   useHostedHubStore,
   useHostedRecoveryCodeDisplayStore,
 } from "../../hostedHub/state";
+import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import {
   selectHostedNodeRoute,
   useHostedNodeRouteNotice,
@@ -366,11 +369,18 @@ function NewToThisHubDisclosure({ bootstrapAvailable }: { readonly bootstrapAvai
   );
 }
 
-function HostedAuthenticationSurface() {
+export function HostedAuthenticationSurface({
+  context = "hub",
+}: {
+  readonly context?: "hub" | "native-authorization";
+} = {}) {
   const status = useHostedHubStore((state) => state.accountStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
   const bootstrapAvailable = useHostedHubStore((state) => state.bootstrapAvailable);
   const [registrationMode, setRegistrationMode] = useState<"invitation" | "bootstrap" | null>(null);
+  const [fallbackMode, setFallbackMode] = useState<
+    "email-recovery" | "password" | "recovery-code" | null
+  >(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
 
@@ -379,8 +389,8 @@ function HostedAuthenticationSurface() {
     // own scroller, and a focus-driven scroll would move the anchored action
     // group's content out from under the user before they have touched it.
     if (registrationMode) registrationInputRef.current?.focus({ preventScroll: true });
-    else headingRef.current?.focus({ preventScroll: true });
-  }, [registrationMode]);
+    else if (!fallbackMode) headingRef.current?.focus({ preventScroll: true });
+  }, [fallbackMode, registrationMode]);
 
   // The action group keeps the exact DOM order and desktop styling it had —
   // the primary stack, then the Hub retry, then the polite announcement — so
@@ -426,56 +436,70 @@ function HostedAuthenticationSurface() {
     </div>
   ) : null;
 
-  const signInActions = registrationMode ? null : (
-    <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
-      <div className="mt-6 flex flex-col gap-3">
-        <Button
-          size="lg"
-          className="phone:min-h-11"
-          disabled={status === "authenticating" || status === "signing-out"}
-          onClick={() => void hostedHubController.signIn()}
-        >
-          <KeyRoundIcon aria-hidden />
-          {status === "authenticating" ? "Waiting for passkey…" : "Sign in with passkey"}
-        </Button>
-        {status === "authenticating" ? (
+  const fallbackActions = fallbackMode ? (
+    <div className={`mt-6 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+      <Button
+        type="button"
+        variant="outline"
+        className="phone:min-h-11"
+        onClick={() => setFallbackMode(null)}
+      >
+        Back to sign in
+      </Button>
+    </div>
+  ) : null;
+
+  const signInActions =
+    registrationMode || fallbackMode ? null : (
+      <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+        <div className="mt-6 flex flex-col gap-3">
           <Button
-            variant="outline"
             size="lg"
             className="phone:min-h-11"
-            onClick={() => hostedHubController.cancelAuthentication()}
+            disabled={status === "authenticating" || status === "signing-out"}
+            onClick={() => void hostedHubController.signIn()}
           >
-            Cancel
+            <KeyRoundIcon aria-hidden />
+            {status === "authenticating" ? "Waiting for passkey…" : "Sign in with passkey"}
           </Button>
-        ) : (
-          <>
-            {/* The cold visitor's real path, so it stays an outline rather than
-                sinking to ghost. */}
+          {status === "authenticating" ? (
             <Button
               variant="outline"
               size="lg"
               className="phone:min-h-11"
-              onClick={() => setRegistrationMode("invitation")}
+              onClick={() => hostedHubController.cancelAuthentication()}
             >
-              Redeem invitation
+              Cancel
             </Button>
-            {bootstrapAvailable ? (
-              // Once per Hub, ever. Reducing its weight does not change its
-              // height, so the anchoring geometry is untouched.
+          ) : (
+            <>
+              {/* The cold visitor's real path, so it stays an outline rather than
+                sinking to ghost. */}
               <Button
-                variant="ghost"
+                variant="outline"
                 size="lg"
                 className="phone:min-h-11"
-                onClick={() => setRegistrationMode("bootstrap")}
+                onClick={() => setRegistrationMode("invitation")}
               >
-                Set up first owner
+                Redeem invitation
               </Button>
-            ) : null}
-          </>
-        )}
+              {bootstrapAvailable ? (
+                // Once per Hub, ever. Reducing its weight does not change its
+                // height, so the anchoring geometry is untouched.
+                <Button
+                  variant="ghost"
+                  size="lg"
+                  className="phone:min-h-11"
+                  onClick={() => setRegistrationMode("bootstrap")}
+                >
+                  Set up first owner
+                </Button>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
-    </div>
-  );
+    );
 
   // Both of these must mount in EVERY account state, including while the
   // registration form is open. Redeeming an invitation and bootstrapping the
@@ -504,7 +528,10 @@ function HostedAuthenticationSurface() {
   );
 
   return (
-    <Surface actions={signInActions ?? registrationActions} trailing={signInTrailing}>
+    <Surface
+      actions={signInActions ?? registrationActions ?? fallbackActions}
+      trailing={signInTrailing}
+    >
       <div className="mb-6 flex size-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
         <ShieldCheckIcon aria-hidden className="size-5" />
       </div>
@@ -512,16 +539,32 @@ function HostedAuthenticationSurface() {
         {APP_DISPLAY_NAME} Hub
       </p>
       <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-2xl font-semibold outline-none">
-        {status === "session-expired" ? "Your session expired" : "Connect to your Ryco nodes"}
+        {context === "native-authorization"
+          ? "Sign in to continue on your device"
+          : status === "session-expired"
+            ? "Your session expired"
+            : "Connect to your Ryco nodes"}
       </h1>
       <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        Ryco Hub reaches the developer machines an owner has authorized for your account. Your
-        session lives in an HttpOnly cookie — nothing about it is readable by this page.
+        {context === "native-authorization"
+          ? "Authenticate in this browser first. Ryco will ask again before it authorizes the mobile app."
+          : "Ryco Hub reaches the developer machines an owner has authorized for your account. Your session lives in an HttpOnly cookie — nothing about it is readable by this page."}
       </p>
       <div className="mt-4">
         <HostedRelayTrustNotice />
       </div>
       <NewToThisHubDisclosure bootstrapAvailable={bootstrapAvailable} />
+      {!registrationMode && !fallbackMode && status !== "authenticating" ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="-ml-2 mt-2 h-auto min-h-8 whitespace-normal phone:min-h-11"
+          onClick={() => setFallbackMode("password")}
+        >
+          <LifeBuoyIcon aria-hidden />
+          Password, recovery code, or email
+        </Button>
+      ) : null}
       <HostedPwaControls />
       {error ? (
         <div className="mt-4">
@@ -535,7 +578,282 @@ function HostedAuthenticationSurface() {
       {registrationMode ? (
         <RegistrationForm mode={registrationMode} credentialRef={registrationInputRef} />
       ) : null}
+      {fallbackMode ? (
+        <BrowserFallbackForm mode={fallbackMode} onModeChange={setFallbackMode} />
+      ) : null}
     </Surface>
+  );
+}
+
+const BROWSER_FALLBACK_FORM_ID = "hub-browser-fallback-form";
+
+function BrowserFallbackForm({
+  mode,
+  onModeChange,
+}: {
+  readonly mode: "email-recovery" | "password" | "recovery-code";
+  readonly onModeChange: (mode: "email-recovery" | "password" | "recovery-code") => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [emailToken, setEmailToken] = useState("");
+  const [emailRequested, setEmailRequested] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    firstInputRef.current?.focus({ preventScroll: true });
+  }, [mode]);
+
+  const authenticate = async (event: FormEvent) => {
+    event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    setNotice(null);
+    try {
+      if (mode === "password") {
+        const submittedPassword = password;
+        const submittedTotpCode = totpCode.trim();
+        setPassword("");
+        setTotpCode("");
+        await hostedHubApi.signInWithPassword({
+          email: email.trim(),
+          password: submittedPassword,
+          ...(submittedTotpCode ? { totpCode: submittedTotpCode } : {}),
+        });
+        await hostedHubController.bootstrap();
+        return;
+      }
+      if (mode === "recovery-code") {
+        const submittedCode = recoveryCode;
+        setRecoveryCode("");
+        await hostedHubApi.signInWithRecoveryCode(submittedCode);
+        await hostedHubController.bootstrap();
+        return;
+      }
+      const submittedToken = emailToken.trim();
+      if (!submittedToken) {
+        await hostedHubApi.requestEmailRecovery(email.trim());
+        setEmailRequested(true);
+        setNotice(
+          "If that verified address belongs to an account, its recovery email is on the way.",
+        );
+        return;
+      }
+      const submittedTotpCode = totpCode.trim();
+      setEmailToken("");
+      setTotpCode("");
+      await hostedHubApi.confirmEmailRecovery({
+        token: submittedToken,
+        ...(submittedTotpCode ? { totpCode: submittedTotpCode } : {}),
+      });
+      await hostedHubController.bootstrap();
+    } catch (cause) {
+      setError(
+        cause instanceof HostedHubApiError
+          ? cause.message
+          : "This sign-in method is temporarily unavailable.",
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="mt-6">
+      <div
+        aria-label="Sign-in method"
+        className="grid grid-cols-3 gap-1 rounded-xl border border-border bg-background/70 p-1"
+        role="group"
+      >
+        {(
+          [
+            ["password", "Password"],
+            ["recovery-code", "Recovery code"],
+            ["email-recovery", "Email"],
+          ] as const
+        ).map(([value, label]) => (
+          <Button
+            key={value}
+            type="button"
+            size="sm"
+            variant={mode === value ? "secondary" : "ghost"}
+            className="h-auto min-h-9 whitespace-normal px-2 py-1.5 text-xs"
+            aria-pressed={mode === value}
+            onClick={() => {
+              setError(null);
+              setNotice(null);
+              onModeChange(value);
+            }}
+          >
+            {label}
+          </Button>
+        ))}
+      </div>
+
+      <form
+        id={BROWSER_FALLBACK_FORM_ID}
+        className="mt-5 space-y-4"
+        autoComplete="on"
+        onSubmit={(event) => void authenticate(event)}
+      >
+        {mode === "password" ? (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="hub-login-email">Verified email</Label>
+              <Input
+                ref={firstInputRef}
+                id="hub-login-email"
+                type="email"
+                autoComplete="username"
+                required
+                maxLength={254}
+                value={email}
+                className={TOUCH_INPUT_CLASS_NAME}
+                onChange={(event) => setEmail(event.currentTarget.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="hub-login-password">Password</Label>
+              <Input
+                id="hub-login-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                maxLength={256}
+                value={password}
+                className={TOUCH_INPUT_CLASS_NAME}
+                onChange={(event) => setPassword(event.currentTarget.value)}
+              />
+            </div>
+            <TotpInput value={totpCode} onChange={setTotpCode} />
+          </>
+        ) : mode === "recovery-code" ? (
+          <div className="space-y-1.5">
+            <Label htmlFor="hub-login-recovery-code">Recovery code</Label>
+            <Input
+              ref={firstInputRef}
+              id="hub-login-recovery-code"
+              type="password"
+              autoComplete="one-time-code"
+              required
+              maxLength={128}
+              value={recoveryCode}
+              className={TOUCH_INPUT_CLASS_NAME}
+              onChange={(event) => setRecoveryCode(event.currentTarget.value)}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="hub-recovery-email">Verified email</Label>
+              <Input
+                ref={firstInputRef}
+                id="hub-recovery-email"
+                type="email"
+                autoComplete="email"
+                required={!emailRequested && !emailToken}
+                maxLength={254}
+                value={email}
+                className={TOUCH_INPUT_CLASS_NAME}
+                onChange={(event) => setEmail(event.currentTarget.value)}
+              />
+            </div>
+            {emailRequested || emailToken ? (
+              <>
+                <div className="space-y-1.5">
+                  <Label htmlFor="hub-recovery-token">Email recovery token</Label>
+                  <Input
+                    id="hub-recovery-token"
+                    type="password"
+                    autoComplete="one-time-code"
+                    required
+                    maxLength={64}
+                    value={emailToken}
+                    className={TOUCH_INPUT_CLASS_NAME}
+                    onChange={(event) => setEmailToken(event.currentTarget.value)}
+                  />
+                </div>
+                <TotpInput value={totpCode} onChange={setTotpCode} />
+              </>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="-ml-2 h-auto min-h-8 whitespace-normal"
+                onClick={() => {
+                  setEmailRequested(true);
+                  setNotice(null);
+                }}
+              >
+                I already have an email token
+              </Button>
+            )}
+          </>
+        )}
+
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+        {notice ? (
+          <p role="status" className="text-sm leading-relaxed text-muted-foreground">
+            {notice}
+          </p>
+        ) : null}
+
+        <Button type="submit" className="min-h-11 w-full" disabled={pending}>
+          {pending ? (
+            <Loader2Icon aria-hidden className="animate-spin motion-reduce:animate-none" />
+          ) : mode === "email-recovery" ? (
+            <MailIcon aria-hidden />
+          ) : (
+            <KeyRoundIcon aria-hidden />
+          )}
+          {pending
+            ? "Working…"
+            : mode === "password"
+              ? "Sign in with password"
+              : mode === "recovery-code"
+                ? "Use recovery code"
+                : emailRequested || emailToken
+                  ? "Continue with email token"
+                  : "Send recovery email"}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+function TotpInput({
+  value,
+  onChange,
+}: {
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="hub-login-totp">
+        Authenticator code <span className="text-muted-foreground">(if enabled)</span>
+      </Label>
+      <Input
+        id="hub-login-totp"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        maxLength={16}
+        value={value}
+        className={TOUCH_INPUT_CLASS_NAME}
+        onChange={(event) => onChange(event.currentTarget.value)}
+      />
+    </div>
   );
 }
 

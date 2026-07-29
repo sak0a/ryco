@@ -354,6 +354,21 @@ describe("worktree sidebar state", () => {
     expect(localEnvironmentStateOf(next).worktreeById?.[worktreeId]?.title).toBe(
       "Renamed Worktree",
     );
+
+    const branchUpdated = applyOrchestrationEvent(
+      next,
+      makeEvent("worktree.metaUpdated", {
+        worktreeId,
+        branch: "feature/renamed",
+        changedAt: "2026-02-13T00:02:00.000Z",
+      }),
+      localEnvironmentId,
+    );
+
+    expect(localEnvironmentStateOf(branchUpdated).worktreeById?.[worktreeId]).toMatchObject({
+      branch: "feature/renamed",
+      title: "Renamed Worktree",
+    });
   });
 });
 

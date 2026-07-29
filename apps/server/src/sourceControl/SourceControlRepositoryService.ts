@@ -18,6 +18,7 @@ import {
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
+import { WorkspaceAccessPolicy } from "../workspace/Services/WorkspaceAccessPolicy.ts";
 import type * as SourceControlProvider from "./SourceControlProvider.ts";
 import * as SourceControlProviderRegistry from "./SourceControlProviderRegistry.ts";
 
@@ -226,6 +227,24 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
   const git = yield* GitVcsDriver.GitVcsDriver;
   const path = yield* Path.Path;
   const providers = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+  const workspaceAccessPolicy = yield* WorkspaceAccessPolicy;
+
+  const authorizeExistingPath = (operation: string, candidate: string) =>
+    workspaceAccessPolicy
+      .assertExistingPath({
+        path: candidate,
+        operation,
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          repositoryError({
+            operation,
+            provider: "unknown",
+            detail: cause.message,
+            cause,
+          }),
+        ),
+      );
 
   const ensureConcreteProvider = (input: {
     readonly operation: string;
@@ -285,11 +304,12 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
       provider: input.provider,
     });
     const provider = yield* providers.get(providerKind);
+    const cwd = yield* authorizeExistingPath("lookupRepository", input.cwd ?? config.cwd);
     const urls = yield* resolveRepositoryCloneUrls({
       operation: "lookupRepository",
       providerKind,
       provider,
-      cwd: input.cwd ?? config.cwd,
+      cwd,
       repository: input.repository.trim(),
     });
     return toRepositoryInfo(providerKind, urls);
@@ -310,8 +330,9 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
         });
       }
 
+      const cwd = yield* authorizeExistingPath("searchRepositories", input.cwd ?? config.cwd);
       const urls = yield* provider.searchRepositories({
-        cwd: input.cwd ?? config.cwd,
+        cwd,
         ...(input.query !== undefined ? { query: input.query.trim() } : {}),
         ...(input.limit !== undefined ? { limit: input.limit } : {}),
       });
@@ -337,9 +358,24 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
   const prepareDestination = Effect.fn("SourceControlRepositoryService.prepareDestination")(
     function* (destinationPath: string) {
       const normalizedDestination = yield* normalizeDestinationPath(destinationPath);
-      if (yield* fileSystem.exists(normalizedDestination).pipe(Effect.orElseSucceed(() => false))) {
+      const authorizedDestination = yield* workspaceAccessPolicy
+        .assertPath({
+          path: normalizedDestination,
+          operation: "cloneRepository",
+        })
+        .pipe(
+          Effect.mapError((cause) =>
+            repositoryError({
+              operation: "cloneRepository",
+              provider: "unknown",
+              detail: cause.message,
+              cause,
+            }),
+          ),
+        );
+      if (yield* fileSystem.exists(authorizedDestination).pipe(Effect.orElseSucceed(() => false))) {
         const entries = yield* fileSystem
-          .readDirectory(normalizedDestination, { recursive: false })
+          .readDirectory(authorizedDestination, { recursive: false })
           .pipe(
             Effect.mapError((cause) =>
               repositoryError({
@@ -358,13 +394,13 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
           });
         }
       } else {
-        yield* fileSystem.makeDirectory(path.dirname(normalizedDestination), { recursive: true });
+        yield* fileSystem.makeDirectory(path.dirname(authorizedDestination), { recursive: true });
       }
 
       return {
-        destinationPath: normalizedDestination,
-        parentPath: path.dirname(normalizedDestination),
-        directoryName: path.basename(normalizedDestination),
+        destinationPath: authorizedDestination,
+        parentPath: path.dirname(authorizedDestination),
+        directoryName: path.basename(authorizedDestination),
       };
     },
   );
@@ -457,8 +493,12 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
       yield* executeClone();
     }
 
+    const clonedPath = yield* authorizeExistingPath(
+      "cloneRepository",
+      preparedDestination.destinationPath,
+    );
     return {
-      cwd: preparedDestination.destinationPath,
+      cwd: clonedPath,
       remoteUrl: cloneRemoteUrl,
       repository,
     };
@@ -471,14 +511,15 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
         provider: input.provider,
       });
       const provider = yield* providers.get(providerKind);
+      const cwd = yield* authorizeExistingPath("publishRepository", input.cwd);
       const urls = yield* provider.createRepository({
-        cwd: input.cwd,
+        cwd,
         repository: input.repository.trim(),
         visibility: input.visibility,
       });
       const remoteUrl = selectRemoteUrl(urls, input.protocol);
       const remoteName = yield* git.ensureRemote({
-        cwd: input.cwd,
+        cwd,
         preferredName: input.remoteName?.trim() || "origin",
         url: remoteUrl,
       });
@@ -490,7 +531,7 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
       const hasCommits = yield* git
         .execute({
           operation: "SourceControlRepositoryService.publishRepository.headCheck",
-          cwd: input.cwd,
+          cwd,
           args: ["rev-parse", "--verify", "HEAD"],
         })
         .pipe(
@@ -499,7 +540,7 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
         );
       if (!hasCommits) {
         const details = yield* git
-          .statusDetails(input.cwd)
+          .statusDetails(cwd)
           .pipe(Effect.catch(() => Effect.succeed(null)));
         return {
           repository: toRepositoryInfo(providerKind, urls),
@@ -510,7 +551,7 @@ export const make = Effect.fn("makeSourceControlRepositoryService")(function* ()
         };
       }
 
-      const pushResult = yield* git.pushCurrentBranch(input.cwd, null, { remoteName });
+      const pushResult = yield* git.pushCurrentBranch(cwd, null, { remoteName });
 
       return {
         repository: toRepositoryInfo(providerKind, urls),

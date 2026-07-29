@@ -271,6 +271,7 @@ describe("OrchestrationEngine", () => {
           commandId: CommandId.make("cmd-worktree-title-update"),
           worktreeId,
           title: "Renamed Worktree",
+          branch: "feature/renamed",
           changedAt,
         }),
       );
@@ -279,6 +280,9 @@ describe("OrchestrationEngine", () => {
       expect(
         readModel.worktrees?.find((worktree) => worktree.worktreeId === worktreeId)?.title,
       ).toBe("Renamed Worktree");
+      expect(
+        readModel.worktrees?.find((worktree) => worktree.worktreeId === worktreeId)?.branch,
+      ).toBe("feature/renamed");
     } finally {
       await system.dispose();
     }

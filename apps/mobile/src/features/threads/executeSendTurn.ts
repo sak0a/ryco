@@ -107,7 +107,8 @@ export async function executeSendTurn(input: ExecuteSendTurnInput): Promise<bool
 
     const bootstrap = buildSendTurnBootstrap({
       isLocalDraftThread: input.thread.isLocalDraftThread,
-      // Mobile has no worktree-creation flow in the MVP.
+      // Existing task sends keep their server-owned worktree context; worktree
+      // creation itself is handled by the New Task / Project workflows.
       baseBranchForWorktree: null,
       shouldMaterializeLegacyBranchWorktree: false,
       projectId: input.project.projectId,

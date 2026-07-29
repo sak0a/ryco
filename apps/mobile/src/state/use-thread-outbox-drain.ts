@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { getWsConnectionStatus, getWsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
+  IMAGE_ONLY_BOOTSTRAP_PROMPT,
   buildSendTurnDispatchAttachment,
   commitSendTurnDispatch,
 } from "@ryco/client-runtime/state/composer";
@@ -35,7 +36,9 @@ async function sendQueuedThreadMessage(message: QueuedThreadMessage): Promise<vo
           id: attachment.id,
           mime: attachment.mimeType,
           size: attachment.sizeBytes,
-          uri: attachment.previewUri,
+          // Use the persisted data URL. Image-picker preview file URIs are
+          // cache-local and may disappear before an offline turn drains.
+          uri: attachment.dataUrl,
         }),
         name: attachment.name,
       }),
@@ -48,7 +51,7 @@ async function sendQueuedThreadMessage(message: QueuedThreadMessage): Promise<vo
     isServerThread: true,
     title: "",
     messageId: message.messageId,
-    outgoingMessageText: message.text,
+    outgoingMessageText: message.text.trim() || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     turnAttachments,
     modelSelection: message.modelSelection,
     hasSelectedModel: true,

@@ -1,6 +1,8 @@
 import type { ClientRuntimeConfigService } from "@ryco/client-runtime/platform";
 import Constants from "expo-constants";
 
+import { normalizeHubOrigin } from "../hostedHub/hubProfile";
+
 interface MobileExtraConfig {
   readonly appVariant?: string | null;
   readonly node?: {
@@ -14,13 +16,15 @@ interface MobileExtraConfig {
   };
 }
 
+export type MobileAppVariant = "development" | "preview" | "production";
+
 /** The validated hosted-plane configuration, or nothing at all. */
 export interface MobileHostedConfig {
   /** The Hub public origin every bearer request URL and DPoP `htu` is built from. */
   readonly hubOrigin: string;
-  /** The hosted web app the fallback browser session opens, when configured. */
+  /** Optional hosted web surface retained for shared runtime compatibility. */
   readonly appUrl: string | null;
-  /** The passkey relying party (associated-domains host). */
+  /** The Hub's advertised passkey relying party. */
   readonly relyingParty: string;
 }
 
@@ -50,16 +54,30 @@ function allowsInsecureHostedOrigin(extra: MobileExtraConfig): boolean {
   return trimmed(extra.appVariant) === "development";
 }
 
+/** The app variant determines the exact custom-scheme authorization callback. */
+export function readMobileAppVariant(): MobileAppVariant {
+  const variant = trimmed(readExtra().appVariant);
+  return variant === "development" || variant === "preview" ? variant : "production";
+}
+
+/** A bounded public label shown in the Hub's explicit device-consent screen. */
+export function readMobileDeviceLabel(): string {
+  const name = trimmed(Constants.deviceName);
+  return Array.from(name ?? "Ryco mobile")
+    .slice(0, 64)
+    .join("");
+}
+
+export function isMobileDevelopmentBuild(): boolean {
+  return allowsInsecureHostedOrigin(readExtra());
+}
+
 function parseUrl(value: string): URL | null {
   try {
     return new URL(value);
   } catch {
     return null;
   }
-}
-
-function hasCredentials(url: URL): boolean {
-  return url.username !== "" || url.password !== "";
 }
 
 function hasAllowedProtocol(url: URL, allowInsecure: boolean): boolean {
@@ -73,21 +91,13 @@ function hasAllowedProtocol(url: URL, allowInsecure: boolean): boolean {
  * client's `htu` from the server-derived one.
  */
 function parseHostedOrigin(value: unknown, allowInsecure: boolean): string | null {
-  const raw = trimmed(value);
-  if (raw === undefined) return null;
-  const url = parseUrl(raw);
-  if (!url) return null;
-  if (!hasAllowedProtocol(url, allowInsecure)) return null;
-  if (hasCredentials(url)) return null;
-  if (url.search !== "" || url.hash !== "") return null;
-  if (url.pathname !== "" && url.pathname !== "/") return null;
-  return url.origin;
+  const normalized = normalizeHubOrigin(value, { allowInsecure });
+  return normalized.ok ? normalized.origin : null;
 }
 
 /**
- * The hosted web app URL may carry a path (the app need not sit at the root) but
- * never a query, fragment, or credential — a fallback browser session must be
- * opened at a URL derived from config alone.
+ * The optional hosted web app URL may carry a path (the app need not sit at the
+ * root) but never a query, fragment, or credential.
  */
 function parseHostedAppUrl(value: unknown, allowInsecure: boolean): string | null {
   const raw = trimmed(value);
@@ -95,7 +105,7 @@ function parseHostedAppUrl(value: unknown, allowInsecure: boolean): string | nul
   const url = parseUrl(raw);
   if (!url) return null;
   if (!hasAllowedProtocol(url, allowInsecure)) return null;
-  if (hasCredentials(url)) return null;
+  if (url.username !== "" || url.password !== "") return null;
   if (url.search !== "" || url.hash !== "") return null;
   return url.toString();
 }

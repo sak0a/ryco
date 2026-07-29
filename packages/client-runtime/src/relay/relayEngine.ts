@@ -2,6 +2,7 @@ import {
   RELAY_AUTHENTICATION_DEADLINE_MS,
   RELAY_MAX_CONTROL_FRAME_BYTES,
   RELAY_MAX_DATA_CHUNK_BYTES,
+  RELAY_MAX_RPC_MESSAGE_BYTES,
   RELAY_MAX_DATA_FRAME_BYTES,
   RELAY_MAX_DATA_FRAME_OVERHEAD_BYTES,
   RELAY_PROTOCOL_MAJOR,
@@ -13,6 +14,7 @@ import {
   type RelayLimits,
 } from "@ryco/contracts";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
+import { prepareRelayMessage, RelayMessageAssembler } from "@ryco/shared/relayMessageChunks";
 
 import { decodeBase64Url } from "./base64url.ts";
 import type {
@@ -182,6 +184,8 @@ export class HostedRelayEngine {
   }
 
   /** Socket backpressure plus everything still awaiting a flow.resume flush. */
+  readonly #assembler = new RelayMessageAssembler();
+
   get bufferedAmount(): number {
     return this.options.socket.bufferedAmount + this.#outboundQueuedBytes;
   }
@@ -191,12 +195,27 @@ export class HostedRelayEngine {
     // completes (channel.accept); a channel that is merely open is not enough.
     if (this.#closed || !this.#accepted || !this.#channel || !this.#limits)
       throw new Error("Relay channel is not open.");
-    if (payload.byteLength > this.#limits.maxDataChunkBytes) {
+    const maxMessageBytes = Math.min(
+      RELAY_MAX_RPC_MESSAGE_BYTES,
+      this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes,
+    );
+    const prepared = prepareRelayMessage(payload, {
+      maxChunkBytes: this.#limits.maxDataChunkBytes,
+      maxMessageBytes,
+      peerSupportsChunking: this.#assembler.peerSupportsChunking,
+    });
+    if (prepared.kind === "error") {
       payload.fill(0);
       this.#fail(failure("transfer_limit"));
-      throw new Error("RPC payload exceeds the negotiated relay limit.");
+      throw new Error(
+        prepared.reason === "peer_unsupported"
+          ? "Relay peer does not support multi-frame RPC messages."
+          : "RPC payload exceeds the maximum relay message size.",
+      );
     }
-    this.#enqueueOutbound(payload);
+    for (const chunk of prepared.payloads) {
+      this.#enqueueOutbound(Uint8Array.from(chunk));
+    }
   }
 
   close(code = 1000, reason = "closed"): void {
@@ -316,18 +335,30 @@ export class HostedRelayEngine {
       return this.#fail(failure("channel_rejected"));
     this.#inboundSequence += 1;
     const payload = Uint8Array.from(frame.payload);
-    if (this.#inboundQueuedBytes + payload.byteLength > this.#limits.maxQueuedBytes) {
+    if (this.#inboundOwnedBytes() + payload.byteLength > this.#limits.maxQueuedBytes) {
       payload.fill(0);
       return this.#fail(failure("slow_consumer"));
     }
     this.#inboundQueue.push(payload);
     this.#inboundQueuedBytes += payload.byteLength;
-    const highWater = Math.floor(this.#limits.maxQueuedBytes * 0.75);
-    if (!this.#inboundPaused && this.#inboundQueuedBytes >= highWater && this.#channel) {
+    this.#refreshInboundFlow();
+    this.#drainInbound();
+  }
+
+  #inboundOwnedBytes(): number {
+    return this.#inboundQueuedBytes + this.#assembler.heldBytes;
+  }
+
+  #refreshInboundFlow(): void {
+    if (!this.#limits || !this.#channel) return;
+    const ownedBytes = this.#inboundOwnedBytes();
+    if (!this.#inboundPaused && ownedBytes >= Math.floor(this.#limits.maxQueuedBytes * 0.75)) {
       this.#inboundPaused = true;
       this.#frame({ type: "flow.pause", ...VERSION, channelId: this.#channel });
+    } else if (this.#inboundPaused && ownedBytes <= Math.floor(this.#limits.maxQueuedBytes * 0.5)) {
+      this.#inboundPaused = false;
+      this.#frame({ type: "flow.resume", ...VERSION, channelId: this.#channel });
     }
-    this.#drainInbound();
   }
 
   #drainInbound(): void {
@@ -341,17 +372,17 @@ export class HostedRelayEngine {
         this.#inboundQueuedBytes -= payload.byteLength;
         const delivered = Uint8Array.from(payload);
         payload.fill(0);
-        this.options.events.onData(delivered);
+        // Reassemble before delivering. An unchunked payload passes straight
+        // through, so an old peer is unaffected; a partial message is held
+        // until its final chunk arrives.
+        const assembled = this.#assembler.push(delivered);
+        if (assembled.kind === "error") {
+          this.#fail(failure("transfer_limit"));
+          return;
+        }
+        if (assembled.kind === "done") this.options.events.onData(assembled.message);
       }
-      if (
-        this.#inboundPaused &&
-        this.#limits &&
-        this.#inboundQueuedBytes <= Math.floor(this.#limits.maxQueuedBytes * 0.5) &&
-        this.#channel
-      ) {
-        this.#inboundPaused = false;
-        this.#frame({ type: "flow.resume", ...VERSION, channelId: this.#channel });
-      }
+      this.#refreshInboundFlow();
       if (this.#inboundQueue.length > 0) this.#drainInbound();
     });
   }
@@ -438,6 +469,7 @@ export class HostedRelayEngine {
     this.#auth = null;
     for (const item of this.#outboundQueue) item.bytes.fill(0);
     for (const item of this.#inboundQueue) item.fill(0);
+    this.#assembler.reset();
     this.#outboundQueue = [];
     this.#inboundQueue = [];
     this.#outboundQueuedBytes = 0;

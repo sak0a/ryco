@@ -224,6 +224,20 @@ export function ensureBrowseDirectoryPath(currentPath: string): string {
   return `${trimmed}${preferredPathSeparator(trimmed)}`;
 }
 
+export function resolveInitialProjectBrowsePath(input: {
+  readonly workspaceAccessRoot?: string | undefined;
+  readonly configuredBaseDirectory?: string | undefined;
+}): string {
+  const workspaceAccessRoot = input.workspaceAccessRoot?.trim() ?? "";
+  if (workspaceAccessRoot.length > 0) {
+    return ensureBrowseDirectoryPath(workspaceAccessRoot);
+  }
+  const configuredBaseDirectory = input.configuredBaseDirectory?.trim() ?? "";
+  return configuredBaseDirectory.length > 0
+    ? ensureBrowseDirectoryPath(configuredBaseDirectory)
+    : "~/";
+}
+
 export function getBrowseParentPath(currentPath: string): string | null {
   const trimmed = trimTrailingPathSeparators(currentPath);
   const absolutePath = splitAbsolutePath(trimmed);
@@ -256,4 +270,20 @@ export function getBrowseParentPath(currentPath: string): string | null {
 
 export function canNavigateUp(currentPath: string): boolean {
   return hasTrailingPathSeparator(currentPath) && getBrowseParentPath(currentPath) !== null;
+}
+
+export function isSameFilesystemPath(left: string, right: string): boolean {
+  const normalizedLeft = trimTrailingPathSeparators(left.trim());
+  const normalizedRight = trimTrailingPathSeparators(right.trim());
+  const isWindowsPath =
+    getAbsolutePathKind(normalizedLeft) === "windows" ||
+    getAbsolutePathKind(normalizedRight) === "windows";
+
+  if (isWindowsPath) {
+    return (
+      normalizedLeft.replace(/\//g, "\\").toLowerCase() ===
+      normalizedRight.replace(/\//g, "\\").toLowerCase()
+    );
+  }
+  return normalizedLeft === normalizedRight;
 }

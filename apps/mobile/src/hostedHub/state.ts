@@ -12,7 +12,7 @@ import {
 } from "@ryco/client-runtime/authorization";
 import { useStore } from "zustand";
 
-import { configureMobileHostedRuntime, ensureMobileHostedSession } from "./runtime";
+import { ensureMobileHostedSession } from "./runtime";
 
 /**
  * Register the mobile wiring as a lazy configurator rather than running it at
@@ -21,16 +21,16 @@ import { configureMobileHostedRuntime, ensureMobileHostedSession } from "./runti
  * or the device-key module, so suites can mock those adapters.
  *
  * The runtime's configurator seam is synchronous while mobile configuration is
- * async (it must resolve a hardware key first), so this kicks off configuration
- * and lets it settle. Screens should call `ensureMobileHostedSession()`, which
- * awaits configuration and hydrates the session token in the right order.
+ * async (it must hydrate the selected Hub profile and resolve a hardware key),
+ * so this kicks off the single ordered session entry point and lets it settle.
+ * Screens call the same function and await the memoized work.
  */
 setHostedRuntimeConfigurator(() => {
-  void configureMobileHostedRuntime();
+  void ensureMobileHostedSession();
 });
 
 export { ensureMobileHostedSession };
-export { isMobileHostedModeAvailable } from "./runtime";
+export { isMobileHostedModeAvailable, subscribeMobileHostedModeAvailability } from "./runtime";
 
 export {
   hostedAccountStore,

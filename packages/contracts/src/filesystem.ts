@@ -23,6 +23,7 @@ export type FilesystemBrowseEntry = typeof FilesystemBrowseEntry.Type;
 
 export const FilesystemBrowseResult = Schema.Struct({
   parentPath: TrimmedNonEmptyString,
+  workspaceAccessRoot: Schema.optional(TrimmedNonEmptyString),
   entries: Schema.Array(FilesystemBrowseEntry),
 });
 export type FilesystemBrowseResult = typeof FilesystemBrowseResult.Type;

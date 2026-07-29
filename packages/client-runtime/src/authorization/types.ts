@@ -102,6 +102,23 @@ export interface HostedHubPasskey {
 }
 
 /**
+ * Bounded credential posture for the signed-in Hub account.
+ *
+ * This contains only what account settings needs in order to render valid
+ * actions. The email address is the user's own PII and must never be logged,
+ * placed in an error, or copied to diagnostics. No credential secret, token,
+ * hash, lockout record, or internal credential identifier belongs here.
+ */
+export interface HostedAccountSecurity {
+  readonly passwordConfigured: boolean;
+  readonly totpEnrolled: boolean;
+  readonly email: {
+    readonly address: string;
+    readonly verified: boolean;
+  } | null;
+}
+
+/**
  * A started TOTP enrolment.
  *
  * **Both members are secret key material.** `secretBase32` is the shared key and

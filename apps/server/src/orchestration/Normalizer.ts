@@ -11,6 +11,7 @@ import {
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
+import { WorkspaceAccessPolicy } from "../workspace/Services/WorkspaceAccessPolicy.ts";
 import { WorkspacePaths } from "../workspace/Services/WorkspacePaths.ts";
 
 export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
@@ -18,27 +19,46 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const serverConfig = yield* ServerConfig;
+    const workspaceAccessPolicy = yield* WorkspaceAccessPolicy;
     const workspacePaths = yield* WorkspacePaths;
 
     const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
-      workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
-        Effect.mapError(
-          (cause) =>
-            new OrchestrationDispatchCommandError({
-              message: cause.message,
-            }),
-        ),
-      );
+      workspaceAccessPolicy
+        .assertExistingPath({
+          path: workspaceRoot,
+          operation: "project workspace",
+        })
+        .pipe(
+          Effect.flatMap((authorizedRoot) => workspacePaths.normalizeWorkspaceRoot(authorizedRoot)),
+          Effect.mapError(
+            (cause) =>
+              new OrchestrationDispatchCommandError({
+                message: cause.message,
+              }),
+          ),
+        );
 
     const normalizeProjectWorkspaceRootForCreate = (
       workspaceRoot: string,
       createIfMissing: boolean | undefined,
     ) =>
-      workspacePaths
-        .normalizeWorkspaceRoot(workspaceRoot, {
-          createIfMissing: createIfMissing === true,
+      workspaceAccessPolicy
+        .assertPath({
+          path: workspaceRoot,
+          operation: "project creation",
         })
         .pipe(
+          Effect.flatMap((authorizedRoot) =>
+            workspacePaths.normalizeWorkspaceRoot(authorizedRoot, {
+              createIfMissing: createIfMissing === true,
+            }),
+          ),
+          Effect.flatMap((normalizedRoot) =>
+            workspaceAccessPolicy.assertExistingPath({
+              path: normalizedRoot,
+              operation: "project creation",
+            }),
+          ),
           Effect.mapError(
             (cause) =>
               new OrchestrationDispatchCommandError({

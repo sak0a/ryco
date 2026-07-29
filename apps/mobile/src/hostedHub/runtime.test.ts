@@ -3,9 +3,17 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const hoisted = vi.hoisted(() => ({
   readMobileHostedConfig: vi.fn(),
   createMobileDpopSigner: vi.fn(),
+  nativeAuthorization: {
+    callbackUri: () => "ryco-dev://hosted/complete",
+    deviceLabel: () => "Ryco mobile",
+    randomBytes: async (length: number) => new Uint8Array(length),
+    sha256: async () => new Uint8Array(32),
+    openSystemBrowser: async () => ({ type: "cancel" as const }),
+  },
   hydrate: vi.fn(async () => {}),
   bootstrap: vi.fn(async () => {}),
   calls: [] as string[],
+  profileRaw: null as string | null,
 }));
 
 vi.mock("react-native", () => ({
@@ -20,12 +28,22 @@ vi.mock("expo-secure-store", () => ({
   setItemAsync: async () => {},
   deleteItemAsync: async () => {},
 }));
+vi.mock("expo-sqlite/kv-store", () => ({
+  default: {
+    getItem: async () => hoisted.profileRaw,
+    setItem: async () => {},
+    removeItem: async () => {},
+  },
+}));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { extra: {} } } }));
 vi.mock("../platform/config", () => ({
   readMobileHostedConfig: hoisted.readMobileHostedConfig,
 }));
 vi.mock("../platform/dpopSigner", () => ({
   createMobileDpopSigner: hoisted.createMobileDpopSigner,
+}));
+vi.mock("../platform/nativeAuthorization", () => ({
+  mobileNativeAuthorization: hoisted.nativeAuthorization,
 }));
 vi.mock("../platform/sessionCredentials", () => ({
   hydrateMobileHostedSessionToken: async () => {
@@ -66,6 +84,11 @@ import {
   isMobileHostedModeAvailable,
   resetMobileHostedRuntimeForTests,
 } from "./runtime";
+import {
+  createHubProfile,
+  resetMobileHubProfileCacheForTests,
+  serializeHubProfile,
+} from "./hubProfile";
 import { resetMobileHostedRuntimeConfigForTests } from "./runtimeConfig";
 
 const HOSTED_CONFIG = {
@@ -77,9 +100,11 @@ const HOSTED_CONFIG = {
 const signer = { sign: async () => "proof" };
 
 beforeEach(() => {
+  resetMobileHubProfileCacheForTests();
   resetMobileHostedRuntimeForTests();
   resetMobileHostedRuntimeConfigForTests();
   hoisted.calls.length = 0;
+  hoisted.profileRaw = null;
   vi.clearAllMocks();
   hoisted.hydrate.mockResolvedValue(undefined);
   hoisted.readMobileHostedConfig.mockReturnValue(HOSTED_CONFIG);
@@ -100,6 +125,7 @@ describe("hosted runtime configuration", () => {
     expect(typeof configuration.passkeyCeremony.register).toBe("function");
     expect(configuration.sessionCredentials.mode).toBe("bearer");
     expect(configuration.dpopSigner).toBe(signer);
+    expect(configuration.nativeAuthorization).toBe(hoisted.nativeAuthorization);
     expect(typeof configuration.nodeLifecycle.connectPrimaryEnvironment).toBe("function");
     expect(typeof configuration.isForeground).toBe("function");
     expect(typeof configuration.subscribeForeground).toBe("function");
@@ -163,6 +189,41 @@ describe("fail-closed configuration", () => {
     hoisted.readMobileHostedConfig.mockReturnValue(null);
 
     await expect(ensureMobileHostedSession()).resolves.toBeUndefined();
+    expect(hoisted.calls).not.toContain("bootstrap");
+  });
+
+  it("makes a compatible saved Hub profile authoritative", async () => {
+    hoisted.profileRaw = serializeHubProfile(
+      createHubProfile({
+        origin: "https://self-hosted.ryco.dev",
+        compatibility: {
+          status: "compatible",
+          checkedAt: 1234,
+          protocolVersion: 1,
+          handoffVersion: 1,
+          relyingPartyId: "self-hosted.ryco.dev",
+        },
+      })!,
+    );
+
+    await ensureMobileHostedSession();
+
+    expect(isMobileHostedModeAvailable()).toBe(true);
+    expect(hoisted.createMobileDpopSigner).toHaveBeenCalledTimes(1);
+    expect(hoisted.calls).toEqual(["hydrate", "bootstrap"]);
+    expect(getHostedRuntimeConfiguration().endpoint.origin()).toBe("https://self-hosted.ryco.dev");
+  });
+
+  it("does not send a credential to an unchecked saved Hub", async () => {
+    hoisted.profileRaw = serializeHubProfile(
+      createHubProfile({ origin: "https://unchecked.ryco.dev" })!,
+    );
+
+    await ensureMobileHostedSession();
+
+    expect(isMobileHostedModeAvailable()).toBe(false);
+    expect(hoisted.createMobileDpopSigner).not.toHaveBeenCalled();
+    expect(hoisted.calls).not.toContain("hydrate");
     expect(hoisted.calls).not.toContain("bootstrap");
   });
 });

@@ -19,6 +19,7 @@ import {
   ProjectId,
   ThreadId,
   TurnId,
+  WorktreeId,
 } from "@ryco/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -597,6 +598,33 @@ describe("ProviderCommandReactor", () => {
   it("generates a worktree branch name for the first turn", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
+    const worktreeId = WorktreeId.make("worktree-generated-branch");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "worktree.create",
+        commandId: CommandId.make("cmd-generated-branch-worktree"),
+        worktreeId,
+        projectId: asProjectId("project-1"),
+        branch: "ryco/1234abcd",
+        worktreePath: "/tmp/provider-project-worktree",
+        origin: "branch",
+        prNumber: null,
+        issueNumber: null,
+        prTitle: null,
+        issueTitle: null,
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.attach-to-worktree",
+        commandId: CommandId.make("cmd-generated-branch-attach"),
+        threadId: ThreadId.make("thread-1"),
+        worktreeId,
+        attachedAt: now,
+      }),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -646,6 +674,17 @@ describe("ProviderCommandReactor", () => {
       message: "Add a safer reconnect backoff.",
     });
     expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe("/tmp/provider-project-worktree");
+    const renamedBranch = (
+      harness.renameBranch.mock.calls[0]?.[0] as { newBranch?: string } | undefined
+    )?.newBranch;
+    expect(renamedBranch).toBeTruthy();
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.worktrees?.find((worktree) => worktree.worktreeId === worktreeId)?.branch ===
+        renamedBranch
+      );
+    });
   });
 
   it("forwards codex model options through session start and turn send", async () => {

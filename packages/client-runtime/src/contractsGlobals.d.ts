@@ -40,12 +40,19 @@ declare class URL {
   constructor(url: string, base?: string | URL);
   host: string;
   hostname: string;
+  password: string;
   pathname: string;
+  port: string;
   protocol: string;
   origin: string;
   search: string;
   hash: string;
+  username: string;
   searchParams: {
+    get(name: string): string | null;
+    getAll(name: string): string[];
+    has(name: string): boolean;
+    keys(): IterableIterator<string>;
     set(name: string, value: string): void;
   };
   toString(): string;
@@ -88,7 +95,11 @@ declare function btoa(value: string): string;
  */
 interface AbortSignal {
   readonly aborted: boolean;
-  addEventListener(type: "abort", listener: () => void): void;
+  addEventListener(
+    type: "abort",
+    listener: () => void,
+    options?: { readonly once?: boolean },
+  ): void;
   removeEventListener(type: "abort", listener: () => void): void;
 }
 

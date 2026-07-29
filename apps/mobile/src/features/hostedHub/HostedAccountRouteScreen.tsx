@@ -1,4 +1,4 @@
-import { useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ScrollView, View } from "react-native";
 
@@ -41,11 +41,12 @@ import { useHostedModeAvailable } from "./useHostedMode";
  *
  * Every credential action below is a native, DPoP-bound controller call.
  * Nothing on this screen opens a browser: `/api/account/*` authorizes an
- * `Authorization: DPoP` request without a same-origin check, so the webview is
- * needed only for the no-passkey *login* fallback on the sign-in sheet.
+ * `Authorization: DPoP` request without a same-origin check. Only signed-out
+ * users leave this screen through the reviewed system-browser handoff.
  */
 export function HostedAccountRouteScreen() {
   const navigation = useNavigation();
+  const isFocused = useIsFocused();
   const hostedModeAvailable = useHostedModeAvailable();
   const state = useHostedHubStore((value) => value);
   const accountState = useHostedAccountStore((value) => value);
@@ -63,13 +64,14 @@ export function HostedAccountRouteScreen() {
 
   const signedIn = state.accountStatus === "authenticated";
 
-  // A read, not a mutation: `refreshPasskeys` deduplicates, no-ops while signed
-  // out, and touches nothing. Regenerating recovery codes deliberately has no
+  // Reads, not mutations: both calls deduplicate, no-op while signed out, and
+  // touch no credentials. Regenerating recovery codes deliberately has no
   // equivalent here — that rotates, so it only ever runs from an explicit,
   // confirmed submit.
   useEffect(() => {
     if (!hostedModeAvailable || !signedIn) return;
     void hostedHubController.refreshPasskeys();
+    void hostedHubController.refreshAccountSecurity();
   }, [hostedModeAvailable, signedIn]);
 
   // This screen displays the account's one-time recovery codes, and saying so
@@ -143,7 +145,7 @@ export function HostedAccountRouteScreen() {
               ) : null}
             </View>
 
-            {view.errorMessage ? (
+            {view.errorMessage && isFocused ? (
               <View className="mx-5 mt-4">
                 <ErrorBanner message={view.errorMessage} />
               </View>
@@ -153,6 +155,25 @@ export function HostedAccountRouteScreen() {
               <View className="mx-5 mt-4">
                 <ErrorBanner message={management.errorMessage} />
               </View>
+            ) : null}
+
+            {management.securityMessage ? (
+              <View className="mx-5 mt-4 rounded-2xl border border-border bg-card px-4 py-3">
+                <Text className="font-sans text-xs leading-relaxed text-foreground-muted">
+                  {management.securityMessage}
+                </Text>
+              </View>
+            ) : null}
+
+            {management.securityRetry ? (
+              <SettingsSection title="Account security">
+                <SettingsRow
+                  first
+                  label={management.securityRetry.label}
+                  disabled={management.securityRetry.disabled}
+                  onPress={management.securityRetry.run}
+                />
+              </SettingsSection>
             ) : null}
 
             {view.deliveryUnknown ? (
@@ -174,6 +195,9 @@ export function HostedAccountRouteScreen() {
               ? management.sections.map((section) => (
                   <View key={section.id}>
                     <SettingsSection title={section.title}>
+                      {section.status !== null ? (
+                        <SettingsRow first label="Status" value={section.status} />
+                      ) : null}
                       {section.id === "passkeys" ? (
                         <HostedPasskeyList
                           rows={management.passkeyRows}
@@ -185,7 +209,9 @@ export function HostedAccountRouteScreen() {
                           key={row.id}
                           // The passkey list occupies the top of its own card,
                           // so the action beneath it always keeps a separator.
-                          first={section.id !== "passkeys" && index === 0}
+                          first={
+                            section.status === null && section.id !== "passkeys" && index === 0
+                          }
                           label={row.label}
                           destructive={row.destructive}
                           disabled={row.disabled}

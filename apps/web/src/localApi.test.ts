@@ -112,6 +112,7 @@ const rpcClientMock = {
 };
 
 vi.mock("./environments/runtime", () => ({
+  readEnvironmentConnection: () => null,
   getPrimaryEnvironmentConnection: () => ({
     kind: "primary" as const,
     knownEnvironment: {
@@ -343,6 +344,22 @@ afterEach(() => {
 });
 
 describe("wsApi", () => {
+  it("keeps direct browser mode connected through the primary environment", async () => {
+    rpcClientMock.server.getConfig.mockResolvedValue(baseServerConfig);
+    Object.defineProperty(getWindowForTest(), "location", {
+      configurable: true,
+      value: { origin: "http://localhost:3000" },
+    });
+    const { writePrimaryEnvironmentDescriptor } = await import("./environments/primary");
+    const { readLocalApi } = await import("./localApi");
+
+    writePrimaryEnvironmentDescriptor(baseServerConfig.environment);
+    const api = readLocalApi();
+
+    await expect(api?.server.getConfig()).resolves.toEqual(baseServerConfig);
+    expect(rpcClientMock.server.getConfig).toHaveBeenCalledOnce();
+  });
+
   it("forwards server config fetches directly to the RPC client", async () => {
     rpcClientMock.server.getConfig.mockResolvedValue(baseServerConfig);
     const { createLocalApi } = await import("./localApi");

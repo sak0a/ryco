@@ -1,5 +1,5 @@
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
-import type { EnvironmentId, VcsRef, ThreadId } from "@ryco/contracts";
+import { WorktreeId, type EnvironmentId, type VcsRef, type ThreadId } from "@ryco/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon } from "lucide-react";
 import {
@@ -157,6 +157,7 @@ export function BranchToolbarBranchSelector({
           .catch(() => undefined);
       }
       if (api && hasServerThread) {
+        const changedAt = new Date().toISOString();
         void api.orchestration.dispatchCommand({
           type: "thread.meta.update",
           commandId: newCommandId(),
@@ -164,6 +165,15 @@ export function BranchToolbarBranchSelector({
           branch,
           worktreePath,
         });
+        if (branch && serverThread.worktreeId) {
+          void api.orchestration.dispatchCommand({
+            type: "worktree.meta.update",
+            commandId: newCommandId(),
+            worktreeId: WorktreeId.make(serverThread.worktreeId),
+            branch,
+            changedAt,
+          });
+        }
       }
       if (hasServerThread) {
         onActiveThreadBranchOverrideChange?.(branch);
@@ -186,6 +196,7 @@ export function BranchToolbarBranchSelector({
       activeThreadId,
       activeProject,
       serverSession,
+      serverThread,
       activeWorktreePath,
       hasServerThread,
       onActiveThreadBranchOverrideChange,

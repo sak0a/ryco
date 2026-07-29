@@ -3,6 +3,7 @@ import type { EndpointService, HttpClientService } from "@ryco/client-runtime/pl
 import { createMobileEndpoint } from "../platform/endpoint";
 import { createMobileHttpClient } from "../platform/httpClient";
 import { readMobileHostedConfig, type MobileHostedConfig } from "../platform/config";
+import { readCachedMobileHubProfile } from "./hubProfile";
 
 /**
  * The hosted plane's endpoint and HTTP client.
@@ -28,7 +29,24 @@ let httpClient: HttpClientService | null = null;
 
 /** `null` when hosted mode is not configured or the origin failed validation. */
 export function getMobileHostedConfig(): MobileHostedConfig | null {
-  if (hostedConfig === undefined) hostedConfig = readMobileHostedConfig();
+  if (hostedConfig === undefined) {
+    const buildConfig = readMobileHostedConfig();
+    const profile = readCachedMobileHubProfile();
+    // A saved profile is authoritative only after the exact origin has
+    // advertised the supported system-browser handoff. Unchecked or
+    // incompatible profiles fail closed while the independent direct plane
+    // continues unchanged.
+    hostedConfig =
+      profile === undefined || profile === null
+        ? buildConfig
+        : profile.compatibility.status === "compatible"
+          ? {
+              hubOrigin: profile.origin,
+              appUrl: profile.origin,
+              relyingParty: profile.compatibility.relyingPartyId,
+            }
+          : null;
+  }
   return hostedConfig;
 }
 
@@ -58,9 +76,14 @@ function toWebSocketOrigin(origin: string): string {
   return url.origin;
 }
 
-/** Test seam: drop the memoized hosted singletons so a fresh config is read. */
-export function resetMobileHostedRuntimeConfigForTests(): void {
+/** Drop memoized hosted singletons after a deliberate profile-domain change. */
+export function invalidateMobileHostedRuntimeConfig(): void {
   hostedConfig = undefined;
   endpoint = null;
   httpClient = null;
+}
+
+/** Test alias kept explicit at call sites. */
+export function resetMobileHostedRuntimeConfigForTests(): void {
+  invalidateMobileHostedRuntimeConfig();
 }

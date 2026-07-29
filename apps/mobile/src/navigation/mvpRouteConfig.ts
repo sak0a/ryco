@@ -26,12 +26,34 @@ export interface MvpRouteDescriptor {
 }
 
 const THREAD = "threads/:environmentId/:threadId";
+const PROJECT = "projects/:environmentId/:projectId";
 
 // Flat root routes (Thread lives here, NOT in a nested navigator — required for
 // the iOS-26 shared-header morph). Order is the source order for the tree.
 export const MVP_ROOT_ROUTES = {
   Home: {
     linking: "",
+    overlay: false,
+    headerPreset: "glass",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
+  AddProject: {
+    linking: "projects/new",
+    overlay: true,
+    headerPreset: "sheet-solid",
+    ios: { presentation: "formSheet", sheetAllowedDetents: [0.7, 0.95], sheetGrabberVisible: true },
+    android: { presentation: "card" },
+  },
+  Project: {
+    linking: PROJECT,
+    overlay: false,
+    headerPreset: "glass",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
+  NewTask: {
+    linking: "tasks/new",
     overlay: false,
     headerPreset: "glass",
     ios: { presentation: "card" },
@@ -82,9 +104,15 @@ export const MVP_ROOT_ROUTES = {
   },
   SettingsSheet: {
     linking: "settings",
+    // Floats over the workspace: opening Settings from the Home header must not
+    // change which thread the workspace is on (see WORKSPACE_OVERLAY_ROUTES).
     overlay: true,
     headerPreset: "none",
-    ios: { presentation: "formSheet", sheetAllowedDetents: [0.7, 0.92], sheetGrabberVisible: true },
+    // A large single-detent sheet rather than a full-screen card, so the name
+    // stops lying and the grabber/swipe dismiss it. Its nested settings stack
+    // supplies the headers inside. Android keeps the card: a nested stack inside
+    // an Android form sheet is unverified, and there is no Android QA yet.
+    ios: { presentation: "formSheet", sheetAllowedDetents: [0.95], sheetGrabberVisible: true },
     android: { presentation: "card" },
   },
   Onboarding: {
@@ -110,17 +138,18 @@ export const MVP_ROOT_ROUTES = {
 
 export type MvpRootRouteName = keyof typeof MVP_ROOT_ROUTES;
 
-// Nested routes inside the SettingsSheet form sheet.
+// Nested routes inside the full-screen Settings stack.
 export const MVP_SETTINGS_SHEET_ROUTES = {
   Settings: { linking: "" },
-  SettingsEnvironments: { linking: "environments" },
-  SettingsEnvironmentNew: { linking: "environment-new" },
+  SettingsHub: { linking: "hub" },
+  SettingsWorkspace: { linking: "workspace" },
   // Hosted Hub account. Nested rather than a root route so the hosted plane
   // adds no root-route churn: sign-in lives inside the existing `Onboarding`
   // sheet, and this is the only route the hosted surfaces add anywhere.
   SettingsAccount: { linking: "account" },
   SettingsAppearance: { linking: "appearance" },
   SettingsClientStorage: { linking: "client-storage" },
+  SettingsAbout: { linking: "about" },
 } as const satisfies Record<string, { readonly linking: string }>;
 
 export const WORKSPACE_OVERLAY_ROUTE_NAMES: readonly MvpRootRouteName[] = (

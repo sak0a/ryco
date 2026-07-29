@@ -1,10 +1,17 @@
 import {
   RELAY_INITIAL_LIMITS,
+  RELAY_MAX_RPC_MESSAGE_BYTES,
   RelayLimits,
   type RelayChannelId,
   type RelayFrame,
 } from "@ryco/contracts";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
+import {
+  isChunkedPayload,
+  RELAY_CHUNK_CAPABILITY_PRELUDE,
+  splitRelayMessage,
+  stripRelayChunkCapabilityPrelude,
+} from "@ryco/shared/relayMessageChunks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { encodeBase64Url } from "./base64url";
@@ -110,11 +117,11 @@ function create(callbackSet = callbacks(), timers: RelayTimers = realTimers()) {
   return { engine, socket, callbacks: callbackSet, events };
 }
 
-function authenticate(socket: MockRelaySocket) {
+function authenticate(socket: MockRelaySocket, limits: RelayLimits = RELAY_INITIAL_LIMITS) {
   socket.open();
   const auth = decodeRelayFrame(socket.sent[0]!);
   expect(auth.ok && auth.value.type === "auth" && auth.value.peer === "client").toBe(true);
-  socket.frame({ type: "ready", ...VERSION, limits: RELAY_INITIAL_LIMITS });
+  socket.frame({ type: "ready", ...VERSION, limits });
   socket.frame({
     type: "channel.open",
     ...VERSION,
@@ -123,6 +130,20 @@ function authenticate(socket: MockRelaySocket) {
     effectiveRole: "operator",
   });
   socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
+}
+
+function advertisedPayload(message: Uint8Array): Uint8Array {
+  const payload = new Uint8Array(RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + message.byteLength);
+  payload.set(RELAY_CHUNK_CAPABILITY_PRELUDE);
+  payload.set(message, RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength);
+  return payload;
+}
+
+function sentFrames(socket: MockRelaySocket): RelayFrame[] {
+  return socket.sent.flatMap((bytes) => {
+    const decoded = decodeRelayFrame(bytes);
+    return decoded.ok ? [decoded.value] : [];
+  });
 }
 
 beforeEach(() => {
@@ -150,9 +171,11 @@ describe("HostedRelayEngine", () => {
     const outbound = new Uint8Array([0, 1, 2, 254, 255]);
     engine.send(outbound);
     const sent = decodeRelayFrame(socket.sent.at(-1)!);
-    expect(sent.ok && sent.value.type === "data" ? [...sent.value.payload] : null).toEqual([
-      0, 1, 2, 254, 255,
-    ]);
+    expect(
+      sent.ok && sent.value.type === "data"
+        ? [...stripRelayChunkCapabilityPrelude(sent.value.payload).message]
+        : null,
+    ).toEqual([0, 1, 2, 254, 255]);
     expect(sent.ok && sent.value.type === "data" ? sent.value.sequence : null).toBe(0);
 
     const inbound = new Uint8Array([9, 8, 7, 0, 255]);
@@ -165,6 +188,72 @@ describe("HostedRelayEngine", () => {
     });
     await Promise.resolve();
     expect(received).toEqual([[9, 8, 7, 0, 255]]);
+  });
+
+  it("advertises chunk support on fitting outbound RPC messages", () => {
+    const { engine, socket } = create();
+    authenticate(socket);
+    const outbound = new TextEncoder().encode('{"request":true}');
+
+    engine.send(outbound);
+
+    const data = sentFrames(socket).findLast((frame) => frame.type === "data");
+    expect(data?.type).toBe("data");
+    if (data?.type !== "data") return;
+    expect(stripRelayChunkCapabilityPrelude(data.payload)).toEqual({
+      advertised: true,
+      message: outbound,
+    });
+  });
+
+  it("does not send chunks before the peer advertises support", () => {
+    const handlers = callbacks();
+    const { engine, socket } = create(handlers);
+    authenticate(
+      socket,
+      RelayLimits.make({
+        ...RELAY_INITIAL_LIMITS,
+        maxControlFrameBytes: 1_024,
+        maxDataChunkBytes: 1_024,
+        maxQueuedBytes: 8_192,
+      }),
+    );
+    const before = sentFrames(socket).filter((frame) => frame.type === "data").length;
+
+    expect(() => engine.send(new Uint8Array(1_025))).toThrow();
+    expect(sentFrames(socket).filter((frame) => frame.type === "data")).toHaveLength(before);
+    expect(handlers.onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "protocol", closeReason: "transfer_limit" }),
+    );
+  });
+
+  it("uses an inbound advertisement to enable a later multi-frame send", async () => {
+    const { engine, socket, events } = create();
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 8_192,
+    });
+    authenticate(socket, limits);
+    const inbound = new TextEncoder().encode('{"response":true}');
+
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: advertisedPayload(inbound),
+    });
+    await Promise.resolve();
+    expect(events.onData).toHaveBeenCalledWith(inbound);
+
+    engine.send(new Uint8Array(3_000));
+    const dataFrames = sentFrames(socket).filter((frame) => frame.type === "data");
+    expect(dataFrames.length).toBeGreaterThan(1);
+    expect(
+      dataFrames.every((frame) => frame.type === "data" && isChunkedPayload(frame.payload)),
+    ).toBe(true);
   });
 
   it("zeroes the ticket-bearing authentication frame after sending it", () => {
@@ -224,12 +313,15 @@ describe("HostedRelayEngine", () => {
     const second = decodeRelayFrame(socket.sent[before + 1]!);
     expect(
       first.ok && first.value.type === "data"
-        ? [[...first.value.payload], first.value.sequence]
+        ? [[...stripRelayChunkCapabilityPrelude(first.value.payload).message], first.value.sequence]
         : null,
     ).toEqual([[1, 2, 3], 0]);
     expect(
       second.ok && second.value.type === "data"
-        ? [[...second.value.payload], second.value.sequence]
+        ? [
+            [...stripRelayChunkCapabilityPrelude(second.value.payload).message],
+            second.value.sequence,
+          ]
         : null,
     ).toEqual([[4, 5, 6], 1]);
   });
@@ -256,7 +348,7 @@ describe("HostedRelayEngine", () => {
     expect(secondHandlers.onFailure).not.toHaveBeenCalled();
   });
 
-  it("rejects oversized data payloads against the negotiated chunk limit", () => {
+  it("rejects data payloads above the reassembly ceiling", () => {
     const handlers = callbacks();
     const { engine, socket } = create(handlers);
     socket.open();
@@ -278,8 +370,10 @@ describe("HostedRelayEngine", () => {
       effectiveRole: "operator",
     });
     socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
-    expect(() => engine.send(new Uint8Array(1_025))).toThrow(
-      "RPC payload exceeds the negotiated relay limit.",
+    // A message over the per-frame limit is now split rather than refused, so
+    // only one above the reassembly ceiling is rejected.
+    expect(() => engine.send(new Uint8Array(RELAY_MAX_RPC_MESSAGE_BYTES + 1))).toThrow(
+      "RPC payload exceeds the maximum relay message size.",
     );
     expect(handlers.onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "protocol", retryable: false }),
@@ -351,6 +445,37 @@ describe("HostedRelayEngine", () => {
     expect(handlers.onFailure).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "slow-consumer", retryable: true }),
     );
+  });
+
+  it("counts partial reassembly against inbound flow control and queue limits", async () => {
+    const handlers = callbacks();
+    const { socket, events } = create(handlers);
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 2_048,
+    });
+    authenticate(socket, limits);
+    const chunks = splitRelayMessage(new Uint8Array(3_000), limits.maxDataChunkBytes);
+
+    for (let sequence = 0; sequence < chunks.length; sequence += 1) {
+      socket.frame({
+        type: "data",
+        ...VERSION,
+        channelId: CHANNEL_ID,
+        sequence: sequence as never,
+        payload: chunks[sequence]!,
+      });
+      await Promise.resolve();
+    }
+
+    expect(events.onData).not.toHaveBeenCalled();
+    expect(handlers.onFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "slow-consumer", retryable: true }),
+    );
+    expect(sentFrames(socket).some((frame) => frame.type === "flow.pause")).toBe(true);
+    expect(sentFrames(socket).some((frame) => frame.type === "flow.resume")).toBe(false);
   });
 
   it("rejects inbound data delivered before the channel handshake completes", () => {

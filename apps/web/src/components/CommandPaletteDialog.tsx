@@ -5,6 +5,7 @@ import {
   DEFAULT_MODEL,
   ORCHESTRATION_WS_METHODS,
   WS_METHODS,
+  type EnvironmentApi,
   type EnvironmentId,
   type FilesystemBrowseResult,
   type ProjectId,
@@ -17,11 +18,13 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate } from "@tanstack/react-router";
 import { Option } from "effect";
 import { prefetchFilesystemBrowse, useFilesystemBrowse } from "~/rpc/useProject";
+import { useServerConfig } from "~/rpc/serverState";
 import { useSourceControlRepositorySearch } from "~/rpc/useSourceControl";
 import {
   ArrowDownIcon,
   ArrowLeftIcon,
   ArrowUpIcon,
+  CircleAlertIcon,
   CornerLeftUpIcon,
   FolderIcon,
   FolderPlusIcon,
@@ -72,8 +75,10 @@ import {
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
+  isSameFilesystemPath,
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
+  resolveInitialProjectBrowsePath,
 } from "../lib/projectPaths";
 import { getLatestThreadForProject } from "../lib/threadSort";
 import { cn, isMacPlatform, isWindowsPlatform, newCommandId, newProjectId } from "../lib/utils";
@@ -387,6 +392,7 @@ function OpenCommandPaletteDialog() {
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const settings = useSettings();
+  const primaryServerConfig = useServerConfig();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
   const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
@@ -562,19 +568,24 @@ function OpenCommandPaletteDialog() {
   }, [canSearchMessages, debouncedMessageSearchQuery, messageSearchEnvironmentIds]);
   const getAddProjectInitialQueryForEnvironment = useCallback(
     (environmentId: EnvironmentId | null): string => {
+      const environmentServerConfig =
+        environmentId && primaryEnvironmentId && environmentId === primaryEnvironmentId
+          ? primaryServerConfig
+          : environmentId
+            ? savedEnvironmentRuntimeById[environmentId]?.serverConfig
+            : null;
       const environmentSettings =
         environmentId && primaryEnvironmentId && environmentId === primaryEnvironmentId
           ? settings
           : environmentId
             ? savedEnvironmentRuntimeById[environmentId]?.serverConfig?.settings
             : null;
-      const baseDirectory = environmentSettings?.addProjectBaseDirectory?.trim() ?? "";
-      if (baseDirectory.length === 0) {
-        return "~/";
-      }
-      return ensureBrowseDirectoryPath(baseDirectory);
+      return resolveInitialProjectBrowsePath({
+        workspaceAccessRoot: environmentServerConfig?.workspaceAccessRoot,
+        configuredBaseDirectory: environmentSettings?.addProjectBaseDirectory,
+      });
     },
-    [primaryEnvironmentId, savedEnvironmentRuntimeById, settings],
+    [primaryEnvironmentId, primaryServerConfig, savedEnvironmentRuntimeById, settings],
   );
 
   const projectCwdById = useMemo(
@@ -652,6 +663,14 @@ function OpenCommandPaletteDialog() {
   const browseResult = browseQuery.data;
   const isBrowsePending = browseQuery.isPending;
   const browseEntries = browseResult?.entries ?? EMPTY_BROWSE_ENTRIES;
+  const isAtWorkspaceAccessRoot =
+    browseResult?.workspaceAccessRoot !== undefined &&
+    isSameFilesystemPath(browseResult.parentPath, browseResult.workspaceAccessRoot);
+  const canBrowseUp =
+    isBrowsing &&
+    !relativePathNeedsActiveProject &&
+    !isAtWorkspaceAccessRoot &&
+    canNavigateUp(browseDirectoryPath);
   const { filteredEntries: filteredBrowseEntries, exactEntry: exactBrowseEntry } = useMemo(
     () => filterBrowseEntries({ browseEntries, browseFilterQuery, highlightedItemValue }),
     [browseEntries, browseFilterQuery, highlightedItemValue],
@@ -674,10 +693,10 @@ function OpenCommandPaletteDialog() {
   useEffect(() => {
     if (!isBrowsing) return;
 
-    if (canNavigateUp(query)) {
+    if (canBrowseUp) {
       prefetchBrowsePath(getBrowseParentPath(query)!);
     }
-  }, [isBrowsing, prefetchBrowsePath, query]);
+  }, [canBrowseUp, isBrowsing, prefetchBrowsePath, query]);
 
   const openProjectFromSearch = useMemo(
     () => async (project: (typeof projects)[number]) => {
@@ -1163,10 +1182,35 @@ function OpenCommandPaletteDialog() {
   });
 
   const handleAddProject = useCallback(
-    async (rawCwd: string) => {
-      if (!browseEnvironmentId) return;
-      const api = readEnvironmentApi(browseEnvironmentId);
-      if (!api) return;
+    async (
+      rawCwd: string,
+      target?: {
+        readonly environmentId: EnvironmentId;
+        readonly api: EnvironmentApi;
+      },
+    ) => {
+      const environmentId = target?.environmentId ?? browseEnvironmentId;
+      if (!environmentId) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to add project",
+            description: "Choose an environment and try again.",
+          }),
+        );
+        return;
+      }
+      const api = target?.api ?? readEnvironmentApi(environmentId);
+      if (!api) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Failed to add project",
+            description: "The environment is still reconnecting. Try again shortly.",
+          }),
+        );
+        return;
+      }
 
       if (isUnsupportedWindowsProjectPath(rawCwd.trim(), browseEnvironmentPlatform)) {
         toastManager.add(
@@ -1194,7 +1238,7 @@ function OpenCommandPaletteDialog() {
       if (cwd.length === 0) return;
 
       const existing = findProjectByPath(
-        projects.filter((project) => project.environmentId === browseEnvironmentId),
+        projects.filter((project) => project.environmentId === environmentId),
         cwd,
       );
       if (existing) {
@@ -1238,7 +1282,7 @@ function OpenCommandPaletteDialog() {
           },
           createdAt: new Date().toISOString(),
         });
-        await handleNewThread(scopeProjectRef(browseEnvironmentId, projectId), {
+        await handleNewThread(scopeProjectRef(environmentId, projectId), {
           envMode: settings.defaultThreadEnvMode,
         }).catch(() => undefined);
         setOpen(false);
@@ -1421,7 +1465,10 @@ function OpenCommandPaletteDialog() {
             }),
         destinationPath,
       });
-      await handleAddProject(result.cwd);
+      await handleAddProject(result.cwd, {
+        environmentId: addProjectCloneFlow.environmentId,
+        api,
+      });
     } catch (error) {
       toastManager.add(
         stackedThreadToast({
@@ -1450,6 +1497,9 @@ function OpenCommandPaletteDialog() {
   }
 
   function browseUp(): void {
+    if (!canBrowseUp) {
+      return;
+    }
     const parentPath = getBrowseParentPath(query);
     if (parentPath === null) {
       return;
@@ -1468,26 +1518,41 @@ function OpenCommandPaletteDialog() {
     ? (browseResult?.parentPath ?? query.trim())
     : (exactBrowseEntry?.fullPath ?? query.trim());
 
-  const canBrowseUp =
-    isBrowsing && !relativePathNeedsActiveProject && canNavigateUp(browseDirectoryPath);
-
-  const browseGroups = buildBrowseGroups({
-    browseEntries: filteredBrowseEntries,
-    browseQuery: query,
-    canBrowseUp,
-    upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
-    directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
-    symlinkIcon: <FolderSymlinkIcon className={ITEM_ICON_CLASS} />,
-    browseUp,
-    browseTo,
-    browseToPath,
-  });
-  const cloneDestinationBrowseGroups = useMemo(
-    () =>
-      browseGroups.map((group) =>
-        group.value === "directories" ? { ...group, label: "Select where to clone" } : group,
-      ),
-    [browseGroups],
+  const browseGroups: CommandPaletteView["groups"] = [
+    ...(browseQuery.error
+      ? [
+          {
+            value: "browse-status",
+            label: "Filesystem",
+            items: [
+              {
+                kind: "action" as const,
+                value: "browse-status:error",
+                searchTerms: ["filesystem", "unavailable", "error"],
+                title: "Unable to browse folders",
+                description: errorMessage(browseQuery.error),
+                icon: <CircleAlertIcon className={ITEM_ICON_CLASS} />,
+                disabled: true,
+                run: async () => {},
+              },
+            ],
+          },
+        ]
+      : []),
+    ...buildBrowseGroups({
+      browseEntries: filteredBrowseEntries,
+      browseQuery: query,
+      canBrowseUp,
+      upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
+      directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
+      symlinkIcon: <FolderSymlinkIcon className={ITEM_ICON_CLASS} />,
+      browseUp,
+      browseTo,
+      browseToPath,
+    }),
+  ];
+  const cloneDestinationBrowseGroups = browseGroups.map((group) =>
+    group.value === "directories" ? { ...group, label: "Select where to clone" } : group,
   );
 
   const remoteProjectContext = useMemo(() => {

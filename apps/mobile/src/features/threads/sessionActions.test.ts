@@ -5,9 +5,11 @@ vi.mock("expo-crypto", () => ({ randomUUID: () => `id-${Math.random().toString(1
 
 import {
   interruptThreadTurn,
+  renameThread,
   respondToThreadApproval,
   respondToThreadUserInput,
   revertThreadCheckpointWithGuards,
+  setThreadArchived,
 } from "./sessionActions";
 
 const THREAD_ID = "thread-1" as ThreadId;
@@ -34,6 +36,21 @@ describe("sessionActions", () => {
     expect(command.type).toBe("thread.turn.interrupt");
     expect(command.threadId).toBe(THREAD_ID);
     expect(command.commandId).toBeTruthy();
+  });
+
+  it("renames and archives through bounded thread commands", async () => {
+    const { api, dispatchCommand } = fakeApi();
+
+    await renameThread(api, THREAD_ID, "  Mobile polish  ");
+    await setThreadArchived(api, THREAD_ID, true);
+    await setThreadArchived(api, THREAD_ID, false);
+
+    expect(dispatchCommand.mock.calls.map((call) => (call[0] as { type: string }).type)).toEqual([
+      "thread.meta.update",
+      "thread.archive",
+      "thread.unarchive",
+    ]);
+    expect(dispatchCommand.mock.calls[0]![0]).toMatchObject({ title: "Mobile polish" });
   });
 
   it("dispatches thread.approval.respond with the decision", async () => {

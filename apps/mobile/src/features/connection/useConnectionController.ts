@@ -58,6 +58,11 @@ export function useSavedEnvironments(): {
     const statusLabel = runtime.authState === "requires-auth" ? "Needs pairing" : tone.label;
     return { record, runtime, tone, statusLabel };
   });
+  // Hermes in the supported development client does not yet expose `toSorted`.
+  // `rows` is a fresh array, so mutating it here cannot affect registry state.
+  rows.sort((left, right) =>
+    left.record.label.localeCompare(right.record.label, undefined, { sensitivity: "base" }),
+  );
   // runtimeState referenced so the store subscription re-renders on runtime change.
   void runtimeState;
 

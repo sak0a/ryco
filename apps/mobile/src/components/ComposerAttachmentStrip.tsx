@@ -66,6 +66,8 @@ export function ComposerAttachmentStrip(props: ComposerAttachmentStripProps) {
               />
             </Pressable>
             <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${image.name}`}
               className="absolute h-[22px] w-[22px] items-center justify-center rounded-[11px] bg-black/55"
               style={{
                 top: removeButtonPlacement === "gutter" ? 0 : 4,

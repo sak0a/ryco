@@ -1,6 +1,40 @@
 import type { ExecutionEnvironmentDescriptor } from "@ryco/contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+const hostedLifecycle = vi.hoisted(() => ({
+  generation: 7,
+  markReady: vi.fn(),
+  markReplaying: vi.fn(),
+  reportFailure: vi.fn(),
+}));
+const connectionFactory = vi.hoisted(() => ({
+  input: null as Record<string, unknown> | null,
+}));
+
+vi.mock("@ryco/client-runtime/authorization", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  hostedHubStore: {
+    getState: () => ({ generation: hostedLifecycle.generation }),
+  },
+  markHostedSessionReady: hostedLifecycle.markReady,
+  markHostedSessionReplaying: hostedLifecycle.markReplaying,
+  reportHostedShellSnapshotFailure: hostedLifecycle.reportFailure,
+}));
+vi.mock("@ryco/client-runtime/connection", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  createEnvironmentConnection: (input: Record<string, unknown>) => {
+    connectionFactory.input = input;
+    return {
+      kind: input.kind,
+      environmentId: (input.knownEnvironment as { environmentId: string }).environmentId,
+      knownEnvironment: input.knownEnvironment,
+      client: input.client,
+      ensureBootstrapped: async () => undefined,
+      reconnect: async () => undefined,
+      dispose: async () => undefined,
+    };
+  },
+}));
 vi.mock("react-native", () => ({
   AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) },
 }));
@@ -54,6 +88,11 @@ const deps = () => ({
 });
 
 beforeEach(() => {
+  hostedLifecycle.generation = 7;
+  hostedLifecycle.markReady.mockReset();
+  hostedLifecycle.markReplaying.mockReset();
+  hostedLifecycle.reportFailure.mockReset();
+  connectionFactory.input = null;
   resetPrimaryEnvironmentForTests();
   resetMobileHostedRuntimeConfigForTests();
 });
@@ -95,6 +134,64 @@ describe("hosted primary connection", () => {
     );
     expect(connection?.knownEnvironment.target.httpBaseUrl).toBe("https://hub.example.test");
     await connection?.dispose().catch(() => undefined);
+  });
+
+  it("marks the hosted session ready when the supervisor accepts the first snapshot", () => {
+    writePrimaryEnvironmentDescriptor(descriptor);
+    const input = deps();
+    input.syncShellSnapshot.mockImplementation((_snapshot, _environmentId, callbacks) => {
+      callbacks?.onReady();
+    });
+
+    createHostedPrimaryConnection(input);
+    const syncShellSnapshot = connectionFactory.input?.syncShellSnapshot as (
+      snapshot: unknown,
+      environmentId: string,
+    ) => void;
+    syncShellSnapshot({ snapshotSequence: 1 }, "env-hosted-1");
+
+    expect(input.syncShellSnapshot).toHaveBeenCalledTimes(1);
+    expect(hostedLifecycle.markReady).toHaveBeenCalledWith("env-hosted-1", 7);
+  });
+
+  it("marks current snapshots ready and reports replay or snapshot failure", () => {
+    writePrimaryEnvironmentDescriptor(descriptor);
+    const input = deps();
+    input.syncShellSnapshot.mockImplementation((_snapshot, _environmentId, callbacks) => {
+      callbacks?.onCurrent();
+    });
+
+    createHostedPrimaryConnection(input);
+    const connectionInput = connectionFactory.input as {
+      syncShellSnapshot: (snapshot: unknown, environmentId: string) => void;
+      onResubscribe: (environmentId: string) => void;
+      onShellError: (environmentId: string) => void;
+    };
+    connectionInput.syncShellSnapshot({ snapshotSequence: 1 }, "env-hosted-1");
+    connectionInput.onResubscribe("env-hosted-1");
+    connectionInput.onShellError("env-hosted-1");
+
+    expect(hostedLifecycle.markReady).toHaveBeenCalledWith("env-hosted-1", 7);
+    expect(hostedLifecycle.markReplaying).toHaveBeenCalledWith("env-hosted-1", 7);
+    expect(hostedLifecycle.reportFailure).toHaveBeenCalledWith("env-hosted-1", 7);
+  });
+
+  it("drops shell data from a superseded hosted generation", () => {
+    writePrimaryEnvironmentDescriptor(descriptor);
+    const input = deps();
+
+    createHostedPrimaryConnection(input);
+    hostedLifecycle.generation = 8;
+    const connectionInput = connectionFactory.input as {
+      applyShellEvent: (event: unknown, environmentId: string) => void;
+      syncShellSnapshot: (snapshot: unknown, environmentId: string) => void;
+    };
+    connectionInput.applyShellEvent({ sequence: 1 }, "env-hosted-1");
+    connectionInput.syncShellSnapshot({ snapshotSequence: 1 }, "env-hosted-1");
+
+    expect(input.applyShellEvent).not.toHaveBeenCalled();
+    expect(input.syncShellSnapshot).not.toHaveBeenCalled();
+    expect(hostedLifecycle.markReady).not.toHaveBeenCalled();
   });
 });
 

@@ -5,7 +5,10 @@ import { useEffect, useEffectEvent, useRef } from "react";
 
 import { AppSidebarLayout } from "./AppSidebarLayout";
 import { CommandPalette } from "./CommandPalette";
-import { shouldApplyBootstrapThreadRedirect } from "./RootAppShell.logic";
+import {
+  resolveCanonicalPrimaryEnvironmentId,
+  shouldApplyBootstrapThreadRedirect,
+} from "./RootAppShell.logic";
 import { ContextMenuActionSheetHost } from "./shell/phone/ContextMenuActionSheetHost";
 import { SshPasswordPromptDialog } from "./desktop/SshPasswordPromptDialog";
 import { ProviderUpdateLaunchNotification } from "./ProviderUpdateLaunchNotification";
@@ -43,6 +46,7 @@ import { configureClientTracing } from "../observability/clientTracing";
 import {
   getPrimaryKnownEnvironment,
   updatePrimaryEnvironmentDescriptor,
+  usePrimaryEnvironmentId,
 } from "../environments/primary";
 import { ServerStateBootstrap } from "./ServerStateBootstrap";
 
@@ -75,7 +79,9 @@ export function RootAppShell({ authGateState }: RootAppShellProps) {
         <ContextMenuActionSheetHost />
         <SshPasswordPromptDialog />
         {authGateState.status === "hosted-static" ? <HostedStaticEnvironmentBootstrap /> : null}
-        {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
+        {primaryEnvironmentAuthenticated ? (
+          <EventRouter hosted={authGateState.status === "hosted-hub"} />
+        ) : null}
         {primaryEnvironmentAuthenticated ? <RoleAwareProviderUpdateLaunchNotification /> : null}
         {primaryEnvironmentAuthenticated ? (
           <WebSocketConnectionCoordinator
@@ -140,8 +146,10 @@ function EnvironmentConnectionManagerBootstrap() {
   return null;
 }
 
-function EventRouter() {
+function EventRouter({ hosted }: { readonly hosted: boolean }) {
   const setActiveEnvironmentId = useStore((store) => store.setActiveEnvironmentId);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const hostedPrimaryEnvironmentId = hosted ? primaryEnvironmentId : null;
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const projectGroupingSettings = useSettings((settings) => ({
@@ -157,10 +165,19 @@ function EventRouter() {
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
 
-    updatePrimaryEnvironmentDescriptor(payload.environment);
-    setActiveEnvironmentId(payload.environment.environmentId);
+    const environmentId = resolveCanonicalPrimaryEnvironmentId({
+      hosted,
+      primaryEnvironmentId: hostedPrimaryEnvironmentId,
+      serverEnvironmentId: payload.environment.environmentId,
+    });
+    if (!environmentId) return;
+
+    if (!hosted) {
+      updatePrimaryEnvironmentDescriptor(payload.environment);
+    }
+    setActiveEnvironmentId(environmentId);
     void (async () => {
-      await ensureEnvironmentConnectionBootstrapped(payload.environment.environmentId);
+      await ensureEnvironmentConnectionBootstrapped(environmentId);
       if (disposedRef.current) {
         return;
       }
@@ -168,8 +185,7 @@ function EventRouter() {
       if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
         return;
       }
-      const bootstrapEnvironmentState =
-        useStore.getState().environmentStateById[payload.environment.environmentId];
+      const bootstrapEnvironmentState = useStore.getState().environmentStateById[environmentId];
       const bootstrapProject =
         bootstrapEnvironmentState?.projectById[payload.bootstrapProjectId] ?? null;
       const bootstrapProjectKey =
@@ -177,11 +193,9 @@ function EventRouter() {
           ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
           : null) ??
         (serverConfig?.cwd
-          ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
+          ? derivePhysicalProjectKeyFromPath(environmentId, serverConfig.cwd)
           : null) ??
-        scopedProjectKey(
-          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-        );
+        scopedProjectKey(scopeProjectRef(environmentId, payload.bootstrapProjectId));
       useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
 
       // Desktop keeps the last-thread redirect; the phone tier lands on Home.
@@ -199,7 +213,7 @@ function EventRouter() {
       await navigate({
         to: "/$environmentId/$threadId",
         params: {
-          environmentId: payload.environment.environmentId,
+          environmentId,
           threadId: payload.bootstrapThreadId,
         },
         replace: true,
@@ -275,9 +289,18 @@ function EventRouter() {
       return;
     }
 
-    updatePrimaryEnvironmentDescriptor(serverConfig.environment);
-    setActiveEnvironmentId(serverConfig.environment.environmentId);
-  }, [serverConfig, setActiveEnvironmentId]);
+    const environmentId = resolveCanonicalPrimaryEnvironmentId({
+      hosted,
+      primaryEnvironmentId: hostedPrimaryEnvironmentId,
+      serverEnvironmentId: serverConfig.environment.environmentId,
+    });
+    if (!environmentId) return;
+
+    if (!hosted) {
+      updatePrimaryEnvironmentDescriptor(serverConfig.environment);
+    }
+    setActiveEnvironmentId(environmentId);
+  }, [hosted, hostedPrimaryEnvironmentId, serverConfig, setActiveEnvironmentId]);
 
   useEffect(() => {
     disposedRef.current = false;

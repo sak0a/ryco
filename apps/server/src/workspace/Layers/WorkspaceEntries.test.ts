@@ -8,21 +8,30 @@ import { ServerConfig } from "../../config.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
+import { WorkspaceAccessPolicyLayer } from "./WorkspaceAccessPolicy.ts";
 import { WorkspaceEntriesLive, isMacOSBookmarkAlias } from "./WorkspaceEntries.ts";
 import { WorkspacePathsLive } from "./WorkspacePaths.ts";
 
-const TestLayer = Layer.empty.pipe(
-  Layer.provideMerge(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
-  Layer.provideMerge(WorkspacePathsLive),
-  Layer.provideMerge(VcsProcess.layer),
-  Layer.provideMerge(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcess.layer))),
-  Layer.provide(
-    ServerConfig.layerTest(process.cwd(), {
-      prefix: "ryco-workspace-entries-test-",
-    }),
-  ),
-  Layer.provideMerge(NodeServices.layer),
-);
+const makeTestLayer = (workspaceAccessRoot: string | undefined) =>
+  Layer.empty.pipe(
+    Layer.provideMerge(
+      WorkspaceEntriesLive.pipe(
+        Layer.provide(WorkspacePathsLive),
+        Layer.provide(WorkspaceAccessPolicyLayer(workspaceAccessRoot)),
+      ),
+    ),
+    Layer.provideMerge(WorkspacePathsLive),
+    Layer.provideMerge(VcsProcess.layer),
+    Layer.provideMerge(VcsDriverRegistry.layer.pipe(Layer.provide(VcsProcess.layer))),
+    Layer.provide(
+      ServerConfig.layerTest(process.cwd(), {
+        prefix: "ryco-workspace-entries-test-",
+      }),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+const TestLayer = makeTestLayer(undefined);
 
 const makeTempDir = Effect.fn(function* (opts?: { prefix?: string; git?: boolean }) {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -73,6 +82,33 @@ const appendSeparator = (input: string) =>
   input.endsWith("/") || input.endsWith("\\")
     ? input
     : `${input}${process.platform === "win32" ? "\\" : "/"}`;
+
+it.effect("restricted browse exposes its root and rejects parent traversal", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "ryco-workspace-restricted-browse-",
+      });
+      const child = `${workspaceRoot}/child`;
+      yield* fileSystem.makeDirectory(child);
+
+      yield* Effect.gen(function* () {
+        const workspaceEntries = yield* WorkspaceEntries;
+        const rootResult = yield* workspaceEntries.browse({
+          partialPath: appendSeparator(workspaceRoot),
+        });
+        expect(rootResult.parentPath).toBe(yield* fileSystem.realPath(workspaceRoot));
+        expect(rootResult.workspaceAccessRoot).toBe(yield* fileSystem.realPath(workspaceRoot));
+
+        const error = yield* workspaceEntries
+          .browse({ partialPath: appendSeparator(`${workspaceRoot}/..`) })
+          .pipe(Effect.flip);
+        expect(error.detail).toContain("access is restricted");
+      }).pipe(Effect.provide(makeTestLayer(workspaceRoot)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
 
 it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
   afterEach(() => {

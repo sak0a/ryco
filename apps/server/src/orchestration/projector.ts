@@ -415,6 +415,7 @@ export function projectEvent(
           ...nextBase,
           worktrees: updateWorktree(nextBase.worktrees, payload.worktreeId, {
             ...(payload.title !== undefined ? { title: payload.title } : {}),
+            ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             updatedAt: payload.changedAt,
           }),
         })),
