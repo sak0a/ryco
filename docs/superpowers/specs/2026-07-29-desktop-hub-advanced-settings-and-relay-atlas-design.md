@@ -29,6 +29,21 @@ The desktop child process strips the three Hub environment variables it owns, so
 envelope remains authoritative. Headless `ryco serve` has no desktop bootstrap envelope and keeps
 normal flag and environment behavior.
 
+## Development renderer origin addendum
+
+In `dev:desktop`, Electron loads the renderer from the configured Vite development URL while Vite
+proxies node HTTP requests to the desktop-scoped backend. Vite rewrites the proxied request host,
+so a legitimate state-changing request has the configured development renderer in `Origin` and the
+backend in `Host`. Production does not have this split because the packaged renderer and node API
+are same-origin.
+
+The mutation-origin guard will accept the exact origin of `ServerConfig.devUrl` in addition to the
+request's own host. The exception exists only while a development URL is explicitly configured.
+It does not accept another loopback port, a related hostname, or an arbitrary origin. Requests with
+no `Origin` remain available to authenticated non-browser clients such as the CLI. Regression tests
+will prove that the configured development origin succeeds, an unconfigured cross-origin request
+fails, and a different origin still fails when development mode is configured.
+
 ## Goals
 
 - Expose every current operator-relevant Hub launch setting in the desktop app.
