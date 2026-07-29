@@ -14,6 +14,7 @@ import {
   type RuntimeMode,
   type AgentTokenMode,
   type TurnId,
+  type WorktreeId,
 } from "@ryco/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@ryco/shared/git";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
@@ -598,6 +599,7 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly branch: string | null;
     readonly worktreePath: string | null;
+    readonly worktreeId: WorktreeId | null;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
   }) {
@@ -634,6 +636,15 @@ const make = Effect.gen(function* () {
         branch: renamed.branch,
         worktreePath: cwd,
       });
+      if (input.worktreeId !== null) {
+        yield* orchestrationEngine.dispatch({
+          type: "worktree.meta.update",
+          commandId: serverCommandId("worktree-branch-rename-meta"),
+          worktreeId: input.worktreeId,
+          branch: renamed.branch,
+          changedAt: new Date().toISOString(),
+        });
+      }
       yield* vcsStatusBroadcaster.refreshStatus(cwd).pipe(Effect.ignoreCause({ log: true }));
     }).pipe(
       Effect.catchCause((cause) =>
@@ -748,6 +759,7 @@ const make = Effect.gen(function* () {
         threadId: event.payload.threadId,
         branch: thread.branch,
         worktreePath: thread.worktreePath,
+        worktreeId: thread.worktreeId ?? null,
         ...generationInput,
       }).pipe(Effect.forkScoped);
 

@@ -4,7 +4,7 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@ryco/client-runtime/scoped";
-import type { ProjectId } from "@ryco/contracts";
+import type { EnvironmentId, ProjectId } from "@ryco/contracts";
 import type { DraftId, DraftThreadState } from "../../composerDraftStore";
 import {
   DEFAULT_AGENT_TOKEN_MODE,
@@ -47,10 +47,35 @@ export interface SidebarTreeAdapterOutput {
   worktrees: ReadonlyArray<SidebarWorktree>;
 }
 
+export function mergeSidebarThreadsWithDrafts(
+  threads: ReadonlyArray<SidebarTreeThread>,
+  draftThreads: ReadonlyArray<SidebarTreeThread>,
+): SidebarTreeThread[] {
+  const combined = [...threads];
+  const seenKeys = new Set(
+    threads.map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+  );
+  for (const draft of draftThreads) {
+    const draftKey = scopedThreadKey(scopeThreadRef(draft.environmentId, draft.id));
+    if (seenKeys.has(draftKey)) {
+      continue;
+    }
+    seenKeys.add(draftKey);
+    combined.push(draft);
+  }
+  return combined;
+}
+
 export function adaptProjectForSidebarTree(
   input: SidebarTreeAdapterInput,
 ): SidebarTreeAdapterOutput {
   const logicalProjectId = input.project.projectKey as ProjectId;
+  const memberProjectByKey = new Map(
+    input.project.memberProjects.map((member) => [
+      scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+      member,
+    ]),
+  );
   const project: Project = {
     ...input.project,
     id: logicalProjectId,
@@ -62,6 +87,10 @@ export function adaptProjectForSidebarTree(
           scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
         ) ?? null,
       logicalProjectId,
+      sourceProjectCwd:
+        memberProjectByKey.get(
+          scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+        )?.cwd ?? input.project.cwd,
       thread,
     }),
   );
@@ -70,20 +99,16 @@ export function adaptProjectForSidebarTree(
     logicalProjectId,
     input.worktrees ?? [],
   );
-  const synthesizedWorktrees = synthesizeWorktreesFromThreads({
+  const synthesizedWorktrees = synthesizeProjectMainWorktrees({
     logicalProjectId,
     project: input.project,
     threads,
   });
-  const worktreesById = new Map<string, SidebarWorktree>();
-  for (const worktree of [...synthesizedWorktrees, ...explicitWorktrees]) {
-    worktreesById.set(worktree.worktreeId, worktree);
-  }
 
   return {
     project,
     threads,
-    worktrees: [...worktreesById.values()],
+    worktrees: [...synthesizedWorktrees, ...explicitWorktrees],
   };
 }
 
@@ -101,6 +126,7 @@ export function adaptDraftThreadsForSidebarProject(input: {
       adaptDraftThreadForSidebarTree({
         draftId: draftId as DraftId,
         logicalProjectId: input.project.projectKey as ProjectId,
+        sourceProjectCwd: resolveSourceProjectCwd(input.project, draftThread),
         draftThread,
       }),
     ];
@@ -140,6 +166,7 @@ export function createSidebarProjectDraftThreadsSelector(
       adaptDraftThreadForSidebarTree({
         draftId: draftId as DraftId,
         logicalProjectId,
+        sourceProjectCwd: resolveSourceProjectCwd(project, draftThread),
         draftThread,
       }),
     );
@@ -170,6 +197,7 @@ function draftThreadBelongsToSidebarProject(
 function adaptThreadForSidebarTree(input: {
   lastVisitedAt: string | null;
   logicalProjectId: ProjectId;
+  sourceProjectCwd: string;
   thread: SidebarThreadSummary;
 }): SidebarTreeThread {
   const extra = input.thread as SidebarThreadSummary & {
@@ -198,6 +226,7 @@ function adaptThreadForSidebarTree(input: {
       readStatusBucket(extra.statusBucket) ??
       null,
     sourceProjectId: input.thread.projectId,
+    sourceProjectCwd: input.sourceProjectCwd,
     statusPill,
     worktreeId: typeof extra.worktreeId === "string" ? extra.worktreeId : null,
   };
@@ -206,6 +235,7 @@ function adaptThreadForSidebarTree(input: {
 function adaptDraftThreadForSidebarTree(input: {
   draftId: DraftId;
   logicalProjectId: ProjectId;
+  sourceProjectCwd: string;
   draftThread: DraftThreadState;
 }): SidebarTreeThread {
   return {
@@ -226,6 +256,7 @@ function adaptDraftThreadForSidebarTree(input: {
     projectId: input.logicalProjectId,
     session: null,
     sourceProjectId: input.draftThread.projectId,
+    sourceProjectCwd: input.sourceProjectCwd,
     statusPill: null,
     title: "Empty Session",
     updatedAt: input.draftThread.createdAt,
@@ -238,8 +269,33 @@ function readExplicitWorktrees(
   logicalProjectId: ProjectId,
   worktrees: ReadonlyArray<SidebarWorktreeSummary>,
 ): SidebarWorktree[] {
-  const candidates: unknown[] = [...worktrees];
-  const members: unknown[] = [project, ...project.memberProjects];
+  type Candidate = {
+    value: unknown;
+    fallbackProject: SidebarProjectSnapshot["memberProjects"][number];
+  };
+  const representative =
+    project.memberProjects.find(
+      (member) => member.id === project.id && member.environmentId === project.environmentId,
+    ) ?? project.memberProjects[0];
+  if (!representative) {
+    return [];
+  }
+  const memberByKey = new Map(
+    project.memberProjects.map((member) => [
+      scopedProjectKey(scopeProjectRef(member.environmentId, member.id)),
+      member,
+    ]),
+  );
+  const candidates: Candidate[] = worktrees.map((worktree) => ({
+    value: worktree,
+    fallbackProject:
+      memberByKey.get(
+        scopedProjectKey(scopeProjectRef(worktree.environmentId, worktree.projectId)),
+      ) ?? representative,
+  }));
+  const members: ReadonlyArray<
+    SidebarProjectSnapshot | SidebarProjectSnapshot["memberProjects"][number]
+  > = [project, ...project.memberProjects];
   for (const member of members) {
     const extra = member as Project & {
       sidebarWorktrees?: unknown;
@@ -247,25 +303,39 @@ function readExplicitWorktrees(
     };
     if (Array.isArray(extra.worktrees)) {
       for (const worktree of extra.worktrees) {
-        candidates.push(worktree);
+        candidates.push({
+          value: worktree,
+          fallbackProject: "physicalProjectKey" in member ? member : representative,
+        });
       }
     }
     if (Array.isArray(extra.sidebarWorktrees)) {
       for (const worktree of extra.sidebarWorktrees) {
-        candidates.push(worktree);
+        candidates.push({
+          value: worktree,
+          fallbackProject: "physicalProjectKey" in member ? member : representative,
+        });
       }
     }
   }
 
-  return candidates.flatMap((candidate, index) => {
-    if (!candidate || typeof candidate !== "object") {
+  return candidates.flatMap(({ value, fallbackProject }, index) => {
+    if (!value || typeof value !== "object") {
       return [];
     }
-    const record = candidate as Record<string, unknown>;
+    const record = value as Record<string, unknown>;
     const branch = readString(record.branch);
     if (!branch) {
       return [];
     }
+    const environmentId = readString(record.environmentId) ?? fallbackProject.environmentId;
+    const sourceProjectId = readString(record.projectId) ?? fallbackProject.id;
+    const sourceProject =
+      memberByKey.get(
+        scopedProjectKey(
+          scopeProjectRef(environmentId as EnvironmentId, sourceProjectId as ProjectId),
+        ),
+      ) ?? fallbackProject;
     const worktreePath = readNullableString(record.worktreePath);
     const origin = readWorktreeOrigin(record.origin) ?? (worktreePath === null ? "main" : "manual");
     const worktreeId =
@@ -274,8 +344,9 @@ function readExplicitWorktrees(
       buildWorktreeId({
         branch,
         fallbackIndex: index,
+        environmentId,
         origin,
-        projectId: logicalProjectId,
+        sourceProjectId,
         worktreePath,
       });
 
@@ -283,6 +354,7 @@ function readExplicitWorktrees(
       {
         archivedAt: readNullableString(record.archivedAt),
         branch,
+        environmentId,
         issueNumber: readNumber(record.issueNumber),
         manualPosition: readNumber(record.manualPosition),
         origin,
@@ -297,6 +369,8 @@ function readExplicitWorktrees(
         workItemStateName: readNullableString(record.workItemStateName),
         workItemUrl: readNullableString(record.workItemUrl),
         projectId: logicalProjectId,
+        sourceProjectCwd: sourceProject.cwd,
+        sourceProjectId,
         title: readNullableString(record.title),
         updatedAt: readString(record.updatedAt),
         worktreeId,
@@ -334,62 +408,49 @@ function readNullableBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
 
-function synthesizeWorktreesFromThreads(input: {
+function synthesizeProjectMainWorktrees(input: {
   logicalProjectId: ProjectId;
   project: SidebarProjectSnapshot;
   threads: ReadonlyArray<SidebarTreeThread>;
 }): SidebarWorktree[] {
-  const worktreesByKey = new Map<string, SidebarWorktree>();
-  const ensureWorktree = (thread: SidebarTreeThread | null, fallbackIndex: number) => {
-    const worktreePath = thread?.worktreePath ?? null;
-    const branch =
-      thread?.branch ?? (worktreePath === null ? "main" : finalPathSegment(worktreePath));
-    const origin: SidebarWorktreeOrigin = worktreePath === null ? "main" : "branch";
-    const worktreeId =
-      thread?.worktreeId ??
-      buildWorktreeId({
-        branch,
-        fallbackIndex,
-        origin,
-        projectId: input.logicalProjectId,
-        worktreePath,
-      });
-    const existing = worktreesByKey.get(worktreeId);
-    const updatedAt = thread?.updatedAt ?? thread?.createdAt ?? input.project.updatedAt;
-    if (existing) {
-      worktreesByKey.set(worktreeId, {
-        ...existing,
-        updatedAt: maxIso(existing.updatedAt, updatedAt),
-      });
-      return;
-    }
-    worktreesByKey.set(worktreeId, {
+  return input.project.memberProjects.map((member, index) => {
+    const latestMainThread = input.threads
+      .filter(
+        (thread) =>
+          thread.environmentId === member.environmentId &&
+          thread.sourceProjectId === member.id &&
+          thread.worktreePath === null,
+      )
+      .toSorted((left, right) =>
+        compareIsoDesc(left.updatedAt ?? left.createdAt, right.updatedAt ?? right.createdAt),
+      )[0];
+    return {
       archivedAt: null,
-      branch,
-      manualPosition: worktreePath === null ? 0 : fallbackIndex + 1,
-      origin,
+      branch: latestMainThread?.branch ?? "main",
+      environmentId: member.environmentId,
+      manualPosition: index,
+      origin: "main",
       projectId: input.logicalProjectId,
+      sourceProjectCwd: member.cwd,
+      sourceProjectId: member.id,
       title: null,
-      updatedAt,
-      worktreeId,
-      worktreePath,
-    });
-  };
-
-  ensureWorktree(null, 0);
-  input.threads.forEach((thread, index) => ensureWorktree(thread, index));
-  return [...worktreesByKey.values()];
+      updatedAt: latestMainThread?.updatedAt ?? latestMainThread?.createdAt ?? member.updatedAt,
+      worktreeId: `main:${member.environmentId}:${member.id}`,
+      worktreePath: null,
+    };
+  });
 }
 
 function buildWorktreeId(input: {
   branch: string;
+  environmentId: string;
   fallbackIndex: number;
   origin: SidebarWorktreeOrigin;
-  projectId: ProjectId;
+  sourceProjectId: string;
   worktreePath: string | null;
 }): string {
   const location = input.worktreePath ?? input.branch;
-  return `${input.origin}:${input.projectId}:${location || input.fallbackIndex}`;
+  return `${input.origin}:${input.environmentId}:${input.sourceProjectId}:${location || input.fallbackIndex}`;
 }
 
 function readStatusBucket(value: unknown): SidebarStatusBucket | null {
@@ -429,19 +490,21 @@ function isThreadStatusPill(value: unknown): value is ThreadStatusPill {
   );
 }
 
-function finalPathSegment(path: string | null): string {
-  if (!path) {
-    return "worktree";
-  }
-  return path.split(/[\\/]/).findLast((part) => part.length > 0) ?? path;
+function compareIsoDesc(left: string | undefined, right: string | undefined): number {
+  const leftMs = left ? Date.parse(left) : Number.NEGATIVE_INFINITY;
+  const rightMs = right ? Date.parse(right) : Number.NEGATIVE_INFINITY;
+  const normalizedLeft = Number.isNaN(leftMs) ? Number.NEGATIVE_INFINITY : leftMs;
+  const normalizedRight = Number.isNaN(rightMs) ? Number.NEGATIVE_INFINITY : rightMs;
+  return normalizedRight - normalizedLeft;
 }
 
-function maxIso(left: string | undefined, right: string | undefined): string | undefined {
-  if (!left) return right;
-  if (!right) return left;
-  const leftMs = Date.parse(left);
-  const rightMs = Date.parse(right);
-  if (Number.isNaN(leftMs)) return right;
-  if (Number.isNaN(rightMs)) return left;
-  return rightMs > leftMs ? right : left;
+function resolveSourceProjectCwd(
+  project: SidebarProjectSnapshot,
+  thread: Pick<DraftThreadState, "environmentId" | "projectId">,
+): string {
+  return (
+    project.memberProjects.find(
+      (member) => member.environmentId === thread.environmentId && member.id === thread.projectId,
+    )?.cwd ?? project.cwd
+  );
 }

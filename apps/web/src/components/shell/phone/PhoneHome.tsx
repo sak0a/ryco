@@ -58,6 +58,7 @@ import {
 import {
   adaptProjectForSidebarTree,
   createSidebarProjectDraftThreadsSelector,
+  mergeSidebarThreadsWithDrafts,
 } from "../../sidebar/sidebarTreeAdapters";
 import {
   useSidebarTree,
@@ -377,19 +378,9 @@ function PhoneHomeProjectSection({
     [pinnedThreadKeysRecord],
   );
   const visibleThreads = useMemo(() => {
-    // A draft can shadow an existing server thread (same scoped key); the
-    // server summary wins so each row key stays unique.
-    const combined: SidebarTreeThread[] = [...threads];
-    const seenKeys = new Set(
-      threads.map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
+    return mergeSidebarThreadsWithDrafts(threads, draftThreads).filter(
+      (thread) => thread.archivedAt === null,
     );
-    for (const draft of draftThreads) {
-      const draftKey = scopedThreadKey(scopeThreadRef(draft.environmentId, draft.id));
-      if (seenKeys.has(draftKey)) continue;
-      seenKeys.add(draftKey);
-      combined.push(draft);
-    }
-    return combined.filter((thread) => thread.archivedAt === null);
   }, [draftThreads, threads]);
   const sortedThreads = useMemo(
     () =>

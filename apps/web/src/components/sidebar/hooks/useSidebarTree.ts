@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { DraftId } from "../../../composerDraftStore";
+import { normalizeProjectPathForComparison } from "../../../lib/projectPaths";
 import type { Project, SidebarThreadSummary } from "../../../types";
 import {
   aggregateWorktreeStatus,
@@ -16,6 +17,9 @@ export type SidebarWorkItemState = "open" | "in_progress" | "done" | "closed" | 
 export interface SidebarWorktree {
   worktreeId: string;
   projectId: Project["id"] | string;
+  environmentId?: string | undefined;
+  sourceProjectId?: Project["id"] | string | undefined;
+  sourceProjectCwd?: string | undefined;
   title?: string | null | undefined;
   branch: string;
   worktreePath: string | null;
@@ -45,6 +49,7 @@ export type SidebarTreeThread = SidebarThreadSummary & {
   draftId?: DraftId | undefined;
   manualStatusBucket?: SidebarStatusBucket | null | undefined;
   sourceProjectId?: Project["id"] | undefined;
+  sourceProjectCwd?: string | undefined;
   statusPill?: ThreadStatusPill | null | undefined;
   worktreeId?: string | null | undefined;
 };
@@ -91,8 +96,9 @@ export type UseSidebarTreeInput = Omit<ComposeSidebarTreeInput, "nowMs"> & {
 };
 
 export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree {
-  const threadsByProjectId = groupBy(input.threads, (thread) => thread.projectId);
-  const allThreadsByProjectId = groupBy(input.threads, (thread) => thread.projectId);
+  const uniqueThreads = dedupeSidebarThreads(input.threads);
+  const threadsByProjectId = groupBy(uniqueThreads, (thread) => thread.projectId);
+  const allThreadsByProjectId = groupBy(uniqueThreads, (thread) => thread.projectId);
   const explicitWorktreesByProjectId = groupBy(input.worktrees ?? [], (worktree) =>
     String(worktree.projectId),
   );
@@ -119,7 +125,7 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
         threads: allThreadsByProjectId.get(project.id) ?? [],
         worktrees: explicitWorktreesByProjectId.get(project.id) ?? [],
       });
-      const mergedProjectWorktrees = mergeEquivalentWorktrees(projectWorktrees);
+      const mergedProjectWorktrees = mergeEquivalentWorktrees(project, projectWorktrees);
 
       return {
         archivedSessions,
@@ -129,7 +135,9 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
             composeWorktreeNode({
               diffStats: getDiffStats(input, worktree.worktreeId),
               nowMs: input.nowMs,
-              threads: projectThreads.filter((thread) => belongsToWorktree(thread, worktree)),
+              threads: projectThreads.filter((thread) =>
+                belongsToWorktree(thread, worktree, project),
+              ),
               worktree,
             }),
           ),
@@ -142,13 +150,29 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
             composeWorktreeNode({
               diffStats: getDiffStats(input, worktree.worktreeId),
               nowMs: input.nowMs,
-              threads: projectThreads.filter((thread) => belongsToWorktree(thread, worktree)),
+              threads: projectThreads.filter((thread) =>
+                belongsToWorktree(thread, worktree, project),
+              ),
               worktree,
             }),
           ),
       };
     }),
   };
+}
+
+function dedupeSidebarThreads(
+  threads: ReadonlyArray<SidebarTreeThread>,
+): ReadonlyArray<SidebarTreeThread> {
+  const seen = new Set<string>();
+  return threads.filter((thread) => {
+    const key = JSON.stringify([thread.environmentId, thread.id]);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 export function useSidebarTree(input: UseSidebarTreeInput): SidebarTree {
@@ -235,18 +259,18 @@ function getThreadBucket(thread: SidebarTreeThread): SidebarStatusBucket {
   });
 }
 
-function belongsToWorktree(thread: SidebarTreeThread, worktree: SidebarWorktree): boolean {
-  if (thread.worktreeId !== undefined && thread.worktreeId !== null) {
-    if (thread.worktreeId === worktree.worktreeId) {
-      return true;
-    }
+function belongsToWorktree(
+  thread: SidebarTreeThread,
+  worktree: SidebarWorktree,
+  project: Project,
+): boolean {
+  const threadDirectoryKey = threadDirectoryGroupKey(thread, project);
+  const worktreeDirectoryKey = worktreeDirectoryGroupKey(worktree, project);
+  if (threadDirectoryKey !== null && worktreeDirectoryKey !== null) {
+    return threadDirectoryKey === worktreeDirectoryKey;
   }
 
-  if (
-    thread.worktreePath !== null &&
-    worktree.worktreePath !== null &&
-    thread.worktreePath === worktree.worktreePath
-  ) {
+  if (thread.worktreeId != null && thread.worktreeId === worktree.worktreeId) {
     return true;
   }
 
@@ -264,39 +288,39 @@ function belongsToWorktree(thread: SidebarTreeThread, worktree: SidebarWorktree)
 }
 
 function mergeEquivalentWorktrees(
+  project: Project,
   worktrees: ReadonlyArray<SidebarWorktree>,
 ): ReadonlyArray<SidebarWorktree> {
   const mergedByKey = new Map<string, SidebarWorktree>();
   for (const worktree of worktrees) {
-    const key = canonicalWorktreeGroupKey(worktree);
+    const key = canonicalWorktreeGroupKey(project, worktree);
     const existing = mergedByKey.get(key);
     mergedByKey.set(key, existing ? mergeWorktree(existing, worktree) : worktree);
   }
   return [...mergedByKey.values()];
 }
 
-function canonicalWorktreeGroupKey(worktree: SidebarWorktree): string {
-  if (worktree.origin === "main") {
-    return `${worktree.projectId}:main`;
-  }
-  if (worktree.worktreePath === null) {
-    return `${worktree.projectId}:${worktree.origin}:${worktree.branch}`;
-  }
-  return `${worktree.projectId}:path:${normalizeWorktreePath(worktree.worktreePath)}`;
+function canonicalWorktreeGroupKey(project: Project, worktree: SidebarWorktree): string {
+  return (
+    worktreeDirectoryGroupKey(worktree, project) ??
+    `${worktree.projectId}:${worktree.origin}:${worktree.worktreeId}:${worktree.branch}`
+  );
 }
 
 export function normalizeWorktreePath(worktreePath: string): string {
-  return worktreePath.replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
+  return normalizeProjectPathForComparison(worktreePath);
 }
 
 function mergeWorktree(left: SidebarWorktree, right: SidebarWorktree): SidebarWorktree {
   const fresher = preferFresher(left, right);
+  const origin = left.origin === "main" || right.origin !== "main" ? left.origin : right.origin;
   return {
     ...left,
     archivedAt: mergeArchivedAt(left.archivedAt, right.archivedAt),
-    branch: preferWorktreeBranch(left.branch, right.branch),
+    branch: fresher.branch,
+    environmentId: fresher.environmentId ?? left.environmentId ?? right.environmentId,
     manualPosition: minNumber(left.manualPosition, right.manualPosition),
-    origin: left.origin === "main" || right.origin !== "main" ? left.origin : right.origin,
+    origin,
     prNumber: left.prNumber ?? right.prNumber ?? null,
     issueNumber: left.issueNumber ?? right.issueNumber ?? null,
     prState: fresher.prState ?? null,
@@ -308,10 +332,12 @@ function mergeWorktree(left: SidebarWorktree, right: SidebarWorktree): SidebarWo
     workItemState: fresher.workItemState ?? null,
     workItemStateName: fresher.workItemStateName ?? null,
     workItemUrl: left.workItemUrl ?? right.workItemUrl ?? null,
+    sourceProjectCwd: fresher.sourceProjectCwd ?? left.sourceProjectCwd ?? right.sourceProjectCwd,
+    sourceProjectId: fresher.sourceProjectId ?? left.sourceProjectId ?? right.sourceProjectId,
     title: preferWorktreeTitle(left, right),
     updatedAt: maxIso(left.updatedAt, right.updatedAt),
     worktreeId: preferWorktreeId(left, right),
-    worktreePath: left.worktreePath ?? right.worktreePath,
+    worktreePath: origin === "main" ? null : (left.worktreePath ?? right.worktreePath),
   };
 }
 
@@ -333,13 +359,6 @@ function preferWorktreeTitle(
   if (Number.isNaN(leftMs)) return right.title;
   if (Number.isNaN(rightMs)) return left.title;
   return rightMs > leftMs ? right.title : left.title;
-}
-
-function preferWorktreeBranch(left: string, right: string): string {
-  if (left === "main" && right !== "main") {
-    return right;
-  }
-  return left;
 }
 
 function preferWorktreeId(left: SidebarWorktree, right: SidebarWorktree): string {
@@ -388,19 +407,10 @@ function ensureProjectWorktrees(input: {
   threads: ReadonlyArray<SidebarTreeThread>;
   worktrees: ReadonlyArray<SidebarWorktree>;
 }): ReadonlyArray<SidebarWorktree> {
-  if (input.threads.length === 0) {
-    return input.worktrees;
-  }
-
-  const worktrees = [...input.worktrees];
-  for (const thread of input.threads) {
-    if (worktrees.some((worktree) => belongsToWorktree(thread, worktree))) {
-      continue;
-    }
-    worktrees.push(synthesizeWorktreeForThread(input.project, thread));
-  }
-
-  return worktrees;
+  return [
+    ...input.worktrees,
+    ...input.threads.map((thread) => synthesizeWorktreeForThread(input.project, thread)),
+  ];
 }
 
 function synthesizeWorktreeForThread(project: Project, thread: SidebarTreeThread): SidebarWorktree {
@@ -410,9 +420,12 @@ function synthesizeWorktreeForThread(project: Project, thread: SidebarTreeThread
   return {
     archivedAt: null,
     branch,
+    environmentId: thread.environmentId,
     manualPosition: origin === "main" ? 0 : null,
     origin,
     projectId: project.id,
+    sourceProjectCwd: thread.sourceProjectCwd ?? project.cwd,
+    sourceProjectId: thread.sourceProjectId ?? thread.projectId,
     updatedAt: thread.updatedAt ?? thread.createdAt,
     worktreeId:
       origin === "main"
@@ -420,6 +433,31 @@ function synthesizeWorktreeForThread(project: Project, thread: SidebarTreeThread
         : `branch:${project.environmentId}:${project.id}:${thread.worktreePath ? normalizeWorktreePath(thread.worktreePath) : branch}`,
     worktreePath: thread.worktreePath,
   };
+}
+
+function threadDirectoryGroupKey(thread: SidebarTreeThread, project: Project): string | null {
+  return sidebarDirectoryGroupKey({
+    directory: thread.worktreePath ?? thread.sourceProjectCwd ?? project.cwd,
+    environmentId: thread.environmentId,
+  });
+}
+
+function worktreeDirectoryGroupKey(worktree: SidebarWorktree, project: Project): string | null {
+  return sidebarDirectoryGroupKey({
+    directory: worktree.worktreePath ?? worktree.sourceProjectCwd ?? project.cwd,
+    environmentId: worktree.environmentId ?? project.environmentId,
+  });
+}
+
+export function sidebarDirectoryGroupKey(input: {
+  directory: string;
+  environmentId: string;
+}): string | null {
+  const directory = normalizeWorktreePath(input.directory);
+  if (directory.length === 0) {
+    return null;
+  }
+  return JSON.stringify([input.environmentId, directory]);
 }
 
 function isLikelyMainBranch(branch: string | null | undefined): boolean {

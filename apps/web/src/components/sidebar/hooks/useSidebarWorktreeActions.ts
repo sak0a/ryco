@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
-import { type ScopedThreadRef, type ThreadEnvMode, WorktreeId } from "@ryco/contracts";
+import {
+  EnvironmentId,
+  type ScopedThreadRef,
+  type ThreadEnvMode,
+  WorktreeId,
+} from "@ryco/contracts";
 import { newCommandId } from "../../../lib/utils";
 import { readEnvironmentApi } from "../../../environmentApi";
 import { readLocalApi } from "../../../localApi";
@@ -38,7 +43,12 @@ export function useSidebarWorktreeActions(params: {
 
   const createThreadInWorktree = useCallback(
     (worktreeNode: SidebarTreeWorktree) => {
-      const targetMember = project.memberProjects[0];
+      const targetMember =
+        project.memberProjects.find(
+          (member) =>
+            member.environmentId === worktreeNode.worktree.environmentId &&
+            member.id === worktreeNode.worktree.sourceProjectId,
+        ) ?? project.memberProjects[0];
       if (!targetMember) {
         return;
       }
@@ -69,8 +79,17 @@ export function useSidebarWorktreeActions(params: {
   );
 
   const resolveWorktreeFilesystemPath = useCallback(
-    (worktreeNode: SidebarTreeWorktree) => worktreeNode.worktree.worktreePath ?? project.cwd,
+    (worktreeNode: SidebarTreeWorktree) =>
+      worktreeNode.worktree.worktreePath ?? worktreeNode.worktree.sourceProjectCwd ?? project.cwd,
     [project.cwd],
+  );
+
+  const resolveWorktreeEnvironmentId = useCallback(
+    (worktreeNode: SidebarTreeWorktree) =>
+      worktreeNode.worktree.environmentId
+        ? EnvironmentId.make(worktreeNode.worktree.environmentId)
+        : project.environmentId,
+    [project.environmentId],
   );
 
   const copyWorktreePath = useCallback(
@@ -120,7 +139,7 @@ export function useSidebarWorktreeActions(params: {
 
   const archiveWorktree = useCallback(
     (worktreeNode: SidebarTreeWorktree) => {
-      const api = readEnvironmentApi(project.environmentId);
+      const api = readEnvironmentApi(resolveWorktreeEnvironmentId(worktreeNode));
       const archive = api?.git.archiveWorktree;
       if (!archive) {
         toastManager.add(
@@ -145,7 +164,7 @@ export function useSidebarWorktreeActions(params: {
         );
       });
     },
-    [project.environmentId],
+    [resolveWorktreeEnvironmentId],
   );
 
   const deleteWorktree = useCallback(
@@ -163,7 +182,7 @@ export function useSidebarWorktreeActions(params: {
             return;
           }
         }
-        const api = readEnvironmentApi(project.environmentId);
+        const api = readEnvironmentApi(resolveWorktreeEnvironmentId(worktreeNode));
         if (!api) {
           toastManager.add(
             stackedThreadToast({
@@ -176,13 +195,10 @@ export function useSidebarWorktreeActions(params: {
         }
         const worktreeIdRaw = worktreeNode.worktree.worktreeId;
 
-        const threadIds = [
-          ...worktreeNode.sessions.map((thread) => thread.id),
-          ...worktreeNode.archivedSessions.map((thread) => thread.id),
-        ];
-        for (const threadId of threadIds) {
-          const threadRef = scopeThreadRef(project.environmentId, threadId);
-          await deleteThread(threadRef, { optimistic: true });
+        for (const thread of [...worktreeNode.sessions, ...worktreeNode.archivedSessions]) {
+          await deleteThread(scopeThreadRef(thread.environmentId, thread.id), {
+            optimistic: true,
+          });
         }
 
         if (isSyntheticWorktreeId(worktreeIdRaw)) {
@@ -248,12 +264,12 @@ export function useSidebarWorktreeActions(params: {
         );
       });
     },
-    [deleteThread, project.environmentId],
+    [deleteThread, resolveWorktreeEnvironmentId],
   );
 
   const restoreWorktree = useCallback(
     (worktreeNode: SidebarTreeWorktree) => {
-      const api = readEnvironmentApi(project.environmentId);
+      const api = readEnvironmentApi(resolveWorktreeEnvironmentId(worktreeNode));
       const restore = api?.git.restoreWorktree;
       if (!restore) {
         toastManager.add(
@@ -277,7 +293,7 @@ export function useSidebarWorktreeActions(params: {
         );
       });
     },
-    [project.environmentId],
+    [resolveWorktreeEnvironmentId],
   );
 
   const renameWorktree = useCallback(
@@ -291,7 +307,8 @@ export function useSidebarWorktreeActions(params: {
         return;
       }
 
-      const api = readEnvironmentApi(project.environmentId);
+      const environmentId = resolveWorktreeEnvironmentId(worktreeNode);
+      const api = readEnvironmentApi(environmentId);
       if (!api) {
         toastManager.add(
           stackedThreadToast({
@@ -313,9 +330,7 @@ export function useSidebarWorktreeActions(params: {
           title: trimmed,
           changedAt,
         });
-        useStore
-          .getState()
-          .setSidebarWorktreeTitle(project.environmentId, worktreeId, trimmed, changedAt);
+        useStore.getState().setSidebarWorktreeTitle(environmentId, worktreeId, trimmed, changedAt);
       } catch (error) {
         toastManager.add(
           stackedThreadToast({
@@ -326,7 +341,7 @@ export function useSidebarWorktreeActions(params: {
         );
       }
     },
-    [project.environmentId],
+    [resolveWorktreeEnvironmentId],
   );
 
   return {

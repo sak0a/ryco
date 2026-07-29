@@ -106,6 +106,7 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
         payload: {
           worktreeId,
           title: "Renamed Worktree",
+          branch: "feature/renamed",
           changedAt: "2026-05-10T00:00:00.000Z",
         },
       });
@@ -113,6 +114,7 @@ layer("OrchestrationProjectionPipeline worktrees", (it) => {
       yield* projectionPipeline.projectEvent(renamed);
       const renamedRow = yield* worktrees.getById({ worktreeId });
       assert.equal(Option.getOrThrow(renamedRow).title, "Renamed Worktree");
+      assert.equal(Option.getOrThrow(renamedRow).branch, "feature/renamed");
     }),
   );
 

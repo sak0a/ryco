@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArchiveIcon,
   ChevronRightIcon,
@@ -12,7 +12,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
-import type { EnvironmentId } from "@ryco/contracts";
+import { EnvironmentId, ProjectId } from "@ryco/contracts";
 import { cn } from "../../lib/utils";
 import { useGitStatus, type GitStatusState } from "../../lib/gitStatusState";
 import {
@@ -85,6 +85,13 @@ export interface SidebarThreadGitStatusTarget {
   cwd: string;
 }
 
+interface LinkedWorktreeItemContext {
+  cwd: string;
+  environmentId: EnvironmentId;
+  item: LinkedWorktreeItem;
+  projectId: ProjectId;
+}
+
 export const SidebarWorktreeList = memo(function SidebarWorktreeList(
   props: SidebarWorktreeListProps,
 ) {
@@ -103,14 +110,24 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
     [props.projectExpanded, props.treeProject.worktrees, props.visibleThreadKeys],
   );
   const [archivedOpen, setArchivedOpen] = useState(false);
-  const [linkedItem, setLinkedItem] = useState<LinkedWorktreeItem | null>(null);
+  const [linkedItemContext, setLinkedItemContext] = useState<LinkedWorktreeItemContext | null>(
+    null,
+  );
 
-  const handleOpenLinkedItem = useCallback((next: LinkedWorktreeItem) => {
-    setLinkedItem(next);
-  }, []);
+  const handleOpenLinkedItem = useCallback(
+    (worktree: SidebarTreeWorktree, item: LinkedWorktreeItem) => {
+      setLinkedItemContext({
+        item,
+        environmentId: resolveWorktreeEnvironmentId(worktree, props.treeProject),
+        projectId: resolveWorktreeProjectId(worktree, props.treeProject),
+        cwd: resolveWorktreeProjectCwd(worktree, props.treeProject),
+      });
+    },
+    [props.treeProject],
+  );
   const handleLinkedItemDialogOpenChange = useCallback((open: boolean) => {
     if (!open) {
-      setLinkedItem(null);
+      setLinkedItemContext(null);
     }
   }, []);
 
@@ -128,7 +145,7 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
           <SidebarWorktreeSection
             key={worktree.worktree.worktreeId}
             orderedProjectThreadKeys={orderedProjectThreadKeys}
-            projectCwd={props.treeProject.project.cwd}
+            projectCwd={resolveWorktreeProjectCwd(worktree, props.treeProject)}
             projectExpanded={props.projectExpanded}
             renderThread={props.renderThread}
             resolveThreadGitStatusTarget={props.resolveThreadGitStatusTarget}
@@ -139,7 +156,7 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
             onDeleteWorktree={props.onDeleteWorktree}
             onNewSession={props.onNewSession}
             onOpenInEditor={props.onOpenInEditor}
-            onOpenLinkedItem={handleOpenLinkedItem}
+            onOpenLinkedItem={(item) => handleOpenLinkedItem(worktree, item)}
             onOpenWorktree={props.onOpenWorktree}
             onRenameWorktree={props.onRenameWorktree}
           />
@@ -162,10 +179,10 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
               ? props.treeProject.archivedWorktrees.map((worktree) => (
                   <ArchivedWorktreeRow
                     key={worktree.worktree.worktreeId}
-                    projectCwd={props.treeProject.project.cwd}
+                    projectCwd={resolveWorktreeProjectCwd(worktree, props.treeProject)}
                     worktree={worktree}
                     onDeleteWorktree={props.onDeleteWorktree}
-                    onOpenLinkedItem={handleOpenLinkedItem}
+                    onOpenLinkedItem={(item) => handleOpenLinkedItem(worktree, item)}
                     onRestoreWorktree={props.onRestoreWorktree}
                   />
                 ))
@@ -174,16 +191,41 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
         ) : null}
       </SidebarMenuSub>
       <LinkedWorktreeItemDialog
-        open={linkedItem !== null}
-        item={linkedItem}
-        environmentId={props.treeProject.project.environmentId}
-        projectId={props.treeProject.project.id}
-        cwd={props.treeProject.project.cwd}
+        open={linkedItemContext !== null}
+        item={linkedItemContext?.item ?? null}
+        environmentId={linkedItemContext?.environmentId ?? null}
+        projectId={linkedItemContext?.projectId ?? null}
+        cwd={linkedItemContext?.cwd ?? null}
         onOpenChange={handleLinkedItemDialogOpenChange}
       />
     </>
   );
 });
+
+function resolveWorktreeEnvironmentId(
+  worktree: SidebarTreeWorktree,
+  treeProject: SidebarTreeProject,
+): EnvironmentId {
+  return worktree.worktree.environmentId
+    ? EnvironmentId.make(worktree.worktree.environmentId)
+    : treeProject.project.environmentId;
+}
+
+function resolveWorktreeProjectId(
+  worktree: SidebarTreeWorktree,
+  treeProject: SidebarTreeProject,
+): ProjectId {
+  return worktree.worktree.sourceProjectId
+    ? ProjectId.make(worktree.worktree.sourceProjectId)
+    : treeProject.project.id;
+}
+
+function resolveWorktreeProjectCwd(
+  worktree: SidebarTreeWorktree,
+  treeProject: SidebarTreeProject,
+): string {
+  return worktree.worktree.sourceProjectCwd ?? treeProject.project.cwd;
+}
 
 function ArchivedWorktreeRow(props: {
   projectCwd: string;
@@ -575,9 +617,11 @@ const SidebarWorktreeThreadRows = memo(function SidebarWorktreeThreadRows(props:
 
   return (
     <>
-      {props.visibleThreads.map((thread) =>
-        props.renderThread(thread, props.orderedProjectThreadKeys, rowGitStatus),
-      )}
+      {props.visibleThreads.map((thread) => (
+        <Fragment key={scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))}>
+          {props.renderThread(thread, props.orderedProjectThreadKeys, rowGitStatus)}
+        </Fragment>
+      ))}
     </>
   );
 });

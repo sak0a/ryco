@@ -95,6 +95,7 @@ describe("composeSidebarTree", () => {
           manualPosition: 0,
           origin: "branch",
           worktreeId: "worktree-feature",
+          worktreePath: "/repo/project-feature",
         }),
         makeWorktree({
           branch: "main",
@@ -132,7 +133,7 @@ describe("composeSidebarTree", () => {
     expect(worktree?.buckets.done).toHaveLength(1);
   });
 
-  it("synthesizes a separate legacy branch group for null-path branch sessions", () => {
+  it("keeps changed branches in the original project directory under one row", () => {
     const tree = composeSidebarTree({
       isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),
       nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
@@ -146,23 +147,173 @@ describe("composeSidebarTree", () => {
         makeThread({
           id: ThreadId.make("thread-feature"),
           branch: "feature/legacy",
+          updatedAt: "2026-05-02T00:00:00.000Z",
           worktreePath: null,
         }),
       ],
       worktrees: [],
     });
 
-    expect(tree.projects[0]?.worktrees.map((entry) => entry.worktree.origin)).toEqual([
-      "main",
-      "branch",
-    ]);
+    expect(tree.projects[0]?.worktrees.map((entry) => entry.worktree.origin)).toEqual(["main"]);
+    expect(tree.projects[0]?.worktrees[0]?.worktree.branch).toBe("feature/legacy");
     expect(tree.projects[0]?.worktrees[0]?.sessions.map((thread) => thread.id)).toEqual([
       ThreadId.make("thread-main"),
-    ]);
-    expect(tree.projects[0]?.worktrees[1]?.worktree.branch).toBe("feature/legacy");
-    expect(tree.projects[0]?.worktrees[1]?.sessions.map((thread) => thread.id)).toEqual([
       ThreadId.make("thread-feature"),
     ]);
+  });
+
+  it("merges an explicit project-root path with the original project row", () => {
+    const tree = composeSidebarTree({
+      isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [],
+      worktrees: [
+        makeWorktree({
+          origin: "main",
+          worktreeId: "worktree-main",
+          worktreePath: null,
+        }),
+        makeWorktree({
+          branch: "feature/root",
+          origin: "branch",
+          updatedAt: "2026-05-02T00:00:00.000Z",
+          worktreeId: "worktree-root-path",
+          worktreePath: "/repo/project/",
+        }),
+      ],
+    });
+
+    expect(tree.projects[0]?.worktrees).toHaveLength(1);
+    expect(tree.projects[0]?.worktrees[0]?.worktree.origin).toBe("main");
+    expect(tree.projects[0]?.worktrees[0]?.worktree.branch).toBe("feature/root");
+  });
+
+  it("binds a thread to its directory before a stale worktree id", () => {
+    const tree = composeSidebarTree({
+      isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-moved"),
+          branch: "feature/b",
+          worktreeId: "worktree-a",
+          worktreePath: "/repo/worktrees/b",
+        }),
+      ],
+      worktrees: [
+        makeWorktree({
+          branch: "feature/a",
+          origin: "branch",
+          worktreeId: "worktree-a",
+          worktreePath: "/repo/worktrees/a",
+        }),
+        makeWorktree({
+          branch: "feature/b",
+          origin: "branch",
+          worktreeId: "worktree-b",
+          worktreePath: "/repo/worktrees/b",
+        }),
+      ],
+    });
+
+    const worktrees = tree.projects[0]?.worktrees ?? [];
+    expect(
+      worktrees.find((entry) => entry.worktree.worktreePath === "/repo/worktrees/a")?.sessions,
+    ).toHaveLength(0);
+    expect(
+      worktrees
+        .find((entry) => entry.worktree.worktreePath === "/repo/worktrees/b")
+        ?.sessions.map((thread) => thread.id),
+    ).toEqual([ThreadId.make("thread-moved")]);
+  });
+
+  it("renders one session when duplicate inputs share a scoped thread id", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-duplicate"),
+      worktreePath: null,
+    });
+    const tree = composeSidebarTree({
+      isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [thread, { ...thread, title: "Duplicate draft" }],
+      worktrees: [makeWorktree()],
+    });
+
+    expect(tree.projects[0]?.worktrees[0]?.sessions).toHaveLength(1);
+    expect(tree.projects[0]?.worktrees[0]?.sessions[0]?.title).toBe("Thread");
+  });
+
+  it("keeps identical path strings on different environments separate", () => {
+    const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+    const tree = composeSidebarTree({
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [],
+      worktrees: [
+        makeWorktree({
+          environmentId,
+          origin: "branch",
+          sourceProjectCwd: "/repo/project",
+          worktreeId: "worktree-local",
+          worktreePath: "/repo/shared",
+        }),
+        makeWorktree({
+          environmentId: remoteEnvironmentId,
+          origin: "branch",
+          sourceProjectCwd: "/repo/project",
+          worktreeId: "worktree-remote",
+          worktreePath: "/repo/shared",
+        }),
+      ],
+    });
+
+    expect(tree.projects[0]?.worktrees.map((entry) => entry.worktree.worktreeId)).toEqual([
+      "worktree-local",
+      "worktree-remote",
+    ]);
+  });
+
+  it("preserves Unix path case while normalizing Windows directory identity", () => {
+    const unixTree = composeSidebarTree({
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [],
+      worktrees: [
+        makeWorktree({
+          origin: "branch",
+          worktreeId: "worktree-upper",
+          worktreePath: "/repo/Feature",
+        }),
+        makeWorktree({
+          origin: "branch",
+          worktreeId: "worktree-lower",
+          worktreePath: "/repo/feature",
+        }),
+      ],
+    });
+    const windowsTree = composeSidebarTree({
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject({ cwd: "C:\\repo\\project" })],
+      threads: [],
+      worktrees: [
+        makeWorktree({
+          origin: "branch",
+          worktreeId: "worktree-windows-a",
+          worktreePath: "C:\\Repo\\Feature\\",
+        }),
+        makeWorktree({
+          origin: "branch",
+          worktreeId: "worktree-windows-b",
+          worktreePath: "c:/repo/feature",
+        }),
+      ],
+    });
+
+    expect(unixTree.projects[0]?.worktrees).toHaveLength(2);
+    expect(windowsTree.projects[0]?.worktrees).toHaveLength(1);
   });
 
   it("synthesizes a path worktree for threads materialized without a worktree row", () => {

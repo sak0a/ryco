@@ -774,6 +774,7 @@ const WorktreeMetaUpdateCommand = Schema.Struct({
   commandId: CommandId,
   worktreeId: WorktreeId,
   title: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  branch: Schema.optional(TrimmedNonEmptyString),
   changedAt: IsoDateTime,
 });
 
@@ -1245,6 +1246,7 @@ export const WorktreeArchivedPayload = Schema.Struct({
 export const WorktreeMetaUpdatedPayload = Schema.Struct({
   worktreeId: WorktreeId,
   title: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  branch: Schema.optional(TrimmedNonEmptyString),
   changedAt: IsoDateTime,
 });
 
