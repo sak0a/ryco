@@ -217,6 +217,7 @@ describe("HubIdentityRuntime", () => {
 
     expect(pending).not.toBeNull();
     expect(pending?.deviceCode).toBe("ABCD-EFGH");
+    expect(pending?.label).toBe("Ryco node");
     expect(pending?.expiresAt).toBe(160_000);
     expect(pending?.pollIntervalMs).toBe(1_000);
     // The security property: the fingerprint is derived from the key actually in

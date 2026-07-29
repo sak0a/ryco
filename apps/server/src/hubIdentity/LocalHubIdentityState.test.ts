@@ -42,6 +42,7 @@ describe("local Hub identity state", () => {
         hubOrigin: "https://hub.example.com",
         keySecretName: "node-key.pending",
         pollingSecretName: "enrollment-poll.pending",
+        label: "Build node",
         deviceCode: "ABCD-EFGH",
         createdAt: 1_784_160_000_000,
         expiresAt: 1_784_160_600_000,
@@ -52,6 +53,7 @@ describe("local Hub identity state", () => {
     expect(updated.environmentId).toBe(initial.environmentId);
     const persisted = await readFile(path, "utf8");
     expect(persisted).toContain("enrollment-poll.pending");
+    expect(persisted).toContain('"label":"Build node"');
     expect(persisted).not.toContain(pollingCanary);
   });
 
@@ -86,6 +88,7 @@ describe("local Hub identity state", () => {
     const state = await store.readOrCreate();
 
     expect(state.pendingEnrollment?.deviceCode).toBeNull();
+    expect(state.pendingEnrollment?.label).toBeNull();
     expect(state.protectedStoreBackend).toBeNull();
     expect(state.pendingEnrollment?.keySecretName).toBe("node-key.pending");
     expect(state.revision).toBe(3);
@@ -157,6 +160,44 @@ describe("local Hub identity state", () => {
 
     const store = await makeLocalHubIdentityStateStore(path);
     await expect(store.readOrCreate()).rejects.toMatchObject({ code: "identity_state_corrupt" });
+  });
+
+  it("rejects an invalid persisted pending label without reflecting it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-bad-label-"));
+    const path = join(root, "identity.json");
+    const canary = `private-machine-${"x".repeat(100)}`;
+    await writeFile(
+      path,
+      JSON.stringify({
+        version: 1,
+        revision: 1,
+        environmentId: `env_${"E".repeat(22)}`,
+        pendingEnrollment: {
+          hubOrigin: "https://hub.example.com",
+          keySecretName: "node-key.pending",
+          pollingSecretName: "enrollment-poll.pending",
+          label: canary,
+          deviceCode: "ABCD-EFGH",
+          createdAt: 1_784_160_000_000,
+          expiresAt: 1_784_160_600_000,
+          pollIntervalMs: 5_000,
+          cleanupRequested: false,
+        },
+        activeNode: null,
+        stagedRotation: null,
+      }),
+      { mode: 0o600 },
+    );
+
+    const store = await makeLocalHubIdentityStateStore(path);
+    let error: unknown;
+    try {
+      await store.readOrCreate();
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toMatchObject({ code: "identity_state_corrupt" });
+    expect(String(error)).not.toContain(canary);
   });
 
   it("rejects environment replacement and invalid revision transitions", async () => {

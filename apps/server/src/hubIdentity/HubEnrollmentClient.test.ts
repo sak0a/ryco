@@ -80,11 +80,13 @@ const approved: HubEnrollmentPollResponse = {
 describe("Hub enrollment client", () => {
   it("generates locally, persists only protected references, and resumes approval", async () => {
     let capturedEnvironmentId = "";
+    let capturedLabel = "";
     let capturedPublicKeyLength = 0;
     let polls = 0;
     const transport: HubEnrollmentTransport = {
       start: async (request) => {
         capturedEnvironmentId = request.environmentId;
+        capturedLabel = request.label;
         capturedPublicKeyLength = request.publicKey.publicKey.byteLength;
         return {
           deviceCode: "ABCD-EFGH",
@@ -104,7 +106,9 @@ describe("Hub enrollment client", () => {
     const started = await test.makeClient().start("https://hub.example.com", metadata);
     expect(started.deviceCode).toBe("ABCD-EFGH");
     expect(started.environmentId).toBe(capturedEnvironmentId);
+    expect(capturedLabel).toBe(metadata.label);
     expect(capturedPublicKeyLength).toBe(32);
+    expect((await test.stateStore.readOrCreate()).pendingEnrollment?.label).toBe(metadata.label);
     expect(await test.makeClient().poll("https://hub.example.com")).toEqual({
       status: "pending",
       retryAfterMs: 5_000,

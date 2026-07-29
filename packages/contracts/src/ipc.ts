@@ -263,6 +263,7 @@ export interface DesktopTurnCompleteNotification {
 export interface DesktopHubLaunchConfig {
   readonly enabled: boolean;
   readonly origin: string | null;
+  readonly nodeName: string | null;
   readonly allowFileSecretStore: boolean;
   /** Whether this host can use the hardened permissioned-file fallback. */
   readonly fileSecretStoreFallbackSupported: boolean;
@@ -332,6 +333,7 @@ export interface DesktopBridge {
   setHubLaunchConfig: (input: {
     readonly enabled?: boolean;
     readonly origin?: string | null;
+    readonly nodeName?: string | null;
     readonly allowFileSecretStore?: boolean;
   }) => Promise<void>;
   /** Validate a typed Hub address without persisting it. */

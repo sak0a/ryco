@@ -132,7 +132,7 @@ export type HubNodePublicKeyFingerprint = typeof HubNodePublicKeyFingerprint.Typ
 export const HubEnrollmentCeremonyDetail = Schema.Struct({
   deviceCode: Schema.String.check(Schema.isPattern(/^[A-Z0-9-]{4,32}$/)),
   fingerprint: HubNodePublicKeyFingerprint,
-  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(128)),
+  label: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(100)),
   platformOs: Schema.Literals(["darwin", "linux", "windows", "unknown"]),
   platformArch: Schema.Literals(["arm64", "x64", "other"]),
   clientVersion: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64)),

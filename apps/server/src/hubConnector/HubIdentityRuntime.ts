@@ -74,6 +74,7 @@ export class HubRelayAuthenticationError extends Error {
  */
 export interface PendingHubEnrollmentDetail {
   readonly deviceCode: string | null;
+  readonly label: string | null;
   readonly fingerprint: Uint8Array;
   readonly algorithm: "ed25519";
   readonly expiresAt: number | null;
@@ -483,6 +484,7 @@ export async function makeHubIdentityRuntime(options: {
         const descriptor = await signingIdentity.getPublicDescriptor(pending.keySecretName);
         return {
           deviceCode: pending.deviceCode,
+          label: pending.label,
           fingerprint: descriptor.fingerprint,
           algorithm: descriptor.algorithm,
           expiresAt: pending.expiresAt,

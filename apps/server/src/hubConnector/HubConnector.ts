@@ -27,6 +27,7 @@ import {
   RelayChannelRegistry,
   type RelayChannelSessionFactory,
 } from "./RelayChannelRegistry.ts";
+import { resolveHubEnrollmentLabel } from "./HubEnrollmentLabel.ts";
 import { reconnectDelay } from "./ReconnectPolicy.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
 
@@ -198,7 +199,15 @@ export class HubConnector {
     this.#state.transition("enrolling");
     let enrollmentStarted = false;
     try {
-      const started = await this.#identity.startEnrollment(origin, this.#enrollmentMetadata);
+      const enrollmentMetadata: HubEnrollmentMetadata = {
+        ...this.#enrollmentMetadata,
+        label: resolveHubEnrollmentLabel({
+          configuredNodeName: this.#config.nodeName,
+          machineLabel: this.#enrollmentMetadata.label,
+          environmentId: state.environmentId,
+        }),
+      };
+      const started = await this.#identity.startEnrollment(origin, enrollmentMetadata);
       enrollmentStarted = true;
       if (!this.#state.isCurrent(generation) || this.#stopping) {
         throw new Error("Hub enrollment start was superseded.");
@@ -211,10 +220,10 @@ export class HubConnector {
         status: this.status(),
         deviceCode: started.deviceCode,
         fingerprint,
-        label: this.#enrollmentMetadata.label,
-        platformOs: this.#enrollmentMetadata.platformOs,
-        platformArch: this.#enrollmentMetadata.platformArch,
-        clientVersion: this.#enrollmentMetadata.clientVersion,
+        label: enrollmentMetadata.label,
+        platformOs: enrollmentMetadata.platformOs,
+        platformArch: enrollmentMetadata.platformArch,
+        clientVersion: enrollmentMetadata.clientVersion,
         algorithm: started.publicKey.algorithm,
         expiresAt,
         pollIntervalMs: started.pollIntervalMs,
@@ -287,7 +296,7 @@ export class HubConnector {
     return {
       deviceCode: pending.deviceCode,
       fingerprint: formatNodePublicKeyFingerprint(pending.fingerprint),
-      label: this.#enrollmentMetadata.label,
+      label: pending.label ?? this.#enrollmentMetadata.label,
       platformOs: this.#enrollmentMetadata.platformOs,
       platformArch: this.#enrollmentMetadata.platformArch,
       clientVersion: this.#enrollmentMetadata.clientVersion,

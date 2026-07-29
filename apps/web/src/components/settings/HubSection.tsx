@@ -76,6 +76,9 @@ export function HubSection({
   const [originDraft, setOriginDraft] = useState("");
   const [originError, setOriginError] = useState<string | null>(null);
   const [originSuggestion, setOriginSuggestion] = useState<string | null>(null);
+  const [nodeNameDraft, setNodeNameDraft] = useState("");
+  const [nodeNameError, setNodeNameError] = useState<string | null>(null);
+  const [savingNodeName, setSavingNodeName] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<HubAction | null>(null);
@@ -128,6 +131,7 @@ export function HubSection({
         if (!mountedRef.current) return;
         setConfig(value);
         setOriginDraft(value.origin ?? "");
+        setNodeNameDraft(value.nodeName ?? "");
         setConfigError(null);
       })
       .catch((cause: unknown) => {
@@ -225,6 +229,32 @@ export function HubSection({
     [desktopBridge],
   );
 
+  const updateNodeNameDraft = useCallback((value: string) => {
+    setNodeNameDraft(value);
+    setNodeNameError(value.trim().length > 100 ? "Use 100 characters or fewer." : null);
+  }, []);
+
+  const saveNodeName = useCallback(async () => {
+    if (!desktopBridge) return;
+    const nodeName = nodeNameDraft.trim();
+    if (nodeName.length > 100) {
+      setNodeNameError("Use 100 characters or fewer.");
+      return;
+    }
+
+    setSavingNodeName(true);
+    setNodeNameError(null);
+    try {
+      await desktopBridge.setHubLaunchConfig({ nodeName: nodeName === "" ? null : nodeName });
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      setNodeNameError(
+        cause instanceof Error ? cause.message : "Unable to save the Hub node name.",
+      );
+      setSavingNodeName(false);
+    }
+  }, [desktopBridge, nodeNameDraft]);
+
   const setFileSecretStoreFallback = useCallback(
     async (enabled: boolean) => {
       if (!desktopBridge) return;
@@ -269,6 +299,7 @@ export function HubSection({
     snapshot === null ? null : presentHubStatus(snapshot.status, snapshot.identity, nowMs);
   const editable = snapshot === null ? false : canEditHubOrigin(snapshot.identity);
   const originChanged = originDraft.trim() !== (config?.origin ?? "");
+  const nodeNameChanged = nodeNameDraft.trim() !== (config?.nodeName ?? "");
 
   const renderAction = (action: HubAction, variant: "outline" | "destructive-outline") =>
     action === "none" ? null : (
@@ -445,6 +476,42 @@ export function HubSection({
                 onClick={() => void saveOrigin(originDraft.trim())}
               >
                 Save and restart
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+
+      <SettingsRow
+        title="Node name"
+        description={
+          editable
+            ? "Choose the name proposed on the Hub approval screen. Leave it blank for a stable automatic name."
+            : snapshot?.identity.enrolled === "pending"
+              ? "Locked while enrollment is pending. Cancel enrollment to change the proposed name."
+              : "Managed on the Hub after enrollment. An owner can rename this node from its Hub details."
+        }
+        status={
+          nodeNameError ? <span className="block text-destructive">{nodeNameError}</span> : null
+        }
+        control={
+          <>
+            <Input
+              value={nodeNameDraft}
+              disabled={!editable || pendingAction !== null || savingNodeName}
+              placeholder="Automatic: machine name · node code"
+              aria-label="Hub node name"
+              className="w-64 text-xs"
+              onChange={(event) => updateNodeNameDraft(event.currentTarget.value)}
+            />
+            {editable && nodeNameChanged && nodeNameError === null ? (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={pendingAction !== null || savingNodeName}
+                onClick={() => void saveNodeName()}
+              >
+                {savingNodeName ? "Saving…" : "Save and restart"}
               </Button>
             ) : null}
           </>

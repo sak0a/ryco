@@ -8,6 +8,7 @@ export const NODE_KEY_ROTATION_TRANSCRIPT_DOMAIN = "ryco.node-key-rotation.proof
 export const NODE_CHALLENGE_BYTES = 32;
 export const ED25519_PUBLIC_KEY_BYTES = 32;
 export const ED25519_SIGNATURE_BYTES = 64;
+export const HUB_NODE_NAME_MAX_LENGTH = 100;
 
 export type NodeSigningAlgorithm = "ed25519" | "p256";
 
@@ -96,6 +97,13 @@ export function canonicalizeHubOrigin(value: string): string {
     invalid();
   }
   return url.origin;
+}
+
+export function normalizeHubNodeName(value: string): string {
+  if (typeof value !== "string") invalid();
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > HUB_NODE_NAME_MAX_LENGTH) invalid();
+  return normalized;
 }
 
 export function validateNodePublicKey(

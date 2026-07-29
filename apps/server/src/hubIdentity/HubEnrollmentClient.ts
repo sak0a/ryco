@@ -279,6 +279,7 @@ export function makeHubEnrollmentClient(
       hubOrigin,
       keySecretName,
       pollingSecretName,
+      label: metadata.label,
       // Unknown until the start response arrives; filled in by the commit below.
       deviceCode: null,
       createdAt,

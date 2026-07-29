@@ -3,12 +3,19 @@ import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
+import { canonicalizeHubOrigin, normalizeHubNodeName } from "@ryco/shared/nodeIdentity";
 
 export interface PendingHubEnrollmentState {
   readonly hubOrigin: string;
   readonly keySecretName: string;
   readonly pollingSecretName: string;
+  /**
+   * Exact bounded label proposed to the Hub for this ceremony.
+   *
+   * Null only for records written before label persistence existed. It is
+   * display metadata, never an identity or bearer value.
+   */
+  readonly label: string | null;
   /**
    * The short human code the service issued for this ceremony.
    *
@@ -137,6 +144,16 @@ function isNullableDeviceCode(value: unknown): value is string | null {
   return typeof value === "string" && DEVICE_CODE.test(value);
 }
 
+function isNullableLabel(value: unknown): value is string | null {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "string") return false;
+  try {
+    return normalizeHubNodeName(value) === value;
+  } catch {
+    return false;
+  }
+}
+
 function isSecretName(value: unknown): value is string {
   return typeof value === "string" && SECRET_NAME.test(value);
 }
@@ -161,7 +178,8 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
         Number(candidate.pollIntervalMs) < 1_000 ||
         Number(candidate.pollIntervalMs) > 60_000)) ||
     (candidate.cleanupRequested !== undefined && typeof candidate.cleanupRequested !== "boolean") ||
-    !isNullableDeviceCode(candidate.deviceCode)
+    !isNullableDeviceCode(candidate.deviceCode) ||
+    !isNullableLabel(candidate.label)
   ) {
     return stateError("identity_state_corrupt");
   }
@@ -175,6 +193,9 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
     hubOrigin,
     keySecretName: candidate.keySecretName,
     pollingSecretName: candidate.pollingSecretName,
+    // Absent on legacy records. They stay pollable and use the pre-feature
+    // friendly machine label when their ceremony is displayed.
+    label: candidate.label ?? null,
     // Absent on records written before this field existed. Those ceremonies stay
     // pollable; they just cannot be re-displayed.
     deviceCode: candidate.deviceCode ?? null,

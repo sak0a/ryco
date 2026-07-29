@@ -10,6 +10,7 @@ import {
   isDesktopHubFileSecretStoreSupported,
   readDesktopSettings,
   resolveDefaultDesktopSettings,
+  setDesktopHubPreference,
   setDesktopServerExposurePreference,
   setDesktopTailscaleServePreference,
   setDesktopUpdateChannelPreference,
@@ -44,6 +45,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -59,6 +61,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
 
@@ -70,6 +73,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -85,6 +89,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubNodeName: null,
           hubAllowFileSecretStore: false,
         },
         "network-accessible",
@@ -97,6 +102,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -112,6 +118,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubNodeName: null,
           hubAllowFileSecretStore: false,
         },
         { enabled: true, port: 8443 },
@@ -124,6 +131,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -139,6 +147,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubNodeName: null,
           hubAllowFileSecretStore: false,
         },
         { enabled: true },
@@ -151,6 +160,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -166,6 +176,7 @@ describe("desktopSettings", () => {
           updateChannelConfiguredByUser: false,
           hubConnectorEnabled: false,
           hubOrigin: null,
+          hubNodeName: null,
           hubAllowFileSecretStore: false,
         },
         "nightly",
@@ -178,6 +189,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -212,13 +224,47 @@ describe("desktopSettings", () => {
       ...DEFAULT_DESKTOP_SETTINGS,
       hubConnectorEnabled: true,
       hubOrigin: "https://hub.example.com",
+      hubNodeName: "Build node",
       hubAllowFileSecretStore: true,
     });
     expect(readDesktopSettings(settingsPath, "0.0.17")).toMatchObject({
       hubConnectorEnabled: true,
       hubOrigin: "https://hub.example.com",
+      hubNodeName: "Build node",
       hubAllowFileSecretStore: true,
     });
+  });
+
+  it("normalizes, preserves, and resets the desktop Hub node name", () => {
+    const configured = setDesktopHubPreference(DEFAULT_DESKTOP_SETTINGS, {
+      enabled: true,
+      nodeName: "  Build node  ",
+    });
+    expect(configured).toMatchObject({
+      hubConnectorEnabled: true,
+      hubNodeName: "Build node",
+    });
+
+    const unchanged = setDesktopHubPreference(configured, { nodeName: "Build node" });
+    expect(unchanged).toBe(configured);
+
+    const reset = setDesktopHubPreference(configured, { nodeName: null });
+    expect(reset).toMatchObject({
+      hubConnectorEnabled: true,
+      hubNodeName: null,
+    });
+  });
+
+  it("rejects an invalid persisted Hub node name without touching the file", () => {
+    const settingsPath = makeSettingsPath();
+    const raw = JSON.stringify({
+      hubConnectorEnabled: true,
+      hubNodeName: " ",
+    });
+    fs.writeFileSync(settingsPath, raw, "utf8");
+
+    expect(() => readDesktopSettings(settingsPath, "0.0.17")).toThrow(DesktopSettingsReadError);
+    expect(fs.readFileSync(settingsPath, "utf8")).toBe(raw);
   });
 
   it("reports permissioned-file Hub key storage only on supported hosts", () => {
@@ -241,6 +287,7 @@ describe("desktopSettings", () => {
     expect(readDesktopSettings(settingsPath, "0.0.17")).toMatchObject({
       hubConnectorEnabled: true,
       hubOrigin: "https://hub.example.com",
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -257,6 +304,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -280,6 +328,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -294,6 +343,7 @@ describe("desktopSettings", () => {
         updateChannelConfiguredByUser: true,
         hubConnectorEnabled: false,
         hubOrigin: null,
+        hubNodeName: null,
         hubAllowFileSecretStore: false,
       }),
       "utf8",
@@ -307,6 +357,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: true,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });
@@ -330,6 +381,7 @@ describe("desktopSettings", () => {
       updateChannelConfiguredByUser: false,
       hubConnectorEnabled: false,
       hubOrigin: null,
+      hubNodeName: null,
       hubAllowFileSecretStore: false,
     });
   });

@@ -265,6 +265,8 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
           "--hub-connector-enabled",
           "--hub-origin",
           "https://hub.example.test",
+          "--hub-node-name",
+          "Build node",
           "--hub-allow-file-secret-store",
           "--version",
         ]),

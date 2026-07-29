@@ -37,6 +37,7 @@ import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 
 import type { ContextMenuItem } from "@ryco/contracts";
 import { RotatingFileSink } from "@ryco/shared/logging";
+import { normalizeHubNodeName } from "@ryco/shared/nodeIdentity";
 import { deleteEnv, readEnv } from "@ryco/shared/runtimeEnv";
 import { parsePersistedServerObservabilitySettings } from "@ryco/shared/serverSettings";
 import type { RemoteRycoRunnerOptions } from "@ryco/ssh/tunnel";
@@ -100,6 +101,7 @@ import { bindFirstRevealTrigger, type RevealSubscription } from "./windowReveal.
 import { resolveBundledRelayGuidePath } from "./bundledGuide.ts";
 import { resolveTailscaleAdvertisedEndpoints } from "./tailscaleEndpointProvider.ts";
 import { validateHubOrigin } from "./hubOrigin.ts";
+import { removeDesktopOwnedHubEnvironment } from "./hubLaunchEnvironment.ts";
 import {
   parseTurnCompleteNotification,
   shouldShowTurnCompleteNotification,
@@ -451,9 +453,7 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   // would give the settings panel a toggle that silently does nothing, guarded
   // by a lock icon any same-user process could forge with `launchctl setenv`.
   // `ryco serve` is unaffected and stays fully env-configurable.
-  deleteEnv(env, "RYCO_HUB_CONNECTOR_ENABLED");
-  deleteEnv(env, "RYCO_HUB_ORIGIN");
-  deleteEnv(env, "RYCO_HUB_ALLOW_FILE_SECRET_STORE");
+  removeDesktopOwnedHubEnvironment(env);
   // VITE_DEV_SERVER_URL must never reach the packaged backend: if a developer's
   // shell exports it, the server's Config.url parser throws and the backend
   // exits before HTTP listen, causing the desktop to spin in a restart loop.
@@ -2033,6 +2033,9 @@ function startBackend(): void {
         tailscaleServePort: desktopSettings.tailscaleServePort,
         hubConnectorEnabled: desktopSettings.hubConnectorEnabled,
         ...(desktopSettings.hubOrigin === null ? {} : { hubOrigin: desktopSettings.hubOrigin }),
+        ...(desktopSettings.hubNodeName === null
+          ? {}
+          : { hubNodeName: desktopSettings.hubNodeName }),
         hubAllowFileSecretStore: desktopSettings.hubAllowFileSecretStore,
         ...(backendObservabilitySettings.otlpTracesUrl
           ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
@@ -2307,6 +2310,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(GET_HUB_LAUNCH_CONFIG_CHANNEL, () => ({
     enabled: desktopSettings.hubConnectorEnabled,
     origin: desktopSettings.hubOrigin,
+    nodeName: desktopSettings.hubNodeName,
     allowFileSecretStore: desktopSettings.hubAllowFileSecretStore,
     fileSecretStoreFallbackSupported: isDesktopHubFileSecretStoreSupported(process.platform),
   }));
@@ -2324,6 +2328,7 @@ function registerIpcHandlers(): void {
     const input = rawInput as {
       readonly enabled?: unknown;
       readonly origin?: unknown;
+      readonly nodeName?: unknown;
       readonly allowFileSecretStore?: unknown;
     };
     if (input.enabled !== undefined && typeof input.enabled !== "boolean") {
@@ -2357,15 +2362,34 @@ function registerIpcHandlers(): void {
       throw new Error("Invalid Hub launch configuration input.");
     }
 
-    desktopSettings = setDesktopHubPreference(desktopSettings, {
+    let nodeName: string | null | undefined;
+    if (input.nodeName === null) {
+      nodeName = null;
+    } else if (typeof input.nodeName === "string") {
+      try {
+        nodeName = normalizeHubNodeName(input.nodeName);
+      } catch {
+        throw new Error("Invalid Hub node name.");
+      }
+    } else if (input.nodeName !== undefined) {
+      throw new Error("Invalid Hub launch configuration input.");
+    }
+
+    const nextSettings = setDesktopHubPreference(desktopSettings, {
       ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
       ...(origin === undefined ? {} : { origin }),
+      ...(nodeName === undefined ? {} : { nodeName }),
       ...(input.allowFileSecretStore === undefined
         ? {}
         : { allowFileSecretStore: input.allowFileSecretStore }),
     });
-    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
-    // Never log the origin: it says where this machine is reachable.
+    if (nextSettings === desktopSettings) return;
+
+    // Persist before publishing the new in-memory value. If the atomic write
+    // fails, an identical retry must still attempt the write and relaunch.
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, nextSettings);
+    desktopSettings = nextSettings;
+    // Never log the origin or node name: together they identify this machine.
     relaunchDesktopApp("hub-launch-config-changed");
   });
 

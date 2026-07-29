@@ -6,6 +6,7 @@ import { canChangeHubFileSecretStore } from "./HubAdvancedOptions.tsx";
 const config = (overrides: Partial<DesktopHubLaunchConfig> = {}): DesktopHubLaunchConfig => ({
   enabled: false,
   origin: null,
+  nodeName: null,
   allowFileSecretStore: false,
   fileSecretStoreFallbackSupported: true,
   ...overrides,

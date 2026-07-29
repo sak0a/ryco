@@ -1,6 +1,7 @@
 import * as FS from "node:fs";
 import * as Path from "node:path";
 import type { DesktopServerExposureMode, DesktopUpdateChannel } from "@ryco/contracts";
+import { normalizeHubNodeName } from "@ryco/shared/nodeIdentity";
 
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 
@@ -21,6 +22,7 @@ export interface DesktopSettings {
    */
   readonly hubConnectorEnabled: boolean;
   readonly hubOrigin: string | null;
+  readonly hubNodeName: string | null;
   readonly hubAllowFileSecretStore: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
@@ -34,6 +36,7 @@ export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
   hubConnectorEnabled: false,
   hubOrigin: null,
+  hubNodeName: null,
   hubAllowFileSecretStore: false,
   tailscaleServeEnabled: false,
   tailscaleServePort: DEFAULT_TAILSCALE_SERVE_PORT,
@@ -88,15 +91,29 @@ export function setDesktopHubPreference(
   input: {
     readonly enabled?: boolean;
     readonly origin?: string | null;
+    readonly nodeName?: string | null;
     readonly allowFileSecretStore?: boolean;
   },
 ): DesktopSettings {
-  return {
+  const nodeName =
+    input.nodeName === undefined
+      ? settings.hubNodeName
+      : input.nodeName === null
+        ? null
+        : normalizeHubNodeName(input.nodeName);
+  const next = {
     ...settings,
     hubConnectorEnabled: input.enabled ?? settings.hubConnectorEnabled,
     hubOrigin: input.origin === undefined ? settings.hubOrigin : input.origin,
+    hubNodeName: nodeName,
     hubAllowFileSecretStore: input.allowFileSecretStore ?? settings.hubAllowFileSecretStore,
   };
+  return next.hubConnectorEnabled === settings.hubConnectorEnabled &&
+    next.hubOrigin === settings.hubOrigin &&
+    next.hubNodeName === settings.hubNodeName &&
+    next.hubAllowFileSecretStore === settings.hubAllowFileSecretStore
+    ? settings
+    : next;
 }
 
 export function isDesktopHubFileSecretStoreSupported(platform: NodeJS.Platform): boolean {
@@ -139,6 +156,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
       readonly updateChannelConfiguredByUser?: unknown;
       readonly hubConnectorEnabled?: unknown;
       readonly hubOrigin?: unknown;
+      readonly hubNodeName?: unknown;
       readonly hubAllowFileSecretStore?: unknown;
     };
     const parsedUpdateChannel =
@@ -149,6 +167,17 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
     const updateChannelConfiguredByUser =
       parsed.updateChannelConfiguredByUser === true ||
       (isLegacySettings && parsedUpdateChannel === "nightly");
+
+    let hubNodeName: string | null = null;
+    if (parsed.hubNodeName !== undefined && parsed.hubNodeName !== null) {
+      if (typeof parsed.hubNodeName !== "string") {
+        throw new Error("Invalid Hub node name.");
+      }
+      hubNodeName = normalizeHubNodeName(parsed.hubNodeName);
+      if (hubNodeName !== parsed.hubNodeName) {
+        throw new Error("Invalid Hub node name.");
+      }
+    }
 
     return {
       serverExposureMode:
@@ -165,6 +194,7 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
         typeof parsed.hubOrigin === "string" && parsed.hubOrigin.length > 0
           ? parsed.hubOrigin
           : null,
+      hubNodeName,
       hubAllowFileSecretStore: parsed.hubAllowFileSecretStore === true,
     };
   } catch (error) {

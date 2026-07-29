@@ -181,6 +181,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     getHubLaunchConfig: async () => ({
       enabled: false,
       origin: null,
+      nodeName: null,
       allowFileSecretStore: false,
       fileSecretStoreFallbackSupported: true,
     }),

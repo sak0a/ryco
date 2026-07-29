@@ -381,6 +381,7 @@ const createDesktopBridgeStub = (overrides?: {
       (async () => ({
         enabled: false,
         origin: null,
+        nodeName: null,
         allowFileSecretStore: false,
         fileSecretStoreFallbackSupported: true,
       })),
@@ -1564,6 +1565,7 @@ describe("ConnectionsSettings Hub section", () => {
       getHubLaunchConfig: async () => ({
         enabled: false,
         origin: null,
+        nodeName: null,
         allowFileSecretStore: false,
         fileSecretStoreFallbackSupported: true,
         ...hubConfig,
@@ -1603,6 +1605,52 @@ describe("ConnectionsSettings Hub section", () => {
     await expect.element(page.getByPlaceholder("https://…")).toBeEnabled();
   });
 
+  it("saves a trimmed pre-enrollment node name", async () => {
+    const setHubLaunchConfig = vi.fn().mockResolvedValue(undefined);
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub({ nodeName: "Build node" }, { setHubLaunchConfig });
+
+    const input = page.getByRole("textbox", { name: "Hub node name" });
+    await expect.element(input).toHaveValue("Build node");
+    await input.fill("  Release node  ");
+    await page.getByRole("button", { name: "Save and restart" }).click();
+    expect(setHubLaunchConfig).toHaveBeenCalledWith({ nodeName: "Release node" });
+  });
+
+  it("resets a configured node name to automatic", async () => {
+    const setHubLaunchConfig = vi.fn().mockResolvedValue(undefined);
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub({ nodeName: "Build node" }, { setHubLaunchConfig });
+
+    const input = page.getByRole("textbox", { name: "Hub node name" });
+    await input.fill("");
+    await page.getByRole("button", { name: "Save and restart" }).click();
+    expect(setHubLaunchConfig).toHaveBeenCalledWith({ nodeName: null });
+  });
+
+  it("rejects an overlong node name before it reaches the desktop bridge", async () => {
+    const setHubLaunchConfig = vi.fn().mockResolvedValue(undefined);
+    stubHubFetch({
+      status: { ...baseStatus, state: "disabled" },
+      identity: { enrolled: "none" },
+    });
+    await renderHub(undefined, { setHubLaunchConfig });
+
+    await page.getByRole("textbox", { name: "Hub node name" }).fill("N".repeat(101));
+
+    await expect.element(page.getByText("Use 100 characters or fewer.")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Save and restart" }))
+      .not.toBeInTheDocument();
+    expect(setHubLaunchConfig).not.toHaveBeenCalled();
+  });
+
   it("locks the address once an identity exists, and offers leaving", async () => {
     stubHubFetch({
       status: { ...baseStatus, state: "disabled" },
@@ -1613,11 +1661,13 @@ describe("ConnectionsSettings Hub section", () => {
     // Status is identical to the previous test; only the identity summary differs.
     await expect.element(page.getByText("Turned off")).toBeInTheDocument();
     await expect.element(page.getByPlaceholder("https://…")).toBeDisabled();
+    await expect.element(page.getByRole("textbox", { name: "Hub node name" })).toBeDisabled();
     await expect
       .element(
         page.getByText("Locked while this machine is enrolled. Leave this Hub to change it."),
       )
       .toBeInTheDocument();
+    await expect.element(page.getByText(/Managed on the Hub after enrollment/)).toBeInTheDocument();
     await expect.element(page.getByRole("button", { name: "Leave this Hub" })).toBeInTheDocument();
   });
 

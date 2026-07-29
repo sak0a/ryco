@@ -17,18 +17,20 @@ The connector is disabled by default. Configure it through the server process en
 | ---------------------------------- | ------- | ----------------------------------------------------- |
 | `RYCO_HUB_CONNECTOR_ENABLED`       | `false` | Exact `true` or `false`                               |
 | `RYCO_HUB_ORIGIN`                  | unset   | Exact HTTPS origin; loopback HTTP is development-only |
+| `RYCO_HUB_NODE_NAME`               | unset   | Proposed enrollment label; trimmed, 1–100 characters  |
 | `RYCO_HUB_RECONNECT_BASE_MS`       | `1000`  | 250–60,000 ms                                         |
 | `RYCO_HUB_RECONNECT_MAX_MS`        | `60000` | 250–300,000 ms and not below the base                 |
 | `RYCO_HUB_RECONNECT_STABLE_MS`     | `60000` | 5,000–600,000 ms                                      |
 | `RYCO_HUB_RECONNECT_JITTER_RATIO`  | `0.2`   | 0–0.5                                                 |
 | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` | `false` | Explicit POSIX permissioned-file fallback             |
 
-The three ordinary startup settings also have shared server CLI flags:
+The four ordinary startup settings also have shared server CLI flags:
 
 | CLI flag                        | Environment fallback               |
 | ------------------------------- | ---------------------------------- |
 | `--hub-connector-enabled`       | `RYCO_HUB_CONNECTOR_ENABLED`       |
 | `--hub-origin <origin>`         | `RYCO_HUB_ORIGIN`                  |
+| `--hub-node-name <name>`        | `RYCO_HUB_NODE_NAME`               |
 | `--hub-allow-file-secret-store` | `RYCO_HUB_ALLOW_FILE_SECRET_STORE` |
 
 Startup values resolve in this order: an explicit CLI flag, its corresponding environment variable,
@@ -38,12 +40,12 @@ The boolean flags use standard presence syntax and support the canonical
 `--no-hub-connector-enabled` and `--no-hub-allow-file-secret-store` forms for explicit `false`
 overrides.
 
-The desktop app deliberately owns these three values for its bundled server. It persists them in
+The desktop app deliberately owns these four values for its bundled server. It persists them in
 desktop settings, removes matching `RYCO_HUB_*` variables from the backend child environment, and
 passes the values over the private bootstrap channel. This keeps the visible desktop controls
-authoritative. The Hub card keeps the common connection controls visible and puts key fallback,
-startup ownership, CLI equivalents, and bounded relay counters behind **Show advanced options**.
-Changing a desktop launch value is confirmed and restarts Ryco.
+authoritative. The Hub card keeps the address and pre-enrollment node name visible and puts key
+fallback, startup ownership, CLI equivalents, and bounded relay counters behind **Show advanced
+options**. Changing a desktop launch value restarts Ryco.
 
 For example:
 
@@ -51,6 +53,7 @@ For example:
 ryco serve \
   --hub-connector-enabled \
   --hub-origin https://hub.example.test \
+  --hub-node-name "Build node" \
   --hub-allow-file-secret-store \
   --restrict-to-cwd \
   --host 127.0.0.1 \
@@ -111,6 +114,19 @@ Hub approval screen shows, so both can be compared item by item. `--json` return
 fields. Compare every field, and the fingerprint exactly, with the Hub approval screen before
 approving. Deny and investigate any mismatch; never approve by device code alone.
 
+When no node name is configured, Ryco proposes `<machine label> · <node code>`. The four-character
+Crockford Base32 node code is derived deterministically from the persistent EnvironmentId, so two
+Ryco state directories on the same machine receive distinguishable, stable proposals. The complete
+label is truncated without splitting a Unicode character and never exceeds 100 JavaScript UTF-16
+code units. An explicit `--hub-node-name`, `RYCO_HUB_NODE_NAME`, or Desktop value replaces that
+automatic proposal after trimming.
+
+The exact proposal is persisted with a pending ceremony before the enrollment request is sent.
+Restarting or changing launch configuration cannot silently change the label an owner is comparing
+on the Hub. Once approved, the Hub's stored label is authoritative: a Hub owner can rename it from
+the desktop/tablet node-detail surface, while node, viewer, and operator sessions cannot rename it.
+The frozen web phone presentation displays refreshed names but does not expose node management.
+
 `hub pending` reprints those fields for a ceremony that is already under way. The device code is
 persisted as bounded non-bearer routing metadata so a comparison survives a lost terminal or a
 restart; the polling secret is not, and stays in the protected store. A ceremony started before this
@@ -124,7 +140,8 @@ contains only bounded non-bearer metadata and protected-store references. The pe
 fallback is opt-in, POSIX-only, and enforces `0700` directories and `0600` regular key files. An
 enrolled node never silently replaces a missing, locked, or corrupt key.
 
-The non-secret local identity state records whether its protected material belongs to the `os` or
+The non-secret local identity state records the pending ceremony's exact proposed label and whether
+its protected material belongs to the `os` or
 `permissioned-file` custody class. Once material exists, Ryco reopens that same class on future
 starts instead of silently switching because another backend became available. A legacy identity
 without the marker is migrated only when all required material is found in exactly one eligible

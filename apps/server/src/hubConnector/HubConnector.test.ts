@@ -692,6 +692,7 @@ describe("HubConnector", () => {
     const socket = new FakeSocket();
     let pending = false;
     let polls = 0;
+    let proposedLabel = "";
     const connector = new HubConnector({
       config: enabledConfig,
       identity: identity({
@@ -705,6 +706,7 @@ describe("HubConnector", () => {
                 hubOrigin: "https://relay.example",
                 keySecretName: "node-key.fixture",
                 pollingSecretName: "enrollment-poll.fixture",
+                label: proposedLabel,
                 deviceCode: "ABCD-EFGH",
                 createdAt: 1,
                 expiresAt: 2_000_000,
@@ -716,7 +718,8 @@ describe("HubConnector", () => {
           stagedRotation: null,
           pendingTeardown: null,
         }),
-        startEnrollment: async () => {
+        startEnrollment: async (_origin, metadata) => {
+          proposedLabel = metadata.label;
           pending = true;
           return {
             deviceCode: "ABCD-EFGH",
@@ -756,9 +759,11 @@ describe("HubConnector", () => {
     expect(started).toMatchObject({
       deviceCode: "ABCD-EFGH",
       fingerprint: `SHA256:${"A".repeat(43)}`,
+      label: proposedLabel,
       pollIntervalMs: 1_000,
       status: { state: "awaiting_approval" },
     });
+    expect(proposedLabel).toMatch(/^Test node · [0-9A-HJKMNP-TV-Z]{4}$/);
     // Canary: the enroll response carries exactly the fields an approver
     // compares, and nothing else. Widening this set is a deliberate act — it
     // must stay in step with the approval screen, and it must never grow to
@@ -849,6 +854,47 @@ describe("HubConnector", () => {
     await connector.stop();
   });
 
+  it("uses the configured node name as the exact enrollment proposal", async () => {
+    let proposedLabel = "";
+    const connector = new HubConnector({
+      config: { ...enabledConfig, nodeName: "Configured node" },
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
+          pendingEnrollment: null,
+          activeNode: null,
+          stagedRotation: null,
+          pendingTeardown: null,
+        }),
+        startEnrollment: async (_origin, metadata) => {
+          proposedLabel = metadata.label;
+          return {
+            deviceCode: "ABCD-EFGH",
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            environmentId: `env_${"E".repeat(22)}`,
+            publicKey: {
+              algorithm: "ed25519",
+              publicKey: new Uint8Array(32),
+              fingerprint: new Uint8Array(32),
+            },
+          };
+        },
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+    });
+
+    await connector.start();
+    expect((await connector.enroll()).label).toBe("Configured node");
+    expect(proposedLabel).toBe("Configured node");
+    await connector.stop();
+  });
+
   it("resumes pending enrollment after restart and cancels without leaving a poll timer", async () => {
     const clock = scheduler();
     let cancelled = 0;
@@ -862,6 +908,7 @@ describe("HubConnector", () => {
         hubOrigin: "https://relay.example",
         keySecretName: "node-key.fixture",
         pollingSecretName: "enrollment-poll.fixture",
+        label: "Persisted proposal",
         deviceCode: "ABCD-EFGH",
         createdAt: 1,
         expiresAt: 2_000_000,
@@ -876,6 +923,14 @@ describe("HubConnector", () => {
       config: enabledConfig,
       identity: identity({
         readState: async () => pendingState,
+        readPendingEnrollment: async () => ({
+          deviceCode: "ABCD-EFGH",
+          label: "Persisted proposal",
+          fingerprint: new Uint8Array(32),
+          algorithm: "ed25519",
+          expiresAt: 2_000_000,
+          pollIntervalMs: 1_000,
+        }),
         pollEnrollment: async () => {
           polls += 1;
           return { status: "pending", retryAfterMs: 1_000 };
@@ -895,12 +950,59 @@ describe("HubConnector", () => {
     });
     await connector.start();
     expect(connector.status().state).toBe("awaiting_approval");
+    expect(await connector.readEnrollment()).toMatchObject({
+      deviceCode: "ABCD-EFGH",
+      label: "Persisted proposal",
+    });
     await clock.advance(0);
     expect(polls).toBe(1);
     await connector.cancelEnrollment();
     expect(cancelled).toBe(1);
     expect(connector.status().state).toBe("enrolling");
     expect(clock.timers.size).toBe(0);
+    await connector.stop();
+  });
+
+  it("uses the pre-feature machine label for a legacy pending ceremony", async () => {
+    const connector = new HubConnector({
+      config: { ...enabledConfig, nodeName: "New configured name" },
+      identity: identity({
+        readState: async () => ({
+          version: 1,
+          revision: 1,
+          environmentId: `env_${"E".repeat(22)}`,
+          protectedStoreBackend: "os" as const,
+          pendingEnrollment: {
+            hubOrigin: "https://relay.example",
+            keySecretName: "node-key.fixture",
+            pollingSecretName: "enrollment-poll.fixture",
+            label: null,
+            deviceCode: "ABCD-EFGH",
+            createdAt: 1,
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            cleanupRequested: false,
+          },
+          activeNode: null,
+          stagedRotation: null,
+          pendingTeardown: null,
+        }),
+        readPendingEnrollment: async () => ({
+          deviceCode: "ABCD-EFGH",
+          label: null,
+          fingerprint: new Uint8Array(32),
+          algorithm: "ed25519",
+          expiresAt: 2_000_000,
+          pollIntervalMs: 1_000,
+        }),
+      }),
+      transport: { open: () => new FakeSocket() },
+      channels: { open: async () => Promise.reject(new Error("unused")) },
+      enrollmentMetadata,
+    });
+
+    await connector.start();
+    expect(await connector.readEnrollment()).toMatchObject({ label: "Test node" });
     await connector.stop();
   });
 
@@ -918,6 +1020,7 @@ describe("HubConnector", () => {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
             pollingSecretName: "enrollment-poll.fixture",
+            label: "Persisted proposal",
             deviceCode: "ABCD-EFGH",
             createdAt: 1,
             expiresAt: 2_000_000,
@@ -962,6 +1065,7 @@ describe("HubConnector", () => {
             hubOrigin: "https://relay.example",
             keySecretName: "node-key.fixture",
             pollingSecretName: "enrollment-poll.fixture",
+            label: "Persisted proposal",
             deviceCode: "ABCD-EFGH",
             createdAt: 1,
             expiresAt: 2_000_000,

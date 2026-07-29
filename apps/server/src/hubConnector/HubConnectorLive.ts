@@ -170,6 +170,7 @@ export const HubConnectorLive = Layer.effect(
       config: config.hubConnector ?? {
         enabled: false,
         origin: undefined,
+        nodeName: undefined,
         reconnectBaseMs: 1_000,
         reconnectMaxMs: 60_000,
         reconnectStableMs: 60_000,

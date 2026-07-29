@@ -153,13 +153,13 @@ export function HubAdvancedOptions({
           <SettingsRow
             title="CLI equivalents"
             description="Use these flags for a headless Ryco node. Explicit flags override matching environment variables."
-            status="Boolean flags also support canonical --no-... forms. --restrict-to-cwd is separate workspace confinement, not a relay setting."
+            status="Use RYCO_HUB_NODE_NAME instead of --hub-node-name when environment configuration is preferable. Boolean flags also support canonical --no-... forms."
           >
             <div className="pb-3.5 pt-3">
               <pre className="overflow-x-auto rounded-lg border border-border/60 bg-background/70 px-3 py-2.5 font-mono text-[11px] leading-5 text-foreground">
                 <code>
                   {
-                    "ryco serve \\\n  --hub-connector-enabled \\\n  --hub-origin https://staging.ryco.space\n\n# Optional on supported POSIX hosts\nryco serve --hub-allow-file-secret-store"
+                    'ryco serve \\\n  --hub-connector-enabled \\\n  --hub-origin https://staging.ryco.space \\\n  --hub-node-name "Build node"\n\n# Optional on supported POSIX hosts\nryco serve --hub-allow-file-secret-store'
                   }
                 </code>
               </pre>

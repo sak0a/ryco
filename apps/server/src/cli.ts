@@ -88,6 +88,7 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   tailscaleServePort: Schema.optional(PortSchema),
   hubConnectorEnabled: Schema.optional(Schema.Boolean),
   hubOrigin: Schema.optional(Schema.String),
+  hubNodeName: Schema.optional(Schema.String),
   hubAllowFileSecretStore: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
@@ -149,6 +150,10 @@ const hubConnectorEnabledFlag = Flag.boolean("hub-connector-enabled").pipe(
 );
 const hubOriginFlag = Flag.string("hub-origin").pipe(
   Flag.withDescription("Canonical Hub HTTPS origin (overrides RYCO_HUB_ORIGIN)."),
+  Flag.optional,
+);
+const hubNodeNameFlag = Flag.string("hub-node-name").pipe(
+  Flag.withDescription("Name proposed when this node enrolls (overrides RYCO_HUB_NODE_NAME)."),
   Flag.optional,
 );
 const hubAllowFileSecretStoreFlag = Flag.boolean("hub-allow-file-secret-store").pipe(
@@ -230,6 +235,10 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  hubNodeName: Config.string("RYCO_HUB_NODE_NAME").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   hubReconnectBaseMs: Config.string("RYCO_HUB_RECONNECT_BASE_MS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -266,6 +275,7 @@ interface CliServerFlags {
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly hubConnectorEnabled?: Option.Option<boolean>;
   readonly hubOrigin?: Option.Option<string>;
+  readonly hubNodeName?: Option.Option<string>;
   readonly hubAllowFileSecretStore?: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
@@ -319,6 +329,7 @@ export const resolveServerConfig = (
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
       hubConnectorEnabled: flags.hubConnectorEnabled ?? Option.none(),
       hubOrigin: flags.hubOrigin ?? Option.none(),
+      hubNodeName: flags.hubNodeName ?? Option.none(),
       hubAllowFileSecretStore: flags.hubAllowFileSecretStore ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
@@ -476,6 +487,13 @@ export const resolveServerConfig = (
           normalizedFlags.hubOrigin,
           Option.fromUndefinedOr(env.hubOrigin),
           Option.fromUndefinedOr(bootstrap?.hubOrigin),
+        ),
+      ),
+      nodeName: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          normalizedFlags.hubNodeName,
+          Option.fromUndefinedOr(env.hubNodeName),
+          Option.fromUndefinedOr(bootstrap?.hubNodeName),
         ),
       ),
       reconnectBaseMs: env.hubReconnectBaseMs,
@@ -1066,6 +1084,7 @@ const sharedServerCommandFlags = {
   logWebSocketEvents: logWebSocketEventsFlag,
   hubConnectorEnabled: hubConnectorEnabledFlag,
   hubOrigin: hubOriginFlag,
+  hubNodeName: hubNodeNameFlag,
   hubAllowFileSecretStore: hubAllowFileSecretStoreFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,

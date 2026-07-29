@@ -44,6 +44,7 @@ vi.mock("../../env", async (importOriginal) => ({
 }));
 
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
+import { hostedHubApi } from "../../hostedHub/api";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
@@ -176,6 +177,7 @@ describe("hosted node directory", () => {
     // sheet already uses, rather than inventing a second vocabulary.
     await expect.element(page.getByText("Access to this node was revoked.")).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Connect" })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: "Rename" })).toBeEnabled();
   });
 
   it("gives every row's details control an accessible name of its own", async () => {
@@ -288,6 +290,118 @@ describe("hosted node directory", () => {
     expect(sheetText()).toContain("Access to this node was revoked.");
     // The decisive one: connecting to a node whose grant is gone.
     await expect.element(page.getByRole("button", { name: "Connect" })).toBeDisabled();
+  });
+
+  it("lets an owner rename the selected node and keeps its detail open by node ID", async () => {
+    const selected = node({ id: "node_aaaaaaaaaaaaaaaaaaaaaa", label: "Studio" });
+    const other = node({ id: "node_bbbbbbbbbbbbbbbbbbbbbb", label: "Travel" });
+    seedDirectory([selected, other]);
+    const renameNode = vi.spyOn(hostedHubApi, "renameNode").mockResolvedValue(undefined);
+    const listNodes = vi
+      .spyOn(hostedHubApi, "listNodes")
+      .mockResolvedValue([other, node({ id: selected.id, label: "Workshop" })]);
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await page.getByRole("button", { name: "Rename" }).click();
+    const input = page.getByRole("textbox", { name: "Node name" });
+    await expect.element(input).toHaveValue("Studio");
+    await input.fill("  Workshop  ");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+
+    expect(renameNode).toHaveBeenCalledWith(selected.id, "Workshop");
+    await vi.waitFor(() => {
+      expect(listNodes).toHaveBeenCalled();
+      expect(detailsNames()).toEqual(["Node details: Travel", "Node details: Workshop"]);
+    });
+    await expect.element(page.getByRole("heading", { name: "Workshop" })).toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "Rename node" }))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps unchanged, blank, and overlong rename values off the wire", async () => {
+    seedDirectory([node()]);
+    const renameNode = vi.spyOn(hostedHubApi, "renameNode").mockResolvedValue(undefined);
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await page.getByRole("button", { name: "Rename" }).click();
+    const input = page.getByRole("textbox", { name: "Node name" });
+    const save = page.getByRole("button", { name: "Save", exact: true });
+    await expect.element(save).toBeDisabled();
+
+    await input.fill(" ");
+    await expect.element(page.getByText("Enter a node name.")).toBeVisible();
+    await expect.element(save).toBeDisabled();
+
+    await input.fill("N".repeat(101));
+    await expect.element(page.getByText("Use 100 characters or fewer.")).toBeVisible();
+    await expect.element(save).toBeDisabled();
+    expect(renameNode).not.toHaveBeenCalled();
+  });
+
+  it("keeps the rename dialog recoverable when the mutation fails", async () => {
+    seedDirectory([node()]);
+    vi.spyOn(hostedHubApi, "renameNode").mockRejectedValue(
+      new Error("You are not authorized to perform this action."),
+    );
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await page.getByRole("button", { name: "Rename" }).click();
+    const input = page.getByRole("textbox", { name: "Node name" });
+    await input.fill("Workshop");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent("You are not authorized to perform this action.");
+    await expect.element(page.getByRole("heading", { name: "Rename node" })).toBeVisible();
+    await expect.element(input).toBeEnabled();
+  });
+
+  it("does not render rename for operators or viewers", async () => {
+    for (const role of ["operator", "viewer"] as const) {
+      useHostedHubStore.setState({
+        accountStatus: "authenticated",
+        account: { ...account, role },
+        session,
+        directoryStatus: "ready",
+        browserStatus: "current",
+        nodes: [node()],
+      });
+      mounted = await render(<HostedHubRoot />);
+      await page.getByRole("button", { name: "Node details: Studio" }).click();
+      await expect.element(page.getByRole("button", { name: "Rename" })).not.toBeInTheDocument();
+
+      await mounted.unmount();
+      mounted = null;
+      hostedHubController.resetForTests();
+    }
+  });
+
+  it("keeps rename on a tablet-width desktop presentation and out of the phone tier", async () => {
+    await page.viewport(820, 720);
+    await vi.waitFor(() => {
+      expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
+    });
+    seedDirectory([node()]);
+    mounted = await render(<HostedHubRoot />);
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await expect.element(page.getByRole("button", { name: "Rename" })).toBeVisible();
+
+    await mounted.unmount();
+    mounted = null;
+    hostedHubController.resetForTests();
+    await page.viewport(390, 720);
+    await vi.waitFor(() => {
+      expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
+    });
+    seedDirectory([node()]);
+    mounted = await render(<HostedHubRoot />);
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await expect.element(page.getByRole("button", { name: "Rename" })).not.toBeInTheDocument();
   });
 
   it("reports a grant role only when it differs from the role in effect", async () => {

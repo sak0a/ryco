@@ -126,6 +126,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   setHubLaunchConfig: (input: {
     readonly enabled?: boolean;
     readonly origin?: string | null;
+    readonly nodeName?: string | null;
     readonly allowFileSecretStore?: boolean;
   }) => ipcRenderer.invoke(SET_HUB_LAUNCH_CONFIG_CHANNEL, input),
   validateHubOrigin: (raw: string) => ipcRenderer.invoke(VALIDATE_HUB_ORIGIN_CHANNEL, raw),
