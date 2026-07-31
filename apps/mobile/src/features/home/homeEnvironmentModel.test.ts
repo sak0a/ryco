@@ -13,6 +13,9 @@ describe("Home environments", () => {
           label: "MacBook",
           connectionState: "connecting",
           role: "owner",
+          threadSettlementSupported: true,
+          shellCurrent: false,
+          apiAvailable: true,
         },
       ],
       hosted: {
@@ -21,6 +24,9 @@ describe("Home environments", () => {
         transportStatus: "online",
         sessionStatus: "ready",
         role: "viewer",
+        threadSettlementSupported: true,
+        shellCurrent: true,
+        apiAvailable: true,
       },
     });
 
@@ -29,11 +35,17 @@ describe("Home environments", () => {
         environmentId: "direct-a",
         label: "MacBook",
         connectionState: "reconnecting",
+        threadSettlementSupported: true,
+        mutationReady: false,
+        shellCurrent: false,
       },
       {
         environmentId: "hosted-a",
         label: "Studio",
         connectionState: "read-only",
+        threadSettlementSupported: true,
+        mutationReady: false,
+        shellCurrent: true,
       },
     ]);
   });
@@ -47,6 +59,9 @@ describe("Home environments", () => {
           label: "LAN address",
           connectionState: "connected",
           role: "owner",
+          threadSettlementSupported: false,
+          shellCurrent: true,
+          apiAvailable: true,
         },
       ],
       hosted: {
@@ -55,6 +70,9 @@ describe("Home environments", () => {
         transportStatus: "reconnecting",
         sessionStatus: "stale",
         role: "owner",
+        threadSettlementSupported: true,
+        shellCurrent: false,
+        apiAvailable: true,
       },
     });
 
@@ -63,6 +81,9 @@ describe("Home environments", () => {
         environmentId,
         label: "Studio",
         connectionState: "reconnecting",
+        threadSettlementSupported: true,
+        mutationReady: false,
+        shellCurrent: false,
       },
     ]);
   });

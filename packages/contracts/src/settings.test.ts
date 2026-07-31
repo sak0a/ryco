@@ -2,10 +2,32 @@ import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  ClientSettingsPatch,
+  ClientSettingsSchema,
+  DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
+const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
+const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+describe("ClientSettings.sidebarViewMode", () => {
+  it("keeps existing installations on the workspace sidebar", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sidebarViewMode).toBe("workspace");
+    expect(decodeClientSettings({}).sidebarViewMode).toBe("workspace");
+  });
+
+  it("round-trips the inbox preference through settings and patches", () => {
+    expect(decodeClientSettings({ sidebarViewMode: "inbox" }).sidebarViewMode).toBe("inbox");
+    expect(decodeClientSettingsPatch({ sidebarViewMode: "inbox" }).sidebarViewMode).toBe("inbox");
+    expect(decodeClientSettingsPatch({}).sidebarViewMode).toBeUndefined();
+  });
+});
 
 describe("ServerSettings.enableProviderUpdateChecks", () => {
   it("defaults provider update checks on", () => {

@@ -30,4 +30,12 @@ export function usePrimaryEnvironmentId(): EnvironmentId | null {
   );
 }
 
+export function usePrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescriptor | null {
+  return useSyncExternalStore(
+    context.store.subscribe,
+    () => context.store.getState().descriptor,
+    () => null,
+  );
+}
+
 export type { ExecutionEnvironmentDescriptor };

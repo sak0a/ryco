@@ -10,6 +10,7 @@ import {
   respondToThreadUserInput,
   revertThreadCheckpointWithGuards,
   setThreadArchived,
+  setThreadSettled,
 } from "./sessionActions";
 
 const THREAD_ID = "thread-1" as ThreadId;
@@ -51,6 +52,23 @@ describe("sessionActions", () => {
       "thread.unarchive",
     ]);
     expect(dispatchCommand.mock.calls[0]![0]).toMatchObject({ title: "Mobile polish" });
+  });
+
+  it("dispatches the exact settle and user-unsettle commands", async () => {
+    const { api, dispatchCommand } = fakeApi();
+
+    await setThreadSettled(api, THREAD_ID, true);
+    await setThreadSettled(api, THREAD_ID, false);
+
+    expect(dispatchCommand.mock.calls[0]![0]).toMatchObject({
+      type: "thread.settle",
+      threadId: THREAD_ID,
+    });
+    expect(dispatchCommand.mock.calls[1]![0]).toMatchObject({
+      type: "thread.unsettle",
+      threadId: THREAD_ID,
+      reason: "user",
+    });
   });
 
   it("dispatches thread.approval.respond with the decision", async () => {

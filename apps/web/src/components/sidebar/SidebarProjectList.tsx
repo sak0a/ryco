@@ -474,7 +474,12 @@ export const SidebarProjectsContent = memo(function SidebarProjectsContent(
 
   return (
     <>
-      <SidebarContent className="gap-0">
+      <SidebarContent
+        aria-labelledby="sidebar-workspace-tab"
+        className="gap-0"
+        id="sidebar-workspace-panel"
+        role="tabpanel"
+      >
         <SidebarGroup className="px-2 pt-2 pb-1">
           <SidebarMenu>
             <SidebarMenuItem>

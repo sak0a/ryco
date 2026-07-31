@@ -367,9 +367,11 @@ function mapThreadShell(
     environmentId,
     projectId: thread.projectId,
     title: thread.title,
+    modelSelection: shell.modelSelection,
     interactionMode: thread.interactionMode,
     tokenMode: thread.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
     session,
+    error: shell.error,
     createdAt: thread.createdAt,
     archivedAt: thread.archivedAt,
     settledOverride: thread.settledOverride,
@@ -471,6 +473,24 @@ function threadSessionsEqual(
   );
 }
 
+function modelSelectionsEqual(
+  left: SidebarThreadSummary["modelSelection"],
+  right: SidebarThreadSummary["modelSelection"],
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.instanceId !== right.instanceId || left.model !== right.model) return false;
+  const leftOptions = left.options ?? [];
+  const rightOptions = right.options ?? [];
+  return (
+    leftOptions.length === rightOptions.length &&
+    leftOptions.every(
+      (option, index) =>
+        option.id === rightOptions[index]?.id && option.value === rightOptions[index]?.value,
+    )
+  );
+}
+
 function sidebarThreadSummariesEqual(
   left: SidebarThreadSummary | undefined,
   right: SidebarThreadSummary,
@@ -480,9 +500,11 @@ function sidebarThreadSummariesEqual(
     left.id === right.id &&
     left.projectId === right.projectId &&
     left.title === right.title &&
+    modelSelectionsEqual(left.modelSelection, right.modelSelection) &&
     left.interactionMode === right.interactionMode &&
     left.tokenMode === right.tokenMode &&
     threadSessionsEqual(left.session, right.session) &&
+    left.error === right.error &&
     left.createdAt === right.createdAt &&
     left.archivedAt === right.archivedAt &&
     left.settledOverride === right.settledOverride &&
@@ -1296,7 +1318,9 @@ function updateThreadShellTimestamp(
 function updateThreadSettlementState(
   state: EnvironmentState,
   threadId: ThreadId,
-  patch: Pick<ThreadShell, "settledOverride" | "settledAt"> & { readonly updatedAt: string },
+  patch: Pick<ThreadShell, "settledOverride" | "settledAt"> & {
+    readonly updatedAt: string;
+  },
 ): EnvironmentState {
   const shell = state.threadShellById[threadId];
   const summary = state.sidebarThreadSummaryById[threadId];
@@ -1519,7 +1543,9 @@ function applyThreadMessageSentEvent(
           assistantMessageId: event.payload.messageId,
         }),
         ...(previousTurnState?.pendingSourceProposedPlan
-          ? { pendingSourceProposedPlan: previousTurnState.pendingSourceProposedPlan }
+          ? {
+              pendingSourceProposedPlan: previousTurnState.pendingSourceProposedPlan,
+            }
           : {}),
       };
 
@@ -1961,7 +1987,9 @@ function applyEnvironmentOrchestrationEvent(
         ...thread,
         ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
         ...(event.payload.modelSelection !== undefined
-          ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }
+          ? {
+              modelSelection: normalizeModelSelection(event.payload.modelSelection),
+            }
           : {}),
         ...(event.payload.branch !== undefined ? { branch: event.payload.branch } : {}),
         ...(event.payload.worktreePath !== undefined
@@ -1995,7 +2023,9 @@ function applyEnvironmentOrchestrationEvent(
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,
         ...(event.payload.modelSelection !== undefined
-          ? { modelSelection: normalizeModelSelection(event.payload.modelSelection) }
+          ? {
+              modelSelection: normalizeModelSelection(event.payload.modelSelection),
+            }
           : {}),
         runtimeMode: event.payload.runtimeMode,
         interactionMode: event.payload.interactionMode,
@@ -2749,7 +2779,10 @@ export function createShellEventCoalescer(deps: ShellEventCoalescerDeps): ShellE
   const thresholdEventsPerMs = deps.thresholdEventsPerMs ?? SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS;
   const rateWindowMs = deps.rateWindowMs ?? SHELL_COALESCE_RATE_WINDOW_MS;
 
-  let queue: Array<{ event: OrchestrationShellStreamEvent; environmentId: EnvironmentId }> = [];
+  let queue: Array<{
+    event: OrchestrationShellStreamEvent;
+    environmentId: EnvironmentId;
+  }> = [];
   let recentTimestamps: number[] = [];
   let framePending = false;
 

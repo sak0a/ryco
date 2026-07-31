@@ -11,12 +11,14 @@ import {
   getWsConnectionUiState,
   serverConfigAtom,
 } from "@ryco/client-runtime/rpc";
+import { getQueuedThreadKeys } from "@ryco/client-runtime/state/message-queue";
 import {
   getProviderInteractionModeToggle,
   getProviderSupportsAskMode,
 } from "@ryco/client-runtime/state/composer";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { TimelineEntry } from "@ryco/client-runtime/state/session";
+import { buildThreadInbox } from "@ryco/client-runtime/state/threads";
 import { EnvironmentId, ThreadId } from "@ryco/contracts";
 
 import { AppText as Text } from "../../components/AppText";
@@ -29,9 +31,15 @@ import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { newCommandId, newMessageId } from "../../lib/ids";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHomeWorkspaceData } from "../../state/homeData";
+import { useMessageQueueStore } from "../../state/messageQueueStore";
 import { enqueueThreadOutboxMessage } from "../../state/threadOutbox";
 import { useThreadTimeline } from "../../state/threadTimeline";
-import { selectProjectByRef, selectThreadByRef, useStore } from "../../state/threadsRuntime";
+import {
+  selectProjectByRef,
+  selectSidebarThreadSummaryByRef,
+  selectThreadByRef,
+  useStore,
+} from "../../state/threadsRuntime";
 import { useHomeEnvironments } from "../home/useHomeEnvironments";
 import { executeSendTurn } from "./executeSendTurn";
 import { PendingApprovalCard } from "./PendingApprovalCard";
@@ -44,6 +52,7 @@ import {
   setThreadInteractionMode,
   setThreadModelSelection,
   setThreadRuntimeMode,
+  setThreadSettled,
 } from "./sessionActions";
 import { useThreadChecks } from "./useThreadChecks";
 import { buildThreadTimelineRows, toggleFold, type ThreadTimelineRow } from "./threadActivityFold";
@@ -170,6 +179,10 @@ export function ThreadDetailScreen(props: {
   );
   const { worktrees } = useHomeWorkspaceData();
   const environments = useHomeEnvironments();
+  const sidebarThread = useStore((state) =>
+    selectSidebarThreadSummaryByRef(state, scopeThreadRef(environmentId, threadId)),
+  );
+  const queuesByThreadKey = useMessageQueueStore((state) => state.queuesByThreadKey);
   const pendingApprovals = built?.viewModel.pendingApprovals ?? [];
   const pendingUserInputs = built?.viewModel.pendingUserInputs ?? [];
   const worktree = useMemo(
@@ -178,6 +191,28 @@ export function ThreadDetailScreen(props: {
   );
   const nodeLabel =
     environments.find((environment) => environment.environmentId === environmentId)?.label ?? null;
+  const settlementEntry = useMemo(() => {
+    const environment = environments.find((candidate) => candidate.environmentId === environmentId);
+    if (!sidebarThread || !environment) return null;
+    const model = buildThreadInbox({
+      projects: project ? [project] : [],
+      worktrees,
+      threads: [sidebarThread],
+      environments: [
+        {
+          environmentId,
+          label: environment.label,
+          threadSettlementSupported: environment.threadSettlementSupported ?? false,
+          connected: environment.connectionState === "connected",
+          mutationReady: environment.mutationReady ?? false,
+          shellCurrent: environment.shellCurrent ?? false,
+        },
+      ],
+      localQueuedThreadKeys: getQueuedThreadKeys(queuesByThreadKey),
+      nowMs: Date.now(),
+    });
+    return model.active[0] ?? model.settled[0] ?? null;
+  }, [environmentId, environments, project, queuesByThreadKey, sidebarThread, worktrees]);
   const headerModel = useMemo(
     () =>
       thread
@@ -188,9 +223,28 @@ export function ThreadDetailScreen(props: {
             nodeLabel,
             hasPendingApproval: pendingApprovals.length > 0,
             hasPendingUserInput: pendingUserInputs.length > 0,
+            ...(settlementEntry
+              ? {
+                  settlement: {
+                    attentionState: settlementEntry.lifecycle.classification,
+                    canSettle: settlementEntry.lifecycle.eligibility.canSettle,
+                    settlementBlocker: settlementEntry.lifecycle.settlementBlocker,
+                    mutationEnabled: settlementEntry.mutationEnabled,
+                    mutationBlocker: settlementEntry.mutationBlocker,
+                  },
+                }
+              : {}),
           })
         : null,
-    [nodeLabel, pendingApprovals.length, pendingUserInputs.length, project, thread, worktree],
+    [
+      nodeLabel,
+      pendingApprovals.length,
+      pendingUserInputs.length,
+      project,
+      settlementEntry,
+      thread,
+      worktree,
+    ],
   );
 
   // The capability gates key off the DRIVER, not the instance id, so resolve the
@@ -589,6 +643,17 @@ export function ThreadDetailScreen(props: {
           onStop={() =>
             void runAction(() => interruptThreadTurn(ensureEnvironmentApi(environmentId), threadId))
           }
+          onToggleSettlement={() => {
+            const action = headerModel.settlementAction;
+            if (!action || action.disabled) return;
+            void runAction(() =>
+              setThreadSettled(
+                ensureEnvironmentApi(environmentId),
+                threadId,
+                action.kind === "settle",
+              ),
+            );
+          }}
           onToggleArchive={() =>
             void runAction(async () => {
               const shouldArchive = thread?.archivedAt === null;

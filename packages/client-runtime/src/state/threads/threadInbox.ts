@@ -179,8 +179,8 @@ function settlementInput(input: {
     archivedAt: input.thread.archivedAt,
     deletedAt: null,
     worktreeArchivedAt: input.worktree?.archivedAt ?? null,
-    settledOverride: input.thread.settledOverride,
-    settledAt: input.thread.settledAt,
+    settledOverride: input.thread.settledOverride ?? null,
+    settledAt: input.thread.settledAt ?? null,
     sessionStatus: input.thread.session?.orchestrationStatus ?? null,
     latestTurnState: input.thread.latestTurn?.state ?? null,
     latestTurnRequestedAt: input.thread.latestTurn?.requestedAt ?? null,
@@ -400,7 +400,9 @@ export function buildThreadInbox(input: BuildThreadInboxInput): ThreadInboxModel
   }
 
   const visibleEntries = entries.filter(
-    (entry) => entry.current || filterEntry(entry, input.filters),
+    (entry) =>
+      (entry.current && entry.lifecycle.classification === "settled") ||
+      filterEntry(entry, input.filters),
   );
   return {
     active: visibleEntries

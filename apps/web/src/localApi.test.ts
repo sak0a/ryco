@@ -291,6 +291,7 @@ const baseEnvironment = {
   serverVersion: "0.0.0-test",
   capabilities: {
     repositoryIdentity: true,
+    threadSettlement: false,
   },
 };
 
@@ -656,6 +657,7 @@ describe("wsApi", () => {
       diffWordWrap: true,
       favorites: [],
       providerModelPreferences: {},
+      sidebarViewMode: "workspace" as const,
       sidebarProjectGroupingMode: "repository_path" as const,
       sidebarProjectGroupingOverrides: {
         "environment-local:/tmp/project": "separate" as const,
@@ -721,6 +723,7 @@ describe("wsApi", () => {
       diffWordWrap: true,
       favorites: [],
       providerModelPreferences: {},
+      sidebarViewMode: "workspace" as const,
       sidebarProjectGroupingMode: "repository_path" as const,
       sidebarProjectGroupingOverrides: {
         "environment-local:/tmp/project": "separate" as const,

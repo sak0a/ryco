@@ -374,4 +374,24 @@ describe("thread inbox", () => {
     expect(inbox.settled).toHaveLength(1);
     expect(inbox.settled[0]).toMatchObject({ key, current: true });
   });
+
+  it("does not bypass filters for the currently routed active row", () => {
+    const active = makeThread(environmentA, "thread-current-active", {
+      title: "Current active thread",
+    });
+    const key = scopedThreadKey({
+      environmentId: active.environmentId,
+      threadId: active.id,
+    });
+    const inbox = buildThreadInbox(
+      baseInput({
+        threads: [active],
+        currentThreadKey: key,
+        filters: { text: "not present" },
+      }),
+    );
+
+    expect(inbox.active).toEqual([]);
+    expect(inbox.settled).toEqual([]);
+  });
 });

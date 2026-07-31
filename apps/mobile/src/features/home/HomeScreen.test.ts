@@ -13,6 +13,7 @@ vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react")>();
   return {
     ...actual,
+    useEffect: () => undefined,
     useLayoutEffect: (effect: () => void) => effect(),
     useMemo: <T>(factory: () => T) => factory(),
     useReducer: <T>(
@@ -52,11 +53,16 @@ vi.mock("../../hostedHub/state", () => ({
 vi.mock("../../state/homeData", () => ({
   useHomeWorkspaceData: () => ({ projects: [], worktrees: [], threads: [] }),
 }));
+vi.mock("../../state/messageQueueStore", () => ({
+  useMessageQueueStore: (selector: (state: { queuesByThreadKey: object }) => unknown) =>
+    selector({ queuesByThreadKey: {} }),
+}));
 vi.mock("../../state/threadsRuntime", () => ({
   useStore: Object.assign(() => undefined, {
     getState: () => ({ setActiveEnvironmentId: () => undefined }),
   }),
 }));
+vi.mock("./useHomeEnvironments", () => ({ useHomeEnvironments: () => [] }));
 
 import { HomeScreen } from "./HomeScreen";
 

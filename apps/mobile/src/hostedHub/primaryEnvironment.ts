@@ -1,4 +1,5 @@
 import type { ExecutionEnvironmentDescriptor } from "@ryco/contracts";
+import { useSyncExternalStore } from "react";
 
 /**
  * The hosted plane's primary-environment descriptor.
@@ -37,6 +38,14 @@ export function subscribePrimaryEnvironmentDescriptor(listener: Listener): () =>
     subscribed = false;
     listeners.delete(listener);
   };
+}
+
+export function usePrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescriptor | null {
+  return useSyncExternalStore(
+    subscribePrimaryEnvironmentDescriptor,
+    readPrimaryEnvironmentDescriptor,
+    () => null,
+  );
 }
 
 /** Test seam: drop the descriptor and every listener between cases. */

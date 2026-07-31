@@ -1011,7 +1011,12 @@ describe("incremental orchestration updates", () => {
         status: "ready",
         files: [
           { path: "src/noop.ts", kind: "modified", additions: 0, deletions: 0 },
-          { path: "script.sh", kind: "mode-changed", additions: 0, deletions: 0 },
+          {
+            path: "script.sh",
+            kind: "mode-changed",
+            additions: 0,
+            deletions: 0,
+          },
           { path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 },
         ],
         assistantMessageId: MessageId.make("assistant-1"),
@@ -1454,6 +1459,7 @@ describe("thread settlement state", () => {
   function makeShellSnapshot(
     settledOverride: "settled" | "active" | null,
     settledAt: string | null,
+    lastError: string | null = null,
   ) {
     const updatedAt = settledAt ?? "2026-07-31T02:00:00.000Z";
     return {
@@ -1491,7 +1497,17 @@ describe("thread settlement state", () => {
           archivedAt: null,
           settledOverride,
           settledAt,
-          session: null,
+          session: lastError
+            ? {
+                threadId: ThreadId.make("thread-settlement"),
+                status: "error" as const,
+                providerName: "codex",
+                runtimeMode: "full-access" as const,
+                activeTurnId: null,
+                lastError,
+                updatedAt,
+              }
+            : null,
           latestUserMessageAt: null,
           hasPendingApprovals: false,
           hasPendingUserInput: false,
@@ -1501,6 +1517,24 @@ describe("thread settlement state", () => {
       updatedAt,
     };
   }
+
+  it("projects model and sanitized failure context into sidebar summaries", () => {
+    const state = syncServerShellSnapshot(
+      makeEmptyState(),
+      makeShellSnapshot(null, null, "Provider failed"),
+      localEnvironmentId,
+    );
+
+    expect(
+      localEnvironmentStateOf(state).sidebarThreadSummaryById["thread-settlement"],
+    ).toMatchObject({
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
+      error: "Provider failed",
+    });
+  });
 
   it("replaces settlement fields with each shell generation", () => {
     const settledAt = "2026-07-31T01:00:00.000Z";
@@ -1564,7 +1598,10 @@ describe("thread settlement state", () => {
       localEnvironmentId,
     );
 
-    expect(threadsOf(state)[0]).toMatchObject({ settledOverride: "settled", settledAt });
+    expect(threadsOf(state)[0]).toMatchObject({
+      settledOverride: "settled",
+      settledAt,
+    });
   });
 
   it("applies raw settle and activity-unsettle events to shell and sidebar state", () => {
