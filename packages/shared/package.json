@@ -12,6 +12,14 @@
       "types": "./src/relayMessageChunks.ts",
       "import": "./src/relayMessageChunks.ts"
     },
+    "./relayE2eeConstants": {
+      "types": "./src/relayE2eeConstants.ts",
+      "import": "./src/relayE2eeConstants.ts"
+    },
+    "./relayE2eeWire": {
+      "types": "./src/relayE2eeWire.ts",
+      "import": "./src/relayE2eeWire.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"
@@ -130,6 +138,9 @@
     "test": "vp test run"
   },
   "dependencies": {
+    "@noble/ciphers": "catalog:",
+    "@noble/curves": "catalog:",
+    "@noble/hashes": "catalog:",
     "@ryco/contracts": "workspace:*",
     "cborg": "catalog:",
     "effect": "catalog:"
