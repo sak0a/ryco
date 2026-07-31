@@ -1,0 +1,326 @@
+import { ed25519 } from "@noble/curves/ed25519";
+import { describe, expect, it } from "vite-plus/test";
+
+import { fingerprintNodePublicKey, formatNodePublicKeyFingerprint } from "./nodeIdentity.ts";
+import {
+  E2EE_AGREEMENT_KEY_FINGERPRINT_DOMAIN,
+  E2EE_AGREEMENT_ALGORITHM,
+  E2EE_CLIENT_IDENTITY_ALGORITHM,
+  E2EE_CLIENT_KEY_FINGERPRINT_DOMAIN,
+  E2EE_KEY_FINGERPRINT_DISPLAY_PREFIX,
+  E2EE_NODE_IDENTITY_ALGORITHM,
+  E2EE_NODE_KEY_FINGERPRINT_DOMAIN,
+  RelayE2eeValidationError,
+  e2eeBytesEqual,
+  e2eeKeyFingerprint,
+  formatE2eeKeyFingerprint,
+  validateE2eeAgreementPublicKey,
+  validateE2eeClientIdentityPublicKey,
+  validateE2eeClientSignature,
+  validateE2eeNodeIdentityPublicKey,
+  validateE2eeNodeSignature,
+  verifyE2eeSignature,
+} from "./relayE2eeKeys.ts";
+
+const bytes = (hex: string): Uint8Array => Uint8Array.from(Buffer.from(hex, "hex"));
+const hex = (value: Uint8Array): string => Buffer.from(value).toString("hex");
+
+// Deterministic §16.1-style test material. Never usable for a real endpoint: the
+// Ed25519 key is the node-identity fixture key, whose seed is public in
+// `nodeIdentity.test.ts`, and the P-256 key is derived from the same seed.
+const NODE_PUBLIC_KEY = bytes("03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8");
+const CLIENT_PUBLIC_KEY = bytes(
+  "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2" +
+    "b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650",
+);
+const AGREEMENT_PUBLIC_KEY = bytes(
+  "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+);
+
+const NODE_FINGERPRINT = "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64";
+const NODE_FINGERPRINT_DISPLAY = "SHA256:AVbN7e5vhHl7KLe-gwSBlEg8wXFlsa56_nu8d-7fm2Q";
+const CLIENT_FINGERPRINT = "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927";
+const CLIENT_FINGERPRINT_DISPLAY = "SHA256:qdYfGtZ1MjmJjm5vJi8uwX8EmPLDOszDt0SL-l8OiSc";
+const AGREEMENT_FINGERPRINT = "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779";
+const AGREEMENT_FINGERPRINT_DISPLAY = "SHA256:D0AEyX-g35GzyxlUek4LFvGze0QPfLYw-vgSkbN993k";
+// The identical 32 raw bytes fingerprinted under the agreement domain instead of
+// the node-identity domain (§7.1).
+const NODE_KEY_UNDER_AGREEMENT_DOMAIN =
+  "2b32468407dd48cc05841f77a2da2ded78c39f3c1cb074a163cb327d50d72fb6";
+
+// §14.3 / §7.1 rejection material, pinned as exact bytes.
+const ED25519_NON_CANONICAL_PUBLIC_KEY = bytes(
+  "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+);
+const ED25519_SMALL_ORDER_PUBLIC_KEY = bytes(
+  "0100000000000000000000000000000000000000000000000000000000000000",
+);
+const P256_KEY_COORDINATE_AT_PRIME = bytes(
+  "04ffffffff00000001000000000000000000000000ffffffffffffffffffffffff" +
+    "a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650",
+);
+const P256_KEY_OFF_CURVE = bytes(
+  "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2" +
+    "b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5651",
+);
+const P256_KEY_ZERO_COORDINATES = bytes(`04${"00".repeat(64)}`);
+const P256_KEY_COMPRESSED_PREFIX = bytes(
+  "027a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2" +
+    "b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650",
+);
+
+// One deterministic message signed under both algorithms, plus the encodings
+// §7.1 refuses for each.
+const MESSAGE = bytes("72656c61792d653265652d666978747572652d6d657373616765");
+const ED25519_TEST_PUBLIC_KEY = bytes(
+  "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd",
+);
+const ED25519_TEST_SIGNATURE = bytes(
+  "02b5dbb1dcc45109d03b2f63fd0ca36555fde0d9a78ee211aca0ee522ec8542c" +
+    "d14db26346925648fce3ad9890f419c2b682fe3f1c8af6931385c153f249430d",
+);
+const P256_RAW_SIGNATURE = bytes(
+  "583a9ee443dd323ad8e7a2b546c30162a77200404f6f2eeed764f76cbc2ea2df" +
+    "4c7b948f187957de6babf02f7d6ed1d82a90c7d8a59c36fb8b942e2465573a6d",
+);
+const P256_DER_SIGNATURE = bytes(
+  "30440220583a9ee443dd323ad8e7a2b546c30162a77200404f6f2eeed764f76cbc2ea2df" +
+    "02204c7b948f187957de6babf02f7d6ed1d82a90c7d8a59c36fb8b942e2465573a6d",
+);
+const P256_SIGNATURE_ZERO_R = bytes(
+  `${"00".repeat(32)}4c7b948f187957de6babf02f7d6ed1d82a90c7d8a59c36fb8b942e2465573a6d`,
+);
+const P256_SIGNATURE_S_AT_ORDER = bytes(
+  "583a9ee443dd323ad8e7a2b546c30162a77200404f6f2eeed764f76cbc2ea2df" +
+    "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+);
+const P256_GROUP_ORDER = BigInt(
+  "0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+);
+
+describe("relay E2EE key material (§7.1)", () => {
+  it("pins the three fingerprint domains and algorithm labels", () => {
+    expect(E2EE_NODE_KEY_FINGERPRINT_DOMAIN).toBe("ryco.node-key.v1");
+    expect(E2EE_CLIENT_KEY_FINGERPRINT_DOMAIN).toBe("ryco.client-key.v1");
+    expect(E2EE_AGREEMENT_KEY_FINGERPRINT_DOMAIN).toBe("ryco.e2ee-agreement-key.v1");
+    expect(E2EE_NODE_IDENTITY_ALGORITHM).toBe("ed25519");
+    expect(E2EE_CLIENT_IDENTITY_ALGORITHM).toBe("p256");
+    expect(E2EE_AGREEMENT_ALGORITHM).toBe("x25519");
+    expect(E2EE_KEY_FINGERPRINT_DISPLAY_PREFIX).toBe("SHA256:");
+  });
+
+  it("matches the deterministic fingerprint and display fixtures", () => {
+    const node = e2eeKeyFingerprint("node-identity", NODE_PUBLIC_KEY);
+    const client = e2eeKeyFingerprint("client-identity", CLIENT_PUBLIC_KEY);
+    const agreement = e2eeKeyFingerprint("agreement", AGREEMENT_PUBLIC_KEY);
+    expect(hex(node)).toBe(NODE_FINGERPRINT);
+    expect(hex(client)).toBe(CLIENT_FINGERPRINT);
+    expect(hex(agreement)).toBe(AGREEMENT_FINGERPRINT);
+    expect(formatE2eeKeyFingerprint(node)).toBe(NODE_FINGERPRINT_DISPLAY);
+    expect(formatE2eeKeyFingerprint(client)).toBe(CLIENT_FINGERPRINT_DISPLAY);
+    expect(formatE2eeKeyFingerprint(agreement)).toBe(AGREEMENT_FINGERPRINT_DISPLAY);
+    // Derived, not chosen: ⌈4 · 32 / 3⌉ characters after the prefix (§7.1).
+    expect(NODE_FINGERPRINT_DISPLAY.length - E2EE_KEY_FINGERPRINT_DISPLAY_PREFIX.length).toBe(43);
+  });
+
+  it("reuses the node-identity fingerprint definition unchanged", () => {
+    // §7.1 defines `ryco.node-key.v1` as the existing construction. This module
+    // restates it so the web and mobile clients can carry it without
+    // `node:crypto`; the two MUST stay byte-identical, in raw and display form.
+    const existing = fingerprintNodePublicKey({
+      algorithm: "ed25519",
+      publicKey: NODE_PUBLIC_KEY,
+    });
+    const e2ee = e2eeKeyFingerprint("node-identity", NODE_PUBLIC_KEY);
+    expect(hex(e2ee)).toBe(hex(existing));
+    expect(formatE2eeKeyFingerprint(e2ee)).toBe(formatNodePublicKeyFingerprint(existing));
+  });
+
+  it("separates the fingerprint domains over identical raw key bytes", () => {
+    const asIdentity = e2eeKeyFingerprint("node-identity", NODE_PUBLIC_KEY);
+    const asAgreement = e2eeKeyFingerprint("agreement", NODE_PUBLIC_KEY);
+    expect(hex(asIdentity)).toBe(NODE_FINGERPRINT);
+    expect(hex(asAgreement)).toBe(NODE_KEY_UNDER_AGREEMENT_DOMAIN);
+    expect(hex(asIdentity)).not.toBe(hex(asAgreement));
+  });
+
+  it("copies accepted key bytes rather than aliasing the caller's buffer", () => {
+    const input = Uint8Array.from(NODE_PUBLIC_KEY);
+    const validated = validateE2eeNodeIdentityPublicKey(input);
+    input.fill(0);
+    expect(hex(validated)).toBe(hex(NODE_PUBLIC_KEY));
+  });
+
+  it("decodes Ed25519 identity keys strictly, not permissively", () => {
+    expect(hex(validateE2eeNodeIdentityPublicKey(NODE_PUBLIC_KEY))).toBe(hex(NODE_PUBLIC_KEY));
+    // A `y` coordinate equal to the field prime: a ZIP215-style decoder accepts
+    // it, RFC 8032 does not. The first assertion is what proves the second one
+    // is doing work rather than tracking the library default.
+    expect(ed25519.utils.isValidPublicKey(ED25519_NON_CANONICAL_PUBLIC_KEY, true)).toBe(true);
+    expect(() => validateE2eeNodeIdentityPublicKey(ED25519_NON_CANONICAL_PUBLIC_KEY)).toThrow(
+      RelayE2eeValidationError,
+    );
+    expect(() => validateE2eeNodeIdentityPublicKey(new Uint8Array(31))).toThrow(
+      RelayE2eeValidationError,
+    );
+    expect(() => validateE2eeNodeIdentityPublicKey(new Uint8Array(33))).toThrow(
+      RelayE2eeValidationError,
+    );
+  });
+
+  it("applies full P-256 point validation", () => {
+    expect(hex(validateE2eeClientIdentityPublicKey(CLIENT_PUBLIC_KEY))).toBe(
+      hex(CLIENT_PUBLIC_KEY),
+    );
+    for (const rejected of [
+      P256_KEY_COMPRESSED_PREFIX,
+      P256_KEY_COORDINATE_AT_PRIME,
+      P256_KEY_OFF_CURVE,
+      P256_KEY_ZERO_COORDINATES,
+      new Uint8Array(64),
+      new Uint8Array(33),
+    ]) {
+      expect(() => validateE2eeClientIdentityPublicKey(rejected)).toThrow(RelayE2eeValidationError);
+    }
+  });
+
+  it("validates agreement keys by length alone", () => {
+    expect(hex(validateE2eeAgreementPublicKey(AGREEMENT_PUBLIC_KEY))).toBe(
+      hex(AGREEMENT_PUBLIC_KEY),
+    );
+    // No point validation exists for X25519; an all-zero key is well formed here
+    // and is caught by the §8.6 all-zero shared-secret abort instead.
+    expect(hex(validateE2eeAgreementPublicKey(new Uint8Array(32)))).toBe("00".repeat(32));
+    expect(() => validateE2eeAgreementPublicKey(new Uint8Array(31))).toThrow(
+      RelayE2eeValidationError,
+    );
+  });
+
+  it("rejects signature encodings this protocol does not carry", () => {
+    expect(hex(validateE2eeNodeSignature(ED25519_TEST_SIGNATURE))).toBe(
+      hex(ED25519_TEST_SIGNATURE),
+    );
+    expect(() => validateE2eeNodeSignature(new Uint8Array(63))).toThrow(RelayE2eeValidationError);
+    expect(hex(validateE2eeClientSignature(P256_RAW_SIGNATURE))).toBe(hex(P256_RAW_SIGNATURE));
+    // ASN.1/DER is rejected on the wire (§7.1): it never has the raw length.
+    expect(() => validateE2eeClientSignature(P256_DER_SIGNATURE)).toThrow(RelayE2eeValidationError);
+    expect(() => validateE2eeClientSignature(P256_SIGNATURE_ZERO_R)).toThrow(
+      RelayE2eeValidationError,
+    );
+    expect(() => validateE2eeClientSignature(P256_SIGNATURE_S_AT_ORDER)).toThrow(
+      RelayE2eeValidationError,
+    );
+  });
+});
+
+describe("relay E2EE signature verification choke point (§14.3)", () => {
+  const edVerification = {
+    algorithm: E2EE_NODE_IDENTITY_ALGORITHM,
+    publicKey: ED25519_TEST_PUBLIC_KEY,
+    message: MESSAGE,
+    signature: ED25519_TEST_SIGNATURE,
+  } as const;
+  const p256Verification = {
+    algorithm: E2EE_CLIENT_IDENTITY_ALGORITHM,
+    publicKey: CLIENT_PUBLIC_KEY,
+    message: MESSAGE,
+    signature: P256_RAW_SIGNATURE,
+  } as const;
+
+  it("verifies the deterministic Ed25519 and P-256 fixtures", () => {
+    expect(verifyE2eeSignature(edVerification)).toBe(true);
+    expect(verifyE2eeSignature(p256Verification)).toBe(true);
+  });
+
+  it("accepts either P-256 `s` value", () => {
+    // §7.1: the protocol derives no uniqueness from signature bytes, so `lowS`
+    // normalization MUST NOT be enforced on verification.
+    const s = BigInt(`0x${hex(P256_RAW_SIGNATURE.subarray(32))}`);
+    const flipped = Uint8Array.from(P256_RAW_SIGNATURE);
+    const negated = (P256_GROUP_ORDER - s).toString(16).padStart(64, "0");
+    flipped.set(bytes(negated), 32);
+    expect(hex(flipped)).not.toBe(hex(P256_RAW_SIGNATURE));
+    expect(verifyE2eeSignature({ ...p256Verification, signature: flipped })).toBe(true);
+  });
+
+  it("rejects a Ed25519 small-order public key and a non-canonical one", () => {
+    // Both are values permissive verifiers admit; `zip215: false` does not.
+    expect(
+      verifyE2eeSignature({ ...edVerification, publicKey: ED25519_SMALL_ORDER_PUBLIC_KEY }),
+    ).toBe(false);
+    expect(
+      verifyE2eeSignature({ ...edVerification, publicKey: ED25519_NON_CANONICAL_PUBLIC_KEY }),
+    ).toBe(false);
+  });
+
+  it("rejects a mutated message, a substituted key, and a DER signature", () => {
+    const mutated = Uint8Array.from(MESSAGE);
+    mutated[0] = (mutated[0]! ^ 0x01) & 0xff;
+    expect(verifyE2eeSignature({ ...edVerification, message: mutated })).toBe(false);
+    expect(verifyE2eeSignature({ ...edVerification, publicKey: NODE_PUBLIC_KEY })).toBe(false);
+    expect(verifyE2eeSignature({ ...p256Verification, message: mutated })).toBe(false);
+    expect(verifyE2eeSignature({ ...p256Verification, signature: P256_DER_SIGNATURE })).toBe(false);
+    expect(verifyE2eeSignature({ ...p256Verification, signature: P256_SIGNATURE_ZERO_R })).toBe(
+      false,
+    );
+    expect(verifyE2eeSignature({ ...p256Verification, signature: P256_SIGNATURE_S_AT_ORDER })).toBe(
+      false,
+    );
+  });
+
+  it("rejects a signature presented under the wrong algorithm", () => {
+    expect(
+      verifyE2eeSignature({
+        algorithm: E2EE_CLIENT_IDENTITY_ALGORITHM,
+        publicKey: ED25519_TEST_PUBLIC_KEY,
+        message: MESSAGE,
+        signature: ED25519_TEST_SIGNATURE,
+      }),
+    ).toBe(false);
+    expect(
+      verifyE2eeSignature({
+        algorithm: E2EE_NODE_IDENTITY_ALGORITHM,
+        publicKey: CLIENT_PUBLIC_KEY,
+        message: MESSAGE,
+        signature: P256_RAW_SIGNATURE,
+      }),
+    ).toBe(false);
+  });
+
+  it("never throws on peer-supplied bytes", () => {
+    for (const length of [0, 1, 31, 32, 63, 64, 65, 96]) {
+      expect(
+        verifyE2eeSignature({
+          algorithm: E2EE_NODE_IDENTITY_ALGORITHM,
+          publicKey: new Uint8Array(length).fill(0xab),
+          message: new Uint8Array(length),
+          signature: new Uint8Array(length).fill(0xcd),
+        }),
+      ).toBe(false);
+      expect(
+        verifyE2eeSignature({
+          algorithm: E2EE_CLIENT_IDENTITY_ALGORITHM,
+          publicKey: new Uint8Array(length).fill(0xab),
+          message: new Uint8Array(length),
+          signature: new Uint8Array(length).fill(0xcd),
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("compares public byte strings without reflecting them", () => {
+    expect(e2eeBytesEqual(NODE_PUBLIC_KEY, Uint8Array.from(NODE_PUBLIC_KEY))).toBe(true);
+    expect(e2eeBytesEqual(NODE_PUBLIC_KEY, AGREEMENT_PUBLIC_KEY)).toBe(false);
+    expect(e2eeBytesEqual(NODE_PUBLIC_KEY, NODE_PUBLIC_KEY.subarray(0, 31))).toBe(false);
+
+    const canary = "do-not-reflect-key-material";
+    let error: unknown;
+    try {
+      formatE2eeKeyFingerprint(new TextEncoder().encode(canary));
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toBeInstanceOf(RelayE2eeValidationError);
+    expect(String(error)).not.toContain(canary);
+  });
+});
