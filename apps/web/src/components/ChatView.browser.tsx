@@ -6,6 +6,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   EnvironmentId,
   type CheckpointRef,
+  type ComposerSourceControlContext,
   type EnvironmentApi,
   type MessageId,
   type OrchestrationReadModel,
@@ -21,6 +22,11 @@ import {
   DEFAULT_SERVER_SETTINGS,
 } from "@ryco/contracts";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
+import {
+  PROMPT_STASH_STORAGE_KEY,
+  stripInlineTerminalContextPlaceholders,
+  type PromptStashEntry,
+} from "@ryco/client-runtime/state/composer";
 import { createModelCapabilities, createModelSelection } from "@ryco/shared/model";
 import { RouterProvider, createMemoryHistory } from "@tanstack/react-router";
 import { Option } from "effect";
@@ -40,7 +46,12 @@ import {
 import { render } from "vitest-browser-react";
 
 import { useCommandPaletteStore } from "../commandPaletteStore";
-import { useComposerDraftStore, DraftId } from "../composerDraftStore";
+import {
+  useComposerDraftStore,
+  DraftId,
+  type ComposerImageAttachment,
+} from "../composerDraftStore";
+import { usePromptStashStore } from "../promptStashStore";
 import {
   __resetEnvironmentApiOverridesForTests,
   __setEnvironmentApiOverrideForTests,
@@ -160,6 +171,21 @@ const CHAT_NEW_LOCAL_KEYBINDING: ServerConfig["keybindings"][number] = {
     metaKey: false,
     ctrlKey: false,
     shiftKey: true,
+    altKey: false,
+    modKey: true,
+  },
+  whenAst: {
+    type: "not" as const,
+    node: { type: "identifier" as const, name: "terminalFocus" },
+  },
+};
+const COMPOSER_STASH_KEYBINDING: ServerConfig["keybindings"][number] = {
+  command: "composer.stash",
+  shortcut: {
+    key: "s",
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
     altKey: false,
     modKey: true,
   },
@@ -396,6 +422,73 @@ function createTerminalContext(input: {
     lineEnd: input.lineEnd,
     text: input.text,
     createdAt: NOW_ISO,
+  };
+}
+
+function createSourceControlContext(id: string): ComposerSourceControlContext {
+  return {
+    id,
+    kind: "issue",
+    provider: "github",
+    reference: "owner/repo#1",
+    detail: {
+      provider: "github",
+      number: 1 as never,
+      title: "Stash context issue" as never,
+      url: "https://github.com/owner/repo/issues/1" as never,
+      state: "open",
+      updatedAt: Option.none(),
+      body: "Issue body",
+      comments: [],
+      truncated: false,
+    },
+    fetchedAt: NOW_ISO as never,
+    staleAfter: NOW_ISO as never,
+  };
+}
+
+function createBrowserComposerImage(input: {
+  id: string;
+  name?: string;
+  bytes?: Uint8Array;
+  arrayBuffer?: () => Promise<ArrayBuffer>;
+  previewUrl?: string;
+}): ComposerImageAttachment {
+  const bytes = input.bytes ?? new Uint8Array([1, 2, 3]);
+  const name = input.name ?? `${input.id}.png`;
+  const fileBytes = new Uint8Array(bytes.byteLength);
+  fileBytes.set(bytes);
+  const file = new File([fileBytes.buffer], name, { type: "image/png" });
+  if (input.arrayBuffer) {
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: input.arrayBuffer,
+    });
+  }
+  return {
+    type: "image",
+    id: input.id,
+    name,
+    mimeType: "image/png",
+    sizeBytes: file.size,
+    previewUrl: input.previewUrl ?? `data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`,
+    file,
+  };
+}
+
+function createPromptStashEntry(input: {
+  id: string;
+  prompt: string;
+  attachments?: PromptStashEntry["attachments"];
+}): PromptStashEntry {
+  return {
+    id: input.id,
+    createdAt: NOW_ISO,
+    prompt: input.prompt,
+    attachments: input.attachments ?? [],
+    droppedImageNames: [],
+    unreadableImageNames: [],
+    pendingImageCount: 0,
   };
 }
 
@@ -1730,6 +1823,24 @@ async function waitForServerConfigToApply(): Promise<void> {
   await waitForLayout();
 }
 
+async function waitForComposerStashBinding(key: string): Promise<void> {
+  await vi.waitFor(
+    () => {
+      expect(
+        getServerConfig()?.keybindings.some(
+          (binding) => binding.command === "composer.stash" && binding.shortcut.key === key,
+        ),
+      ).toBe(true);
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  await waitForElement(
+    () => document.querySelector('[data-chat-composer-form="true"]'),
+    "Unable to find the active composer for the stash shortcut.",
+  );
+  await waitForLayout();
+}
+
 function dispatchChatNewShortcut(): void {
   const useMetaForMod = isMacPlatform(navigator.platform);
   window.dispatchEvent(
@@ -1756,6 +1867,23 @@ function dispatchChatNewLocalShortcut(): void {
       cancelable: true,
     }),
   );
+}
+
+function dispatchComposerStashShortcut(
+  overrides: Partial<KeyboardEventInit> = {},
+  target: EventTarget = document.activeElement ?? window,
+): KeyboardEvent {
+  const useMetaForMod = isMacPlatform(navigator.platform);
+  const event = new KeyboardEvent("keydown", {
+    key: "s",
+    metaKey: useMetaForMod,
+    ctrlKey: !useMetaForMod,
+    bubbles: true,
+    cancelable: true,
+    ...overrides,
+  });
+  target.dispatchEvent(event);
+  return event;
 }
 
 function releaseModShortcut(key?: string): void {
@@ -1817,6 +1945,13 @@ function enableChatNewLocalShortcut(nextFixture: TestFixture): void {
   nextFixture.serverConfig = {
     ...nextFixture.serverConfig,
     keybindings: [CHAT_NEW_LOCAL_KEYBINDING],
+  };
+}
+
+function enableComposerStashShortcut(nextFixture: TestFixture): void {
+  nextFixture.serverConfig = {
+    ...nextFixture.serverConfig,
+    keybindings: [COMPOSER_STASH_KEYBINDING],
   };
 }
 
@@ -2202,6 +2337,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     await parkPointer(4, 4);
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();
+    usePromptStashStore.setState({ entries: [] });
     document.body.innerHTML = "";
     wsRequests.length = 0;
     customWsRpcResolver = null;
@@ -2247,6 +2383,464 @@ describe("ChatView timeline estimator parity (full app)", () => {
   afterEach(() => {
     customWsRpcResolver = null;
     document.body.innerHTML = "";
+  });
+
+  it("stashes globally, preserves contexts/model state, merges on keyboard restore, and deletes from the picker", async () => {
+    const terminalContext = createTerminalContext({
+      id: "stash-terminal",
+      terminalLabel: "Terminal 1",
+      lineStart: 3,
+      lineEnd: 4,
+      text: "git status",
+    });
+    const sourceControlContext = createSourceControlContext("stash-source");
+    const draftStore = useComposerDraftStore.getState();
+    draftStore.setPrompt(THREAD_REF, "Stashed text");
+    draftStore.addTerminalContext(THREAD_REF, terminalContext);
+    draftStore.addSourceControlContext(THREAD_REF, sourceControlContext);
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-stash-global" as MessageId,
+        targetText: "stash global target",
+      }),
+      configureFixture: enableComposerStashShortcut,
+    });
+
+    try {
+      await waitForComposerStashBinding("s");
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      const saveEvent = dispatchComposerStashShortcut({}, composerEditor);
+      expect(saveEvent.defaultPrevented).toBe(true);
+
+      let stashedId = "";
+      await vi.waitFor(() => {
+        const stash = usePromptStashStore.getState().entries;
+        expect(stash).toHaveLength(1);
+        expect(stash[0]?.prompt).toBe("Stashed text");
+        stashedId = stash[0]?.id ?? "";
+        const draft = useComposerDraftStore.getState().getComposerDraft(THREAD_REF);
+        expect(stripInlineTerminalContextPlaceholders(draft?.prompt ?? "")).toBe("");
+        expect(draft?.terminalContexts.map((context) => context.id)).toEqual(["stash-terminal"]);
+        expect(draft?.sourceControlContexts.map((context) => context.id)).toEqual(["stash-source"]);
+      });
+      expect(localStorage.getItem(PROMPT_STASH_STORAGE_KEY)).toContain("Stashed text");
+
+      usePromptStashStore
+        .getState()
+        .stashEntry(createPromptStashEntry({ id: "newer-picker-entry", prompt: "Other stash" }));
+      const emptyShortcut = dispatchComposerStashShortcut();
+      expect(emptyShortcut.defaultPrevented).toBe(true);
+      await waitForElement(
+        () => document.querySelector('[data-prompt-stash-picker="true"]'),
+        "Empty stash shortcut should open the picker.",
+      );
+      const escapeEvent = new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(escapeEvent);
+      expect(escapeEvent.defaultPrevented).toBe(true);
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-prompt-stash-picker="true"]')).toBeNull();
+      });
+      dispatchComposerStashShortcut();
+      await waitForElement(
+        () => document.querySelector('[data-prompt-stash-picker="true"]'),
+        "Empty stash shortcut should reopen the picker.",
+      );
+      const outsidePickerButton = document.createElement("button");
+      document.body.append(outsidePickerButton);
+      outsidePickerButton.focus();
+      const outsidePickerArrow = new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        bubbles: true,
+        cancelable: true,
+      });
+      outsidePickerButton.dispatchEvent(outsidePickerArrow);
+      expect(outsidePickerArrow.defaultPrevented).toBe(false);
+      outsidePickerButton.remove();
+
+      const switchedSelection = createModelSelection(
+        ProviderInstanceId.make("claudeAgent"),
+        "claude-opus-4-6",
+        [{ id: "effort", value: "max" }],
+      );
+      useComposerDraftStore.getState().setModelSelection(THREAD_REF, switchedSelection);
+      useComposerDraftStore
+        .getState()
+        .setPrompt(THREAD_REF, `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}Current text`);
+      await waitForLayout();
+
+      const stashPicker = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-prompt-stash-picker="true"]'),
+        "Unable to focus the stash picker.",
+      );
+      stashPicker.focus();
+      await userEvent.keyboard("{ArrowUp}{ArrowDown}{ArrowDown}{Enter}");
+
+      await vi.waitFor(() => {
+        const draft = useComposerDraftStore.getState().getComposerDraft(THREAD_REF);
+        expect(stripInlineTerminalContextPlaceholders(draft?.prompt ?? "")).toBe(
+          "Current text\n\nStashed text",
+        );
+        expect(draft?.modelSelectionByProvider[ProviderInstanceId.make("claudeAgent")]).toEqual(
+          switchedSelection,
+        );
+        expect(draft?.activeProvider).toBe("claudeAgent");
+        expect(usePromptStashStore.getState().entries.map((entry) => entry.id)).not.toContain(
+          stashedId,
+        );
+      });
+
+      const mergedPrompt =
+        useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt ?? "";
+      const stashBadge = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[data-prompt-stash-badge="true"]'),
+        "Unable to find stash badge for deletion.",
+      );
+      stashBadge.click();
+      const deleteButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            '[data-prompt-stash-delete="newer-picker-entry"]',
+          ),
+        "Unable to find stash delete button.",
+      );
+      deleteButton.focus();
+      await userEvent.keyboard("{Enter}");
+      await vi.waitFor(() => {
+        expect(usePromptStashStore.getState().entries).toEqual([]);
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
+          mergedPrompt,
+        );
+      });
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-prompt-stash-picker="true"]')).toBeNull();
+      });
+
+      usePromptStashStore
+        .getState()
+        .stashEntry(createPromptStashEntry({ id: "keyboard-keep", prompt: "Keep" }));
+      usePromptStashStore
+        .getState()
+        .stashEntry(createPromptStashEntry({ id: "keyboard-delete", prompt: "Delete" }));
+      const keyboardDeleteBadge = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[data-prompt-stash-badge="true"]'),
+        "Unable to find stash badge for keyboard deletion.",
+      );
+      keyboardDeleteBadge.click();
+      const keyboardDeletePicker = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-prompt-stash-picker="true"]'),
+        "Unable to focus stash picker for keyboard deletion.",
+      );
+      keyboardDeletePicker.focus();
+      const deleteShortcut = new KeyboardEvent("keydown", {
+        key: "Backspace",
+        metaKey: isMacPlatform(navigator.platform),
+        ctrlKey: !isMacPlatform(navigator.platform),
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(deleteShortcut);
+      expect(deleteShortcut.defaultPrevented).toBe(true);
+      await vi.waitFor(() => {
+        expect(usePromptStashStore.getState().entries.map((entry) => entry.id)).toEqual([
+          "keyboard-keep",
+        ]);
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
+          mergedPrompt,
+        );
+      });
+
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-prompt-stash-picker="true"]')).toBeNull();
+      });
+
+      const entriesBeforeIgnoredShortcuts = usePromptStashStore.getState().entries;
+      const alreadyHandledShortcut = new KeyboardEvent("keydown", {
+        key: "s",
+        metaKey: isMacPlatform(navigator.platform),
+        ctrlKey: !isMacPlatform(navigator.platform),
+        bubbles: true,
+        cancelable: true,
+      });
+      alreadyHandledShortcut.preventDefault();
+      window.dispatchEvent(alreadyHandledShortcut);
+      expect(usePromptStashStore.getState().entries).toBe(entriesBeforeIgnoredShortcuts);
+
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      const dialogInput = document.createElement("input");
+      dialog.append(dialogInput);
+      document.body.append(dialog);
+      dialogInput.focus();
+      const ignoredInDialog = dispatchComposerStashShortcut({}, dialogInput);
+      expect(ignoredInDialog.defaultPrevented).toBe(false);
+      expect(usePromptStashStore.getState().entries).toBe(entriesBeforeIgnoredShortcuts);
+      dialog.remove();
+
+      const terminalInput = document.createElement("textarea");
+      terminalInput.className = "xterm-helper-textarea";
+      document.body.append(terminalInput);
+      terminalInput.focus();
+      const unresolvedInTerminal = dispatchComposerStashShortcut();
+      expect(unresolvedInTerminal.defaultPrevented).toBe(false);
+      terminalInput.remove();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("separates restored text from retained terminal placeholders", async () => {
+    const draftStore = useComposerDraftStore.getState();
+    draftStore.setPrompt(THREAD_REF, "Separated stash text");
+    draftStore.addTerminalContext(
+      THREAD_REF,
+      createTerminalContext({
+        id: "stash-separator-terminal",
+        terminalLabel: "Terminal 1",
+        lineStart: 3,
+        lineEnd: 4,
+        text: "git status",
+      }),
+    );
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-stash-separator" as MessageId,
+        targetText: "stash separator target",
+      }),
+      configureFixture: enableComposerStashShortcut,
+    });
+
+    try {
+      await waitForComposerStashBinding("s");
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      dispatchComposerStashShortcut();
+      await vi.waitFor(() => {
+        expect(usePromptStashStore.getState().entries).toHaveLength(1);
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
+          INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
+        );
+      });
+
+      dispatchComposerStashShortcut();
+      const row = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-prompt-stash-row]"),
+        "Unable to find the terminal-separator stash row.",
+      );
+      row.click();
+      await vi.waitFor(() => {
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
+          `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}\n\nSeparated stash text`,
+        );
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("honors a custom composer stash binding without suppressing the unbound Save shortcut", async () => {
+    useComposerDraftStore.getState().setPrompt(THREAD_REF, "Custom binding prompt");
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-stash-custom-binding" as MessageId,
+        targetText: "stash custom binding target",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          keybindings: [
+            {
+              command: "composer.stash",
+              shortcut: {
+                key: "x",
+                metaKey: false,
+                ctrlKey: true,
+                shiftKey: false,
+                altKey: true,
+                modKey: false,
+              },
+              whenAst: {
+                type: "not",
+                node: { type: "identifier", name: "terminalFocus" },
+              },
+            },
+          ],
+        };
+      },
+    });
+
+    try {
+      await waitForComposerStashBinding("x");
+      expect(dispatchComposerStashShortcut().defaultPrevented).toBe(false);
+      expect(usePromptStashStore.getState().entries).toEqual([]);
+
+      const customEvent = new KeyboardEvent("keydown", {
+        key: "x",
+        ctrlKey: true,
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(customEvent);
+      expect(customEvent.defaultPrevented).toBe(true);
+      await vi.waitFor(() => {
+        expect(usePromptStashStore.getState().entries[0]?.prompt).toBe("Custom binding prompt");
+      });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps newer typing during image finalization and enforces restore dedupe and attachment caps", async () => {
+    let resolveImageBytes!: (value: ArrayBuffer) => void;
+    const delayedImageBytes = new Promise<ArrayBuffer>((resolve) => {
+      resolveImageBytes = resolve;
+    });
+    const delayedImage = createBrowserComposerImage({
+      id: "delayed-image",
+      name: "delayed.png",
+      arrayBuffer: () => delayedImageBytes,
+      previewUrl: "blob:delayed-image",
+    });
+    const draftStore = useComposerDraftStore.getState();
+    draftStore.setPrompt(THREAD_REF, "Image prompt");
+    draftStore.addImage(THREAD_REF, delayedImage);
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-stash-images" as MessageId,
+        targetText: "stash images target",
+      }),
+      configureFixture: enableComposerStashShortcut,
+    });
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    const revokeObjectUrl = vi.fn();
+    URL.revokeObjectURL = revokeObjectUrl;
+
+    try {
+      await waitForComposerStashBinding("s");
+      dispatchComposerStashShortcut();
+      await vi.waitFor(() => {
+        expect(usePromptStashStore.getState().entries[0]?.pendingImageCount).toBe(1);
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.images ?? []).toEqual(
+          [],
+        );
+      });
+
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Typed while saving");
+      resolveImageBytes(new Uint8Array([1, 2, 3]).buffer);
+      await vi.waitFor(() => {
+        expect(usePromptStashStore.getState().entries[0]?.pendingImageCount).toBe(0);
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
+          "Typed while saving",
+        );
+        expect(revokeObjectUrl).toHaveBeenCalledWith("blob:delayed-image");
+      });
+
+      const finalizedImageBadge = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[data-prompt-stash-badge="true"]'),
+        "Unable to find finalized image stash badge.",
+      );
+      finalizedImageBadge.click();
+      const delayedRow = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-prompt-stash-row]"),
+        "Unable to find finalized image stash row.",
+      );
+      delayedRow.click();
+      await vi.waitFor(() => {
+        const draft = useComposerDraftStore.getState().getComposerDraft(THREAD_REF);
+        expect(draft?.prompt).toBe("Typed while saving\n\nImage prompt");
+        expect(draft?.images.map((image) => image.name)).toEqual(["delayed.png"]);
+      });
+
+      useComposerDraftStore.getState().clearPromptAndImages(THREAD_REF);
+      const currentImages = [
+        createBrowserComposerImage({ id: "current-duplicate", name: "duplicate.png" }),
+        ...Array.from({ length: 6 }, (_, index) =>
+          createBrowserComposerImage({
+            id: `current-${index}`,
+            name: `current-${index}.png`,
+            bytes: new Uint8Array([index + 10]),
+          }),
+        ),
+      ];
+      useComposerDraftStore.getState().addImages(THREAD_REF, currentImages);
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Current cap text");
+      usePromptStashStore.getState().stashEntry(
+        createPromptStashEntry({
+          id: "cap-entry",
+          prompt: "Saved cap text",
+          attachments: [
+            {
+              id: "saved-duplicate",
+              name: "duplicate.png",
+              mimeType: "image/png",
+              sizeBytes: 3,
+              dataUrl: "data:image/png;base64,AQID",
+            },
+            {
+              id: "saved-accepted",
+              name: "accepted.png",
+              mimeType: "image/png",
+              sizeBytes: 3,
+              dataUrl: "data:image/png;base64,AQID",
+            },
+            {
+              id: "saved-overflow",
+              name: "overflow.png",
+              mimeType: "image/png",
+              sizeBytes: 3,
+              dataUrl: "data:image/png;base64,AQID",
+            },
+          ],
+        }),
+      );
+
+      const capBadge = await waitForElement(
+        () => document.querySelector<HTMLButtonElement>('[data-prompt-stash-badge="true"]'),
+        "Unable to find attachment cap stash badge.",
+      );
+      capBadge.click();
+      const capRow = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-prompt-stash-row="cap-entry"]'),
+        "Unable to find attachment cap stash row.",
+      );
+      capRow.click();
+      await vi.waitFor(() => {
+        const draft = useComposerDraftStore.getState().getComposerDraft(THREAD_REF);
+        expect(draft?.prompt).toBe("Current cap text\n\nSaved cap text");
+        expect(draft?.images).toHaveLength(8);
+        expect(draft?.images.map((image) => image.name)).toContain("accepted.png");
+        expect(draft?.images.map((image) => image.name)).not.toContain("overflow.png");
+        expect(draft?.images.filter((image) => image.name === "duplicate.png")).toHaveLength(1);
+      });
+    } finally {
+      await mounted.cleanup();
+      URL.revokeObjectURL = originalRevokeObjectUrl;
+    }
   });
 
   it("keeps the mobile run-context control non-interactive when the environment is locked", async () => {

@@ -65,6 +65,13 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedLocal.command, "chat.newLocal");
 
+    const parsedComposerStash = yield* decode(KeybindingRule, {
+      key: "mod+s",
+      command: "composer.stash",
+      when: "!terminalFocus",
+    });
+    assert.strictEqual(parsedComposerStash.command, "composer.stash");
+
     const parsedModelPickerToggle = yield* decode(KeybindingRule, {
       key: "mod+shift+m",
       command: "modelPicker.toggle",

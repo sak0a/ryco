@@ -32,6 +32,7 @@ See the full schema for more details: [`packages/contracts/src/keybindings.ts`](
   { "key": "mod+n", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+o", "command": "chat.new", "when": "!terminalFocus" },
   { "key": "mod+shift+n", "command": "chat.newLocal", "when": "!terminalFocus" },
+  { "key": "mod+s", "command": "composer.stash", "when": "!terminalFocus" },
   { "key": "mod+shift+m", "command": "modelPicker.toggle", "when": "!terminalFocus" },
   { "key": "mod+o", "command": "editor.openFavorite" },
   { "key": "mod+shift+[", "command": "thread.previous" },
@@ -84,6 +85,7 @@ Invalid rules are ignored. Invalid config files are ignored. Warnings are logged
 - `commandPalette.toggle`: open or close the global command palette
 - `chat.new`: create a new chat thread preserving the active thread's branch/worktree state
 - `chat.newLocal`: create a new chat thread for the active project in a new environment (local/worktree determined by app settings (default `local`))
+- `composer.stash`: stash prompt text and images, or open the stash picker when the composer is empty
 - `editor.openFavorite`: open current project/worktree in the last-used editor
 - `modelPicker.toggle`: open or close the model picker
 - `modelPicker.jump.1` through `modelPicker.jump.9`: pick a visible model by position while the model picker is open

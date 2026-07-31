@@ -20,6 +20,11 @@ describe("keybindingCategories", () => {
     expect(getCommandMeta("chat.newLocal").category).toBe(KEYBINDING_CATEGORIES.chat);
   });
 
+  it("maps stash to the Composer category with a friendly title", () => {
+    expect(getCommandMeta("composer.stash").category).toBe(KEYBINDING_CATEGORIES.composer);
+    expect(getCommandMeta("composer.stash").title).toBe("Stash prompt or open stash");
+  });
+
   it("maps thread navigation to the Threads category", () => {
     expect(getCommandMeta("thread.find").category).toBe(KEYBINDING_CATEGORIES.thread);
     expect(getCommandMeta("thread.previous").category).toBe(KEYBINDING_CATEGORIES.thread);

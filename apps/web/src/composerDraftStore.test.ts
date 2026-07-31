@@ -290,6 +290,63 @@ describe("composerDraftStore clearComposerContent", () => {
   });
 });
 
+describe("composerDraftStore clearPromptAndImages", () => {
+  const threadId = ThreadId.make("thread-stash-clear");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("clears stashable content while preserving contexts, provider, model, and modes", () => {
+    const store = useComposerDraftStore.getState();
+    const terminalContext = makeTerminalContext({ id: "terminal-stays" });
+    const sourceControlContext = makeSourceControlContext("source-stays");
+    const image = makeImage({
+      id: "image-clears",
+      previewUrl: "blob:image-clears",
+    });
+    const selection = modelSelection(CODEX_DRIVER, "gpt-5.3-codex", {
+      reasoningEffort: "high",
+    });
+
+    store.setPrompt(threadRef, "Keep contexts, clear this prompt");
+    store.addImage(threadRef, image);
+    store.syncPersistedAttachments(threadRef, [
+      {
+        id: image.id,
+        name: image.name,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        dataUrl: "data:image/png;base64,AQID",
+      },
+    ]);
+    store.addTerminalContext(threadRef, terminalContext);
+    store.addSourceControlContext(threadRef, sourceControlContext);
+    store.setModelSelection(threadRef, selection);
+    store.setRuntimeMode(threadRef, "approval-required");
+    store.setInteractionMode(threadRef, "plan");
+    store.setTokenMode(threadRef, "aggressive");
+
+    store.clearPromptAndImages(threadRef);
+
+    const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
+    expect(draft).toMatchObject({
+      prompt: INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
+      images: [],
+      persistedAttachments: [],
+      nonPersistedImageIds: [],
+      terminalContexts: [{ ...terminalContext, threadId }],
+      sourceControlContexts: [sourceControlContext],
+      activeProvider: CODEX_INSTANCE,
+      runtimeMode: "approval-required",
+      interactionMode: "plan",
+      tokenMode: "aggressive",
+    });
+    expect(draft?.modelSelectionByProvider[CODEX_INSTANCE]).toEqual(selection);
+  });
+});
+
 describe("composerDraftStore syncPersistedAttachments", () => {
   const threadId = ThreadId.make("thread-sync-persisted");
   const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
