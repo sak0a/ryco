@@ -19,6 +19,7 @@ import type {
   RuntimeMode,
   AgentTokenMode,
   StatusBucket,
+  ThreadSettlementOverride,
   WorktreeId,
   WorktreeOrigin,
   ThreadGoal,
@@ -121,6 +122,8 @@ export interface Thread {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  settledOverride: ThreadSettlementOverride | null;
+  settledAt: string | null;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   goal?: ThreadGoal | null;
@@ -147,6 +150,8 @@ export interface ThreadShell {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  settledOverride: ThreadSettlementOverride | null;
+  settledAt: string | null;
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
@@ -175,6 +180,8 @@ export interface SidebarThreadSummary {
   session: ThreadSession | null;
   createdAt: string;
   archivedAt: string | null;
+  settledOverride: ThreadSettlementOverride | null;
+  settledAt: string | null;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   branch: string | null;

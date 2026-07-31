@@ -149,6 +149,16 @@ export interface QueuedMessageSummaryInput {
   readonly terminalContextCount: number;
 }
 
+export function getQueuedThreadKeys<Composer, Settings>(
+  queuesByThreadKey: Readonly<Record<string, readonly QueuedMessage<Composer, Settings>[]>>,
+): Set<string> {
+  return new Set(
+    Object.entries(queuesByThreadKey).flatMap(([threadKey, queue]) =>
+      queue.length > 0 ? [threadKey] : [],
+    ),
+  );
+}
+
 const QUEUED_MESSAGE_SUMMARY_MAX_CHARS = 120;
 
 export function summarizeQueuedMessage(input: QueuedMessageSummaryInput): string {
