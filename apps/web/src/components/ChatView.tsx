@@ -504,6 +504,9 @@ export default function ChatView(props: ChatViewProps) {
   // tier flips (rotation preserves route, draft, and panel state).
   const presentationTierRef = useRef(presentationTier);
   presentationTierRef.current = presentationTier;
+  // The web phone tier is frozen (see AGENTS.md): the Build-mode lock only
+  // applies to non-phone presentation tiers.
+  const enforceBuildMode = alwaysUseBuildMode && presentationTier !== "phone";
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -612,7 +615,7 @@ export default function ChatView(props: ChatViewProps) {
   const deferredActiveThreadId = useDeferredValue(activeThreadIdRaw);
   const isActiveThreadIdFresh = deferredActiveThreadId === activeThreadIdRaw;
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-  const interactionMode = alwaysUseBuildMode
+  const interactionMode = enforceBuildMode
     ? DEFAULT_INTERACTION_MODE
     : (composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE);
   const tokenMode =
@@ -1889,7 +1892,7 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    if (alwaysUseBuildMode) return;
+    if (enforceBuildMode) return;
     const askModeSupported = getProviderSupportsAskMode(providerStatuses, selectedProvider);
     const nextMode: ProviderInteractionMode =
       interactionMode === "default"
@@ -1899,7 +1902,7 @@ export default function ChatView(props: ChatViewProps) {
           : "default";
     handleInteractionModeChange(nextMode);
   }, [
-    alwaysUseBuildMode,
+    enforceBuildMode,
     handleInteractionModeChange,
     interactionMode,
     providerStatuses,
@@ -2397,6 +2400,12 @@ export default function ChatView(props: ChatViewProps) {
     if (!dispatchCapability.allowed) return false;
     const api = readEnvironmentApi(environmentId);
     if (!api || !activeThread || !activeProject) return false;
+    // Queued messages keep the settings snapshot from enqueue time; when the
+    // Build-mode lock is on, every dispatched turn must still run in Build
+    // mode even if it was queued as Plan/Ask before the setting flipped.
+    const effectiveSettingsSnapshot: SendTurnSettings = enforceBuildMode
+      ? { ...settingsSnapshot, interactionMode: DEFAULT_INTERACTION_MODE }
+      : settingsSnapshot;
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const { shouldMaterializeLegacyBranchWorktree, baseBranchForWorktree, shouldCreateWorktree } =
@@ -2433,7 +2442,7 @@ export default function ChatView(props: ChatViewProps) {
         baseBranchForWorktree,
         shouldCreateWorktree,
       },
-      settings: settingsSnapshot,
+      settings: effectiveSettingsSnapshot,
       project: {
         projectId: activeProject.id,
         projectCwd: activeProject.cwd,

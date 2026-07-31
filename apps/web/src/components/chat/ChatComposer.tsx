@@ -651,14 +651,16 @@ export const ChatComposer = memo(
     const selectedPromptEffort = composerProviderState.promptEffort;
     const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
     const alwaysUseBuildMode = useUiStateStore((state) => state.alwaysUseBuildMode);
+    // The web phone tier is frozen (see AGENTS.md): the Build-mode lock only
+    // applies to non-phone presentation tiers.
+    const enforceBuildMode = alwaysUseBuildMode && usePresentationTier() !== "phone";
     const composerProviderControls = useMemo(
       () => ({
         showInteractionModeToggle:
-          !alwaysUseBuildMode &&
-          getProviderInteractionModeToggle(providerStatuses, selectedProvider),
+          !enforceBuildMode && getProviderInteractionModeToggle(providerStatuses, selectedProvider),
         askModeSupported: getProviderSupportsAskMode(providerStatuses, selectedProvider),
       }),
-      [alwaysUseBuildMode, providerStatuses, selectedProvider],
+      [enforceBuildMode, providerStatuses, selectedProvider],
     );
     const selectedModelSelection = useMemo<ModelSelection>(
       () =>
