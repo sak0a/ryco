@@ -1,10 +1,10 @@
 # Ryco relay E2EE protocol 1
 
-- **Status**: Reviewed, proposed for approval. This revision has completed its dedicated
-  adversarial protocol-security review and carries no blocking finding. Wire formats, constants,
-  and registries are frozen for review purposes but become normative only when this document
-  merges; implementation begins against the merged revision, and no implementation may ship
-  against a revision that has not merged.
+- **Status**: Normative. This document completed its dedicated adversarial protocol-security
+  review with no blocking finding and has merged; its wire formats, constants, and registries
+  bind every implementation. A change to any of them is a protocol change: it requires its own
+  review, and it may not be made to accommodate an implementation difficulty. Implementations
+  track the merged revision.
 - **Protocol version**: 1 (`E2EE_PROTOCOL_VERSION`, §3).
 - **Layers inside**: [Ryco relay protocol 1.2](./relay-protocol.md) `data.payload`.
 - **Companion documents**: [relay protocol](./relay-protocol.md),
@@ -99,12 +99,12 @@ Every claim in this table is per payload class as well as per tier. §8.10 state
 authentication and confidentiality grade of each individual payload, and **§8.10 is
 authoritative wherever this table is summarised in user-facing text**.
 
-| Tier (channel state) | Pattern | Passive read | Retroactive read | Active Hub (originate an endpoint or substitute a node) |
-| --- | --- | --- | --- | --- |
-| Legacy plaintext | — | **Not protected** — operator policy only | **Not protected** | **Not protected** — the plaintext flow has no client identity proof |
-| Web, unsigned ephemeral | NX | Protected while the served web code is honest | Protected while the served web code is honest | **Not protected** — the Hub can originate an unsigned NX session and controls the served code |
-| Native signed, not yet mutually verified | IK | Protected | Protected (except IK message-1 metadata — §8.10) | **Not protected** — restricted to the pairing ceremony (§13); no application payload is released under an active-Hub claim |
-| Native signed, mutually verified (verified node pin + approved client record) | IK | Protected | Protected (except IK message-1 metadata — §8.10) | **Protected for this channel** |
+| Tier (channel state)                                                          | Pattern | Passive read                                  | Retroactive read                                 | Active Hub (originate an endpoint or substitute a node)                                                                    |
+| ----------------------------------------------------------------------------- | ------- | --------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| Legacy plaintext                                                              | —       | **Not protected** — operator policy only      | **Not protected**                                | **Not protected** — the plaintext flow has no client identity proof                                                        |
+| Web, unsigned ephemeral                                                       | NX      | Protected while the served web code is honest | Protected while the served web code is honest    | **Not protected** — the Hub can originate an unsigned NX session and controls the served code                              |
+| Native signed, not yet mutually verified                                      | IK      | Protected                                     | Protected (except IK message-1 metadata — §8.10) | **Not protected** — restricted to the pairing ceremony (§13); no application payload is released under an active-Hub claim |
+| Native signed, mutually verified (verified node pin + approved client record) | IK      | Protected                                     | Protected (except IK message-1 metadata — §8.10) | **Protected for this channel**                                                                                             |
 
 - **Passive read**: a Hub or proxy that records, inspects, or leaks traffic sees only ciphertext
   and the metadata in §2.5. This closes accidental payload-persistence bugs and passive
@@ -112,16 +112,16 @@ authoritative wherever this table is summarised in user-facing text**.
 - **Retroactive read**: recorded ciphertext stays sealed even if long-term identity or agreement
   keys leak later. This holds for all application payload and for every post-handshake record.
   §8.10 grades three of the four transport directions confidentiality 5 and the fourth — NX
-  node→client — confidentiality 1, which is a statement about *whom* the node is encrypting to
+  node→client — confidentiality 1, which is a statement about _whom_ the node is encrypting to
   rather than about forward secrecy; forward secrecy holds there through `ee`, which is exactly
   the passive/retroactive guarantee the web row of the table above claims (§8.10). It does
   **not** hold for the IK message-1 handshake payload, which
-  Noise grades confidentiality 2: an observer who recorded the handshake and *later obtains the
-  node agreement private key* can decrypt it, exposing the §7.4 client certificate, the client
+  Noise grades confidentiality 2: an observer who recorded the handshake and _later obtains the
+  node agreement private key_ can decrypt it, exposing the §7.4 client certificate, the client
   identity key and its `ryco.client-key.v1` fingerprint, and the account and authority claim —
   certification metadata only, never application data (§8.10, §2.6). The exposure window per
   prekey is bounded by `E2EE_PREKEY_LIFETIME` and by destruction of the outgoing key after
-  `E2EE_PREKEY_ROTATION_OVERLAP` (§6.4). Compromise of *live* session state is excluded (§1.3).
+  `E2EE_PREKEY_ROTATION_OVERLAP` (§6.4). Compromise of _live_ session state is excluded (§1.3).
 - **Active Hub**: on the mutually verified signed native tier, a malicious or compelled Hub can
   complete neither endpoint of the session. It cannot originate the client, because the node
   accepts only client identity keys the owner approved for the claimed Hub/account namespace,
@@ -139,11 +139,11 @@ authoritative wherever this table is summarised in user-facing text**.
 
 ### 2.3 Node admission policies
 
-| Policy state | Effect | Whole-node active-Hub protection |
-| --- | --- | --- |
-| `requireE2EE=false`, `requireApprovedClientE2EE=false` (compatibility default) | Legacy plaintext admitted; every legacy acceptance by an E2EE-capable node is counted (§12) — as a lower bound the Hub can inflate but never suppress (§12.5, §17.15) | No |
-| `requireE2EE=true` | Plaintext rejected; unsigned web NX still admitted | **No** — a malicious Hub can still originate an unsigned web NX session |
-| `requireApprovedClientE2EE=true` | Implies effective `requireE2EE=true`; admits only approved signed native IK clients; disables web and legacy access | **Yes** — the only whole-node policy |
+| Policy state                                                                   | Effect                                                                                                                                                                | Whole-node active-Hub protection                                        |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `requireE2EE=false`, `requireApprovedClientE2EE=false` (compatibility default) | Legacy plaintext admitted; every legacy acceptance by an E2EE-capable node is counted (§12) — as a lower bound the Hub can inflate but never suppress (§12.5, §17.15) | No                                                                      |
+| `requireE2EE=true`                                                             | Plaintext rejected; unsigned web NX still admitted                                                                                                                    | **No** — a malicious Hub can still originate an unsigned web NX session |
+| `requireApprovedClientE2EE=true`                                               | Implies effective `requireE2EE=true`; admits only approved signed native IK clients; disables web and legacy access                                                   | **Yes** — the only whole-node policy                                    |
 
 `requireE2EE` closes the plaintext downgrade path but does not create a whole-node active-Hub
 guarantee. Only `requireApprovedClientE2EE` does, and it intentionally disables web and legacy
@@ -184,6 +184,7 @@ may be described in the other's terms.
   and may not do and what the owner MUST be shown; §17.11 records the residual risk. Disclosure
   text MUST NOT describe native downgrade resistance as surviving reinstall, restore, or device
   transfer.
+
 - **Web.** The web client retains no durable latch, no pin of any kind, and no durable
   policy-generation memory (§5.7, §13.1). It sets an in-memory latch on the **first capability
   statement it validates** for a node in an application session (§12.1). Before that first
@@ -275,14 +276,14 @@ and only when, they appear in all capitals.
   are forbidden for these values in any conforming implementation.
 
 Verified-behavior citations of the form "(verified against `<path>:<line>`, 2026-07-30)" appear
-only in paragraphs marked *Note (non-normative)* and refer to repository-relative paths in this
+only in paragraphs marked _Note (non-normative)_ and refer to repository-relative paths in this
 repository at the time of writing.
 
 ### 3.2 Constants
 
 This table is the single source of truth for every constant in this protocol. Later sections
 reference constants by name and never restate their values, with one bounded exception: the
-paragraphs explicitly marked *Note (non-normative)* that work an arithmetic example may show the
+paragraphs explicitly marked _Note (non-normative)_ that work an arithmetic example may show the
 numbers, because an example with only names in it demonstrates nothing. Those notes are never
 normative and never define a value. Registry **values** — inner and negotiation record types,
 suite ids, direction labels (§3.4), and the encrypted error codes (§11.3) — are not constants in
@@ -295,11 +296,11 @@ The post-strip discriminators this protocol itself defines go the other way:
 `E2EE_ENVELOPE_DISCRIMINATOR` and `E2EE_NEGOTIATION_DISCRIMINATOR` are named constants of this
 table and the §3.4 registry refers to them by name; the legacy-JSON first bytes that registry also
 enumerates are properties of the pinned RPC serialization rather than constants of this protocol.
-The rows marked area *Relay chunking*
-or *Relay connection*
+The rows marked area _Relay chunking_
+or _Relay connection_
 are defined by the relay protocol and its message-chunking layer
 (`packages/contracts/src/relay.ts`, `packages/shared/src/relayMessageChunks.ts`); the row marked
-area *RPC keepalive* is defined by the pinned RPC client; and the two `ED25519_*` rows are defined
+area _RPC keepalive_ is defined by the pinned RPC client; and the two `ED25519_*` rows are defined
 by the node identity primitives. All four groups are restated here for
 cross-checking and their defining modules remain authoritative for them. One row in those groups —
 `RELAY_CLOSE_REASONS` — **names** a relay-owned set without restating its members: the set is large
@@ -307,117 +308,117 @@ enough that a copy here would become a second definition site rather than a cros
 forbids forking a relay-owned registry. The name exists so §11.1 can state membership over one
 name, exactly as `RELAY_CAPABILITY_LITERALS` exists so §8.3 element 11 can.
 
-| Area | Name | Value | Meaning |
-| --- | --- | --- | --- |
-| Wire | `E2EE_ENVELOPE_DISCRIMINATOR` | `0x01` | First post-strip byte of every E2EE envelope |
-| Wire | `E2EE_NEGOTIATION_DISCRIMINATOR` | `0x02` | First post-strip byte of every negotiation record |
-| Wire | `E2EE_PROTOCOL_VERSION` | `0x01` | Envelope `version` field value for protocol version 1 |
-| Wire | `E2EE_ENVELOPE_HEADER_BYTES` | 15 | Envelope header length: discriminator, version, suite, epoch, counter |
-| Wire | `E2EE_EPOCH_FIELD_BYTES` | 4 | Epoch field width (`uint32be`) |
-| Wire | `E2EE_COUNTER_FIELD_BYTES` | 8 | Counter field width (`uint64be`) |
-| Wire | `E2EE_AEAD_TAG_BYTES` | 16 | ChaCha20-Poly1305 authentication tag length |
-| Wire | `E2EE_INNER_TYPE_BYTES` | 1 | Encrypted inner-record type prefix length |
-| Wire | `E2EE_ENVELOPE_OVERHEAD_BYTES` | 32 | `E2EE_ENVELOPE_HEADER_BYTES + E2EE_AEAD_TAG_BYTES + E2EE_INNER_TYPE_BYTES`; also the minimum envelope length |
-| Wire | `E2EE_AEAD_NONCE_BYTES` | 12 | AEAD nonce length: epoch ‖ counter, exactly the ChaCha20-Poly1305 nonce |
-| Wire | `E2EE_SESSION_BINDING_HASH_BYTES` | 32 | Length of `sessionBindingHash` (SHA-256 output, §8) |
-| Wire | `E2EE_DIRECTION_LABEL_BYTES` | 3 | Length of a direction label (§3.4) |
-| Wire | `E2EE_AAD_BYTES` | 50 | AAD length: header ‖ `sessionBindingHash` ‖ direction label |
-| Wire | `E2EE_CONTEXT_COMMITMENT_BYTES` | 32 | Length of `contextCommitment` (SHA-256 output, §8) |
-| Wire | `E2EE_HANDSHAKE_NONCE_BYTES` | 32 | Length of the `E2EEClientHello` `clientNonce` field (§8) |
-| Wire | `E2EE_CONFIRMATION_BYTES` | 32 | Length of `serverConfirmation` (HMAC-SHA-256 output, §8) |
-| Wire | `E2EE_CLOSE_COMMITMENT_BYTES` | 32 | Length of `closeCommitment` (SHA-256 output, §10) |
-| Wire | `E2EE_ERROR_BODY_MAX_BYTES` | 16 | Maximum `E2EEError` body length (§11) |
-| Negotiation | `E2EE_CLIENT_HELLO_MAX_BYTES` | 4,096 | Maximum total `E2EEClientHello` record length. Deliberate headroom, not a derived bound: the worst conforming record is far smaller, and no S-invariant ties this value to the record's structure. A revision that grows §7.4 or §8.5 MUST re-check the worst case against this value by hand, because no fixture will fail first |
-| Negotiation | `E2EE_SERVER_ACCEPT_MAX_BYTES` | 8,192 | Maximum total `E2EEServerAccept` record length (carries the Noise response, the `channel.open` authority echo, and the prekey binding). Deliberate headroom on the same terms as the row above, with the same hand-check obligation on any revision that grows §8.7 |
-| Negotiation | `E2EE_HANDSHAKE_REJECT_BYTES` | 64 | Exact total `E2EEHandshakeReject` record length — the only pre-key error record, generic and fixed-size |
-| Negotiation | `E2EE_HANDSHAKE_REJECT_PAD_BYTES` | 60 | Zero-byte padding length inside `E2EEHandshakeReject`, sized so the record totals exactly `E2EE_HANDSHAKE_REJECT_BYTES` (§11) |
-| Negotiation | `E2EE_HUB_ORIGIN_MAX_BYTES` | 128 | Maximum UTF-8 byte length of a canonical Hub origin appearing in any E2EE transcript; deliberately tighter than the bound the node identity primitives apply, so the §3.2.1 size invariants close (§7.1) |
-| Negotiation | `E2EE_SUITE_REGISTRY_MAX_ENTRIES` | 8 | Maximum number of suite ids a capability statement may offer (§7.6 element 9) |
-| Negotiation | `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES` | 5,120 | Maximum capability-statement transcript length (§7.6); the transcript is signed through the fixed-size §7.2.1 envelope, so this bound is set by the carrier arithmetic and not by the signing interface |
-| Negotiation | `E2EE_STATEMENT_WRAPPER_MAX_BYTES` | 70 | Maximum canonical-CBOR overhead the `[ bstr(transcript), bstr(signature) ]` statement wrapper adds to a transcript of at most `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES` bytes (§7.6) |
-| Negotiation | `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` | 5,190 | Maximum capability-statement CBOR length before base64url encoding; derived by §3.2.1 S4 |
-| Negotiation | `E2EE_CAPABILITY_CARRIER_TAG` | `"ryco.e2ee.capability.v1"` | Reserved `_tag` value of the capability carrier (§5.3) |
-| Negotiation | `E2EE_CAPABILITY_CARRIER_FIXED_BYTES` | 49 | Length of the §5.3 carrier JSON with an empty `statement` member — the fixed wrapper the base64url statement text is placed into |
-| Negotiation | `E2EE_CAPABILITY_CARRIER_MAX_BYTES` | 6,969 | Maximum carrier JSON length; derived by §3.2.1 S5 |
-| Negotiation | `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES` | 8,192 | Smallest Hub-asserted `maxDataChunkBytes` on which the advertisement is serviceable (§5.5); satisfies §3.2.1 S6 |
-| Negotiation | `E2EE_ACCOUNT_ID_MAX_BYTES` | 256 | Maximum UTF-8 byte length of an account identifier carried in any E2EE structure (§7, §8) |
-| Negotiation | `E2EE_NEGOTIATION_BUFFER_MAX_BYTES` | `maxQueuedBytes − maxControlFrameBytes` | Total plaintext bytes an E2EE-capable client MAY hold in its `negotiating` send buffers, **summed across every channel on one relay connection**: the same aggregate send budget the relay send queue enforces, charged as though the buffered bytes had already been enqueued (§4.4). Derived from the Hub-asserted `ready` limits, so it is a per-connection value rather than a literal — and the accounting is per connection for the same reason, because that is the scope of the single send queue it mirrors (§4.4) |
-| Timers | `T_ADV` | 1,500 ms | Client advertisement wait, measured from receipt of `channel.accept`. Its value is fixed by the §3.2.2 L1 keepalive budget together with `T_HANDSHAKE`; it is not chosen independently |
-| Timers | `T_HANDSHAKE` | 3,000 ms | **Client** handshake deadline, from `E2EEClientHello` emit (§4.4 K15). Bounded by §3.2.2 L1 |
-| Timers | `T_HANDSHAKE_NODE` | 10,000 ms | **Node** handshake deadline, from advertisement emit, extending through the authenticated implicit client finish (§8.9). The `negotiating`-phase half is enforced only under effective `requireE2EE` (row N8); the implicit-finish half is enforced always (§8.9). Bounded below by §3.2.2 L2 |
-| Timers | `T_KEEPALIVE_FLUSH_MARGIN` | 500 ms | Budget reserved inside `RPC_KEEPALIVE_INTERVAL` for the tail of a window in which an E2EE-capable client cannot write the keepalive `Ping`. It is spent two different ways and both are invariants over this one name: flushing the single stalled `Ping` and receiving its `Pong` after a negotiating window (§3.2.2 L1), and completing channel teardown after a close phase that swallowed one (§3.2.2 L5) |
-| Timers | `T_CLOSE` | 1,500 ms | Close-exchange deadline: maximum wait for the peer's next close-machine record after sending one's own, at every step of the close exchange, before the close is reported unclean (§10). Its value is fixed by the §3.2.2 L5 keepalive budget together with `T_CLOSE_LINGER_MAX`; it is not chosen independently. L5 charges it **twice**, because §10.2 admits two `T_CLOSE`-bounded waits on the simultaneous path and only one on either sequential path; it was reduced from a value equal to `RPC_KEEPALIVE_INTERVAL`, and again when L5 was re-derived over the two-wait worst case |
-| Timers | `T_CLOSE_LINGER_MAX` | 1,000 ms | Maximum last-record linger before the outer `channel.close` (§10.3). An implementation chooses any bound at most this; the constant exists so the close phase is bounded by named values and §3.2.2 L5 is evaluable from this table |
-| Timers | `E2EE_CAPABILITY_STATEMENT_VALIDITY` | 600 s | Maximum capability-statement validity interval (`expiresAt − issuedAt`) |
-| Timers | `E2EE_MAX_CLOCK_SKEW` | 300 s | Maximum verifier clock skew for statement and prekey validity checks |
-| Timers | `E2EE_PREKEY_LIFETIME` | 30 days | Agreement-prekey certificate lifetime (§6) |
-| Timers | `E2EE_PREKEY_ROTATION_OVERLAP` | 48 hours | Staged-rotation window during which outgoing and incoming prekeys both verify (§6) |
-| Timers | `E2EE_FALLBACK_OBSERVATION_WINDOW` | 14 days | Fallback-observation window of representative use that MUST precede the `requireE2EE` default flip; the flip criterion assessed over it is a maintainer judgement, not a zero test (§12.3, §12.5) |
-| Rekey | `E2EE_REKEY_MAX_RECORDS` | 65,536 | Per-direction protected-record count threshold *N* (§9) |
-| Rekey | `E2EE_REKEY_MAX_BYTES` | 268,435,456 | Per-direction authenticated inner-plaintext byte threshold *B* (§9) |
-| Rekey | `E2EE_EPOCH_MAX` | 2^32 − 1 | Epoch exhaustion bound; reaching it terminates the channel before wrap (§9) |
-| Rekey | `E2EE_COUNTER_MAX` | 2^64 − 1 | Counter exhaustion bound; reaching it terminates the channel before wrap (§9) |
-| Rekey | `E2EE_CLOSE_RECORDS_RESERVED` | 2 | Per-direction record capacity — under **both** §9.4 thresholds, not only the counter — that an endpoint MUST hold in reserve for the authenticated close; equals the maximum number of close-machine records one endpoint protects in one exchange (§9.6, §10.2). It is **not** the whole §9.6 post-application reserve, which is this plus `E2EE_ERROR_RECORDS_RESERVED` |
-| Rekey | `E2EE_ERROR_RECORDS_RESERVED` | 1 | Per-direction record capacity an endpoint MUST hold in reserve, in addition to `E2EE_CLOSE_RECORDS_RESERVED` and under both §9.4 thresholds, for the single terminal `E2EEError` a FATAL-POST detected during or after the close machine requires (§9.6, §10.2, §11.3). One is the exact maximum: §11.3 makes an `E2EEError` terminal in both directions, so no exchange contains two |
-| Keys | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES` | 32 | X25519 agreement public-key length (§6, §7) |
-| Keys | `E2EE_KEY_FINGERPRINT_BYTES` | 32 | Key-fingerprint digest length (SHA-256 output, §7) |
-| Keys | `E2EE_SECRET_BYTES` | 32 | Length of every handshake-derived secret and per-epoch AEAD key (HKDF-Expand output length; equals the ChaCha20-Poly1305 key length) (§6, §8, §9) |
-| Keys | `ED25519_PUBLIC_KEY_BYTES` | 32 | Ed25519 public-key length; defined by the node identity primitives and restated for cross-checking (§7) |
-| Keys | `ED25519_SIGNATURE_BYTES` | 64 | Ed25519 signature length; defined by the node identity primitives and restated for cross-checking (§7) |
-| Keys | `P256_PUBLIC_KEY_BYTES` | 65 | P-256 public-key length: X9.63 uncompressed point `0x04 ‖ X ‖ Y` (§7) |
-| Keys | `P256_SIGNATURE_BYTES` | 64 | P-256 ECDSA signature length: fixed-width raw `r ‖ s` (§7) |
-| Signing | `E2EE_SIGNING_INPUT_MAX_BYTES` | 4,096 | Hard input bound of the node identity signing interface: it rejects any input outside 1..this many bytes, so no signed structure of this protocol may exceed it (§7.2) |
-| Signing | `E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES` | 1,024 | Maximum length of an E2EE transcript that is signed directly, without the §7.2.1 envelope (§7.3, §7.4, §7.5) |
-| Signing | `E2EE_TRANSCRIPT_DIGEST_BYTES` | 32 | Transcript-digest length inside the §7.2.1 signing envelope (SHA-256 output) |
-| Signing | `E2EE_CAPABILITY_SIGNING_ENVELOPE_BYTES` | 72 | Exact encoded length of the §7.2.1 capability signing envelope, for every input |
-| Chains | `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` | 8 | Maximum identity-continuity certificate chain length (§13) |
-| Client records | `E2EE_PENDING_CLIENTS_MAX_GLOBAL` | 64 | Global cap on pending client-key records (§13) |
-| Client records | `E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT` | 8 | Pending client-key records per (Hub origin, account id) (§13) |
-| Client records | `E2EE_PENDING_CLIENT_RETENTION` | 7 days | Pending client-key record retention (§13) |
-| Client records | `E2EE_APPROVED_CLIENTS_MAX` | 256 | Maximum approved client-key records (§13) |
-| Client records | `E2EE_REVOKED_CLIENTS_RETAINED_MAX` | 1,024 | Maximum retained revoked client-key records; only the oldest revoked records past this cap are evicted (§13) |
-| Client records | `E2EE_LAST_SEEN_WRITE_INTERVAL` | 3,600 s | Last-seen writes per record are coalesced to at most one per interval (§13) |
-| Client records | `E2EE_CLIENT_DISPLAY_LABEL_MAX_CHARS` | 100 | Maximum owner-assigned display-label length in a client authorization record (§13) |
-| Client records | `E2EE_PAIRING_WINDOW` | 300 s | Maximum duration of an owner-opened pairing window on the node, during which the owner-bound pending-cap reservation rule of §13.6 applies (§13.6) |
-| Client records | `E2EE_PAIRING_RESERVATION_LIFETIME` | 3,600 s | Maximum age, measured from record creation, for which a pending record created under an owner-opened pairing window retains its reservation against a later pairing-window eviction (§13.6). Sized for the human comparison ceremony of §13.2 steps 4–5 with margin, and deliberately far below `E2EE_PENDING_CLIENT_RETENTION` so a reservation the owner never converts to `approved` stops occupying the reserved class within the hour rather than within the week (§3.2.2 L4). Its equality with `E2EE_LAST_SEEN_WRITE_INTERVAL` is coincidental: the two bound unrelated things and no invariant couples them |
-| Client trust state | `E2EE_PIN_NODE_ID_HINTS_MAX` | 8 | Maximum Hub-minted node ids retained per client-side pin record as untrusted selection-resolution hints; oldest-first eviction (§13.1) |
-| Instrumentation | `E2EE_FALLBACK_RING_SIZE` | 32 | Bounded ring of most recent fallback occurrences retained by the node; occurrences evicted past it are counted by the per-class ring-overflow counter, which is what tells §12.3 the ring is an incomplete account of a window (§12.3, §12.5) |
-| Instrumentation | `E2EE_FALLBACK_WRITE_INTERVAL` | 3,600 s | Fallback-counter durable writes are coalesced to at most one per interval per class, after a leading-edge durable write (§12.5). Deliberately equal to `E2EE_LAST_SEEN_WRITE_INTERVAL`, which it mirrors |
-| Pre-auth bounds | `E2EE_HANDSHAKE_RATE_BURST` | 8 | Token-bucket capacity of the node's per-Hub-origin handshake-attempt budget; satisfies §3.2.2 L3 (§15) |
-| Pre-auth bounds | `E2EE_HANDSHAKE_RATE_REFILL` | 2 per second | Refill rate of that bucket, per Hub origin. Sized at or above the per-node ticket-issuance rate the Hub deployment authorizes, so a conforming node never refuses a handshake the Hub was entitled to authorize; a deployment MUST re-check this against its Hub's ticket rate limits (§15) |
-| Display | `E2EE_SAFETY_NUMBER_DIGITS` | 60 decimal digits, rendered as 12 groups of 5, separated by single spaces | Native long-term safety-number output format; roughly 199 displayed bits against `E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS`; the fixed length is the checksum (§13.4) |
-| Display | `E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS` | 60 | Required minimum anti-grinding entropy of the rendered native safety number. The adversary model is offline: the value is long-term and an attacker may grind key material against it without interacting (§13.4) |
-| Display | `E2EE_WEB_SAS_CHARS` | 8 Crockford base32 characters, rendered 4-4, separated by a single hyphen | `WebSAS` output format; `E2EE_WEB_SAS_HKDF_BYTES` × 8 displayed bits against `E2EE_WEB_SAS_MIN_DISPLAYED_BITS` (§13.5) |
-| Display | `E2EE_WEB_SAS_MIN_DISPLAYED_BITS` | 30 | Required minimum displayed entropy of the rendered `WebSAS`. Unlike `E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS` this floor is **not** an offline work factor: §13.5 derives it from the grinding window an interposer actually has — `T_HANDSHAKE`, at one handshake attempt per channel (§8.1) — and that derivation, not this number, is the justification (§13.5, §17.5) |
-| Display | `E2EE_SAFETY_NUMBER_GROUP_BYTES` | 5 | HKDF output bytes consumed per displayed safety-number group (§13) |
-| Display | `E2EE_SAFETY_NUMBER_GROUP_MODULUS` | 100,000 | Modulus reducing each safety-number group to its five-digit decimal form (§13) |
-| Display | `E2EE_SAFETY_NUMBER_HKDF_BYTES` | 60 | Total safety-number HKDF-Expand output length (§13) |
-| Display | `E2EE_WEB_SAS_HKDF_BYTES` | 5 | `WebSAS` HKDF-Expand output length — exactly the displayed bits (§13) |
-| Display | `E2EE_CROCKFORD_ALPHABET` | `0123456789ABCDEFGHJKMNPQRSTVWXYZ` | Crockford base32 alphabet used by `WebSAS` rendering (§13) |
-| Encoding | `E2EE_CBOR_CODEC` | `cborg@5.1.7` | Pinned canonical-CBOR codec and version (§3.6) |
-| Dependencies | `E2EE_NOBLE_CURVES_AUDIT_BASELINE` | `@noble/curves@1.6.0` | Independently audited baseline for the X25519/Ed25519/P-256 dependency (Cure53, September 2024; §14) |
-| Dependencies | `E2EE_NOBLE_CIPHERS_AUDIT_BASELINE` | `@noble/ciphers@1.0.0` | Independently audited baseline for the ChaCha20-Poly1305 dependency (Cure53, September 2024; §14) |
-| Dependencies | `E2EE_NOBLE_HASHES_AUDIT_BASELINE` | `@noble/hashes@1.0.0` | Independently audited baseline for the SHA-256/HMAC/HKDF dependency (Cure53, January 2022; §14) |
-| Handshake | `NOISE_SPEC_REVISION` | 34 | Noise Protocol Framework specification revision the suite registry is defined against |
-| Relay chunking | `RELAY_CHUNK_CAPABILITY_PRELUDE` | `0x20 0x09 0x0D 0x0A 0x20 0x09 0x0D 0x0A` | JSON-whitespace prelude advertising chunk support on unchunked payloads |
-| Relay chunking | `RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES` | 8 | Length of `RELAY_CHUNK_CAPABILITY_PRELUDE`, named so the §3.2.1 carrier invariants are expressible over constant names alone |
-| Relay chunking | `RELAY_CHUNK_MAGIC` | `0x00` | First byte of every chunk payload |
-| Relay chunking | `RELAY_CHUNK_HEADER_BYTES` | 8 | Chunk header: magic (1), version (1) = `0x01`, flags (1), reserved (1) = `0x00`, totalBytes (4, `uint32be`) |
-| Relay chunking | `RELAY_MAX_RPC_MESSAGE_BYTES` | 4,194,304 | Hard ceiling on a reassembled message |
-| Relay chunking | `RELAY_MAX_DATA_CHUNK_BYTES` | 262,144 | Maximum Hub-asserted data-chunk size |
-| Relay chunking | `RELAY_MIN_DATA_CHUNK_BYTES` | 1,024 | Minimum Hub-asserted data-chunk size the relay protocol admits; strictly below `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES` (§3.2.1 S7, §5.5, §17.13) |
-| Relay connection | `RELAY_CAPABILITY_LITERALS` | `{ "ryco.rpc" }` | The relay contract's closed set of channel capability literals ([relay-protocol.md](./relay-protocol.md), Frame classes). This protocol **adds none** (§1.1) and validates against the relay contract's current set; it is named here only so §8.3 element 11 and the §13.6 `capabilitySet` vocabulary reference one name instead of restating the literal |
-| Relay connection | `RELAY_CLOSE_REASONS` | The relay contract's closed close-reason set ([relay-protocol.md](./relay-protocol.md)); named, deliberately not enumerated here | The vocabulary every close on a relay channel draws from. This protocol uses exactly one member, `channel_rejected`, and **adds none** (§1.1, §11.1); the relay contract's defining module remains authoritative for the members, and this row exists only so §11.1 states membership over one name rather than asserting the set's contents |
-| Relay connection | `RELAY_MAX_CHANNELS` | 8 | Maximum simultaneous channels on one relay connection. The Hub asserts `maxChannels` in the `ready` frame, but the frame schema rejects any value above this bound, so the untrusted Hub can lower it and cannot raise it. Combined with §4.4's one-handshake-per-channel rule this is the **structural** bound on a node's concurrent handshakes (§15) |
-| RPC keepalive | `RPC_KEEPALIVE_INTERVAL` | 5,000 ms | Period of the pinned RPC client's keepalive fiber (§3.2.2 L1) |
+| Area               | Name                                       | Value                                                                                                                            | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------ | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Wire               | `E2EE_ENVELOPE_DISCRIMINATOR`              | `0x01`                                                                                                                           | First post-strip byte of every E2EE envelope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Wire               | `E2EE_NEGOTIATION_DISCRIMINATOR`           | `0x02`                                                                                                                           | First post-strip byte of every negotiation record                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Wire               | `E2EE_PROTOCOL_VERSION`                    | `0x01`                                                                                                                           | Envelope `version` field value for protocol version 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Wire               | `E2EE_ENVELOPE_HEADER_BYTES`               | 15                                                                                                                               | Envelope header length: discriminator, version, suite, epoch, counter                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Wire               | `E2EE_EPOCH_FIELD_BYTES`                   | 4                                                                                                                                | Epoch field width (`uint32be`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Wire               | `E2EE_COUNTER_FIELD_BYTES`                 | 8                                                                                                                                | Counter field width (`uint64be`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Wire               | `E2EE_AEAD_TAG_BYTES`                      | 16                                                                                                                               | ChaCha20-Poly1305 authentication tag length                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Wire               | `E2EE_INNER_TYPE_BYTES`                    | 1                                                                                                                                | Encrypted inner-record type prefix length                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Wire               | `E2EE_ENVELOPE_OVERHEAD_BYTES`             | 32                                                                                                                               | `E2EE_ENVELOPE_HEADER_BYTES + E2EE_AEAD_TAG_BYTES + E2EE_INNER_TYPE_BYTES`; also the minimum envelope length                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Wire               | `E2EE_AEAD_NONCE_BYTES`                    | 12                                                                                                                               | AEAD nonce length: epoch ‖ counter, exactly the ChaCha20-Poly1305 nonce                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Wire               | `E2EE_SESSION_BINDING_HASH_BYTES`          | 32                                                                                                                               | Length of `sessionBindingHash` (SHA-256 output, §8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Wire               | `E2EE_DIRECTION_LABEL_BYTES`               | 3                                                                                                                                | Length of a direction label (§3.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Wire               | `E2EE_AAD_BYTES`                           | 50                                                                                                                               | AAD length: header ‖ `sessionBindingHash` ‖ direction label                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Wire               | `E2EE_CONTEXT_COMMITMENT_BYTES`            | 32                                                                                                                               | Length of `contextCommitment` (SHA-256 output, §8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Wire               | `E2EE_HANDSHAKE_NONCE_BYTES`               | 32                                                                                                                               | Length of the `E2EEClientHello` `clientNonce` field (§8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Wire               | `E2EE_CONFIRMATION_BYTES`                  | 32                                                                                                                               | Length of `serverConfirmation` (HMAC-SHA-256 output, §8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Wire               | `E2EE_CLOSE_COMMITMENT_BYTES`              | 32                                                                                                                               | Length of `closeCommitment` (SHA-256 output, §10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Wire               | `E2EE_ERROR_BODY_MAX_BYTES`                | 16                                                                                                                               | Maximum `E2EEError` body length (§11)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Negotiation        | `E2EE_CLIENT_HELLO_MAX_BYTES`              | 4,096                                                                                                                            | Maximum total `E2EEClientHello` record length. Deliberate headroom, not a derived bound: the worst conforming record is far smaller, and no S-invariant ties this value to the record's structure. A revision that grows §7.4 or §8.5 MUST re-check the worst case against this value by hand, because no fixture will fail first                                                                                                                                                                                                                                                                                   |
+| Negotiation        | `E2EE_SERVER_ACCEPT_MAX_BYTES`             | 8,192                                                                                                                            | Maximum total `E2EEServerAccept` record length (carries the Noise response, the `channel.open` authority echo, and the prekey binding). Deliberate headroom on the same terms as the row above, with the same hand-check obligation on any revision that grows §8.7                                                                                                                                                                                                                                                                                                                                                 |
+| Negotiation        | `E2EE_HANDSHAKE_REJECT_BYTES`              | 64                                                                                                                               | Exact total `E2EEHandshakeReject` record length — the only pre-key error record, generic and fixed-size                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Negotiation        | `E2EE_HANDSHAKE_REJECT_PAD_BYTES`          | 60                                                                                                                               | Zero-byte padding length inside `E2EEHandshakeReject`, sized so the record totals exactly `E2EE_HANDSHAKE_REJECT_BYTES` (§11)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Negotiation        | `E2EE_HUB_ORIGIN_MAX_BYTES`                | 128                                                                                                                              | Maximum UTF-8 byte length of a canonical Hub origin appearing in any E2EE transcript; deliberately tighter than the bound the node identity primitives apply, so the §3.2.1 size invariants close (§7.1)                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Negotiation        | `E2EE_SUITE_REGISTRY_MAX_ENTRIES`          | 8                                                                                                                                | Maximum number of suite ids a capability statement may offer (§7.6 element 9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Negotiation        | `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES`     | 5,120                                                                                                                            | Maximum capability-statement transcript length (§7.6); the transcript is signed through the fixed-size §7.2.1 envelope, so this bound is set by the carrier arithmetic and not by the signing interface                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Negotiation        | `E2EE_STATEMENT_WRAPPER_MAX_BYTES`         | 70                                                                                                                               | Maximum canonical-CBOR overhead the `[ bstr(transcript), bstr(signature) ]` statement wrapper adds to a transcript of at most `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES` bytes (§7.6)                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Negotiation        | `E2EE_CAPABILITY_STATEMENT_MAX_BYTES`      | 5,190                                                                                                                            | Maximum capability-statement CBOR length before base64url encoding; derived by §3.2.1 S4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Negotiation        | `E2EE_CAPABILITY_CARRIER_TAG`              | `"ryco.e2ee.capability.v1"`                                                                                                      | Reserved `_tag` value of the capability carrier (§5.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Negotiation        | `E2EE_CAPABILITY_CARRIER_FIXED_BYTES`      | 49                                                                                                                               | Length of the §5.3 carrier JSON with an empty `statement` member — the fixed wrapper the base64url statement text is placed into                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Negotiation        | `E2EE_CAPABILITY_CARRIER_MAX_BYTES`        | 6,969                                                                                                                            | Maximum carrier JSON length; derived by §3.2.1 S5                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Negotiation        | `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`       | 8,192                                                                                                                            | Smallest Hub-asserted `maxDataChunkBytes` on which the advertisement is serviceable (§5.5); satisfies §3.2.1 S6                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Negotiation        | `E2EE_ACCOUNT_ID_MAX_BYTES`                | 256                                                                                                                              | Maximum UTF-8 byte length of an account identifier carried in any E2EE structure (§7, §8)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Negotiation        | `E2EE_NEGOTIATION_BUFFER_MAX_BYTES`        | `maxQueuedBytes − maxControlFrameBytes`                                                                                          | Total plaintext bytes an E2EE-capable client MAY hold in its `negotiating` send buffers, **summed across every channel on one relay connection**: the same aggregate send budget the relay send queue enforces, charged as though the buffered bytes had already been enqueued (§4.4). Derived from the Hub-asserted `ready` limits, so it is a per-connection value rather than a literal — and the accounting is per connection for the same reason, because that is the scope of the single send queue it mirrors (§4.4)                                                                                         |
+| Timers             | `T_ADV`                                    | 1,500 ms                                                                                                                         | Client advertisement wait, measured from receipt of `channel.accept`. Its value is fixed by the §3.2.2 L1 keepalive budget together with `T_HANDSHAKE`; it is not chosen independently                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Timers             | `T_HANDSHAKE`                              | 3,000 ms                                                                                                                         | **Client** handshake deadline, from `E2EEClientHello` emit (§4.4 K15). Bounded by §3.2.2 L1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Timers             | `T_HANDSHAKE_NODE`                         | 10,000 ms                                                                                                                        | **Node** handshake deadline, from advertisement emit, extending through the authenticated implicit client finish (§8.9). The `negotiating`-phase half is enforced only under effective `requireE2EE` (row N8); the implicit-finish half is enforced always (§8.9). Bounded below by §3.2.2 L2                                                                                                                                                                                                                                                                                                                       |
+| Timers             | `T_KEEPALIVE_FLUSH_MARGIN`                 | 500 ms                                                                                                                           | Budget reserved inside `RPC_KEEPALIVE_INTERVAL` for the tail of a window in which an E2EE-capable client cannot write the keepalive `Ping`. It is spent two different ways and both are invariants over this one name: flushing the single stalled `Ping` and receiving its `Pong` after a negotiating window (§3.2.2 L1), and completing channel teardown after a close phase that swallowed one (§3.2.2 L5)                                                                                                                                                                                                       |
+| Timers             | `T_CLOSE`                                  | 1,500 ms                                                                                                                         | Close-exchange deadline: maximum wait for the peer's next close-machine record after sending one's own, at every step of the close exchange, before the close is reported unclean (§10). Its value is fixed by the §3.2.2 L5 keepalive budget together with `T_CLOSE_LINGER_MAX`; it is not chosen independently. L5 charges it **twice**, because §10.2 admits two `T_CLOSE`-bounded waits on the simultaneous path and only one on either sequential path; it was reduced from a value equal to `RPC_KEEPALIVE_INTERVAL`, and again when L5 was re-derived over the two-wait worst case                           |
+| Timers             | `T_CLOSE_LINGER_MAX`                       | 1,000 ms                                                                                                                         | Maximum last-record linger before the outer `channel.close` (§10.3). An implementation chooses any bound at most this; the constant exists so the close phase is bounded by named values and §3.2.2 L5 is evaluable from this table                                                                                                                                                                                                                                                                                                                                                                                 |
+| Timers             | `E2EE_CAPABILITY_STATEMENT_VALIDITY`       | 600 s                                                                                                                            | Maximum capability-statement validity interval (`expiresAt − issuedAt`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Timers             | `E2EE_MAX_CLOCK_SKEW`                      | 300 s                                                                                                                            | Maximum verifier clock skew for statement and prekey validity checks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Timers             | `E2EE_PREKEY_LIFETIME`                     | 30 days                                                                                                                          | Agreement-prekey certificate lifetime (§6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Timers             | `E2EE_PREKEY_ROTATION_OVERLAP`             | 48 hours                                                                                                                         | Staged-rotation window during which outgoing and incoming prekeys both verify (§6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Timers             | `E2EE_FALLBACK_OBSERVATION_WINDOW`         | 14 days                                                                                                                          | Fallback-observation window of representative use that MUST precede the `requireE2EE` default flip; the flip criterion assessed over it is a maintainer judgement, not a zero test (§12.3, §12.5)                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Rekey              | `E2EE_REKEY_MAX_RECORDS`                   | 65,536                                                                                                                           | Per-direction protected-record count threshold _N_ (§9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Rekey              | `E2EE_REKEY_MAX_BYTES`                     | 268,435,456                                                                                                                      | Per-direction authenticated inner-plaintext byte threshold _B_ (§9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Rekey              | `E2EE_EPOCH_MAX`                           | 2^32 − 1                                                                                                                         | Epoch exhaustion bound; reaching it terminates the channel before wrap (§9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Rekey              | `E2EE_COUNTER_MAX`                         | 2^64 − 1                                                                                                                         | Counter exhaustion bound; reaching it terminates the channel before wrap (§9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Rekey              | `E2EE_CLOSE_RECORDS_RESERVED`              | 2                                                                                                                                | Per-direction record capacity — under **both** §9.4 thresholds, not only the counter — that an endpoint MUST hold in reserve for the authenticated close; equals the maximum number of close-machine records one endpoint protects in one exchange (§9.6, §10.2). It is **not** the whole §9.6 post-application reserve, which is this plus `E2EE_ERROR_RECORDS_RESERVED`                                                                                                                                                                                                                                           |
+| Rekey              | `E2EE_ERROR_RECORDS_RESERVED`              | 1                                                                                                                                | Per-direction record capacity an endpoint MUST hold in reserve, in addition to `E2EE_CLOSE_RECORDS_RESERVED` and under both §9.4 thresholds, for the single terminal `E2EEError` a FATAL-POST detected during or after the close machine requires (§9.6, §10.2, §11.3). One is the exact maximum: §11.3 makes an `E2EEError` terminal in both directions, so no exchange contains two                                                                                                                                                                                                                               |
+| Keys               | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES`          | 32                                                                                                                               | X25519 agreement public-key length (§6, §7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Keys               | `E2EE_KEY_FINGERPRINT_BYTES`               | 32                                                                                                                               | Key-fingerprint digest length (SHA-256 output, §7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Keys               | `E2EE_SECRET_BYTES`                        | 32                                                                                                                               | Length of every handshake-derived secret and per-epoch AEAD key (HKDF-Expand output length; equals the ChaCha20-Poly1305 key length) (§6, §8, §9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Keys               | `ED25519_PUBLIC_KEY_BYTES`                 | 32                                                                                                                               | Ed25519 public-key length; defined by the node identity primitives and restated for cross-checking (§7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Keys               | `ED25519_SIGNATURE_BYTES`                  | 64                                                                                                                               | Ed25519 signature length; defined by the node identity primitives and restated for cross-checking (§7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Keys               | `P256_PUBLIC_KEY_BYTES`                    | 65                                                                                                                               | P-256 public-key length: X9.63 uncompressed point `0x04 ‖ X ‖ Y` (§7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Keys               | `P256_SIGNATURE_BYTES`                     | 64                                                                                                                               | P-256 ECDSA signature length: fixed-width raw `r ‖ s` (§7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Signing            | `E2EE_SIGNING_INPUT_MAX_BYTES`             | 4,096                                                                                                                            | Hard input bound of the node identity signing interface: it rejects any input outside 1..this many bytes, so no signed structure of this protocol may exceed it (§7.2)                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Signing            | `E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES` | 1,024                                                                                                                            | Maximum length of an E2EE transcript that is signed directly, without the §7.2.1 envelope (§7.3, §7.4, §7.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Signing            | `E2EE_TRANSCRIPT_DIGEST_BYTES`             | 32                                                                                                                               | Transcript-digest length inside the §7.2.1 signing envelope (SHA-256 output)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Signing            | `E2EE_CAPABILITY_SIGNING_ENVELOPE_BYTES`   | 72                                                                                                                               | Exact encoded length of the §7.2.1 capability signing envelope, for every input                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Chains             | `E2EE_CONTINUITY_CHAIN_MAX_LENGTH`         | 8                                                                                                                                | Maximum identity-continuity certificate chain length (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Client records     | `E2EE_PENDING_CLIENTS_MAX_GLOBAL`          | 64                                                                                                                               | Global cap on pending client-key records (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Client records     | `E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT`     | 8                                                                                                                                | Pending client-key records per (Hub origin, account id) (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Client records     | `E2EE_PENDING_CLIENT_RETENTION`            | 7 days                                                                                                                           | Pending client-key record retention (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Client records     | `E2EE_APPROVED_CLIENTS_MAX`                | 256                                                                                                                              | Maximum approved client-key records (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Client records     | `E2EE_REVOKED_CLIENTS_RETAINED_MAX`        | 1,024                                                                                                                            | Maximum retained revoked client-key records; only the oldest revoked records past this cap are evicted (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Client records     | `E2EE_LAST_SEEN_WRITE_INTERVAL`            | 3,600 s                                                                                                                          | Last-seen writes per record are coalesced to at most one per interval (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Client records     | `E2EE_CLIENT_DISPLAY_LABEL_MAX_CHARS`      | 100                                                                                                                              | Maximum owner-assigned display-label length in a client authorization record (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Client records     | `E2EE_PAIRING_WINDOW`                      | 300 s                                                                                                                            | Maximum duration of an owner-opened pairing window on the node, during which the owner-bound pending-cap reservation rule of §13.6 applies (§13.6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Client records     | `E2EE_PAIRING_RESERVATION_LIFETIME`        | 3,600 s                                                                                                                          | Maximum age, measured from record creation, for which a pending record created under an owner-opened pairing window retains its reservation against a later pairing-window eviction (§13.6). Sized for the human comparison ceremony of §13.2 steps 4–5 with margin, and deliberately far below `E2EE_PENDING_CLIENT_RETENTION` so a reservation the owner never converts to `approved` stops occupying the reserved class within the hour rather than within the week (§3.2.2 L4). Its equality with `E2EE_LAST_SEEN_WRITE_INTERVAL` is coincidental: the two bound unrelated things and no invariant couples them |
+| Client trust state | `E2EE_PIN_NODE_ID_HINTS_MAX`               | 8                                                                                                                                | Maximum Hub-minted node ids retained per client-side pin record as untrusted selection-resolution hints; oldest-first eviction (§13.1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Instrumentation    | `E2EE_FALLBACK_RING_SIZE`                  | 32                                                                                                                               | Bounded ring of most recent fallback occurrences retained by the node; occurrences evicted past it are counted by the per-class ring-overflow counter, which is what tells §12.3 the ring is an incomplete account of a window (§12.3, §12.5)                                                                                                                                                                                                                                                                                                                                                                       |
+| Instrumentation    | `E2EE_FALLBACK_WRITE_INTERVAL`             | 3,600 s                                                                                                                          | Fallback-counter durable writes are coalesced to at most one per interval per class, after a leading-edge durable write (§12.5). Deliberately equal to `E2EE_LAST_SEEN_WRITE_INTERVAL`, which it mirrors                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Pre-auth bounds    | `E2EE_HANDSHAKE_RATE_BURST`                | 8                                                                                                                                | Token-bucket capacity of the node's per-Hub-origin handshake-attempt budget; satisfies §3.2.2 L3 (§15)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Pre-auth bounds    | `E2EE_HANDSHAKE_RATE_REFILL`               | 2 per second                                                                                                                     | Refill rate of that bucket, per Hub origin. Sized at or above the per-node ticket-issuance rate the Hub deployment authorizes, so a conforming node never refuses a handshake the Hub was entitled to authorize; a deployment MUST re-check this against its Hub's ticket rate limits (§15)                                                                                                                                                                                                                                                                                                                         |
+| Display            | `E2EE_SAFETY_NUMBER_DIGITS`                | 60 decimal digits, rendered as 12 groups of 5, separated by single spaces                                                        | Native long-term safety-number output format; roughly 199 displayed bits against `E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS`; the fixed length is the checksum (§13.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Display            | `E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS`    | 60                                                                                                                               | Required minimum anti-grinding entropy of the rendered native safety number. The adversary model is offline: the value is long-term and an attacker may grind key material against it without interacting (§13.4)                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Display            | `E2EE_WEB_SAS_CHARS`                       | 8 Crockford base32 characters, rendered 4-4, separated by a single hyphen                                                        | `WebSAS` output format; `E2EE_WEB_SAS_HKDF_BYTES` × 8 displayed bits against `E2EE_WEB_SAS_MIN_DISPLAYED_BITS` (§13.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Display            | `E2EE_WEB_SAS_MIN_DISPLAYED_BITS`          | 30                                                                                                                               | Required minimum displayed entropy of the rendered `WebSAS`. Unlike `E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS` this floor is **not** an offline work factor: §13.5 derives it from the grinding window an interposer actually has — `T_HANDSHAKE`, at one handshake attempt per channel (§8.1) — and that derivation, not this number, is the justification (§13.5, §17.5)                                                                                                                                                                                                                                             |
+| Display            | `E2EE_SAFETY_NUMBER_GROUP_BYTES`           | 5                                                                                                                                | HKDF output bytes consumed per displayed safety-number group (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Display            | `E2EE_SAFETY_NUMBER_GROUP_MODULUS`         | 100,000                                                                                                                          | Modulus reducing each safety-number group to its five-digit decimal form (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Display            | `E2EE_SAFETY_NUMBER_HKDF_BYTES`            | 60                                                                                                                               | Total safety-number HKDF-Expand output length (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Display            | `E2EE_WEB_SAS_HKDF_BYTES`                  | 5                                                                                                                                | `WebSAS` HKDF-Expand output length — exactly the displayed bits (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Display            | `E2EE_CROCKFORD_ALPHABET`                  | `0123456789ABCDEFGHJKMNPQRSTVWXYZ`                                                                                               | Crockford base32 alphabet used by `WebSAS` rendering (§13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Encoding           | `E2EE_CBOR_CODEC`                          | `cborg@5.1.7`                                                                                                                    | Pinned canonical-CBOR codec and version (§3.6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Dependencies       | `E2EE_NOBLE_CURVES_AUDIT_BASELINE`         | `@noble/curves@1.6.0`                                                                                                            | Independently audited baseline for the X25519/Ed25519/P-256 dependency (Cure53, September 2024; §14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Dependencies       | `E2EE_NOBLE_CIPHERS_AUDIT_BASELINE`        | `@noble/ciphers@1.0.0`                                                                                                           | Independently audited baseline for the ChaCha20-Poly1305 dependency (Cure53, September 2024; §14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Dependencies       | `E2EE_NOBLE_HASHES_AUDIT_BASELINE`         | `@noble/hashes@1.0.0`                                                                                                            | Independently audited baseline for the SHA-256/HMAC/HKDF dependency (Cure53, January 2022; §14)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Handshake          | `NOISE_SPEC_REVISION`                      | 34                                                                                                                               | Noise Protocol Framework specification revision the suite registry is defined against                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Relay chunking     | `RELAY_CHUNK_CAPABILITY_PRELUDE`           | `0x20 0x09 0x0D 0x0A 0x20 0x09 0x0D 0x0A`                                                                                        | JSON-whitespace prelude advertising chunk support on unchunked payloads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Relay chunking     | `RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES`     | 8                                                                                                                                | Length of `RELAY_CHUNK_CAPABILITY_PRELUDE`, named so the §3.2.1 carrier invariants are expressible over constant names alone                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Relay chunking     | `RELAY_CHUNK_MAGIC`                        | `0x00`                                                                                                                           | First byte of every chunk payload                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Relay chunking     | `RELAY_CHUNK_HEADER_BYTES`                 | 8                                                                                                                                | Chunk header: magic (1), version (1) = `0x01`, flags (1), reserved (1) = `0x00`, totalBytes (4, `uint32be`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Relay chunking     | `RELAY_MAX_RPC_MESSAGE_BYTES`              | 4,194,304                                                                                                                        | Hard ceiling on a reassembled message                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Relay chunking     | `RELAY_MAX_DATA_CHUNK_BYTES`               | 262,144                                                                                                                          | Maximum Hub-asserted data-chunk size                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Relay chunking     | `RELAY_MIN_DATA_CHUNK_BYTES`               | 1,024                                                                                                                            | Minimum Hub-asserted data-chunk size the relay protocol admits; strictly below `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES` (§3.2.1 S7, §5.5, §17.13)                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Relay connection   | `RELAY_CAPABILITY_LITERALS`                | `{ "ryco.rpc" }`                                                                                                                 | The relay contract's closed set of channel capability literals ([relay-protocol.md](./relay-protocol.md), Frame classes). This protocol **adds none** (§1.1) and validates against the relay contract's current set; it is named here only so §8.3 element 11 and the §13.6 `capabilitySet` vocabulary reference one name instead of restating the literal                                                                                                                                                                                                                                                          |
+| Relay connection   | `RELAY_CLOSE_REASONS`                      | The relay contract's closed close-reason set ([relay-protocol.md](./relay-protocol.md)); named, deliberately not enumerated here | The vocabulary every close on a relay channel draws from. This protocol uses exactly one member, `channel_rejected`, and **adds none** (§1.1, §11.1); the relay contract's defining module remains authoritative for the members, and this row exists only so §11.1 states membership over one name rather than asserting the set's contents                                                                                                                                                                                                                                                                        |
+| Relay connection   | `RELAY_MAX_CHANNELS`                       | 8                                                                                                                                | Maximum simultaneous channels on one relay connection. The Hub asserts `maxChannels` in the `ready` frame, but the frame schema rejects any value above this bound, so the untrusted Hub can lower it and cannot raise it. Combined with §4.4's one-handshake-per-channel rule this is the **structural** bound on a node's concurrent handshakes (§15)                                                                                                                                                                                                                                                             |
+| RPC keepalive      | `RPC_KEEPALIVE_INTERVAL`                   | 5,000 ms                                                                                                                         | Period of the pinned RPC client's keepalive fiber (§3.2.2 L1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
-*Note (non-normative)*: the relay-chunking rows were cross-checked against
+_Note (non-normative)_: the relay-chunking rows were cross-checked against
 `packages/shared/src/relayMessageChunks.ts:28-30` (prelude bytes) and
 `packages/contracts/src/relay.ts:36-49` (chunk header constants, message ceiling, chunk bounds);
 `RELAY_MAX_CHANNELS` against `packages/contracts/src/relay.ts:14` and the `ready`-limits schema
 check at `:191-194` (verified 2026-07-30).
 
-*Note (non-normative) — what the pinned keepalive actually does.* The pinned RPC client forks a
+_Note (non-normative) — what the pinned keepalive actually does._ The pinned RPC client forks a
 keepalive fiber at **RPC-protocol-socket construction**, not at `channel.accept`, and the fiber
 loops on a fixed `RPC_KEEPALIVE_INTERVAL` delay. On each tick it opens a timeout latch if the
 previous `Pong` never arrived, and otherwise clears the flag and writes a `Ping`. The latch is
@@ -430,7 +431,7 @@ any negotiation event may be assumed, and the dead-peer verdict lands somewhere 
 `[RPC_KEEPALIVE_INTERVAL, 2 · RPC_KEEPALIVE_INTERVAL)` after the last `Pong`. An earlier revision
 of this document justified `T_ADV` as "chosen below the keepalive interval so a buffering client
 never stalls the keepalive"; that justification was wrong twice over — a tick inside the
-buffering window *is* stalled, and the quantity that must fit the interval is the whole
+buffering window _is_ stalled, and the quantity that must fit the interval is the whole
 negotiating window, not `T_ADV` alone. The node runs no keepalive fiber, so this constraint is
 client-side only (verified against `patches/effect@4.0.0-beta.59.patch`, `makePinger` /
 `makeProtocolSocket`, and the single `makePinger` call site therein, 2026-07-30).
@@ -494,7 +495,7 @@ attempt per channel — and buys no offline work factor at all (§13.5, §17.5).
 are discharged by fixture rather than by inspection, in §16.3 F14.
 
 S6 is what makes the §5.5 carrier rule satisfiable; S1 and S2 are what make every signature in
-§7 producible. S7 states that the required floor is *reachable* on this relay protocol, and
+§7 producible. S7 states that the required floor is _reachable_ on this relay protocol, and
 deliberately does **not** claim it is guaranteed: `RELAY_MIN_DATA_CHUNK_BYTES` is strictly below
 `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`, so the relay protocol still admits connections on which
 no conforming advertisement can be carried. §5.5 defines the behavior in that case and §17.13
@@ -577,7 +578,7 @@ extending it.
 The longest such window, measured from an endpoint's own first close-machine record to the outer
 `channel.close`, is **two** `T_CLOSE`-bounded waits followed by `T_CLOSE_LINGER_MAX` (the §10.3
 linger). Two, not one, and this is the correction of a model an earlier revision of L5 stated:
-§10.2 bounds *each* wait step by `T_CLOSE` and places no limit on how late the peer's own
+§10.2 bounds _each_ wait step by `T_CLOSE` and places no limit on how late the peer's own
 `E2EEClose` may arrive. An endpoint sends `E2EEClose` at `t = 0`; the peer's `E2EEClose` arrives
 at just under `T_CLOSE`, which is inside the first deadline and puts the endpoint in the
 simultaneous branch; the endpoint sends its `E2EECloseAck` and waits a **second** `T_CLOSE` for
@@ -587,7 +588,7 @@ an endpoint's close phase contains exactly one wait on either sequential path an
 the simultaneous path, and no path admits a third. Because the pinned keepalive is free-running
 with unknown phase, a window shorter than `RPC_KEEPALIVE_INTERVAL` can contain **at most one**
 tick; L5 additionally reserves `T_KEEPALIVE_FLUSH_MARGIN` so the channel is torn down before the
-*following* tick — the one that would read the stalled `Ping`'s missing `Pong` and open the
+_following_ tick — the one that would read the stalled `Ping`'s missing `Pong` and open the
 dead-peer latch — can fire. Without L5 the pair `T_CLOSE = T_CLOSE_LINGER_MAX =
 RPC_KEEPALIVE_INTERVAL` an earlier revision carried let a clean, fully authenticated close span
 two ticks unconditionally, so a Hub that returned the peer's acknowledgement just under `T_CLOSE`
@@ -597,7 +598,7 @@ left the same case reachable on the simultaneous path at one extra `T_CLOSE`, wh
 inequality above charges it twice and the two constants were re-chosen against it.
 
 L5 removes that deterministic case; it does **not** make the close phase keepalive-proof, and
-§10.3 and §17.14 say so rather than implying otherwise. A `Ping` written *before* the close phase
+§10.3 and §17.14 say so rather than implying otherwise. A `Ping` written _before_ the close phase
 whose `Pong` the peer can no longer send — because the peer has itself entered a close phase and
 is equally forbidden to protect it — expires on the pinger's own schedule, which no timer in this
 document bounds. That is why §10.4 requires the verdict to be determined and recorded when the
@@ -656,13 +657,13 @@ bound MUST be rejected without parsing its body. Body contents are defined in §
 
 Post-strip payload discriminators (the first byte of a reassembled, prelude-stripped payload):
 
-| First byte | Class | Accepted per §4.4 |
-| --- | --- | --- |
-| `E2EE_ENVELOPE_DISCRIMINATOR` | E2EE envelope | `e2ee` state; also completes the handshake (§8) |
-| `E2EE_NEGOTIATION_DISCRIMINATOR` | Negotiation record | `negotiating` state only |
-| `0x7B` (`{`) or `0x5B` (`[`) | Legacy JSON | Where the mode machine admits legacy input |
-| (no bytes — zero-length post-strip payload) | Malformed | Fatal in every state |
-| any other value | Malformed | Fatal in every state |
+| First byte                                  | Class              | Accepted per §4.4                               |
+| ------------------------------------------- | ------------------ | ----------------------------------------------- |
+| `E2EE_ENVELOPE_DISCRIMINATOR`               | E2EE envelope      | `e2ee` state; also completes the handshake (§8) |
+| `E2EE_NEGOTIATION_DISCRIMINATOR`            | Negotiation record | `negotiating` state only                        |
+| `0x7B` (`{`) or `0x5B` (`[`)                | Legacy JSON        | Where the mode machine admits legacy input      |
+| (no bytes — zero-length post-strip payload) | Malformed          | Fatal in every state                            |
+| any other value                             | Malformed          | Fatal in every state                            |
 
 Legacy JSON payloads always begin `{` or `[`; the pinned RPC serialization emits a single JSON
 object or a JSON array of messages. The capability carrier (§5.3) is the single legacy-JSON
@@ -674,7 +675,7 @@ exactly `RELAY_CHUNK_CAPABILITY_PRELUDE` also post-strips to nothing. Both are e
 rather than left to the catch-all, so that every conforming implementation reaches the same
 outcome on them (§4.3, §4.4, §11.2 P6, §11.3 Q6).
 
-*Note (non-normative)*: the zero-length reachability was cross-checked against the relay payload
+_Note (non-normative)_: the zero-length reachability was cross-checked against the relay payload
 schema (`packages/contracts/src/relay.ts`, `data.payload` lower bound of zero) and the assembler,
 which surfaces a zero-length payload as a completed message
 (`packages/shared/src/relayMessageChunks.ts`); the chunked path cannot produce it, because a
@@ -683,35 +684,35 @@ zero-length chunk body and a zero total length are both chunk-layer failures (ve
 
 Encrypted inner-record types (the authenticated `innerType` byte inside an envelope):
 
-| Value | Name | Body |
-| --- | --- | --- |
-| `0x01` | RPC | Opaque application RPC message bytes, handed to the RPC layer |
-| `0x02` | `E2EEClose` | Canonical-CBOR close control (§10) |
-| `0x03` | `E2EEError` | Canonical-CBOR bounded encrypted error (§11) |
-| `0x04` | `E2EECloseAck` | Canonical-CBOR close acknowledgement (§10) |
-| all others | reserved | Fatal (§4.4) |
+| Value      | Name           | Body                                                          |
+| ---------- | -------------- | ------------------------------------------------------------- |
+| `0x01`     | RPC            | Opaque application RPC message bytes, handed to the RPC layer |
+| `0x02`     | `E2EEClose`    | Canonical-CBOR close control (§10)                            |
+| `0x03`     | `E2EEError`    | Canonical-CBOR bounded encrypted error (§11)                  |
+| `0x04`     | `E2EECloseAck` | Canonical-CBOR close acknowledgement (§10)                    |
+| all others | reserved       | Fatal (§4.4)                                                  |
 
 Negotiation record types:
 
-| Value | Name | Direction | Bound |
-| --- | --- | --- | --- |
-| `0x01` | `E2EEClientHello` | client → node | `E2EE_CLIENT_HELLO_MAX_BYTES` |
-| `0x02` | `E2EEServerAccept` | node → client | `E2EE_SERVER_ACCEPT_MAX_BYTES` |
-| `0x03` | `E2EEHandshakeReject` | node → client | exactly `E2EE_HANDSHAKE_REJECT_BYTES` |
-| all others | reserved | — | Fatal (§4.4) |
+| Value      | Name                  | Direction     | Bound                                 |
+| ---------- | --------------------- | ------------- | ------------------------------------- |
+| `0x01`     | `E2EEClientHello`     | client → node | `E2EE_CLIENT_HELLO_MAX_BYTES`         |
+| `0x02`     | `E2EEServerAccept`    | node → client | `E2EE_SERVER_ACCEPT_MAX_BYTES`        |
+| `0x03`     | `E2EEHandshakeReject` | node → client | exactly `E2EE_HANDSHAKE_REJECT_BYTES` |
+| all others | reserved              | —             | Fatal (§4.4)                          |
 
 Suite registry (protocol version 1). The tier selects the pattern; the client selects the suite;
 the server may only accept or reject the client's selection (§8):
 
-| Suite id | Signed native tier (IK) | Unsigned web tier (NX) | Definition |
-| --- | --- | --- | --- |
-| `0x01` | `Noise_IK_25519_ChaChaPoly_SHA256` | `Noise_NX_25519_ChaChaPoly_SHA256` | Noise Protocol Framework revision `NOISE_SPEC_REVISION`; X25519 (RFC 7748), ChaCha20-Poly1305 (RFC 8439), SHA-256 |
-| all others | reserved | reserved | Reject |
+| Suite id   | Signed native tier (IK)            | Unsigned web tier (NX)             | Definition                                                                                                        |
+| ---------- | ---------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `0x01`     | `Noise_IK_25519_ChaChaPoly_SHA256` | `Noise_NX_25519_ChaChaPoly_SHA256` | Noise Protocol Framework revision `NOISE_SPEC_REVISION`; X25519 (RFC 7748), ChaCha20-Poly1305 (RFC 8439), SHA-256 |
+| all others | reserved                           | reserved                           | Reject                                                                                                            |
 
 Direction labels (ASCII, `E2EE_DIRECTION_LABEL_BYTES` bytes):
 
-| Label | Bytes | Direction |
-| --- | --- | --- |
+| Label   | Bytes            | Direction     |
+| ------- | ---------------- | ------------- |
 | `"c2n"` | `0x63 0x32 0x6E` | client → node |
 | `"n2c"` | `0x6E 0x32 0x63` | node → client |
 
@@ -723,39 +724,39 @@ in §3.2 as `RELAY_CAPABILITY_LITERALS` (§1.1 — this protocol defines no capa
 
 ### 3.5 HKDF labels and transcript domains
 
-HKDF labels (all HKDF-Expand invocations use HMAC-SHA-256; where a label is marked *directional*
+HKDF labels (all HKDF-Expand invocations use HMAC-SHA-256; where a label is marked _directional_
 the `info` input is the label bytes followed by the direction label of the derived direction):
 
-| Label | Directional | Derives |
-| --- | --- | --- |
-| `ryco.relay-e2ee.exporter.v1` | no | `exporterSecret` from the final Noise chaining key (§6) |
-| `ryco.relay-e2ee.confirmation-key.v1` | no | `serverConfirmationKey` from `exporterSecret` (§8) |
-| `ryco.relay-e2ee.aead-key.v1` | yes | Per-epoch directional AEAD key (§9) |
-| `ryco.relay-e2ee.ratchet.v1` | yes | Next directional epoch secret (§9) |
-| `ryco.relay-e2ee.safety-number.v1` | no | Native long-term safety number (§13) |
-| `ryco.relay-e2ee.web-sas.v1` | no | Per-session `WebSAS` (§13) |
+| Label                                 | Directional | Derives                                                 |
+| ------------------------------------- | ----------- | ------------------------------------------------------- |
+| `ryco.relay-e2ee.exporter.v1`         | no          | `exporterSecret` from the final Noise chaining key (§6) |
+| `ryco.relay-e2ee.confirmation-key.v1` | no          | `serverConfirmationKey` from `exporterSecret` (§8)      |
+| `ryco.relay-e2ee.aead-key.v1`         | yes         | Per-epoch directional AEAD key (§9)                     |
+| `ryco.relay-e2ee.ratchet.v1`          | yes         | Next directional epoch secret (§9)                      |
+| `ryco.relay-e2ee.safety-number.v1`    | no          | Native long-term safety number (§13)                    |
+| `ryco.relay-e2ee.web-sas.v1`          | no          | Per-session `WebSAS` (§13)                              |
 
 Transcript and derivation domains (each appears exactly once, as the first element of its
 canonical-CBOR structure):
 
-| Domain | Structure | Defined in |
-| --- | --- | --- |
-| `ryco.node-e2ee-prekey.v1` | Node agreement-prekey certificate transcript | §7 |
-| `ryco.client-e2ee-prekey.v1` | Client agreement-prekey certificate transcript | §7 |
-| `ryco.node-e2ee-capability.v1` | Capability statement transcript (`encodeNodeE2eeCapabilityTranscript`) | §5, §7 |
-| `ryco.node-e2ee-capability-digest.v1` | Capability signing envelope (`encodeNodeE2eeCapabilitySigningEnvelope`) — the fixed-size structure actually handed to the node identity signing interface for a capability statement | §7.2.1 |
-| `ryco.node-identity-continuity.v1` | Identity-continuity certificate transcript | §7, §13 |
-| `ryco.relay-e2ee.prologue.v1` | Noise prologue array | §8 |
-| `ryco.relay-e2ee.confirmation.v1` | Confirmation transcript array | §8 |
-| `ryco.relay-e2ee.session.v1` | Session-binding transcript array | §8 |
-| `ryco.relay-e2ee.safety-number.v1` | Safety-number input array | §13 |
-| `ryco.relay-e2ee.web-sas.v1` | `WebSAS` input array | §13 |
-| `ryco.relay-e2ee.context.v1` | Authorization context block | §8 |
-| `ryco.relay-e2ee.close.v1` | Close-commitment input array | §10 |
-| `ryco.relay-e2ee.fallback-origin.v1` | Fallback-occurrence origin-hash input array | §12 |
-| `ryco.node-key.v1` | Node identity-key fingerprint input (existing; defined by the node identity primitives) | §7 |
-| `ryco.client-key.v1` | Client identity-key fingerprint input | §7 |
-| `ryco.e2ee-agreement-key.v1` | Agreement-key fingerprint input | §7 |
+| Domain                                | Structure                                                                                                                                                                            | Defined in |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- |
+| `ryco.node-e2ee-prekey.v1`            | Node agreement-prekey certificate transcript                                                                                                                                         | §7         |
+| `ryco.client-e2ee-prekey.v1`          | Client agreement-prekey certificate transcript                                                                                                                                       | §7         |
+| `ryco.node-e2ee-capability.v1`        | Capability statement transcript (`encodeNodeE2eeCapabilityTranscript`)                                                                                                               | §5, §7     |
+| `ryco.node-e2ee-capability-digest.v1` | Capability signing envelope (`encodeNodeE2eeCapabilitySigningEnvelope`) — the fixed-size structure actually handed to the node identity signing interface for a capability statement | §7.2.1     |
+| `ryco.node-identity-continuity.v1`    | Identity-continuity certificate transcript                                                                                                                                           | §7, §13    |
+| `ryco.relay-e2ee.prologue.v1`         | Noise prologue array                                                                                                                                                                 | §8         |
+| `ryco.relay-e2ee.confirmation.v1`     | Confirmation transcript array                                                                                                                                                        | §8         |
+| `ryco.relay-e2ee.session.v1`          | Session-binding transcript array                                                                                                                                                     | §8         |
+| `ryco.relay-e2ee.safety-number.v1`    | Safety-number input array                                                                                                                                                            | §13        |
+| `ryco.relay-e2ee.web-sas.v1`          | `WebSAS` input array                                                                                                                                                                 | §13        |
+| `ryco.relay-e2ee.context.v1`          | Authorization context block                                                                                                                                                          | §8         |
+| `ryco.relay-e2ee.close.v1`            | Close-commitment input array                                                                                                                                                         | §10        |
+| `ryco.relay-e2ee.fallback-origin.v1`  | Fallback-occurrence origin-hash input array                                                                                                                                          | §12        |
+| `ryco.node-key.v1`                    | Node identity-key fingerprint input (existing; defined by the node identity primitives)                                                                                              | §7         |
+| `ryco.client-key.v1`                  | Client identity-key fingerprint input                                                                                                                                                | §7         |
+| `ryco.e2ee-agreement-key.v1`          | Agreement-key fingerprint input                                                                                                                                                      | §7         |
 
 No consumer of a signing key may construct transcript bytes ad hoc: every signature in this
 protocol covers bytes produced by the named encoder for one of the domains above, and every
@@ -781,7 +782,7 @@ profile:
   decode strictly, re-encode with the same profile, and require byte equality with the received
   bytes before using the value.
 
-*Note (non-normative)*: this matches the relay codec's existing practice of strict decode plus
+_Note (non-normative)_: this matches the relay codec's existing practice of strict decode plus
 canonical re-encode byte-equality (verified against `packages/shared/src/relayCodec.ts:23-33` and
 `:111-137`, 2026-07-30).
 
@@ -828,7 +829,7 @@ order:
 Encrypted control records (§10, §11) follow the same pipeline from step 2 with their control
 inner type and canonical-CBOR body.
 
-*Note (non-normative)*: without the prelude, oversized sends fail `peer_unsupported`, because the
+_Note (non-normative)_: without the prelude, oversized sends fail `peer_unsupported`, because the
 chunk-support latch is fed only by inbound evidence (verified against
 `packages/shared/src/relayMessageChunks.ts:135-174` and
 `packages/client-runtime/src/relay/relayEngine.ts:198-206`, 2026-07-30).
@@ -897,31 +898,31 @@ Fatal outcomes use one of two procedures, elaborated in §11:
 - **FATAL-POST** (session keys established): when sendable, emit an encrypted `E2EEError` inner
   record consuming the normal directional sequence, then close with `channel_rejected`.
 
-*Note (non-normative)*: `channel_rejected` is an existing stable protocol 1.2+ close reason;
+_Note (non-normative)_: `channel_rejected` is an existing stable protocol 1.2+ close reason;
 this protocol introduces no close-reason literal (verified against
 `packages/contracts/src/relay.ts:57-86`, 2026-07-30).
 
 Node (responder) transitions:
 
-| # | State | Input | Guard | Action | Next |
-| --- | --- | --- | --- | --- | --- |
-| N1 | `negotiating` | `LEGACY-JSON` | effective `requireE2EE` | FATAL-PRE | closed |
-| N2 | `negotiating` | `LEGACY-JSON` | otherwise, node E2EE-capable, **advertisement emitted** | Lock legacy; count one **peer-legacy** fallback occurrence (§12.5); deliver to the RPC parser | `legacy` |
-| N3 | `negotiating` | `NEGOTIATION(E2EEClientHello)` | advertisement emitted; first hello on this channel; within bound | Run the responder handshake (§8); on success emit `E2EEServerAccept`; any handshake failure is FATAL-PRE | `e2ee` |
-| N4 | `negotiating` | `NEGOTIATION(E2EEClientHello)` | advertisement unavailable (§5.5) or a hello was already consumed | FATAL-PRE | closed |
-| N5 | `negotiating` | `NEGOTIATION` (any other or misdirected type) | — | FATAL-PRE | closed |
-| N6 | `negotiating` | `ENVELOPE` | — | FATAL-PRE | closed |
-| N7 | `negotiating` | `OTHER` | — | FATAL-PRE | closed |
-| N8 | `negotiating` | `T_HANDSHAKE_NODE` expires (from advertisement emit) | effective `requireE2EE`; handshake incomplete — covers a silent peer, an oversized or excessive negotiation exchange, and timeout alike | FATAL-PRE | closed |
-| N9 | `e2ee` | `ENVELOPE` | §4.3 step 3 checks pass; known inner type | Deliver the authenticated inner record. The first authenticated client→node envelope completes the implicit client finish (§8); the node MUST NOT emit RPC output or invoke the RPC handler before it | `e2ee` |
-| N10 | `e2ee` | `ENVELOPE` | any §4.3 step 3 check fails, or reserved inner type | FATAL-POST | closed |
-| N11 | `e2ee` | `NEGOTIATION` / `LEGACY-JSON` / `OTHER` | — | FATAL-POST; plaintext after E2EE never reaches the RPC parser | closed |
-| N12 | `legacy` | `LEGACY-JSON` | — | Deliver to the RPC parser | `legacy` |
-| N13 | `legacy` | `ENVELOPE` / `NEGOTIATION` | — | FATAL-PRE (no session keys exist in `legacy`) | closed |
-| N14 | `legacy` | `OTHER` | — | FATAL-PRE | closed |
-| N15 | `negotiating` | `channel.accept` | advertisement unavailable (§5.5 U1 or U2); effective `requireE2EE` | FATAL-PRE, before any carrier is built and before any peer input; §11.2 P2 (U1) or P23 (U2), plus the §5.5 operator diagnostic | closed |
-| N16 | `negotiating` | `channel.accept` | advertisement unavailable (§5.5 U1 or U2); otherwise | Suppress the advertisement; record exactly one **advertisement-unavailable** occurrence for this channel (§12.5) — never a peer-legacy occurrence; emit no carrier | `negotiating` (no advertisement) |
-| N17 | `negotiating` (no advertisement) | `LEGACY-JSON` | otherwise, node E2EE-capable | Lock legacy; deliver to the RPC parser. The channel's single fallback occurrence was already recorded by N16, so N2's peer-legacy count MUST NOT also fire | `legacy` |
+| #   | State                            | Input                                                | Guard                                                                                                                                   | Action                                                                                                                                                                                                | Next                             |
+| --- | -------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| N1  | `negotiating`                    | `LEGACY-JSON`                                        | effective `requireE2EE`                                                                                                                 | FATAL-PRE                                                                                                                                                                                             | closed                           |
+| N2  | `negotiating`                    | `LEGACY-JSON`                                        | otherwise, node E2EE-capable, **advertisement emitted**                                                                                 | Lock legacy; count one **peer-legacy** fallback occurrence (§12.5); deliver to the RPC parser                                                                                                         | `legacy`                         |
+| N3  | `negotiating`                    | `NEGOTIATION(E2EEClientHello)`                       | advertisement emitted; first hello on this channel; within bound                                                                        | Run the responder handshake (§8); on success emit `E2EEServerAccept`; any handshake failure is FATAL-PRE                                                                                              | `e2ee`                           |
+| N4  | `negotiating`                    | `NEGOTIATION(E2EEClientHello)`                       | advertisement unavailable (§5.5) or a hello was already consumed                                                                        | FATAL-PRE                                                                                                                                                                                             | closed                           |
+| N5  | `negotiating`                    | `NEGOTIATION` (any other or misdirected type)        | —                                                                                                                                       | FATAL-PRE                                                                                                                                                                                             | closed                           |
+| N6  | `negotiating`                    | `ENVELOPE`                                           | —                                                                                                                                       | FATAL-PRE                                                                                                                                                                                             | closed                           |
+| N7  | `negotiating`                    | `OTHER`                                              | —                                                                                                                                       | FATAL-PRE                                                                                                                                                                                             | closed                           |
+| N8  | `negotiating`                    | `T_HANDSHAKE_NODE` expires (from advertisement emit) | effective `requireE2EE`; handshake incomplete — covers a silent peer, an oversized or excessive negotiation exchange, and timeout alike | FATAL-PRE                                                                                                                                                                                             | closed                           |
+| N9  | `e2ee`                           | `ENVELOPE`                                           | §4.3 step 3 checks pass; known inner type                                                                                               | Deliver the authenticated inner record. The first authenticated client→node envelope completes the implicit client finish (§8); the node MUST NOT emit RPC output or invoke the RPC handler before it | `e2ee`                           |
+| N10 | `e2ee`                           | `ENVELOPE`                                           | any §4.3 step 3 check fails, or reserved inner type                                                                                     | FATAL-POST                                                                                                                                                                                            | closed                           |
+| N11 | `e2ee`                           | `NEGOTIATION` / `LEGACY-JSON` / `OTHER`              | —                                                                                                                                       | FATAL-POST; plaintext after E2EE never reaches the RPC parser                                                                                                                                         | closed                           |
+| N12 | `legacy`                         | `LEGACY-JSON`                                        | —                                                                                                                                       | Deliver to the RPC parser                                                                                                                                                                             | `legacy`                         |
+| N13 | `legacy`                         | `ENVELOPE` / `NEGOTIATION`                           | —                                                                                                                                       | FATAL-PRE (no session keys exist in `legacy`)                                                                                                                                                         | closed                           |
+| N14 | `legacy`                         | `OTHER`                                              | —                                                                                                                                       | FATAL-PRE                                                                                                                                                                                             | closed                           |
+| N15 | `negotiating`                    | `channel.accept`                                     | advertisement unavailable (§5.5 U1 or U2); effective `requireE2EE`                                                                      | FATAL-PRE, before any carrier is built and before any peer input; §11.2 P2 (U1) or P23 (U2), plus the §5.5 operator diagnostic                                                                        | closed                           |
+| N16 | `negotiating`                    | `channel.accept`                                     | advertisement unavailable (§5.5 U1 or U2); otherwise                                                                                    | Suppress the advertisement; record exactly one **advertisement-unavailable** occurrence for this channel (§12.5) — never a peer-legacy occurrence; emit no carrier                                    | `negotiating` (no advertisement) |
+| N17 | `negotiating` (no advertisement) | `LEGACY-JSON`                                        | otherwise, node E2EE-capable                                                                                                            | Lock legacy; deliver to the RPC parser. The channel's single fallback occurrence was already recorded by N16, so N2's peer-legacy count MUST NOT also fire                                            | `legacy`                         |
 
 Rows N2 and N17 partition legacy admission by whether the node actually advertised, so an
 advertisement the node could not emit is never recorded as evidence that a legacy peer exists
@@ -937,7 +938,7 @@ slot indefinitely in every configuration anyway. The channel slot is consumed at
 legacy channel that has not yet spoken. Per-channel idle reaping and per-account concurrent-
 channel quotas are relay- and Hub-layer concerns and are deliberately not bolted onto a payload
 encryption handshake; §15 states the structural bound that does apply. The **implicit-finish**
-deadline of §8.9 is a different matter and *is* armed unconditionally, because there the node is
+deadline of §8.9 is a different matter and _is_ armed unconditionally, because there the node is
 holding live key material rather than an idle slot.
 
 **Node-local terminations are not input rows, and the absence of a row is not an absence of a
@@ -958,7 +959,7 @@ the send path is usable, then `channel_rejected` — and an implementation that 
 table as the complete list of ways a channel ends is non-conforming. The two withdrawal sweeps
 are the ones that can fire on a channel that has been serving application RPC for an arbitrary
 time, because §15 arms no idle deadline in `legacy` or in `e2ee`; they are disjoint transitions
-with disjoint tests — §13.6 asks what a *client* is authorized to do, §12.6 asks what the *node*
+with disjoint tests — §13.6 asks what a _client_ is authorized to do, §12.6 asks what the _node_
 admits — and an implementation MUST evaluate both.
 
 Both withdrawal transitions additionally terminate channels that are **not yet admitted to
@@ -972,43 +973,43 @@ peer input drives them.
 is `LEGACY-JSON`, so a client that let one escape would trigger N1 (a spurious FATAL-PRE) or, far
 worse, N2 — a silent legacy lock of a channel that was about to go E2EE, counted as evidence
 that a legacy client population exists (§12.5). This is why the send-buffering rule below covers
-*all* plaintext and not only application RPC, and why §3.2.2 L1 exists to make that safe.
+_all_ plaintext and not only application RPC, and why §3.2.2 L1 exists to make that safe.
 
 Client (initiator) transitions:
 
-| # | State | Input | Guard | Action | Next |
-| --- | --- | --- | --- | --- | --- |
-| K1 | `negotiating` | `CARRIER` | first carrier; statement validates and yields a usable protocol version, suite, and admitted pattern (§5.2 including steps 8–9, §8.2); the client proceeds (see the no-legacy-after-evidence rule below) | Cancel `T_ADV`; select the suite (§8.2); send `E2EEClientHello`; start `T_HANDSHAKE` | `negotiating` (hello sent) |
-| K2 | `negotiating` | `CARRIER` | statement fails validation, or is valid but unusable — protocol range excluding `E2EE_PROTOCOL_VERSION` (§5.2 step 8), empty suite intersection (§8.2), or an effective admitted pattern set omitting this client's tier's pattern (§5.2 step 9, §7.6 element 14); the selection is **latched** (§12.1.1) | FATAL-PRE | closed |
-| K3 | `negotiating` | `CARRIER` | statement fails validation or is unusable (as K2); the selection is not latched | Treat as absent evidence: discard, record a client diagnostic; MUST NOT send a hello on unvalidated or unusable evidence; the `T_ADV` rows below still decide the channel | `negotiating` |
-| K4 | `negotiating` | `CARRIER` | duplicate carrier | FATAL-PRE | closed |
-| K5 | `negotiating` | `NEGOTIATION(E2EEServerAccept)` | hello sent; within bound; verification succeeds (§8) | Enter `e2ee`; flush the buffered sends as envelopes | `e2ee` |
-| K6 | `negotiating` | `NEGOTIATION(E2EEServerAccept)` | no hello sent, or verification fails | FATAL-PRE | closed |
-| K7 | `negotiating` | `NEGOTIATION(E2EEHandshakeReject)` | hello sent; exact size | FATAL-PRE — the handshake failed; retry requires a fresh ticket, channel, and handshake | closed |
-| K8 | `negotiating` | `NEGOTIATION` (any other or misdirected type) | — | FATAL-PRE | closed |
-| K9 | `negotiating` | `LEGACY-JSON` (non-carrier) | hello not sent; the selection is **legacy-eligible** (§12.1.1); local policy permits legacy | Lock legacy; deliver; flush the buffered sends as plaintext | `legacy` |
-| K10 | `negotiating` | `LEGACY-JSON` (non-carrier) | the selection is **latched** (§12.1.1), local policy forbids legacy, or hello sent | FATAL-PRE | closed |
-| K11 | `negotiating` | `ENVELOPE` | — | FATAL-PRE | closed |
-| K12 | `negotiating` | `OTHER` | — | FATAL-PRE | closed |
-| K13 | `negotiating` | `T_ADV` expires (from `channel.accept`) | no validated statement; hello not sent; the selection is **legacy-eligible** (§12.1.1); policy permits legacy | Lock legacy; flush the buffered sends as plaintext | `legacy` |
-| K14 | `negotiating` | `T_ADV` expires | the selection is **latched** (§12.1.1), or policy forbids legacy | FATAL-PRE | closed |
-| K15 | `negotiating` | `T_HANDSHAKE` expires (from hello emit) | no valid `E2EEServerAccept` received | FATAL-PRE — never a legacy fallback after a hello | closed |
-| K16 | `e2ee` | `ENVELOPE` | §4.3 step 3 checks pass; known inner type | Deliver the authenticated inner record | `e2ee` |
-| K17 | `e2ee` | `ENVELOPE` | any check fails, or reserved inner type | FATAL-POST | closed |
-| K18 | `e2ee` | `NEGOTIATION` / `LEGACY-JSON` / `OTHER` | — | FATAL-POST | closed |
-| K19 | `legacy` | `LEGACY-JSON` (non-carrier) | — | Deliver to the RPC parser | `legacy` |
-| K20 | `legacy` | `CARRIER` | — | Ignore as a no-op; MAY record a fallback diagnostic; MUST NOT upgrade | `legacy` |
-| K21 | `legacy` | `ENVELOPE` / `NEGOTIATION` | — | FATAL-PRE | closed |
-| K22 | `legacy` | `OTHER` | — | FATAL-PRE | closed |
-| K23 | `negotiating` | `LEGACY-JSON` (non-carrier) | hello not sent; the selection is **unexpected** (§12.1.1); local policy permits legacy | FATAL-PRE; raise the §13.2.1 unexpected-node surface; the buffered sends are discarded unflushed | closed |
-| K24 | `negotiating` | `T_ADV` expires | no validated statement; hello not sent; the selection is **unexpected** (§12.1.1); policy permits legacy | FATAL-PRE; raise the §13.2.1 unexpected-node surface; the buffered sends are discarded unflushed | closed |
+| #   | State         | Input                                         | Guard                                                                                                                                                                                                                                                                                                     | Action                                                                                                                                                                    | Next                       |
+| --- | ------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| K1  | `negotiating` | `CARRIER`                                     | first carrier; statement validates and yields a usable protocol version, suite, and admitted pattern (§5.2 including steps 8–9, §8.2); the client proceeds (see the no-legacy-after-evidence rule below)                                                                                                  | Cancel `T_ADV`; select the suite (§8.2); send `E2EEClientHello`; start `T_HANDSHAKE`                                                                                      | `negotiating` (hello sent) |
+| K2  | `negotiating` | `CARRIER`                                     | statement fails validation, or is valid but unusable — protocol range excluding `E2EE_PROTOCOL_VERSION` (§5.2 step 8), empty suite intersection (§8.2), or an effective admitted pattern set omitting this client's tier's pattern (§5.2 step 9, §7.6 element 14); the selection is **latched** (§12.1.1) | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K3  | `negotiating` | `CARRIER`                                     | statement fails validation or is unusable (as K2); the selection is not latched                                                                                                                                                                                                                           | Treat as absent evidence: discard, record a client diagnostic; MUST NOT send a hello on unvalidated or unusable evidence; the `T_ADV` rows below still decide the channel | `negotiating`              |
+| K4  | `negotiating` | `CARRIER`                                     | duplicate carrier                                                                                                                                                                                                                                                                                         | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K5  | `negotiating` | `NEGOTIATION(E2EEServerAccept)`               | hello sent; within bound; verification succeeds (§8)                                                                                                                                                                                                                                                      | Enter `e2ee`; flush the buffered sends as envelopes                                                                                                                       | `e2ee`                     |
+| K6  | `negotiating` | `NEGOTIATION(E2EEServerAccept)`               | no hello sent, or verification fails                                                                                                                                                                                                                                                                      | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K7  | `negotiating` | `NEGOTIATION(E2EEHandshakeReject)`            | hello sent; exact size                                                                                                                                                                                                                                                                                    | FATAL-PRE — the handshake failed; retry requires a fresh ticket, channel, and handshake                                                                                   | closed                     |
+| K8  | `negotiating` | `NEGOTIATION` (any other or misdirected type) | —                                                                                                                                                                                                                                                                                                         | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K9  | `negotiating` | `LEGACY-JSON` (non-carrier)                   | hello not sent; the selection is **legacy-eligible** (§12.1.1); local policy permits legacy                                                                                                                                                                                                               | Lock legacy; deliver; flush the buffered sends as plaintext                                                                                                               | `legacy`                   |
+| K10 | `negotiating` | `LEGACY-JSON` (non-carrier)                   | the selection is **latched** (§12.1.1), local policy forbids legacy, or hello sent                                                                                                                                                                                                                        | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K11 | `negotiating` | `ENVELOPE`                                    | —                                                                                                                                                                                                                                                                                                         | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K12 | `negotiating` | `OTHER`                                       | —                                                                                                                                                                                                                                                                                                         | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K13 | `negotiating` | `T_ADV` expires (from `channel.accept`)       | no validated statement; hello not sent; the selection is **legacy-eligible** (§12.1.1); policy permits legacy                                                                                                                                                                                             | Lock legacy; flush the buffered sends as plaintext                                                                                                                        | `legacy`                   |
+| K14 | `negotiating` | `T_ADV` expires                               | the selection is **latched** (§12.1.1), or policy forbids legacy                                                                                                                                                                                                                                          | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K15 | `negotiating` | `T_HANDSHAKE` expires (from hello emit)       | no valid `E2EEServerAccept` received                                                                                                                                                                                                                                                                      | FATAL-PRE — never a legacy fallback after a hello                                                                                                                         | closed                     |
+| K16 | `e2ee`        | `ENVELOPE`                                    | §4.3 step 3 checks pass; known inner type                                                                                                                                                                                                                                                                 | Deliver the authenticated inner record                                                                                                                                    | `e2ee`                     |
+| K17 | `e2ee`        | `ENVELOPE`                                    | any check fails, or reserved inner type                                                                                                                                                                                                                                                                   | FATAL-POST                                                                                                                                                                | closed                     |
+| K18 | `e2ee`        | `NEGOTIATION` / `LEGACY-JSON` / `OTHER`       | —                                                                                                                                                                                                                                                                                                         | FATAL-POST                                                                                                                                                                | closed                     |
+| K19 | `legacy`      | `LEGACY-JSON` (non-carrier)                   | —                                                                                                                                                                                                                                                                                                         | Deliver to the RPC parser                                                                                                                                                 | `legacy`                   |
+| K20 | `legacy`      | `CARRIER`                                     | —                                                                                                                                                                                                                                                                                                         | Ignore as a no-op; MAY record a fallback diagnostic; MUST NOT upgrade                                                                                                     | `legacy`                   |
+| K21 | `legacy`      | `ENVELOPE` / `NEGOTIATION`                    | —                                                                                                                                                                                                                                                                                                         | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K22 | `legacy`      | `OTHER`                                       | —                                                                                                                                                                                                                                                                                                         | FATAL-PRE                                                                                                                                                                 | closed                     |
+| K23 | `negotiating` | `LEGACY-JSON` (non-carrier)                   | hello not sent; the selection is **unexpected** (§12.1.1); local policy permits legacy                                                                                                                                                                                                                    | FATAL-PRE; raise the §13.2.1 unexpected-node surface; the buffered sends are discarded unflushed                                                                          | closed                     |
+| K24 | `negotiating` | `T_ADV` expires                               | no validated statement; hello not sent; the selection is **unexpected** (§12.1.1); policy permits legacy                                                                                                                                                                                                  | FATAL-PRE; raise the §13.2.1 unexpected-node surface; the buffered sends are discarded unflushed                                                                          | closed                     |
 
 Rows K9/K10/K23 and K13/K14/K24 partition their input: §12.1.1 classifies every selection as
 exactly one of legacy-eligible, latched, or unexpected, so no client input reaches an
 unspecified outcome and "absence of evidence" can never by itself select the legacy branch.
 **That classification is computed from client-anchored state only** — the resolved pin, the set of
 verified pins under the pair, the device-level `anyNodeVerified(hubOrigin)` marker (§13.1), and
-the owner's recorded consent. No Hub-supplied value may move a selection *into* the
+the owner's recorded consent. No Hub-supplied value may move a selection _into_ the
 legacy-eligible class: not the `nodeId`, which the Hub re-mints at will, and not the `accountId`,
 which the Hub issues (§12.1.1). Rows K13 and K9 are the only rows that release plaintext, and
 their guard is exactly the class this rule protects.
@@ -1024,7 +1025,7 @@ Cross-cutting rules:
   envelopes) or `legacy` (flushed as plaintext). On every FATAL-PRE row the buffer is discarded
   unsent — no buffered byte is ever flushed as plaintext on a channel that closed rather than
   locking `legacy`. The maximum contiguous duration of this window is bounded by §3.2.2 L1.
-- **Send-buffer bound and disposition.** The buffer sits *above* the relay send queue precisely
+- **Send-buffer bound and disposition.** The buffer sits _above_ the relay send queue precisely
   so that nothing is handed down to it, so it does not inherit the queue's accounting by
   accident and MUST be bounded explicitly. Each buffered send MUST satisfy the §4.5 per-message
   bounds at submission time, and the total buffered bytes MUST be charged against
@@ -1131,7 +1132,7 @@ non-positive fails the channel during establishment rather than shrinking anythi
 same adversary control over `maxDataChunkBytes` is **not** fail-closed by itself, which is why
 §5.5 handles it explicitly.
 
-*Note (non-normative)*: the sender-side ceiling formula matches the existing negotiated-limit
+_Note (non-normative)_: the sender-side ceiling formula matches the existing negotiated-limit
 computation on both current senders, and because `effectiveMessageCeiling` never exceeds
 `RELAY_MAX_RPC_MESSAGE_BYTES`, envelopes produced under it always pass the receiving assembler's
 fixed reassembly cap (verified against `packages/client-runtime/src/relay/relayEngine.ts:198-206`,
@@ -1151,7 +1152,7 @@ Negotiation and the handshake complete on the **same channel** that carried the 
 This protocol defines no reopen step, and an implementation MUST NOT close and reopen a channel
 merely to switch modes.
 
-*Note (non-normative)*: a legacy node's byte session deliberately fails on unparseable input
+_Note (non-normative)_: a legacy node's byte session deliberately fails on unparseable input
 (verified against `apps/server/src/ws/RpcByteSession.ts:49-56`, 2026-07-30), and nothing in the
 current runtimes forbids node-first data at the first node-to-client sequence or a same-channel
 handshake after it (verified against `packages/client-runtime/src/relay/relayEngine.ts:303-335`,
@@ -1166,21 +1167,21 @@ fixed-size signing envelope of §7.2.1 — the transcript grows with the carried
 and would otherwise be able to exceed `E2EE_SIGNING_INPUT_MAX_BYTES`. §7 fixes the byte-level
 transcript encoding; the statement MUST contain exactly the following information:
 
-| Field | Content |
-| --- | --- |
-| Hub origin | Canonical Hub origin the node serves |
-| Node id | Hub-assigned node identifier |
-| Identity algorithm and key id | The active node identity key's algorithm and key id |
-| Identity public key and fingerprint | The raw identity public key and its domain-separated fingerprint |
-| Continuity id | The node's stable continuity id (§7.5). REQUIRED in every statement, including from a node that has never rotated |
-| E2EE protocol range | Minimum and maximum supported E2EE protocol versions; consumed by verifier step 8 below and by §8.6 step 2, and by nothing else (§7.6 elements 7–8) |
-| Suite registry | The ordered suite registry entries the node offers (§3.4) |
-| Node prekey certificate | Bounded agreement-prekey certificate: key id, raw agreement public key, identity cross-signature (§7), fingerprint, creation time, expiry |
-| Continuity chain | Bounded ordered identity-continuity certificate chain, at most `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` entries (§13) |
-| `requireE2EE`, `requireApprovedClientE2EE` | The raw admission-policy values |
-| Effective admission set | The effective admitted tier/pattern set; IK-only when `requireApprovedClientE2EE` is enabled (§12). Consumed by verifier step 9 below, and by nothing else (§7.6 element 14) |
-| Policy generation | Monotonic policy generation (§5.7) |
-| Issued-at, expires-at | Statement validity interval (§5.7) |
+| Field                                      | Content                                                                                                                                                                      |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hub origin                                 | Canonical Hub origin the node serves                                                                                                                                         |
+| Node id                                    | Hub-assigned node identifier                                                                                                                                                 |
+| Identity algorithm and key id              | The active node identity key's algorithm and key id                                                                                                                          |
+| Identity public key and fingerprint        | The raw identity public key and its domain-separated fingerprint                                                                                                             |
+| Continuity id                              | The node's stable continuity id (§7.5). REQUIRED in every statement, including from a node that has never rotated                                                            |
+| E2EE protocol range                        | Minimum and maximum supported E2EE protocol versions; consumed by verifier step 8 below and by §8.6 step 2, and by nothing else (§7.6 elements 7–8)                          |
+| Suite registry                             | The ordered suite registry entries the node offers (§3.4)                                                                                                                    |
+| Node prekey certificate                    | Bounded agreement-prekey certificate: key id, raw agreement public key, identity cross-signature (§7), fingerprint, creation time, expiry                                    |
+| Continuity chain                           | Bounded ordered identity-continuity certificate chain, at most `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` entries (§13)                                                              |
+| `requireE2EE`, `requireApprovedClientE2EE` | The raw admission-policy values                                                                                                                                              |
+| Effective admission set                    | The effective admitted tier/pattern set; IK-only when `requireApprovedClientE2EE` is enabled (§12). Consumed by verifier step 9 below, and by nothing else (§7.6 element 14) |
+| Policy generation                          | Monotonic policy generation (§5.7)                                                                                                                                           |
+| Issued-at, expires-at                      | Statement validity interval (§5.7)                                                                                                                                           |
 
 The raw responder static agreement public key is REQUIRED in the prekey certificate: Noise IK
 cannot construct its first message from a fingerprint alone.
@@ -1304,7 +1305,7 @@ Normative requirements:
 - The node sends the carrier exactly once per channel, unless the advertisement is unavailable
   under §5.5.
 
-*Note (non-normative)*: a malformed carrier is **not** ignored by legacy clients — a JSON parse
+_Note (non-normative)_: a malformed carrier is **not** ignored by legacy clients — a JSON parse
 failure fails every in-flight request — which is why the carrier bytes must come from a real
 JSON encoder rather than hand assembly (verified against the pinned `effect@4.0.0-beta.59` RPC
 client's decode-failure path, 2026-07-30). The JSON-whitespace chunk prelude alone does not make
@@ -1321,7 +1322,7 @@ node's single ordered channel send path — the same path as all other node data
 - the `RELAY_CHUNK_CAPABILITY_PRELUDE` is prepended exactly as for any other fitting message,
   establishing the upgraded node's chunking support to the peer.
 
-*Note (non-normative)*: `channel.accept` travels on the control lane, which is flushed before
+_Note (non-normative)_: `channel.accept` travels on the control lane, which is flushed before
 data, and the client accepts data from sequence 0 immediately after the accept frame flips its
 channel state; sending the carrier outside the shared send path would break the single output
 sequence counter and close the channel (verified against
@@ -1341,7 +1342,7 @@ len(carrier JSON) + RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES ≤ asserted maxDataChu
 relay `ready` frame the Hub sends and both endpoints adopt it verbatim; the relay protocol admits
 any value in `[RELAY_MIN_DATA_CHUNK_BYTES, RELAY_MAX_DATA_CHUNK_BYTES]`, and neither endpoint
 proposes, counters, or vetoes it. This document therefore calls it **asserted**, never
-*negotiated* (§4.5): it is a security-relevant threshold chosen by the party §2.1 declares
+_negotiated_ (§4.5): it is a security-relevant threshold chosen by the party §2.1 declares
 untrusted.
 
 **The fit is guaranteed by construction, not by advice.** A conforming node's carrier can never
@@ -1396,15 +1397,15 @@ may it emit a partial, pruned, or unsigned statement. The disposition is:
 **Why the second branch is not a silent Hub downgrade lever.** Three properties bound it, and
 they are the reason this branch is retained rather than promoted to a universal fail-closed:
 
-1. *It cannot reach a protected selection.* The client resolves its selection at
+1. _It cannot reach a protected selection._ The client resolves its selection at
    `channel.accept`, before any evidence arrives (§12.1.1), so an absent carrier is fatal for a
    **latched** selection (row K14, §11.2 P19) and fatal-plus-owner-surface for an **unexpected**
    one (row K24, P22). U1 and U2 can therefore produce plaintext only on a selection already
    classified legacy-eligible — precisely the exposure §17.4 already retains for a Hub that
    simply strips the carrier. Suppression buys the Hub no victim that stripping did not.
-2. *It is not silent.* The occurrence is counted in its own class, displayed separately by the
+2. _It is not silent._ The occurrence is counted in its own class, displayed separately by the
    node CLI, and accompanied by the operator diagnostic above (§12.5).
-3. *It cannot veto the rollout.* Because the Hub chooses `maxDataChunkBytes`, counting U1 in the
+3. _It cannot veto the rollout._ Because the Hub chooses `maxDataChunkBytes`, counting U1 in the
    same bucket as a genuine legacy peer would let the Hub hold the §12.3 flip criterion above
    zero forever. §12.3 therefore gates on the peer-legacy class only.
 
@@ -1412,14 +1413,14 @@ Failing this branch closed instead would not add confidentiality — a Hub that 
 limit can equally strip the carrier — while handing that same Hub a universal, one-integer
 outage of every node. The honest statement is in §2.3 and §17.13.
 
-*Note (non-normative) — worst-case carrier arithmetic.* This is the evidence that S6 — and
+_Note (non-normative) — worst-case carrier arithmetic._ This is the evidence that S6 — and
 therefore the carrier-fit inequality at the top of this section — is satisfiable, so every figure
 below is derived from a stated rule rather than asserted, and each one is reproducible from §3.6,
 §7.1, §7.5, and §7.6 alone.
 
 Encoding rules used, all of them §3.6 canonical CBOR: definite lengths and shortest-form
-integers throughout; a text or byte string of length *n* costs a header of 1 byte for
-*n* ≤ 23, 2 bytes for 24 ≤ *n* ≤ 255, and 3 bytes for 256 ≤ *n* ≤ 65,535, plus *n*; an array of
+integers throughout; a text or byte string of length _n_ costs a header of 1 byte for
+_n_ ≤ 23, 2 bytes for 24 ≤ _n_ ≤ 255, and 3 bytes for 256 ≤ _n_ ≤ 65,535, plus _n_; an array of
 at most 23 elements costs a 1-byte header; a boolean costs 1 byte. Every bound is taken
 simultaneously: Hub origin at `E2EE_HUB_ORIGIN_MAX_BYTES` (128 bytes), continuity chain at
 `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` (8 entries), suite registry at
@@ -1483,7 +1484,7 @@ signing input: §7.2.1 envelope, fixed                             =    72 B
   ⇒ 72 ≤ E2EE_SIGNING_INPUT_MAX_BYTES (4,096)                     ✓ S1
 ```
 
-*Note (non-normative), continued.* For contrast, the same worst-case transcript signed
+_Note (non-normative), continued._ For contrast, the same worst-case transcript signed
 **directly** would be 4,560 bytes against an
 `E2EE_SIGNING_INPUT_MAX_BYTES` of 4,096 — unsignable, on a node that had done nothing worse than
 rotate its identity the permitted number of times. That is the defect §7.2.1 removes. The
@@ -1495,7 +1496,7 @@ earlier revision of this note carried a fixed-element figure that no breakdown r
 chain of totals derived from it; the per-element derivation above exists so that the one number
 S6 rests on cannot again be an assertion.
 
-*Note (non-normative)*: the relay's own default asserts `maxDataChunkBytes =
+_Note (non-normative)_: the relay's own default asserts `maxDataChunkBytes =
 RELAY_MAX_DATA_CHUNK_BYTES`, far above `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`, so U1 does not fire
 against a cooperating relay (verified against `packages/contracts/src/relay.ts:183-225`,
 2026-07-30). U1 exists because the schema also admits `RELAY_MIN_DATA_CHUNK_BYTES`, not because
@@ -1535,7 +1536,7 @@ beta bump. Accordingly:
   build that violates any of (i)–(iv) is outside this protocol's compatibility envelope and MUST
   be treated as such, whatever its version number.
 
-*Note (non-normative).* The population these cases must survive is narrower than it appears. The
+_Note (non-normative)._ The population these cases must survive is narrower than it appears. The
 relay contract, the client relay engine, and the chunking module all postdate the current pin, so
 no build carrying an earlier RPC client contains relay client code at all and none can open a
 channel to meet the carrier. The properties above are nonetheless stated implementation-
@@ -1617,7 +1618,7 @@ NOT advertise, MUST NOT reuse the lower value, and MUST surface the §5.7 recove
 §7.5's "durable generation high-water mark" for the rotation generation is subject to the same
 two properties.
 
-*Note (non-normative)*: no store with both properties exists in the node today. The protected
+_Note (non-normative)_: no store with both properties exists in the node today. The protected
 secret store is create-only (`get` / `create` / `remove`, `create` conflicting on an existing
 name), so it cannot hold a monotonically updated value without a non-atomic remove-then-create
 window; and both the identity state file and the permissioned-file secret root live under the
@@ -1682,7 +1683,7 @@ This protocol adds no identity key and changes no identity-key algorithm:
 certificate or statement; `"p256"` node identities remain reserved (§7.1). The client identity
 algorithm is `"p256"` only.
 
-*Note (non-normative)*: the node signing interface exposes generate/sign/delete over named
+_Note (non-normative)_: the node signing interface exposes generate/sign/delete over named
 secrets and signs caller-supplied bytes without internal domain separation (verified against
 `apps/server/src/hubIdentity/NodeSigningIdentity.ts:38-43`, 2026-07-30) — and hard-rejects any
 input longer than 4,096 bytes with `node_signing_failed` (`:128-135`, verified 2026-07-30), which
@@ -1716,11 +1717,11 @@ uses the fingerprints of §7.1.
 
 ### 6.3 Custody by endpoint
 
-| Endpoint | Private-key home | Properties |
-| --- | --- | --- |
-| Node | A new named secret in the node's protected secret store, in the same store class and under the same create-only naming discipline as the node identity key | Durable; loaded transiently for use and zeroized after each use; staged rotation per §6.4 |
-| Native client | Platform secure store (`expo-secure-store`) entry | Durable; **device-only, non-synchronizing, excluded from backup, restore, and device-transfer on both platforms**; the iOS keychain item MUST use a this-device-only accessibility class and MUST NOT be synchronized; the Android entry MUST be excluded from every backup and transfer surface |
-| Web | Process memory only | Ephemeral per application session; MUST NOT touch `localStorage`, `sessionStorage`, IndexedDB, service-worker caches, URL or history state, configuration exports, or logs — the hosted-client no-durable-secrets policy ([hosted-hub-client.md](./hosted-hub-client.md)) applies verbatim |
+| Endpoint      | Private-key home                                                                                                                                           | Properties                                                                                                                                                                                                                                                                                       |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Node          | A new named secret in the node's protected secret store, in the same store class and under the same create-only naming discipline as the node identity key | Durable; loaded transiently for use and zeroized after each use; staged rotation per §6.4                                                                                                                                                                                                        |
+| Native client | Platform secure store (`expo-secure-store`) entry                                                                                                          | Durable; **device-only, non-synchronizing, excluded from backup, restore, and device-transfer on both platforms**; the iOS keychain item MUST use a this-device-only accessibility class and MUST NOT be synchronized; the Android entry MUST be excluded from every backup and transfer surface |
+| Web           | Process memory only                                                                                                                                        | Ephemeral per application session; MUST NOT touch `localStorage`, `sessionStorage`, IndexedDB, service-worker caches, URL or history state, configuration exports, or logs — the hosted-client no-durable-secrets policy ([hosted-hub-client.md](./hosted-hub-client.md)) applies verbatim       |
 
 **Clone and restore prohibition (native).** Restoring or cloning a signed mobile agreement
 private key onto another device is forbidden even while its cross-signature remains unexpired.
@@ -1728,7 +1729,7 @@ An implementation that detects it is holding restored or transferred agreement-k
 MUST NOT use it, MUST destroy it, and MUST require re-pairing (§13). The storage class above
 exists to make such material unavailable to backup and transfer surfaces in the first place.
 
-*Note (non-normative)*: the protected secret store's three backends and create-only semantics
+_Note (non-normative)_: the protected secret store's three backends and create-only semantics
 are defined in `apps/server/src/hubIdentity/ProtectedSecretStore.ts` (verified 2026-07-30). The
 current mobile secure-store wrapper passes no options and therefore inherits library defaults
 (verified against `apps/mobile/src/platform/secretKv.ts:29-44`, 2026-07-30); the storage class
@@ -1764,7 +1765,7 @@ current default behavior.
   responder always knows which prekey a hello targets). A crash at any point leaves either the
   old state or the new state fully intact, never a torn mixture.
 
-*Note (non-normative)*: the staged create-new-secret-first, promote, then delete-old pattern
+_Note (non-normative)_: the staged create-new-secret-first, promote, then delete-old pattern
 mirrors `apps/server/src/hubIdentity/HubKeyRotationClient.ts:229-288` (verified 2026-07-30).
 
 ### 6.5 Session keys
@@ -1807,20 +1808,20 @@ definite-length arrays of the same types. Timestamps are unsigned integers in ep
 milliseconds. Signatures always cover the exact transcript bytes; verifiers MUST apply the §3.6
 re-encode equality rule before acting on any decoded transcript.
 
-*Note (non-normative)*: the existing encoders emit exactly this shape — a flat definite-length
+_Note (non-normative)_: the existing encoders emit exactly this shape — a flat definite-length
 CBOR array with the domain string first, encoded with the pinned codec's RFC 8949 options
 (verified against `packages/shared/src/nodeIdentity.ts:146-205`, 2026-07-30).
 
 **Identifier formats** (transcript-side, exact):
 
-| Identifier | Format |
-| --- | --- |
-| Node id | `node_` plus exactly 22 Base64URL characters |
-| Node identity key id | `nkey_` plus exactly 22 Base64URL characters |
-| Node prekey id | `epk_` plus exactly 22 Base64URL characters |
-| Continuity id | `nct_` plus exactly 22 Base64URL characters |
-| Account id | Nonempty UTF-8 text, at most `E2EE_ACCOUNT_ID_MAX_BYTES` bytes, treated as opaque; the empty string is not a valid identifier and is reserved for the absence semantics of §8.3. **Provenance: Hub-issued and not client-anchored** — the client never verifies it against anything and the Hub may present a different value at any time, so no downgrade guard may rest on it alone (§12.1.1) |
-| Hub origin | The canonical Hub origin as defined by the node identity primitives (scheme-validated, exactly equal to the URL origin, bounded), **and additionally at most `E2EE_HUB_ORIGIN_MAX_BYTES` bytes in every E2EE transcript**. The E2EE bound is deliberately tighter than the primitives' own, because the origin appears once per §7.6 statement and once per carried §7.5 certificate — up to `E2EE_CONTINUITY_CHAIN_MAX_LENGTH + 1` occurrences — and is therefore the dominant term in §3.2.1 S8. A node whose canonical Hub origin exceeds it cannot serve E2EE and MUST fail the §7.6.1 self-check rather than emit a shorter or elided origin (§5.5 U2, §17.13) |
+| Identifier           | Format                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node id              | `node_` plus exactly 22 Base64URL characters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Node identity key id | `nkey_` plus exactly 22 Base64URL characters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Node prekey id       | `epk_` plus exactly 22 Base64URL characters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Continuity id        | `nct_` plus exactly 22 Base64URL characters                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Account id           | Nonempty UTF-8 text, at most `E2EE_ACCOUNT_ID_MAX_BYTES` bytes, treated as opaque; the empty string is not a valid identifier and is reserved for the absence semantics of §8.3. **Provenance: Hub-issued and not client-anchored** — the client never verifies it against anything and the Hub may present a different value at any time, so no downgrade guard may rest on it alone (§12.1.1)                                                                                                                                                                                                                                                                     |
+| Hub origin           | The canonical Hub origin as defined by the node identity primitives (scheme-validated, exactly equal to the URL origin, bounded), **and additionally at most `E2EE_HUB_ORIGIN_MAX_BYTES` bytes in every E2EE transcript**. The E2EE bound is deliberately tighter than the primitives' own, because the origin appears once per §7.6 statement and once per carried §7.5 certificate — up to `E2EE_CONTINUITY_CHAIN_MAX_LENGTH + 1` occurrences — and is therefore the dominant term in §3.2.1 S8. A node whose canonical Hub origin exceeds it cannot serve E2EE and MUST fail the §7.6.1 self-check rather than emit a shorter or elided origin (§5.5 U2, §17.13) |
 
 **Fingerprints.** A key fingerprint is:
 
@@ -1831,11 +1832,11 @@ fingerprint(domain, algorithm, publicKey) =
 
 producing `E2EE_KEY_FINGERPRINT_BYTES` bytes. The domains and algorithm labels are:
 
-| Domain | Key family | Algorithm label |
-| --- | --- | --- |
-| `ryco.node-key.v1` | Node identity keys (existing definition, reused unchanged) | `"ed25519"` |
-| `ryco.client-key.v1` | Client identity keys | `"p256"` |
-| `ryco.e2ee-agreement-key.v1` | X25519 agreement keys (node and client) | `"x25519"` |
+| Domain                       | Key family                                                 | Algorithm label |
+| ---------------------------- | ---------------------------------------------------------- | --------------- |
+| `ryco.node-key.v1`           | Node identity keys (existing definition, reused unchanged) | `"ed25519"`     |
+| `ryco.client-key.v1`         | Client identity keys                                       | `"p256"`        |
+| `ryco.e2ee-agreement-key.v1` | X25519 agreement keys (node and client)                    | `"x25519"`      |
 
 The display form is the literal prefix `SHA256:` followed by the unpadded base64url encoding of
 the digest, which is ⌈4 · `E2EE_KEY_FINGERPRINT_BYTES` / 3⌉ characters — derived, not chosen, and
@@ -1845,25 +1846,25 @@ in display form. A verifier MUST recompute every fingerprint it consumes from th
 algorithm-labelled raw public key and reject disagreement; a fingerprint is never accepted on
 the carrier's authority alone (§5.2).
 
-*Note (non-normative)*: construction and display form match `fingerprintNodePublicKey` and
+_Note (non-normative)_: construction and display form match `fingerprintNodePublicKey` and
 `formatNodePublicKeyFingerprint` (verified against `packages/shared/src/nodeIdentity.ts:132-144`,
 2026-07-30).
 
 **Key and signature wire encodings and validation** (normative for every E2EE structure):
 
-| Material | Encoding | Mandatory validation |
-| --- | --- | --- |
-| Ed25519 public key | `ED25519_PUBLIC_KEY_BYTES` raw bytes | Exact length; strict RFC 8032 decoding |
-| Ed25519 signature | `ED25519_SIGNATURE_BYTES` raw bytes | **Strict RFC 8032 verification**: canonical point and scalar encodings only, non-canonical values rejected; permissive (ZIP215-style) acceptance is forbidden. Signatures are PureEdDSA over the exact bytes emitted by the applicable named encoder (§7.2): the transcript itself for §7.3 and §7.5, and the fixed-size §7.2.1 envelope for the §7.6 capability statement |
-| P-256 public key | `P256_PUBLIC_KEY_BYTES` bytes, X9.63 uncompressed `0x04 ‖ X ‖ Y` | First byte `0x04`; coordinates below the field prime; point on the curve; not the identity |
-| P-256 ECDSA signature | `P256_SIGNATURE_BYTES` bytes, fixed-width raw `r ‖ s`, each coordinate big-endian | `1 ≤ r, s ≤ n − 1`; ASN.1/DER encodings rejected on the wire. The signature is ECDSA over SHA-256 of the exact transcript bytes. Either `s` value is accepted; the protocol derives no uniqueness from signature bytes |
-| X25519 public key | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES` raw bytes | Exact length. No point validation exists for X25519; the **single mandated behavior** for invalid or low-order inputs is defined in §8.6: any X25519 operation whose shared-secret output is all zeros MUST abort the handshake. Public-key equality comparisons are byte-wise on the transmitted encoding |
+| Material              | Encoding                                                                          | Mandatory validation                                                                                                                                                                                                                                                                                                                                                       |
+| --------------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ed25519 public key    | `ED25519_PUBLIC_KEY_BYTES` raw bytes                                              | Exact length; strict RFC 8032 decoding                                                                                                                                                                                                                                                                                                                                     |
+| Ed25519 signature     | `ED25519_SIGNATURE_BYTES` raw bytes                                               | **Strict RFC 8032 verification**: canonical point and scalar encodings only, non-canonical values rejected; permissive (ZIP215-style) acceptance is forbidden. Signatures are PureEdDSA over the exact bytes emitted by the applicable named encoder (§7.2): the transcript itself for §7.3 and §7.5, and the fixed-size §7.2.1 envelope for the §7.6 capability statement |
+| P-256 public key      | `P256_PUBLIC_KEY_BYTES` bytes, X9.63 uncompressed `0x04 ‖ X ‖ Y`                  | First byte `0x04`; coordinates below the field prime; point on the curve; not the identity                                                                                                                                                                                                                                                                                 |
+| P-256 ECDSA signature | `P256_SIGNATURE_BYTES` bytes, fixed-width raw `r ‖ s`, each coordinate big-endian | `1 ≤ r, s ≤ n − 1`; ASN.1/DER encodings rejected on the wire. The signature is ECDSA over SHA-256 of the exact transcript bytes. Either `s` value is accepted; the protocol derives no uniqueness from signature bytes                                                                                                                                                     |
+| X25519 public key     | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES` raw bytes                                       | Exact length. No point validation exists for X25519; the **single mandated behavior** for invalid or low-order inputs is defined in §8.6: any X25519 operation whose shared-secret output is all zeros MUST abort the handshake. Public-key equality comparisons are byte-wise on the transmitted encoding                                                                 |
 
 A node certificate or statement declaring any node identity algorithm other than `"ed25519"`,
 or a client certificate declaring any client identity algorithm other than `"p256"`, MUST be
 rejected in protocol version 1.
 
-*Note (non-normative)*: hardware signers return ASN.1 DER ECDSA signatures; the mobile platform
+_Note (non-normative)_: hardware signers return ASN.1 DER ECDSA signatures; the mobile platform
 already converts DER to fixed-width raw `r ‖ s` before any wire use (verified against
 `apps/mobile/src/platform/ecdsa.ts:96-129` and `apps/mobile/src/platform/deviceKey.ts:66-70`,
 2026-07-30).
@@ -1906,7 +1907,7 @@ would hand an attacker-influenced signing oracle over attacker-chosen agreement 
 separation therefore lives entirely in the encoders: every signed structure begins with a
 distinct domain string (§3.5), and the E2EE domains are disjoint from the node-identity domains.
 
-*Note (non-normative)*: the mobile device key's only pre-existing signatures are DPoP JWS
+_Note (non-normative)_: the mobile device key's only pre-existing signatures are DPoP JWS
 signing inputs, which are ASCII (base64url segments joined by `.`); a canonical-CBOR transcript
 begins with an array-header byte of `0x80` or above, so the two signed-byte families cannot
 collide (verified against `packages/client-runtime/src/relay/dpop.ts:116`, 2026-07-30). The
@@ -1922,10 +1923,10 @@ Encoder `encodeNodeE2eeCapabilitySigningEnvelope`, domain
 `ryco.node-e2ee-capability-digest.v1`. The envelope is a canonical-CBOR array of exactly 2
 elements:
 
-| # | Field | Type | Constraint |
-| --- | --- | --- | --- |
-| 0 | domain | text | `"ryco.node-e2ee-capability-digest.v1"` |
-| 1 | `transcriptDigest` | bytes | `E2EE_TRANSCRIPT_DIGEST_BYTES`; SHA-256 of the exact §7.6 transcript bytes |
+| #   | Field              | Type  | Constraint                                                                 |
+| --- | ------------------ | ----- | -------------------------------------------------------------------------- |
+| 0   | domain             | text  | `"ryco.node-e2ee-capability-digest.v1"`                                    |
+| 1   | `transcriptDigest` | bytes | `E2EE_TRANSCRIPT_DIGEST_BYTES`; SHA-256 of the exact §7.6 transcript bytes |
 
 Both elements are fixed-width, so the encoded envelope is exactly
 `E2EE_CAPABILITY_SIGNING_ENVELOPE_BYTES` bytes for every input, whatever the transcript's length
@@ -1956,7 +1957,7 @@ that finds the extra hop inconvenient:
   fingerprint (§7.1) and every commitment (§8, §10). Nothing about the statement's authentication
   is weakened; only the number of bytes the key sees changes.
 
-*Note (non-normative)*: the envelope exists because the §7.6 transcript can legitimately exceed
+_Note (non-normative)_: the envelope exists because the §7.6 transcript can legitimately exceed
 `E2EE_SIGNING_INPUT_MAX_BYTES`. At every bound simultaneously the transcript is 4,560 bytes
 (§5.5 worked example), so a node that had merely rotated its identity
 `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` times would otherwise be unable to sign its own
@@ -1970,21 +1971,21 @@ re-verification prompt, depend on how long the operator's Hub origin happens to 
 Encoder `encodeNodeE2eePrekeyTranscript`, domain `ryco.node-e2ee-prekey.v1`. The transcript is a
 canonical-CBOR array of exactly 13 elements:
 
-| # | Field | Type | Constraint |
-| --- | --- | --- | --- |
-| 0 | domain | text | `"ryco.node-e2ee-prekey.v1"` |
-| 1 | `hubOrigin` | text | Canonical Hub origin (§7.1) |
-| 2 | `nodeId` | text | Node id format (§7.1) |
-| 3 | `identityAlgorithm` | text | `"ed25519"` |
-| 4 | `identityKeyId` | text | The active node identity key id |
-| 5 | `prekeyId` | text | Node prekey id format (§7.1); fresh per certificate |
-| 6 | `identityPublicKey` | bytes | `ED25519_PUBLIC_KEY_BYTES` |
-| 7 | `identityFingerprint` | bytes | `E2EE_KEY_FINGERPRINT_BYTES`; `ryco.node-key.v1` fingerprint of element 6 |
-| 8 | `agreementPublicKey` | bytes | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES` |
-| 9 | `noiseDh` | text | `"25519"` |
-| 10 | `noiseHash` | text | `"SHA256"` |
-| 11 | `createdAt` | uint | Epoch milliseconds |
-| 12 | `expiresAt` | uint | Epoch milliseconds; lifetime bound per §6.4 |
+| #   | Field                 | Type  | Constraint                                                                |
+| --- | --------------------- | ----- | ------------------------------------------------------------------------- |
+| 0   | domain                | text  | `"ryco.node-e2ee-prekey.v1"`                                              |
+| 1   | `hubOrigin`           | text  | Canonical Hub origin (§7.1)                                               |
+| 2   | `nodeId`              | text  | Node id format (§7.1)                                                     |
+| 3   | `identityAlgorithm`   | text  | `"ed25519"`                                                               |
+| 4   | `identityKeyId`       | text  | The active node identity key id                                           |
+| 5   | `prekeyId`            | text  | Node prekey id format (§7.1); fresh per certificate                       |
+| 6   | `identityPublicKey`   | bytes | `ED25519_PUBLIC_KEY_BYTES`                                                |
+| 7   | `identityFingerprint` | bytes | `E2EE_KEY_FINGERPRINT_BYTES`; `ryco.node-key.v1` fingerprint of element 6 |
+| 8   | `agreementPublicKey`  | bytes | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES`                                         |
+| 9   | `noiseDh`             | text  | `"25519"`                                                                 |
+| 10  | `noiseHash`           | text  | `"SHA256"`                                                                |
+| 11  | `createdAt`           | uint  | Epoch milliseconds                                                        |
+| 12  | `expiresAt`           | uint  | Epoch milliseconds; lifetime bound per §6.4                               |
 
 The **cross-signature** is the node identity key's Ed25519 signature over the exact transcript
 bytes. Elements 9 and 10 pin the key's Noise usage to the suite-registry functions (§3.4); a
@@ -2002,19 +2003,19 @@ fingerprint (from element 8); validity window against the verifier's clock with
 Encoder `encodeClientE2eePrekeyTranscript`, domain `ryco.client-e2ee-prekey.v1`. Signed by the
 mobile device key. The transcript is a canonical-CBOR array of exactly 11 elements:
 
-| # | Field | Type | Constraint |
-| --- | --- | --- | --- |
-| 0 | domain | text | `"ryco.client-e2ee-prekey.v1"` |
-| 1 | `hubOrigin` | text | Canonical Hub origin — with element 2, the Hub/account namespace binding |
-| 2 | `accountId` | text | Account id format (§7.1); the account this key claims to act for |
-| 3 | `identityAlgorithm` | text | `"p256"` |
-| 4 | `identityPublicKey` | bytes | `P256_PUBLIC_KEY_BYTES`, X9.63 uncompressed; point-validated (§7.1) |
-| 5 | `identityFingerprint` | bytes | `E2EE_KEY_FINGERPRINT_BYTES`; `ryco.client-key.v1` fingerprint of element 4 |
-| 6 | `agreementPublicKey` | bytes | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES` |
-| 7 | `noiseDh` | text | `"25519"` |
-| 8 | `noiseHash` | text | `"SHA256"` |
-| 9 | `createdAt` | uint | Epoch milliseconds |
-| 10 | `expiresAt` | uint | Epoch milliseconds; lifetime bound per §6.4 |
+| #   | Field                 | Type  | Constraint                                                                  |
+| --- | --------------------- | ----- | --------------------------------------------------------------------------- |
+| 0   | domain                | text  | `"ryco.client-e2ee-prekey.v1"`                                              |
+| 1   | `hubOrigin`           | text  | Canonical Hub origin — with element 2, the Hub/account namespace binding    |
+| 2   | `accountId`           | text  | Account id format (§7.1); the account this key claims to act for            |
+| 3   | `identityAlgorithm`   | text  | `"p256"`                                                                    |
+| 4   | `identityPublicKey`   | bytes | `P256_PUBLIC_KEY_BYTES`, X9.63 uncompressed; point-validated (§7.1)         |
+| 5   | `identityFingerprint` | bytes | `E2EE_KEY_FINGERPRINT_BYTES`; `ryco.client-key.v1` fingerprint of element 4 |
+| 6   | `agreementPublicKey`  | bytes | `E2EE_AGREEMENT_PUBLIC_KEY_BYTES`                                           |
+| 7   | `noiseDh`             | text  | `"25519"`                                                                   |
+| 8   | `noiseHash`           | text  | `"SHA256"`                                                                  |
+| 9   | `createdAt`           | uint  | Epoch milliseconds                                                          |
+| 10  | `expiresAt`           | uint  | Epoch milliseconds; lifetime bound per §6.4                                 |
 
 The signature is ECDSA P-256 over SHA-256 of the exact transcript bytes, in the fixed-width raw
 encoding of §7.1. The certificate binds the client identity key, the client agreement key, and
@@ -2029,21 +2030,21 @@ Encoder `encodeNodeIdentityContinuityTranscript`, domain `ryco.node-identity-con
 Signed by the **outgoing** node identity key at rotation time, before that key is destroyed.
 The transcript is a canonical-CBOR array of exactly 13 elements:
 
-| # | Field | Type | Constraint |
-| --- | --- | --- | --- |
-| 0 | domain | text | `"ryco.node-identity-continuity.v1"` |
-| 1 | `hubOrigin` | text | Canonical Hub origin |
-| 2 | `continuityId` | text | Continuity id format (§7.1); see semantics below |
-| 3 | `generation` | uint | Monotonic rotation generation; see semantics below |
-| 4 | `oldAlgorithm` | text | `"ed25519"` |
-| 5 | `oldKeyId` | text | Outgoing identity key id |
-| 6 | `oldPublicKey` | bytes | `ED25519_PUBLIC_KEY_BYTES` |
-| 7 | `oldFingerprint` | bytes | `ryco.node-key.v1` fingerprint of element 6 |
-| 8 | `newAlgorithm` | text | `"ed25519"` |
-| 9 | `newKeyId` | text | Incoming identity key id |
-| 10 | `newPublicKey` | bytes | `ED25519_PUBLIC_KEY_BYTES` |
-| 11 | `newFingerprint` | bytes | `ryco.node-key.v1` fingerprint of element 10 |
-| 12 | `createdAt` | uint | Epoch milliseconds |
+| #   | Field            | Type  | Constraint                                         |
+| --- | ---------------- | ----- | -------------------------------------------------- |
+| 0   | domain           | text  | `"ryco.node-identity-continuity.v1"`               |
+| 1   | `hubOrigin`      | text  | Canonical Hub origin                               |
+| 2   | `continuityId`   | text  | Continuity id format (§7.1); see semantics below   |
+| 3   | `generation`     | uint  | Monotonic rotation generation; see semantics below |
+| 4   | `oldAlgorithm`   | text  | `"ed25519"`                                        |
+| 5   | `oldKeyId`       | text  | Outgoing identity key id                           |
+| 6   | `oldPublicKey`   | bytes | `ED25519_PUBLIC_KEY_BYTES`                         |
+| 7   | `oldFingerprint` | bytes | `ryco.node-key.v1` fingerprint of element 6        |
+| 8   | `newAlgorithm`   | text  | `"ed25519"`                                        |
+| 9   | `newKeyId`       | text  | Incoming identity key id                           |
+| 10  | `newPublicKey`   | bytes | `ED25519_PUBLIC_KEY_BYTES`                         |
+| 11  | `newFingerprint` | bytes | `ryco.node-key.v1` fingerprint of element 10       |
+| 12  | `createdAt`      | uint  | Epoch milliseconds                                 |
 
 The signature is the **outgoing** key's Ed25519 signature over the exact transcript bytes. The
 carried form of one certificate is the canonical-CBOR array
@@ -2089,19 +2090,19 @@ for that check to compare. The rules are therefore:
   not be forgotten with them.
 - **Startup cross-check (normative).** On startup, and before any advertisement, the node MUST
   compare its stored continuity id against the anchor and take exactly one of:
-  - *anchor unset, stored value unset* — the node has never advertised. Mint once, crash-atomically,
+  - _anchor unset, stored value unset_ — the node has never advertised. Mint once, crash-atomically,
     per the creation rule above. This is also the migration rule for a node whose identity
     predates this protocol: mint once at upgrade, durably, before the first advertisement.
-  - *anchor set, stored value equal* — normal operation.
-  - *anchor set, stored value absent* — an operator restore rolled the stored copy back. The node
+  - _anchor set, stored value equal_ — normal operation.
+  - _anchor set, stored value absent_ — an operator restore rolled the stored copy back. The node
     MUST restore the stored copy **from the anchor**, crash-atomically, and MUST NOT mint. This
     is the benign case and it is deliberately silent on the wire: the node re-advertises the
     identical value, every pin still matches, and no client sees an identity event. The node MUST
     surface a node-local operator diagnostic recording the repair.
-  - *anchor unset, stored value present* — the anchor was lost, the value was not. Adopt the
+  - _anchor unset, stored value present_ — the anchor was lost, the value was not. Adopt the
     stored value into the anchor crash-atomically, then proceed. Minting is forbidden whenever a
     stored value exists.
-  - *anchor set, stored value present and different, or the anchor unreadable* — unresolvable:
+  - _anchor set, stored value present and different, or the anchor unreadable_ — unresolvable:
     two values claim the node's lineage, or none can be proven. The node MUST NOT advertise, MUST
     NOT mint, MUST NOT choose between them, and MUST surface the recovery command below. This is
     §5.5 U2 (`statement-unavailable`): under effective `requireE2EE` every channel is FATAL-PRE
@@ -2207,27 +2208,27 @@ Encoder `encodeNodeE2eeCapabilityTranscript`, domain `ryco.node-e2ee-capability.
 the byte-level encoding of the §5.2 statement. The transcript is a canonical-CBOR array of
 exactly 19 elements:
 
-| # | Field | Type | Constraint |
-| --- | --- | --- | --- |
-| 0 | domain | text | `"ryco.node-e2ee-capability.v1"` |
-| 1 | `hubOrigin` | text | Canonical Hub origin; at most `E2EE_HUB_ORIGIN_MAX_BYTES` (§7.1) |
-| 2 | `nodeId` | text | Node id format |
-| 3 | `identityAlgorithm` | text | `"ed25519"` |
-| 4 | `identityKeyId` | text | Active identity key id |
-| 5 | `identityPublicKey` | bytes | `ED25519_PUBLIC_KEY_BYTES` |
-| 6 | `identityFingerprint` | bytes | `ryco.node-key.v1` fingerprint of element 5 |
-| 7 | `e2eeVersionMin` | uint | Minimum supported E2EE protocol version |
-| 8 | `e2eeVersionMax` | uint | Maximum supported E2EE protocol version; `min ≤ max`, and the range MUST contain every version the node will accept at §8.6 step 2 — in version 1, exactly `E2EE_PROTOCOL_VERSION` |
-| 9 | `suiteRegistry` | array of uint | Ordered suite ids offered, in the node's preference order; nonempty; at most `E2EE_SUITE_REGISTRY_MAX_ENTRIES` entries; each in the §3.4 registry |
-| 10 | `prekeyCertificate` | array | Exactly `[ prekeyId (text), agreementPublicKey (bytes), crossSignature (bytes), agreementFingerprint (bytes), createdAt (uint), expiresAt (uint) ]` |
-| 11 | `continuityChain` | array | Zero or more `[ bstr(transcript), bstr(signature) ]` entries (§7.5), at most `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` |
-| 12 | `requireE2EE` | bool | Raw policy value (§12) |
-| 13 | `requireApprovedClientE2EE` | bool | Raw policy value (§12) |
-| 14 | `admittedPatterns` | array of text | Effective admitted pattern set, in fixed order `"IK"` then `"NX"`; exactly `["IK"]` when `requireApprovedClientE2EE` is true (§12) |
-| 15 | `policyGeneration` | uint | Monotonic policy generation (§5.7) |
-| 16 | `issuedAt` | uint | Epoch milliseconds |
-| 17 | `expiresAt` | uint | Epoch milliseconds; interval bound per §5.7 |
-| 18 | `continuityId` | text | Continuity id format (§7.1). **REQUIRED in every statement**, including from a node that has never rotated; every entry of element 11 MUST carry the identical value (§7.5) |
+| #   | Field                       | Type          | Constraint                                                                                                                                                                         |
+| --- | --------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0   | domain                      | text          | `"ryco.node-e2ee-capability.v1"`                                                                                                                                                   |
+| 1   | `hubOrigin`                 | text          | Canonical Hub origin; at most `E2EE_HUB_ORIGIN_MAX_BYTES` (§7.1)                                                                                                                   |
+| 2   | `nodeId`                    | text          | Node id format                                                                                                                                                                     |
+| 3   | `identityAlgorithm`         | text          | `"ed25519"`                                                                                                                                                                        |
+| 4   | `identityKeyId`             | text          | Active identity key id                                                                                                                                                             |
+| 5   | `identityPublicKey`         | bytes         | `ED25519_PUBLIC_KEY_BYTES`                                                                                                                                                         |
+| 6   | `identityFingerprint`       | bytes         | `ryco.node-key.v1` fingerprint of element 5                                                                                                                                        |
+| 7   | `e2eeVersionMin`            | uint          | Minimum supported E2EE protocol version                                                                                                                                            |
+| 8   | `e2eeVersionMax`            | uint          | Maximum supported E2EE protocol version; `min ≤ max`, and the range MUST contain every version the node will accept at §8.6 step 2 — in version 1, exactly `E2EE_PROTOCOL_VERSION` |
+| 9   | `suiteRegistry`             | array of uint | Ordered suite ids offered, in the node's preference order; nonempty; at most `E2EE_SUITE_REGISTRY_MAX_ENTRIES` entries; each in the §3.4 registry                                  |
+| 10  | `prekeyCertificate`         | array         | Exactly `[ prekeyId (text), agreementPublicKey (bytes), crossSignature (bytes), agreementFingerprint (bytes), createdAt (uint), expiresAt (uint) ]`                                |
+| 11  | `continuityChain`           | array         | Zero or more `[ bstr(transcript), bstr(signature) ]` entries (§7.5), at most `E2EE_CONTINUITY_CHAIN_MAX_LENGTH`                                                                    |
+| 12  | `requireE2EE`               | bool          | Raw policy value (§12)                                                                                                                                                             |
+| 13  | `requireApprovedClientE2EE` | bool          | Raw policy value (§12)                                                                                                                                                             |
+| 14  | `admittedPatterns`          | array of text | Effective admitted pattern set, in fixed order `"IK"` then `"NX"`; exactly `["IK"]` when `requireApprovedClientE2EE` is true (§12)                                                 |
+| 15  | `policyGeneration`          | uint          | Monotonic policy generation (§5.7)                                                                                                                                                 |
+| 16  | `issuedAt`                  | uint          | Epoch milliseconds                                                                                                                                                                 |
+| 17  | `expiresAt`                 | uint          | Epoch milliseconds; interval bound per §5.7                                                                                                                                        |
+| 18  | `continuityId`              | text          | Continuity id format (§7.1). **REQUIRED in every statement**, including from a node that has never rotated; every entry of element 11 MUST carry the identical value (§7.5)        |
 
 Element 18 is appended rather than inserted so the index mapping of the cross-signature
 reconstruction below is unaffected. It is the node's Hub-independent anchor (§7.5): a verifier
@@ -2254,7 +2255,7 @@ statement as unusable evidence and never sends a hello, taking the disposition o
 §8.2. Nothing else reads element 14. In particular the **node** does not: §8.6 step 2 evaluates
 `tier` against the node's own committed policy and never against the set an advertisement carries,
 which is the §12.6 rule that keeps a stale replayed advertisement from widening admission. Element
-14 therefore needs no §7.6.1 self-check line of its own, unlike elements 7–8: it is *computed*
+14 therefore needs no §7.6.1 self-check line of its own, unlike elements 7–8: it is _computed_
 from the committed policy — exactly `["IK"]` when `requireApprovedClientE2EE` is true, otherwise
 `["IK", "NX"]` — rather than configured independently, so a node cannot advertise a set it does not
 serve. When a future revision adds a tier or a pattern, §5.2 step 9 and this element are the two
@@ -2390,26 +2391,26 @@ a different suite. Multi-suite negotiation requires its own reviewed handshake r
 The context block is a canonical-CBOR array of exactly 18 elements under domain
 `ryco.relay-e2ee.context.v1`:
 
-| # | Field | Type | Content |
-| --- | --- | --- | --- |
-| 0 | domain | text | `"ryco.relay-e2ee.context.v1"` |
-| 1 | `hubOrigin` | text | Canonical Hub origin the endpoint is actually connected to |
-| 2 | `channelId` | text | The relay channel id |
-| 3 | `relayProtocolMajor` | uint | Negotiated relay protocol major |
-| 4 | `relayProtocolMinor` | uint | Negotiated relay protocol minor |
-| 5 | `e2eeVersion` | uint | This protocol's version (`E2EE_PROTOCOL_VERSION`) |
-| 6 | `suiteId` | uint | The selected suite |
-| 7 | `nodeId` | text | The selected node id |
-| 8 | `nodeIdentityAlgorithm` | text | Expected node identity algorithm (`"ed25519"`) |
-| 9 | `nodeIdentityFingerprint` | bytes | Expected node identity fingerprint (`ryco.node-key.v1`) |
-| 10 | `accountId` | text | Client-claimed account id; the namespace is the pair with element 1. **Hub-issued and not client-anchored** (§12.1.1). **NX: the empty string** |
-| 11 | `clientIntendedCapability` | text | Capability the client commits to exercise |
-| 12 | `clientIntendedRole` | text | Role the client commits to exercise |
-| 13 | `channelOpenCapability` | text | The `channel.open.capability` the endpoint received |
-| 14 | `channelOpenEffectiveRole` | text | The `channel.open.effectiveRole` the endpoint received |
-| 15 | `nodeCertificateFingerprints` | array of bytes | Element 0: node agreement-key fingerprint (`ryco.e2ee-agreement-key.v1`); elements 1…n: SHA-256 of each continuity-certificate transcript in chain order (empty chain contributes none). Both are taken from the capability statement advertised **on this channel**, per the construction rules below |
-| 16 | `clientCertificateFingerprints` | array of bytes | IK: exactly `[ clientIdentityFingerprint, clientAgreementFingerprint ]`. **NX: the empty array** |
-| 17 | `nodeContinuityId` | text | The node continuity id (§7.5) this endpoint expects for this channel. Nonempty on **both** tiers; it has no absence semantics, because a continuity id exists for every node and §7.6 element 18 makes it a required signed element of every statement |
+| #   | Field                           | Type           | Content                                                                                                                                                                                                                                                                                                |
+| --- | ------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0   | domain                          | text           | `"ryco.relay-e2ee.context.v1"`                                                                                                                                                                                                                                                                         |
+| 1   | `hubOrigin`                     | text           | Canonical Hub origin the endpoint is actually connected to                                                                                                                                                                                                                                             |
+| 2   | `channelId`                     | text           | The relay channel id                                                                                                                                                                                                                                                                                   |
+| 3   | `relayProtocolMajor`            | uint           | Negotiated relay protocol major                                                                                                                                                                                                                                                                        |
+| 4   | `relayProtocolMinor`            | uint           | Negotiated relay protocol minor                                                                                                                                                                                                                                                                        |
+| 5   | `e2eeVersion`                   | uint           | This protocol's version (`E2EE_PROTOCOL_VERSION`)                                                                                                                                                                                                                                                      |
+| 6   | `suiteId`                       | uint           | The selected suite                                                                                                                                                                                                                                                                                     |
+| 7   | `nodeId`                        | text           | The selected node id                                                                                                                                                                                                                                                                                   |
+| 8   | `nodeIdentityAlgorithm`         | text           | Expected node identity algorithm (`"ed25519"`)                                                                                                                                                                                                                                                         |
+| 9   | `nodeIdentityFingerprint`       | bytes          | Expected node identity fingerprint (`ryco.node-key.v1`)                                                                                                                                                                                                                                                |
+| 10  | `accountId`                     | text           | Client-claimed account id; the namespace is the pair with element 1. **Hub-issued and not client-anchored** (§12.1.1). **NX: the empty string**                                                                                                                                                        |
+| 11  | `clientIntendedCapability`      | text           | Capability the client commits to exercise                                                                                                                                                                                                                                                              |
+| 12  | `clientIntendedRole`            | text           | Role the client commits to exercise                                                                                                                                                                                                                                                                    |
+| 13  | `channelOpenCapability`         | text           | The `channel.open.capability` the endpoint received                                                                                                                                                                                                                                                    |
+| 14  | `channelOpenEffectiveRole`      | text           | The `channel.open.effectiveRole` the endpoint received                                                                                                                                                                                                                                                 |
+| 15  | `nodeCertificateFingerprints`   | array of bytes | Element 0: node agreement-key fingerprint (`ryco.e2ee-agreement-key.v1`); elements 1…n: SHA-256 of each continuity-certificate transcript in chain order (empty chain contributes none). Both are taken from the capability statement advertised **on this channel**, per the construction rules below |
+| 16  | `clientCertificateFingerprints` | array of bytes | IK: exactly `[ clientIdentityFingerprint, clientAgreementFingerprint ]`. **NX: the empty array**                                                                                                                                                                                                       |
+| 17  | `nodeContinuityId`              | text           | The node continuity id (§7.5) this endpoint expects for this channel. Nonempty on **both** tiers; it has no absence semantics, because a continuity id exists for every node and §7.6 element 18 makes it a required signed element of every statement                                                 |
 
 Element 17 is appended rather than inserted, so elements 0–16 keep their indices and every
 previously fixed ordering is unchanged.
@@ -2515,11 +2516,10 @@ registry check rather than adopted from the wrapper. The only **other** wrapper 
 before Noise processing begins is `tier`, which selects the pattern (§8.1, §8.6 step 4);
 `e2eeVersion`, `selectedSuite`, and `offeredSuites` are validated against the responder's own
 state at §8.6 step 2 and never adopted. **No wrapper value is trusted**: the full authorization
-context is independently reconstructed from the responder's own state and compared at §8.6 step
-7. Because Noise mixes the prologue into the handshake hash, any disagreement about these public
+context is independently reconstructed from the responder's own state and compared at §8.6 step 7. Because Noise mixes the prologue into the handshake hash, any disagreement about these public
 fields or about the commitment makes the handshake fail cryptographically.
 
-*Note (non-normative)*: tier integrity is not carried by a prologue field, and deliberately so —
+_Note (non-normative)_: tier integrity is not carried by a prologue field, and deliberately so —
 a responder-populated tier element would be derived from the same unauthenticated wrapper value
 that chose the pattern, so it would detect nothing. Tier confusion is caught in three places
 instead: the tier-dependent shape of context elements 10 and 16 (§8.3 absence semantics), which
@@ -2529,7 +2529,7 @@ coverage of the **exact hello wire bytes** — the `tier` field among them — b
 confirmation. Those are the concrete assertions the §14.1 tier/pattern-confusion suite tests
 against.
 
-*Note (non-normative)*: channel ids are unique per channel, which makes the prologue — and
+_Note (non-normative)_: channel ids are unique per channel, which makes the prologue — and
 therefore every Noise message and derived key — channel-unique; a recorded `E2EEClientHello`
 replayed on another channel fails Noise processing outright.
 
@@ -2538,15 +2538,15 @@ replayed on another channel fails Noise processing outright.
 Negotiation record type `0x01` (§3.4), bounded by `E2EE_CLIENT_HELLO_MAX_BYTES`. The body is a
 canonical-CBOR array of exactly 7 elements:
 
-| # | Field | Type | Content |
-| --- | --- | --- | --- |
-| 0 | `e2eeVersion` | uint | MUST equal `E2EE_PROTOCOL_VERSION` |
-| 1 | `tier` | text | `"native"` (IK) or `"web"` (NX) |
-| 2 | `selectedSuite` | uint | The client-selected suite (§8.2) |
-| 3 | `offeredSuites` | array of uint | The client's complete ordered local suite-preference list; MUST contain element 2; MUST NOT exceed `E2EE_SUITE_REGISTRY_MAX_ENTRIES` entries, matching the cap on the node's registry (§7.6 element 9). The record is in any case bounded by `E2EE_CLIENT_HELLO_MAX_BYTES`, enforced before any body parse (§8.6 step 1) |
-| 4 | `clientNonce` | bytes | `E2EE_HANDSHAKE_NONCE_BYTES` fresh CSPRNG bytes; contributes transcript entropy; not otherwise interpreted |
-| 5 | `contextCommitment` | bytes | `E2EE_CONTEXT_COMMITMENT_BYTES` (§8.3) |
-| 6 | `noiseMessage1` | bytes | The Noise first handshake message for the tier's pattern |
+| #   | Field               | Type          | Content                                                                                                                                                                                                                                                                                                                  |
+| --- | ------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0   | `e2eeVersion`       | uint          | MUST equal `E2EE_PROTOCOL_VERSION`                                                                                                                                                                                                                                                                                       |
+| 1   | `tier`              | text          | `"native"` (IK) or `"web"` (NX)                                                                                                                                                                                                                                                                                          |
+| 2   | `selectedSuite`     | uint          | The client-selected suite (§8.2)                                                                                                                                                                                                                                                                                         |
+| 3   | `offeredSuites`     | array of uint | The client's complete ordered local suite-preference list; MUST contain element 2; MUST NOT exceed `E2EE_SUITE_REGISTRY_MAX_ENTRIES` entries, matching the cap on the node's registry (§7.6 element 9). The record is in any case bounded by `E2EE_CLIENT_HELLO_MAX_BYTES`, enforced before any body parse (§8.6 step 1) |
+| 4   | `clientNonce`       | bytes         | `E2EE_HANDSHAKE_NONCE_BYTES` fresh CSPRNG bytes; contributes transcript entropy; not otherwise interpreted                                                                                                                                                                                                               |
+| 5   | `contextCommitment` | bytes         | `E2EE_CONTEXT_COMMITMENT_BYTES` (§8.3)                                                                                                                                                                                                                                                                                   |
+| 6   | `noiseMessage1`     | bytes         | The Noise first handshake message for the tier's pattern                                                                                                                                                                                                                                                                 |
 
 **The clear wrapper carries no client identifier**: no account id, no client key, no client
 fingerprint, no certificate. On IK those travel only inside the encrypted Noise payload; the
@@ -2556,13 +2556,13 @@ handshake encryption.
 **IK message-1 payload** — the encrypted handshake payload of `noiseMessage1` — is a
 canonical-CBOR array of exactly 5 elements:
 
-| # | Field | Type | Content |
-| --- | --- | --- | --- |
-| 0 | `clientPrekeyTranscript` | bytes | Exact §7.4 transcript bytes |
-| 1 | `clientPrekeySignature` | bytes | Device-key signature over element 0 (§7.1) |
-| 2 | `accountId` | text | The account claim; MUST equal the certificate's namespace account id |
-| 3 | `intendedCapability` | text | Context element 11 |
-| 4 | `intendedRole` | text | Context element 12 |
+| #   | Field                    | Type  | Content                                                              |
+| --- | ------------------------ | ----- | -------------------------------------------------------------------- |
+| 0   | `clientPrekeyTranscript` | bytes | Exact §7.4 transcript bytes                                          |
+| 1   | `clientPrekeySignature`  | bytes | Device-key signature over element 0 (§7.1)                           |
+| 2   | `accountId`              | text  | The account claim; MUST equal the certificate's namespace account id |
+| 3   | `intendedCapability`     | text  | Context element 11                                                   |
+| 4   | `intendedRole`           | text  | Context element 12                                                   |
 
 **NX message-1 payload MUST be zero-length.** The NX first message has no encryption keys
 (§8.10); nothing may ride in it, and a responder MUST treat a nonempty NX message-1 payload as
@@ -2631,23 +2631,23 @@ The responder processes a hello in exactly this order; every failure at any step
 Negotiation record type `0x02` (§3.4), bounded by `E2EE_SERVER_ACCEPT_MAX_BYTES`. The body is a
 canonical-CBOR array of exactly 5 elements:
 
-| # | Field | Type | Content |
-| --- | --- | --- | --- |
-| 0 | `acceptedSuite` | uint | MUST equal the hello's `selectedSuite` |
-| 1 | `nodePrekeyId` | text | MUST equal the `prekeyId` advertised on this channel (§7.6) |
-| 2 | `contextCommitment` | bytes | MUST byte-equal the hello's commitment |
-| 3 | `noiseMessage2` | bytes | The Noise second handshake message |
-| 4 | `serverConfirmation` | bytes | `E2EE_CONFIRMATION_BYTES`; defined below |
+| #   | Field                | Type  | Content                                                     |
+| --- | -------------------- | ----- | ----------------------------------------------------------- |
+| 0   | `acceptedSuite`      | uint  | MUST equal the hello's `selectedSuite`                      |
+| 1   | `nodePrekeyId`       | text  | MUST equal the `prekeyId` advertised on this channel (§7.6) |
+| 2   | `contextCommitment`  | bytes | MUST byte-equal the hello's commitment                      |
+| 3   | `noiseMessage2`      | bytes | The Noise second handshake message                          |
+| 4   | `serverConfirmation` | bytes | `E2EE_CONFIRMATION_BYTES`; defined below                    |
 
 **Message-2 payload** (both patterns) — the encrypted handshake payload of `noiseMessage2` —
 is a canonical-CBOR array of exactly 3 elements carrying the node-received authority fields and
 the certificate binding the client must compare:
 
-| # | Field | Type | Content |
-| --- | --- | --- | --- |
-| 0 | `channelOpenCapability` | text | The `channel.open.capability` the node received |
-| 1 | `channelOpenEffectiveRole` | text | The `channel.open.effectiveRole` the node received |
-| 2 | `nodeAgreementKeyFingerprint` | bytes | `ryco.e2ee-agreement-key.v1` fingerprint of the responder static used |
+| #   | Field                         | Type  | Content                                                               |
+| --- | ----------------------------- | ----- | --------------------------------------------------------------------- |
+| 0   | `channelOpenCapability`       | text  | The `channel.open.capability` the node received                       |
+| 1   | `channelOpenEffectiveRole`    | text  | The `channel.open.effectiveRole` the node received                    |
+| 2   | `nodeAgreementKeyFingerprint` | bytes | `ryco.e2ee-agreement-key.v1` fingerprint of the responder static used |
 
 In NX, the Noise `s` token in message 2 transmits and proves possession of the node static
 agreement key; the client MUST require it to byte-equal the advertised prekey certificate's
@@ -2776,18 +2776,18 @@ at revision `NOISE_SPEC_REVISION` (authentication / confidentiality as defined i
 specification §7.7), stated per payload and per post-handshake direction, with their concrete
 consequences in this protocol. There is no blanket claim.
 
-| Payload / direction | Noise auth | Noise conf | Consequences here |
-| --- | --- | --- | --- |
-| IK message-1 payload (client certificate, account claim, requested authority) | 1 | 2 | Sender authentication rests on `ss`: a holder of the **node agreement private key** could forge it (KCI) — within this design that holder is the node itself or a compromised node, which is outside the threat model (§2.6). No forward secrecy: later compromise of the node agreement key exposes recorded message-1 payloads. Replayable at the Noise level, neutralized by the channel-unique prologue (§8.4) and the one-hello rule (N3/N4). Therefore this payload carries **certification metadata only, never application data**, and the node acts on it only as §8.6 describes |
-| IK message-2 payload (authority echo, prekey binding) | 2 | 4 | Responder authentication via `es` is KCI-resistant. Weak forward secrecy **conditional on the node agreement prekey**: the node's binding of the client's apparent ephemeral to the client static rests only on `es` and `ss`, both computed with the **node agreement private key**, so an attacker who had **previously** compromised that key could have substituted its own ephemeral for the client's. Such an attacker still cannot read this payload at the time — message 2 also mixes `se`, which requires the client agreement private key — but a **later** compromise of the client agreement key would then decrypt it, which the strong forward secrecy of grade 5 would otherwise prevent. Prior compromise of the *client* agreement key is a separate and strictly stronger case: it is outright client impersonation, not this caveat. Metadata only |
-| IK client→node transport (incl. the implicit finish) | 2 | 5 | Mutual static authentication, KCI-resistant, strong forward secrecy |
-| IK node→client transport | 2 | 5 | Same |
-| NX message-1 payload | 0 | 0 | No keys exist yet: no authentication, no confidentiality. **MUST be empty** (§8.5) |
-| NX message-2 payload | 2 | 1 | Node authenticated (KCI-resistant via `es`); encryption is to an **anonymous ephemeral initiator** — any active party, including the Hub, could be that initiator. Contents are limited to relay-visible authority fields and a public fingerprint |
-| NX client→node transport | 0 | 5 | **The client is never authenticated at the Noise level.** This is the structural fact behind the web row of §2.2 and §2.3: a Hub can originate an NX session. Confidentiality toward the node is strong (forward secrecy via `ee`) |
-| NX node→client transport | 2 | 1 | Node-authenticated to whoever initiated. Forward secrecy holds via `ee` — recorded traffic stays sealed after ephemerals are erased — which is exactly the passive/retroactive (not active) guarantee of §2.2 |
+| Payload / direction                                                           | Noise auth | Noise conf | Consequences here                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------- | ---------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| IK message-1 payload (client certificate, account claim, requested authority) | 1          | 2          | Sender authentication rests on `ss`: a holder of the **node agreement private key** could forge it (KCI) — within this design that holder is the node itself or a compromised node, which is outside the threat model (§2.6). No forward secrecy: later compromise of the node agreement key exposes recorded message-1 payloads. Replayable at the Noise level, neutralized by the channel-unique prologue (§8.4) and the one-hello rule (N3/N4). Therefore this payload carries **certification metadata only, never application data**, and the node acts on it only as §8.6 describes                                                                                                                                                                                                                                                                              |
+| IK message-2 payload (authority echo, prekey binding)                         | 2          | 4          | Responder authentication via `es` is KCI-resistant. Weak forward secrecy **conditional on the node agreement prekey**: the node's binding of the client's apparent ephemeral to the client static rests only on `es` and `ss`, both computed with the **node agreement private key**, so an attacker who had **previously** compromised that key could have substituted its own ephemeral for the client's. Such an attacker still cannot read this payload at the time — message 2 also mixes `se`, which requires the client agreement private key — but a **later** compromise of the client agreement key would then decrypt it, which the strong forward secrecy of grade 5 would otherwise prevent. Prior compromise of the _client_ agreement key is a separate and strictly stronger case: it is outright client impersonation, not this caveat. Metadata only |
+| IK client→node transport (incl. the implicit finish)                          | 2          | 5          | Mutual static authentication, KCI-resistant, strong forward secrecy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| IK node→client transport                                                      | 2          | 5          | Same                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| NX message-1 payload                                                          | 0          | 0          | No keys exist yet: no authentication, no confidentiality. **MUST be empty** (§8.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| NX message-2 payload                                                          | 2          | 1          | Node authenticated (KCI-resistant via `es`); encryption is to an **anonymous ephemeral initiator** — any active party, including the Hub, could be that initiator. Contents are limited to relay-visible authority fields and a public fingerprint                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| NX client→node transport                                                      | 0          | 5          | **The client is never authenticated at the Noise level.** This is the structural fact behind the web row of §2.2 and §2.3: a Hub can originate an NX session. Confidentiality toward the node is strong (forward secrecy via `ee`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| NX node→client transport                                                      | 2          | 1          | Node-authenticated to whoever initiated. Forward secrecy holds via `ee` — recorded traffic stays sealed after ephemerals are erased — which is exactly the passive/retroactive (not active) guarantee of §2.2                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
-*Note (non-normative)*: both IK handshake-payload caveats above are rooted in the **node
+_Note (non-normative)_: both IK handshake-payload caveats above are rooted in the **node
 agreement prekey** — retroactively for message 1, and, in combination with a later client-key
 compromise, for message 2. §2.6 places node compromise outside the threat model and §6.4 governs
 that key's rotation; rotation does not mitigate a caveat whose trigger is prior compromise of the
@@ -2854,7 +2854,7 @@ A **gap, repeat, or regression is fatal**, not recoverable: see §9.7 for what t
   respect to every other send in that direction. Concurrent callers MUST NOT observe the same
   pair.
 - **Reserve before you encrypt.** A sender MUST obtain transmission admission for the **entire**
-  record — every chunk of it — *before* it assigns `(epoch, counter)` and invokes the AEAD. A
+  record — every chunk of it — _before_ it assigns `(epoch, counter)` and invokes the AEAD. A
   refused admission is therefore a sender-local error (`e2ee_send_unavailable`, §11.4): no pair
   is consumed, no record is encrypted, no wire record of any kind is produced, and the channel
   is unaffected and remains usable. Ordinary backpressure MUST NOT be allowed to consume a
@@ -2864,7 +2864,7 @@ A **gap, repeat, or regression is fatal**, not recoverable: see §9.7 for what t
   invocation, it is consumed and MUST NOT be reused under any circumstance. If the send
   subsequently fails locally after that point, the sender's disposition is determined by what it
   can establish about delivery — the choice is **not** free:
-  - *No byte of the record reached the relay.* The peer's expected-next pair is still the
+  - _No byte of the record reached the relay._ The peer's expected-next pair is still the
     consumed one, so every later record in that direction would be a §9.2 gap and fatal at the
     peer. The sender MUST NOT protect any further record on that channel. It terminates as a
     local internal failure whose send path is unusable (§11.3, condition Q10): it MUST NOT emit
@@ -2872,7 +2872,7 @@ A **gap, repeat, or regression is fatal**, not recoverable: see §9.7 for what t
     the gap being avoided, and it emits the outer `channel.close`. The peer records
     **Unclean — abrupt** (§10.4), which is unattributed, rather than a spurious tampering
     signal.
-  - *Delivery ambiguous or partial* — the realistic case once a record is chunked, where earlier
+  - _Delivery ambiguous or partial_ — the realistic case once a record is chunked, where earlier
     chunks may already have been transmitted. The sender MAY continue with the next pair. If the
     record did not in fact arrive, the peer's next comparison is a §9.2 mismatch it cannot
     distinguish from tampering; see the §9.7 caveat.
@@ -2925,7 +2925,7 @@ defensive.
   `exporterSecret`, `serverConfirmationKey`, and buffered plaintext MUST be erased (§6.5).
 - Erasure means overwriting the byte buffers with zeros before releasing the references.
 
-*Note (non-normative)*: managed runtimes may retain unreachable copies (garbage-collector
+_Note (non-normative)_: managed runtimes may retain unreachable copies (garbage-collector
 moves, JIT spills); the zeroization discipline bounds, but cannot eliminate, that exposure.
 Residual-risk treatment belongs to §17.
 
@@ -2966,7 +2966,7 @@ post-application reserve = E2EE_CLOSE_RECORDS_RESERVED + E2EE_ERROR_RECORDS_RESE
   wrap, reuse, or silently drop the obligation. None of the three is authorised, so the capacity
   is reserved instead.
 
-*Note (non-normative)*: a sequential responder in fact protects only a single close-machine
+_Note (non-normative)_: a sequential responder in fact protects only a single close-machine
 record, and a close that meets no fatal condition never protects the error record at all, so both
 finish with part of the reserve unused. That is the intended slack; sizing the reserve to the
 responder role, or to a close that no fatal condition interrupts, is the defect this rule exists
@@ -3012,13 +3012,13 @@ and close generically (§4.4, §11).
 
 Both record bodies are the same canonical-CBOR array of exactly 5 elements:
 
-| # | Field | Type | Content |
-| --- | --- | --- | --- |
-| 0 | `finalSendEpoch` | bytes (`E2EE_EPOCH_FIELD_BYTES`) | MUST byte-equal the carrying envelope's epoch field |
-| 1 | `finalSendCounter` | bytes (`E2EE_COUNTER_FIELD_BYTES`) | MUST byte-equal the carrying envelope's counter field |
-| 2 | `expectedRecvEpoch` | bytes (`E2EE_EPOCH_FIELD_BYTES`) | The sender's §9.2 expected-next epoch for its receive direction |
-| 3 | `expectedRecvCounter` | bytes (`E2EE_COUNTER_FIELD_BYTES`) | The sender's §9.2 expected-next counter for its receive direction |
-| 4 | `closeCommitment` | bytes (`E2EE_CLOSE_COMMITMENT_BYTES`) | Defined below |
+| #   | Field                 | Type                                  | Content                                                           |
+| --- | --------------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| 0   | `finalSendEpoch`      | bytes (`E2EE_EPOCH_FIELD_BYTES`)      | MUST byte-equal the carrying envelope's epoch field               |
+| 1   | `finalSendCounter`    | bytes (`E2EE_COUNTER_FIELD_BYTES`)    | MUST byte-equal the carrying envelope's counter field             |
+| 2   | `expectedRecvEpoch`   | bytes (`E2EE_EPOCH_FIELD_BYTES`)      | The sender's §9.2 expected-next epoch for its receive direction   |
+| 3   | `expectedRecvCounter` | bytes (`E2EE_COUNTER_FIELD_BYTES`)    | The sender's §9.2 expected-next counter for its receive direction |
+| 4   | `closeCommitment`     | bytes (`E2EE_CLOSE_COMMITMENT_BYTES`) | Defined below                                                     |
 
 The commitment binds the declared final session state to the session and to the record's role:
 
@@ -3057,11 +3057,11 @@ transmitted its own **first** close-machine record on that channel. Equivalently
 the endpoint's next-send state as of immediately after it transmitted that record. It is fixed at
 that instant and MUST NOT be recomputed from the endpoint's later next-send state.
 
-| Branch and role | The endpoint's first close-machine record | Anchor |
-| --- | --- | --- |
-| Sequential initiator (validating the responder's `E2EECloseAck`, §10.2 step 3) | its `E2EEClose` | advance of that `E2EEClose`'s position |
-| Sequential responder (validating the initiator's final confirmation, §10.2 step 4) | its `E2EECloseAck` | advance of that `E2EECloseAck`'s position |
-| Simultaneous close, either side (validating the peer's `E2EECloseAck`, §10.2) | its `E2EEClose` | advance of that `E2EEClose`'s position |
+| Branch and role                                                                    | The endpoint's first close-machine record | Anchor                                    |
+| ---------------------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------- |
+| Sequential initiator (validating the responder's `E2EECloseAck`, §10.2 step 3)     | its `E2EEClose`                           | advance of that `E2EEClose`'s position    |
+| Sequential responder (validating the initiator's final confirmation, §10.2 step 4) | its `E2EECloseAck`                        | advance of that `E2EECloseAck`'s position |
+| Simultaneous close, either side (validating the peer's `E2EECloseAck`, §10.2)      | its `E2EEClose`                           | advance of that `E2EEClose`'s position    |
 
 The anchor — rather than the receiver's current next-send — is normative because in the
 simultaneous branch the two are never equal for an honest pair. Each side sends `E2EEClose`, then
@@ -3122,12 +3122,12 @@ which sizes `T_CLOSE` and `T_CLOSE_LINGER_MAX` so the whole close phase fits ins
 
 Sequential close:
 
-| Step | Endpoint | Action |
-| --- | --- | --- |
-| 1 | Initiator | Sends `E2EEClose` as its final application-phase record; waits |
-| 2 | Responder | Authenticates the close in sequence; validates §10.1 (passed-through rule); stops sending RPC; sends `E2EECloseAck` (its own final state declaration); waits |
-| 3 | Initiator | Validates the ack (strict rule, against the initiator's close anchor, which names its own `E2EEClose`, §10.1.1 — at this point the whole of its stream, since it has sent nothing since); sends a final `E2EECloseAck` (the **final confirmation**, strict fields); its exchange is complete |
-| 4 | Responder | Validates the final confirmation (strict rule, against the responder's close anchor — its own `E2EECloseAck`, §10.1.1 — proof the initiator received the responder's entire stream, including that ack); its exchange is complete |
+| Step | Endpoint  | Action                                                                                                                                                                                                                                                                                       |
+| ---- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | Initiator | Sends `E2EEClose` as its final application-phase record; waits                                                                                                                                                                                                                               |
+| 2    | Responder | Authenticates the close in sequence; validates §10.1 (passed-through rule); stops sending RPC; sends `E2EECloseAck` (its own final state declaration); waits                                                                                                                                 |
+| 3    | Initiator | Validates the ack (strict rule, against the initiator's close anchor, which names its own `E2EEClose`, §10.1.1 — at this point the whole of its stream, since it has sent nothing since); sends a final `E2EECloseAck` (the **final confirmation**, strict fields); its exchange is complete |
+| 4    | Responder | Validates the final confirmation (strict rule, against the responder's close anchor — its own `E2EECloseAck`, §10.1.1 — proof the initiator received the responder's entire stream, including that ack); its exchange is complete                                                            |
 
 **Simultaneous close.** An endpoint that receives `E2EEClose` after having sent its own treats
 the exchange as simultaneous: each side validates the peer's close under the passed-through
@@ -3171,7 +3171,7 @@ even in the terminal epoch. This carve-out is exhaustive: no other record type, 
 
 The carve-out cannot disturb the §10.1.1 close anchor, which is the property the prohibition
 exists to protect. The anchor is fixed at an endpoint's **first** close-machine record and is
-validated by the *peer's* strict-rule declaration; what would break it is a record protected
+validated by the _peer's_ strict-rule declaration; what would break it is a record protected
 between that first record and the peer's proof, which is exactly what the paragraph above still
 forbids. The terminal `E2EEError` is protected only once no further strict-rule validation of
 this endpoint's stream can occur — either the exchange has completed, or it has just been
@@ -3222,7 +3222,7 @@ Enqueueing one's own final records is never sufficient: **enqueueing a record is
 it**, and only the encrypted peer proof demonstrates delivery.
 
 **Last-record linger (SHOULD).** Satisfying the lower bound does not by itself make it safe to
-close, because an endpoint's role may still require it to *send* one more record. The endpoint
+close, because an endpoint's role may still require it to _send_ one more record. The endpoint
 that transmits the **last close-machine record of the exchange** — the sequential initiator's
 final confirmation (§10.2 step 3), and each side's `E2EECloseAck` in the simultaneous branch —
 holds a proof its peer does not yet hold, and per the paragraph below the relay may discard that
@@ -3241,7 +3241,7 @@ close-machine record until the channel closes. `T_CLOSE` and `T_CLOSE_LINGER_MAX
 the linger — plus `T_KEEPALIVE_FLUSH_MARGIN` fits inside one
 `RPC_KEEPALIVE_INTERVAL`; at the values an earlier revision carried it did not, and a Hub that
 returned the peer proof just under `T_CLOSE` and withheld the peer's `channel.close` — letting
-the linger run its full bound — turned a *successful* authenticated close into a transport
+the linger run its full bound — turned a _successful_ authenticated close into a transport
 timeout that tore down the connection and every channel on it, deterministically. The same Hub
 strategy applied one step later — delivering the peer's `E2EEClose` just under `T_CLOSE` so the
 endpoint enters the simultaneous branch and waits a second time — reached the identical outcome
@@ -3287,12 +3287,12 @@ the relay protocol's orderly close.
 
 ### 10.4 Close verdicts
 
-| Verdict | Condition |
-| --- | --- |
-| **Clean** | The endpoint's complete close exchange verified (§10.2), every inbound record authenticated in order with no partial reassembly outstanding, and the strict-rule proof was received and validated against the endpoint's close anchor (§10.1.1) |
-| **Unclean — truncation** | The relay chunk assembler holds an incomplete reassembled message when the channel ends: a partial reassembled message at close **is truncation**, regardless of any other state |
-| **Unclean — abrupt** | The channel, connection, or socket ends — including an outer `channel.close` arriving — without a completed close exchange, or a `T_CLOSE` expiry |
-| **Failed** | The channel was terminated by FATAL-POST (`E2EEError`, §11) or any fatal condition of §4.4/§9 — including every close-machine violation of §11.3 Q7 and every §10.2 record beyond the machine's expectation; never reported as clean |
+| Verdict                  | Condition                                                                                                                                                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Clean**                | The endpoint's complete close exchange verified (§10.2), every inbound record authenticated in order with no partial reassembly outstanding, and the strict-rule proof was received and validated against the endpoint's close anchor (§10.1.1) |
+| **Unclean — truncation** | The relay chunk assembler holds an incomplete reassembled message when the channel ends: a partial reassembled message at close **is truncation**, regardless of any other state                                                                |
+| **Unclean — abrupt**     | The channel, connection, or socket ends — including an outer `channel.close` arriving — without a completed close exchange, or a `T_CLOSE` expiry                                                                                               |
+| **Failed**               | The channel was terminated by FATAL-POST (`E2EEError`, §11) or any fatal condition of §4.4/§9 — including every close-machine violation of §11.3 Q7 and every §10.2 record beyond the machine's expectation; never reported as clean            |
 
 **Exactly one verdict per endpoint, resolved in this order:** **Failed**, then **Unclean —
 truncation**, then **Unclean — abrupt**, then **Clean**. The truncation row's "regardless of any
@@ -3312,7 +3312,7 @@ it clean.
 **What Clean does and does not assert.** A Clean verdict is exactly the §10.2 statement and no
 more: the peer received and authenticated, in order, everything this endpoint sent up to and
 including the close-machine record its anchor names (§10.1.1). It never asserts that the peer
-received this endpoint's *last* close-machine record, because that record is unacknowledged by
+received this endpoint's _last_ close-machine record, because that record is unacknowledged by
 construction — the sequential initiator's final confirmation, and both acks in a simultaneous
 close. A Clean verdict at one end is therefore compatible with **Unclean — abrupt** at the
 other when that last record is dropped, which is why §10.2 forbids reporting the peer's verdict
@@ -3352,7 +3352,7 @@ fatal terminations, whose close verdict is **Failed** (§10.4).
 
 Sender-local errors (§11.4) are API-level diagnostics and never appear on the wire.
 
-*Note (non-normative)*: `channel_rejected`'s membership was verified against
+_Note (non-normative)_: `channel_rejected`'s membership was verified against
 `packages/contracts/src/relay.ts:57-77`, entry at `:73`, 2026-07-30. It is a
 relay protocol minor 2 reason, which is compatible with the §8.1 precondition that every E2EE
 channel is a minor 2 (or newer) channel. Extending the close-reason set would force a relay
@@ -3393,7 +3393,7 @@ path** — the creation of the new record, and equally the pairing-window evicti
 one. The §15 caps and the §13.6 pairing-window reservation are evaluated **before** emission,
 entirely in memory, so a cap-exceeding attempt outside a window still creates nothing and a
 window-admitted attempt still emits the identical reject at the identical point; the eviction
-target is *selected* before emission and *committed* after it. Both mutations — the delete and
+target is _selected_ before emission and _committed_ after it. Both mutations — the delete and
 the create, including the new record's §13.4 safety number — are committed after the reject and
 the close, on a best-effort basis, and MUST be committed atomically with respect to each other so
 that a crash cannot leave the slot freed without the record that was admitted into it (§13.2
@@ -3428,33 +3428,33 @@ path.
 **Pre-key condition table.** Every condition below maps to FATAL-PRE; the table is the
 normative enumeration and each row cites its defining rule.
 
-| # | Condition | Detecting endpoint | Defined in |
-| --- | --- | --- | --- |
-| P1 | Legacy JSON first message under effective `requireE2EE` | node | §4.4 N1, §12.3 |
-| P2 | Advertisement unavailable — undersized connection (§5.5 U1: asserted `maxDataChunkBytes` below `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`) — under effective `requireE2EE`. Evaluated once per relay connection, so every channel on it takes this row | node | §5.5, N15 |
-| P3 | Negotiation record **in `negotiating`** exceeding its per-type bound, or of an unknown or misdirected negotiation type. A negotiation record in `legacy` is P24 regardless of its type or size | both | §3.3, §3.4, N5/K8 |
-| P4 | Hello without an emitted advertisement, or a second hello or carrier on the channel | node / client | N4, K4 |
-| P5 | **Envelope** received before establishment or in `legacy` state — the envelope half of rows N13/K21; the negotiation half is P24 | both | N6/N13, K11/K21 |
-| P6 | Unknown **or absent** first byte in any state — the absent case is a zero-length post-strip payload (§3.4) | both | §3.4, §4.3 step 2, N7/N14, K12/K22 |
-| P7 | `T_HANDSHAKE_NODE` expiry from advertisement emit under effective `requireE2EE` (silent peer, oversized or excessive negotiation exchange, timeout alike) | node | N8 |
-| P8 | Any §15 concurrency, rate, or size bound exceeded | node | §15 |
-| P9 | Hello wrapper failure: strict-decode failure, an `e2eeVersion` outside the protocol range the node advertised on this channel (§7.6 elements 7–8) or not implemented by it, tier not admitted by policy, `selectedSuite` not in both registries, wrong field length | node | §8.6 step 2 |
-| P10 | Noise processing failure: AEAD failure, malformed message, all-zero X25519 output | both | §8.1, §8.6 step 4, §8.8 step 3 |
-| P11 | IK binding failure: client certificate invalid, expired (with `E2EE_MAX_CLOCK_SKEW`), namespace mismatch, Noise static not byte-equal to the certificate key, usage-field mismatch | node | §8.6 step 5 |
-| P12 | Authorization failure: client record absent, pending, or revoked; capability outside the approved set; role above the approved ceiling. Also the **in-flight withdrawal abort** — an owner authorization withdrawal (§13.6) committed after this handshake's §8.6 step 6 read and failing the withdrawal test against its admitted-authority snapshot. That abort takes this generic surface and never a `policy` code, which exists only post-key. Its node-policy counterpart is **P25**, a separate row on a separate ground | node | §8.6 step 6, §13.6 |
-| P13 | Context mismatch: the reconstructed `contextCommitment` differing from the wrapper's, or any §8.3 exact-equality or absence rule violated — elements 11/13, elements 12/14 in **either** direction, a substituted element 9, element 10, or element 17, or the NX absence semantics of elements 10 and 16 | both | §8.3, §8.6 step 7, §8.8 |
-| P14 | `plaintextCeiling` not positive at establishment | both | §4.5 |
-| P15 | Invalid **or unusable** capability statement while the channel's selection is latched (§12.1.1); includes a regressed policy generation, a continuity id disagreeing with the pinned value, an advertised protocol range excluding `E2EE_PROTOCOL_VERSION` or with `min > max` (§5.2 step 8), an empty suite intersection (§8.2), and an effective admitted pattern set omitting the pattern this client's tier runs (§5.2 step 9, §7.6 element 14) | client | K2, §5.2, §7.6, §8.2, §5.7, §12.1.1, §13.3 |
-| P16 | `E2EEServerAccept` without a sent hello, or failing any §8.8 step 1–5 check | client | K6 |
-| P17 | `E2EEHandshakeReject` received after a hello | client | K7 |
-| P18 | Non-carrier legacy JSON while the selection is latched (§12.1.1), while local policy forbids legacy, or after a hello was sent | client | K10 |
-| P19 | `T_ADV` expiry with the selection latched (§12.1.1) or local policy forbidding legacy | client | K14 |
-| P20 | `T_HANDSHAKE` expiry after hello emit without a valid accept. Reachable only because §3.2.2 L1 keeps the client's whole negotiating window inside one keepalive period; without L1 the transport dies first and this row never executes (§17.14) | client | K15 |
-| P21 | Usable validated statement present but the client cannot proceed (unverified pin with no pairing attempt under way) | client | §4.4 no-legacy-after-evidence rule |
-| P22 | Unexpected selection (§12.1.1) — a resolved-but-unlatched pin; no resolved pin under a `(hubOrigin, accountId)` pair holding a verified pin; or no resolved pin under the pair while the device-level `anyNodeVerified(hubOrigin)` marker is set (§13.1), which is the account-scope-change case — in each case with no recorded owner legacy consent, on non-carrier legacy JSON or at `T_ADV` expiry. The channel closes and the §13.2.1 unexpected-node surface is raised locally; the wire surface is the ordinary generic one | client | K23, K24, §12.1.1, §13.2.1 |
-| P23 | Advertisement unavailable — no conforming signed statement (§5.5 U2: §7.6.1 self-check failure, including an over-long Hub origin, an over-long transcript, a refused signing call, an advertised protocol range excluding the version the node implements, or an unresolvable continuity id under the §7.5 startup cross-check) — under effective `requireE2EE`. The node MUST also have failed startup when the condition was present at start; this row covers the case where it arose afterwards | node | §5.5, §7.5, §7.6.1, N15 |
-| P24 | **Negotiation record received in `legacy` state** — any type, any size, in either direction, including a correctly sized and correctly directed `E2EEClientHello` or `E2EEServerAccept`, which is neither over-bound nor misdirected and so is not P3, and is not an envelope and so is not P5. No session keys exist in `legacy`, so the disposition is FATAL-PRE and never FATAL-POST | both | N13/K21, §4.4 one-way-transitions rule |
-| P25 | **Policy-withdrawal in-flight abort** — a §12.6 policy withdrawal durably committed after this handshake's §8.6 step 2 read and before its row-N3 transition, whose narrowed policy would refuse the handshake's tier or selected suite. It is P9's condition re-evaluated after step 2 rather than at it, which is why it is its own row: P9 is defined at step 2 and a fixture naming P9 would assert a refusal the node did not make there. Like P12's second clause it takes the generic surface — the fixed-size reject and `channel_rejected` — and **never** a `policy` code, which exists only post-key; the established-channel counterpart of this transition is `Q12` (§11.3) | node | §12.6, §8.6 step 2 |
+| #   | Condition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Detecting endpoint | Defined in                                 |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ------------------------------------------ |
+| P1  | Legacy JSON first message under effective `requireE2EE`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | node               | §4.4 N1, §12.3                             |
+| P2  | Advertisement unavailable — undersized connection (§5.5 U1: asserted `maxDataChunkBytes` below `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`) — under effective `requireE2EE`. Evaluated once per relay connection, so every channel on it takes this row                                                                                                                                                                                                                                                                                                                                                                                                                                         | node               | §5.5, N15                                  |
+| P3  | Negotiation record **in `negotiating`** exceeding its per-type bound, or of an unknown or misdirected negotiation type. A negotiation record in `legacy` is P24 regardless of its type or size                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | both               | §3.3, §3.4, N5/K8                          |
+| P4  | Hello without an emitted advertisement, or a second hello or carrier on the channel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | node / client      | N4, K4                                     |
+| P5  | **Envelope** received before establishment or in `legacy` state — the envelope half of rows N13/K21; the negotiation half is P24                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | both               | N6/N13, K11/K21                            |
+| P6  | Unknown **or absent** first byte in any state — the absent case is a zero-length post-strip payload (§3.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | both               | §3.4, §4.3 step 2, N7/N14, K12/K22         |
+| P7  | `T_HANDSHAKE_NODE` expiry from advertisement emit under effective `requireE2EE` (silent peer, oversized or excessive negotiation exchange, timeout alike)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | node               | N8                                         |
+| P8  | Any §15 concurrency, rate, or size bound exceeded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | node               | §15                                        |
+| P9  | Hello wrapper failure: strict-decode failure, an `e2eeVersion` outside the protocol range the node advertised on this channel (§7.6 elements 7–8) or not implemented by it, tier not admitted by policy, `selectedSuite` not in both registries, wrong field length                                                                                                                                                                                                                                                                                                                                                                                                                      | node               | §8.6 step 2                                |
+| P10 | Noise processing failure: AEAD failure, malformed message, all-zero X25519 output                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | both               | §8.1, §8.6 step 4, §8.8 step 3             |
+| P11 | IK binding failure: client certificate invalid, expired (with `E2EE_MAX_CLOCK_SKEW`), namespace mismatch, Noise static not byte-equal to the certificate key, usage-field mismatch                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | node               | §8.6 step 5                                |
+| P12 | Authorization failure: client record absent, pending, or revoked; capability outside the approved set; role above the approved ceiling. Also the **in-flight withdrawal abort** — an owner authorization withdrawal (§13.6) committed after this handshake's §8.6 step 6 read and failing the withdrawal test against its admitted-authority snapshot. That abort takes this generic surface and never a `policy` code, which exists only post-key. Its node-policy counterpart is **P25**, a separate row on a separate ground                                                                                                                                                          | node               | §8.6 step 6, §13.6                         |
+| P13 | Context mismatch: the reconstructed `contextCommitment` differing from the wrapper's, or any §8.3 exact-equality or absence rule violated — elements 11/13, elements 12/14 in **either** direction, a substituted element 9, element 10, or element 17, or the NX absence semantics of elements 10 and 16                                                                                                                                                                                                                                                                                                                                                                                | both               | §8.3, §8.6 step 7, §8.8                    |
+| P14 | `plaintextCeiling` not positive at establishment                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | both               | §4.5                                       |
+| P15 | Invalid **or unusable** capability statement while the channel's selection is latched (§12.1.1); includes a regressed policy generation, a continuity id disagreeing with the pinned value, an advertised protocol range excluding `E2EE_PROTOCOL_VERSION` or with `min > max` (§5.2 step 8), an empty suite intersection (§8.2), and an effective admitted pattern set omitting the pattern this client's tier runs (§5.2 step 9, §7.6 element 14)                                                                                                                                                                                                                                      | client             | K2, §5.2, §7.6, §8.2, §5.7, §12.1.1, §13.3 |
+| P16 | `E2EEServerAccept` without a sent hello, or failing any §8.8 step 1–5 check                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | client             | K6                                         |
+| P17 | `E2EEHandshakeReject` received after a hello                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | client             | K7                                         |
+| P18 | Non-carrier legacy JSON while the selection is latched (§12.1.1), while local policy forbids legacy, or after a hello was sent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | client             | K10                                        |
+| P19 | `T_ADV` expiry with the selection latched (§12.1.1) or local policy forbidding legacy                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | client             | K14                                        |
+| P20 | `T_HANDSHAKE` expiry after hello emit without a valid accept. Reachable only because §3.2.2 L1 keeps the client's whole negotiating window inside one keepalive period; without L1 the transport dies first and this row never executes (§17.14)                                                                                                                                                                                                                                                                                                                                                                                                                                         | client             | K15                                        |
+| P21 | Usable validated statement present but the client cannot proceed (unverified pin with no pairing attempt under way)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | client             | §4.4 no-legacy-after-evidence rule         |
+| P22 | Unexpected selection (§12.1.1) — a resolved-but-unlatched pin; no resolved pin under a `(hubOrigin, accountId)` pair holding a verified pin; or no resolved pin under the pair while the device-level `anyNodeVerified(hubOrigin)` marker is set (§13.1), which is the account-scope-change case — in each case with no recorded owner legacy consent, on non-carrier legacy JSON or at `T_ADV` expiry. The channel closes and the §13.2.1 unexpected-node surface is raised locally; the wire surface is the ordinary generic one                                                                                                                                                       | client             | K23, K24, §12.1.1, §13.2.1                 |
+| P23 | Advertisement unavailable — no conforming signed statement (§5.5 U2: §7.6.1 self-check failure, including an over-long Hub origin, an over-long transcript, a refused signing call, an advertised protocol range excluding the version the node implements, or an unresolvable continuity id under the §7.5 startup cross-check) — under effective `requireE2EE`. The node MUST also have failed startup when the condition was present at start; this row covers the case where it arose afterwards                                                                                                                                                                                     | node               | §5.5, §7.5, §7.6.1, N15                    |
+| P24 | **Negotiation record received in `legacy` state** — any type, any size, in either direction, including a correctly sized and correctly directed `E2EEClientHello` or `E2EEServerAccept`, which is neither over-bound nor misdirected and so is not P3, and is not an envelope and so is not P5. No session keys exist in `legacy`, so the disposition is FATAL-PRE and never FATAL-POST                                                                                                                                                                                                                                                                                                  | both               | N13/K21, §4.4 one-way-transitions rule     |
+| P25 | **Policy-withdrawal in-flight abort** — a §12.6 policy withdrawal durably committed after this handshake's §8.6 step 2 read and before its row-N3 transition, whose narrowed policy would refuse the handshake's tier or selected suite. It is P9's condition re-evaluated after step 2 rather than at it, which is why it is its own row: P9 is defined at step 2 and a fixture naming P9 would assert a refusal the node did not make there. Like P12's second clause it takes the generic surface — the fixed-size reject and `channel_rejected` — and **never** a `policy` code, which exists only post-key; the established-channel counterpart of this transition is `Q12` (§11.3) | node               | §12.6, §8.6 step 2                         |
 
 **Every fatal input in `legacy` and in `negotiating` matches exactly one row above.** Rows
 N13/K21 accept two input classes, and each has its own condition here: an envelope
@@ -3466,13 +3466,13 @@ legacy-lock injection case therefore has exactly one row to name (§16.2, §16.3
 outcome of P3, P5, P6 and P24 is the identical generic FATAL-PRE, so the distinction is one of
 enumeration and diagnosis, never of observable behavior.
 
-Rows P2 and P23 are node-local *availability* conditions, not peer-input failures. They are
+Rows P2 and P23 are node-local _availability_ conditions, not peer-input failures. They are
 listed here because their wire surface is identical to every other FATAL-PRE — a generic
 fixed-size reject and `channel_rejected`, revealing nothing about the cause — while their
 node-local surface is a specific operator diagnostic (§5.5). No client-observable behavior
 distinguishes them from any other pre-key failure.
 
-Rows P12 (second clause) and P25 are node-local *owner- and operator-action* conditions, likewise
+Rows P12 (second clause) and P25 are node-local _owner- and operator-action_ conditions, likewise
 not peer-input failures: they fire when a §13.6 authorization withdrawal or a §12.6 policy
 withdrawal lands on a handshake already past the step whose read admitted it. They are enumerated
 here for the same reason P2 and P23 are — the wire surface is the identical generic FATAL-PRE, and
@@ -3491,12 +3491,12 @@ E2EEError body = canonical-CBOR array [ errorCode (uint) ]
 
 bounded by `E2EE_ERROR_BODY_MAX_BYTES`. Error codes:
 
-| Code | Name | Meaning |
-| --- | --- | --- |
-| `0x01` | `protocol_violation` | A §4, §9, or §10 fatal condition was detected on peer input |
-| `0x02` | `internal` | A local failure unrelated to peer input |
-| `0x03` | `policy` | An owner **authorization withdrawal** — revocation, role reduction, or capability removal — terminated the channel (§13.6, Q9); or a **policy withdrawal** — a node admission policy narrowed so that the channel would no longer be admitted — terminated it (§12.6, Q12). Both clauses name a defined transition with an ordered procedure; neither is a general licence to close a channel and call it policy |
-| all others | reserved | The channel still closes; a reserved code is not separately actionable |
+| Code       | Name                 | Meaning                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ---------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0x01`     | `protocol_violation` | A §4, §9, or §10 fatal condition was detected on peer input                                                                                                                                                                                                                                                                                                                                                      |
+| `0x02`     | `internal`           | A local failure unrelated to peer input                                                                                                                                                                                                                                                                                                                                                                          |
+| `0x03`     | `policy`             | An owner **authorization withdrawal** — revocation, role reduction, or capability removal — terminated the channel (§13.6, Q9); or a **policy withdrawal** — a node admission policy narrowed so that the channel would no longer be admitted — terminated it (§12.6, Q12). Both clauses name a defined transition with an ordered procedure; neither is a general licence to close a channel and call it policy |
+| all others | reserved             | The channel still closes; a reserved code is not separately actionable                                                                                                                                                                                                                                                                                                                                           |
 
 This table is the sole definition site of the encrypted error-code registry; §3.4 delegates to
 it rather than restating it. Every defined code encodes to the same body length, so every
@@ -3525,20 +3525,20 @@ the machine's expectation.
 **Post-key condition table** (all map to FATAL-POST with code `protocol_violation` unless
 another code is named):
 
-| # | Condition | Defined in |
-| --- | --- | --- |
-| Q1 | Envelope `version` or `suite` differing from established session state | §4.3, §9.1 |
-| Q2 | Transmitted epoch/counter not equal to the receiver-expected pair; epoch transition other than exactly +1 with counter 0 at the exact boundary. Fatal, but **not attributable**: the same gap arises from a peer's post-AEAD local send failure (§9.3, §9.7) | §9.2 |
-| Q3 | AEAD authentication failure | §4.3 |
-| Q4 | Envelope shorter than `E2EE_ENVELOPE_OVERHEAD_BYTES` | §3.3 |
-| Q5 | Reserved inner-record type | §3.4, N10/K17 |
-| Q6 | Negotiation record, legacy JSON, or unknown **or absent** first byte in `e2ee` state — the absent case is a zero-length post-strip payload (§3.4). A close phase in progress grants no exemption: this row applies unchanged from the first close-machine record to the channel's end (§10.2) | §3.4, §4.3 step 2, N11, K18, §10.2 |
-| Q7 | Close-machine violation: decode failure, envelope-header mismatch, commitment mismatch, passed-through-rule failure (against the receiver's current next-send), strict-rule failure (against the receiver's **close anchor**, §10.1.1 — not its current next-send), and any **envelope** beyond what the machine expects, with the single exception of an authenticated `E2EEError`, which §10.2 classifies as the peer's terminal record of this section rather than as a Q7 envelope. Every Q7 condition yields close verdict **Failed** (§10.4) and never an unclean verdict; a non-envelope payload in the same window is Q6, and is equally Failed | §10.1, §10.1.1, §10.2, §10.4 |
-| Q8 | Implicit-finish deadline (`T_HANDSHAKE_NODE`) expiry, under **every** policy including the compatibility default | §8.9 |
-| Q9 | **Authorization withdrawal** against an active E2EE channel — a channel whose node-side mode machine is in `e2ee`, whether or not its implicit finish has authenticated. The transition is any of `status` leaving `approved` (including revocation and record deletion), a `maxRole` reduction under the §8.3 role ordering, or a `capabilitySet` removal, applied to a record whose key matches the channel's §8.6 step 6 admitted-authority snapshot and failing the §13.6 withdrawal test against it (code `policy`) | §13.6, §8.9 |
-| Q10 | Local internal failure (code `internal`). Includes a post-AEAD send failure that reached no byte of the relay, which per §9.3 closes **without** an `E2EEError` because the error record would itself create the sequence gap being avoided | §9.3, this section |
-| Q11 | `E2EEError` body oversized, non-canonical, or structurally invalid | this section |
-| Q12 | **Policy withdrawal** against a live `e2ee` channel — a node admission policy narrowed so that the channel's own admitted state would no longer be admitted: `requireApprovedClientE2EE` becoming true, a suite leaving the advertised registry, or a pattern leaving the effective admitted set. (Effective `requireE2EE` becoming true is also a §12.6 narrowing, but it withdraws only `legacy` channels, which this table excludes; it never reaches a live `e2ee` channel and so is not a clause of this row.) Evaluated per channel by the §12.6 policy-withdrawal test and swept before the operator command is acknowledged (code `policy`). Unlike Q9 it is keyed on the channel's tier, suite, and mode rather than on a Branch A record, so it reaches NX channels, which hold no record and no snapshot. The clauses are not uniformly tier-scoped and §12.6 fixes which is which: the `requireApprovedClientE2EE` and admitted-pattern clauses reach **NX channels only**, because §8.6 step 6 admitted no IK channel without an `approved` record; the **suite** clause is tier-independent and reaches an IK channel established on the withdrawn suite exactly as it reaches an NX one. The pre-key counterpart of this transition, on a handshake that has not reached row N3, is `P25` (§11.2) | §12.6, §12.3, §12.4 |
+| #   | Condition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Defined in                         |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| Q1  | Envelope `version` or `suite` differing from established session state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | §4.3, §9.1                         |
+| Q2  | Transmitted epoch/counter not equal to the receiver-expected pair; epoch transition other than exactly +1 with counter 0 at the exact boundary. Fatal, but **not attributable**: the same gap arises from a peer's post-AEAD local send failure (§9.3, §9.7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | §9.2                               |
+| Q3  | AEAD authentication failure                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | §4.3                               |
+| Q4  | Envelope shorter than `E2EE_ENVELOPE_OVERHEAD_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | §3.3                               |
+| Q5  | Reserved inner-record type                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | §3.4, N10/K17                      |
+| Q6  | Negotiation record, legacy JSON, or unknown **or absent** first byte in `e2ee` state — the absent case is a zero-length post-strip payload (§3.4). A close phase in progress grants no exemption: this row applies unchanged from the first close-machine record to the channel's end (§10.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | §3.4, §4.3 step 2, N11, K18, §10.2 |
+| Q7  | Close-machine violation: decode failure, envelope-header mismatch, commitment mismatch, passed-through-rule failure (against the receiver's current next-send), strict-rule failure (against the receiver's **close anchor**, §10.1.1 — not its current next-send), and any **envelope** beyond what the machine expects, with the single exception of an authenticated `E2EEError`, which §10.2 classifies as the peer's terminal record of this section rather than as a Q7 envelope. Every Q7 condition yields close verdict **Failed** (§10.4) and never an unclean verdict; a non-envelope payload in the same window is Q6, and is equally Failed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | §10.1, §10.1.1, §10.2, §10.4       |
+| Q8  | Implicit-finish deadline (`T_HANDSHAKE_NODE`) expiry, under **every** policy including the compatibility default                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | §8.9                               |
+| Q9  | **Authorization withdrawal** against an active E2EE channel — a channel whose node-side mode machine is in `e2ee`, whether or not its implicit finish has authenticated. The transition is any of `status` leaving `approved` (including revocation and record deletion), a `maxRole` reduction under the §8.3 role ordering, or a `capabilitySet` removal, applied to a record whose key matches the channel's §8.6 step 6 admitted-authority snapshot and failing the §13.6 withdrawal test against it (code `policy`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | §13.6, §8.9                        |
+| Q10 | Local internal failure (code `internal`). Includes a post-AEAD send failure that reached no byte of the relay, which per §9.3 closes **without** an `E2EEError` because the error record would itself create the sequence gap being avoided                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | §9.3, this section                 |
+| Q11 | `E2EEError` body oversized, non-canonical, or structurally invalid                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | this section                       |
+| Q12 | **Policy withdrawal** against a live `e2ee` channel — a node admission policy narrowed so that the channel's own admitted state would no longer be admitted: `requireApprovedClientE2EE` becoming true, a suite leaving the advertised registry, or a pattern leaving the effective admitted set. (Effective `requireE2EE` becoming true is also a §12.6 narrowing, but it withdraws only `legacy` channels, which this table excludes; it never reaches a live `e2ee` channel and so is not a clause of this row.) Evaluated per channel by the §12.6 policy-withdrawal test and swept before the operator command is acknowledged (code `policy`). Unlike Q9 it is keyed on the channel's tier, suite, and mode rather than on a Branch A record, so it reaches NX channels, which hold no record and no snapshot. The clauses are not uniformly tier-scoped and §12.6 fixes which is which: the `requireApprovedClientE2EE` and admitted-pattern clauses reach **NX channels only**, because §8.6 step 6 admitted no IK channel without an `approved` record; the **suite** clause is tier-independent and reaches an IK channel established on the withdrawn suite exactly as it reaches an NX one. The pre-key counterpart of this transition, on a handshake that has not reached row N3, is `P25` (§11.2) | §12.6, §12.3, §12.4                |
 
 Sequence exhaustion (§9.6) is deliberately **not** in this table: it is handled by the
 authenticated close of §10, not by an error. A `legacy` channel closed by a §12.6 policy
@@ -3559,7 +3559,7 @@ row N13/K21 at the peer.
   admission for the entire record before protecting it (relay send queue full, or the send path
   otherwise unable to accept every chunk), and equally when a client's `negotiating` send buffer
   is already at `E2EE_NEGOTIATION_BUFFER_MAX_BYTES` (§4.4). Because §9.3 requires admission
-  *before* the pair is assigned, no `(epoch, counter)` is consumed, the record MUST NOT be
+  _before_ the pair is assigned, no `(epoch, counter)` is consumed, the record MUST NOT be
   encrypted or transmitted, no wire record of any kind is produced, and the channel is
   unaffected and remains usable. It is the correct disposition for ordinary backpressure, which
   MUST NOT be escalated to a channel-fatal condition. The two cases share one code deliberately:
@@ -3641,7 +3641,7 @@ advertisements are fatal (rows K2, K10, K14 of §4.4).
   any pin state, MUST NOT activate the active-Hub guarantee (§2.2, §5.2), MUST NOT persist
   beyond the application session, and MUST NOT satisfy any §13 release gate. Its only effect
   is rows K2, K10, and K14, which are therefore reachable on web; rows K23/K24 are not, because
-  web has no pins and so never produces an *unexpected* selection (§12.1.1).
+  web has no pins and so never produces an _unexpected_ selection (§12.1.1).
 - **Web threat scope (bounded, and it MUST be disclosed as bounded).** The web latch resists a
   same-session downgrade only while the served code is honest. It buys nothing against the Hub
   under any keying, because the Hub serves every byte of the code that implements it (§2.4) —
@@ -3679,11 +3679,12 @@ withholds is therefore never an input to these guards.
 
   It follows that **no guard in this document may rest a downgrade decision on `accountId`
   alone**, in either direction. Where a rule uses the `(hubOrigin, accountId)` pair, an
-  account-scope change MUST be able to move a selection only *into* a stricter class, never into
+  account-scope change MUST be able to move a selection only _into_ a stricter class, never into
   the legacy-eligible one — which is what the device-level marker below enforces. Rules that
-  *relax* on a pair are the ones a Hub re-mint would shed, and they are enumerated and corrected
+  _relax_ on a pair are the ones a Hub re-mint would shed, and they are enumerated and corrected
   here: the legacy-eligible branch (a) below, the account-wide strict-mode policy below, and the
   first-contact substitution surface of §5.2 and §13.2.1.
+
 - **Selection.** Every client channel is opened against a **selection**: the client-local node
   handle the owner chose. On native the handle is client-generated at §13.2 pairing and is
   never Hub-supplied; the client keeps it in the pin record (§13.1). On web the selection is
@@ -3697,7 +3698,7 @@ withholds is therefore never an input to these guards.
   against a pin under the same pair; such a late resolution can only **tighten** the
   classification below, never move a channel into the legacy-eligible class.
 - **Why an untrusted hint is safe here.** Misresolution cannot release anything. A Hub that
-  suppresses a hint produces *no* resolution, which lands the channel in the unexpected class
+  suppresses a hint produces _no_ resolution, which lands the channel in the unexpected class
   and demands owner consent; a Hub that induces a resolution to the wrong pin produces a
   channel whose statement cannot match that pin's fingerprint or chain, which is §13.3 fatal.
   The pin's verified fingerprint and the continuity chain remain the only trust anchors; the
@@ -3709,28 +3710,28 @@ withholds is therefore never an input to these guards.
   - **legacy-eligible** — the resolved pin, if any, is not latched, and either (a) no pin
     resolves, the `(hubOrigin, accountId)` pair holds no verified pin, **and the device-level
     `anyNodeVerified(hubOrigin)` marker of §13.1 is unset** — that is, this install has never
-    verified any node on this Hub origin under *any* account scope — or (b) the owner has
+    verified any node on this Hub origin under _any_ account scope — or (b) the owner has
     recorded explicit legacy consent for this selection (§13.1).
   - **unexpected** — everything else. The three clauses below are illustrative, and each is
     subject to the same exclusion: a selection for which the owner has recorded explicit legacy
     consent is claimed by legacy-eligible branch (b) and is never unexpected. The clauses are
     (i) a pin resolves but is not latched; (ii) no pin resolves while the `(hubOrigin,
-    accountId)` pair holds at least one verified pin; (iii) no pin resolves under the pair while
+accountId)` pair holds at least one verified pin; (iii) no pin resolves under the pair while
     `anyNodeVerified(hubOrigin)` is set. Evaluate the three classes in the order stated above —
     latched, then legacy-eligible, then unexpected — which resolves every selection identically
     to the precise rule of §11.2 P22.
 - **Why branch (a) is scoped to the Hub origin and not to the pair.** The `(hubOrigin,
-  accountId)` pair is half Hub-chosen (see provenance above), so a pair test alone is a guard the
+accountId)` pair is half Hub-chosen (see provenance above), so a pair test alone is a guard the
   Hub can retire by re-minting the account identifier: a fully verified, latched device resolves
-  its selection under the new pair, finds no pin and no verified pin *in that pair*, and would
+  its selection under the new pair, finds no pin and no verified pin _in that pair_, and would
   classify as "genuine first contact" — after which withholding the carrier reaches row K13 and a
   plaintext flush. The `anyNodeVerified(hubOrigin)` marker closes that: it is written only by the
   owner's §13.2 step 5 verification and read under the client-anchored `hubOrigin` alone, so an
   account-scope change lands in **unexpected** (rows K23/K24, §11.2 P22) and raises the §13.2.1
   surface instead of releasing plaintext. Note the asymmetry this restores: on the node side the
   same re-mint already fails **closed**, because §8.6 step 6 looks up `(hubOrigin, accountId,
-  clientIdentityFingerprint)` and finds no record (§11.2 P12). Before the marker, the client
-  failed *open* on exactly the input the node failed closed on.
+clientIdentityFingerprint)` and finds no record (§11.2 P12). Before the marker, the client
+  failed _open_ on exactly the input the node failed closed on.
 - **The marker never relaxes anything.** It can only move a selection from legacy-eligible to
   unexpected, never the reverse, and it is not evidence about the node on the channel: it says
   only that this install has completed at least one §13.2 ceremony on this Hub origin. It is
@@ -3744,7 +3745,7 @@ withholds is therefore never an input to these guards.
   verification marker, so
   the classification degenerates: a web selection is **latched** when the §12.1 in-memory latch
   is set for its `(hubOrigin, accountId, nodeId)` triple in the current application session, and
-  **legacy-eligible** otherwise. Web never produces an *unexpected* selection, and consequently
+  **legacy-eligible** otherwise. Web never produces an _unexpected_ selection, and consequently
   never raises §13.2.1. This degeneracy is the mechanism behind the honest web statement in
   §2.3 and §17.5, not an oversight.
 - **Unexpected selections never lock legacy silently.** They are FATAL-PRE (rows K23, K24;
@@ -3826,7 +3827,7 @@ Node admission policy, default **false** at introduction.
   criterion below, operators MAY enable `requireE2EE` at any time by explicit configuration.
   That path does not consult the fallback counter, cannot be delayed by anything the Hub does,
   and is the RECOMMENDED action for any operator who does not need legacy compatibility. The
-  default flip is a shipping decision about *other people's* nodes; it is not the mechanism by
+  default flip is a shipping decision about _other people's_ nodes; it is not the mechanism by
   which a given operator obtains the guarantee. A default flip is a policy withdrawal like any
   other (§12.6): a node that starts under the new default with channels carried across a restart
   has none, because no channel survives a restart, but a node whose default is flipped by
@@ -3851,10 +3852,10 @@ Node admission policy, default **false** at introduction.
   the counter "can be inflated but never suppressed, so it can never falsely permit a flip, only
   delay one". Half of that survives the amendment and half does not, and the difference is stated
   here rather than left standing.
-  - *Survives.* The counter's **value** is a monotone lower bound on legacy acceptances on
+  - _Survives._ The counter's **value** is a monotone lower bound on legacy acceptances on
     channels the node advertised on. It can be inflated and never deflated (§12.5), so no party
     can make a node under-report that legacy was accepted at all.
-  - *Does not survive.* Under an attributability judgement the decisive evidence is no longer
+  - _Does not survive._ Under an attributability judgement the decisive evidence is no longer
     that value — a nonzero counter no longer blocks — but the per-occurrence shape retained in
     the §12.5 ring, and that ring is bounded and lossy. An adversary injecting legacy-first
     channels at a plausible, deliberately non-metronomic rate fills `E2EE_FALLBACK_RING_SIZE`
@@ -3863,14 +3864,14 @@ Node admission policy, default **false** at introduction.
     — which turns row N1 into a hard lockout of every genuinely un-upgraded client — as readily
     as away from one. **Inflation biases the criterion in both directions.** The one-directional
     claim is withdrawn: it was a property of the zero test and is false of this one.
-  - *Made visible, not repaired.* §12.5 therefore requires a per-class **ring-overflow counter**:
+  - _Made visible, not repaired._ §12.5 therefore requires a per-class **ring-overflow counter**:
     a monotonic count of occurrences observed while the ring was already full. A nonzero overflow
     count for a window means the ring holds no complete account of that window, and the
     maintainers MUST NOT treat ring shape as evidence in **either** direction for it. That
     records the loss; it does not undo it, and nothing here does. It is deliberately **not** a
     hard block, because making overflow blocking would hand back the same fortnightly veto this
     amendment removed, merely repriced from one channel to `E2EE_FALLBACK_RING_SIZE`.
-  - *Therefore.* For a window whose ring overflowed, the criterion's remaining inputs are a lower
+  - _Therefore._ For a window whose ring overflowed, the criterion's remaining inputs are a lower
     bound and shipped-release telemetry — which §12.5 forbids resting a security decision on, and
     which is itself Hub-relayed and suppressible. The honest conclusion is that the default-flip
     criterion is Hub-influenceable in both directions and is not a security mechanism. The
@@ -3883,6 +3884,7 @@ Node admission policy, default **false** at introduction.
   per-occurrence
   accounting is not required and MUST NOT be introduced by widening what the ring retains. The
   residual is §17.15.
+
 - **Why the criterion names one class.** The §12.5 **advertisement-unavailable** class (§5.5 U1
   and U2) is deliberately **excluded** from the criterion above. U1 is triggered by an
   integer the Hub asserts, so folding it into the gate would let the party this protocol treats
@@ -3940,15 +3942,15 @@ The node-side **peer-legacy** fallback counter is the authoritative **lower boun
 acceptances, and the only rollout signal a malicious Hub cannot suppress: it is incremented by
 the node's own act of locking legacy on a channel it advertised on, so no such plaintext channel
 can go uncounted — a channel the node could not advertise on at all is counted in the second
-class below, never in this one — and client-side diagnostics, which a malicious Hub *can*
+class below, never in this one — and client-side diagnostics, which a malicious Hub _can_
 suppress, never substitute for it.
 
-It is not an authenticated measure of how many *genuine* legacy clients exist, and this
+It is not an authenticated measure of how many _genuine_ legacy clients exist, and this
 document does not claim it is. Row N2 fires on the first unauthenticated `LEGACY-JSON` byte,
 before any hello, key, signature, or §15 bound, so a party that can originate channels (§2.1:
 the Hub can, and a node cannot tell a Hub-originated session from a genuine one) can inflate
 the counter at will. **The counter can be inflated by the Hub and never deflated.** That is a
-property of the counter's *value*, and it is the reason §12.3's gate is a maintainer judgement
+property of the counter's _value_, and it is the reason §12.3's gate is a maintainer judgement
 rather than a zero test. It is **not** a claim that inflation is harmless in only one direction:
 under the judgement criterion the decisive evidence is the bounded ring below, and inflation
 evicts genuine occurrences from it, so inflation can bias the flip decision toward a premature
@@ -3978,12 +3980,13 @@ counted separately rather than being allowed to move the same number.
     being measured — that this node could not advertise — is already true and complete at
     accept. Row N17 therefore adds nothing on top, and it never adds a peer-legacy occurrence
     (§4.4 N16/N17, §16.3 F10).
+
 - **Durable bounded state.** The node retains, durably and crash-consistently: **one monotonic
   occurrence counter per class**; **one monotonic ring-overflow counter per class**; the
   observation-window start timestamp; the last-occurrence
   timestamp per class; and a bounded ring of the most recent `E2EE_FALLBACK_RING_SIZE`
   occurrences across both classes. Each ring entry contains exactly three fields: `originHash =
-  SHA-256(canonical-CBOR([ "ryco.relay-e2ee.fallback-origin.v1", hubOrigin ]))`, the occurrence
+SHA-256(canonical-CBOR([ "ryco.relay-e2ee.fallback-origin.v1", hubOrigin ]))`, the occurrence
   timestamp, and the reason label — one of the fixed set `peer-legacy`, `undersized-connection`,
   `statement-unavailable`. The label is a bounded enumerated value carrying no account, channel,
   session, key, or payload data, so it does not widen what this record retains. Counters are
@@ -3995,8 +3998,9 @@ counted separately rather than being allowed to move the same number.
   more: it stores no origin, timestamp, or label, so it widens what the node retains by two
   integers and by nothing identifying. Its purpose is stated at its consumer (§12.3): a nonzero
   overflow count for an observation window means the ring is not a complete account of that
-  window, so ring *shape* is evidence in neither direction for it. The node MUST NOT infer
+  window, so ring _shape_ is evidence in neither direction for it. The node MUST NOT infer
   anything else from it, and MUST NOT use it to block anything automatically.
+
 - **Durable writes are coalesced, leading edge first.** The event is driven by unauthenticated
   peer input on a path that has no authentication ahead of it, so an uncoalesced crash-consistent
   write per occurrence would let channel churn drive the node's durable security state at
@@ -4029,7 +4033,7 @@ counted separately rather than being allowed to move the same number.
   retained in the ring. The CLI MUST NOT display account, channel, session, or key identifiers —
   none are stored — and MUST NOT display payload-derived data.
 
-  Because §12.3's gate is a judgement about the *shape* of the occurrences rather than a zero
+  Because §12.3's gate is a judgement about the _shape_ of the occurrences rather than a zero
   test, the display MUST make that shape legible: the retained ring entries in time order with
   their reason labels, not only the totals. A sparse, metronomic peer-legacy pattern with no
   corresponding released legacy client population is the signature of deliberate inflation and is
@@ -4044,6 +4048,7 @@ counted separately rather than being allowed to move the same number.
   occurrence is evicted and the only legible shape is the one it authored. The ring-overflow
   counter is the signal that this is possible for the window in question, and §12.3 states what
   the maintainers must do with it.
+
 - **Client diagnostics are corroborating only.** Clients SHOULD record local fallback
   diagnostics (rows K13/K20), but no rollout or security decision may rest on them. The
   unexpected-selection closes of rows K23/K24 are **not** diagnostics: they are owner-visible
@@ -4107,7 +4112,7 @@ construction is no longer one they will run, and an IK channel established on th
 running it as much as an NX channel is. Exempting IK there would leave every IK channel on a
 withdrawn suite open indefinitely — §15 arms no idle deadline in established `e2ee` — under an
 acknowledgement that claims the opposite. The first bullet is tier-independent for a different
-reason: it is about `legacy`, which has no tier. Narrowing what a *particular* client is
+reason: it is about `legacy`, which has no tier. Narrowing what a _particular_ client is
 authorized to do is the §13.6 transition, not this one; the two are disjoint and an implementation
 MUST run both tests, not one.
 
@@ -4155,6 +4160,7 @@ implies the other.
   behind an acknowledgement that says none is. §8.6 step 2's atomicity requirement is what makes
   that crossing impossible in the first place; this rule is the cheap second line and MUST also be
   implemented.
+
 - **(c) Only then acknowledge.** The CLI command MUST NOT complete or be acknowledged to the
   operator until (a) and (b) have completed, and it MUST report how many channels it closed,
   broken out by class — `legacy`, NX `e2ee`, suite-withdrawn `e2ee` **of either tier** — and how
@@ -4260,7 +4266,7 @@ handle and carries the anchor as a value.
   Every guard therefore reads an `unverified` record as holding none of the promoted fields:
   §5.2 step 6 has no anchor to authenticate against, §8.3 elements 9 and 17 take their
   first-contact provenance, §12.1 cannot latch it, and §12.1.1 classifies a selection that
-  resolves to it as *unexpected* unless that consent is present — §12.1.1's branch (a) cannot
+  resolves to it as _unexpected_ unless that consent is present — §12.1.1's branch (a) cannot
   apply, because a pin did resolve. A record with **no pin at all** is the third shape and holds
   the index, the hints, and the consent only (states bullet above). Promotion at step 5 is what
   writes the rest, and it is atomic with the `anyNodeVerified(hubOrigin)` marker below.
@@ -4270,7 +4276,7 @@ handle and carries the anchor as a value.
   `verified` at §13.2 step 5, under **any** account scope. It is read under `hubOrigin` alone —
   never under the `(hubOrigin, accountId)` pair — because `accountId` is Hub-issued and not
   client-anchored (§12.1.1). Its only use is the §12.1.1 classification, where it can move a
-  selection from *legacy-eligible* to *unexpected* and never the reverse.
+  selection from _legacy-eligible_ to _unexpected_ and never the reverse.
   - It is **never** set, cleared, refreshed, or influenced by anything the Hub sends: not by a
     statement, a continuity id, a `nodeId`, an account scope, a channel outcome, or a timeout.
   - It is cleared only by the explicit owner action that removes the last verified pin under that
@@ -4280,8 +4286,8 @@ handle and carries the anchor as a value.
     origin. It is written only by an owner ceremony, or by the local reconciliation required
     below, so it is unreachable from unauthenticated input and needs no §15 rate or count bound.
   - **It is a lower bound on the client's own pin set, and MUST NOT be losable independently of
-    it.** The marker summarizes state the pin records already hold, so the invariant *the marker
-    is set whenever a `verified` pin exists under that `hubOrigin` under any account scope* MUST
+    it.** The marker summarizes state the pin records already hold, so the invariant _the marker
+    is set whenever a `verified` pin exists under that `hubOrigin` under any account scope_ MUST
     hold at every point a §12.1.1 classification is evaluated. Two consequences are normative.
     First, the write at §13.2 step 5 MUST be crash-atomic with the pin's promotion to `verified`:
     a crash leaves both applied or neither, never the pin alone. Second, a client MUST reconcile
@@ -4362,7 +4368,7 @@ data rides in handshake payloads applies with no pairing exception.
 
    **Ordering.** The §15 caps and the §13.6 pairing-window reservation are evaluated **before**
    anything is emitted and entirely in memory, so a cap-exceeding attempt outside a window still
-   creates no record, and inside a window the eviction target is *selected* here but not yet
+   creates no record, and inside a window the eviction target is _selected_ here but not yet
    removed. The node then emits the generic `E2EEHandshakeReject` and closes, and only afterwards
    commits the pending-class mutation — the eviction, where one was selected, and the creation of
    the new record including its §13.4 safety number — on a best-effort basis, and atomically with
@@ -4371,6 +4377,7 @@ data rides in handshake payloads applies with no pairing exception.
    would make "this key is not on file" — or "the owner has a pairing window open" — measurable
    from the wire by latency alone. A pending-class mutation lost to a crash before it commits is a
    benign availability event; the client re-pairs.
+
 4. Both ends display the safety number (§13.4): the node CLI from the pending record, the
    client computed locally from its own keys and the advertised node identity key. The
    pending record persists the **derived safety number only** as bounded display metadata —
@@ -4425,14 +4432,14 @@ new-node pairing:
 The presentation MUST distinguish the three underlying situations in its copy, because they carry
 different meanings for the owner:
 
-- *"You have other verified nodes on this account, but this one is new"* — the expected message
+- _"You have other verified nodes on this account, but this one is new"_ — the expected message
   when the owner is legitimately adding a second node. This will fire on every genuine
   additional node, which is an accepted cost: adding a node is already a ceremony.
-- *"This device has verified nodes on this Hub, but not for this account"* — situation 3, the
+- _"This device has verified nodes on this Hub, but not for this account"_ — situation 3, the
   expected message when the owner is legitimately signing in under a second account. It fires on
   every genuine additional account scope on a Hub origin the device already uses, which is the
   same accepted cost for the same reason. It MUST NOT be worded as an identity change.
-- *"The node you previously verified is presenting a different identity"* — the §13.3 message,
+- _"The node you previously verified is presenting a different identity"_ — the §13.3 message,
   which fires when a channel resolves to a **verified** pin and the identity fails to
   authenticate to it.
 
@@ -4472,7 +4479,7 @@ raises. Rotation is instead authenticated by the identity-continuity certificate
   **re-verification UI**: the client explains that the node's identity changed without proof of
   continuity, displays the new fingerprint and safety number, and requires a fresh §13.2
   ceremony before any application payload flows to the new identity. A **policy-generation**
-  regression is deliberately *not* on this list: it is an invalid statement with a local-only
+  regression is deliberately _not_ on this list: it is an invalid statement with a local-only
   diagnostic (§5.7, §11.4), because a Hub can replay a genuine older statement on demand.
 - **Deliberate breaks.** Administrative lost-key recovery, rotation motivated by compromise or
   suspected compromise of the outgoing identity key, and any rotation performed by a mechanism
@@ -4560,7 +4567,7 @@ displayed entropy meets `E2EE_WEB_SAS_MIN_DISPLAYED_BITS`. There is no separate 
 as with the safety number, the fixed length and grouping are the checksum.
 
 **The `WebSAS` threat model, stated plainly.** Session binding buys **non-precomputability, not
-unforgeability**, and the entropy floor here is *not* an offline work factor the way
+unforgeability**, and the entropy floor here is _not_ an offline work factor the way
 `E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS` is. An interposer running one NX session with the node
 and another with the client **authors the client-facing `E2EEServerAccept` itself**. It therefore
 knows every input to `sessionBindingHash` — the client's hello wire bytes, the accept bytes it is
@@ -4575,13 +4582,13 @@ that attack is not the derivation but the window and the retry cost:
   attacker a fresh ticket, a fresh channel, and a victim-side reconnect, and restarts the search
   against new hello bytes and a new target.
 
-`E2EE_WEB_SAS_MIN_DISPLAYED_BITS` is derived from that bound and from nothing else: matching *k*
-displayed bits costs about 2^*k* trials of roughly two X25519 operations each, all of which must
+`E2EE_WEB_SAS_MIN_DISPLAYED_BITS` is derived from that bound and from nothing else: matching _k_
+displayed bits costs about 2^_k_ trials of roughly two X25519 operations each, all of which must
 land inside one `T_HANDSHAKE`. §3.2.1 S11 states the resulting relationship over constant names.
 Implementations MUST NOT present the `WebSAS` as unforgeable against an active interposer, and
 MUST NOT use this derivation to strengthen the claims of §2.4 or §17.5.
 
-*Note (non-normative)*: at the shipped `E2EE_WEB_SAS_CHARS` the search is ~2^40 expected trials,
+_Note (non-normative)_: at the shipped `E2EE_WEB_SAS_CHARS` the search is ~2^40 expected trials,
 i.e. a sustained ~7·10^11 X25519/s across the whole 3-second window — far beyond a large GPU
 fleet — while the `E2EE_WEB_SAS_MIN_DISPLAYED_BITS` floor corresponds to ~7·10^8 X25519/s over
 the same window, which is where a well-resourced attacker becomes relevant. The shipped format
@@ -4612,16 +4619,16 @@ registered with or stored by the Hub.
 clientIdentityFingerprint)` — the fingerprint per §7.1 (`ryco.client-key.v1`), never a raw
 key:
 
-| Field | Content |
-| --- | --- |
-| `status` | `pending` \| `approved` \| `revoked` |
-| `maxRole` | Maximum role the owner granted; §8.3 role ordering |
-| `capabilitySet` | The subset of `RELAY_CAPABILITY_LITERALS` the owner granted (§3.2, §8.3) |
-| `createdAt`, `approvedAt`, `revokedAt` | Epoch-millisecond timestamps for the transitions taken |
-| `lastSeenAt` | Coalesced: at most one durable write per `E2EE_LAST_SEEN_WRITE_INTERVAL` per record |
-| `safetyNumber` | The derived §13.4 display string — the only pairing display metadata; never either raw key |
-| `displayLabel` | Optional owner-assigned label, at most `E2EE_CLIENT_DISPLAY_LABEL_MAX_CHARS` characters |
-| `pairingReservedAt` | Absent, or the epoch-millisecond time at which a `pending` record was created as the single record admitted by an owner-opened pairing window whose discriminator it matched. A bounded, non-identifying timestamp consulted only by the pending eviction rule below; the record's reservation is held while `now − pairingReservedAt ≤ E2EE_PAIRING_RESERVATION_LIFETIME` and is spent thereafter |
+| Field                                  | Content                                                                                                                                                                                                                                                                                                                                                                                            |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status`                               | `pending` \| `approved` \| `revoked`                                                                                                                                                                                                                                                                                                                                                               |
+| `maxRole`                              | Maximum role the owner granted; §8.3 role ordering                                                                                                                                                                                                                                                                                                                                                 |
+| `capabilitySet`                        | The subset of `RELAY_CAPABILITY_LITERALS` the owner granted (§3.2, §8.3)                                                                                                                                                                                                                                                                                                                           |
+| `createdAt`, `approvedAt`, `revokedAt` | Epoch-millisecond timestamps for the transitions taken                                                                                                                                                                                                                                                                                                                                             |
+| `lastSeenAt`                           | Coalesced: at most one durable write per `E2EE_LAST_SEEN_WRITE_INTERVAL` per record                                                                                                                                                                                                                                                                                                                |
+| `safetyNumber`                         | The derived §13.4 display string — the only pairing display metadata; never either raw key                                                                                                                                                                                                                                                                                                         |
+| `displayLabel`                         | Optional owner-assigned label, at most `E2EE_CLIENT_DISPLAY_LABEL_MAX_CHARS` characters                                                                                                                                                                                                                                                                                                            |
+| `pairingReservedAt`                    | Absent, or the epoch-millisecond time at which a `pending` record was created as the single record admitted by an owner-opened pairing window whose discriminator it matched. A bounded, non-identifying timestamp consulted only by the pending eviction rule below; the record's reservation is held while `now − pairingReservedAt ≤ E2EE_PAIRING_RESERVATION_LIFETIME` and is spent thereafter |
 
 **Lifecycle.**
 
@@ -4646,7 +4653,6 @@ key:
   An **authorization withdrawal** is any owner-initiated change to a record that reduces what it
   authorizes. There are exactly three, and this document treats them as one transition with one
   procedure:
-
   1. `status` leaving `approved` — revocation to `revoked`, and equally deletion of the record;
   2. any `maxRole` reduction under the §8.3 role ordering `viewer < operator < owner`;
   3. any `capabilitySet` removal — any change whose new set is not a superset of the old one.
@@ -4719,7 +4725,7 @@ key:
   be built on it as though it were. The client-side counterpart of this concession is §12.1.1's
   provenance rule: `accountId` is Hub-issued at the other end of the same value, so no downgrade
   guard rests on it alone. Note that the Branch A key `(hubOrigin, accountId,
-  clientIdentityFingerprint)` fails **closed** under an account re-mint — the lookup at §8.6 step
+clientIdentityFingerprint)` fails **closed** under an account re-mint — the lookup at §8.6 step
   6 simply finds no record and takes §11.2 P12 — which is the behavior §12.1.1's marker restores
   on the client side.
 - Approved: at most `E2EE_APPROVED_CLIENTS_MAX`; exceeding it fails the approval explicitly —
@@ -4750,7 +4756,6 @@ different protocol. It bounds it instead, with two owner-side mechanisms:
   pairing window at the node CLI, lasting at most `E2EE_PAIRING_WINDOW`. A window is **not** a
   blanket suspension of the caps; it is a reservation for one attempt, and it is defined by four
   rules.
-
   - **Discriminator (REQUIRED).** Opening a window MUST name a discriminator: the
     `ryco.client-key.v1` fingerprint (§7.1) of the device the owner intends to pair, entered at
     the node CLI in the `SHA256:` display form. A window without one MUST be refused by the CLI;
@@ -4766,7 +4771,7 @@ different protocol. It bounds it instead, with two owner-side mechanisms:
     node contact. Version 1 defines no hello field for a CLI-displayed pairing code, so the
     fingerprint is the only discriminator available here; a code-based binding would be a new
     wire field and is deliberately not added. The ordering works because the pending caps and
-    this reservation are evaluated at §13.2 step 3 — *after* §8.6 step 5 has authenticated the
+    this reservation are evaluated at §13.2 step 3 — _after_ §8.6 step 5 has authenticated the
     fingerprint — so the discriminator is matched against a value the node has proven, never one
     the peer merely asserted.
   - **One record per window.** A window admits **at most one** pending record, and that record
@@ -4777,7 +4782,7 @@ different protocol. It bounds it instead, with two owner-side mechanisms:
   - **Partition-scoped eviction.** While a window is open and the matching attempt would exceed a
     pending cap, the attempt MUST NOT be refused for the cap. The node instead evicts one existing
     pending record **in the same partition as the cap that was exceeded** — for
-    `E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT`, the oldest eligible record under the *same*
+    `E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT`, the oldest eligible record under the _same_
     `(hubOrigin, accountId)` as the attempt; for `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the oldest
     eligible record anywhere — and then creates the new record with `pairingReservedAt` set to
     now. **When both caps are exceeded the per-account partition governs**, and one eviction
@@ -4797,7 +4802,7 @@ different protocol. It bounds it instead, with two owner-side mechanisms:
 
   Outside a window the behavior is exactly the refuse-newest rule above, which is the default.
 
-  **What the window is and is not observable as.** The window changes no wire *record*, no close
+  **What the window is and is not observable as.** The window changes no wire _record_, no close
   reason, and no close timing: a pairing attempt ends in the identical FATAL-PRE either way
   (§13.2 step 3), and because §11.2's ordering rule covers the eviction as well as the creation,
   the durable mutation the window adds sits after the reject and the close rather than inside the
@@ -4805,6 +4810,7 @@ different protocol. It bounds it instead, with two owner-side mechanisms:
   timing class — and it rests on that ordering rule. It is not the stronger claim that the window
   introduces no observable at all; a node's coarse timing behavior in a managed runtime remains
   what §11.2's SHOULD and §17.2 already describe.
+
 - **Purge.** Purging or revoking a `pending` record is an owner action that frees its slot
   against both pending caps immediately.
 
@@ -4847,7 +4853,7 @@ deviation:
 > accepted: first-party minimal frozen Noise IK+NX state machine implemented in
 > `packages/shared` on audited noble primitives.
 
-*Note (non-normative)*: the survey behind that verdict found the gap structural, not a search
+_Note (non-normative)_: the survey behind that verdict found the gap structural, not a search
 failure: no pure-TS/JS Noise implementation has ever been audited **as** a Noise
 implementation; the libraries covering IK+NX are built on native-binding or unaudited-JS
 sodium splits with no Hermes support; and no JS Noise library exposes a supported
@@ -4941,7 +4947,7 @@ this section — it MUST NOT happen as an incidental dependency bump.
   field prime, on-curve, not the identity); the pinned implementation validates points on a
   cofactor-1 curve. Signatures are fixed-width raw `r ‖ s` with the §7.1 range checks.
 
-*Note (non-normative)*: the zero-output throw was verified in the pinned Montgomery-ladder
+_Note (non-normative)_: the zero-output throw was verified in the pinned Montgomery-ladder
 source (the implementation throws on an all-zero shared secret after the ladder), matching the
 RFC 7748 check and the Noise recommendation (verified 2026-07-30).
 
@@ -4989,61 +4995,61 @@ any pending client record, and MUST NOT touch latch state, pin state, the device
 verification marker (§13.1), or any
 instrumentation entry other than the fallback counting §12.5 itself defines. That carve-out is the protocol's only durable write reachable on wholly
 unauthenticated input — row N2 fires before any hello, key, or signature — which is exactly why
-§12.5 bounds its *rate* with `E2EE_FALLBACK_WRITE_INTERVAL` rather than leaving the write
+§12.5 bounds its _rate_ with `E2EE_FALLBACK_WRITE_INTERVAL` rather than leaving the write
 uncoalesced.
 
-| Bound | Limit | Enforcement point |
-| --- | --- | --- |
-| Simultaneous channels per relay connection | The Hub-asserted `maxChannels`, itself at most `RELAY_MAX_CHANNELS` — schema-enforced at frame decode, so the Hub can lower it and cannot raise it | Relay frame decode, unchanged; **this is the structural bound on handshake concurrency** |
-| Concurrent in-flight handshakes | At most the connection's asserted `maxChannels`, by the row above and one handshake per channel (§4.4) | Node; the in-flight entry is created at §8.6 step 1 and retired at the first of authenticated implicit finish (§8.9), any FATAL-PRE or FATAL-POST outcome, or channel close |
-| Handshake-attempt rate | Token bucket of capacity `E2EE_HANDSHAKE_RATE_BURST` refilled at `E2EE_HANDSHAKE_RATE_REFILL`, per Hub origin (§3.2.2 L3) | Node, before any signature or DH work |
-| Handshake attempts per channel | Exactly one (§4.4) | Both endpoints |
-| Client `negotiating` send buffer | `E2EE_NEGOTIATION_BUFFER_MAX_BYTES`, charged **per relay connection** — the sum over every channel on it, matching the scope of the single send queue the value is derived from, so a connection's full complement of `negotiating` channels cannot commit a multiple of the queue's capacity (§4.4). Overflow is `e2ee_send_unavailable` (§11.4), never a silent drop and never unbounded growth | Client, at submission, while `negotiating` (§4.4) |
-| `E2EEClientHello` size | `E2EE_CLIENT_HELLO_MAX_BYTES` | Both, before body parse (§3.3) |
-| `E2EEServerAccept` size | `E2EE_SERVER_ACCEPT_MAX_BYTES` | Both, before body parse |
-| `E2EEHandshakeReject` size | Exactly `E2EE_HANDSHAKE_REJECT_BYTES` | Both |
-| Signing-interface input size | `E2EE_SIGNING_INPUT_MAX_BYTES` | Node, before **every** call to the identity signing interface (§7.2) |
-| Directly signed transcript size | `E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES` | Encoder at emit, verifier before signature check (§7.2, §7.3–§7.5) |
-| Capability signing envelope size | Exactly `E2EE_CAPABILITY_SIGNING_ENVELOPE_BYTES` | Node before sign, verifier on rebuild (§7.2.1) |
-| Hub origin length in any E2EE transcript | `E2EE_HUB_ORIGIN_MAX_BYTES` | Encoder at emit, verifier before use (§7.1) |
-| Suite registry entries | `E2EE_SUITE_REGISTRY_MAX_ENTRIES` | Node at emit, client before verify (§7.6 element 9) |
-| Capability statement transcript size | `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES` | Node at encode and at the §7.6.1 self-check; client before decoding the transcript (§5.2 step 0, §7.6) |
-| Capability statement CBOR size | `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` | Node at emit, client before verify (§5.3) |
-| Capability carrier size | `E2EE_CAPABILITY_CARRIER_MAX_BYTES` | Node at emit (§5.3, §5.5); never truncated, split, or chunked |
-| Advertisement serviceability | Asserted `maxDataChunkBytes` ≥ `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES` | Node, **once per relay connection** on `ready`, before any channel is accepted (§5.5 U1) |
-| Conforming statement available | §7.6.1 self-check passes, which includes the advertised protocol range containing `E2EE_PROTOCOL_VERSION` (§7.6 elements 7–8) and the §7.5 continuity-id startup cross-check resolving to a single advertisable value — element 18 is REQUIRED, so a node that cannot resolve it has no conforming statement and MUST NOT mint one (§7.5, §5.5 U2) | Node at startup and after every rotation, prune, prekey rotation, and policy change (§5.5 U2) |
-| Negotiation records per channel | One carrier, one hello, one accept **or** reject; duplicates fatal (§4.4) | Both |
-| Continuity chain depth | `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` | Node at emit, client before verify (§7.5) |
-| Node-id resolution hints per pin record | `E2EE_PIN_NODE_ID_HINTS_MAX`, oldest-first eviction | Native client, on recording a hint (§13.1) |
-| Device-level verification markers | One boolean per configured Hub origin, and no other content. Set **only** by the §13.2 step 5 owner ceremony — atomically with the pin promotion — or by the client-local reconciliation §13.1 requires against the client's own pin set, and cleared **only** by the §13.3 owner-initiated re-pair that leaves no verified pin under that origin, so it is unreachable from unauthenticated input and deliberately carries no numeric cap of its own (§13.1, §13.3) | Native client |
-| `E2EEError` body size | `E2EE_ERROR_BODY_MAX_BYTES` | Both (§11.3) |
-| Account id length | `E2EE_ACCOUNT_ID_MAX_BYTES` | Both (§7.1) |
-| Envelope message size | `RELAY_MAX_RPC_MESSAGE_BYTES` and the Hub-asserted chunk limits, on encrypted bytes (§4.5) | Relay chunking layer, unchanged |
-| Inner-record body size | `plaintextCeiling`, pre-encryption (§4.5) | Sender |
-| Advertisement wait | `T_ADV` (§4.4) | Client |
-| Handshake deadline, client | `T_HANDSHAKE`, from hello emit (§4.4 K15); together with the one-attempt-per-channel rule it is also the bound on `WebSAS` grinding (§13.5, §17.5) | Client, always |
-| Handshake deadline, node | `T_HANDSHAKE_NODE`, from advertisement emit (§4.4 N8, §8.9) | Node: the `negotiating` half under effective `requireE2EE`; the implicit-finish half **always** (§8.9) |
-| Negotiating-window keepalive budget | `T_ADV + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN ≤ RPC_KEEPALIVE_INTERVAL` (§3.2.2 L1) | Client; a specification-level invariant, checkable from §3.2 |
-| Close-phase keepalive budget | `2 · T_CLOSE + T_CLOSE_LINGER_MAX + T_KEEPALIVE_FLUSH_MARGIN ≤ RPC_KEEPALIVE_INTERVAL` (§3.2.2 L5). The close phase suppresses the keepalive `Ping` with **no** later flush, so this bounds the whole phase rather than reserving a flush; `T_CLOSE` is charged twice because the simultaneous branch of §10.2 contains two `T_CLOSE`-bounded waits. It removes the deterministic case and not the residual of §17.14 | Client; a specification-level invariant, checkable from §3.2 |
-| Close-exchange step deadline | `T_CLOSE` (§10.2) | Both |
-| Close-exchange wait steps per endpoint per phase | At most two — one on either sequential path, two on the simultaneous path, never three (§10.2) | Both |
-| Last-record linger before the outer close | At most `T_CLOSE_LINGER_MAX` (§10.3) | The endpoint that sent the last close-machine record |
-| Close-machine records per endpoint per exchange | At most `E2EE_CLOSE_RECORDS_RESERVED` (§10.2) | Both |
-| Terminal `E2EEError` records after the close machine | At most `E2EE_ERROR_RECORDS_RESERVED`, and nothing else may follow it (§10.2, §11.3) | Both |
-| Post-application sequence reservation | `E2EE_CLOSE_RECORDS_RESERVED + E2EE_ERROR_RECORDS_RESERVED` records under **both** §9.4 thresholds, per direction (§9.6) | Sender, before protecting any application record |
-| Policy-withdrawal sweep | Every live channel the narrowed policy would no longer admit, closed — and every in-flight handshake it would refuse, aborted — before the operator command is acknowledged (§12.6); `e2ee` channels as FATAL-POST `Q12` code `policy`, `legacy` channels as a bare `channel_rejected`, in-flight handshakes as FATAL-PRE `P25`. Both enumerations run over **one consistent snapshot** of channel state, walking the in-flight handshake list of the row above alongside the live-channel set, so no channel can cross row N3 between them; §8.6 step 2 additionally serializes that transition against the §12.6 commit | Node, operator-initiated |
-| Transmission admission before protection | Whole record, every chunk, admitted before the pair is assigned (§9.3); refusal is `e2ee_send_unavailable` (§11.4) | Sender |
-| Pending client records | `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, `E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT`, `E2EE_PENDING_CLIENT_RETENTION` (§13.6); the per-account key is a bookkeeping partition, not an isolation boundary (§13.6) | Node |
-| Owner pairing window | `E2EE_PAIRING_WINDOW`, and **at most one** pending record admitted per window (structural, §13.6). The window MUST name an owner-supplied discriminator — the client identity fingerprint — and only an attempt whose authenticated `clientIdentityFingerprint` equals it receives the reservation. Its cap-exceeding attempt then evicts the oldest *eligible* pending record **in the partition of the cap that was exceeded**, per-account governing when both are exceeded, and never touches `approved` or `revoked` state (§13.6) | Node, owner-initiated |
-| Pairing reservation lifetime | `E2EE_PAIRING_RESERVATION_LIFETIME` from record creation; past it the record becomes eligible for pairing-window eviction again, while its own expiry stays at `E2EE_PENDING_CLIENT_RETENTION` (§13.6). The ordering of the three durations is §3.2.2 L4, a specification-level invariant checkable from §3.2 | Node |
-| Per-channel advertised-statement snapshot | The identity, prekey, continuity-chain, and continuity-id material the node advertised on that channel — exactly what §8.3 elements 7–9, 15, and 17 are built from, and no other statement content. At most one per channel, at most `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` chain entries, held from advertisement emit until the channel closes and consumed at §8.6 step 7 (§7.5, §8.3). It is in-memory channel state, not durable state, and the channel count is already bounded by the first row above | Node |
-| Per-channel admitted-authority snapshot | The full Branch A record key `(hubOrigin, accountId, clientIdentityFingerprint)` plus the `status`, `maxRole`, and `capabilitySet` read at §8.6 step 6, and no other record content. Recorded on the in-flight handshake entry at that read and retained for the channel's lifetime; consumed by the §13.6 withdrawal test and the §8.9 re-check. NX channels carry none | Node (IK only) |
-| Approved / revoked client records | `E2EE_APPROVED_CLIENTS_MAX`, `E2EE_REVOKED_CLIENTS_RETAINED_MAX` (§13.6) | Node |
-| Last-seen write rate | `E2EE_LAST_SEEN_WRITE_INTERVAL` (§13.6) | Node |
-| Fallback counter write rate | `E2EE_FALLBACK_WRITE_INTERVAL`, leading-edge then coalesced (§12.5) | Node |
-| Fallback ring | `E2EE_FALLBACK_RING_SIZE` (§12.5); evictions past it are counted by the per-class monotonic **ring-overflow counter**, which stores a count and no occurrence fields, so the retained set is two integers wider and no more identifying (§12.5, §12.3) | Node |
-| Rekey thresholds | `E2EE_REKEY_MAX_RECORDS`, `E2EE_REKEY_MAX_BYTES` (§9.4) | Both, per direction |
-| Sequence exhaustion | `E2EE_COUNTER_MAX`, `E2EE_EPOCH_MAX` (§9.6) | Both, per direction |
+| Bound                                                | Limit                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Enforcement point                                                                                                                                                           |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Simultaneous channels per relay connection           | The Hub-asserted `maxChannels`, itself at most `RELAY_MAX_CHANNELS` — schema-enforced at frame decode, so the Hub can lower it and cannot raise it                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Relay frame decode, unchanged; **this is the structural bound on handshake concurrency**                                                                                    |
+| Concurrent in-flight handshakes                      | At most the connection's asserted `maxChannels`, by the row above and one handshake per channel (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Node; the in-flight entry is created at §8.6 step 1 and retired at the first of authenticated implicit finish (§8.9), any FATAL-PRE or FATAL-POST outcome, or channel close |
+| Handshake-attempt rate                               | Token bucket of capacity `E2EE_HANDSHAKE_RATE_BURST` refilled at `E2EE_HANDSHAKE_RATE_REFILL`, per Hub origin (§3.2.2 L3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Node, before any signature or DH work                                                                                                                                       |
+| Handshake attempts per channel                       | Exactly one (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Both endpoints                                                                                                                                                              |
+| Client `negotiating` send buffer                     | `E2EE_NEGOTIATION_BUFFER_MAX_BYTES`, charged **per relay connection** — the sum over every channel on it, matching the scope of the single send queue the value is derived from, so a connection's full complement of `negotiating` channels cannot commit a multiple of the queue's capacity (§4.4). Overflow is `e2ee_send_unavailable` (§11.4), never a silent drop and never unbounded growth                                                                                                                                                                                                                         | Client, at submission, while `negotiating` (§4.4)                                                                                                                           |
+| `E2EEClientHello` size                               | `E2EE_CLIENT_HELLO_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Both, before body parse (§3.3)                                                                                                                                              |
+| `E2EEServerAccept` size                              | `E2EE_SERVER_ACCEPT_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Both, before body parse                                                                                                                                                     |
+| `E2EEHandshakeReject` size                           | Exactly `E2EE_HANDSHAKE_REJECT_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Both                                                                                                                                                                        |
+| Signing-interface input size                         | `E2EE_SIGNING_INPUT_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Node, before **every** call to the identity signing interface (§7.2)                                                                                                        |
+| Directly signed transcript size                      | `E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Encoder at emit, verifier before signature check (§7.2, §7.3–§7.5)                                                                                                          |
+| Capability signing envelope size                     | Exactly `E2EE_CAPABILITY_SIGNING_ENVELOPE_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Node before sign, verifier on rebuild (§7.2.1)                                                                                                                              |
+| Hub origin length in any E2EE transcript             | `E2EE_HUB_ORIGIN_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Encoder at emit, verifier before use (§7.1)                                                                                                                                 |
+| Suite registry entries                               | `E2EE_SUITE_REGISTRY_MAX_ENTRIES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Node at emit, client before verify (§7.6 element 9)                                                                                                                         |
+| Capability statement transcript size                 | `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Node at encode and at the §7.6.1 self-check; client before decoding the transcript (§5.2 step 0, §7.6)                                                                      |
+| Capability statement CBOR size                       | `E2EE_CAPABILITY_STATEMENT_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Node at emit, client before verify (§5.3)                                                                                                                                   |
+| Capability carrier size                              | `E2EE_CAPABILITY_CARRIER_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Node at emit (§5.3, §5.5); never truncated, split, or chunked                                                                                                               |
+| Advertisement serviceability                         | Asserted `maxDataChunkBytes` ≥ `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Node, **once per relay connection** on `ready`, before any channel is accepted (§5.5 U1)                                                                                    |
+| Conforming statement available                       | §7.6.1 self-check passes, which includes the advertised protocol range containing `E2EE_PROTOCOL_VERSION` (§7.6 elements 7–8) and the §7.5 continuity-id startup cross-check resolving to a single advertisable value — element 18 is REQUIRED, so a node that cannot resolve it has no conforming statement and MUST NOT mint one (§7.5, §5.5 U2)                                                                                                                                                                                                                                                                        | Node at startup and after every rotation, prune, prekey rotation, and policy change (§5.5 U2)                                                                               |
+| Negotiation records per channel                      | One carrier, one hello, one accept **or** reject; duplicates fatal (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Both                                                                                                                                                                        |
+| Continuity chain depth                               | `E2EE_CONTINUITY_CHAIN_MAX_LENGTH`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Node at emit, client before verify (§7.5)                                                                                                                                   |
+| Node-id resolution hints per pin record              | `E2EE_PIN_NODE_ID_HINTS_MAX`, oldest-first eviction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Native client, on recording a hint (§13.1)                                                                                                                                  |
+| Device-level verification markers                    | One boolean per configured Hub origin, and no other content. Set **only** by the §13.2 step 5 owner ceremony — atomically with the pin promotion — or by the client-local reconciliation §13.1 requires against the client's own pin set, and cleared **only** by the §13.3 owner-initiated re-pair that leaves no verified pin under that origin, so it is unreachable from unauthenticated input and deliberately carries no numeric cap of its own (§13.1, §13.3)                                                                                                                                                      | Native client                                                                                                                                                               |
+| `E2EEError` body size                                | `E2EE_ERROR_BODY_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Both (§11.3)                                                                                                                                                                |
+| Account id length                                    | `E2EE_ACCOUNT_ID_MAX_BYTES`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Both (§7.1)                                                                                                                                                                 |
+| Envelope message size                                | `RELAY_MAX_RPC_MESSAGE_BYTES` and the Hub-asserted chunk limits, on encrypted bytes (§4.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Relay chunking layer, unchanged                                                                                                                                             |
+| Inner-record body size                               | `plaintextCeiling`, pre-encryption (§4.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Sender                                                                                                                                                                      |
+| Advertisement wait                                   | `T_ADV` (§4.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Client                                                                                                                                                                      |
+| Handshake deadline, client                           | `T_HANDSHAKE`, from hello emit (§4.4 K15); together with the one-attempt-per-channel rule it is also the bound on `WebSAS` grinding (§13.5, §17.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Client, always                                                                                                                                                              |
+| Handshake deadline, node                             | `T_HANDSHAKE_NODE`, from advertisement emit (§4.4 N8, §8.9)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Node: the `negotiating` half under effective `requireE2EE`; the implicit-finish half **always** (§8.9)                                                                      |
+| Negotiating-window keepalive budget                  | `T_ADV + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN ≤ RPC_KEEPALIVE_INTERVAL` (§3.2.2 L1)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | Client; a specification-level invariant, checkable from §3.2                                                                                                                |
+| Close-phase keepalive budget                         | `2 · T_CLOSE + T_CLOSE_LINGER_MAX + T_KEEPALIVE_FLUSH_MARGIN ≤ RPC_KEEPALIVE_INTERVAL` (§3.2.2 L5). The close phase suppresses the keepalive `Ping` with **no** later flush, so this bounds the whole phase rather than reserving a flush; `T_CLOSE` is charged twice because the simultaneous branch of §10.2 contains two `T_CLOSE`-bounded waits. It removes the deterministic case and not the residual of §17.14                                                                                                                                                                                                     | Client; a specification-level invariant, checkable from §3.2                                                                                                                |
+| Close-exchange step deadline                         | `T_CLOSE` (§10.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | Both                                                                                                                                                                        |
+| Close-exchange wait steps per endpoint per phase     | At most two — one on either sequential path, two on the simultaneous path, never three (§10.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Both                                                                                                                                                                        |
+| Last-record linger before the outer close            | At most `T_CLOSE_LINGER_MAX` (§10.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | The endpoint that sent the last close-machine record                                                                                                                        |
+| Close-machine records per endpoint per exchange      | At most `E2EE_CLOSE_RECORDS_RESERVED` (§10.2)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Both                                                                                                                                                                        |
+| Terminal `E2EEError` records after the close machine | At most `E2EE_ERROR_RECORDS_RESERVED`, and nothing else may follow it (§10.2, §11.3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Both                                                                                                                                                                        |
+| Post-application sequence reservation                | `E2EE_CLOSE_RECORDS_RESERVED + E2EE_ERROR_RECORDS_RESERVED` records under **both** §9.4 thresholds, per direction (§9.6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Sender, before protecting any application record                                                                                                                            |
+| Policy-withdrawal sweep                              | Every live channel the narrowed policy would no longer admit, closed — and every in-flight handshake it would refuse, aborted — before the operator command is acknowledged (§12.6); `e2ee` channels as FATAL-POST `Q12` code `policy`, `legacy` channels as a bare `channel_rejected`, in-flight handshakes as FATAL-PRE `P25`. Both enumerations run over **one consistent snapshot** of channel state, walking the in-flight handshake list of the row above alongside the live-channel set, so no channel can cross row N3 between them; §8.6 step 2 additionally serializes that transition against the §12.6 commit | Node, operator-initiated                                                                                                                                                    |
+| Transmission admission before protection             | Whole record, every chunk, admitted before the pair is assigned (§9.3); refusal is `e2ee_send_unavailable` (§11.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Sender                                                                                                                                                                      |
+| Pending client records                               | `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, `E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT`, `E2EE_PENDING_CLIENT_RETENTION` (§13.6); the per-account key is a bookkeeping partition, not an isolation boundary (§13.6)                                                                                                                                                                                                                                                                                                                                                                                                                     | Node                                                                                                                                                                        |
+| Owner pairing window                                 | `E2EE_PAIRING_WINDOW`, and **at most one** pending record admitted per window (structural, §13.6). The window MUST name an owner-supplied discriminator — the client identity fingerprint — and only an attempt whose authenticated `clientIdentityFingerprint` equals it receives the reservation. Its cap-exceeding attempt then evicts the oldest _eligible_ pending record **in the partition of the cap that was exceeded**, per-account governing when both are exceeded, and never touches `approved` or `revoked` state (§13.6)                                                                                   | Node, owner-initiated                                                                                                                                                       |
+| Pairing reservation lifetime                         | `E2EE_PAIRING_RESERVATION_LIFETIME` from record creation; past it the record becomes eligible for pairing-window eviction again, while its own expiry stays at `E2EE_PENDING_CLIENT_RETENTION` (§13.6). The ordering of the three durations is §3.2.2 L4, a specification-level invariant checkable from §3.2                                                                                                                                                                                                                                                                                                             | Node                                                                                                                                                                        |
+| Per-channel advertised-statement snapshot            | The identity, prekey, continuity-chain, and continuity-id material the node advertised on that channel — exactly what §8.3 elements 7–9, 15, and 17 are built from, and no other statement content. At most one per channel, at most `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` chain entries, held from advertisement emit until the channel closes and consumed at §8.6 step 7 (§7.5, §8.3). It is in-memory channel state, not durable state, and the channel count is already bounded by the first row above                                                                                                                  | Node                                                                                                                                                                        |
+| Per-channel admitted-authority snapshot              | The full Branch A record key `(hubOrigin, accountId, clientIdentityFingerprint)` plus the `status`, `maxRole`, and `capabilitySet` read at §8.6 step 6, and no other record content. Recorded on the in-flight handshake entry at that read and retained for the channel's lifetime; consumed by the §13.6 withdrawal test and the §8.9 re-check. NX channels carry none                                                                                                                                                                                                                                                  | Node (IK only)                                                                                                                                                              |
+| Approved / revoked client records                    | `E2EE_APPROVED_CLIENTS_MAX`, `E2EE_REVOKED_CLIENTS_RETAINED_MAX` (§13.6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Node                                                                                                                                                                        |
+| Last-seen write rate                                 | `E2EE_LAST_SEEN_WRITE_INTERVAL` (§13.6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Node                                                                                                                                                                        |
+| Fallback counter write rate                          | `E2EE_FALLBACK_WRITE_INTERVAL`, leading-edge then coalesced (§12.5)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Node                                                                                                                                                                        |
+| Fallback ring                                        | `E2EE_FALLBACK_RING_SIZE` (§12.5); evictions past it are counted by the per-class monotonic **ring-overflow counter**, which stores a count and no occurrence fields, so the retained set is two integers wider and no more identifying (§12.5, §12.3)                                                                                                                                                                                                                                                                                                                                                                    | Node                                                                                                                                                                        |
+| Rekey thresholds                                     | `E2EE_REKEY_MAX_RECORDS`, `E2EE_REKEY_MAX_BYTES` (§9.4)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Both, per direction                                                                                                                                                         |
+| Sequence exhaustion                                  | `E2EE_COUNTER_MAX`, `E2EE_EPOCH_MAX` (§9.6)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Both, per direction                                                                                                                                                         |
 
 **The size bounds above are mutually consistent, and that is a checkable claim.** The rows for
 the signing interface, the transcript, the statement, the carrier, and the advertisement floor
@@ -5056,7 +5062,7 @@ carries the current worst-case arithmetic end to end.
 
 **Where the concurrency guarantee actually comes from.** An earlier revision named two constants
 — a global and a per-Hub-origin in-flight handshake cap — as the source of the bound on
-cryptographic concurrency. Both sat *above* the structural maximum and could therefore never
+cryptographic concurrency. Both sat _above_ the structural maximum and could therefore never
 fire: a node holds one relay connection, that connection carries at most the asserted
 `maxChannels` simultaneous channels and at most `RELAY_MAX_CHANNELS` under any assertion the
 frame schema will decode, and §4.4 permits exactly one handshake per channel. The constants were
@@ -5184,6 +5190,7 @@ class, the §11 tables define it.
   prelude case MUST additionally assert that the peer's chunk-support latch still **sets** before
   the fatal outcome is taken. These are distinct from the zero-length inner-body case above,
   which is a valid §9.1 record.
+
 - **F2 — Capability carrier compatibility** (§5.6, §5.5): one case per compatibility case
   C1–C6, each with exact carrier bytes (with and without prelude where applicable) and the
   required outcome — including the C5 defect-reply demonstration of the prohibited
@@ -5239,9 +5246,9 @@ class, the §11 tables define it.
   with a carried chain entry (invalid, §7.5); a statement whose continuity id differs from the
   pinned value (channel-fatal with the
   §13.3 re-verification expectation, **not** a new-node outcome); and the §5.7 policy-generation
-  recovery pair — a statement at generation *N* presented to a client holding *N + k* (rejected,
+  recovery pair — a statement at generation _N_ presented to a client holding _N + k_ (rejected,
   local diagnostic `e2ee_policy_generation_regressed`, no ceremony launched) followed by a
-  statement at a generation strictly above *N + k* (accepted).
+  statement at a generation strictly above _N + k_ (accepted).
 
   **Protocol-range cases (§5.2 step 8, §7.6 elements 7–8).** The corpus MUST carry a
   fully valid, correctly signed statement whose advertised range **excludes**
@@ -5277,6 +5284,7 @@ class, the §11 tables define it.
   deliver an NX hello to a node running `requireApprovedClientE2EE`, expecting `P9` with the §11.5
   observable byte-identical to the F12 reject cases — the enforcement that remains when a client
   ignores the field.
+
 - **F4 — Prekey certificates** (§7.3, §7.4, §6.4): valid node and client certificates
   (transcript bytes and signatures); expiry exactly at and one beyond the
   `E2EE_MAX_CLOCK_SKEW` boundary; wrong namespace (`hubOrigin`, `accountId`); usage-field
@@ -5316,6 +5324,7 @@ class, the §11 tables define it.
   chain depth and carrier fit can never drift apart in separate fixtures again. The long-origin
   run MUST additionally assert the silent-pin-update expectation is **unchanged** by origin
   length: effective chain depth is not permitted to depend on how long the Hub origin is.
+
 - **F6 — IK handshake** (§8): a complete deterministic handshake with every named
   intermediate as an expected output: context block bytes, `contextCommitment`, prologue
   bytes, `E2EEClientHello` wire bytes, IK message-1 payload plaintext, `ServerAcceptTBS`
@@ -5353,6 +5362,7 @@ class, the §11 tables define it.
   from a synthetic state whose remaining capacity covers the close machine but not the error
   record, expecting the close without the error record and the §11.5 "send path unusable"
   observable rather than a wrap or a dropped obligation.
+
 - **F10 — Mode machine** (§4.4): one case per transition row N1–N17 and K1–K24 — input
   payload bytes and state, expected action and next state — including plaintext injection
   after E2EE, envelope and negotiation injection after a legacy lock, and an unknown first
@@ -5430,6 +5440,7 @@ class, the §11 tables define it.
     N8 under effective `requireE2EE` and MUST NOT fire it under the compatibility default; the
     same deadline expiring **after** row N3 with no authenticated implicit finish MUST be
     FATAL-POST `Q8` under **both** policies (§8.9).
+
 - **F11 — Authenticated close** (§10): a sequential clean close (all three records — the
   initiator's `E2EEClose`, the responder's `E2EECloseAck`, and the initiator's final
   confirmation, §10.2 — with their bodies, commitments, and both verdicts, which MUST both be
@@ -5445,12 +5456,12 @@ class, the §11 tables define it.
     the endpoint's exchange is complete, carrying any inner type other than `E2EEError` —
     expecting FATAL-POST `Q7`, `protocol_violation`, one
     length-uniform `E2EEError` on the wire, and verdict **Failed**. The case MUST assert
-    explicitly that the verdict is not **Unclean — abrupt** and that the error record *is*
+    explicitly that the verdict is not **Unclean — abrupt** and that the error record _is_
     emitted, since the discarded reading produces neither, and that it is the **only** record
     protected after the close machine (§10.2);
   - the **peer's view of that same trace**: an authenticated `E2EEError` arriving after the
     receiving endpoint's own exchange completed, expecting **no** record on the wire in reply,
-    verdict **Failed**, and secrets erased. The case MUST assert explicitly that this is *not*
+    verdict **Failed**, and secrets erased. The case MUST assert explicitly that this is _not_
     `Q7` and produces no second error record, since the Q7 reading would have the two endpoints
     answer each other's terminal errors indefinitely;
   - **legacy JSON and a negotiation record delivered during the close phase**, expecting
@@ -5487,16 +5498,17 @@ class, the §11 tables define it.
   reference implementation happens to pick. Shared state: epoch 0 throughout, initiator I's
   next-send `(0, 7)`, responder R's next-send `(0, 4)`.
 
-  | Case | Wire records | Expectation |
-  | --- | --- | --- |
-  | Simultaneous close, passing | I `E2EEClose` at `(0, 7)`; R `E2EEClose` at `(0, 4)`; I `E2EECloseAck` at `(0, 8)` declaring `expectedRecv` `(0, 5)`; R `E2EECloseAck` at `(0, 5)` declaring `expectedRecv` `(0, 8)` | Both acks satisfy the strict rule against the validator's anchor (I's anchor `(0, 8)`, R's anchor `(0, 5)`); verdict **Clean** at both endpoints |
-  | Simultaneous close, ack declaring current next-send (negative) | as above, except R's `E2EECloseAck` at `(0, 5)` declares `expectedRecv` `(0, 9)` — I's *current* next-send after sending its own ack, rather than I's anchor `(0, 8)` | Strict-rule failure at I: FATAL-POST `Q7`, `protocol_violation`, verdict **Failed**. A conforming implementation MUST reject this record; accepting it is the disallowed reading |
-  | Close anchor across an epoch boundary | I's `E2EEClose` is the last record of epoch `e` under a §9.4 threshold; R's `E2EECloseAck` declares `expectedRecv` `(e + 1, 0)` | Accepted: the anchor is the §9.2/§9.4 advance, so an epoch-completing close advances to `(e + 1, 0)` and never to counter + 1. A companion negative case declaring `(e, counter + 1)` MUST fail as `Q7` |
+  | Case                                                           | Wire records                                                                                                                                                                         | Expectation                                                                                                                                                                                             |
+  | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Simultaneous close, passing                                    | I `E2EEClose` at `(0, 7)`; R `E2EEClose` at `(0, 4)`; I `E2EECloseAck` at `(0, 8)` declaring `expectedRecv` `(0, 5)`; R `E2EECloseAck` at `(0, 5)` declaring `expectedRecv` `(0, 8)` | Both acks satisfy the strict rule against the validator's anchor (I's anchor `(0, 8)`, R's anchor `(0, 5)`); verdict **Clean** at both endpoints                                                        |
+  | Simultaneous close, ack declaring current next-send (negative) | as above, except R's `E2EECloseAck` at `(0, 5)` declares `expectedRecv` `(0, 9)` — I's _current_ next-send after sending its own ack, rather than I's anchor `(0, 8)`                | Strict-rule failure at I: FATAL-POST `Q7`, `protocol_violation`, verdict **Failed**. A conforming implementation MUST reject this record; accepting it is the disallowed reading                        |
+  | Close anchor across an epoch boundary                          | I's `E2EEClose` is the last record of epoch `e` under a §9.4 threshold; R's `E2EECloseAck` declares `expectedRecv` `(e + 1, 0)`                                                      | Accepted: the anchor is the §9.2/§9.4 advance, so an epoch-completing close advances to `(e + 1, 0)` and never to counter + 1. A companion negative case declaring `(e, counter + 1)` MUST fail as `Q7` |
+
 - **F12 — Error records** (§11): the exact, byte-identical `E2EEHandshakeReject` record; one
   `E2EEError` envelope per defined code, demonstrating identical envelope lengths. The reject
   case MUST be asserted **byte-identical across causes** — at minimum an absent Branch A record,
   a `pending` record, a `revoked` record, and a context-commitment mismatch — since those four
-  are precisely the approval-membership classes §11.2 forbids distinguishing. Reject *timing* is
+  are precisely the approval-membership classes §11.2 forbids distinguishing. Reject _timing_ is
   not a fixture assertion: the §11.2 ordering rule that keeps the durable pending write off the
   response path constrains an implementation, not a wire vector.
 - **F13 — Fingerprints** (§7.1): node, client, and agreement fingerprint vectors from the
@@ -5529,7 +5541,7 @@ class, the §11 tables define it.
   - element 11 capability mismatch against element 13 — `P13`;
   - element 12 role **escalation** above element 14 — `P13`;
   - element 12 role **reduction** below element 14 — `P13`, since §8.3 makes a difference in
-    *either* direction a context mismatch;
+    _either_ direction a context mismatch;
   - a commitment/preimage mismatch: a well-formed context block presented under a
     `contextCommitment` computed over different bytes — `P13`;
   - the NX absence semantics violated: a nonempty element 10 or element 16 on the web tier —
@@ -5544,7 +5556,7 @@ class, the §11 tables define it.
   emitted but before the hello arrives, and the expected outcome:
   - an **identity rotation appending a continuity certificate** in that window — the handshake
     **completes**, against the chain and identity fingerprint the statement advertised. The case
-    MUST assert that rebuilding element 15 from the node's *current* chain yields a different
+    MUST assert that rebuilding element 15 from the node's _current_ chain yields a different
     context and would fail as `P13`, since that is the implementation this rule exists to exclude,
     and that the client's element 15 is unchanged because it has only the validated statement to
     build from;
@@ -5583,7 +5595,7 @@ class, the §11 tables define it.
     ticket, channel, and handshake;
   - a combined narrow-and-widen command — withdrawn, because it contains a reduction;
   - a withdrawal applied to the **same client fingerprint under a different**
-    `(hubOrigin, accountId)` **scope** — *not* withdrawn for this channel. The case MUST assert
+    `(hubOrigin, accountId)` **scope** — _not_ withdrawn for this channel. The case MUST assert
     the channel stays open, since a fingerprint-only sweep would close it;
   - a withdrawal landing between §8.6 step 6 and row N3 — the in-flight abort, which MUST take
     the generic fixed-size `E2EEHandshakeReject` and be byte-identical to the F12 reject cases,
@@ -5610,9 +5622,10 @@ class, the §11 tables define it.
   holds an unexpired reservation (refused); the same set with one reservation aged past
   `E2EE_PAIRING_RESERVATION_LIFETIME` (that record evicted); and, in every one of these cases, the
   assertion that `approved` and `revoked` records were untouched and that the §11.5 observable was
-  byte-identical throughout. Eviction and creation *timing* is not a fixture assertion, for the
+  byte-identical throughout. Eviction and creation _timing_ is not a fixture assertion, for the
   same reason F12 excludes reject timing: §11.2's ordering rule constrains an implementation, not
   a wire vector.
+
 - **F17 — Key-material validation** (§7.1, §8.1, §14.3): the strict validation rules the
   headline guarantee assumes, one case per rejected encoding. Each case MUST name the §11
   outcome for the position the material occupies: `P11` for material inside the IK client
@@ -5731,7 +5744,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
    contact has passed": the Hub can re-mint the `nodeId` — and, being the issuer of account
    identity, the `accountId` — and withhold the carrier to synthesize an unrecognized selection at
    any time. The actual bounds, stated per tier:
-   - *Native.* A selection is legacy-eligible only on a `hubOrigin` whose device-level
+   - _Native._ A selection is legacy-eligible only on a `hubOrigin` whose device-level
      `anyNodeVerified` marker is unset **and** under a `(hubOrigin, accountId)` pair that holds no
      verified pin, or after an explicit owner legacy consent (§13.1). A latched selection is fatal
      (K14) and an unexpected one demands owner consent (K23/K24), on every channel, before any
@@ -5746,7 +5759,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
      requirement that the three situations be worded distinctly, and §13.1's rule that consent is
      never inferred from a timeout, a retry, or a dismissal, are what keep that decision meaningful;
      nothing in the protocol bounds how often it is put to the owner.
-   - *Native, after durable-state loss.* The bound above is **install-scoped state in the §6.3
+   - _Native, after durable-state loss._ The bound above is **install-scoped state in the §6.3
      class**, not a permanent property of the device or the account. App reinstall, OS device
      transfer, restore, and a platform secure-store reset each destroy every pin, latch, consent,
      and marker, and a client cannot detect that it ever held them (§13.1.1). Each such event
@@ -5755,10 +5768,10 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
      frequently reached path into this item in practice, and it is bounded only by §13.1.1's
      required owner-visible "no verified node on this Hub" surface and by node-side effective
      `requireE2EE` (item 11).
-   - *Web.* Exposed until the first validated statement of each application session, and again
+   - _Web._ Exposed until the first validated statement of each application session, and again
      in every fresh session (§12.1); nothing web-side closes it against the Hub (§2.4).
-   Node-side, effective `requireE2EE` (§12.3) closes it for both tiers. Occurrences are counted
-   (§12.5) and channels are labeled legacy (§12.2), but neither closes it.
+     Node-side, effective `requireE2EE` (§12.3) closes it for both tiers. Occurrences are counted
+     (§12.5) and channels are labeled legacy (§12.2), but neither closes it.
 5. **The web ceiling.** The web tier is never operator-proof (§2.4); the `WebSAS` is advisory
    by construction (§13.5). **The `WebSAS` is additionally grindable, and its floor is an online
    bound rather than an offline one.** An interposer that authors the client-facing
@@ -5806,12 +5819,12 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     — the §15 bounds keep node resources bounded, and no confidentiality or authorization
     property depends on a channel surviving.
 11. **Backup and restore rollback, and client-side durable-state loss.** Node-side restores fail
-    closed or repair silently, but into three *different* paths, and the differences matter
+    closed or repair silently, but into three _different_ paths, and the differences matter
     operationally.
     - A rolled-back **continuity chain** is detected against the §7.5 startup cross-check and
       surfaces client-side as the §13.3 re-verification UI.
     - A rolled-back **continuity id** is detected against the §7.5 continuity-id anchor, and it is
-      the one path that is *not* a client-visible event. The node restores the stored value from
+      the one path that is _not_ a client-visible event. The node restores the stored value from
       the anchor and re-advertises the identical id, so every pin still matches and no client sees
       anything. That outcome is the point of the anchor: the case is reached by an ordinary
       operator restore of a node that has **never rotated**, whose chain is empty and whose
@@ -5820,12 +5833,12 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
       which every pinned client reads as a §5.2 step 6 mismatch — channel-fatal, §13.3
       re-verification UI — turning a benign restore into a fleet-wide re-verification storm with
       no attacker involved, and training owners to click through the one warning that matters
-      (§13.3). Where the anchor and the stored value *disagree*, or the anchor is unreadable, the
+      (§13.3). Where the anchor and the stored value _disagree_, or the anchor is unreadable, the
       node fails closed instead: it declines to advertise (§5.5 U2) until an operator resolves it,
       and minting is never automatic (§7.5).
     - A rolled-back **policy generation** is detected only against the §5.7 high-water anchor,
       which this specification requires the implementation to build because no store with both
-      required properties exists in the node today. Client-side it is *not* re-verification: it
+      required properties exists in the node today. Client-side it is _not_ re-verification: it
       is an ordinary invalid statement (rows K2/K3, §11.2 P15) with a local-only diagnostic,
       deliberately, because a Hub can replay a genuine older statement on demand and an
       automatic identity prompt would be a Hub-triggered click-through trainer. Until the
@@ -5833,8 +5846,8 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
       holding a higher remembered generation. Authenticated identity rotation does not help:
       §13.3 carries the remembered generation across it. The client-side escape is the
       owner-initiated re-pair of §13.3.
-    All three are resolved by failing closed or by an explicit, recorded repair — availability
-    costs accepted deliberately over silent trust regression.
+      All three are resolved by failing closed or by an explicit, recorded repair — availability
+      costs accepted deliberately over silent trust regression.
 
     **The client side of a restore is not symmetric, and this document no longer claims it is.**
     An earlier revision asserted that a restored device "holds no E2EE identity and MUST re-pair".
@@ -5853,13 +5866,14 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     are routine events rather than rare failures, so this is a recurring exposure and not a
     one-time migration cost. Restored or cloned agreement keys are a separate case and are
     destroyed on detection (§6.3).
+
 12. **Continuity chains do not survive outgoing-key compromise.** The chain authenticates a
     rotation only while the outgoing identity private key was under exclusive honest custody
     (§13.3). An adversary holding a retired-but-once-current node identity key can sign a
     certificate to a key of its choosing and move a client's pin **silently**, carrying the
     latch, the policy-generation memory, and the approval state with it. Bounds and honesty:
-    holding that key means the node host is compromised, which §2.6 already lists under *Never
-    delivered*, and §7.5 requires a compromise rotation to be executed as a deliberate
+    holding that key means the node host is compromised, which §2.6 already lists under _Never
+    delivered_, and §7.5 requires a compromise rotation to be executed as a deliberate
     chain break plus a fresh §13.2 verification, with the node CLI warning at the point of use.
     No pin-local mechanism detects the fork at accept time, and none is specified: both
     certificates sit at the same generation, and the continuity id is public and copyable. The
@@ -5868,7 +5882,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     §13.3 re-verification UI.
 13. **Advertisement serviceability rests on a Hub-asserted relay limit and on a bounded Hub
     origin.** Two availability conditions are accepted rather than solved here.
-    - *The relay floor is below the E2EE floor.* `RELAY_MIN_DATA_CHUNK_BYTES` is strictly less
+    - _The relay floor is below the E2EE floor._ `RELAY_MIN_DATA_CHUNK_BYTES` is strictly less
       than `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES` (§3.2.1 S7), so the relay protocol still permits
       a connection on which no conforming advertisement can be carried (§5.5 U1). Closing the gap
       genuinely — rather than documenting it — is a **relay-protocol** change: raising the
@@ -5880,19 +5894,19 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
       advertisement into an ambiguous partial one; and moving the continuity chain into the
       encrypted `E2EEServerAccept`, which would invert §5.1's verify-before-you-act ordering by
       making the client send a hello to a static it has not yet checked against its pin.
-    - *A long Hub origin disables E2EE for a deployment.* A canonical Hub origin longer than
+    - _A long Hub origin disables E2EE for a deployment._ A canonical Hub origin longer than
       `E2EE_HUB_ORIGIN_MAX_BYTES` fails the §7.6.1 self-check (§5.5 U2, §7.1). The bound sits far
       above any realistic origin and buys a closed, machine-checkable size argument for the
       carrier; the cost is that an operator can configure a node out of E2EE eligibility.
-    Both conditions are deterministic, operator-visible at startup or at `ready`, and never
-    silent: under effective `requireE2EE` they are FATAL-PRE (§11.2 P2, P23) and the node is
-    unreachable until corrected; otherwise they are counted and displayed in a class distinct
-    from peer-legacy fallback (§12.5) so they cannot be mistaken for compatibility traffic, and
-    they are excluded from the §12.3 flip criterion so the Hub cannot use them to veto the
-    rollout. What they are *not* is a new confidentiality exposure: the client-side classification
-    of §12.1.1 is computed before any evidence arrives, so a suppressed advertisement is fatal for
-    latched and unexpected selections and can only reach the legacy-eligible selections item 4
-    already retains.
+      Both conditions are deterministic, operator-visible at startup or at `ready`, and never
+      silent: under effective `requireE2EE` they are FATAL-PRE (§11.2 P2, P23) and the node is
+      unreachable until corrected; otherwise they are counted and displayed in a class distinct
+      from peer-legacy fallback (§12.5) so they cannot be mistaken for compatibility traffic, and
+      they are excluded from the §12.3 flip criterion so the Hub cannot use them to veto the
+      rollout. What they are _not_ is a new confidentiality exposure: the client-side classification
+      of §12.1.1 is computed before any evidence arrives, so a suppressed advertisement is fatal for
+      latched and unexpected selections and can only reach the legacy-eligible selections item 4
+      already retains.
 14. **The client's handshake and close budgets are coupled to a pinned transport keepalive.**
     Because an
     E2EE-capable client emits no plaintext while `negotiating` (§4.4), the pinned RPC client's
@@ -5906,7 +5920,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     but it surfaces as a transport error rather than as the K15 FATAL-PRE the mode machine
     describes, so a diagnostic that only reads mode-machine outcomes will misattribute it.
     Second, `T_ADV` is now short enough that an honest but slow path can expire it, locking
-    legacy on a *legacy-eligible* selection where a longer wait would have negotiated E2EE; that
+    legacy on a _legacy-eligible_ selection where a longer wait would have negotiated E2EE; that
     lands inside the exposure item 4 already retains and is not a new one, since a Hub that
     wants the same outcome simply drops the carrier. The bound on the whole coupling is that it
     is checkable: L1 is an inequality over §3.2 names, and §16.3 F10 carries a stalled-accept
@@ -5924,10 +5938,10 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     `RPC_KEEPALIVE_INTERVAL`, which is why `T_CLOSE` is smaller than it would otherwise be — an
     earlier revision carried `T_CLOSE` equal to `RPC_KEEPALIVE_INTERVAL` with a linger bound
     equal to `T_CLOSE`, so a Hub that returned the peer proof just under `T_CLOSE` and withheld
-    the peer's `channel.close` made a *successful* authenticated close end in a transport timeout
+    the peer's `channel.close` made a _successful_ authenticated close end in a transport timeout
     that tore down the connection and every channel on it, deterministically. A later revision
     fixed the constants against a one-wait model of the phase and left the same attack reachable
-    one step further along: §10.2 bounds *each* wait by `T_CLOSE` and the simultaneous branch has
+    one step further along: §10.2 bounds _each_ wait by `T_CLOSE` and the simultaneous branch has
     two, so a Hub delivering the peer's `E2EEClose` just inside the first deadline and its
     `E2EECloseAck` just inside the second reconstituted the deterministic teardown at
     `2 · T_CLOSE + T_CLOSE_LINGER_MAX`. L5 now charges `T_CLOSE` twice, §10.2 caps the wait count
@@ -5935,13 +5949,14 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     First, a close-exchange step that genuinely needs longer than `T_CLOSE` now ends in
     **Unclean — abrupt** where a longer deadline would have completed; that is an unattributed
     verdict and never a confidentiality event (§10.4, item 9). Second, and not removable by any
-    timer: a `Ping` written *before* the close phase whose `Pong` the peer can no longer send —
+    timer: a `Ping` written _before_ the close phase whose `Pong` the peer can no longer send —
     because the peer has itself entered a close phase and is under the identical prohibition —
     expires on the pinger's own schedule. The transport dead-peer verdict is therefore an
     accepted and expected terminator of a close phase, which is why §10.3 and §10.4 require each
     endpoint's verdict to be determined and recorded when its exchange completes or `T_CLOSE`
     expires, never when the outer `channel.close` is emitted or delivered. As with L1, a runtime
     exposing keepalive suspend/resume MAY hold the verdict off, and L5 must hold regardless.
+
 15. **The rollout signal is upward-forgeable.** Row N2 counts a fallback occurrence on the first
     unauthenticated `LEGACY-JSON` byte, so any party that can originate a channel — the Hub can,
     and §2.1 concedes a node cannot tell a Hub-originated session from a genuine one — can
@@ -5962,7 +5977,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     turns row N1 into a hard lockout of every genuinely un-upgraded client. Inflation therefore
     biases the decision in both directions.
 
-    Bounds, stated exactly. The counter's *value* remains a monotone lower bound that cannot be
+    Bounds, stated exactly. The counter's _value_ remains a monotone lower bound that cannot be
     deflated, so the node can never be made to under-report that legacy was accepted at all.
     §12.5's per-class **ring-overflow counter** records how much per-occurrence evidence a window
     lost, so the loss is visible even though it is not recoverable, and §12.3 requires the
@@ -5977,6 +5992,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     directions and is not a security mechanism, and that **§12.3's operator override is the only
     path whose outcome the Hub cannot influence** — which is why it is stated first there and
     recommended to every operator who does not need legacy compatibility.
+
 16. **Pairing can be denied by flooding the pending-record caps.** §7.4 client certificates are
     self-signed and name a client-chosen `accountId`, and §13.6 creates a pending record from
     them once the §8.6 step 5 bindings verify, so a party that can open channels can saturate
@@ -5993,11 +6009,11 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
 
     **The two recovery paths are not equally strong, and this document no longer calls either of
     them unconditional.** An earlier revision described the owner-opened pairing window as
-    window-scoped: while open, *any* cap-exceeding attempt evicted the oldest record created
+    window-scoped: while open, _any_ cap-exceeding attempt evicted the oldest record created
     outside a window and was itself marked as created inside one. That was self-poisoning. The
     flood did not have to detect the window; running continuously at the permitted §15 rate, it
     converted every pending slot into a marked, un-evictable record within the window's own
-    duration, and — because the mark lasted as long as the record — disabled every *subsequent*
+    duration, and — because the mark lasted as long as the record — disabled every _subsequent_
     window for the whole of `E2EE_PENDING_CLIENT_RETENTION`. It was also silent on partition
     scope, so a per-account saturation could be answered by evicting a record in some other
     account and relieving nothing. §13.6 now binds the reservation to an owner-supplied
@@ -6011,7 +6027,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
       fingerprint locally, which §13.6 makes a REQUIREMENT of any product offering the window and
       which a product that has not built that surface simply does not have; and it requires the
       owner to reach approval within `E2EE_PAIRING_RESERVATION_LIFETIME`, after which the record
-      is evictable again like any other. What it *is* proof against is the flood: matching the
+      is evictable again like any other. What it _is_ proof against is the flood: matching the
       discriminator requires the private key behind a public fingerprint the owner read off their
       own device, so no volume of fabricated identities receives the reservation, causes an
       eviction, or burns the window — this window or any later one.
@@ -6019,6 +6035,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
       through a saturated cap; the cap stays saturated, the flood can resume, and the owner must
       act again. And neither reaches the case where the Hub simply never delivers the owner's
       channel (§17.8, §17.10), which no node-side mechanism can.
+
 17. **Authorization withdrawal is channel-granular, not operation-granular.** §13.6 makes
     revocation, `maxRole` reduction, and `capabilitySet` removal one transition with one ordered
     procedure — durable commit, then sweep and in-flight abort, then acknowledgement — so a
@@ -6027,7 +6044,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     rather than implied. First, the unit is the channel: an RPC the handler had already dispatched
     under the old authority runs to completion, and this protocol neither cancels nor compensates
     it — payload encryption is the wrong layer for transactional revocation, and the node's
-    application layer owns that question. Second, the sweep's effect on the *peer* is bounded by
+    application layer owns that question. Second, the sweep's effect on the _peer_ is bounded by
     the peer's own send path: the `E2EEError(policy)` and the `channel_rejected` close are ordinary
     records, and a Hub that drops them leaves the peer at an abrupt close it cannot attribute
     (item 9) — the node-side guarantee is that it stopped delivering, not that the peer was told
@@ -6042,7 +6059,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     then acknowledgement — so §2.3's rows describe the node's live channels and the CLI's
     acknowledgement means no channel the new policy would refuse is still open. Four limits are
     stated rather than implied. First, the unit is the channel, exactly as in item 17: an RPC the
-    handler had already dispatched runs to completion. Second, the sweep's effect on the *peer* is
+    handler had already dispatched runs to completion. Second, the sweep's effect on the _peer_ is
     bounded by the peer's own send path — the `E2EEError(policy)` and the `channel_rejected` close
     are ordinary records, and a `legacy` channel's peer receives no record at all by construction,
     so a Hub that drops or reorders them leaves the peer at an unattributed close (item 9); the
@@ -6050,7 +6067,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
     capability statement already advertised on an open `negotiating` channel is a **signed
     snapshot of the pre-withdrawal policy** and stays verifiable for its own
     `E2EE_CAPABILITY_STATEMENT_VALIDITY`; a Hub may replay it to any client holding no higher
-    remembered generation (§5.7), so a client's *displayed* view of a node's policy can lag the
+    remembered generation (§5.7), so a client's _displayed_ view of a node's policy can lag the
     node's committed one by up to that interval. This cannot widen admission — the node evaluates
     its own committed policy at §8.6 step 2 and at every §4.4 row, and a client acting on the stale
     statement is refused fail-closed at `P9` — but it can waste a channel and a single-use ticket,
@@ -6104,7 +6121,7 @@ Entries are numbered and are referenced elsewhere in this document as §17.\<n\>
 
 ## Appendix A — Analyzed alternative carrier (not part of this protocol)
 
-*This appendix is non-normative.*
+_This appendix is non-normative._
 
 During carrier analysis (§5.3, §5.6), a second legacy-safe shape was identified that is
 silent in **both** directions against the pinned RPC implementations:
@@ -6138,54 +6155,53 @@ proof against the then-current pinned implementations.
 
 ## Appendix B — Deliverable checklist cross-reference
 
-*This appendix is non-normative.* The protocol was authored against a 44-item deliverable
+_This appendix is non-normative._ The protocol was authored against a 44-item deliverable
 checklist; the table maps each item number and a one-line paraphrase to the sections that
 satisfy it.
 
-| # | Item (paraphrase) | Sections |
-| --- | --- | --- |
-| 1 | E2EE envelope byte layout, field widths, endianness | §3.2, §3.3 |
-| 2 | Encrypted inner-record framing, type registry, max sizes | §3.3, §3.4, §9.1, §10.1, §11.3 |
-| 3 | Negotiation-only `0x02` record layout, registry, bounds | §3.3, §3.4, §8.5, §8.7, §11.2 |
-| 4 | Proven legacy-safe capability carrier + compatibility cases + prelude-headroom fit | §3.2.1, §5.3–§5.6, §16.3 F2 |
-| 5 | Overhead constant, effective-ceiling formula, plaintext ceiling, distinct error, fail-before-release | §3.2, §4.5, §11.4 |
-| 6 | negotiating/e2ee/legacy mode machine, deadlines, fatal inputs per state | §4.4, §3.2.2 |
-| 7 | Single client-selected v1 suite, concrete Noise names, spec revision | §3.4, §8.2 |
-| 8 | Noise library decision with audit status and supported exporter API | §14.1, §14.2, §6.5 |
-| 9 | Exact IK/NX message composition; no identifiers in clear wrappers; no app RPC in payloads | §8.5, §8.7, §8.1 |
-| 10 | Client-selected suite rule; server may only accept or reject | §8.2 |
-| 11 | Per-payload security properties, stated per payload and direction | §8.10, §2.2, §2.6 |
-| 12 | Implicit client finish; no node RPC before it authenticates | §8.9 |
-| 13 | Authorization context block: fields, order, role rules, absence semantics | §8.3, §16.3 F16 |
-| 14 | `contextCommitment`, prologue, responder pre-check, symmetric client check | §8.3, §8.4, §8.6, §8.8, §16.3 F16 |
-| 15 | `ServerAcceptTBS`, confirmation transcript, confirmation key derivation | §8.7 |
-| 16 | `sessionBindingHash` without self-reference | §8.8 |
-| 17 | Key schedule: Split/exporter, directional keys, per-channel, destroyed, never resumed | §6.5, §9.4, §9.5 |
-| 18 | Per-record AEAD: nonce, AAD, version/suite gate, receiver-state counters, uint64 rules | §3.3, §9.1–§9.3 |
-| 19 | Rekey ratchet: thresholds, boundary ownership, labels, erasure, exhaustion | §9.4–§9.6 |
-| 20 | Authenticated close machine, outer-close ordering, truncation, unattributed abrupt close | §10 |
-| 21 | Agreement keys, cross-signing transcripts and domains, no ad-hoc signing, signing-input bound | §6.2, §7.2, §7.2.1, §7.3, §7.4 |
-| 22 | Custody: node secret store, mobile device-only, web memory-only, clone/restore ban, and what a client whose durable trust state was lost may do | §6.3, §13.1.1 |
-| 23 | Prekey expiry semantics, skew, remedies, rotation overlap | §6.4 |
-| 24 | Identity/signature wire encodings and strict validation rules | §7.1, §14.3, §16.3 F17 |
-| 25 | Pin = identity fingerprint anchor, indexed by client-side selection handle; states; storage; device-level verification marker; release gate | §13.1, §13.1.1, §12.1.1 |
-| 26 | First-contact pairing ceremony, pending record, fresh-ticket effectiveness, unexpected-node surface | §13.2, §13.2.1 |
-| 27 | Identity-continuity certificate, chain rules, storage, recovery and compromise breaks, custody caveat | §7.5, §13.3 |
-| 28 | Native safety number derivation, format, surfaces, entropy floor | §3.2, §13.4 |
-| 29 | `WebSAS` derivation, format, advisory-only language, grinding bound | §3.2, §13.5, §17.5 |
-| 30 | Client authorization records: schema, caps, partition-scoped eviction, owner-bound pairing window, authorization withdrawal (revocation, role reduction, capability removal) and its acknowledgement ordering, node-side state | §13.6, §8.6, §8.9, §16.3 F16 |
-| 31 | Capability advertisement transcript, freshness, replay, policy generation and its high-water anchor, statement self-check | §5.2, §5.7, §7.2.1, §7.6, §7.6.1 |
-| 32 | Latch carried on a pin whose latched value is the verified fingerprint, resolved from the client's own selection; native durable, first contact never latches; web in-memory and session-scoped, set on the first validated statement as an explicit narrowly-scoped exception with a bounded threat claim | §12.1, §12.1.1 |
-| 33 | Fallback rule: no probe, bounded wait, no reopen, legacy labeling | §12.2 |
-| 34 | `requireE2EE` semantics and default-flip criteria; policy withdrawal on narrowing | §12.3, §12.6, §16.3 F18 |
-| 35 | `requireApprovedClientE2EE`: implication, IK-only advertisement, warnings, no silent weakening, live-channel sweep on enable | §12.4, §12.6, §16.3 F18 |
-| 36 | Pre-authentication bounds, size-relationship invariants, liveness and concurrency invariants, one attempt per channel, generic close on excess | §3.2.1, §3.2.2, §15, §4.4 |
-| 37 | Error taxonomy onto existing close reasons; generic pre-key surface; named observable | §11 |
-| 38 | Fallback-occurrence instrumentation: two disjoint classes, event, state, reset, display | §12.5, §5.5 |
-| 39 | Fixture directory, file format, required vector families | §16 |
-| 40 | Shared-module home beside the chunking module; referenced from the relay protocol | §1.1 |
-| 41 | Canonical-CBOR dependency, version, strictness, vetting status | §3.6, §14.4 |
-| 42 | React Native randomness adapter, fail closed | §14.5 |
-| 43 | Mobile custody: device-only, non-backup on both platforms | §6.3 |
-| 44 | Honest guarantees: tier table, web ceiling, retained metadata, non-goals | §2, §1.3 |
-
+| #   | Item (paraphrase)                                                                                                                                                                                                                                                                                          | Sections                          |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| 1   | E2EE envelope byte layout, field widths, endianness                                                                                                                                                                                                                                                        | §3.2, §3.3                        |
+| 2   | Encrypted inner-record framing, type registry, max sizes                                                                                                                                                                                                                                                   | §3.3, §3.4, §9.1, §10.1, §11.3    |
+| 3   | Negotiation-only `0x02` record layout, registry, bounds                                                                                                                                                                                                                                                    | §3.3, §3.4, §8.5, §8.7, §11.2     |
+| 4   | Proven legacy-safe capability carrier + compatibility cases + prelude-headroom fit                                                                                                                                                                                                                         | §3.2.1, §5.3–§5.6, §16.3 F2       |
+| 5   | Overhead constant, effective-ceiling formula, plaintext ceiling, distinct error, fail-before-release                                                                                                                                                                                                       | §3.2, §4.5, §11.4                 |
+| 6   | negotiating/e2ee/legacy mode machine, deadlines, fatal inputs per state                                                                                                                                                                                                                                    | §4.4, §3.2.2                      |
+| 7   | Single client-selected v1 suite, concrete Noise names, spec revision                                                                                                                                                                                                                                       | §3.4, §8.2                        |
+| 8   | Noise library decision with audit status and supported exporter API                                                                                                                                                                                                                                        | §14.1, §14.2, §6.5                |
+| 9   | Exact IK/NX message composition; no identifiers in clear wrappers; no app RPC in payloads                                                                                                                                                                                                                  | §8.5, §8.7, §8.1                  |
+| 10  | Client-selected suite rule; server may only accept or reject                                                                                                                                                                                                                                               | §8.2                              |
+| 11  | Per-payload security properties, stated per payload and direction                                                                                                                                                                                                                                          | §8.10, §2.2, §2.6                 |
+| 12  | Implicit client finish; no node RPC before it authenticates                                                                                                                                                                                                                                                | §8.9                              |
+| 13  | Authorization context block: fields, order, role rules, absence semantics                                                                                                                                                                                                                                  | §8.3, §16.3 F16                   |
+| 14  | `contextCommitment`, prologue, responder pre-check, symmetric client check                                                                                                                                                                                                                                 | §8.3, §8.4, §8.6, §8.8, §16.3 F16 |
+| 15  | `ServerAcceptTBS`, confirmation transcript, confirmation key derivation                                                                                                                                                                                                                                    | §8.7                              |
+| 16  | `sessionBindingHash` without self-reference                                                                                                                                                                                                                                                                | §8.8                              |
+| 17  | Key schedule: Split/exporter, directional keys, per-channel, destroyed, never resumed                                                                                                                                                                                                                      | §6.5, §9.4, §9.5                  |
+| 18  | Per-record AEAD: nonce, AAD, version/suite gate, receiver-state counters, uint64 rules                                                                                                                                                                                                                     | §3.3, §9.1–§9.3                   |
+| 19  | Rekey ratchet: thresholds, boundary ownership, labels, erasure, exhaustion                                                                                                                                                                                                                                 | §9.4–§9.6                         |
+| 20  | Authenticated close machine, outer-close ordering, truncation, unattributed abrupt close                                                                                                                                                                                                                   | §10                               |
+| 21  | Agreement keys, cross-signing transcripts and domains, no ad-hoc signing, signing-input bound                                                                                                                                                                                                              | §6.2, §7.2, §7.2.1, §7.3, §7.4    |
+| 22  | Custody: node secret store, mobile device-only, web memory-only, clone/restore ban, and what a client whose durable trust state was lost may do                                                                                                                                                            | §6.3, §13.1.1                     |
+| 23  | Prekey expiry semantics, skew, remedies, rotation overlap                                                                                                                                                                                                                                                  | §6.4                              |
+| 24  | Identity/signature wire encodings and strict validation rules                                                                                                                                                                                                                                              | §7.1, §14.3, §16.3 F17            |
+| 25  | Pin = identity fingerprint anchor, indexed by client-side selection handle; states; storage; device-level verification marker; release gate                                                                                                                                                                | §13.1, §13.1.1, §12.1.1           |
+| 26  | First-contact pairing ceremony, pending record, fresh-ticket effectiveness, unexpected-node surface                                                                                                                                                                                                        | §13.2, §13.2.1                    |
+| 27  | Identity-continuity certificate, chain rules, storage, recovery and compromise breaks, custody caveat                                                                                                                                                                                                      | §7.5, §13.3                       |
+| 28  | Native safety number derivation, format, surfaces, entropy floor                                                                                                                                                                                                                                           | §3.2, §13.4                       |
+| 29  | `WebSAS` derivation, format, advisory-only language, grinding bound                                                                                                                                                                                                                                        | §3.2, §13.5, §17.5                |
+| 30  | Client authorization records: schema, caps, partition-scoped eviction, owner-bound pairing window, authorization withdrawal (revocation, role reduction, capability removal) and its acknowledgement ordering, node-side state                                                                             | §13.6, §8.6, §8.9, §16.3 F16      |
+| 31  | Capability advertisement transcript, freshness, replay, policy generation and its high-water anchor, statement self-check                                                                                                                                                                                  | §5.2, §5.7, §7.2.1, §7.6, §7.6.1  |
+| 32  | Latch carried on a pin whose latched value is the verified fingerprint, resolved from the client's own selection; native durable, first contact never latches; web in-memory and session-scoped, set on the first validated statement as an explicit narrowly-scoped exception with a bounded threat claim | §12.1, §12.1.1                    |
+| 33  | Fallback rule: no probe, bounded wait, no reopen, legacy labeling                                                                                                                                                                                                                                          | §12.2                             |
+| 34  | `requireE2EE` semantics and default-flip criteria; policy withdrawal on narrowing                                                                                                                                                                                                                          | §12.3, §12.6, §16.3 F18           |
+| 35  | `requireApprovedClientE2EE`: implication, IK-only advertisement, warnings, no silent weakening, live-channel sweep on enable                                                                                                                                                                               | §12.4, §12.6, §16.3 F18           |
+| 36  | Pre-authentication bounds, size-relationship invariants, liveness and concurrency invariants, one attempt per channel, generic close on excess                                                                                                                                                             | §3.2.1, §3.2.2, §15, §4.4         |
+| 37  | Error taxonomy onto existing close reasons; generic pre-key surface; named observable                                                                                                                                                                                                                      | §11                               |
+| 38  | Fallback-occurrence instrumentation: two disjoint classes, event, state, reset, display                                                                                                                                                                                                                    | §12.5, §5.5                       |
+| 39  | Fixture directory, file format, required vector families                                                                                                                                                                                                                                                   | §16                               |
+| 40  | Shared-module home beside the chunking module; referenced from the relay protocol                                                                                                                                                                                                                          | §1.1                              |
+| 41  | Canonical-CBOR dependency, version, strictness, vetting status                                                                                                                                                                                                                                             | §3.6, §14.4                       |
+| 42  | React Native randomness adapter, fail closed                                                                                                                                                                                                                                                               | §14.5                             |
+| 43  | Mobile custody: device-only, non-backup on both platforms                                                                                                                                                                                                                                                  | §6.3                              |
+| 44  | Honest guarantees: tier table, web ceiling, retained metadata, non-goals                                                                                                                                                                                                                                   | §2, §1.3                          |
