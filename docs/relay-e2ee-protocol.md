@@ -1508,6 +1508,40 @@ current legacy receive paths. Cases C1–C6 are normative compatibility requirem
 fixture corpus MUST include a vector family demonstrating each outcome against the pinned
 implementations. All verification citations are as of 2026-07-30.
 
+**Version binding and re-verification.** C1–C6 are claims about the behavior of a third-party RPC
+client implementation that this protocol does not control. They are verified against, and
+normatively scoped to, the RPC client pinned by the workspace catalog at the time of writing —
+`effect@4.0.0-beta.59` as patched by `patches/effect@4.0.0-beta.59.patch`. The scope is not
+cosmetic: the relevant routing internals have already changed once inside this repository's own
+dependency history. Before `effect@4.0.0-beta.45`, `RpcClient.makeProtocolSocket` had no
+multi-client fan-out and performed no `requestId` lookup, forwarding every decoded response
+unconditionally; the broadcast path C2 names did not exist. That change arrived in an ordinary
+beta bump. Accordingly:
+
+- Changing the pinned `effect` version — including a patch-level beta bump, and including a
+  change to `patches/effect@<version>.patch` that touches `dist/unstable/rpc/RpcClient.js` — MUST
+  re-run the §16 C1–C6 vector family against the new build before the pin lands. A bump that
+  cannot satisfy C1–C6 is a protocol-breaking change and MUST NOT be taken as an incidental
+  dependency update.
+- The §16 corpus, not this prose, is the normative enforcement point for C1–C6. Each case MUST
+  have a vector that fails if the behavior regresses.
+- The load-bearing properties a conforming legacy client path MUST exhibit, stated independently
+  of any one implementation's internals, are: (i) a decoded response bearing an unrecognized
+  `_tag` and no `requestId` reaches the response dispatcher without being treated as a transport
+  error; (ii) the dispatcher's unmatched-tag branch performs no method invocation, no reply, no
+  request-state mutation, and no session failure; (iii) a payload the deserializer rejects
+  produces a client protocol error delivered to in-flight requests and does not close the
+  transport; and (iv) no path in the chain emits a reply in response to an unrecognized tag. A
+  build that violates any of (i)–(iv) is outside this protocol's compatibility envelope and MUST
+  be treated as such, whatever its version number.
+
+*Note (non-normative).* The population these cases must survive is narrower than it appears. The
+relay contract, the client relay engine, and the chunking module all postdate the current pin, so
+no build carrying an earlier RPC client contains relay client code at all and none can open a
+channel to meet the carrier. The properties above are nonetheless stated implementation-
+independently, because that coincidence is a property of today's history rather than a guarantee
+about future builds.
+
 **C1 — client chunk-assembler pass-through.** The carrier payload, with and without the
 prelude, presented to the current client reassembly path MUST yield a completed message whose
 bytes equal the carrier JSON (prelude stripped when present), with no reassembly error; when the
@@ -1518,14 +1552,15 @@ carrier can never enter the chunk parser because its first byte is `{`, not
 
 **C2 — protocol-socket routing.** The decoded carrier object MUST be routed to the client
 protocol's broadcast path: its tag is not the keepalive response tag and it has no `requestId`
-member, so no request-entry lookup occurs and no reply is generated. (Verified against the
-pinned `effect@4.0.0-beta.59` RPC client — as patched by
-`patches/effect@4.0.0-beta.59.patch` — `makeProtocolSocket` response routing.)
+member, so no request-entry lookup occurs and no reply is generated. (Normatively scoped to the
+pinned `effect@4.0.0-beta.59` RPC client as patched by `patches/effect@4.0.0-beta.59.patch`;
+verified against its `makeProtocolSocket` response routing, 2026-07-30. Re-verification is
+required on any pin change per the version-binding rule above.)
 
 **C3 — client dispatcher ignore.** The carrier's tag matches no known response tag, so the RPC
 client's response dispatcher MUST take its default branch: no method invocation, no reply, no
-request-state mutation, no session failure. (Verified against the same pinned RPC client's run
-dispatcher default branch.)
+request-state mutation, no session failure. (Normatively scoped as for C2; verified against the
+same pinned RPC client's run dispatcher default branch, 2026-07-30.)
 
 **C4 — client-runtime wrapper pass-through.** The client-runtime connection wrapper inspects
 only protocol-error and defect tags; the carrier MUST pass through without failing in-flight
@@ -5156,7 +5191,10 @@ class, the §11 tables define it.
   presented at an asserted `maxDataChunkBytes` of exactly
   `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES` (emitted unchunked, prelude intact) and at one byte below
   it (§5.5 U1 — advertisement suppressed, one `undersized-connection` occurrence recorded, **no**
-  peer-legacy occurrence, and FATAL-PRE under effective `requireE2EE`).
+  peer-legacy occurrence, and FATAL-PRE under effective `requireE2EE`). This family is the
+  normative enforcement point for §5.6's version binding: each case MUST fail if the pinned RPC
+  client's behavior regresses, and the family MUST be re-run against any new build before a
+  changed `effect` pin — or a changed patch touching its RPC client — lands.
 - **F3 — Capability statement** (§5.2, §5.7, §7.2.1, §7.6, §3.2.1): a valid statement
   (transcript bytes, §7.2.1 envelope bytes, signature, recomputed fingerprints, reconstructed
   prekey cross-signature); and invalid variants — expired, future issued-at, over-long validity
