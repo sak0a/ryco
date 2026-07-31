@@ -72,6 +72,8 @@ function makeThread(overrides: Partial<OrchestrationThread> = {}): Orchestration
     createdAt: baseTime,
     updatedAt: baseTime,
     archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
     deletedAt: null,
     messages: [],
     proposedPlans: [],

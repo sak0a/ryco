@@ -75,6 +75,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           model_selection_json,
           runtime_mode,
           interaction_mode,
+          settled_override,
+          settled_at,
           branch,
           worktree_path,
           latest_turn_id,
@@ -93,6 +95,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           '{"provider":"codex","model":"gpt-5-codex"}',
           'full-access',
           'default',
+          'settled',
+          '2026-02-24T00:00:02.500Z',
           NULL,
           NULL,
           'turn-1',
@@ -316,6 +320,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,
+          settledOverride: "settled",
+          settledAt: "2026-02-24T00:00:02.500Z",
           deletedAt: null,
           messages: [
             {
@@ -443,6 +449,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           createdAt: "2026-02-24T00:00:02.000Z",
           updatedAt: "2026-02-24T00:00:03.000Z",
           archivedAt: null,
+          settledOverride: "settled",
+          settledAt: "2026-02-24T00:00:02.500Z",
           session: {
             threadId: ThreadId.make("thread-1"),
             status: "running",
