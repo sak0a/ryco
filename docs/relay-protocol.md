@@ -239,6 +239,12 @@ The trusted-relay boundary permits TLS termination and the forwarding process to
 memory. A conforming relay must not log or persist opaque payloads. Keeping the payload schema
 opaque allows later application-level end-to-end encryption without changing relay routing.
 
+That reservation is exercised by
+[End-to-end relay payload encryption](./relay-e2ee-protocol.md), which defines an application-level
+encryption layer carried entirely inside `data.payload`. It adds no relay frame, field, limit,
+close reason, or version change; encrypted payloads remain opaque byte strings that the relay
+routes exactly as this document specifies.
+
 ## Encoded-size enforcement
 
 Size is checked before semantic validation:
