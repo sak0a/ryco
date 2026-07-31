@@ -28,6 +28,8 @@ import {
   setSidebarWorktreeTitle,
   setThreadBranch,
   selectThreadsAcrossEnvironments,
+  syncServerShellSnapshot,
+  syncServerThreadDetail,
   SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS,
   type AppState,
   type EnvironmentState,
@@ -86,6 +88,8 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     error: null,
     createdAt: "2026-02-13T00:00:00.000Z",
     archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
     latestTurn: null,
     branch: null,
     worktreePath: null,
@@ -131,6 +135,8 @@ function makeState(thread: Thread): AppState {
         error: thread.error,
         createdAt: thread.createdAt,
         archivedAt: thread.archivedAt,
+        settledOverride: thread.settledOverride,
+        settledAt: thread.settledAt,
         updatedAt: thread.updatedAt,
         branch: thread.branch,
         worktreePath: thread.worktreePath,
@@ -731,6 +737,8 @@ describe("incremental orchestration updates", () => {
           error: thread2.error,
           createdAt: thread2.createdAt,
           archivedAt: thread2.archivedAt,
+          settledOverride: thread2.settledOverride,
+          settledAt: thread2.settledAt,
           updatedAt: thread2.updatedAt,
           branch: thread2.branch,
           worktreePath: thread2.worktreePath,
@@ -1442,6 +1450,167 @@ describe("incremental orchestration updates", () => {
   });
 });
 
+describe("thread settlement state", () => {
+  function makeShellSnapshot(
+    settledOverride: "settled" | "active" | null,
+    settledAt: string | null,
+  ) {
+    const updatedAt = settledAt ?? "2026-07-31T02:00:00.000Z";
+    return {
+      snapshotSequence: settledOverride === "settled" ? 1 : 2,
+      projects: [
+        {
+          id: ProjectId.make("project-1"),
+          title: "Project",
+          workspaceRoot: "/tmp/project",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-07-31T00:00:00.000Z",
+          updatedAt,
+        },
+      ],
+      threads: [
+        {
+          id: ThreadId.make("thread-settlement"),
+          projectId: ProjectId.make("project-1"),
+          title: "Settlement",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.4",
+          },
+          runtimeMode: "full-access" as const,
+          interactionMode: "default" as const,
+          branch: null,
+          worktreePath: null,
+          worktreeId: null,
+          manualStatusBucket: null,
+          manualPosition: 0,
+          latestTurn: null,
+          createdAt: "2026-07-31T00:00:00.000Z",
+          updatedAt,
+          archivedAt: null,
+          settledOverride,
+          settledAt,
+          session: null,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        },
+      ],
+      updatedAt,
+    };
+  }
+
+  it("replaces settlement fields with each shell generation", () => {
+    const settledAt = "2026-07-31T01:00:00.000Z";
+    const settled = syncServerShellSnapshot(
+      makeEmptyState(),
+      makeShellSnapshot("settled", settledAt),
+      localEnvironmentId,
+    );
+    expect(
+      localEnvironmentStateOf(settled).sidebarThreadSummaryById["thread-settlement"],
+    ).toMatchObject({
+      settledOverride: "settled",
+      settledAt,
+    });
+
+    const replaced = syncServerShellSnapshot(
+      settled,
+      makeShellSnapshot(null, null),
+      localEnvironmentId,
+    );
+    expect(
+      localEnvironmentStateOf(replaced).sidebarThreadSummaryById["thread-settlement"],
+    ).toMatchObject({
+      settledOverride: null,
+      settledAt: null,
+    });
+  });
+
+  it("maps settlement fields from thread detail snapshots", () => {
+    const settledAt = "2026-07-31T01:00:00.000Z";
+    const state = syncServerThreadDetail(
+      makeEmptyState(),
+      {
+        id: ThreadId.make("thread-detail-settlement"),
+        projectId: ProjectId.make("project-1"),
+        title: "Detail settlement",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        worktreeId: null,
+        manualStatusBucket: null,
+        manualPosition: 0,
+        latestTurn: null,
+        createdAt: "2026-07-31T00:00:00.000Z",
+        updatedAt: settledAt,
+        archivedAt: null,
+        settledOverride: "settled",
+        settledAt,
+        deletedAt: null,
+        messages: [],
+        proposedPlans: [],
+        activities: [],
+        checkpoints: [],
+        session: null,
+      },
+      localEnvironmentId,
+    );
+
+    expect(threadsOf(state)[0]).toMatchObject({ settledOverride: "settled", settledAt });
+  });
+
+  it("applies raw settle and activity-unsettle events to shell and sidebar state", () => {
+    const threadId = ThreadId.make("thread-settlement");
+    const initial = syncServerShellSnapshot(
+      makeEmptyState(),
+      makeShellSnapshot(null, null),
+      localEnvironmentId,
+    );
+    const settledAt = "2026-07-31T03:00:00.000Z";
+    const settled = applyOrchestrationEvent(
+      initial,
+      makeEvent("thread.settled", {
+        threadId,
+        settledAt,
+        updatedAt: settledAt,
+      }),
+      localEnvironmentId,
+    );
+    expect(localEnvironmentStateOf(settled).threadShellById[threadId]).toMatchObject({
+      settledOverride: "settled",
+      settledAt,
+    });
+    expect(localEnvironmentStateOf(settled).sidebarThreadSummaryById[threadId]).toMatchObject({
+      settledOverride: "settled",
+      settledAt,
+    });
+
+    const activeAt = "2026-07-31T04:00:00.000Z";
+    const active = applyOrchestrationEvent(
+      settled,
+      makeEvent("thread.unsettled", {
+        threadId,
+        reason: "activity",
+        updatedAt: activeAt,
+      }),
+      localEnvironmentId,
+    );
+    expect(localEnvironmentStateOf(active).sidebarThreadSummaryById[threadId]).toMatchObject({
+      settledOverride: null,
+      settledAt: null,
+      updatedAt: activeAt,
+    });
+  });
+});
+
 describe("shell push coalescing", () => {
   function makeThreadShellUpsertEvent(params: {
     threadId: ThreadId;
@@ -1477,6 +1646,8 @@ describe("shell push coalescing", () => {
         createdAt: "2026-02-27T00:00:00.000Z",
         updatedAt: params.updatedAt,
         archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
         session: {
           threadId: params.threadId,
           status: params.turnState === "running" ? "running" : "ready",
