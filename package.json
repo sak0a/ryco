@@ -55,6 +55,7 @@
     "build:contracts": "turbo run build --filter=@ryco/contracts",
     "generate:relay-fixtures": "bun scripts/generate-relay-fixtures.ts",
     "generate:node-identity-fixtures": "bun scripts/generate-node-identity-fixtures.ts",
+    "generate:e2ee-fixtures": "bun scripts/generate-e2ee-fixtures.ts",
     "dist:desktop:artifact": "node scripts/build-desktop-artifact.ts",
     "dist:desktop:dmg": "node scripts/build-desktop-artifact.ts --platform mac --target dmg",
     "dist:desktop:dmg:arm64": "node scripts/build-desktop-artifact.ts --platform mac --target dmg --arch arm64",

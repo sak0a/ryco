@@ -1,0 +1,321 @@
+{
+  "family": {
+    "number": 7,
+    "title": "NX handshake",
+    "sections": [
+      "8",
+      "16.3 F7"
+    ],
+    "summary": "The F6 shape on the web tier, plus the two rules that exist only for NX: the zero-length message-1 payload (§8.5), with a nonempty-payload case expecting FATAL-PRE `P10`; and the §8.8 step 3 responder-static byte-equality check against the advertised prekey, with a substitution case expecting `P16`.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyClientEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyNodeEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyClientNonce": {
+      "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
+    },
+    "clientIdentityFingerprint": {
+      "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+    },
+    "clientAgreementFingerprint": {
+      "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+    },
+    "nodeIdentityFingerprint": {
+      "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+    },
+    "nodeAgreementFingerprint": {
+      "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+    },
+    "channel": {
+      "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+      "relayProtocolMajor": 1,
+      "relayProtocolMinor": 2,
+      "channelOpenCapability": "ryco.rpc",
+      "channelOpenEffectiveRole": "operator"
+    }
+  },
+  "cases": [
+    {
+      "name": "nx-handshake-complete-trace",
+      "sections": [
+        "8.1",
+        "8.3",
+        "8.4",
+        "8.5",
+        "8.6",
+        "8.7",
+        "8.8",
+        "8.9",
+        "6.5"
+      ],
+      "note": "The same shape as F6 on the web tier. Element 10 is the empty string and element 16 the empty array (§8.3 absence semantics), the message-1 payload is zero-length (§8.5), and the node records no §8.6 step 6 snapshot because NX carries no Branch A record.",
+      "inputs": {
+        "tier": "web",
+        "pattern": "NX",
+        "selectedSuite": 1,
+        "offeredSuites": [
+          1
+        ],
+        "hubOrigin": "https://hub.example.com",
+        "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+        "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+        "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+        "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+        "continuityChainLength": 0,
+        "now": 1784160030000
+      },
+      "expected": {
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b6460687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df77980781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextBlockBytes": 256,
+        "contextCommitment": {
+          "$bytes": "030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf"
+        },
+        "prologue": {
+          "$bytes": "89781b7279636f2e72656c61792d653265652e70726f6c6f6775652e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f414141414141414141414141414141414141414141415820030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf"
+        },
+        "clientHello": {
+          "$bytes": "020187016377656201810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281805820030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf58202fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b74"
+        },
+        "clientHelloBytes": 113,
+        "noiseMessage1": {
+          "$bytes": "2fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b74"
+        },
+        "message1PayloadPlaintext": {
+          "$bytes": ""
+        },
+        "message1PayloadPlaintextBytes": 0,
+        "serverAcceptTbs": {
+          "$bytes": "02028401781a65706b5f454545454545454545454545454545454545454545455820030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf58952fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b7485d20a51552ce6dfc98d583d35544e6b8809b9b0e933d3671091a1ad4cf3222b4cab032945fb66f89bde0cdde1de13e8c4307071fa52227e93f0564931a811fd2131cc9d05efe08c9594bd46c319e56aa3aa3f4b27b77d8c540f8cdea066760480b126dd0da66c1d97f360948d26dd8e1fc2222bae"
+        },
+        "noiseMessage2": {
+          "$bytes": "2fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b7485d20a51552ce6dfc98d583d35544e6b8809b9b0e933d3671091a1ad4cf3222b4cab032945fb66f89bde0cdde1de13e8c4307071fa52227e93f0564931a811fd2131cc9d05efe08c9594bd46c319e56aa3aa3f4b27b77d8c540f8cdea066760480b126dd0da66c1d97f360948d26dd8e1fc2222bae"
+        },
+        "message2PayloadPlaintext": {
+          "$bytes": "83687279636f2e727063686f70657261746f7258200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "exporterSecret": {
+          "$bytes": "ae6cba1404373df27115fc92016724fa685872a27e6f19224dac69ed91e2d162"
+        },
+        "serverConfirmationKey": {
+          "$bytes": "c75e696dadf036ebf50844d0668d1f646e296a746f6a1229a5b2a6105c048792"
+        },
+        "confirmationTranscript": {
+          "$bytes": "962cedcc37a317b08403a0d9ca466ea4fa660c07ba83c89a0b1f814d20a613e8"
+        },
+        "serverConfirmation": {
+          "$bytes": "dd2c226ba2237831e426b74c2ecdb1b4dbe982f6a8b0853ff7b02b937358d001"
+        },
+        "serverAccept": {
+          "$bytes": "02028501781a65706b5f454545454545454545454545454545454545454545455820030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf58952fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b7485d20a51552ce6dfc98d583d35544e6b8809b9b0e933d3671091a1ad4cf3222b4cab032945fb66f89bde0cdde1de13e8c4307071fa52227e93f0564931a811fd2131cc9d05efe08c9594bd46c319e56aa3aa3f4b27b77d8c540f8cdea066760480b126dd0da66c1d97f360948d26dd8e1fc2222bae5820dd2c226ba2237831e426b74c2ecdb1b4dbe982f6a8b0853ff7b02b937358d001"
+        },
+        "serverAcceptBytes": 251,
+        "sessionBindingHash": {
+          "$bytes": "493a4603ad1e49561cec44ac12f1b1f684d1fa254ed5ae138a1a2588ccfa62b8"
+        },
+        "epochSecretC2N": {
+          "$bytes": "df83ba955948df482344f94789bdf475f0c94ad3cde30c1f69374b89f30f8093"
+        },
+        "epochSecretN2C": {
+          "$bytes": "3e18d38a506475bb3c6da78c4e4016d0b4ddf9d2048d6f426749fba09eb03b4d"
+        },
+        "aeadKeyC2NEpoch0": {
+          "$bytes": "b5c7622c474e372bd91125173a17eb27cfd85347c9acdc3373a104b7581761f3"
+        },
+        "aeadKeyN2CEpoch0": {
+          "$bytes": "eb5fae524f09873142b9d624a506ed1b2f9a6cc684e855f66d47fbc558a2b6cd"
+        },
+        "bothEndpointsDerivedIdenticalSecrets": true,
+        "message1PayloadIsEmpty": true,
+        "admittedAuthority": null,
+        "firstProtectedEnvelopes": {
+          "clientToNode": {
+            "innerBody": {
+              "$bytes": "7b225f746167223a227279636f2e7270632e70696e67227d"
+            },
+            "envelope": {
+              "$bytes": "0101010000000000000000000000000eed616a03620bfb6337c15e8b02a61efd63d478beb7702e6fd3c293d93a1436a7e33874a8d0b41c9f"
+            },
+            "envelopeBytes": 56,
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "aad": {
+              "$bytes": "010101000000000000000000000000493a4603ad1e49561cec44ac12f1b1f684d1fa254ed5ae138a1a2588ccfa62b863326e"
+            },
+            "receivedByNode": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 24,
+              "epoch": 0,
+              "counter": 0,
+              "plaintextBytes": 25,
+              "epochCompleted": false
+            }
+          },
+          "implicitFinish": {
+            "beforeFirstClientEnvelope": {
+              "mayInvokeRpcHandler": false,
+              "mayEmitApplicationRpc": false
+            },
+            "result": "finished",
+            "mayInvokeRpcHandlerAfter": true,
+            "mayEmitApplicationRpcAfter": true,
+            "deadlineAt": 1784160040000
+          },
+          "nodeToClient": {
+            "innerBody": {
+              "$bytes": "7b225f746167223a227279636f2e7270632e706f6e67227d"
+            },
+            "envelope": {
+              "$bytes": "010101000000000000000000000000ce66ff86e42b5f407e3cd161d7aa861c698e4aafc57a787df9c537d381c5fd02b3ed37eccedbc1dc48"
+            },
+            "envelopeBytes": 56,
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "aad": {
+              "$bytes": "010101000000000000000000000000493a4603ad1e49561cec44ac12f1b1f684d1fa254ed5ae138a1a2588ccfa62b86e3263"
+            },
+            "receivedByClient": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 24,
+              "epoch": 0,
+              "counter": 0,
+              "plaintextBytes": 25,
+              "epochCompleted": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "nx-message-1-payload-must-be-empty",
+      "sections": [
+        "8.5",
+        "8.6 step 5",
+        "8.10",
+        "11.2 P10"
+      ],
+      "note": "The wrapper, the prologue, and the context are the happy path's; only the Noise message-1 payload differs. The §8.10 property that makes this a rule is that message 1 of NX is unencrypted and unauthenticated.",
+      "inputs": {
+        "tier": "web",
+        "message1PayloadPlaintext": {
+          "$bytes": "6e6f742d656d707479"
+        },
+        "clientHello": {
+          "$bytes": "020187016377656201810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281805820030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf58292fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b746e6f742d656d707479"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P10",
+        "reason": "nx_payload_not_empty",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "nx-responder-static-must-equal-the-advertised-prekey",
+      "sections": [
+        "8.7",
+        "8.8 step 3",
+        "6.4",
+        "11.2 P16"
+      ],
+      "note": "The node's context, accept payload, and confirmation are all built from the ADVERTISED prekey, so every other check passes; only the Noise static the client learns from message 2 differs. It is a check on the accept's content and therefore enumerates as P16, not as one of P10's three named Noise conditions.",
+      "inputs": {
+        "tier": "web",
+        "advertisedAgreementPublicKey": {
+          "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "testOnlySubstitutedAgreementSecretKey": {
+          "$bytes": "1414141414141414141414141414141414141414141414141414141414141414"
+        },
+        "substitutedAgreementPublicKey": {
+          "$bytes": "18a6f8c1a7fddf22bd410138f79f7298cd38d1d0a542d4266d556be8609d8862"
+        },
+        "serverAccept": {
+          "$bytes": "02028501781a65706b5f454545454545454545454545454545454545454545455820030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf58952fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b74e63a620b4caec7b9b0a9fb25c1b65c7da669ffb3528875b102b043699c99955aa87630f18b8bf4ea7e7375ca1450a8b03a500898ba6e8eefb29274a74f77abbdc9a7bf9af45cd8975d865c21c75e84739a395e1aeea104412130da7ba2119e2cd3c79556fcc8768f21817fd7f86162ed8128d1e091582060ef62f816f95512b0d78366310069a590abec319462b928a54488954311d005"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P16",
+        "reason": "accept_mismatch",
+        "disposition": "FATAL-PRE",
+        "clientEmitsNoRecord": true,
+        "closeReason": "channel_rejected"
+      }
+    }
+  ]
+}

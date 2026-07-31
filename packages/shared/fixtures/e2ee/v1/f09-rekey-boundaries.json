@@ -1,0 +1,1878 @@
+{
+  "family": {
+    "number": 9,
+    "title": "Rekey boundaries",
+    "sections": [
+      "9.4",
+      "9.5",
+      "9.6",
+      "16.3 F9"
+    ],
+    "summary": "The §9.4 epoch schedule for epochs zero through two in both directions; both threshold boundaries with the successor that carries epoch +1 and counter 0; early, late, and skipped epoch transitions, each a §9.2 sequence mismatch decided before decryption; and BOTH §9.6 exhaustion states — a complete close protected entirely out of `E2EE_CLOSE_RECORDS_RESERVED` for all three roles, once in the terminal epoch and once at the `E2EE_COUNTER_MAX` ceiling within a live epoch — plus the terminal `E2EEError` protected out of `E2EE_ERROR_RECORDS_RESERVED` beyond the close machine, the same trace without capacity for the error record, and the degenerate state below the reserve.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyClientEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyNodeEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyClientNonce": {
+      "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
+    },
+    "clientIdentityFingerprint": {
+      "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+    },
+    "clientAgreementFingerprint": {
+      "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+    },
+    "nodeIdentityFingerprint": {
+      "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+    },
+    "nodeAgreementFingerprint": {
+      "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+    },
+    "channel": {
+      "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+      "relayProtocolMajor": 1,
+      "relayProtocolMinor": 2,
+      "channelOpenCapability": "ryco.rpc",
+      "channelOpenEffectiveRole": "operator"
+    }
+  },
+  "cases": [
+    {
+      "name": "epoch-key-schedule-client-to-node",
+      "sections": [
+        "6.5",
+        "9.4"
+      ],
+      "note": "`epochSecret_d[0]` is the `Split()` output of the F6 handshake. Both direction schedules are always derived at both endpoints regardless of traffic volume, so `aeadKey_d[0]` exists from the moment the session does on the direction an endpoint never sends on.",
+      "inputs": {
+        "direction": "c2n",
+        "directionLabel": {
+          "$bytes": "63326e"
+        },
+        "epochSecretZero": {
+          "$bytes": "b89ee30677c2855a7b9e88f6d4e9f85b1a317007734895653baac3463b19204d"
+        },
+        "aeadKeyLabel": "ryco.relay-e2ee.aead-key.v1",
+        "ratchetLabel": "ryco.relay-e2ee.ratchet.v1"
+      },
+      "expected": {
+        "epochs": [
+          {
+            "epoch": 0,
+            "epochSecret": {
+              "$bytes": "b89ee30677c2855a7b9e88f6d4e9f85b1a317007734895653baac3463b19204d"
+            },
+            "aeadKey": {
+              "$bytes": "99a6a5b035262ec751e2623691d6afe37a3328ab418d4df6a7cbdb445efe86ad"
+            },
+            "nextEpochSecret": {
+              "$bytes": "9142f4bb9140a68329d3c216f6f5a66d1591c6975cfbdb3c13b4fb7adecf7c60"
+            }
+          },
+          {
+            "epoch": 1,
+            "epochSecret": {
+              "$bytes": "9142f4bb9140a68329d3c216f6f5a66d1591c6975cfbdb3c13b4fb7adecf7c60"
+            },
+            "aeadKey": {
+              "$bytes": "58a7d516fe5b6bd783ddd0019fddc875ffcf9713d7121dfcf91bc6bb1e137eb3"
+            },
+            "nextEpochSecret": {
+              "$bytes": "09af27a62d16fb53b5294147a0f5a6e78d2dda94c94cfa0437800f101e62e74b"
+            }
+          },
+          {
+            "epoch": 2,
+            "epochSecret": {
+              "$bytes": "09af27a62d16fb53b5294147a0f5a6e78d2dda94c94cfa0437800f101e62e74b"
+            },
+            "aeadKey": {
+              "$bytes": "ae96168d317ea62daa9750644008680f55cf4c021b7b86433263664610a02381"
+            },
+            "nextEpochSecret": {
+              "$bytes": "506204c345c03d8a7d0e48bc2f41f4b51df116cbe402ebd797c56916050e86ee"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "epoch-key-schedule-node-to-client",
+      "sections": [
+        "6.5",
+        "9.4"
+      ],
+      "note": "`epochSecret_d[0]` is the `Split()` output of the F6 handshake. Both direction schedules are always derived at both endpoints regardless of traffic volume, so `aeadKey_d[0]` exists from the moment the session does on the direction an endpoint never sends on.",
+      "inputs": {
+        "direction": "n2c",
+        "directionLabel": {
+          "$bytes": "6e3263"
+        },
+        "epochSecretZero": {
+          "$bytes": "b1acc4b4ce50246a35b4075217acda93c68e4201eee1b5c307f1b2fec5adf290"
+        },
+        "aeadKeyLabel": "ryco.relay-e2ee.aead-key.v1",
+        "ratchetLabel": "ryco.relay-e2ee.ratchet.v1"
+      },
+      "expected": {
+        "epochs": [
+          {
+            "epoch": 0,
+            "epochSecret": {
+              "$bytes": "b1acc4b4ce50246a35b4075217acda93c68e4201eee1b5c307f1b2fec5adf290"
+            },
+            "aeadKey": {
+              "$bytes": "e0f13593d4e14f5304cb6082e5bade70addbc1db7e8946958bf42c691a99ff79"
+            },
+            "nextEpochSecret": {
+              "$bytes": "9a920f7884fef8201c95fdc649280360235b0b201c21f9493fc2011616796dbd"
+            }
+          },
+          {
+            "epoch": 1,
+            "epochSecret": {
+              "$bytes": "9a920f7884fef8201c95fdc649280360235b0b201c21f9493fc2011616796dbd"
+            },
+            "aeadKey": {
+              "$bytes": "d93bbbc061c2a9d62debae0a54f1869e0d8140a2ce71dd14ea562f68412ffa3b"
+            },
+            "nextEpochSecret": {
+              "$bytes": "2653a11d77645bfaed3751f94f44a4f386aeb498c3e7c851c6f6ff9148d87229"
+            }
+          },
+          {
+            "epoch": 2,
+            "epochSecret": {
+              "$bytes": "2653a11d77645bfaed3751f94f44a4f386aeb498c3e7c851c6f6ff9148d87229"
+            },
+            "aeadKey": {
+              "$bytes": "7e19405aa894633557e56307d49d94522a65292acae0bcf3684bbc898ba24a66"
+            },
+            "nextEpochSecret": {
+              "$bytes": "7c504fc32c198fbced79c810172ab32dba7fcf2506add61a326e29d1bca6f1c8"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "record-count-threshold-boundary",
+      "sections": [
+        "9.4",
+        "9.2"
+      ],
+      "note": "The record that REACHES the threshold is the last of its epoch, so the boundary record still carries epoch `e`; its successor carries `e + 1` and counter 0. The receiver's expectation advances by the same rule, which is why the boundary needs no signaling. The starting position is synthetic (§16.3 F9) because no reachable amount of test traffic produces it.",
+      "inputs": {
+        "rekeyMaxRecords": 65536,
+        "syntheticStart": {
+          "epoch": 0,
+          "counter": 65535,
+          "epochRecords": 65535,
+          "epochBytes": 0
+        }
+      },
+      "expected": {
+        "boundaryRecord": {
+          "position": {
+            "epoch": 0,
+            "counter": 65535
+          },
+          "epochCompleted": true,
+          "received": {
+            "kind": "authenticated",
+            "innerType": 1,
+            "bodyBytes": 17,
+            "epoch": 0,
+            "counter": 65535,
+            "plaintextBytes": 18,
+            "epochCompleted": true
+          }
+        },
+        "successorRecord": {
+          "position": {
+            "epoch": 1,
+            "counter": 0
+          },
+          "epochCompleted": false,
+          "received": {
+            "kind": "authenticated",
+            "innerType": 1,
+            "bodyBytes": 11,
+            "epoch": 1,
+            "counter": 0,
+            "plaintextBytes": 12,
+            "epochCompleted": false
+          }
+        },
+        "senderStateAfter": {
+          "epoch": 1,
+          "counter": 1,
+          "epochRecords": 1,
+          "epochBytes": 12,
+          "exhausted": false
+        },
+        "receiverStateAfter": {
+          "epoch": 1,
+          "counter": 1,
+          "epochRecords": 1,
+          "epochBytes": 12,
+          "exhausted": false
+        },
+        "counterNeverExceedsRekeyMaxRecordsMinusOne": true
+      }
+    },
+    {
+      "name": "byte-threshold-crossing",
+      "sections": [
+        "9.4",
+        "9.2"
+      ],
+      "note": "The byte counter increases by the AUTHENTICATED INNER PLAINTEXT — the type byte plus the body — and the epoch is complete when it REACHES OR EXCEEDS `E2EE_REKEY_MAX_BYTES`. The crossing record is the last of its epoch, exactly as the record threshold's boundary record is.",
+      "inputs": {
+        "rekeyMaxBytes": 268435456,
+        "syntheticStart": {
+          "epoch": 0,
+          "counter": 3,
+          "epochRecords": 3,
+          "epochBytes": 268435448
+        },
+        "bodyBytes": 32
+      },
+      "expected": {
+        "crossingRecord": {
+          "position": {
+            "epoch": 0,
+            "counter": 3
+          },
+          "plaintextBytes": 33,
+          "epochCompleted": true,
+          "received": {
+            "kind": "authenticated",
+            "innerType": 1,
+            "bodyBytes": 32,
+            "epoch": 0,
+            "counter": 3,
+            "plaintextBytes": 33,
+            "epochCompleted": true
+          }
+        },
+        "successorRecord": {
+          "position": {
+            "epoch": 1,
+            "counter": 0
+          },
+          "epochCompleted": false,
+          "received": {
+            "kind": "authenticated",
+            "innerType": 1,
+            "bodyBytes": 11,
+            "epoch": 1,
+            "counter": 0,
+            "plaintextBytes": 12,
+            "epochCompleted": false
+          }
+        },
+        "senderStateAfter": {
+          "epoch": 1,
+          "counter": 1,
+          "epochRecords": 1,
+          "epochBytes": 12,
+          "exhausted": false
+        },
+        "receiverStateAfter": {
+          "epoch": 1,
+          "counter": 1,
+          "epochRecords": 1,
+          "epochBytes": 12,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "name": "early-epoch-transition",
+      "sections": [
+        "9.2",
+        "9.4",
+        "11.3 Q2"
+      ],
+      "note": "The sender entered epoch 1 before its epoch-0 thresholds were reached; the receiver still expects `(0, 5)`. A gap, a repeat, a regression, and an early, late, or skipped rekey are ALL THE SAME COMPARISON, because the receiver's expectation already encodes the §9.4 boundary — and the comparison runs before decryption, so the ciphertext is never decrypted.",
+      "inputs": {
+        "senderPosition": {
+          "epoch": 1,
+          "counter": 0
+        },
+        "receiverExpectedNext": {
+          "epoch": 0,
+          "counter": 5
+        },
+        "envelope": {
+          "$bytes": "010101000000010000000000000000f155b321509e6fcb03f1c3e6f303b744fd2ea1c548c283ac2b57f35d855c6400"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "sequence_mismatch"
+        },
+        "ciphertextDecrypted": false,
+        "disposition": "FATAL-POST",
+        "attributable": false
+      }
+    },
+    {
+      "name": "late-epoch-transition",
+      "sections": [
+        "9.2",
+        "9.4",
+        "11.3 Q2"
+      ],
+      "note": "The sender protected a further record in an epoch its own thresholds had already completed; the receiver has advanced to `(1, 0)`. A gap, a repeat, a regression, and an early, late, or skipped rekey are ALL THE SAME COMPARISON, because the receiver's expectation already encodes the §9.4 boundary — and the comparison runs before decryption, so the ciphertext is never decrypted.",
+      "inputs": {
+        "senderPosition": {
+          "epoch": 0,
+          "counter": 12
+        },
+        "receiverExpectedNext": {
+          "epoch": 1,
+          "counter": 0
+        },
+        "envelope": {
+          "$bytes": "01010100000000000000000000000c23047543e4ddad56b7a335b92a4f604abb4da7c958d1a7aaae5ca37e4a84344b"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "sequence_mismatch"
+        },
+        "ciphertextDecrypted": false,
+        "disposition": "FATAL-POST",
+        "attributable": false
+      }
+    },
+    {
+      "name": "skipped-epoch-transition",
+      "sections": [
+        "9.2",
+        "9.4",
+        "11.3 Q2"
+      ],
+      "note": "The sender jumped from epoch 0 to epoch 2; §9.2 accepts an epoch transition only as exactly +1 with counter 0. A gap, a repeat, a regression, and an early, late, or skipped rekey are ALL THE SAME COMPARISON, because the receiver's expectation already encodes the §9.4 boundary — and the comparison runs before decryption, so the ciphertext is never decrypted.",
+      "inputs": {
+        "senderPosition": {
+          "epoch": 2,
+          "counter": 0
+        },
+        "receiverExpectedNext": {
+          "epoch": 1,
+          "counter": 0
+        },
+        "envelope": {
+          "$bytes": "01010100000002000000000000000031bb2f3f10dcf7cb726bbebf10b4a27bcbbad24f125500f49bd2bd8f3caa17a7"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "sequence_mismatch"
+        },
+        "ciphertextDecrypted": false,
+        "disposition": "FATAL-POST",
+        "attributable": false
+      }
+    },
+    {
+      "name": "post-application-reserve-composition",
+      "sections": [
+        "9.6",
+        "10.1",
+        "11.3"
+      ],
+      "note": "The reserve is computed from the §10.1 body and the §11.3 body bound through the pinned codec, never written out by hand, so a change to either cannot silently leave the accounting behind.",
+      "inputs": {
+        "closeRecordsReserved": 2,
+        "errorRecordsReserved": 1
+      },
+      "expected": {
+        "closeRecordPlaintextBytes": 64,
+        "errorRecordPlaintextMaxBytes": 17,
+        "postApplicationReserveRecords": 3,
+        "postApplicationReservePlaintextBytes": [
+          64,
+          64,
+          17
+        ],
+        "reserveRecordsMatchTheTwoHalves": true
+      }
+    },
+    {
+      "name": "terminal-epoch-sequential-close-out-of-the-close-reserve",
+      "sections": [
+        "9.6",
+        "10.2",
+        "10.1.1"
+      ],
+      "note": "Both endpoints start in epoch `E2EE_EPOCH_MAX` with exactly `E2EE_CLOSE_RECORDS_RESERVED` protectable records left. The initiator spends both (its `E2EEClose` and its final confirmation); the sequential responder spends ONE and leaves the remainder of its reserve unused, which is the intended slack §9.6 names. The synthetic state is not ratcheted, so both endpoints are constructed from the same secrets and the same synthetic position.",
+      "inputs": {
+        "epoch": 4294967295,
+        "closeRecordsReserved": 2,
+        "initiatorSyntheticStart": {
+          "epoch": 4294967295,
+          "counter": 65534,
+          "epochRecords": 65534
+        },
+        "responderSyntheticStart": {
+          "epoch": 4294967295,
+          "counter": 65534,
+          "epochRecords": 65534
+        }
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffe44ffffffff48000000000000fffe"
+            },
+            "closeCommitment": {
+              "$bytes": "f5c3230d69caf5604fecd82e2ace6b73ff765cdd387674f81742480befed52af"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000fffe5820f5c3230d69caf5604fecd82e2ace6b73ff765cdd387674f81742480befed52af"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffef9a0aab75fc925a71c3f1eee19eb9e8d7273cb2240ad204f4f2fcd6a98b227d0d4fa9faf552985fc7c292e1e13e29c3e682dabb1ad902b2be38d86473f6c01e69b49429600b56fa113a2dc5f4c7fd23a"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffe44ffffffff48000000000000ffff"
+            },
+            "closeCommitment": {
+              "$bytes": "5a133a404a2ba556849f4bb5d530f5d1a2e35b01ea3ab9bc9894a216fbe34ccc"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000ffff58205a133a404a2ba556849f4bb5d530f5d1a2e35b01ea3ab9bc9894a216fbe34ccc"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffeb896d8f83127d52f5b12256344de45168ec270360e297e4689e0c5a400408bcf5477b31e23905b80d466571c34ea6fd697ec93c3776cf92f88f74bf684bcba5daea182187c79fdc197bbeb0df2410240"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "final_confirmation",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000ffff44ffffffff48000000000000ffff"
+            },
+            "closeCommitment": {
+              "$bytes": "86cca00c9f20eb820d84096d02def4c6bba3f7b0bd0e32500e0fdf342409bd7c"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000ffff44ffffffff48000000000000ffff582086cca00c9f20eb820d84096d02def4c6bba3f7b0bd0e32500e0fdf342409bd7c"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000ffff1bcda0a939eb37d122f6c99f2fc2276bb996dc47188ca4b05ece021d2e5801c0f327e0cf21b52942b0c1f377831b749eed9b20fee06a0b5eefb2e9791a377630ed9ee4faaf18aa94afed3891a0370c4d"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": true
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-initiator-sends-close",
+            "initiatorState": "awaiting_ack",
+            "initiatorAnchor": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "waitsArmed": 1,
+            "mayProtectApplicationRecord": false
+          },
+          {
+            "step": "2-responder-authenticates-the-close",
+            "received": {
+              "kind": "close",
+              "branch": "sequential",
+              "finalSend": {
+                "epoch": 4294967295,
+                "counter": 65534
+              },
+              "expectedRecv": {
+                "epoch": 4294967295,
+                "counter": 65534
+              }
+            },
+            "responderState": "close_received",
+            "responderBranch": "sequential_responder",
+            "ackExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "pendingRecord": "close_ack"
+          },
+          {
+            "step": "2-responder-sends-close-ack",
+            "responderState": "awaiting_confirmation",
+            "responderAnchor": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "waitsArmed": 1
+          },
+          {
+            "step": "3-initiator-validates-the-ack-against-its-anchor",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": false,
+              "finalSend": {
+                "epoch": 4294967295,
+                "counter": 65534
+              },
+              "expectedRecv": {
+                "epoch": 4294967295,
+                "counter": 65535
+              }
+            },
+            "initiatorState": "confirmation_due",
+            "initiatorBranch": "sequential_initiator",
+            "pendingRecord": "final_confirmation"
+          },
+          {
+            "step": "3-initiator-sends-the-final-confirmation",
+            "initiatorState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": true
+          },
+          {
+            "step": "4-responder-validates-the-final-confirmation",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 4294967295,
+                "counter": 65535
+              },
+              "expectedRecv": {
+                "epoch": 4294967295,
+                "counter": 65535
+              }
+            },
+            "responderState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": false
+          }
+        ],
+        "initiatorCloseRecordsSent": 2,
+        "responderCloseRecordsSent": 1,
+        "initiatorRecordsSpent": 2,
+        "responderRecordsSpent": 1,
+        "initiatorVerdict": "clean",
+        "responderVerdict": "clean",
+        "initiatorSendState": {
+          "epoch": null,
+          "counter": null,
+          "epochRecords": 65536,
+          "epochBytes": 128,
+          "exhausted": true
+        },
+        "responderSendState": {
+          "epoch": 4294967295,
+          "counter": 65535,
+          "epochRecords": 65535,
+          "epochBytes": 64,
+          "exhausted": false
+        },
+        "wrapped": false,
+        "reused": false
+      }
+    },
+    {
+      "name": "terminal-epoch-simultaneous-close-out-of-the-close-reserve",
+      "sections": [
+        "9.6",
+        "10.2",
+        "10.1.1"
+      ],
+      "note": "Each side of a simultaneous close protects `E2EE_CLOSE_RECORDS_RESERVED` records — its `E2EEClose` and its `E2EECloseAck` — which is why §9.6 sizes the close half unconditionally in every role rather than to the responder's single record.",
+      "inputs": {
+        "epoch": 4294967295,
+        "closeRecordsReserved": 2,
+        "syntheticStartCounter": 65534
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffe44ffffffff48000000000000fffe"
+            },
+            "closeCommitment": {
+              "$bytes": "f5c3230d69caf5604fecd82e2ace6b73ff765cdd387674f81742480befed52af"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000fffe5820f5c3230d69caf5604fecd82e2ace6b73ff765cdd387674f81742480befed52af"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffef9a0aab75fc925a71c3f1eee19eb9e8d7273cb2240ad204f4f2fcd6a98b227d0d4fa9faf552985fc7c292e1e13e29c3e682dabb1ad902b2be38d86473f6c01e69b49429600b56fa113a2dc5f4c7fd23a"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763102636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffe44ffffffff48000000000000fffe"
+            },
+            "closeCommitment": {
+              "$bytes": "ef6c7c38a404fd59c156eec07582853110a92c8c2a36c11569afe3970fa3aa53"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000fffe5820ef6c7c38a404fd59c156eec07582853110a92c8c2a36c11569afe3970fa3aa53"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffebe96d8f83127d52f5b12256344de45168ec270360e297e4689e0c5a400418bcfe108f566cdbf038f91aff26994581f3625a6e44eb760818679cc0a7770fc5cc23bdfc082005f91fdbb5c581bec8b1e14"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000ffff44ffffffff48000000000000ffff"
+            },
+            "closeCommitment": {
+              "$bytes": "86cca00c9f20eb820d84096d02def4c6bba3f7b0bd0e32500e0fdf342409bd7c"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000ffff44ffffffff48000000000000ffff582086cca00c9f20eb820d84096d02def4c6bba3f7b0bd0e32500e0fdf342409bd7c"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000ffff1bcda0a939eb37d122f6c99f2fc2276bb996dc47188ca4b05ece021d2e5801c0f327e0cf21b52942b0c1f377831b749eed9b20fee06a0b5eefb2e9791a377630ed9ee4faaf18aa94afed3891a0370c4d"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": true
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000ffff44ffffffff48000000000000ffff"
+            },
+            "closeCommitment": {
+              "$bytes": "1928aa15974e360361074486d242d801f82454a7a5c723e95f3c6542100d6c14"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000ffff44ffffffff48000000000000ffff58201928aa15974e360361074486d242d801f82454a7a5c723e95f3c6542100d6c14"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000ffffdf9093a6ad4699a6f0842616fecc9c7631e8fa9b0be5b8305fc12b854d716202329e5ab6c60fd1ae0cff3385611badc24dce4eecd3cc56e6fc56b5e54a8239ecb4454120399bb295651aa25250adca4b"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": true
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-both-endpoints-send-close",
+            "initiatorAnchor": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "responderAnchor": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "2-each-side-validates-the-peer-close-under-the-passed-through-rule",
+            "atInitiator": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 4294967295,
+                "counter": 65534
+              },
+              "expectedRecv": {
+                "epoch": 4294967295,
+                "counter": 65534
+              }
+            },
+            "atResponder": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 4294967295,
+                "counter": 65534
+              },
+              "expectedRecv": {
+                "epoch": 4294967295,
+                "counter": 65534
+              }
+            },
+            "initiatorBranch": "simultaneous",
+            "responderBranch": "simultaneous",
+            "initiatorAckExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "responderAckExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "3-each-side-validates-the-peer-ack-against-its-own-anchor",
+            "atInitiator": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 4294967295,
+                "counter": 65535
+              },
+              "expectedRecv": {
+                "epoch": 4294967295,
+                "counter": 65535
+              }
+            },
+            "atResponder": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 4294967295,
+                "counter": 65535
+              },
+              "expectedRecv": {
+                "epoch": 4294967295,
+                "counter": 65535
+              }
+            },
+            "initiatorAnchor": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "responderAnchor": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "initiatorVerdict": "clean",
+            "responderVerdict": "clean",
+            "initiatorExchangeComplete": true,
+            "responderExchangeComplete": true,
+            "initiatorWaitsArmed": 2,
+            "responderWaitsArmed": 2
+          }
+        ],
+        "initiatorRecordsSpent": 2,
+        "responderRecordsSpent": 2,
+        "initiatorVerdict": "clean",
+        "responderVerdict": "clean",
+        "wrapped": false,
+        "reused": false
+      }
+    },
+    {
+      "name": "counter-exhaustion-sequential-close-out-of-the-close-reserve",
+      "sections": [
+        "9.6",
+        "10.2",
+        "10.1.1"
+      ],
+      "note": "Both endpoints stand exactly `E2EE_CLOSE_RECORDS_RESERVED` positions short of `E2EE_COUNTER_MAX` in a LIVE epoch. The initiator spends both (its `E2EEClose` and its final confirmation) and the direction is exhausted at the ceiling; the sequential responder spends ONE and leaves the remainder of its reserve unused, which is the same §9.6 slack the terminal-epoch case names. The state is synthetic in the counter alone: the epoch is 0, its §9.4 usage is zero, and no record here completes an epoch — the direction ends because the counter reaches `E2EE_COUNTER_MAX` and for no other reason. `E2EE_REKEY_MAX_RECORDS` completes an epoch long before a counter starting at 0 could climb to 2^64 − 1, so no reachable traffic reaches this branch, which is exactly why §16.3 F9 asks for the state. Note what the reserve predicate does and does not say here: §9.6 scopes the post-application reserve to the two §9.4 thresholds WITHIN epoch `E2EE_EPOCH_MAX`, so `postApplicationReserveHeld` is true in this state even though fewer than the reserve of positions remain before the ceiling. What §9.6 binds at a counter ceiling is the other rule — no wrap, no reuse, no continuation — and that is what this trace pins.",
+      "inputs": {
+        "exhaustionCause": "counter-ceiling",
+        "counterMax": "18446744073709551615",
+        "epochMax": 4294967295,
+        "closeRecordsReserved": 2,
+        "postApplicationReserveRecords": 3,
+        "positionsRemainingBeforeTheCeiling": 2,
+        "initiatorSyntheticStart": {
+          "epoch": 0,
+          "counter": "18446744073709551614",
+          "epochRecords": 0,
+          "epochBytes": 0
+        },
+        "responderSyntheticStart": {
+          "epoch": 0,
+          "counter": "18446744073709551614",
+          "epochRecords": 0,
+          "epochBytes": 0
+        }
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048fffffffffffffffe440000000048fffffffffffffffe"
+            },
+            "closeCommitment": {
+              "$bytes": "95ce52a7153836cba49dd53c08d8dcf00256ab44df68939b75158bb8ed7ad3c0"
+            },
+            "body": {
+              "$bytes": "85440000000048fffffffffffffffe440000000048fffffffffffffffe582095ce52a7153836cba49dd53c08d8dcf00256ab44df68939b75158bb8ed7ad3c0"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000fffffffffffffffeef8e1df674f8bbd891f210b63b64b6f2620033c4ac7c316b0c43c837856df8f3ec0ec7c54f741419283142234e0ffff725e2894d552feae743c04d7b21126a450436c76a62c667c491a326d090487bf8"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048fffffffffffffffe440000000048ffffffffffffffff"
+            },
+            "closeCommitment": {
+              "$bytes": "d4ee937c6b49cded8d079bc17a98ad65bd0f57014b8e98be792e67638c7fe2b6"
+            },
+            "body": {
+              "$bytes": "85440000000048fffffffffffffffe440000000048ffffffffffffffff5820d4ee937c6b49cded8d079bc17a98ad65bd0f57014b8e98be792e67638c7fe2b6"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000fffffffffffffffe927704eedd6bc13b3e4aeb2f48563c6d2592177aea00d014e54ae6471838ccaf3b74f873b9a8529565fc64cf2b47050cd4db6160570d2d3800b0dc4d438d9a06dbd6a357e7ad2cb530856c99d78a1e48"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "final_confirmation",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048ffffffffffffffff440000000048ffffffffffffffff"
+            },
+            "closeCommitment": {
+              "$bytes": "ea7cdfb2c72b322235e0cfb10f6dab3bec89bff345d5cbfe44da8f7d55475fc3"
+            },
+            "body": {
+              "$bytes": "85440000000048ffffffffffffffff440000000048ffffffffffffffff5820ea7cdfb2c72b322235e0cfb10f6dab3bec89bff345d5cbfe44da8f7d55475fc3"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000ffffffffffffffff20bf05200f17a5a4f4380b48ab9860623477c8d0902e97dc9052308f309819529082d8f21392a49027094924cd689aac168928d107e438a10fd9f8465db36fd85ce947d0690adacef3510e92c7b1ffcd"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-initiator-sends-close",
+            "initiatorState": "awaiting_ack",
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "waitsArmed": 1,
+            "mayProtectApplicationRecord": false
+          },
+          {
+            "step": "2-responder-authenticates-the-close",
+            "received": {
+              "kind": "close",
+              "branch": "sequential",
+              "finalSend": {
+                "epoch": 0,
+                "counter": "18446744073709551614"
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": "18446744073709551614"
+              }
+            },
+            "responderState": "close_received",
+            "responderBranch": "sequential_responder",
+            "ackExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "pendingRecord": "close_ack"
+          },
+          {
+            "step": "2-responder-sends-close-ack",
+            "responderState": "awaiting_confirmation",
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "waitsArmed": 1
+          },
+          {
+            "step": "3-initiator-validates-the-ack-against-its-anchor",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": false,
+              "finalSend": {
+                "epoch": 0,
+                "counter": "18446744073709551614"
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": "18446744073709551615"
+              }
+            },
+            "initiatorState": "confirmation_due",
+            "initiatorBranch": "sequential_initiator",
+            "pendingRecord": "final_confirmation"
+          },
+          {
+            "step": "3-initiator-sends-the-final-confirmation",
+            "initiatorState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": true
+          },
+          {
+            "step": "4-responder-validates-the-final-confirmation",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 0,
+                "counter": "18446744073709551615"
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": "18446744073709551615"
+              }
+            },
+            "responderState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": false
+          }
+        ],
+        "postApplicationReserveHeld": true,
+        "initiatorCloseRecordsSent": 2,
+        "responderCloseRecordsSent": 1,
+        "initiatorRecordsSpent": 2,
+        "responderRecordsSpent": 1,
+        "initiatorVerdict": "clean",
+        "responderVerdict": "clean",
+        "initiatorSendState": {
+          "epoch": null,
+          "counter": null,
+          "epochRecords": 2,
+          "epochBytes": 128,
+          "exhausted": true
+        },
+        "responderSendState": {
+          "epoch": 0,
+          "counter": "18446744073709551615",
+          "epochRecords": 1,
+          "epochBytes": 64,
+          "exhausted": false
+        },
+        "initiatorExhaustedAtTheCeiling": true,
+        "responderExhaustedAtTheCeiling": false,
+        "recordsThatCompletedAnEpoch": 0,
+        "wrapped": false,
+        "reused": false
+      }
+    },
+    {
+      "name": "counter-exhaustion-simultaneous-close-out-of-the-close-reserve",
+      "sections": [
+        "9.6",
+        "10.2",
+        "10.1.1"
+      ],
+      "note": "Each side of a simultaneous close protects `E2EE_CLOSE_RECORDS_RESERVED` records — its `E2EEClose` and its `E2EECloseAck` — and both directions therefore end AT the counter ceiling, which is why §9.6 sizes the close half unconditionally in every role rather than to the responder's single record. The state is synthetic in the counter alone: the epoch is 0, its §9.4 usage is zero, and no record here completes an epoch — the direction ends because the counter reaches `E2EE_COUNTER_MAX` and for no other reason. `E2EE_REKEY_MAX_RECORDS` completes an epoch long before a counter starting at 0 could climb to 2^64 − 1, so no reachable traffic reaches this branch, which is exactly why §16.3 F9 asks for the state. Note what the reserve predicate does and does not say here: §9.6 scopes the post-application reserve to the two §9.4 thresholds WITHIN epoch `E2EE_EPOCH_MAX`, so `postApplicationReserveHeld` is true in this state even though fewer than the reserve of positions remain before the ceiling. What §9.6 binds at a counter ceiling is the other rule — no wrap, no reuse, no continuation — and that is what this trace pins.",
+      "inputs": {
+        "exhaustionCause": "counter-ceiling",
+        "counterMax": "18446744073709551615",
+        "epochMax": 4294967295,
+        "closeRecordsReserved": 2,
+        "postApplicationReserveRecords": 3,
+        "positionsRemainingBeforeTheCeiling": 2,
+        "syntheticStartCounter": "18446744073709551614"
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048fffffffffffffffe440000000048fffffffffffffffe"
+            },
+            "closeCommitment": {
+              "$bytes": "95ce52a7153836cba49dd53c08d8dcf00256ab44df68939b75158bb8ed7ad3c0"
+            },
+            "body": {
+              "$bytes": "85440000000048fffffffffffffffe440000000048fffffffffffffffe582095ce52a7153836cba49dd53c08d8dcf00256ab44df68939b75158bb8ed7ad3c0"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000fffffffffffffffeef8e1df674f8bbd891f210b63b64b6f2620033c4ac7c316b0c43c837856df8f3ec0ec7c54f741419283142234e0ffff725e2894d552feae743c04d7b21126a450436c76a62c667c491a326d090487bf8"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551614"
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763102636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048fffffffffffffffe440000000048fffffffffffffffe"
+            },
+            "closeCommitment": {
+              "$bytes": "31d517cf4fbbceae0f102eed58efd7280110010d9cc2937f29f91bc979b60d92"
+            },
+            "body": {
+              "$bytes": "85440000000048fffffffffffffffe440000000048fffffffffffffffe582031d517cf4fbbceae0f102eed58efd7280110010d9cc2937f29f91bc979b60d92"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000fffffffffffffffe947704eedd6bc13b3e4aeb2f48563c6d2592177aea00d014e54ae6471839ccafde4f7cc09d5a51d6e7ebd1e309307f4168c4376c804126f95067a0e7b644752203435bf9e13fe6d64becf2edc434aabe"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048ffffffffffffffff440000000048ffffffffffffffff"
+            },
+            "closeCommitment": {
+              "$bytes": "ea7cdfb2c72b322235e0cfb10f6dab3bec89bff345d5cbfe44da8f7d55475fc3"
+            },
+            "body": {
+              "$bytes": "85440000000048ffffffffffffffff440000000048ffffffffffffffff5820ea7cdfb2c72b322235e0cfb10f6dab3bec89bff345d5cbfe44da8f7d55475fc3"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000ffffffffffffffff20bf05200f17a5a4f4380b48ab9860623477c8d0902e97dc9052308f309819529082d8f21392a49027094924cd689aac168928d107e438a10fd9f8465db36fd85ce947d0690adacef3510e92c7b1ffcd"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048ffffffffffffffff440000000048ffffffffffffffff"
+            },
+            "closeCommitment": {
+              "$bytes": "a5ef2cb1fabf4a63ebad8dbece51755e664fde87b32c8ebbd764a3a3c7eb07d4"
+            },
+            "body": {
+              "$bytes": "85440000000048ffffffffffffffff440000000048ffffffffffffffff5820a5ef2cb1fabf4a63ebad8dbece51755e664fde87b32c8ebbd764a3a3c7eb07d4"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000ffffffffffffffff80ad35b3e08d1e33fce62ac1c5f609935b882f6ff25cbb5511e38a168fcb812290c267eeffd25ff89a2a316c03f91aa40a353842c16c402b7fda2d0adf096a320be1f97f704ab8541b846340579b3f4e"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-both-endpoints-send-close",
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "2-each-side-validates-the-peer-close-under-the-passed-through-rule",
+            "atInitiator": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 0,
+                "counter": "18446744073709551614"
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": "18446744073709551614"
+              }
+            },
+            "atResponder": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 0,
+                "counter": "18446744073709551614"
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": "18446744073709551614"
+              }
+            },
+            "initiatorBranch": "simultaneous",
+            "responderBranch": "simultaneous",
+            "initiatorAckExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "responderAckExpectedRecv": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "3-each-side-validates-the-peer-ack-against-its-own-anchor",
+            "atInitiator": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 0,
+                "counter": "18446744073709551615"
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": "18446744073709551615"
+              }
+            },
+            "atResponder": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 0,
+                "counter": "18446744073709551615"
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": "18446744073709551615"
+              }
+            },
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": "18446744073709551615"
+            },
+            "initiatorVerdict": "clean",
+            "responderVerdict": "clean",
+            "initiatorExchangeComplete": true,
+            "responderExchangeComplete": true,
+            "initiatorWaitsArmed": 2,
+            "responderWaitsArmed": 2
+          }
+        ],
+        "initiatorRecordsSpent": 2,
+        "responderRecordsSpent": 2,
+        "initiatorVerdict": "clean",
+        "responderVerdict": "clean",
+        "initiatorSendState": {
+          "epoch": null,
+          "counter": null,
+          "epochRecords": 2,
+          "epochBytes": 128,
+          "exhausted": true
+        },
+        "responderSendState": {
+          "epoch": null,
+          "counter": null,
+          "epochRecords": 2,
+          "epochBytes": 128,
+          "exhausted": true
+        },
+        "initiatorExhaustedAtTheCeiling": true,
+        "responderExhaustedAtTheCeiling": true,
+        "recordsThatCompletedAnEpoch": 0,
+        "wrapped": false,
+        "reused": false
+      }
+    },
+    {
+      "name": "terminal-epoch-error-record-out-of-the-error-reserve",
+      "sections": [
+        "9.6",
+        "10.2",
+        "11.3",
+        "11.5"
+      ],
+      "note": "The whole post-application reserve is held: the close machine spends `E2EE_CLOSE_RECORDS_RESERVED` and the terminal `E2EEError` is protected out of `E2EE_ERROR_RECORDS_RESERVED` at the NEXT `(epoch, counter)` — no wrap, no reuse, and no third close-machine record. This is the case that fails against an implementation sizing the reserve at the close half alone.",
+      "inputs": {
+        "epoch": 4294967295,
+        "availableRecordsAtStart": 3,
+        "postApplicationReserveRecords": 3,
+        "closeRecordsReserved": 2,
+        "errorRecordsReserved": 1,
+        "strayRecord": {
+          "innerType": 4,
+          "body": {
+            "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000fffe5820eebf22166f2683bacdf230533edb86936577b5dc3e0e6eb4cd75972e1d3f4666"
+          },
+          "position": {
+            "epoch": 4294967295,
+            "counter": 65534
+          },
+          "envelope": {
+            "$bytes": "010101ffffffff000000000000fffeb896d8f83127d52f5b12256344de45168ec270360e297e4689e0c5a400418bcfe0dbab48069d7d6c9d0b2cfadf011c9450787d1ea3582e27dd167ece6260b0f767c1d0325823420777524ec5cf5898b4"
+          }
+        }
+      },
+      "expected": {
+        "closeRecords": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65533
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65533
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65533
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffd44ffffffff48000000000000fffd"
+            },
+            "closeCommitment": {
+              "$bytes": "31d7aa80d66234b7d68815e704286cb8870db17f9243d0ff517ffa814d0b93fd"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffd44ffffffff48000000000000fffd582031d7aa80d66234b7d68815e704286cb8870db17f9243d0ff517ffa814d0b93fd"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffdcafb26fdd776edd3b937f3e029a5de138a1ddff13d7103bfc5c68d047af37fa3b7f81e174a364bc2f337b93ea331d0c607cd6fdf2a240d0e00370ea8b26eef0c0153a4bce6af3f4557ed776b23f5c64b"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65533
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65533
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffd44ffffffff48000000000000fffe"
+            },
+            "closeCommitment": {
+              "$bytes": "9d2ae180b0abf26bd88a5d3211e5cad1be441fd743fd38b7d12e0a724acc5469"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffd44ffffffff48000000000000fffe58209d2ae180b0abf26bd88a5d3211e5cad1be441fd743fd38b7d12e0a724acc5469"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffd2b2f6efc0708e88933c635c265f062e82a42fcce33320388b3b60244752e03366dd70f6c61e3aa9796cfa5f37dbb600583d97c10b4f434e57e021be65c6a1411b1b7e59efda6bfd299e95ba7a2ff6118"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "final_confirmation",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffe44ffffffff48000000000000fffe"
+            },
+            "closeCommitment": {
+              "$bytes": "75222c45df1dc822bc07216af035961b9103f27ea611ecff4f1bcf4183c98729"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000fffe582075222c45df1dc822bc07216af035961b9103f27ea611ecff4f1bcf4183c98729"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffeffa0aab75fc925a71c3f1eee19eb9e8d7273cb2240ad204f4f2fcd6a98b227d0541b90e7e3feb8be8fc2d75ac91961560658051233f7b32cbbd4010d5348d46007938b4520c64208f3209e26d59c5688"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          }
+        ],
+        "strayAuthenticated": {
+          "kind": "authenticated",
+          "innerType": 4,
+          "bodyBytes": 63,
+          "epoch": 4294967295,
+          "counter": 65534,
+          "plaintextBytes": 64,
+          "epochCompleted": false
+        },
+        "strayVerdict": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "record_beyond_machine"
+        },
+        "mayProtectTerminalError": true,
+        "errorBody": {
+          "$bytes": "8101"
+        },
+        "errorRecord": {
+          "kind": "protected",
+          "epoch": 4294967295,
+          "counter": 65535,
+          "plaintextBytes": 3,
+          "envelopeBytes": 34,
+          "epochCompleted": true
+        },
+        "errorEnvelope": {
+          "$bytes": "010101ffffffff000000000000ffff1cc9e59f8073644270a4792cd6d65be6449dec"
+        },
+        "errorRecordsOnTheWire": 1,
+        "closeMachineRecordsSent": 2,
+        "thirdCloseMachineRecordSent": false,
+        "initiatorSendState": {
+          "epoch": null,
+          "counter": null,
+          "epochRecords": 65536,
+          "epochBytes": 131,
+          "exhausted": true
+        },
+        "initiatorVerdict": "failed",
+        "wrapped": false,
+        "reused": false,
+        "observable": {
+          "lengthUniformEncryptedRecords": 1,
+          "closeReason": "channel_rejected"
+        }
+      }
+    },
+    {
+      "name": "terminal-epoch-error-record-without-capacity",
+      "sections": [
+        "9.6",
+        "10.2",
+        "11.3",
+        "11.5"
+      ],
+      "note": "The same trace from a synthetic state whose remaining capacity covers the close machine but NOT the error record. The close completes and the §11.5 observable is the 'none when the send path is unusable' case — never a wrap, a reuse, or a silently dropped obligation.",
+      "inputs": {
+        "epoch": 4294967295,
+        "availableRecordsAtStart": 2,
+        "postApplicationReserveRecords": 3,
+        "closeRecordsReserved": 2,
+        "errorRecordsReserved": 1,
+        "strayRecord": {
+          "innerType": 4,
+          "body": {
+            "$bytes": "8544ffffffff48000000000000ffff44ffffffff48000000000000ffff58201928aa15974e360361074486d242d801f82454a7a5c723e95f3c6542100d6c14"
+          },
+          "position": {
+            "epoch": 4294967295,
+            "counter": 65535
+          },
+          "envelope": {
+            "$bytes": "010101ffffffff000000000000ffffdf9093a6ad4699a6f0842616fecc9c7631e8fa9b0be5b8305fc12b854d716202329e5ab6c60fd1ae0cff3385611badc24dce4eecd3cc56e6fc56b5e54a8239ecb4454120399bb295651aa25250adca4b"
+          }
+        }
+      },
+      "expected": {
+        "closeRecords": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffe44ffffffff48000000000000fffe"
+            },
+            "closeCommitment": {
+              "$bytes": "f5c3230d69caf5604fecd82e2ace6b73ff765cdd387674f81742480befed52af"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000fffe5820f5c3230d69caf5604fecd82e2ace6b73ff765cdd387674f81742480befed52af"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffef9a0aab75fc925a71c3f1eee19eb9e8d7273cb2240ad204f4f2fcd6a98b227d0d4fa9faf552985fc7c292e1e13e29c3e682dabb1ad902b2be38d86473f6c01e69b49429600b56fa113a2dc5f4c7fd23a"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65534
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000fffe44ffffffff48000000000000ffff"
+            },
+            "closeCommitment": {
+              "$bytes": "5a133a404a2ba556849f4bb5d530f5d1a2e35b01ea3ab9bc9894a216fbe34ccc"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000fffe44ffffffff48000000000000ffff58205a133a404a2ba556849f4bb5d530f5d1a2e35b01ea3ab9bc9894a216fbe34ccc"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000fffeb896d8f83127d52f5b12256344de45168ec270360e297e4689e0c5a400408bcf5477b31e23905b80d466571c34ea6fd697ec93c3776cf92f88f74bf684bcba5daea182187c79fdc197bbeb0df2410240"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "final_confirmation",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredFinalSend": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "declaredExpectedRecv": {
+              "epoch": 4294967295,
+              "counter": 65535
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000ffff44ffffffff48000000000000ffff"
+            },
+            "closeCommitment": {
+              "$bytes": "86cca00c9f20eb820d84096d02def4c6bba3f7b0bd0e32500e0fdf342409bd7c"
+            },
+            "body": {
+              "$bytes": "8544ffffffff48000000000000ffff44ffffffff48000000000000ffff582086cca00c9f20eb820d84096d02def4c6bba3f7b0bd0e32500e0fdf342409bd7c"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101ffffffff000000000000ffff1bcda0a939eb37d122f6c99f2fc2276bb996dc47188ca4b05ece021d2e5801c0f327e0cf21b52942b0c1f377831b749eed9b20fee06a0b5eefb2e9791a377630ed9ee4faaf18aa94afed3891a0370c4d"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": true
+          }
+        ],
+        "strayAuthenticated": {
+          "kind": "authenticated",
+          "innerType": 4,
+          "bodyBytes": 63,
+          "epoch": 4294967295,
+          "counter": 65535,
+          "plaintextBytes": 64,
+          "epochCompleted": true
+        },
+        "strayVerdict": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "record_beyond_machine"
+        },
+        "mayProtectTerminalError": true,
+        "errorBody": {
+          "$bytes": "8101"
+        },
+        "errorRecord": {
+          "kind": "exhausted"
+        },
+        "errorEnvelope": null,
+        "errorRecordsOnTheWire": 0,
+        "closeMachineRecordsSent": 2,
+        "thirdCloseMachineRecordSent": false,
+        "initiatorSendState": {
+          "epoch": null,
+          "counter": null,
+          "epochRecords": 65536,
+          "epochBytes": 128,
+          "exhausted": true
+        },
+        "initiatorVerdict": "failed",
+        "wrapped": false,
+        "reused": false,
+        "observable": {
+          "lengthUniformEncryptedRecords": 0,
+          "closeReason": "channel_rejected"
+        }
+      }
+    },
+    {
+      "name": "degenerate-state-below-the-post-application-reserve",
+      "sections": [
+        "9.6",
+        "10.1.1",
+        "10.4"
+      ],
+      "note": "A state that already violated the reservation: ONE protectable record remains in the initiator's direction. The application record is refused with `close_required`, the `E2EEClose` spends the last position of the direction, and there is therefore no §10.1.1 anchor for a peer ack to equal — so §9.6 fixes the outcome as **Unclean — abrupt** with no wire record, and nothing wraps or is reused.",
+      "inputs": {
+        "epoch": 4294967295,
+        "availableRecordsAtStart": 1,
+        "postApplicationReserveRecords": 3
+      },
+      "expected": {
+        "postApplicationReserveHeld": false,
+        "applicationRecord": {
+          "kind": "close_required"
+        },
+        "applicationRecordsOnTheWire": 0,
+        "closeRecord": {
+          "purpose": "close",
+          "innerType": 2,
+          "senderDirection": "c2n",
+          "position": {
+            "epoch": 4294967295,
+            "counter": 65535
+          },
+          "declaredFinalSend": {
+            "epoch": 4294967295,
+            "counter": 65535
+          },
+          "declaredExpectedRecv": {
+            "epoch": 4294967295,
+            "counter": 65533
+          },
+          "commitmentPreimage": {
+            "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744ffffffff48000000000000ffff44ffffffff48000000000000fffd"
+          },
+          "closeCommitment": {
+            "$bytes": "3450f950586c3c583c27ab189bb312248ba7b4f3eb3c6d2c42768ff2558e09c8"
+          },
+          "body": {
+            "$bytes": "8544ffffffff48000000000000ffff44ffffffff48000000000000fffd58203450f950586c3c583c27ab189bb312248ba7b4f3eb3c6d2c42768ff2558e09c8"
+          },
+          "bodyBytes": 63,
+          "envelope": {
+            "$bytes": "010101ffffffff000000000000ffff1dcda0a939eb37d122f6c99f2fc2276bb996dc47188ca4b05ece021d2e5a01c041bbb993e6f9fe98816251021a76927cdd9f63bdb6585422a3cbb9bf6bb0c284dfda137bd21656f8dba9c5132be1d714"
+          },
+          "envelopeBytes": 95,
+          "epochCompleted": true
+        },
+        "closeAnchor": null,
+        "closeAnchorUnavailable": true,
+        "initiatorVerdict": "unclean_abrupt",
+        "initiatorSendState": {
+          "epoch": null,
+          "counter": null,
+          "epochRecords": 65536,
+          "epochBytes": 64,
+          "exhausted": true
+        },
+        "furtherCloseMachineRecord": {
+          "kind": "exhausted"
+        },
+        "furtherRecordsOnTheWire": 0,
+        "responderView": {
+          "kind": "close",
+          "branch": "sequential",
+          "finalSend": {
+            "epoch": 4294967295,
+            "counter": 65535
+          },
+          "expectedRecv": {
+            "epoch": 4294967295,
+            "counter": 65533
+          }
+        },
+        "wrapped": false,
+        "reused": false
+      }
+    }
+  ]
+}

@@ -28,6 +28,11 @@ const rootConfig = {
       "apps/web/public/mockServiceWorker.js",
       "apps/web/src/lib/vendor/qrcodegen.ts",
       "*.icon/**",
+      // Generated and transcoded test vectors. `scripts/generate-e2ee-fixtures.ts`
+      // owns these bytes and a drift test compares them byte for byte
+      // (docs/relay-e2ee-protocol.md §16.1), so a formatter rewriting them would
+      // put the two in permanent conflict.
+      "packages/shared/fixtures/e2ee/v1/*.json",
     ],
     sortPackageJson: {},
     overrides: [

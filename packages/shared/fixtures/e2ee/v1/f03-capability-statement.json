@@ -1,0 +1,1102 @@
+{
+  "family": {
+    "number": 3,
+    "title": "Capability statement",
+    "sections": [
+      "5.2",
+      "5.3",
+      "5.5",
+      "5.7",
+      "7.2.1",
+      "7.6",
+      "7.6.1",
+      "3.2.1",
+      "16.3 F3"
+    ],
+    "summary": "The §7.6 transcript, the §7.2.1 signing envelope, the identity signature, the recomputed fingerprints, the reconstructed prekey cross-signature, and the §5.3 carrier — for a valid statement, for a never-rotated node, and for the maximum conforming statement with both the largest-validating and the §5.5 upper-bound figures. Plus the size-invariant, wrong-signing-input, re-encode-inequality, protocol-range, and admitted-pattern cases.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "The §5.2 step 3, 4, and 7 invalid variants — expired, future issued-at, over-long validity interval, wrong Hub origin, and a lower policy generation, together with the §5.7 policy-generation recovery pair. There is no capability-statement VERIFIER in packages/shared/src: the landed modules encode the transcript, build and check the §7.2.1 envelope, verify the cross-signature, and run the §7.6.1 self-check, but nothing evaluates a received statement against a clock, a connected origin, or a stored policy generation. Emitting these cases would mean asserting an outcome no implementation produces. Owned by the §5.2 statement verifier.",
+    "A statement OMITTING element 18, and a statement whose element 18 disagrees with the PINNED continuity id. The first needs a §7.6 statement decoder to have an arity verdict to derive; the second needs the §13.1 durable pin record. Owned by the §5.2 statement verifier and the client trust-state work respectively. The element-18-disagrees-with-a-carried-chain-entry case IS emitted, in family F5.",
+    "The CLIENT half of the protocol-range and admitted-pattern cases — the K3/P15 channel disposition, the assertion that no `E2EEClientHello` was produced, and the single-use ticket accounting — is a §4.4 client row (family F10). What this family derives is `selectE2eeSuite`'s verdict. Their NODE-SIDE companions, a hello whose `e2eeVersion` lies outside the advertised range and an NX hello to a node running `requireApprovedClientE2EE`, ARE emitted, in family F12, where their §11.5 observable can be compared against the reject vector directly. Owned by the client phase, together with family F10.",
+    "The K3/K2 channel dispositions and the ticket-accounting assertions attached to the selection cases are §4.4 client rows (family F10) and are carried here as labels. What this family DERIVES is `selectE2eeSuite`'s verdict, which is the precondition the rows read: `helloMayBeBuilt: false` is the 'no hello may be built from the statement' obligation, stated over the landed function. Owned by the client phase, which will assert the dispositions themselves.",
+    "§16.4 cross-runtime equality: the admitted-pattern cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "maxHubOrigin": "https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com",
+    "overlongHubOrigin": "https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com",
+    "maxAccountId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "capabilityCarrierTag": "ryco.e2ee.capability.v1",
+    "transcriptDomain": "ryco.node-e2ee-capability.v1",
+    "signingEnvelopeDomain": "ryco.node-e2ee-capability-digest.v1"
+  },
+  "cases": [
+    {
+      "name": "valid-capability-statement",
+      "sections": [
+        "5.2",
+        "7.6",
+        "7.2.1",
+        "5.3"
+      ],
+      "note": "Element 14 is DERIVED from `requireApprovedClientE2EE` by the encoder, so a node cannot advertise an admitted set it does not serve, and the prekey member's agreement fingerprint is recomputed from the agreement key like every other fingerprint here.",
+      "inputs": {
+        "hubOrigin": "https://hub.example.com",
+        "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+        "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+        "identityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "e2eeVersionMin": 1,
+        "e2eeVersionMax": 1,
+        "suiteRegistry": [
+          1
+        ],
+        "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+        "agreementPublicKey": {
+          "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "continuityChainLength": 2,
+        "requireE2EE": false,
+        "requireApprovedClientE2EE": false,
+        "policyGeneration": 7,
+        "issuedAt": 1784160030000,
+        "expiresAt": 1784160630000,
+        "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF"
+      },
+      "expected": {
+        "transcript": {
+          "$bytes": "93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "transcriptBytes": 1185,
+        "transcriptSha256": "db437f495b2364f83db5619f42055dce391cae46401c4fd2f092bc59974161eb",
+        "signingEnvelope": {
+          "$bytes": "8278237279636f2e6e6f64652d653265652d6361706162696c6974792d6469676573742e76315820db437f495b2364f83db5619f42055dce391cae46401c4fd2f092bc59974161eb"
+        },
+        "signingEnvelopeBytes": 72,
+        "signature": {
+          "$bytes": "2aea508d3a152d8fc8d7bfc7237f862c32490fad58a84390d78bf4a666c305ad527dba4502bedea3e5539bb4c4b6738c491190087b0861e7e8f8299c646a0107"
+        },
+        "statement": {
+          "$bytes": "825904a193781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f4646464646464646464646464646464646464646464658402aea508d3a152d8fc8d7bfc7237f862c32490fad58a84390d78bf4a666c305ad527dba4502bedea3e5539bb4c4b6738c491190087b0861e7e8f8299c646a0107"
+        },
+        "statementBytes": 1255,
+        "base64urlChars": 1674,
+        "carrierBytes": 1723,
+        "identityFingerprint": {
+          "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+        },
+        "agreementFingerprint": {
+          "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "admittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "nodePrekeyTranscript": {
+          "$bytes": "8d78187279636f2e6e6f64652d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242781a65706b5f45454545454545454545454545454545454545454545582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b6458207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "crossSignature": {
+          "$bytes": "58f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c716207"
+        },
+        "crossSignatureReconstructionVerifies": true,
+        "identitySignatureVerifiesOverTheEnvelope": true,
+        "selfCheck": {
+          "kind": "ok"
+        },
+        "carrier": "{\"_tag\":\"ryco.e2ee.capability.v1\",\"statement\":\"glkEoZN4HHJ5Y28ubm9kZS1lMmVlLWNhcGFiaWxpdHkudjF3aHR0cHM6Ly9odWIuZXhhbXBsZS5jb214G25vZGVfQUFBQUFBQUFBQUFBQUFBQUFBQUFBQWdlZDI1NTE5eBtua2V5X0JCQkJCQkJCQkJCQkJCQkJCQkJCQkJYIAOhB7_zzhC-HXDdGOdLwJln5NYwm6UNXx3chmQSVTG4WCABVs3t7m-EeXsot76DBIGUSDzBcWWxrnr-e7x37t-bZAEBgQGGeBplcGtfRUVFRUVFRUVFRUVFRUVFRUVFRUVFRVgge06Qm75__kTEZaIgA31gjuNYl9Me-XLwf3SJLLD3PxNYQFjyxzZbX1z-EZP8vxlN_DT_d-Fz62IuzRh7fF48OBNN6T3uYJeYRWp3D6jvuooC3XIRn-aOu7PzZbCRvjxxYgdYIA9ABMl_oN-Rs8sZVHpOCxbxs3tED3y2MPr4EpGzffd5GwAAAZ9oORgAGwAAAaACt-AAgoJZATONeCByeWNvLm5vZGUtaWRlbnRpdHktY29udGludWl0eS52MXdodHRwczovL2h1Yi5leGFtcGxlLmNvbXgabmN0X0ZGRkZGRkZGRkZGRkZGRkZGRkZGRkYBZ2VkMjU1MTl4G25rZXlfQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ1ggiEuIV_TqoWE8YVBNs01L6vNGUXoOMd483dTZtCAdnQtYIHoOcE2bBlQ33ZmthjPLTs8__D0DUsqqy9aJxoeOL5FbZ2VkMjU1MTl4G25rZXlfRERERERERERERERERERERERERERERFggoJql9HpnWYAv-VX43C0qFKXJnSO-l_hkEn_5ODRVpPBYIFB6e0r_ytaSKcKiOyx_gLmOoeAz9QDq3fa0alFKaAaGGwAAAZ9oORgAWEBJPxQC841_g80CLcOr2bUbTUQBzfBh_nJ20ixL8SdN1l0cFNjzOzl2-Ayy4hM3Vkscq9eWZqihRt5u2s-GB4sMglkBM414IHJ5Y28ubm9kZS1pZGVudGl0eS1jb250aW51aXR5LnYxd2h0dHBzOi8vaHViLmV4YW1wbGUuY29teBpuY3RfRkZGRkZGRkZGRkZGRkZGRkZGRkZGRgJnZWQyNTUxOXgbbmtleV9EREREREREREREREREREREREREREREWCCgmqX0emdZgC_5VfjcLSoUpcmdI76X-GQSf_k4NFWk8FggUHp7Sv_K1pIpwqI7LH-AuY6h4DP1AOrd9rRqUUpoBoZnZWQyNTUxOXgbbmtleV9CQkJCQkJCQkJCQkJCQkJCQkJCQkJCWCADoQe_884Qvh1w3RjnS8CZZ-TWMJulDV8d3IZkElUxuFggAVbN7e5vhHl7KLe-gwSBlEg8wXFlsa56_nu8d-7fm2QbAAABn2g5GABYQIM2Rk4LJ2fafQyr6IlLvOfuKkiwX5C3DJgNpaN58HLCZhofevGL0JOrNMSr6Fqm8-TTGC3fYhevBcZaUi2qxAT09IJiSUtiTlgHGwAAAZ9oOY0wGwAAAZ9oQrTweBpuY3RfRkZGRkZGRkZGRkZGRkZGRkZGRkZGRlhAKupQjToVLY_I17_HI3-GLDJJD61YqEOQ14v0pmbDBa1SfbpFAr7eo-VTm7TEtnOMSRGQCHsIYefo-CmcZGoBBw\"}",
+        "carrierFixedBytes": 49,
+        "carrierFixedBytesMatchesJsonStringify": true
+      }
+    },
+    {
+      "name": "valid-statement-from-a-never-rotated-node",
+      "sections": [
+        "7.6 element 18",
+        "7.5"
+      ],
+      "note": "Element 18 is REQUIRED in every statement, including from a node that has never rotated: the chain is empty and the continuity id is still present.",
+      "inputs": {
+        "continuityChainLength": 0,
+        "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF"
+      },
+      "expected": {
+        "transcript": {
+          "$bytes": "93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00080f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "transcriptBytes": 431,
+        "transcriptSha256": "8ce8633054986c54fc59c1e4dea23916165fe06720f775340f7c5d59c5b83612",
+        "signingEnvelope": {
+          "$bytes": "8278237279636f2e6e6f64652d653265652d6361706162696c6974792d6469676573742e763158208ce8633054986c54fc59c1e4dea23916165fe06720f775340f7c5d59c5b83612"
+        },
+        "signingEnvelopeBytes": 72,
+        "signature": {
+          "$bytes": "597daad9dd94894c5fbc10270611c69b05a889699bfebc0d9379dfac8467f0b54062b8840b1083c8a2eeba8955993cb007636e00d08f4d04e211bb58677ce502"
+        },
+        "statement": {
+          "$bytes": "825901af93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00080f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f464646464646464646464646464646464646464646465840597daad9dd94894c5fbc10270611c69b05a889699bfebc0d9379dfac8467f0b54062b8840b1083c8a2eeba8955993cb007636e00d08f4d04e211bb58677ce502"
+        },
+        "statementBytes": 501,
+        "base64urlChars": 668,
+        "carrierBytes": 717,
+        "identityFingerprint": {
+          "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+        },
+        "agreementFingerprint": {
+          "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "admittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "continuityChainElement": [],
+        "continuityIdElement": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+        "selfCheck": {
+          "kind": "ok"
+        }
+      }
+    },
+    {
+      "name": "maximum-conforming-statement",
+      "sections": [
+        "5.5",
+        "3.2.1 S1",
+        "3.2.1 S3",
+        "3.2.1 S4",
+        "3.2.1 S5",
+        "3.2.1 S6",
+        "3.2.1 S8"
+      ],
+      "note": "Every bound taken simultaneously: `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` chain entries, a Hub origin of exactly `E2EE_HUB_ORIGIN_MAX_BYTES`, `E2EE_SUITE_REGISTRY_MAX_ENTRIES` suite ids, and every unsigned field at its widest canonical encoding. TWO numbers are emitted for each figure and both are asserted: the largest statement that actually VALIDATES under the version-1 registries, and the §5.5 upper bound, which additionally charges the version and suite-id fields their widest encoding. They differ by exactly the over-charge §5.5 names.",
+      "inputs": {
+        "hubOriginBytes": 128,
+        "hubOriginMaxBytes": 128,
+        "continuityChainLength": 8,
+        "suiteRegistryEntries": 8,
+        "firstGeneration": 4294967297,
+        "unsignedFieldValue": 4294967296
+      },
+      "expected": {
+        "continuityTranscriptBytes": 421,
+        "largestValidating": {
+          "transcriptBytes": 4480,
+          "statementBytes": 4550,
+          "base64urlChars": 6067,
+          "carrierBytes": 6116,
+          "carrierPlusPreludeBytes": 6124
+        },
+        "section55UpperBound": {
+          "overChargedFields": 10,
+          "overChargeBytes": 80,
+          "transcriptBytes": 4560,
+          "statementBytes": 4630,
+          "base64urlChars": 6174,
+          "carrierBytes": 6223,
+          "carrierPlusPreludeBytes": 6231
+        },
+        "bounds": {
+          "capabilityTranscriptMaxBytes": 5120,
+          "statementWrapperMaxBytes": 70,
+          "capabilityStatementMaxBytes": 5190,
+          "capabilityCarrierFixedBytes": 49,
+          "capabilityCarrierMaxBytes": 6969,
+          "advertisementMinChunkBytes": 8192,
+          "capabilitySigningEnvelopeBytes": 72,
+          "signingInputMaxBytes": 4096
+        },
+        "satisfiesS8": true,
+        "satisfiesS4": true,
+        "satisfiesS5": true,
+        "satisfiesS6": true,
+        "satisfiesS1": true,
+        "selfCheck": {
+          "kind": "ok"
+        },
+        "directSigningWouldExceedTheSigningInterface": true
+      }
+    },
+    {
+      "name": "signing-envelope-length-is-identical-for-a-minimum-and-a-maximum-transcript",
+      "sections": [
+        "7.2.1",
+        "3.2.1 S1",
+        "3.2.1 S3"
+      ],
+      "note": "This is why the transcript is never signed directly: the envelope is fixed-width whatever the chain depth, so a node that has rotated the permitted number of times can still sign.",
+      "inputs": {
+        "minimumTranscriptBytes": 431,
+        "maximumTranscriptBytes": 4480
+      },
+      "expected": {
+        "minimumEnvelope": {
+          "$bytes": "8278237279636f2e6e6f64652d653265652d6361706162696c6974792d6469676573742e763158208ce8633054986c54fc59c1e4dea23916165fe06720f775340f7c5d59c5b83612"
+        },
+        "maximumEnvelope": {
+          "$bytes": "8278237279636f2e6e6f64652d653265652d6361706162696c6974792d6469676573742e763158204b780789c26fc8235b304aec4a4555a6a63448ab75fafcb62baaab0e301d8802"
+        },
+        "minimumEnvelopeBytes": 72,
+        "maximumEnvelopeBytes": 72,
+        "identicalLengths": true,
+        "capabilitySigningEnvelopeBytes": 72,
+        "bothWithinSigningInputMaxBytes": true,
+        "digestDomain": "ryco.node-e2ee-capability-digest.v1"
+      }
+    },
+    {
+      "name": "signature-computed-over-the-raw-transcript-instead-of-the-envelope",
+      "sections": [
+        "7.2",
+        "7.2.1",
+        "5.2 step 1"
+      ],
+      "note": "§7.2.1 forbids any structure that invites a verifier to accept a digest it did not compute; a signature made over the transcript itself does not verify against the envelope the verifier rebuilds.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "signature": {
+          "$bytes": "158e8ba7fbcc0c2576b0924838a1ed2be29f7ea1d5c0ac6092060eb0030cc310cf60b4baf2fc3bac1dbbdd133f58838848d4177986356deafd34a145f0584b0a"
+        },
+        "verifierRebuiltEnvelope": {
+          "$bytes": "8278237279636f2e6e6f64652d653265652d6361706162696c6974792d6469676573742e76315820db437f495b2364f83db5619f42055dce391cae46401c4fd2f092bc59974161eb"
+        }
+      },
+      "expected": {
+        "verifies": false
+      }
+    },
+    {
+      "name": "envelope-built-from-a-digest-of-different-transcript-bytes",
+      "sections": [
+        "7.2.1",
+        "5.2 step 1"
+      ],
+      "note": "The signature is over a correctly formed envelope — of the WRONG transcript. The verifier rebuilds the envelope from the exact bytes received, so the substitution shows up as a signature failure and never as an accepted digest.",
+      "inputs": {
+        "carriedTranscript": {
+          "$bytes": "93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "signedOverEnvelopeOfTranscript": {
+          "$bytes": "93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00080f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "signature": {
+          "$bytes": "597daad9dd94894c5fbc10270611c69b05a889699bfebc0d9379dfac8467f0b54062b8840b1083c8a2eeba8955993cb007636e00d08f4d04e211bb58677ce502"
+        }
+      },
+      "expected": {
+        "verifies": false
+      }
+    },
+    {
+      "name": "non-canonical-transcript-encoding",
+      "sections": [
+        "3.6",
+        "5.2 step 1"
+      ],
+      "note": "The same 19 elements with the array header re-emitted one byte wider. §3.6's re-encode equality rule rejects it before any signature check, and the identity signature over the canonical bytes does not cover these bytes either.",
+      "inputs": {
+        "canonicalTranscript": {
+          "$bytes": "93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "nonCanonicalTranscript": {
+          "$bytes": "9813781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        }
+      },
+      "expected": {
+        "canonicalDecode": {
+          "kind": "error",
+          "reason": "malformed"
+        },
+        "envelopeOverTheNonCanonicalBytesDiffers": true,
+        "verifiesUnderTheCanonicalSignature": false
+      }
+    },
+    {
+      "name": "prekey-cross-signature-lifted-from-another-statement",
+      "sections": [
+        "7.6",
+        "5.2 step 5"
+      ],
+      "inputs": {
+        "statementHubOrigin": "https://hub.example.com",
+        "crossSignatureTakenFromStatementForHubOrigin": "https://other.example.com",
+        "crossSignature": {
+          "$bytes": "690e6a9f0e59ee2735a76c14b07dba854929262df7798554647e8232b729774538f8076d8ef7082812421c070b806e28d5ebfed05b19dd8a894f015d63412403"
+        }
+      },
+      "expected": {
+        "crossSignatureReconstructionVerifies": false
+      }
+    },
+    {
+      "name": "advertised-identity-fingerprint-disagrees-with-the-advertised-identity-key",
+      "sections": [
+        "7.1",
+        "7.6",
+        "5.2 step 2"
+      ],
+      "note": "§5.2 step 2 recomputes EVERY advertised fingerprint from its algorithm-labelled raw public key. The reconstruction enforces the same rule, so the two agree on the verdict rather than leaving it to whichever runs first.",
+      "inputs": {
+        "carriedIdentityFingerprint": {
+          "$bytes": "507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a680686"
+        },
+        "recomputedIdentityFingerprint": {
+          "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+        }
+      },
+      "expected": {
+        "crossSignatureReconstructionVerifies": false
+      }
+    },
+    {
+      "name": "hub-origin-exactly-at-the-bound",
+      "sections": [
+        "7.1",
+        "7.6.1"
+      ],
+      "inputs": {
+        "hubOrigin": "https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com",
+        "hubOriginBytes": 128,
+        "hubOriginMaxBytes": 128
+      },
+      "expected": {
+        "canonicalizationAccepted": true,
+        "encoderAccepted": true,
+        "expectedAccepted": true,
+        "selfCheckOnAConformingArtifact": {
+          "kind": "ok"
+        }
+      }
+    },
+    {
+      "name": "hub-origin-one-byte-over-the-bound",
+      "sections": [
+        "7.1",
+        "7.6.1"
+      ],
+      "inputs": {
+        "hubOrigin": "https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com",
+        "hubOriginBytes": 129,
+        "hubOriginMaxBytes": 128
+      },
+      "expected": {
+        "canonicalizationAccepted": false,
+        "encoderAccepted": false,
+        "expectedAccepted": false,
+        "selfCheckOnAConformingArtifact": {
+          "kind": "error",
+          "failure": "hub_origin_max_bytes"
+        }
+      }
+    },
+    {
+      "name": "suite-registry-exactly-at-max-entries",
+      "sections": [
+        "7.6 element 9",
+        "15"
+      ],
+      "note": "Version 1 registers exactly one suite id, so the maximum registry is that id repeated: it is the largest registry the version-1 registries can actually produce, which is the reading §5.5 gives its own worked example.",
+      "inputs": {
+        "suiteRegistryEntries": 8,
+        "maxEntries": 8
+      },
+      "expected": {
+        "encoderAccepted": true,
+        "expectedAccepted": true,
+        "transcriptBytes": 1192
+      }
+    },
+    {
+      "name": "suite-registry-one-entry-over-max-entries",
+      "sections": [
+        "7.6 element 9",
+        "15"
+      ],
+      "note": "Version 1 registers exactly one suite id, so the maximum registry is that id repeated: it is the largest registry the version-1 registries can actually produce, which is the reading §5.5 gives its own worked example.",
+      "inputs": {
+        "suiteRegistryEntries": 9,
+        "maxEntries": 8
+      },
+      "expected": {
+        "encoderAccepted": false,
+        "expectedAccepted": false
+      }
+    },
+    {
+      "name": "transcript-exactly-at-the-transcript-bound",
+      "sections": [
+        "5.2 step 0",
+        "7.6",
+        "7.6.1"
+      ],
+      "note": "SYNTHETIC LENGTH PROBE, not a conforming statement: the largest transcript the version-1 registries can produce is well below this bound, so the bound cannot be reached by a conforming encoder. What is exercised is §5.2 step 0's refusal to decode and §7.6.1's refusal to sign.",
+      "inputs": {
+        "transcriptBytes": 5120,
+        "transcriptMaxBytes": 5120
+      },
+      "expected": {
+        "signingEnvelopeAccepted": true,
+        "expectedAccepted": true,
+        "selfCheck": {
+          "kind": "ok"
+        }
+      }
+    },
+    {
+      "name": "transcript-one-byte-over-the-transcript-bound",
+      "sections": [
+        "5.2 step 0",
+        "7.6",
+        "7.6.1"
+      ],
+      "note": "SYNTHETIC LENGTH PROBE, not a conforming statement: the largest transcript the version-1 registries can produce is well below this bound, so the bound cannot be reached by a conforming encoder. What is exercised is §5.2 step 0's refusal to decode and §7.6.1's refusal to sign.",
+      "inputs": {
+        "transcriptBytes": 5121,
+        "transcriptMaxBytes": 5120
+      },
+      "expected": {
+        "signingEnvelopeAccepted": false,
+        "expectedAccepted": false,
+        "selfCheck": {
+          "kind": "error",
+          "failure": "capability_transcript_max_bytes"
+        }
+      }
+    },
+    {
+      "name": "oversized-statement",
+      "sections": [
+        "5.2 step 0",
+        "7.6.1",
+        "3.2.1 S4"
+      ],
+      "note": "Re-anchored to the CURRENT `E2EE_CAPABILITY_STATEMENT_MAX_BYTES`; a synthetic length probe for the same reason as the transcript probes above.",
+      "inputs": {
+        "statementBytes": 5191,
+        "statementMaxBytes": 5190
+      },
+      "expected": {
+        "selfCheck": {
+          "kind": "error",
+          "failure": "capability_statement_max_bytes"
+        }
+      }
+    },
+    {
+      "name": "oversized-carrier",
+      "sections": [
+        "5.3",
+        "7.6.1",
+        "3.2.1 S5"
+      ],
+      "inputs": {
+        "carrierBytes": 6970,
+        "carrierMaxBytes": 6969
+      },
+      "expected": {
+        "selfCheck": {
+          "kind": "error",
+          "failure": "capability_carrier_max_bytes"
+        }
+      }
+    },
+    {
+      "name": "malformed-continuity-id-wrong-prefix",
+      "sections": [
+        "7.6 element 18",
+        "7.1"
+      ],
+      "note": "The §7.1 prefix is part of the identifier.",
+      "inputs": {
+        "continuityId": "epk_FFFFFFFFFFFFFFFFFFFFFF"
+      },
+      "expected": {
+        "encoderRejects": {
+          "rejected": true
+        }
+      }
+    },
+    {
+      "name": "malformed-continuity-id-too-short",
+      "sections": [
+        "7.6 element 18",
+        "7.1"
+      ],
+      "inputs": {
+        "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFF"
+      },
+      "expected": {
+        "encoderRejects": {
+          "rejected": true
+        }
+      }
+    },
+    {
+      "name": "malformed-continuity-id-out-of-alphabet",
+      "sections": [
+        "7.6 element 18",
+        "7.1"
+      ],
+      "note": "The §7.1 body alphabet is `[A-Za-z0-9_-]`.",
+      "inputs": {
+        "continuityId": "nct_**********************"
+      },
+      "expected": {
+        "encoderRejects": {
+          "rejected": true
+        }
+      }
+    },
+    {
+      "name": "malformed-continuity-id-empty",
+      "sections": [
+        "7.6 element 18",
+        "7.1"
+      ],
+      "inputs": {
+        "continuityId": ""
+      },
+      "expected": {
+        "encoderRejects": {
+          "rejected": true
+        }
+      }
+    },
+    {
+      "name": "continuity-id-unresolved-at-startup",
+      "sections": [
+        "7.6.1",
+        "7.5",
+        "5.5 U2"
+      ],
+      "note": "The §7.5 startup cross-check is a NODE-STATE input here, not a computation: the state machine that decides it is owned by the node phase (see this family's `deferred` list). What is derived is the §7.6.1 verdict once the input is known.",
+      "inputs": {
+        "continuityIdResolved": false
+      },
+      "expected": {
+        "selfCheck": {
+          "kind": "error",
+          "failure": "continuity_id_unresolved"
+        },
+        "advertisementUnavailable": "U2 statement-unavailable",
+        "fatalUnderEffectiveRequireE2EE": "P23"
+      }
+    },
+    {
+      "name": "protocol-range-excludes-the-implemented-version-unlatched",
+      "sections": [
+        "5.2 step 8",
+        "7.6 elements 7-8",
+        "8.2",
+        "12.1.1"
+      ],
+      "note": "Fully valid and correctly signed, and still unusable evidence: a hello sent against a range that excludes this client's version cannot succeed and would spend the channel and its single-use ticket for nothing.",
+      "inputs": {
+        "tier": "native",
+        "tierNoisePattern": "IK",
+        "selectionLatched": false,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 2,
+        "advertisedVersionMax": 3,
+        "advertisedAdmittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statement": {
+          "$bytes": "825904a193781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640203810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f464646464646464646464646464646464646464646465840e374ae2994bdc5d4339e6ec879a399ff63794471ad31efba02022cb39f6a080d4c85fdc79c84024a12b4d47a29273f61542946a4b851a7c2fb1327b33dfce507"
+        },
+        "carrierBytes": 1723
+      },
+      "expected": {
+        "selection": {
+          "kind": "unusable",
+          "reason": "protocol_version_out_of_range"
+        },
+        "helloMayBeBuilt": false,
+        "row": "K3",
+        "evidenceTreatment": "absent-evidence",
+        "ticketSpentOnAHello": false
+      }
+    },
+    {
+      "name": "protocol-range-excludes-the-implemented-version-latched",
+      "sections": [
+        "5.2 step 8",
+        "7.6 elements 7-8",
+        "8.2",
+        "12.1.1"
+      ],
+      "note": "Fully valid and correctly signed, and still unusable evidence: a hello sent against a range that excludes this client's version cannot succeed and would spend the channel and its single-use ticket for nothing.",
+      "inputs": {
+        "tier": "native",
+        "tierNoisePattern": "IK",
+        "selectionLatched": true,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 2,
+        "advertisedVersionMax": 3,
+        "advertisedAdmittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statement": {
+          "$bytes": "825904a193781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640203810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f464646464646464646464646464646464646464646465840e374ae2994bdc5d4339e6ec879a399ff63794471ad31efba02022cb39f6a080d4c85fdc79c84024a12b4d47a29273f61542946a4b851a7c2fb1327b33dfce507"
+        },
+        "carrierBytes": 1723
+      },
+      "expected": {
+        "selection": {
+          "kind": "unusable",
+          "reason": "protocol_version_out_of_range"
+        },
+        "helloMayBeBuilt": false,
+        "row": "K2",
+        "fatal": "P15",
+        "ticketSpentOnAHello": false
+      }
+    },
+    {
+      "name": "protocol-range-excludes-the-implemented-version-fails-the-node-self-check",
+      "sections": [
+        "7.6.1",
+        "5.5 U2"
+      ],
+      "inputs": {
+        "e2eeVersionMin": 2,
+        "e2eeVersionMax": 3,
+        "implementedVersion": 1
+      },
+      "expected": {
+        "selfCheck": {
+          "kind": "error",
+          "failure": "protocol_version_out_of_range"
+        }
+      }
+    },
+    {
+      "name": "protocol-range-inverted-unlatched",
+      "sections": [
+        "5.2 step 8",
+        "7.6 elements 7-8"
+      ],
+      "note": "`e2eeVersionMin > e2eeVersionMax`. No signed statement bytes are emitted for this case: `encodeNodeE2eeCapabilityTranscript` refuses to build one, so an inverted range can only ever arrive as peer-supplied evidence, which is the position the selection input below models.",
+      "inputs": {
+        "tier": "native",
+        "tierNoisePattern": "IK",
+        "selectionLatched": false,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 3,
+        "advertisedVersionMax": 2,
+        "advertisedAdmittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statementBytesEmitted": false
+      },
+      "expected": {
+        "selection": {
+          "kind": "unusable",
+          "reason": "protocol_version_out_of_range"
+        },
+        "helloMayBeBuilt": false,
+        "row": "K3",
+        "evidenceTreatment": "absent-evidence",
+        "ticketSpentOnAHello": false
+      }
+    },
+    {
+      "name": "protocol-range-inverted-latched",
+      "sections": [
+        "5.2 step 8",
+        "7.6 elements 7-8"
+      ],
+      "note": "`e2eeVersionMin > e2eeVersionMax`. No signed statement bytes are emitted for this case: `encodeNodeE2eeCapabilityTranscript` refuses to build one, so an inverted range can only ever arrive as peer-supplied evidence, which is the position the selection input below models.",
+      "inputs": {
+        "tier": "native",
+        "tierNoisePattern": "IK",
+        "selectionLatched": true,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 3,
+        "advertisedVersionMax": 2,
+        "advertisedAdmittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statementBytesEmitted": false
+      },
+      "expected": {
+        "selection": {
+          "kind": "unusable",
+          "reason": "protocol_version_out_of_range"
+        },
+        "helloMayBeBuilt": false,
+        "row": "K2",
+        "fatal": "P15",
+        "ticketSpentOnAHello": false
+      }
+    },
+    {
+      "name": "protocol-range-minimum-equal-to-the-implemented-version",
+      "sections": [
+        "5.2 step 8"
+      ],
+      "note": "A range test and not an equality test: the minimum equals `E2EE_PROTOCOL_VERSION` and the maximum is strictly greater, and the ordinary K1 path applies.",
+      "inputs": {
+        "tier": "native",
+        "tierNoisePattern": "IK",
+        "selectionLatched": true,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 1,
+        "advertisedVersionMax": 4,
+        "advertisedAdmittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statement": {
+          "$bytes": "825904a193781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640104810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f4646464646464646464646464646464646464646464658400186b30b25d157f7096e0b2ad0d8325c1660afc0beb571cdc90f408df729f4b6c56cb3482d46b5f414b2332fd8c2e2b711cfc94b6605e554b56a61eecf68d40d"
+        },
+        "carrierBytes": 1723
+      },
+      "expected": {
+        "selection": {
+          "kind": "usable",
+          "selectedSuite": 1
+        },
+        "helloMayBeBuilt": true,
+        "row": "K1"
+      }
+    },
+    {
+      "name": "admitted-pattern-set-under-require-approved-client-e2ee",
+      "sections": [
+        "7.6 element 14",
+        "12.4"
+      ],
+      "note": "Element 14 is derived by the encoder from `requireApprovedClientE2EE`, so this is the set such a node advertises rather than one the fixture chose.",
+      "inputs": {
+        "requireApprovedClientE2EE": true
+      },
+      "expected": {
+        "transcript": {
+          "$bytes": "93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f58162494b071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "transcriptBytes": 1182,
+        "transcriptSha256": "605ec785571b440d81657cf70a608070b4bad97e072c24a206db86c34798c333",
+        "signingEnvelope": {
+          "$bytes": "8278237279636f2e6e6f64652d653265652d6361706162696c6974792d6469676573742e76315820605ec785571b440d81657cf70a608070b4bad97e072c24a206db86c34798c333"
+        },
+        "signingEnvelopeBytes": 72,
+        "signature": {
+          "$bytes": "00b0d82c418189059291c33355c2baa3acad404f1790c10e48601b03227c9f5f4e8317a2ee9ad9e873e19a70ec94823147a43cb57231f539a5ac539af6e69700"
+        },
+        "statement": {
+          "$bytes": "8259049e93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f58162494b071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646584000b0d82c418189059291c33355c2baa3acad404f1790c10e48601b03227c9f5f4e8317a2ee9ad9e873e19a70ec94823147a43cb57231f539a5ac539af6e69700"
+        },
+        "statementBytes": 1252,
+        "base64urlChars": 1670,
+        "carrierBytes": 1719,
+        "identityFingerprint": {
+          "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+        },
+        "agreementFingerprint": {
+          "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "admittedPatterns": [
+          "IK"
+        ]
+      }
+    },
+    {
+      "name": "admitted-pattern-set-ik-only-evaluated-as-web-latched",
+      "sections": [
+        "5.2 step 9",
+        "7.6 element 14",
+        "8.1",
+        "12.1",
+        "12.4"
+      ],
+      "note": "The REACHABLE version-1 configuration: §12.1 sets the web latch on the statement's own validation and step 9 runs after it, so a web client against a node running `requireApprovedClientE2EE` takes P15 and no buffered send is ever flushed as plaintext.",
+      "inputs": {
+        "tier": "web",
+        "tierNoisePattern": "NX",
+        "selectionLatched": true,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 1,
+        "advertisedVersionMax": 1,
+        "advertisedAdmittedPatterns": [
+          "IK"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statement": {
+          "$bytes": "8259049e93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f58162494b071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646584000b0d82c418189059291c33355c2baa3acad404f1790c10e48601b03227c9f5f4e8317a2ee9ad9e873e19a70ec94823147a43cb57231f539a5ac539af6e69700"
+        },
+        "carrierBytes": 1719
+      },
+      "expected": {
+        "selection": {
+          "kind": "unusable",
+          "reason": "pattern_not_admitted"
+        },
+        "helloMayBeBuilt": false,
+        "row": "K2",
+        "fatal": "P15",
+        "ticketSpentOnAHello": false
+      }
+    },
+    {
+      "name": "admitted-pattern-set-ik-only-evaluated-as-web-unlatched",
+      "sections": [
+        "5.2 step 9",
+        "7.6 element 14",
+        "12.1.1"
+      ],
+      "note": "A RULE-LEVEL case, not a reachable web one: it pins the K3 branch of the same guard for the first future tier whose latch is unset. It does not claim a conforming version-1 web client can occupy this state.",
+      "inputs": {
+        "tier": "web",
+        "tierNoisePattern": "NX",
+        "selectionLatched": false,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 1,
+        "advertisedVersionMax": 1,
+        "advertisedAdmittedPatterns": [
+          "IK"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statement": {
+          "$bytes": "8259049e93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f58162494b071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646584000b0d82c418189059291c33355c2baa3acad404f1790c10e48601b03227c9f5f4e8317a2ee9ad9e873e19a70ec94823147a43cb57231f539a5ac539af6e69700"
+        },
+        "carrierBytes": 1719
+      },
+      "expected": {
+        "selection": {
+          "kind": "unusable",
+          "reason": "pattern_not_admitted"
+        },
+        "helloMayBeBuilt": false,
+        "row": "K3",
+        "evidenceTreatment": "absent-evidence",
+        "ticketSpentOnAHello": false
+      }
+    },
+    {
+      "name": "admitted-pattern-set-ik-only-evaluated-as-native",
+      "sections": [
+        "5.2 step 9",
+        "8.1"
+      ],
+      "note": "The identical statement bytes evaluated by a client whose tier runs `IK`: the ordinary K1 path, which is what makes the check a membership test against the client's own pattern rather than a length or literal test on the set.",
+      "inputs": {
+        "tier": "native",
+        "tierNoisePattern": "IK",
+        "selectionLatched": true,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 1,
+        "advertisedVersionMax": 1,
+        "advertisedAdmittedPatterns": [
+          "IK"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statement": {
+          "$bytes": "8259049e93781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f58162494b071b0000019f68398d301b0000019f6842b4f0781a6e63745f46464646464646464646464646464646464646464646584000b0d82c418189059291c33355c2baa3acad404f1790c10e48601b03227c9f5f4e8317a2ee9ad9e873e19a70ec94823147a43cb57231f539a5ac539af6e69700"
+        },
+        "carrierBytes": 1719
+      },
+      "expected": {
+        "selection": {
+          "kind": "usable",
+          "selectedSuite": 1
+        },
+        "helloMayBeBuilt": true,
+        "row": "K1"
+      }
+    },
+    {
+      "name": "admitted-pattern-set-ik-and-nx-evaluated-as-web",
+      "sections": [
+        "5.2 step 9"
+      ],
+      "inputs": {
+        "tier": "web",
+        "tierNoisePattern": "NX",
+        "selectionLatched": true,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 1,
+        "advertisedVersionMax": 1,
+        "advertisedAdmittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          1
+        ],
+        "statement": {
+          "$bytes": "825904a193781c7279636f2e6e6f64652d653265652d6361706162696c6974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b640101810186781a65706b5f4545454545454545454545454545454545454545454558207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13584058f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c71620758200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7791b0000019f683918001b000001a002b7e00082825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f683918005840493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c825901338d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646026765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806866765643235353139781b6e6b65795f42424242424242424242424242424242424242424242582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f6839180058408336464e0b2767da7d0cabe8894bbce7ee2a48b05f90b70c980da5a379f072c2661a1f7af18bd093ab34c4abe85aa6f3e4d3182ddf6217af05c65a522daac404f4f48262494b624e58071b0000019f68398d301b0000019f6842b4f0781a6e63745f4646464646464646464646464646464646464646464658402aea508d3a152d8fc8d7bfc7237f862c32490fad58a84390d78bf4a666c305ad527dba4502bedea3e5539bb4c4b6738c491190087b0861e7e8f8299c646a0107"
+        },
+        "carrierBytes": 1723
+      },
+      "expected": {
+        "selection": {
+          "kind": "usable",
+          "selectedSuite": 1
+        },
+        "helloMayBeBuilt": true,
+        "row": "K1"
+      }
+    },
+    {
+      "name": "empty-suite-intersection",
+      "sections": [
+        "8.2"
+      ],
+      "note": "The third way a valid, correctly signed statement is unusable; it carries the identical disposition to steps 8 and 9.",
+      "inputs": {
+        "tier": "native",
+        "tierNoisePattern": "IK",
+        "selectionLatched": true,
+        "protocolVersion": 1,
+        "advertisedVersionMin": 1,
+        "advertisedVersionMax": 1,
+        "advertisedAdmittedPatterns": [
+          "IK",
+          "NX"
+        ],
+        "advertisedSuiteRegistry": [
+          1
+        ],
+        "localSuitePreference": [
+          2
+        ],
+        "statementBytesEmitted": false
+      },
+      "expected": {
+        "selection": {
+          "kind": "unusable",
+          "reason": "empty_suite_intersection"
+        },
+        "helloMayBeBuilt": false,
+        "row": "K2",
+        "fatal": "P15",
+        "ticketSpentOnAHello": false
+      }
+    },
+    {
+      "name": "largest-directly-signed-transcripts",
+      "sections": [
+        "7.3",
+        "7.4",
+        "7.5",
+        "3.2.1 S9"
+      ],
+      "note": "§7.3, §7.4, and §7.5 are of bounded, non-growing shape and are signed DIRECTLY, so S9 is what makes each of them producible.",
+      "inputs": {
+        "hubOriginBytes": 128,
+        "accountIdBytes": 256
+      },
+      "expected": {
+        "nodePrekeyTranscriptBytes": 384,
+        "clientPrekeyTranscriptBytes": 589,
+        "continuityTranscriptBytes": 421,
+        "largestDirectTranscriptBytes": 589,
+        "directSigningTranscriptMaxBytes": 1024,
+        "satisfiesS9": true
+      }
+    }
+  ]
+}

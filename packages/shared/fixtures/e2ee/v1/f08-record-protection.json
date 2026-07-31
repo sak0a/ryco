@@ -1,0 +1,619 @@
+{
+  "family": {
+    "number": 8,
+    "title": "Record protection",
+    "sections": [
+      "9.1",
+      "9.2",
+      "9.3",
+      "16.3 F8"
+    ],
+    "summary": "The §9.1 AEAD invocation as data: the exact AAD bytes and nonce in both directions, envelopes at counters zero and one in both directions, a control record taking the next pair of the same directional sequence, and the four tampering cases — a header byte of each field, a ciphertext byte, an AEAD tag byte, the direction label, and `sessionBindingHash`.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyClientEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyNodeEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyClientNonce": {
+      "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
+    },
+    "clientIdentityFingerprint": {
+      "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+    },
+    "clientAgreementFingerprint": {
+      "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+    },
+    "nodeIdentityFingerprint": {
+      "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+    },
+    "nodeAgreementFingerprint": {
+      "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+    },
+    "channel": {
+      "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+      "relayProtocolMajor": 1,
+      "relayProtocolMinor": 2,
+      "channelOpenCapability": "ryco.rpc",
+      "channelOpenEffectiveRole": "operator"
+    }
+  },
+  "cases": [
+    {
+      "name": "aad-client-to-node",
+      "sections": [
+        "3.3",
+        "9.1"
+      ],
+      "note": "The AAD is `header ‖ sessionBindingHash ‖ directionLabel`, and it is the exact envelope header rather than a re-encoding of its fields. The nonce is the header's own `epoch ‖ counter`.",
+      "inputs": {
+        "direction": "c2n",
+        "suite": 1,
+        "epoch": 0,
+        "counter": 0,
+        "sessionBindingHash": {
+          "$bytes": "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        }
+      },
+      "expected": {
+        "header": {
+          "$bytes": "010101000000000000000000000000"
+        },
+        "headerBytes": 15,
+        "envelopeHeaderBytes": 15,
+        "directionLabel": {
+          "$bytes": "63326e"
+        },
+        "nonce": {
+          "$bytes": "000000000000000000000000"
+        },
+        "nonceEqualsHeaderSequenceFields": true,
+        "aad": {
+          "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6763326e"
+        },
+        "aadBytes": 50,
+        "matchesAadBytesConstant": true
+      }
+    },
+    {
+      "name": "aad-node-to-client",
+      "sections": [
+        "3.3",
+        "9.1"
+      ],
+      "note": "The AAD is `header ‖ sessionBindingHash ‖ directionLabel`, and it is the exact envelope header rather than a re-encoding of its fields. The nonce is the header's own `epoch ‖ counter`.",
+      "inputs": {
+        "direction": "n2c",
+        "suite": 1,
+        "epoch": 0,
+        "counter": 0,
+        "sessionBindingHash": {
+          "$bytes": "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        }
+      },
+      "expected": {
+        "header": {
+          "$bytes": "010101000000000000000000000000"
+        },
+        "headerBytes": 15,
+        "envelopeHeaderBytes": 15,
+        "directionLabel": {
+          "$bytes": "6e3263"
+        },
+        "nonce": {
+          "$bytes": "000000000000000000000000"
+        },
+        "nonceEqualsHeaderSequenceFields": true,
+        "aad": {
+          "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a676e3263"
+        },
+        "aadBytes": 50,
+        "matchesAadBytesConstant": true
+      }
+    },
+    {
+      "name": "envelopes-at-counters-zero-and-one-client-to-node",
+      "sections": [
+        "9.1",
+        "9.2",
+        "9.3"
+      ],
+      "inputs": {
+        "sendDirection": "c2n",
+        "aeadKey": {
+          "$bytes": "99a6a5b035262ec751e2623691d6afe37a3328ab418d4df6a7cbdb445efe86ad"
+        },
+        "sessionBindingHash": {
+          "$bytes": "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        }
+      },
+      "expected": {
+        "records": [
+          {
+            "innerBody": {
+              "$bytes": "636f756e7465722d7a65726f"
+            },
+            "envelope": {
+              "$bytes": "01010100000000000000000000000078e6c4a48a2b069a9c6a875f5994933f21b2f9dd58c71b782fda51e6e7"
+            },
+            "envelopeBytes": 44,
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "aad": {
+              "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6763326e"
+            },
+            "received": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 12,
+              "epoch": 0,
+              "counter": 0,
+              "plaintextBytes": 13,
+              "epochCompleted": false
+            }
+          },
+          {
+            "innerBody": {
+              "$bytes": "636f756e7465722d6f6e65"
+            },
+            "envelope": {
+              "$bytes": "01010100000000000000000000000105c88a1fd19800e104e6614ad919a8c53b3f1860fdf5343bd5833746"
+            },
+            "envelopeBytes": 43,
+            "position": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "aad": {
+              "$bytes": "0101010000000000000000000000015f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6763326e"
+            },
+            "received": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 11,
+              "epoch": 0,
+              "counter": 1,
+              "plaintextBytes": 12,
+              "epochCompleted": false
+            }
+          }
+        ],
+        "senderNextSend": {
+          "epoch": 0,
+          "counter": 2,
+          "epochRecords": 2,
+          "epochBytes": 25,
+          "exhausted": false
+        },
+        "receiverExpectedNext": {
+          "epoch": 0,
+          "counter": 2,
+          "epochRecords": 2,
+          "epochBytes": 25,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "name": "envelopes-at-counters-zero-and-one-node-to-client",
+      "sections": [
+        "9.1",
+        "9.2",
+        "9.3"
+      ],
+      "inputs": {
+        "sendDirection": "n2c",
+        "aeadKey": {
+          "$bytes": "e0f13593d4e14f5304cb6082e5bade70addbc1db7e8946958bf42c691a99ff79"
+        },
+        "sessionBindingHash": {
+          "$bytes": "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        }
+      },
+      "expected": {
+        "records": [
+          {
+            "innerBody": {
+              "$bytes": "636f756e7465722d7a65726f"
+            },
+            "envelope": {
+              "$bytes": "010101000000000000000000000000deb62682d021d0eaf45f0028c3bbb9cba1bdf3f6f9c578214cdbb828c2"
+            },
+            "envelopeBytes": 44,
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "aad": {
+              "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a676e3263"
+            },
+            "received": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 12,
+              "epoch": 0,
+              "counter": 0,
+              "plaintextBytes": 13,
+              "epochCompleted": false
+            }
+          },
+          {
+            "innerBody": {
+              "$bytes": "636f756e7465722d6f6e65"
+            },
+            "envelope": {
+              "$bytes": "010101000000000000000000000001800b8fb86ea09b8393c6350af815afe788f730786c26e56e50545e33"
+            },
+            "envelopeBytes": 43,
+            "position": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "aad": {
+              "$bytes": "0101010000000000000000000000015f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a676e3263"
+            },
+            "received": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 11,
+              "epoch": 0,
+              "counter": 1,
+              "plaintextBytes": 12,
+              "epochCompleted": false
+            }
+          }
+        ],
+        "senderNextSend": {
+          "epoch": 0,
+          "counter": 2,
+          "epochRecords": 2,
+          "epochBytes": 25,
+          "exhausted": false
+        },
+        "receiverExpectedNext": {
+          "epoch": 0,
+          "counter": 2,
+          "epochRecords": 2,
+          "epochBytes": 25,
+          "exhausted": false
+        }
+      }
+    },
+    {
+      "name": "control-record-consumes-the-shared-sequence",
+      "sections": [
+        "4.1",
+        "9.1",
+        "9.4"
+      ],
+      "note": "§4.1 defines no second nonce space: an `E2EEClose` takes the next `(epoch, counter)` of the same directional sequence an RPC record would have taken, and counts toward both §9.4 thresholds.",
+      "inputs": {
+        "firstRecord": {
+          "innerType": 1,
+          "body": {
+            "$bytes": "6170706c69636174696f6e"
+          }
+        },
+        "secondRecord": {
+          "innerType": 2,
+          "body": {
+            "$bytes": "8544000000004800000000000000014400000000480000000000000000582022d0f181fbc32cb6c1947e70f969573d184fdf2ca948fe1f9988bd9a3fd2e73e"
+          }
+        }
+      },
+      "expected": {
+        "firstEnvelope": {
+          "$bytes": "01010100000000000000000000000078e4dba188360089c5798d43b72a8d89391c6e70a3aa8d23964f0b6d"
+        },
+        "firstPosition": {
+          "epoch": 0,
+          "counter": 0
+        },
+        "firstReceived": {
+          "kind": "authenticated",
+          "innerType": 1,
+          "bodyBytes": 11,
+          "epoch": 0,
+          "counter": 0,
+          "plaintextBytes": 12,
+          "epochCompleted": false
+        },
+        "secondEnvelope": {
+          "$bytes": "010101000000000000000000000001062ea16abfec65db29890f2fcaf2edfcaab55c741b0f5b5f34a55ad2deda35745a97cd8c19210267aeebcd31634c17f02e62e286dc33a97c401744ecfe1eb2bff3c401819cb2dc9a6da44dc05ce29908"
+        },
+        "secondPosition": {
+          "epoch": 0,
+          "counter": 1
+        },
+        "secondReceived": {
+          "kind": "authenticated",
+          "innerType": 2,
+          "bodyBytes": 63,
+          "epoch": 0,
+          "counter": 1,
+          "plaintextBytes": 64,
+          "epochCompleted": false
+        },
+        "senderNextSend": {
+          "epoch": 0,
+          "counter": 2,
+          "epochRecords": 2,
+          "epochBytes": 76,
+          "exhausted": false
+        },
+        "controlRecordCountedTowardTheEpoch": true
+      }
+    },
+    {
+      "name": "tampered-header-version-byte",
+      "sections": [
+        "4.3",
+        "9.1",
+        "11.3 Q1"
+      ],
+      "note": "The header is inside the AAD, so a tamper would also fail authentication — but §4.3's ordering means the field's own comparison fires first and the ciphertext is never decrypted.",
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        },
+        "tamperedByteIndex": 1,
+        "tamperedField": "version",
+        "tamperedEnvelope": {
+          "$bytes": "01000100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "version_mismatch"
+        },
+        "ciphertextDecrypted": false,
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "tampered-header-suite-byte",
+      "sections": [
+        "4.3",
+        "9.1",
+        "11.3 Q1"
+      ],
+      "note": "The header is inside the AAD, so a tamper would also fail authentication — but §4.3's ordering means the field's own comparison fires first and the ciphertext is never decrypted.",
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        },
+        "tamperedByteIndex": 2,
+        "tamperedField": "suite",
+        "tamperedEnvelope": {
+          "$bytes": "01010000000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "suite_mismatch"
+        },
+        "ciphertextDecrypted": false,
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "tampered-header-epoch-byte",
+      "sections": [
+        "9.2",
+        "11.3 Q2"
+      ],
+      "note": "The header is inside the AAD, so a tamper would also fail authentication — but §4.3's ordering means the field's own comparison fires first and the ciphertext is never decrypted.",
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        },
+        "tamperedByteIndex": 3,
+        "tamperedField": "epoch",
+        "tamperedEnvelope": {
+          "$bytes": "01010101000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "sequence_mismatch"
+        },
+        "ciphertextDecrypted": false,
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "tampered-header-counter-byte",
+      "sections": [
+        "9.2",
+        "11.3 Q2"
+      ],
+      "note": "The header is inside the AAD, so a tamper would also fail authentication — but §4.3's ordering means the field's own comparison fires first and the ciphertext is never decrypted.",
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        },
+        "tamperedByteIndex": 10,
+        "tamperedField": "counter",
+        "tamperedEnvelope": {
+          "$bytes": "01010100000000000000010000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "sequence_mismatch"
+        },
+        "ciphertextDecrypted": false,
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "tampered-ciphertext-byte",
+      "sections": [
+        "9.1",
+        "11.3 Q3"
+      ],
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        },
+        "tamperedByteIndex": 15,
+        "tamperedEnvelope": {
+          "$bytes": "01010100000000000000000000000079f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "authentication_failed"
+        },
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "tampered-aead-tag-byte",
+      "sections": [
+        "9.1",
+        "11.3 Q3"
+      ],
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf48"
+        },
+        "tamperedByteIndex": 40,
+        "tamperedEnvelope": {
+          "$bytes": "01010100000000000000000000000078f1cabc943a11c5dc753db71e0ab3e70148b42b271fe210bf49"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "authentication_failed"
+        },
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "wrong-direction-label-fails-authentication",
+      "sections": [
+        "3.4",
+        "9.1",
+        "11.3 Q3"
+      ],
+      "note": "The direction label is bound TWICE — in the AAD (§9.1) and in the §9.4 key derivation — so an ordinary cross-direction delivery differs in two places at once and proves nothing about either. Here the receiver's AEAD key is pinned to the sender's through the session's own test hook, so the ONLY difference is the label, and the authentication failure is attributable to it alone.",
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078e1c2a3813c1781de7eb313d58cfbf7e22a1f2007f93348e4a5"
+        },
+        "senderDirection": "c2n",
+        "receiverDirectionLabelUsed": "n2c",
+        "testOnlyPinnedAeadKey": {
+          "$bytes": "99a6a5b035262ec751e2623691d6afe37a3328ab418d4df6a7cbdb445efe86ad"
+        }
+      },
+      "expected": {
+        "senderAad": {
+          "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6763326e"
+        },
+        "receiverAad": {
+          "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a676e3263"
+        },
+        "aadsDifferOnlyInTheTrailingLabel": true,
+        "received": {
+          "kind": "fatal",
+          "reason": "authentication_failed"
+        },
+        "aeadKeysAlsoDifferByDirection": true,
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "wrong-session-binding-hash-fails-authentication",
+      "sections": [
+        "3.3",
+        "8.8 step 6",
+        "9.1",
+        "11.3 Q3"
+      ],
+      "note": "The receiver differs from the sender in one bit of `sessionBindingHash` and in nothing else — same suite, same keys, same position. This is what binds every protected record to the exact handshake wire bytes the two ends exchanged.",
+      "inputs": {
+        "envelope": {
+          "$bytes": "01010100000000000000000000000078e7c2bf80360d8f01ad9fac0f2fc6a373a2755fe806d8d8"
+        },
+        "senderSessionBindingHash": {
+          "$bytes": "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        },
+        "receiverSessionBindingHash": {
+          "$bytes": "5e0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "reason": "authentication_failed"
+        },
+        "disposition": "FATAL-POST"
+      }
+    }
+  ]
+}

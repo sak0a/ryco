@@ -1,0 +1,1613 @@
+{
+  "family": {
+    "number": 16,
+    "title": "Authorization context and Branch A enforcement",
+    "sections": [
+      "8.3",
+      "8.6",
+      "8.7",
+      "8.9",
+      "11.3 Q9",
+      "13.6",
+      "16.3 F16"
+    ],
+    "summary": "The §8.3 context block and `contextCommitment` for both tiers, one case per single-element mutation with its mutated bytes and expected §11.2 row, the §8.7 suite-list strip surfaced as a confirmation failure, the §8.3 advertised-snapshot rules (identity rotation, a prune at the chain bound, a prekey rotation, and the next channel), the five Branch A record states with their byte-identical §11.5 observable, and the §13.6 withdrawal test over an admitted-authority snapshot including the full-key scope rule, the widenings, the combined narrow-and-widen command, the in-flight abort, and the NX channel that no withdrawal can name.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations; no pending-client store exists in packages/shared/src. Owned by the node phase.",
+    "The §12.6 policy-withdrawal counterparts of the §13.6 cases above are family F18, which this corpus carries only in part for the same reason: no node policy store and no channel registry exists in packages/shared/src. Owned by the node phase, and enumerated case by case in family F18's own deferrals.",
+    "§16.4 cross-runtime equality: the NX cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyClientEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyNodeEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyClientNonce": {
+      "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
+    },
+    "clientIdentityFingerprint": {
+      "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+    },
+    "clientAgreementFingerprint": {
+      "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+    },
+    "nodeIdentityFingerprint": {
+      "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+    },
+    "nodeAgreementFingerprint": {
+      "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+    },
+    "channel": {
+      "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+      "relayProtocolMajor": 1,
+      "relayProtocolMinor": 2,
+      "channelOpenCapability": "ryco.rpc",
+      "channelOpenEffectiveRole": "operator"
+    }
+  },
+  "cases": [
+    {
+      "name": "authorization-context-block-native-ik",
+      "sections": [
+        "8.3"
+      ],
+      "note": "Both endpoints build the block independently from their own state and compare only the commitment (§8.6 step 7). Elements 10 and 16 are the ONLY tier-dependent elements: the web tier carries the empty string and the empty array, and element 17 has no absence form because the node it describes exists on both tiers.",
+      "inputs": {
+        "tier": "native",
+        "hubOrigin": "https://hub.example.com",
+        "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+        "relayProtocolMajor": 1,
+        "relayProtocolMinor": 2,
+        "suiteId": 1,
+        "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+        "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+        "continuityChainLength": 0,
+        "channelOpenCapability": "ryco.rpc",
+        "channelOpenEffectiveRole": "operator",
+        "accountId": "acct_0123456789"
+      },
+      "expected": {
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "86d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d78"
+        },
+        "contextCommitmentBytes": 32,
+        "elements": {
+          "elementCount": 18,
+          "domain": "ryco.relay-e2ee.context.v1",
+          "hubOrigin": "https://hub.example.com",
+          "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+          "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+          "nodeIdentityAlgorithm": "ed25519",
+          "nodeIdentityFingerprint": {
+            "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+          },
+          "accountId": "acct_0123456789",
+          "clientIntendedCapability": "ryco.rpc",
+          "clientIntendedRole": "operator",
+          "channelOpenCapability": "ryco.rpc",
+          "channelOpenEffectiveRole": "operator",
+          "nodeCertificateFingerprints": [
+            {
+              "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+            }
+          ],
+          "nodeCertificateFingerprintCount": 1,
+          "clientCertificateFingerprints": [
+            {
+              "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+            },
+            {
+              "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+            }
+          ],
+          "nodeContinuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF"
+        },
+        "commitmentIsSha256OfTheBlock": true
+      }
+    },
+    {
+      "name": "authorization-context-block-web-nx",
+      "sections": [
+        "8.3"
+      ],
+      "note": "Both endpoints build the block independently from their own state and compare only the commitment (§8.6 step 7). Elements 10 and 16 are the ONLY tier-dependent elements: the web tier carries the empty string and the empty array, and element 17 has no absence form because the node it describes exists on both tiers.",
+      "inputs": {
+        "tier": "web",
+        "hubOrigin": "https://hub.example.com",
+        "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+        "relayProtocolMajor": 1,
+        "relayProtocolMinor": 2,
+        "suiteId": 1,
+        "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+        "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+        "continuityChainLength": 0,
+        "channelOpenCapability": "ryco.rpc",
+        "channelOpenEffectiveRole": "operator"
+      },
+      "expected": {
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b6460687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df77980781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf"
+        },
+        "contextCommitmentBytes": 32,
+        "elements": {
+          "elementCount": 18,
+          "domain": "ryco.relay-e2ee.context.v1",
+          "hubOrigin": "https://hub.example.com",
+          "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+          "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+          "nodeIdentityAlgorithm": "ed25519",
+          "nodeIdentityFingerprint": {
+            "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+          },
+          "accountId": "",
+          "clientIntendedCapability": "ryco.rpc",
+          "clientIntendedRole": "operator",
+          "channelOpenCapability": "ryco.rpc",
+          "channelOpenEffectiveRole": "operator",
+          "nodeCertificateFingerprints": [
+            {
+              "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+            }
+          ],
+          "nodeCertificateFingerprintCount": 1,
+          "clientCertificateFingerprints": [],
+          "nodeContinuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF"
+        },
+        "commitmentIsSha256OfTheBlock": true
+      }
+    },
+    {
+      "name": "element-9-node-fingerprint-substitution",
+      "sections": [
+        "8.3",
+        "8.6 step 7",
+        "11.2 P13"
+      ],
+      "note": "The node rebuilds element 9 from the identity fingerprint it ADVERTISED on this channel, so a substituted value cannot survive the commitment comparison.",
+      "inputs": {
+        "mutatedElement": 9,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f414141414141414141414141414141414141414141416765643235353139582009090909090909090909090909090909090909090909090909090909090909096f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "5d68b7ccacd9ce864744d2adf14e43233fc8d6e4c3e8db94490b502c6baa3a9f"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a8988878685848382818058205d68b7ccacd9ce864744d2adf14e43233fc8d6e4c3e8db94490b502c6baa3a9f5901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad5766ce4f54f6d634c3952327544811aa5c6be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7dac93b302f77d33cb7c6b8641202fe6ea"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "element-10-cross-account-splice",
+      "sections": [
+        "8.3",
+        "8.6 step 7",
+        "11.2 P13"
+      ],
+      "note": "The node builds element 10 from the AUTHENTICATED IK payload claims and the account id bound in the client certificate, so a context naming a different account does not match the one the certificate carries.",
+      "inputs": {
+        "mutatedElement": 10,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f39383736353433323130687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "5e3ffdb97c6f5bb1266cbcf8c9ce870471fc708604b8dfd245085af79c10ab72"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a8988878685848382818058205e3ffdb97c6f5bb1266cbcf8c9ce870471fc708604b8dfd245085af79c10ab725901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad570c23f1bd2485f895f3b4d913426fd2fc6be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7d407d4698ca5d08526f11e6ddcf2bbebe"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "element-11-capability-mismatch-against-element-13",
+      "sections": [
+        "8.3",
+        "8.6 step 7",
+        "11.2 P13"
+      ],
+      "note": "§8.3 requires element 11 to EQUAL element 13 at both endpoints. Version 1's relay capability vocabulary has a single member, so this block is a peer-supplied mutation rather than anything an encoder will produce; the authenticated payload claims still carry the granted capability, so the node's rebuilt block differs from the committed one.",
+      "inputs": {
+        "mutatedElement": 11,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839781b7279636f2e6e6f742d612d72656c61792d6361706162696c697479686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "d71df6686d35295d2de1906d73e3fc3fc7b2543c0fe2156dbf45bebfa1fdf532"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281805820d71df6686d35295d2de1906d73e3fc3fc7b2543c0fe2156dbf45bebfa1fdf5325901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad57f39c701a5ebc9e80ef5ea066e73936656be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7d7b40d50ebd58f7ea2a199cf0abacf7ee"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "element-12-role-escalation-above-element-14",
+      "sections": [
+        "8.3",
+        "8.6 step 5",
+        "11.2 P13"
+      ],
+      "note": "The client commits to `owner` while the `channel.open` it received granted `operator`.",
+      "inputs": {
+        "mutatedElement": 12,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839687279636f2e727063656f776e6572687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "8cd4feb3075ca2b2a73810faaddeefb8adfc7777f6cc64c4805a1998b5d8fa2b"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a8988878685848382818058208cd4feb3075ca2b2a73810faaddeefb8adfc7777f6cc64c4805a1998b5d8fa2b5901b42fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad57662ddd19d55462f771e3bc45553ed2e16be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44aa4ae3e4bf5fc913f3c557c462c192cf818dc6ae34a6"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "element-12-role-reduction-below-element-14",
+      "sections": [
+        "8.3",
+        "8.6 step 5",
+        "11.2 P13"
+      ],
+      "note": "A SILENT ROLE REDUCTION is a context mismatch too: §8.3 makes a difference in EITHER direction fatal, and the handshake fails rather than proceeding at the lower authority.",
+      "inputs": {
+        "mutatedElement": 12,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839687279636f2e72706366766965776572687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "ab06cc98915a24d161c74e548002605bda9181e08268d21a6afb9d570efe96fe"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281805820ab06cc98915a24d161c74e548002605bda9181e08268d21a6afb9d570efe96fe5901b52fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad5769f2c4f1eff8aadfeffdbba647d311626be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a953fdefad48a10689b10e0a2e435f31263f652d5b288f"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "element-17-continuity-id-substitution-never-rotated-node",
+      "sections": [
+        "7.5",
+        "8.3",
+        "8.6 step 7",
+        "11.2 P13"
+      ],
+      "note": "The node has NEVER ROTATED, so its §7.6 element 11 chain is empty and element 15 carries no chain digest: element 17 is the only place the continuity id is bound. This is the run that exercises the gap element 17 exists to close — a corpus carrying only the max-chain run below would pass against an implementation that omitted element 17 entirely.",
+      "inputs": {
+        "mutatedElement": 17,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f48484848484848484848484848484848484848484848"
+        },
+        "contextCommitment": {
+          "$bytes": "20257bb9407b56f10c340481c4cd565cff243c45cbb807733faa82afafcab21e"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582020257bb9407b56f10c340481c4cd565cff243c45cbb807733faa82afafcab21e5901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad57a65124be9df993011c6969f7a2631c4d6be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7d5ec822c0db122831c168ff22ac4e4258"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        },
+        "acceptedByANodeWhoseStoredContinuityIdIsTheSubstitutedOne": {
+          "kind": "accepted",
+          "contextCommitment": {
+            "$bytes": "20257bb9407b56f10c340481c4cd565cff243c45cbb807733faa82afafcab21e"
+          }
+        },
+        "element15EntryCount": 1,
+        "element15CarriesNoChainDigest": true
+      }
+    },
+    {
+      "name": "element-17-continuity-id-substitution-max-length-chain",
+      "sections": [
+        "7.5",
+        "8.3",
+        "8.6 step 7",
+        "11.2 P13"
+      ],
+      "note": "The same substitution against a node at `E2EE_CONTINUITY_CHAIN_MAX_LENGTH`, where element 15 already binds the id transitively through every chain-certificate digest. Both runs are required: only the never-rotated one isolates element 17.",
+      "inputs": {
+        "mutatedElement": 17,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f414141414141414141414141414141414141414141416765643235353139582019aa1fed2b79eb2d14203efe6cf57a6c24a5b75fe730849cbaba8e0eeb9a62f06f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728958200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779582024edda0f10662365297c5764c1f2b26d1b2178a7f061b1b657101e918e1fb94e58202c9926cf24557e5931b4c86b8eb32ad4ba1fec095a999f086e8802521cd513f65820d141160689d17b141c82cc9e0c137e59715304c4705227a60f6425fa476fc8e5582069e402f12d2070b4bcc333b7df40c34526de411d81fbb6879e9ccfd49c35fc435820f62cd74f88b86cf1330a09977b74256de00700763795f8a9b2fb0669abc95d99582096c97282d48ea3e091e58da924e4ad700d2f922cb259b396ae7395f3f398687b5820df6827ca284d9a377c0af764154b03f74e4e80fcb11e40f13582de81e9fef81c5820c1975e1988769f352e27c60d188251965f7a58d448623b65c3e07d6723f5872d825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f48484848484848484848484848484848484848484848"
+        },
+        "contextCommitment": {
+          "$bytes": "8e573eb39b00571cf3b7a6c23ec047e209ecd496ade0e248d239950e60f4ea84"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a8988878685848382818058208e573eb39b00571cf3b7a6c23ec047e209ecd496ade0e248d239950e60f4ea845901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad57fe07cd736224e0e4894c816e552dead86be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7db21d60a8be874a63b6aba143ede81e01"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        },
+        "element15EntryCount": 9,
+        "element15CarriesNoChainDigest": false
+      }
+    },
+    {
+      "name": "commitment-over-different-bytes-than-the-block",
+      "sections": [
+        "8.3",
+        "8.6 step 7",
+        "11.2 P13"
+      ],
+      "note": "A well-formed context block presented under a `contextCommitment` computed over DIFFERENT bytes. The responder rebuilds the block from its own state and compares only the commitment, so the preimage the client actually holds never reaches it.",
+      "inputs": {
+        "mutatedElement": null,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "86d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d78"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281805820030d6c8e7240157b7545ba7c40dbbf29b08887380f62b95a430966d3cdc806bf5901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad573852950d61fbf64000fec7de5aa09a276be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7da4adc2340e310d48cac18013096fcb7c"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "nx-absence-semantics-violated",
+      "sections": [
+        "8.3",
+        "8.6 step 7",
+        "11.2 P13"
+      ],
+      "note": "A web-tier hello whose context carries a nonempty element 10 AND a nonempty element 16. The two are inseparable by construction — `E2eeAuthorizationContextClient` is a discriminated union, which is what makes the §8.3 absence semantics unrepresentable-wrong in a conforming encoder — so one case covers both halves of the rule.",
+      "inputs": {
+        "mutatedElement": 10,
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextCommitment": {
+          "$bytes": "86d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d78"
+        },
+        "clientHello": {
+          "$bytes": "020187016377656201810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d7858202fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b74"
+        }
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P13",
+        "reason": "context_mismatch",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "suite-list-strip-after-the-hello-was-hashed",
+      "sections": [
+        "8.5",
+        "8.7",
+        "8.8 step 5",
+        "11.2 P16"
+      ],
+      "note": "`offeredSuites` mutated in transit AFTER the client hashed its own hello wire bytes. Every node-side check passes — the stripped list still contains the selected suite — so the node's `confirmationTranscript` covers the STRIPPED bytes while the client's covers the original, and the confirmation MAC does not match. §8.7 hashes exact hello wire bytes precisely so this is detectable.",
+      "inputs": {
+        "offeredSuitesAsSent": [
+          1,
+          2
+        ],
+        "offeredSuitesAsDelivered": [
+          1
+        ],
+        "clientHelloAsSent": {
+          "$bytes": "02018701666e61746976650182010258209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad5771ea6d34f84cf39a87d0bfb1803413c96be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7d3743c746d9610d732985fbff60bc549c"
+        },
+        "clientHelloAsDelivered": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad5771ea6d34f84cf39a87d0bfb1803413c96be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7d3743c746d9610d732985fbff60bc549c"
+        }
+      },
+      "expected": {
+        "nodeAccepted": true,
+        "serverAccept": {
+          "$bytes": "02028501781a65706b5f45454545454545454545454545454545454545454545582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d7858652fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b74adae005ca25eab1741e70d11413b122ad4c154dc8cf68f8ee249f330ac7c84071399b4cf965f1c74e04fa923d0e964bd64a69695f59c6674f75a290e4c94327ecbe44b4d7c582095f12df6b981ea3713332fcf36c8d05992cb2f4f096bd4bf71ccdd90bcb364f4"
+        },
+        "clientVerdict": {
+          "kind": "fatal",
+          "row": "P16",
+          "reason": "confirmation_mismatch"
+        },
+        "disposition": "FATAL-PRE",
+        "clientEmitsNoRecord": true,
+        "closeReason": "channel_rejected"
+      }
+    },
+    {
+      "name": "identity-rotation-between-advertisement-and-hello",
+      "sections": [
+        "7.5",
+        "8.3",
+        "8.6 step 7"
+      ],
+      "note": "The node rotated its identity and appended a continuity certificate AFTER emitting the advertisement and BEFORE the hello arrived. The handshake completes against the chain and identity fingerprint the statement advertised; rebuilding element 15 from the node's CURRENT chain yields a different context and fails as P13, which is the implementation this rule exists to exclude. The client's element 15 is unchanged because it has only the validated statement to build from.",
+      "inputs": {
+        "advertisedChainLength": 2,
+        "currentChainLength": 3,
+        "advertisedIdentityFingerprint": {
+          "$bytes": "9905e51a996b8fb92efcf428b2f8ee91cb64f72f71471f771af46a7fc2b9e26d"
+        },
+        "currentIdentityFingerprint": {
+          "$bytes": "ab00f123f9954b15e2a1d4bf58b6d7143dc92f28b7345c0b57f0cf48ee09fbf6"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a8988878685848382818058201cfe66acb7372ca9efcad7cf079dcb26dee9728339bb6d6716cdeb7039721ef45901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad570afbfc355f249e86f48fb5aef07aa3c46be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7df5a8ba8c9d62eb965cd81b5686e4954e"
+        }
+      },
+      "expected": {
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958209905e51a996b8fb92efcf428b2f8ee91cb64f72f71471f771af46a7fc2b9e26d6f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728358200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7795820a837b66b3e69db41e84e7a7200cd6db39ff867e9ab9ce1a53c05f82a82151377582016c39a8784ba66004c0e19f6809eb3fa61e20045f63251548e86639eeafe306d825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "elements": {
+          "elementCount": 18,
+          "domain": "ryco.relay-e2ee.context.v1",
+          "hubOrigin": "https://hub.example.com",
+          "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+          "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+          "nodeIdentityAlgorithm": "ed25519",
+          "nodeIdentityFingerprint": {
+            "$bytes": "9905e51a996b8fb92efcf428b2f8ee91cb64f72f71471f771af46a7fc2b9e26d"
+          },
+          "accountId": "acct_0123456789",
+          "clientIntendedCapability": "ryco.rpc",
+          "clientIntendedRole": "operator",
+          "channelOpenCapability": "ryco.rpc",
+          "channelOpenEffectiveRole": "operator",
+          "nodeCertificateFingerprints": [
+            {
+              "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+            },
+            {
+              "$bytes": "a837b66b3e69db41e84e7a7200cd6db39ff867e9ab9ce1a53c05f82a82151377"
+            },
+            {
+              "$bytes": "16c39a8784ba66004c0e19f6809eb3fa61e20045f63251548e86639eeafe306d"
+            }
+          ],
+          "nodeCertificateFingerprintCount": 3,
+          "clientCertificateFingerprints": [
+            {
+              "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+            },
+            {
+              "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+            }
+          ],
+          "nodeContinuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF"
+        },
+        "againstTheAdvertisedSnapshot": {
+          "kind": "accepted",
+          "contextCommitment": {
+            "$bytes": "1cfe66acb7372ca9efcad7cf079dcb26dee9728339bb6d6716cdeb7039721ef4"
+          }
+        },
+        "againstTheNodesCurrentState": {
+          "kind": "fatal",
+          "row": "P13",
+          "reason": "context_mismatch",
+          "disposition": "FATAL-PRE",
+          "observable": {
+            "handshakeRejectRecords": 1,
+            "handshakeReject": {
+              "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "handshakeRejectBytes": 64,
+            "closeReason": "channel_rejected",
+            "applicationPayloadBytes": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "identity-rotation-at-max-chain-length-prunes-the-oldest-entry",
+      "sections": [
+        "7.5",
+        "8.3",
+        "8.6 step 7",
+        "15"
+      ],
+      "note": "At `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` the append also PRUNES the oldest entry, so the node's current chain no longer contains it — but the channel's element 15 still carries its digest, because §7.5 requires the node to retain the advertised snapshot for the channel's lifetime.",
+      "inputs": {
+        "chainMaxLength": 8,
+        "advertisedChainLength": 8,
+        "currentChainLength": 8,
+        "prunedEntryTranscript": {
+          "$bytes": "8d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a4a58201ba4075b77c9e3fb3ecde15cdaf5221f3c10373e623f7b0e1ef76366b0af7137582054920d610edb5d026e25bbdda3ddc3948a65e5b96332c8a786b1efda8e8bc64a6765643235353139781b6e6b65795f4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b4b582048075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd58202f1b155910b6b0e656759f588cb7c90bde711f2f5c8b7a3d9495d34ad379e6a01b0000019f68391800"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a898887868584838281805820c3029e1175237349afbf4d3e0d2fac5c42268f47eb607acb3c3f0d7a21d8e18c5901b72fe57da347cd62431528daac5fbb290730fff684afc4cfc2ed90995f58cb3b743073234d29d6c8351e7e49832b21bee9ed31a511b04b946bf064620279e0ad57de1143051d721df7754e55d4b8cec1076be1f4aa4b5b981dc640988294e5c626e3f880311116c41a72e81f206e4a4640dbb4c30ab7f6b792ea6a18e041fbacfed31ea6d977bd3e4ee6f2be567c36a21a4c50bdb42d180fb5481d6b2b9305fc8cc0a3a8da49a44a507b70478aeaae949cb9e2b6c2a347a72ad1a62553a00d7f7a81a89d42ef8b2fd825774170b72fbf029607f789ea91ff79df2353bd6baa64d361a07d075a5ea26fa08477565893dc77d55d51e813fe76a7c22272bd3d0c658064507663dcb81d2382d7dc4a618a6ac192b737172dbc15fa92dda51417354a4b48c4c2b6fd306b49474d351ea87effd9e28078cd3da16eb60c4f0f41fbbaf0336fbc1fd191699a1c3a41b8d3072adf1e0ba4fdd6dca3a1bb39e28638fb9c33bf06beb5094438e7df203fd94e886ef8c183aeb0c68ebd17edc6232baf2442d0f4f904cf32a5200d52e2cc30f8282f9d589a3e858c3451453963247acfdd44a74ae4efa84ca7da7d7e515fe96efa9910d12be57360e5e231"
+        }
+      },
+      "expected": {
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f414141414141414141414141414141414141414141416765643235353139582019aa1fed2b79eb2d14203efe6cf57a6c24a5b75fe730849cbaba8e0eeb9a62f06f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728958200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7795820a837b66b3e69db41e84e7a7200cd6db39ff867e9ab9ce1a53c05f82a82151377582016c39a8784ba66004c0e19f6809eb3fa61e20045f63251548e86639eeafe306d582067e6a349e04a4f2c8734045fb7e98df84c7858bde83bab3b9cad9cb3ff75848a58208e4356fe843704d509eb263e1899dc08465b2caa17b96c33b0b640a93f7ac35a5820505b1d0dfa2af34dacf4820a73551858abdee3b0377ed68e380ef878e8d99d425820221896bfeac9424d1a9d726a728d895a22ddb9c1cf5f3d1b65c63c87ed6e097d5820f645864b74b34307170b95c287b2a0a7c65289d113c23547f85887f41da62e6c5820a1272547fcd2ebc9bbce67a0c3fa50604cad79080546487bc6516550fd7b033b825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "element15EntryCount": 9,
+        "prunedEntryDigest": {
+          "$bytes": "a837b66b3e69db41e84e7a7200cd6db39ff867e9ab9ce1a53c05f82a82151377"
+        },
+        "prunedEntryDigestStillPresentInElement15": true,
+        "againstTheAdvertisedSnapshot": {
+          "kind": "accepted",
+          "contextCommitment": {
+            "$bytes": "c3029e1175237349afbf4d3e0d2fac5c42268f47eb607acb3c3f0d7a21d8e18c"
+          }
+        },
+        "againstTheNodesCurrentState": {
+          "kind": "fatal",
+          "row": "P13",
+          "reason": "context_mismatch",
+          "disposition": "FATAL-PRE",
+          "observable": {
+            "handshakeRejectRecords": 1,
+            "handshakeReject": {
+              "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "handshakeRejectBytes": 64,
+            "closeReason": "channel_rejected",
+            "applicationPayloadBytes": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "prekey-rotation-between-advertisement-and-hello",
+      "sections": [
+        "6.4",
+        "8.3",
+        "8.6 step 7"
+      ],
+      "note": "The handshake completes against the prekey advertised ON THIS CHANNEL, and element 15 entry 0 is that prekey's agreement fingerprint. The counterfactual is stated as a commitment comparison rather than a second run, because a node answering with the rotated STATIC would fail in the Noise layer first and would prove nothing about element 15.",
+      "inputs": {
+        "advertisedAgreementPublicKey": {
+          "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "testOnlyRotatedAgreementSecretKey": {
+          "$bytes": "1515151515151515151515151515151515151515151515151515151515151515"
+        },
+        "rotatedAgreementPublicKey": {
+          "$bytes": "bce059bf5b2ab7a91f3e863acf0c84d3ebbe04ca8490094b052b5b15afab1743"
+        }
+      },
+      "expected": {
+        "element15EntryZero": {
+          "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "element15EntryZeroIsTheAdvertisedAgreementFingerprint": true,
+        "againstTheAdvertisedSnapshot": {
+          "kind": "accepted",
+          "contextCommitment": {
+            "$bytes": "86d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d78"
+          }
+        },
+        "rotatedContextCommitment": {
+          "$bytes": "0c24829515f1f96f58ea66cb9b582ede5933a8a0b258ef41225dda7e7e3c6743"
+        },
+        "rotatedContextDiffers": true
+      }
+    },
+    {
+      "name": "next-channel-carries-the-new-material",
+      "sections": [
+        "5.1",
+        "7.5",
+        "8.3",
+        "15"
+      ],
+      "note": "The per-channel snapshot pins IDENTITY MATERIAL for the channel that carried the statement; it is not a freeze of the node. A channel opened after the rotation advertises and commits to the new chain and the new identity fingerprint.",
+      "inputs": {
+        "channelId": "ch_IIIIIIIIIIIIIIIIIIIIII",
+        "chainLength": 3,
+        "identityFingerprint": {
+          "$bytes": "ab00f123f9954b15e2a1d4bf58b6d7143dc92f28b7345c0b57f0cf48ee09fbf6"
+        }
+      },
+      "expected": {
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4949494949494949494949494949494949494949494901020101781b6e6f64655f4141414141414141414141414141414141414141414167656432353531395820ab00f123f9954b15e2a1d4bf58b6d7143dc92f28b7345c0b57f0cf48ee09fbf66f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728458200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df7795820a837b66b3e69db41e84e7a7200cd6db39ff867e9ab9ce1a53c05f82a82151377582016c39a8784ba66004c0e19f6809eb3fa61e20045f63251548e86639eeafe306d582067e6a349e04a4f2c8734045fb7e98df84c7858bde83bab3b9cad9cb3ff75848a825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "elements": {
+          "elementCount": 18,
+          "domain": "ryco.relay-e2ee.context.v1",
+          "hubOrigin": "https://hub.example.com",
+          "channelId": "ch_IIIIIIIIIIIIIIIIIIIIII",
+          "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+          "nodeIdentityAlgorithm": "ed25519",
+          "nodeIdentityFingerprint": {
+            "$bytes": "ab00f123f9954b15e2a1d4bf58b6d7143dc92f28b7345c0b57f0cf48ee09fbf6"
+          },
+          "accountId": "acct_0123456789",
+          "clientIntendedCapability": "ryco.rpc",
+          "clientIntendedRole": "operator",
+          "channelOpenCapability": "ryco.rpc",
+          "channelOpenEffectiveRole": "operator",
+          "nodeCertificateFingerprints": [
+            {
+              "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+            },
+            {
+              "$bytes": "a837b66b3e69db41e84e7a7200cd6db39ff867e9ab9ce1a53c05f82a82151377"
+            },
+            {
+              "$bytes": "16c39a8784ba66004c0e19f6809eb3fa61e20045f63251548e86639eeafe306d"
+            },
+            {
+              "$bytes": "67e6a349e04a4f2c8734045fb7e98df84c7858bde83bab3b9cad9cb3ff75848a"
+            }
+          ],
+          "nodeCertificateFingerprintCount": 4,
+          "clientCertificateFingerprints": [
+            {
+              "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+            },
+            {
+              "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+            }
+          ],
+          "nodeContinuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF"
+        },
+        "accepted": {
+          "kind": "accepted",
+          "contextCommitment": {
+            "$bytes": "34a76640c472e3a29bfd9b73cd0659fbf5ceb97e7d533e91fc4498a42757f5ae"
+          }
+        }
+      }
+    },
+    {
+      "name": "branch-a-record-absent",
+      "sections": [
+        "8.6 step 6",
+        "11.2 P12",
+        "11.5",
+        "13.6"
+      ],
+      "note": "The node's Branch A record for `(hubOrigin, accountId, clientIdentityFingerprint)` is no record for this key at all. All five record states expect P12 and the §11.5 observable is byte-identical across them and to the F12 reject cases: approval membership is exactly what §11.2 forbids distinguishing.",
+      "inputs": {
+        "recordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "record": null,
+        "requestedCapability": "ryco.rpc",
+        "requestedRole": "operator"
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P12",
+        "reason": "authorization",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "branch-a-record-pending",
+      "sections": [
+        "8.6 step 6",
+        "11.2 P12",
+        "11.5",
+        "13.6"
+      ],
+      "note": "The node's Branch A record for `(hubOrigin, accountId, clientIdentityFingerprint)` is a record awaiting the owner's approval. All five record states expect P12 and the §11.5 observable is byte-identical across them and to the F12 reject cases: approval membership is exactly what §11.2 forbids distinguishing.",
+      "inputs": {
+        "recordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "record": {
+          "status": "pending",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "requestedCapability": "ryco.rpc",
+        "requestedRole": "operator"
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P12",
+        "reason": "authorization",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "branch-a-record-revoked",
+      "sections": [
+        "8.6 step 6",
+        "11.2 P12",
+        "11.5",
+        "13.6"
+      ],
+      "note": "The node's Branch A record for `(hubOrigin, accountId, clientIdentityFingerprint)` is a record the owner revoked. All five record states expect P12 and the §11.5 observable is byte-identical across them and to the F12 reject cases: approval membership is exactly what §11.2 forbids distinguishing.",
+      "inputs": {
+        "recordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "record": {
+          "status": "revoked",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "requestedCapability": "ryco.rpc",
+        "requestedRole": "operator"
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P12",
+        "reason": "authorization",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "branch-a-record-approved-capability-set-excludes-the-requested-capability",
+      "sections": [
+        "8.6 step 6",
+        "11.2 P12",
+        "11.5",
+        "13.6"
+      ],
+      "note": "The node's Branch A record for `(hubOrigin, accountId, clientIdentityFingerprint)` is an approved record whose `capabilitySet` does not contain the requested capability — the empty set, because version 1's relay capability vocabulary has exactly one member. All five record states expect P12 and the §11.5 observable is byte-identical across them and to the F12 reject cases: approval membership is exactly what §11.2 forbids distinguishing.",
+      "inputs": {
+        "recordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "record": {
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": []
+        },
+        "requestedCapability": "ryco.rpc",
+        "requestedRole": "operator"
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P12",
+        "reason": "authorization",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "branch-a-record-approved-max-role-below-the-requested-role",
+      "sections": [
+        "8.6 step 6",
+        "11.2 P12",
+        "11.5",
+        "13.6"
+      ],
+      "note": "The node's Branch A record for `(hubOrigin, accountId, clientIdentityFingerprint)` is an approved record whose `maxRole` is below the requested `operator` under the §8.3 ordering. All five record states expect P12 and the §11.5 observable is byte-identical across them and to the F12 reject cases: approval membership is exactly what §11.2 forbids distinguishing.",
+      "inputs": {
+        "recordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "record": {
+          "status": "approved",
+          "maxRole": "viewer",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "requestedCapability": "ryco.rpc",
+        "requestedRole": "operator"
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P12",
+        "reason": "authorization",
+        "disposition": "FATAL-PRE",
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "withdrawal-status-approved-to-revoked",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "`status` leaving `approved` is the first §13.6 transition: withdrawn, FATAL-POST Q9, code `policy`.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "revoked",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": true,
+        "implicitFinish": {
+          "kind": "fatal",
+          "row": "Q9",
+          "errorCode": "policy",
+          "reason": "authorization_withdrawn"
+        },
+        "channelStaysOpen": false
+      }
+    },
+    {
+      "name": "withdrawal-max-role-owner-to-viewer-channel-admitted-at-owner",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "`maxRole` reduced with `status` unchanged at `approved`. A STATUS-ONLY re-check passes this channel, which is exactly the defect the withdrawal test exists to close. The test reads the SNAPSHOT rather than the authority the channel is exercising, so both an `owner` channel and a `viewer` channel under the same `owner` ceiling are withdrawn.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "owner",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "viewer",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": true,
+        "implicitFinish": {
+          "kind": "fatal",
+          "row": "Q9",
+          "errorCode": "policy",
+          "reason": "authorization_withdrawn"
+        },
+        "channelStaysOpen": false,
+        "statusStillApproved": true,
+        "aStatusOnlyRecheckWouldPassIt": true
+      }
+    },
+    {
+      "name": "withdrawal-max-role-owner-to-viewer-channel-admitted-at-viewer",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "`maxRole` reduced with `status` unchanged at `approved`. A STATUS-ONLY re-check passes this channel, which is exactly the defect the withdrawal test exists to close. The test reads the SNAPSHOT rather than the authority the channel is exercising, so both an `owner` channel and a `viewer` channel under the same `owner` ceiling are withdrawn.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "viewer",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "viewer",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": true,
+        "implicitFinish": {
+          "kind": "fatal",
+          "row": "Q9",
+          "errorCode": "policy",
+          "reason": "authorization_withdrawn"
+        },
+        "channelStaysOpen": false,
+        "statusStillApproved": true,
+        "aStatusOnlyRecheckWouldPassIt": true
+      }
+    },
+    {
+      "name": "withdrawal-capability-set-loses-a-member",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "`capabilitySet` no longer contains every member the snapshot held, with `maxRole` and `status` unchanged: withdrawn.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": []
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": true,
+        "implicitFinish": {
+          "kind": "fatal",
+          "row": "Q9",
+          "errorCode": "policy",
+          "reason": "authorization_withdrawn"
+        },
+        "channelStaysOpen": false
+      }
+    },
+    {
+      "name": "widening-re-approval-is-not-a-withdrawal",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "Re-approving the same record changes nothing the test reads: not withdrawn, and the channel stays open.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": false,
+        "implicitFinish": {
+          "kind": "finished"
+        },
+        "channelStaysOpen": true
+      }
+    },
+    {
+      "name": "widening-max-role-increase-is-not-a-withdrawal",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "The snapshot was admitted under an `operator` ceiling and the owner raised it to `owner`. Not withdrawn; the widened authority reaches the channel only on a fresh ticket, channel, and handshake.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "operator",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": false,
+        "implicitFinish": {
+          "kind": "finished"
+        },
+        "channelStaysOpen": true
+      }
+    },
+    {
+      "name": "widening-capability-set-addition-is-not-a-withdrawal",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "A capability added to the approved set, with `status` and `maxRole` unchanged: the new set is a superset of the old one, so nothing is withdrawn.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc",
+            "ryco.future"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": false,
+        "implicitFinish": {
+          "kind": "finished"
+        },
+        "channelStaysOpen": true
+      }
+    },
+    {
+      "name": "widening-first-approval-of-another-client-is-not-a-withdrawal",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "A first approval names a DIFFERENT record key, so the full-key comparison does not match this channel's snapshot and the channel is untouched.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": false,
+        "withdrawn": false,
+        "implicitFinish": {
+          "kind": "finished"
+        },
+        "channelStaysOpen": true
+      }
+    },
+    {
+      "name": "combined-narrow-and-widen-is-a-withdrawal",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "One owner command that drops `owner` to `operator` while adding a capability IS a withdrawal: it contains a reduction, and the reduction governs.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": {
+          "status": "approved",
+          "maxRole": "operator",
+          "capabilitySet": [
+            "ryco.rpc",
+            "ryco.future"
+          ]
+        }
+      },
+      "expected": {
+        "recordKeyMatches": true,
+        "withdrawn": true,
+        "implicitFinish": {
+          "kind": "fatal",
+          "row": "Q9",
+          "errorCode": "policy",
+          "reason": "authorization_withdrawn"
+        },
+        "channelStaysOpen": false
+      }
+    },
+    {
+      "name": "withdrawal-under-a-different-account-scope",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "The SAME client fingerprint under a different `(hubOrigin, accountId)` scope. A fingerprint-only sweep would close this channel; the full-key comparison §13.6 mandates does not, and the channel stays open.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_9876543210",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": null
+      },
+      "expected": {
+        "recordKeyMatches": false,
+        "withdrawn": false,
+        "implicitFinish": {
+          "kind": "finished"
+        },
+        "channelStaysOpen": true
+      }
+    },
+    {
+      "name": "withdrawal-under-a-different-hub-origin",
+      "sections": [
+        "8.9",
+        "11.3 Q9",
+        "13.6"
+      ],
+      "note": "The same client fingerprint and account under a different Hub origin: likewise not this channel's record.",
+      "inputs": {
+        "admittedAuthoritySnapshot": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "channelElement12Role": "operator",
+        "changedRecordKey": {
+          "hubOrigin": "https://other.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          }
+        },
+        "postChangeRecord": null
+      },
+      "expected": {
+        "recordKeyMatches": false,
+        "withdrawn": false,
+        "implicitFinish": {
+          "kind": "finished"
+        },
+        "channelStaysOpen": true
+      }
+    },
+    {
+      "name": "withdrawal-between-step-6-and-row-n3",
+      "sections": [
+        "8.6 step 6",
+        "8.6 step 8",
+        "11.2 P12",
+        "13.6"
+      ],
+      "note": "The owner's withdrawal committed after this handshake's step-6 read and before its row-N3 transition. The abort is FATAL-PRE and takes the GENERIC fixed-size `E2EEHandshakeReject`, byte-identical to the F12 reject cases — never a `policy` code, which exists only post-key.",
+      "inputs": {
+        "stepSixReadReturned": {
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "rowN3Transition": "refused: authorization_withdrawn"
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P12",
+        "reason": "authorization_withdrawn",
+        "disposition": "FATAL-PRE",
+        "errorCodeEmitted": null,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "nx-channel-is-never-matched-by-an-authorization-withdrawal",
+      "sections": [
+        "8.6 step 6",
+        "8.9",
+        "12.4",
+        "13.6"
+      ],
+      "note": "NX carries no Branch A record and therefore no §8.6 step 6 snapshot, so no withdrawal can name an NX channel and there is nothing to re-read. The re-read callback is supplied and returns 'absent' — the most aggressive answer available — and is never invoked. §12.4 governs NX admission instead.",
+      "inputs": {
+        "tier": "web",
+        "reReadWouldReturn": null
+      },
+      "expected": {
+        "admittedAuthority": null,
+        "reReadInvocations": 0,
+        "implicitFinish": {
+          "kind": "finished"
+        },
+        "channelStaysOpen": true
+      }
+    }
+  ]
+}

@@ -3,11 +3,266 @@
   "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
   "encoding": "deterministic-cbor-rfc8949",
   "encodingNote": "The encoding identifier above applies to transcript bytes in the families that carry them. Family 15 carries no transcript bytes: its byte strings are raw Noise wire bytes and raw key material, copied verbatim from the upstream vector sets.",
+  "generator": "scripts/generate-e2ee-fixtures.ts",
   "files": {
+    "f01-payload-discrimination.json": {
+      "family": 1,
+      "title": "Payload discrimination and chunk pipeline",
+      "sections": [
+        "4.2",
+        "4.3",
+        "4.5",
+        "3.3",
+        "3.4",
+        "9.1",
+        "11.4",
+        "16.3 F1"
+      ],
+      "sha256": "0d57138a78aaf9ffcd0eb98043c71559e3e49bb5dd89d40e4539511411864028",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 18,
+      "deferred": [
+        "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict. The mode machine is not implemented in packages/shared/src yet, so the row is carried as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The node and client transition rows themselves are family F10. Owned by the node and client phases.",
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f02-carrier-compatibility.json": {
+      "family": 2,
+      "title": "Capability carrier compatibility",
+      "sections": [
+        "5.5",
+        "5.6",
+        "16.3 F2"
+      ],
+      "sha256": "68a197ed8829505651179043eb6580f5e636e88622b9fcfac14d36659004ccdd",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 5,
+      "deferred": [
+        "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.59` as patched by `patches/effect@4.0.0-beta.59.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. Owned by the §5.6 compatibility harness.",
+        "Case C5, the node-direction hazard, is the defect reply the node's RPC server emits for an unknown request tag. It is a property of the pinned RPC server rather than of any protocol structure, and it is what makes the carrier direction node-to-client only. Owned by the §5.6 compatibility harness, together with the node phase.",
+        "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src. The comparison the decision reads IS emitted above. Owned by the node phase.",
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f03-capability-statement.json": {
+      "family": 3,
+      "title": "Capability statement",
+      "sections": [
+        "5.2",
+        "5.3",
+        "5.5",
+        "5.7",
+        "7.2.1",
+        "7.6",
+        "7.6.1",
+        "3.2.1",
+        "16.3 F3"
+      ],
+      "sha256": "95bc3840a12c0e057fc76bfa4ffb854b256e27a335a2f01b3e13dae0e24006de",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 35,
+      "deferred": [
+        "The §5.2 step 3, 4, and 7 invalid variants — expired, future issued-at, over-long validity interval, wrong Hub origin, and a lower policy generation, together with the §5.7 policy-generation recovery pair. There is no capability-statement VERIFIER in packages/shared/src: the landed modules encode the transcript, build and check the §7.2.1 envelope, verify the cross-signature, and run the §7.6.1 self-check, but nothing evaluates a received statement against a clock, a connected origin, or a stored policy generation. Emitting these cases would mean asserting an outcome no implementation produces. Owned by the §5.2 statement verifier.",
+        "A statement OMITTING element 18, and a statement whose element 18 disagrees with the PINNED continuity id. The first needs a §7.6 statement decoder to have an arity verdict to derive; the second needs the §13.1 durable pin record. Owned by the §5.2 statement verifier and the client trust-state work respectively. The element-18-disagrees-with-a-carried-chain-entry case IS emitted, in family F5.",
+        "The CLIENT half of the protocol-range and admitted-pattern cases — the K3/P15 channel disposition, the assertion that no `E2EEClientHello` was produced, and the single-use ticket accounting — is a §4.4 client row (family F10). What this family derives is `selectE2eeSuite`'s verdict. Their NODE-SIDE companions, a hello whose `e2eeVersion` lies outside the advertised range and an NX hello to a node running `requireApprovedClientE2EE`, ARE emitted, in family F12, where their §11.5 observable can be compared against the reject vector directly. Owned by the client phase, together with family F10.",
+        "The K3/K2 channel dispositions and the ticket-accounting assertions attached to the selection cases are §4.4 client rows (family F10) and are carried here as labels. What this family DERIVES is `selectE2eeSuite`'s verdict, which is the precondition the rows read: `helloMayBeBuilt: false` is the 'no hello may be built from the statement' obligation, stated over the landed function. Owned by the client phase, which will assert the dispositions themselves.",
+        "§16.4 cross-runtime equality: the admitted-pattern cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f04-prekey-certificates.json": {
+      "family": 4,
+      "title": "Prekey certificates",
+      "sections": [
+        "7.3",
+        "7.4",
+        "6.4",
+        "8.6 step 5",
+        "3.2.1 S9",
+        "16.3 F4"
+      ],
+      "sha256": "2be336c71f6742b3ed77eac011de6d108289d2322b77d317e70c7c1d46ef21e3",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 25,
+      "deferred": [
+        "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any landed module: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock, and the node-side prekey rotation state that holds two is owned by the node phase.",
+        "The §5.2 step 5 checks a VERIFIER applies to the node prekey carried in a capability statement — lifetime and rotation-overlap against the verifier's clock — have no landed implementation; the reconstruction above is the part §7.6 fixes. Owned by the §5.2 statement verifier."
+      ]
+    },
+    "f05-continuity-chains.json": {
+      "family": 5,
+      "title": "Continuity chains",
+      "sections": [
+        "7.5",
+        "13.3",
+        "5.5",
+        "3.2.1 S6",
+        "16.3 F5"
+      ],
+      "sha256": "d5fe5216848c22f949bd724893a8bca5bba6a29583f3adcf8857a20f46fdbbe8",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 20,
+      "deferred": [
+        "A chain whose continuity id disagrees with the PINNED value. `validateNodeE2eeContinuityChain` takes a pinned identity fingerprint and no pinned continuity id; the §13.1 durable pin record that holds one is not in packages/shared/src yet, so the comparison has no implementation to derive an expectation from. Owned by the client trust-state work (§13.1, §13.3).",
+        "The §7.5 continuity-id storage and anchor cases (the five startup outcomes, the never-rotated anchor restore, and the pre-protocol migration mint). These are node-state transitions against a durable anchor; no node startup state machine exists in packages/shared/src. Owned by the node phase."
+      ]
+    },
+    "f06-ik-handshake.json": {
+      "family": 6,
+      "title": "IK handshake",
+      "sections": [
+        "8",
+        "16.3 F6"
+      ],
+      "sha256": "44ee58c7e921ef91a8b47f1b74c2235236176a2a5edbe1a44b37d4e95149a114",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 1
+    },
+    "f07-nx-handshake.json": {
+      "family": 7,
+      "title": "NX handshake",
+      "sections": [
+        "8",
+        "16.3 F7"
+      ],
+      "sha256": "7175b9b9642dcb2daaa78a1e838aab7f126bcf4aa58ac85cf6ca5d8adeec3887",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 3,
+      "deferred": [
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f08-record-protection.json": {
+      "family": 8,
+      "title": "Record protection",
+      "sections": [
+        "9.1",
+        "9.2",
+        "9.3",
+        "16.3 F8"
+      ],
+      "sha256": "e3959e0a3c6514e8b395dec8ebfb8a3cc40b17ff155578d0ebe20610b956a839",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 13,
+      "deferred": [
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f09-rekey-boundaries.json": {
+      "family": 9,
+      "title": "Rekey boundaries",
+      "sections": [
+        "9.4",
+        "9.5",
+        "9.6",
+        "16.3 F9"
+      ],
+      "sha256": "f7a67cc68da3f6be36b76bbc262ff013f500ea601c1c3391b2901773a8344009",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 15
+    },
+    "f10-mode-machine.json": {
+      "family": 10,
+      "title": "Mode machine",
+      "sections": [
+        "3.4",
+        "4.3",
+        "4.4",
+        "11.2",
+        "16.3 F10"
+      ],
+      "sha256": "4bd26be16473314d6e146c1b893af88796a8bb05b85e3e6c56e7bf790469b098",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 7,
+      "deferred": [
+        "Every transition row of §4.4 — N1–N17 and K1–K24, with its input payload, its state, its expected ACTION and its next state. No §4.4 mode machine exists in packages/shared/src, so no row has an implementation to derive an expectation from; the cases above pin the classification and the record-framing verdicts a machine consumes, not the machine. Owned by the node and client phases.",
+        "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
+        "Rows N15–N17, which are driven by a connection-level input rather than a payload, and their §12.5 occurrence accounting. Owned by the node phase.",
+        "The timer and keepalive cases that discharge §3.2.2 L1 and L2 and the §8.9 deadline — the stalled accept (K15), the buffered keepalive round trip, the send-buffer overflow including the connection-wide multi-channel accounting, and the node deadline under each policy. `E2eeClientHandshake` and `E2eeNodeHandshake` do expose the two deadlines, but the buffering, flushing, and occurrence behavior these cases assert belongs to the mode machine and to the relay engine. Owned by the node and client phases.",
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f11-authenticated-close.json": {
+      "family": 11,
+      "title": "Authenticated close",
+      "sections": [
+        "10.1",
+        "10.1.1",
+        "10.2",
+        "10.4",
+        "16.3 F11"
+      ],
+      "sha256": "e27c9eeaf49f0f8780a88b85f69c6ccf29f6b0fc6f0e0d1ab42022b920844fbc",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 20,
+      "deferred": [
+        "Ordering and linger behavior (§10.3) beyond the timed phase-duration case is not expressible as a deterministic wire vector and belongs to implementation tests rather than to this corpus, exactly as §16.3 F11 states."
+      ]
+    },
+    "f12-error-records.json": {
+      "family": 12,
+      "title": "Error records",
+      "sections": [
+        "11.2",
+        "11.3",
+        "11.5",
+        "16.3 F12"
+      ],
+      "sha256": "1007e229934fcd119510819769333a92e926af1f9c674ee513bd4aef27a31f20",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 12,
+      "deferred": [
+        "Reject TIMING is deliberately not a fixture assertion: the §11.2 ordering rule that keeps the durable pending write off the response path constrains an implementation, not a wire vector (§16.3 F12)."
+      ]
+    },
+    "f13-fingerprints.json": {
+      "family": 13,
+      "title": "Fingerprints",
+      "sections": [
+        "7.1",
+        "16.3 F13"
+      ],
+      "sha256": "551dc0133dfc0d9011485ae6cc40e3094f627fa15e18a9a3a35cc7b922ab57ae",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 4
+    },
+    "f14-verification-display.json": {
+      "family": 14,
+      "title": "Safety number and WebSAS",
+      "sections": [
+        "13.4",
+        "13.5",
+        "3.2.1 S10",
+        "3.2.1 S11",
+        "16.3 F14"
+      ],
+      "sha256": "ff7f17224361bb45fd246c5009bfa87b9ecf97604db15c3a43c3d4da3080ca92",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 6,
+      "deferred": [
+        "§16.4 cross-runtime equality: the `WebSAS` half of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
     "f15-noise-core-vectors.json": {
       "family": 15,
       "title": "Noise core vectors",
-      "sections": ["14.1", "16.3 F15"],
+      "sections": [
+        "14.1",
+        "16.3 F15"
+      ],
       "sha256": "7b0469edfa11806d33fe59f2d628255f32833192db7e5281c25cef8275695f5b",
       "origin": "transcoded-upstream",
       "originNote": "Not generated by this repository. Transcoded verbatim from the published cacophony and snow Noise test-vector sets; the file's own `provenance` array records each source repository, commit, retrieval URL, upstream file SHA-256, and git blob id.",
@@ -23,6 +278,251 @@
           "sourceFileSha256": "69da433305fd045f6c9f01b656662a389d022688986fd39fbe7af009cd402fd3"
         }
       ]
+    },
+    "f16-authorization-context.json": {
+      "family": 16,
+      "title": "Authorization context and Branch A enforcement",
+      "sections": [
+        "8.3",
+        "8.6",
+        "8.7",
+        "8.9",
+        "11.3 Q9",
+        "13.6",
+        "16.3 F16"
+      ],
+      "sha256": "20cdf8846a8c399847cf8dd796aae6f9477240f52bcb5ea6fcbeb47be0f22e34",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 34,
+      "deferred": [
+        "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations; no pending-client store exists in packages/shared/src. Owned by the node phase.",
+        "The §12.6 policy-withdrawal counterparts of the §13.6 cases above are family F18, which this corpus carries only in part for the same reason: no node policy store and no channel registry exists in packages/shared/src. Owned by the node phase, and enumerated case by case in family F18's own deferrals.",
+        "§16.4 cross-runtime equality: the NX cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f17-key-material-validation.json": {
+      "family": 17,
+      "title": "Key-material validation",
+      "sections": [
+        "7.1",
+        "8.1",
+        "14.3",
+        "3.5",
+        "7.2",
+        "16.3 F17"
+      ],
+      "sha256": "7c921d3b8a49c85159ab691c3092c81f3604f5a06e21fcb9b8e1e470878882f1",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 26,
+      "deferred": [
+        "Each case names the §11 row for the position the material occupies (P11 inside the IK client certificate, P10 for a Noise-level failure, K2/K3 and P15 inside a node-signed statement). The row for material inside a node-signed statement depends on the §5.2 verifier and the §12.1.1 selection classification, neither of which is in packages/shared/src; those rows are carried as §16.2 labels and the DERIVED value in every case is the validator's or the verification path's own verdict. Owned by the §5.2 statement verifier and the client phase.",
+        "A small-order Ed25519 public key is NOT emitted as a rejected encoding: the pinned primitive's strict public-key validation accepts it, and the rejection happens at verification. Asserting a validator rejection here would have been wrong, so the case is left to the verification-path rows above.",
+        "§16.4 cross-runtime equality: the P-256 cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    "f18-node-admission-policy.json": {
+      "family": 18,
+      "title": "Node admission policy transitions",
+      "sections": [
+        "8.6",
+        "11.2 P25",
+        "12.4",
+        "12.6",
+        "16.3 F18"
+      ],
+      "sha256": "e0a4405eb8dedc1d35df90bb245e4a74dc4f938308f0aaff093790612db46aa5",
+      "origin": "generated",
+      "generator": "scripts/generate-e2ee-fixtures.ts",
+      "cases": 2,
+      "deferred": [
+        "Every per-channel case of §16.3 F18: `requireE2EE` false → true over a `legacy`, an NX `e2ee`, and an IK `e2ee` channel; `requireApprovedClientE2EE` false → true over the same three; a suite leaving the advertised registry run twice against the same command with the established channel IK and NX; the widening that closes nothing while the policy generation still advances; the combined narrow-and-widen command; and the `negotiating` channel that is not swept and then fails closed on its next input. Each states a pre-change policy, a policy generation, and a live-channel set with per-channel mode, tier, suite, and snapshot. No node policy store and no channel registry exists in packages/shared/src, so there is nothing to derive the §12.6 policy-withdrawal test's per-channel verdict from. Owned by the node phase.",
+        "The §12.6 ordering cases: a hello reaching §8.6 step 2 AFTER the durable commit, and the row-N3 race in which a channel's transition lands concurrently with the sweep, run with the two enumerations attempted in both orders. These are properties of a single-snapshot sweep over a live registry. Owned by the node phase.",
+        "The §12.6 step (c) reported counts broken out by class, and the §12.5 non-interaction assertion that no fallback occurrence of either class is recorded by a withdrawal. Both need the node's occurrence counters and its channel registry. Owned by the node phase."
+      ]
     }
+  },
+  "deferredFamilies": [],
+  "partialFamilies": [
+    {
+      "family": 1,
+      "title": "Payload discrimination and chunk pipeline",
+      "file": "f01-payload-discrimination.json",
+      "deferred": [
+        "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict. The mode machine is not implemented in packages/shared/src yet, so the row is carried as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The node and client transition rows themselves are family F10. Owned by the node and client phases.",
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 2,
+      "title": "Capability carrier compatibility",
+      "file": "f02-carrier-compatibility.json",
+      "deferred": [
+        "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.59` as patched by `patches/effect@4.0.0-beta.59.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. Owned by the §5.6 compatibility harness.",
+        "Case C5, the node-direction hazard, is the defect reply the node's RPC server emits for an unknown request tag. It is a property of the pinned RPC server rather than of any protocol structure, and it is what makes the carrier direction node-to-client only. Owned by the §5.6 compatibility harness, together with the node phase.",
+        "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src. The comparison the decision reads IS emitted above. Owned by the node phase.",
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 3,
+      "title": "Capability statement",
+      "file": "f03-capability-statement.json",
+      "deferred": [
+        "The §5.2 step 3, 4, and 7 invalid variants — expired, future issued-at, over-long validity interval, wrong Hub origin, and a lower policy generation, together with the §5.7 policy-generation recovery pair. There is no capability-statement VERIFIER in packages/shared/src: the landed modules encode the transcript, build and check the §7.2.1 envelope, verify the cross-signature, and run the §7.6.1 self-check, but nothing evaluates a received statement against a clock, a connected origin, or a stored policy generation. Emitting these cases would mean asserting an outcome no implementation produces. Owned by the §5.2 statement verifier.",
+        "A statement OMITTING element 18, and a statement whose element 18 disagrees with the PINNED continuity id. The first needs a §7.6 statement decoder to have an arity verdict to derive; the second needs the §13.1 durable pin record. Owned by the §5.2 statement verifier and the client trust-state work respectively. The element-18-disagrees-with-a-carried-chain-entry case IS emitted, in family F5.",
+        "The CLIENT half of the protocol-range and admitted-pattern cases — the K3/P15 channel disposition, the assertion that no `E2EEClientHello` was produced, and the single-use ticket accounting — is a §4.4 client row (family F10). What this family derives is `selectE2eeSuite`'s verdict. Their NODE-SIDE companions, a hello whose `e2eeVersion` lies outside the advertised range and an NX hello to a node running `requireApprovedClientE2EE`, ARE emitted, in family F12, where their §11.5 observable can be compared against the reject vector directly. Owned by the client phase, together with family F10.",
+        "The K3/K2 channel dispositions and the ticket-accounting assertions attached to the selection cases are §4.4 client rows (family F10) and are carried here as labels. What this family DERIVES is `selectE2eeSuite`'s verdict, which is the precondition the rows read: `helloMayBeBuilt: false` is the 'no hello may be built from the statement' obligation, stated over the landed function. Owned by the client phase, which will assert the dispositions themselves.",
+        "§16.4 cross-runtime equality: the admitted-pattern cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 4,
+      "title": "Prekey certificates",
+      "file": "f04-prekey-certificates.json",
+      "deferred": [
+        "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any landed module: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock, and the node-side prekey rotation state that holds two is owned by the node phase.",
+        "The §5.2 step 5 checks a VERIFIER applies to the node prekey carried in a capability statement — lifetime and rotation-overlap against the verifier's clock — have no landed implementation; the reconstruction above is the part §7.6 fixes. Owned by the §5.2 statement verifier."
+      ]
+    },
+    {
+      "family": 5,
+      "title": "Continuity chains",
+      "file": "f05-continuity-chains.json",
+      "deferred": [
+        "A chain whose continuity id disagrees with the PINNED value. `validateNodeE2eeContinuityChain` takes a pinned identity fingerprint and no pinned continuity id; the §13.1 durable pin record that holds one is not in packages/shared/src yet, so the comparison has no implementation to derive an expectation from. Owned by the client trust-state work (§13.1, §13.3).",
+        "The §7.5 continuity-id storage and anchor cases (the five startup outcomes, the never-rotated anchor restore, and the pre-protocol migration mint). These are node-state transitions against a durable anchor; no node startup state machine exists in packages/shared/src. Owned by the node phase."
+      ]
+    },
+    {
+      "family": 7,
+      "title": "NX handshake",
+      "file": "f07-nx-handshake.json",
+      "deferred": [
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 8,
+      "title": "Record protection",
+      "file": "f08-record-protection.json",
+      "deferred": [
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 10,
+      "title": "Mode machine",
+      "file": "f10-mode-machine.json",
+      "deferred": [
+        "Every transition row of §4.4 — N1–N17 and K1–K24, with its input payload, its state, its expected ACTION and its next state. No §4.4 mode machine exists in packages/shared/src, so no row has an implementation to derive an expectation from; the cases above pin the classification and the record-framing verdicts a machine consumes, not the machine. Owned by the node and client phases.",
+        "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
+        "Rows N15–N17, which are driven by a connection-level input rather than a payload, and their §12.5 occurrence accounting. Owned by the node phase.",
+        "The timer and keepalive cases that discharge §3.2.2 L1 and L2 and the §8.9 deadline — the stalled accept (K15), the buffered keepalive round trip, the send-buffer overflow including the connection-wide multi-channel accounting, and the node deadline under each policy. `E2eeClientHandshake` and `E2eeNodeHandshake` do expose the two deadlines, but the buffering, flushing, and occurrence behavior these cases assert belongs to the mode machine and to the relay engine. Owned by the node and client phases.",
+        "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 11,
+      "title": "Authenticated close",
+      "file": "f11-authenticated-close.json",
+      "deferred": [
+        "Ordering and linger behavior (§10.3) beyond the timed phase-duration case is not expressible as a deterministic wire vector and belongs to implementation tests rather than to this corpus, exactly as §16.3 F11 states."
+      ]
+    },
+    {
+      "family": 12,
+      "title": "Error records",
+      "file": "f12-error-records.json",
+      "deferred": [
+        "Reject TIMING is deliberately not a fixture assertion: the §11.2 ordering rule that keeps the durable pending write off the response path constrains an implementation, not a wire vector (§16.3 F12)."
+      ]
+    },
+    {
+      "family": 14,
+      "title": "Safety number and WebSAS",
+      "file": "f14-verification-display.json",
+      "deferred": [
+        "§16.4 cross-runtime equality: the `WebSAS` half of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 16,
+      "title": "Authorization context and Branch A enforcement",
+      "file": "f16-authorization-context.json",
+      "deferred": [
+        "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations; no pending-client store exists in packages/shared/src. Owned by the node phase.",
+        "The §12.6 policy-withdrawal counterparts of the §13.6 cases above are family F18, which this corpus carries only in part for the same reason: no node policy store and no channel registry exists in packages/shared/src. Owned by the node phase, and enumerated case by case in family F18's own deferrals.",
+        "§16.4 cross-runtime equality: the NX cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 17,
+      "title": "Key-material validation",
+      "file": "f17-key-material-validation.json",
+      "deferred": [
+        "Each case names the §11 row for the position the material occupies (P11 inside the IK client certificate, P10 for a Noise-level failure, K2/K3 and P15 inside a node-signed statement). The row for material inside a node-signed statement depends on the §5.2 verifier and the §12.1.1 selection classification, neither of which is in packages/shared/src; those rows are carried as §16.2 labels and the DERIVED value in every case is the validator's or the verification path's own verdict. Owned by the §5.2 statement verifier and the client phase.",
+        "A small-order Ed25519 public key is NOT emitted as a rejected encoding: the pinned primitive's strict public-key validation accepts it, and the rejection happens at verification. Asserting a validator rejection here would have been wrong, so the case is left to the verification-path rows above.",
+        "§16.4 cross-runtime equality: the P-256 cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+      ]
+    },
+    {
+      "family": 18,
+      "title": "Node admission policy transitions",
+      "file": "f18-node-admission-policy.json",
+      "deferred": [
+        "Every per-channel case of §16.3 F18: `requireE2EE` false → true over a `legacy`, an NX `e2ee`, and an IK `e2ee` channel; `requireApprovedClientE2EE` false → true over the same three; a suite leaving the advertised registry run twice against the same command with the established channel IK and NX; the widening that closes nothing while the policy generation still advances; the combined narrow-and-widen command; and the `negotiating` channel that is not swept and then fails closed on its next input. Each states a pre-change policy, a policy generation, and a live-channel set with per-channel mode, tier, suite, and snapshot. No node policy store and no channel registry exists in packages/shared/src, so there is nothing to derive the §12.6 policy-withdrawal test's per-channel verdict from. Owned by the node phase.",
+        "The §12.6 ordering cases: a hello reaching §8.6 step 2 AFTER the durable commit, and the row-N3 race in which a channel's transition lands concurrently with the sweep, run with the two enumerations attempted in both orders. These are properties of a single-snapshot sweep over a live registry. Owned by the node phase.",
+        "The §12.6 step (c) reported counts broken out by class, and the §12.5 non-interaction assertion that no fallback occurrence of either class is recorded by a withdrawal. Both need the node's occurrence counters and its channel registry. Owned by the node phase."
+      ]
+    }
+  ],
+  "crossRuntime": {
+    "section": "16.4",
+    "requirement": "Every family runs under the repository's Node test gate. The families named below MUST ALSO run in the web browser test suite, and before the native client ships E2EE support the COMPLETE corpus MUST additionally pass on physical devices on both mobile platforms — an explicit acceptance gate of the native rollout, not an optional extra. A vector that produces different bytes on any supported runtime is a release-blocking defect.",
+    "status": "declared-deferred",
+    "browserRun": {
+      "state": "not-wired",
+      "families": [
+        1,
+        2,
+        3,
+        7,
+        8,
+        10,
+        14,
+        16,
+        17
+      ],
+      "scopes": {
+        "F1": "this whole family",
+        "F2": "this whole family",
+        "F3": "the admitted-pattern cases of this family",
+        "F7": "this whole family",
+        "F8": "this whole family",
+        "F10": "this whole family",
+        "F14": "the `WebSAS` half of this family",
+        "F16": "the NX cases of this family",
+        "F17": "the P-256 cases of this family"
+      },
+      "reason": "This repository has no browser test gate over packages/shared, so no vector in these families has yet been run anywhere but Node.",
+      "ownedBy": "the web phase"
+    },
+    "physicalDeviceRun": {
+      "state": "not-wired",
+      "families": "all",
+      "reason": "Until the native client ships E2EE support the Node run uses the §14.5 RN-realistic crypto adapters; the physical-device pass on both mobile platforms has not been performed.",
+      "ownedBy": "the native rollout's acceptance gate"
+    }
+  },
+  "ledgerFidelity": {
+    "section": "16.3",
+    "ledger": "packages/shared/src/relayE2eeCorpus.test.ts — SECTION_16_3_LEDGER",
+    "status": "hand-maintained-transcription",
+    "proves": "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and a group obligation cannot lose members below its floor. So a case that is dropped, or a deferral that is quietly deleted, fails a test.",
+    "doesNotProve": "That the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+    "reviewObligation": "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
+    "whyNotAutomated": "Parsing §16.3's prose to derive the obligation set automatically was considered and deliberately rejected. The section is discursive English — nested bullets, prose qualifiers, single obligations spread across several sentences, some of them negative — and an extractor over it would be wrong in ways no test could surface. A green check from an unreliable extractor is strictly worse than a known limitation whose reviewer is told, in as many words, to close it."
   }
 }

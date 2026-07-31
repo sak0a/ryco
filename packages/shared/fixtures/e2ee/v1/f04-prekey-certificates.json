@@ -1,0 +1,743 @@
+{
+  "family": {
+    "number": 4,
+    "title": "Prekey certificates",
+    "sections": [
+      "7.3",
+      "7.4",
+      "6.4",
+      "8.6 step 5",
+      "3.2.1 S9",
+      "16.3 F4"
+    ],
+    "summary": "The §7.3 node agreement-prekey certificate through the §7.6 cross-signature reconstruction, and the §7.4 client agreement-prekey certificate through §8.6 step 5: valid transcripts and signatures, both sides of each `E2EE_MAX_CLOCK_SKEW` edge, the `E2EE_PREKEY_LIFETIME` bound, namespace mismatches, usage-field substitution, and the strict-decode failures of §3.6. The maximum-namespace certificates additionally discharge §3.2.1 S9.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any landed module: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock, and the node-side prekey rotation state that holds two is owned by the node phase.",
+    "The §5.2 step 5 checks a VERIFIER applies to the node prekey carried in a capability statement — lifetime and rotation-overlap against the verifier's clock — have no landed implementation; the reconstruction above is the part §7.6 fixes. Owned by the §5.2 statement verifier."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    }
+  },
+  "cases": [
+    {
+      "name": "valid-node-agreement-prekey-certificate",
+      "sections": [
+        "7.3",
+        "7.6"
+      ],
+      "note": "The statement does not carry the §7.3 transcript bytes; the verifier REBUILDS them from the statement's own identity fields and prekey members, and that reconstruction is what binds the advertised prekey to the advertised identity.",
+      "inputs": {
+        "hubOrigin": "https://hub.example.com",
+        "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+        "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+        "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+        "identityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "agreementPublicKey": {
+          "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "createdAt": 1784160000000,
+        "expiresAt": 1786752000000,
+        "noiseUsage": {
+          "dh": "25519",
+          "hash": "SHA256"
+        }
+      },
+      "expected": {
+        "transcript": {
+          "$bytes": "8d78187279636f2e6e6f64652d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242781a65706b5f45454545454545454545454545454545454545454545582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b6458207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "transcriptBytes": 278,
+        "transcriptSha256": "c8f6f5f775a7fe1bf0b30afe4b93143a5bd7127da0fe1bc9497cd5905f31cdea",
+        "identityFingerprint": {
+          "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+        },
+        "agreementFingerprint": {
+          "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "crossSignature": {
+          "$bytes": "58f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c716207"
+        },
+        "crossSignatureReconstructionVerifies": true,
+        "withinDirectSigningBound": true
+      }
+    },
+    {
+      "name": "node-certificate-at-the-maximum-hub-origin-accepted-and-within-S9",
+      "sections": [
+        "7.3",
+        "3.2.1 S9"
+      ],
+      "inputs": {
+        "hubOrigin": "https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com",
+        "hubOriginBytes": 128,
+        "hubOriginMaxBytes": 128
+      },
+      "expected": {
+        "transcript": {
+          "$bytes": "8d78187279636f2e6e6f64652d653265652d7072656b65792e7631788068747470733a2f2f6868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868682e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242781a65706b5f45454545454545454545454545454545454545454545582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b6458207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13653235353139665348413235361b00000001000000001b0000000100000000"
+        },
+        "transcriptBytes": 384,
+        "directSigningTranscriptMaxBytes": 1024,
+        "satisfiesS9": true
+      }
+    },
+    {
+      "name": "node-certificate-cross-signature-lifted-from-another-hub-origin",
+      "sections": [
+        "7.3",
+        "7.6"
+      ],
+      "note": "A prekey lifted out of a statement for a different Hub origin reconstructs to different bytes and fails there — no signature check is needed to see it.",
+      "inputs": {
+        "statementHubOrigin": "https://hub.example.com",
+        "crossSignatureBoundToHubOrigin": "https://other.example.com"
+      },
+      "expected": {
+        "crossSignatureReconstructionVerifies": false
+      }
+    },
+    {
+      "name": "node-certificate-carried-identity-fingerprint-disagrees-with-the-identity-key",
+      "sections": [
+        "7.1",
+        "7.6"
+      ],
+      "note": "§7.6 rebuilds element 7 of the §7.3 array from the statement's CARRIED element 6, so a statement that disagrees with itself reconstructs to bytes the cross-signature does not cover. Re-deriving the fingerprint instead would repair the disagreement and admit the statement.",
+      "inputs": {
+        "carriedIdentityFingerprint": {
+          "$bytes": "bb4edb00cb9d84e3efd88f88d789514b9b6346c9597a759f6f64363cf864698b"
+        },
+        "recomputedIdentityFingerprint": {
+          "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+        }
+      },
+      "expected": {
+        "crossSignatureReconstructionVerifies": false
+      }
+    },
+    {
+      "name": "node-certificate-carried-agreement-fingerprint-disagrees-with-the-agreement-key",
+      "sections": [
+        "7.1",
+        "7.6"
+      ],
+      "inputs": {
+        "carriedAgreementFingerprint": {
+          "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+        },
+        "recomputedAgreementFingerprint": {
+          "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        }
+      },
+      "expected": {
+        "crossSignatureReconstructionVerifies": false
+      }
+    },
+    {
+      "name": "node-certificate-prekey-id-substituted-after-signing",
+      "sections": [
+        "7.3",
+        "7.6"
+      ],
+      "inputs": {
+        "signedPrekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+        "carriedPrekeyId": "epk_ZZZZZZZZZZZZZZZZZZZZZZ"
+      },
+      "expected": {
+        "crossSignatureReconstructionVerifies": false
+      }
+    },
+    {
+      "name": "node-certificate-usage-fields-are-not-carrier-supplied",
+      "sections": [
+        "7.3",
+        "3.4"
+      ],
+      "note": "§7.3 elements 9 and 10 pin the agreement key's Noise usage to the suite functions. They are ENCODER-DERIVED on both sides, so a statement cannot present different ones: the reconstruction rebuilds `25519`/`SHA256` and a signature made over any other usage fails.",
+      "inputs": {
+        "mutatedTranscript": {
+          "$bytes": "8d78187279636f2e6e6f64652d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242781a65706b5f45454545454545454545454545454545454545454545582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b6458207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f1363343438665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "mutatedUsageDh": "448"
+      },
+      "expected": {
+        "crossSignatureReconstructionVerifies": false,
+        "reconstructedUsageDh": "25519",
+        "reconstructedUsageHash": "SHA256"
+      }
+    },
+    {
+      "name": "valid-client-agreement-prekey-certificate",
+      "sections": [
+        "7.4",
+        "8.6 step 5"
+      ],
+      "note": "The §8.6 step 5 re-encode equality is against the §7.4 ENCODER ITSELF, so the domain, the algorithm label, the element order, the derived identity fingerprint, and the usage fields are all checked by construction.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "transcriptSha256": "44d1fac7726a5ae0b3d72e554043713c39b091a39b46e9ab07030cadd0b0a2e7",
+        "transcriptBytes": 240
+      },
+      "expected": {
+        "step5": {
+          "kind": "ok",
+          "accountId": "acct_0123456789",
+          "identityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "agreementFingerprint": {
+            "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+          }
+        }
+      }
+    },
+    {
+      "name": "client-certificate-at-the-maximum-namespace-accepted-and-within-S9",
+      "sections": [
+        "7.4",
+        "3.2.1 S9"
+      ],
+      "note": "The largest §7.4 transcript the bounds admit: Hub origin at `E2EE_HUB_ORIGIN_MAX_BYTES`, account id at `E2EE_ACCOUNT_ID_MAX_BYTES`, every unsigned field at its widest canonical encoding. It is the largest of the three directly signed transcripts, so it is the one S9 turns on.",
+      "inputs": {
+        "hubOriginBytes": 128,
+        "accountIdBytes": 256,
+        "accountIdMaxBytes": 256
+      },
+      "expected": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e7631788068747470733a2f2f6868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868686868682e6578616d706c652e636f6d7901006161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616164703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b00000001000000001b000000019a7ec800"
+        },
+        "transcriptBytes": 589,
+        "directSigningTranscriptMaxBytes": 1024,
+        "satisfiesS9": true,
+        "signingInputMaxBytes": 4096,
+        "satisfiesS2": true
+      }
+    },
+    {
+      "name": "client-certificate-not-yet-valid-accepted-exactly-at-the-clock-skew-boundary",
+      "sections": [
+        "6.4",
+        "8.6 step 5"
+      ],
+      "note": "The verifier's clock is `E2EE_MAX_CLOCK_SKEW` behind the certificate's creation, which §6.4 tolerates exactly.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784159700000,
+        "certificateCreatedAt": 1784160000000,
+        "certificateExpiresAt": 1786752000000,
+        "maxClockSkew": 300000
+      },
+      "expected": {
+        "step5": {
+          "kind": "ok",
+          "accountId": "acct_0123456789",
+          "identityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "agreementFingerprint": {
+            "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+          }
+        }
+      }
+    },
+    {
+      "name": "client-certificate-not-yet-valid-one-millisecond-beyond-the-clock-skew-boundary",
+      "sections": [
+        "6.4",
+        "8.6 step 5"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784159699999,
+        "certificateCreatedAt": 1784160000000,
+        "certificateExpiresAt": 1786752000000,
+        "maxClockSkew": 300000
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "expired"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-expiry-accepted-exactly-at-the-clock-skew-boundary",
+      "sections": [
+        "6.4",
+        "8.6 step 5"
+      ],
+      "note": "The verifier's clock is `E2EE_MAX_CLOCK_SKEW` past expiry, which §6.4 tolerates exactly.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1786752300000,
+        "certificateCreatedAt": 1784160000000,
+        "certificateExpiresAt": 1786752000000,
+        "maxClockSkew": 300000
+      },
+      "expected": {
+        "step5": {
+          "kind": "ok",
+          "accountId": "acct_0123456789",
+          "identityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "agreementFingerprint": {
+            "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+          }
+        }
+      }
+    },
+    {
+      "name": "client-certificate-expiry-one-millisecond-beyond-the-clock-skew-boundary",
+      "sections": [
+        "6.4",
+        "8.6 step 5"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1786752300001,
+        "certificateCreatedAt": 1784160000000,
+        "certificateExpiresAt": 1786752000000,
+        "maxClockSkew": 300000
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "expired"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-lifetime-one-millisecond-over-the-prekey-lifetime",
+      "sections": [
+        "6.4"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e001"
+        },
+        "signature": {
+          "$bytes": "f03c015549ba345e0d18641b20bf22b130ca7d24cc703daeb9b808c5fb4d575406545c8779a5b86a27dd6c897cdc1cef62c50552e4bf01050c9452cc9e5bd638"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160000000,
+        "prekeyLifetime": 2592000000
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "expired"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-wrong-hub-origin-namespace",
+      "sections": [
+        "7.4",
+        "8.6 step 5"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e7631781968747470733a2f2f6f746865722e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "42c69a9962a6d7ff81e04846c19336968c35f4b0a0ff1d174903c47284334af1f3b220c4fddaf652f321fd30787a7328a6ef53f626083d6b62bec89c8ef6793e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "certificateHubOrigin": "https://other.example.com"
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "hub_origin_mismatch"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-foreign-account-id-passes-step-5-and-is-caught-elsewhere",
+      "sections": [
+        "7.4",
+        "8.6 step 5",
+        "8.3 element 10"
+      ],
+      "note": "§8.6 step 5 compares the certificate's HUB ORIGIN against the channel's and does not compare the account id; the account half of the namespace is bound by §8.3 element 10 and a substitution there is the cross-account splice of family F16. This case pins step 5's actual verdict so no reader assumes the check lives here.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3938373635343332313064703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "50b1f2ba62cf4a71c499603fe0d5aea3ab45126d82cac384ce5086117fe20bc3228454f8a316de3209c9f06e20627db9d3acc421ad0f7ba34ed661333e9fae4d"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "certificateAccountId": "acct_9876543210",
+        "channelAccountId": "acct_0123456789",
+        "now": 1784160030000
+      },
+      "expected": {
+        "step5": {
+          "kind": "ok",
+          "accountId": "acct_9876543210",
+          "identityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "agreementFingerprint": {
+            "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+          }
+        },
+        "enforcedBy": "§8.3 element 10, evaluated at §8.6 step 7 (family F16)"
+      }
+    },
+    {
+      "name": "client-certificate-usage-field-substituted",
+      "sections": [
+        "7.4",
+        "8.6 step 5",
+        "3.4"
+      ],
+      "note": "The §7.4 usage fields are encoder-derived, so the re-encode equality catches a usage substitution BEFORE the usage comparison runs. `usage_mismatch` is therefore reachable only once a suite registers different usage fields; today the substitution is `malformed`, which this case pins rather than assuming.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b84363343438665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "19d7f6959bb9c5fe0ee004d883effc72cf1e6476dff6dc3840a02e3adc08dcc3a1fb74b6d5c925222652802eeccd928b6f22e6e989e1447d77f102a4d98f05c2"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "substitutedUsageDh": "448"
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "malformed"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-invalid-signature",
+      "sections": [
+        "7.4",
+        "14.3"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7ec435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "invalid_signature"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-signed-by-another-device-key",
+      "sections": [
+        "7.4",
+        "14.3"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "d49483a6aefdc0a3e4f01a563dfa2289e4101c7e78b9d4656c4c319d237057f050c57b2bd987ab09092cd437781a4f9634e054e7d67427e45dfc203453d44b4f"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "testOnlyForeignClientIdentitySecretKey": {
+          "$bytes": "4141414141414141414141414141414141414141414141414141414141414141"
+        }
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "invalid_signature"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-non-canonical-array-header",
+      "sections": [
+        "3.6",
+        "8.6 step 5"
+      ],
+      "note": "The array header re-emitted one byte wider. The value decodes identically; the §3.6 re-encode equality rule is what rejects it, because bytes that do not re-encode to themselves are not the bytes a signature covers.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "980b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "canonicalDecode": {
+          "kind": "error",
+          "reason": "malformed"
+        }
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "malformed"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-indefinite-length-array",
+      "sections": [
+        "3.6",
+        "8.6 step 5"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "9f781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000ff"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "canonicalDecode": {
+          "kind": "error",
+          "reason": "malformed"
+        }
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "malformed"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-trailing-byte",
+      "sections": [
+        "3.6",
+        "8.6 step 5"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e00000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "canonicalDecode": {
+          "kind": "error",
+          "reason": "malformed"
+        }
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "malformed"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-truncated",
+      "sections": [
+        "3.6",
+        "8.6 step 5"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e0"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "canonicalDecode": {
+          "kind": "error",
+          "reason": "malformed"
+        }
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "malformed"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-float-element",
+      "sections": [
+        "3.6",
+        "8.6 step 5"
+      ],
+      "note": "§3.6 forbids floating-point values in every E2EE structure, and the rejection is over the ENCODING: an integral float would otherwise be indistinguishable from an integer after decoding.",
+      "inputs": {
+        "transcript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b84365323535313966534841323536f93e001b000001a002b7e000"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "canonicalDecode": {
+          "kind": "error",
+          "reason": "float_forbidden"
+        }
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "malformed"
+        },
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "client-certificate-wrong-element-count",
+      "sections": [
+        "3.6",
+        "8.6 step 5"
+      ],
+      "inputs": {
+        "transcript": {
+          "$bytes": "8a781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f68391800"
+        },
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "channelHubOrigin": "https://hub.example.com",
+        "negotiatedSuite": 1,
+        "now": 1784160030000,
+        "canonicalDecode": {
+          "kind": "ok"
+        }
+      },
+      "expected": {
+        "step5": {
+          "kind": "error",
+          "failure": "malformed"
+        },
+        "fatal": "P11"
+      }
+    }
+  ]
+}
