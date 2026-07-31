@@ -12,10 +12,11 @@ export const KEYBINDING_CATEGORIES: Record<string, KeybindingCategory> = {
   diff: { id: "diff", label: "Diff", sortWeight: 30 },
   commandPalette: { id: "commandPalette", label: "Command palette", sortWeight: 40 },
   chat: { id: "chat", label: "Chat", sortWeight: 50 },
-  editor: { id: "editor", label: "Editor", sortWeight: 60 },
-  modelPicker: { id: "modelPicker", label: "Model picker", sortWeight: 70 },
-  thread: { id: "thread", label: "Threads", sortWeight: 80 },
-  script: { id: "script", label: "Project scripts", sortWeight: 90 },
+  composer: { id: "composer", label: "Composer", sortWeight: 60 },
+  editor: { id: "editor", label: "Editor", sortWeight: 70 },
+  modelPicker: { id: "modelPicker", label: "Model picker", sortWeight: 80 },
+  thread: { id: "thread", label: "Threads", sortWeight: 90 },
+  script: { id: "script", label: "Project scripts", sortWeight: 100 },
 } as const;
 
 export interface KeybindingCommandMeta {
@@ -36,6 +37,7 @@ const STATIC_COMMAND_META: Record<string, Omit<KeybindingCommandMeta, "category"
   "commandPalette.toggle": { title: "Open command palette", sortWeight: 1 },
   "chat.new": { title: "New chat", sortWeight: 1 },
   "chat.newLocal": { title: "New chat (local environment)", sortWeight: 2 },
+  "composer.stash": { title: "Stash prompt or open stash", sortWeight: 1 },
   "editor.openFavorite": { title: "Open in preferred editor", sortWeight: 1 },
   "modelPicker.toggle": { title: "Toggle model picker", sortWeight: 1 },
   "modelPicker.jump.1": { title: "Pick model 1", sortWeight: 2 },

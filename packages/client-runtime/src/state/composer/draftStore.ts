@@ -284,6 +284,8 @@ export interface ComposerDraftStoreState<TImage extends ComposerDraftImage = Com
     threadRef: ComposerThreadTarget,
     attachments: PersistedComposerImageAttachment[],
   ) => void;
+  /** Clears only stashable prompt content, preserving all routing, modes, and contexts. */
+  clearPromptAndImages: (threadRef: ComposerThreadTarget) => void;
   clearComposerContent: (threadRef: ComposerThreadTarget) => void;
 }
 
@@ -369,7 +371,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState<never> {
   };
 }
 
-function composerImageDedupKey(image: ComposerDraftImage): string {
+export function composerDraftImageDedupKey(image: ComposerDraftImage): string {
   // Keep this independent from File.lastModified so dedupe is stable for hydrated
   // images reconstructed from localStorage (which get a fresh lastModified value).
   return `${image.mimeType}\u0000${image.sizeBytes}\u0000${image.name}`;
@@ -1519,12 +1521,12 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
               const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
               const existingIds = new Set(existing.images.map((image) => image.id));
               const existingDedupKeys = new Set(
-                existing.images.map((image) => composerImageDedupKey(image)),
+                existing.images.map((image) => composerDraftImageDedupKey(image)),
               );
               const acceptedPreviewUrls = new Set(existing.images.map((image) => image.previewUrl));
               const dedupedIncoming: TImage[] = [];
               for (const image of images) {
-                const dedupKey = composerImageDedupKey(image);
+                const dedupKey = composerDraftImageDedupKey(image);
                 if (existingIds.has(image.id) || existingDedupKeys.has(dedupKey)) {
                   // Avoid revoking a blob URL that's still referenced by an accepted image.
                   if (!acceptedPreviewUrls.has(image.previewUrl)) {
@@ -1843,6 +1845,35 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
             });
             Promise.resolve().then(() => {
               verifyPersistedAttachments(threadKey, attachments, set);
+            });
+          },
+          clearPromptAndImages: (threadRef) => {
+            const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+            if (threadKey.length === 0) {
+              return;
+            }
+            set((state) => {
+              const current = state.draftsByThreadKey[threadKey];
+              if (!current) {
+                return state;
+              }
+              const nextDraft: ComposerThreadDraftState<TImage> = {
+                ...current,
+                prompt: ensureInlineTerminalContextPlaceholders(
+                  "",
+                  current.terminalContexts.length,
+                ),
+                images: [],
+                nonPersistedImageIds: [],
+                persistedAttachments: [],
+              };
+              const nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+              if (shouldRemoveDraft(nextDraft)) {
+                delete nextDraftsByThreadKey[threadKey];
+              } else {
+                nextDraftsByThreadKey[threadKey] = nextDraft;
+              }
+              return { draftsByThreadKey: nextDraftsByThreadKey };
             });
           },
           clearComposerContent: (threadRef) => {

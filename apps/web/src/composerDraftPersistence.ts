@@ -94,20 +94,32 @@ function hydratePersistedComposerImageAttachment(
 export function hydrateImagesFromPersisted(
   attachments: ReadonlyArray<PersistedComposerImageAttachment>,
 ): ComposerImageAttachment[] {
-  return attachments.flatMap((attachment) => {
-    const file = hydratePersistedComposerImageAttachment(attachment);
-    if (!file) return [];
+  return hydrateImagesFromPersistedWithFailures(attachments).images;
+}
 
-    return [
-      {
-        type: "image" as const,
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        previewUrl: attachment.dataUrl,
-        file,
-      } satisfies ComposerImageAttachment,
-    ];
-  });
+export function hydrateImagesFromPersistedWithFailures(
+  attachments: ReadonlyArray<PersistedComposerImageAttachment>,
+): {
+  images: ComposerImageAttachment[];
+  unreadableImageNames: string[];
+} {
+  const images: ComposerImageAttachment[] = [];
+  const unreadableImageNames: string[] = [];
+  for (const attachment of attachments) {
+    const file = hydratePersistedComposerImageAttachment(attachment);
+    if (!file) {
+      unreadableImageNames.push(attachment.name);
+      continue;
+    }
+    images.push({
+      type: "image" as const,
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      previewUrl: attachment.dataUrl,
+      file,
+    });
+  }
+  return { images, unreadableImageNames };
 }
