@@ -20,6 +20,22 @@
       "types": "./src/relayE2eeWire.ts",
       "import": "./src/relayE2eeWire.ts"
     },
+    "./relayE2eeNoise": {
+      "types": "./src/relayE2eeNoise.ts",
+      "import": "./src/relayE2eeNoise.ts"
+    },
+    "./relayE2eeKeys": {
+      "types": "./src/relayE2eeKeys.ts",
+      "import": "./src/relayE2eeKeys.ts"
+    },
+    "./relayE2eeTranscripts": {
+      "types": "./src/relayE2eeTranscripts.ts",
+      "import": "./src/relayE2eeTranscripts.ts"
+    },
+    "./relayE2eeVerificationDisplay": {
+      "types": "./src/relayE2eeVerificationDisplay.ts",
+      "import": "./src/relayE2eeVerificationDisplay.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"

@@ -1,0 +1,335 @@
+{
+  "family": {
+    "number": 15,
+    "title": "Noise core vectors",
+    "sections": ["14.1", "16.1", "16.2", "16.3 F15", "3.4", "6.5", "8.1"],
+    "summary": "The published cacophony and snow vector sets for Noise_IK_25519_ChaChaPoly_SHA256 and Noise_NX_25519_ChaChaPoly_SHA256, transcoded into the §16.2 corpus format. §14.1 makes reproducing them a MUST for the first-party Noise state machine.",
+    "transcodeRule": "Every value below is copied verbatim from its upstream vector. Nothing here was computed, regenerated, normalised, or reordered by this repository: the upstream hex strings are already lowercase, and the only restructuring is splitting each vector's flat `messages` array into the two handshake messages of the pattern and the transport messages that follow, and renaming fields to the §16.1 testOnly convention.",
+    "messageOrder": "Both patterns are two-message patterns, so upstream messages 0 and 1 are the handshake (initiator, then responder) and every later message is a transport message, alternating initiator, responder, initiator, responder. Transport messages are encrypted under the Split() outputs — the first for initiator-to-responder, the second for responder-to-initiator (§6.5) — each with its own counter starting at zero and an empty AD.",
+    "sharedTestKeyMaterial": "None. Unlike a generated family, each upstream vector carries its own key material, so it is stated per case under inputs.testOnly*."
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, and ephemeral below is published deterministic test material transcoded from an upstream Noise test-vector set. It MUST NEVER be used for a real endpoint, and no production code path may accept it (§16.1).",
+  "provenance": [
+    {
+      "source": "cacophony",
+      "description": "Reference Haskell Noise implementation listed on noiseprotocol.org; its vectors/cacophony.txt is the published cacophony vector set.",
+      "repository": "https://github.com/haskell-cryptography/cacophony",
+      "repositoryNote": "Published as github.com/centromere/cacophony (the URL noiseprotocol.org lists); that path now redirects to haskell-cryptography/cacophony, which is the same repository.",
+      "path": "vectors/cacophony.txt",
+      "commit": "18b7348c54fd61fcd0c220298883de0d09c8364d",
+      "commitDate": "2018-12-16T00:54:27Z",
+      "url": "https://raw.githubusercontent.com/haskell-cryptography/cacophony/18b7348c54fd61fcd0c220298883de0d09c8364d/vectors/cacophony.txt",
+      "sourceFileSha256": "3bde7c09a6f349ee11c825c50fcc02649f8f02a47c857a459206b357f9386cae",
+      "sourceFileGitBlobId": "b8a271ed1aba8b4a56bf429e559d7947827123b4",
+      "sourceFileBytes": 1709817,
+      "vectorsInSourceFile": 944,
+      "retrievedAt": "2026-07-31",
+      "corroboration": "Byte-identical (same SHA-256) to the copy the snow repository vendors at tests/vectors/cacophony.txt and to the current master of the cacophony repository, so two independent projects publish the same bytes.",
+      "transcodedVectors": ["Noise_IK_25519_ChaChaPoly_SHA256", "Noise_NX_25519_ChaChaPoly_SHA256"]
+    },
+    {
+      "source": "snow",
+      "description": "Reference Rust Noise implementation listed on noiseprotocol.org; its tests/vectors/snow.txt is the vector set snow itself publishes and tests against.",
+      "repository": "https://github.com/mcginty/snow",
+      "path": "tests/vectors/snow.txt",
+      "commit": "d00b360cc61a7fe519ce7539974dca4f36c4654a",
+      "commitDate": "2025-03-04T17:23:46Z",
+      "url": "https://raw.githubusercontent.com/mcginty/snow/d00b360cc61a7fe519ce7539974dca4f36c4654a/tests/vectors/snow.txt",
+      "sourceFileSha256": "69da433305fd045f6c9f01b656662a389d022688986fd39fbe7af009cd402fd3",
+      "sourceFileGitBlobId": "11f7b7c8b43506f1ad8879dc789cc694cd7c17c0",
+      "sourceFileBytes": 883233,
+      "vectorsInSourceFile": 408,
+      "retrievedAt": "2026-07-31",
+      "corroboration": "Produced by an implementation independent of cacophony (Rust vs Haskell) with different keys, prologues, and payloads, so the two sources agree on the pattern rather than on one project's habits.",
+      "transcodedVectors": ["Noise_IK_25519_ChaChaPoly_SHA256", "Noise_NX_25519_ChaChaPoly_SHA256"]
+    }
+  ],
+  "cases": [
+    {
+      "name": "cacophony/Noise_IK_25519_ChaChaPoly_SHA256",
+      "inputs": {
+        "source": "cacophony",
+        "protocolName": "Noise_IK_25519_ChaChaPoly_SHA256",
+        "pattern": "IK",
+        "role": {
+          "initiator": "client (§8.1)",
+          "responder": "node (§8.1)"
+        },
+        "initiatorPrologue": {
+          "$bytes": "4a6f686e2047616c74"
+        },
+        "responderPrologue": {
+          "$bytes": "4a6f686e2047616c74"
+        },
+        "testOnlyInitiatorStaticSecretKey": {
+          "$bytes": "e61ef9919cde45dd5f82166404bd08e38bceb5dfdfded0a34c8df7ed542214d1"
+        },
+        "testOnlyInitiatorEphemeralSecretKey": {
+          "$bytes": "893e28b9dc6ca8d611ab664754b8ceb7bac5117349a4439a6b0569da977c464a"
+        },
+        "testOnlyInitiatorRemoteStaticPublicKey": {
+          "$bytes": "31e0303fd6418d2f8c0e78b91f22e8caed0fbe48656dcf4767e4834f701b8f62"
+        },
+        "testOnlyResponderStaticSecretKey": {
+          "$bytes": "4a3acbfdb163dec651dfa3194dece676d437029c62a408b4c5ea9114246e4893"
+        },
+        "testOnlyResponderEphemeralSecretKey": {
+          "$bytes": "bbdb4cdbd309f1a1f2e1456967fe288cadd6f712d65dc7b7793d5e63da6b375b"
+        },
+        "handshakePayloads": [
+          {
+            "$bytes": "4c756477696720766f6e204d69736573"
+          },
+          {
+            "$bytes": "4d757272617920526f746862617264"
+          }
+        ],
+        "transportPayloads": [
+          {
+            "$bytes": "462e20412e20486179656b"
+          },
+          {
+            "$bytes": "4361726c204d656e676572"
+          },
+          {
+            "$bytes": "4a65616e2d426170746973746520536179"
+          },
+          {
+            "$bytes": "457567656e2042f6686d20766f6e2042617765726b"
+          }
+        ]
+      },
+      "expected": {
+        "handshakeMessages": [
+          {
+            "$bytes": "ca35def5ae56cec33dc2036731ab14896bc4c75dbb07a61f879f8e3afa4c7944718da798efbcd91528520204f904b9bd6c7413dccdc214d951e15253e39987f18146e8cd0873654207148333479d4d16c289f0294b29960a72f48e0b7bba2e89083169825e59642148d492020664ccf7"
+          },
+          {
+            "$bytes": "95ebc60d2b1fa672c1f46a8aa265ef51bfe38e7ccb39ec5be34069f1448088435361e70b2ed446e6c9ec387d1d6b3b840f194e373979d241b203c4acafccf5"
+          }
+        ],
+        "handshakeHash": {
+          "$bytes": "0b0f68fb0c27e03ce9b97565995ed4838cc0581b762ef72b062f6a546419fad7"
+        },
+        "transportMessages": [
+          {
+            "$bytes": "050e9f3c8fac16b68dbce8f8c4bfbf6617c897f9ada4aa29aa19c8"
+          },
+          {
+            "$bytes": "344233a6cabb7141d80f3da2fedc311d9646bbb0f505afe403a667"
+          },
+          {
+            "$bytes": "62cdeeb172ad7ade7aa7d9e069da5790f12331bfa00177787a1d0810c67dc3b2b4"
+          },
+          {
+            "$bytes": "029bead1b40992327044d409d9a1f3ad8f36c3c452775d557e18bbeb2e8dfcead32d514024"
+          }
+        ]
+      }
+    },
+    {
+      "name": "cacophony/Noise_NX_25519_ChaChaPoly_SHA256",
+      "inputs": {
+        "source": "cacophony",
+        "protocolName": "Noise_NX_25519_ChaChaPoly_SHA256",
+        "pattern": "NX",
+        "role": {
+          "initiator": "client (§8.1)",
+          "responder": "node (§8.1)"
+        },
+        "initiatorPrologue": {
+          "$bytes": "4a6f686e2047616c74"
+        },
+        "responderPrologue": {
+          "$bytes": "4a6f686e2047616c74"
+        },
+        "testOnlyInitiatorEphemeralSecretKey": {
+          "$bytes": "893e28b9dc6ca8d611ab664754b8ceb7bac5117349a4439a6b0569da977c464a"
+        },
+        "testOnlyResponderStaticSecretKey": {
+          "$bytes": "4a3acbfdb163dec651dfa3194dece676d437029c62a408b4c5ea9114246e4893"
+        },
+        "testOnlyResponderEphemeralSecretKey": {
+          "$bytes": "bbdb4cdbd309f1a1f2e1456967fe288cadd6f712d65dc7b7793d5e63da6b375b"
+        },
+        "handshakePayloads": [
+          {
+            "$bytes": "4c756477696720766f6e204d69736573"
+          },
+          {
+            "$bytes": "4d757272617920526f746862617264"
+          }
+        ],
+        "transportPayloads": [
+          {
+            "$bytes": "462e20412e20486179656b"
+          },
+          {
+            "$bytes": "4361726c204d656e676572"
+          },
+          {
+            "$bytes": "4a65616e2d426170746973746520536179"
+          },
+          {
+            "$bytes": "457567656e2042f6686d20766f6e2042617765726b"
+          }
+        ]
+      },
+      "expected": {
+        "handshakeMessages": [
+          {
+            "$bytes": "ca35def5ae56cec33dc2036731ab14896bc4c75dbb07a61f879f8e3afa4c79444c756477696720766f6e204d69736573"
+          },
+          {
+            "$bytes": "95ebc60d2b1fa672c1f46a8aa265ef51bfe38e7ccb39ec5be34069f1448088430da8899553a0e2d18bb3bcdf632634e25dd60e400ecc50c371de2cd83257c7636c5913e463b6bd3f3efe3eb1c9e92f10dde5d45c312e42ff98cfadd9f9e92b01ec7604e5d2150eef5db0aed53ab203"
+          }
+        ],
+        "handshakeHash": {
+          "$bytes": "6959d38aed4b70824a50c722b47c07e00e88eb3eb14f351c11cbee4f56dac33b"
+        },
+        "transportMessages": [
+          {
+            "$bytes": "deefd230bea16077f1ceecaad5e4284c3bf2c564e20f694a61b9d4"
+          },
+          {
+            "$bytes": "6bfa60de93cf432f460dcc86cf66716c22ffb502125832433808c0"
+          },
+          {
+            "$bytes": "9c9608d8fc3ef689ae393775e8bb60c16f28ab12ff5c94015961e54addb3d64983"
+          },
+          {
+            "$bytes": "2490983755cc8a904f08a5876acb67db6821de003421b2f72f9f2389b21105ed4d43c4c799"
+          }
+        ]
+      }
+    },
+    {
+      "name": "snow/Noise_IK_25519_ChaChaPoly_SHA256",
+      "inputs": {
+        "source": "snow",
+        "protocolName": "Noise_IK_25519_ChaChaPoly_SHA256",
+        "pattern": "IK",
+        "role": {
+          "initiator": "client (§8.1)",
+          "responder": "node (§8.1)"
+        },
+        "initiatorPrologue": {
+          "$bytes": "5468657265206973206e6f20726967687420616e642077726f6e672e2054686572652773206f6e6c792066756e20616e6420626f72696e672e"
+        },
+        "responderPrologue": {
+          "$bytes": "5468657265206973206e6f20726967687420616e642077726f6e672e2054686572652773206f6e6c792066756e20616e6420626f72696e672e"
+        },
+        "testOnlyInitiatorStaticSecretKey": {
+          "$bytes": "f49f93c5112c0787acc808d61716d7e090e076a58f15a3f78d92773f8dcb473b"
+        },
+        "testOnlyInitiatorEphemeralSecretKey": {
+          "$bytes": "dae68498c41315cff7e4a34dded8d973199d8f0cf3fcb8b6651c169de77de8be"
+        },
+        "testOnlyInitiatorRemoteStaticPublicKey": {
+          "$bytes": "2ea5942829bac414e25aa4cbb1bcc43394816ebb1bd12550d7d0eb4415e42951"
+        },
+        "testOnlyResponderStaticSecretKey": {
+          "$bytes": "b790546f98b1e933c48cd01f17e7b281469d46fcacc9a3b584ae65b1d6272e8e"
+        },
+        "testOnlyResponderEphemeralSecretKey": {
+          "$bytes": "c0875a5b59c8492bd2135e5432d7d484f938e0a1f5009428c4bcb70b2f69f69f"
+        },
+        "handshakePayloads": [
+          {
+            "$bytes": "95a8f51c435a9530ff1f30868ed7b23ec952eb513c26a0774fed82d2978a8c81"
+          },
+          {
+            "$bytes": "b866b807a6d8b83182b884dbfedc861843c5082bd6e480cb54e4245a72083041"
+          }
+        ],
+        "transportPayloads": [
+          {
+            "$bytes": "e3a4937faef391028f759758b428b57652e0069a8dee64dfed01b60846938740"
+          },
+          {
+            "$bytes": "693972f27b0cb98aeac1fb54d782125431e7540e0cb2fa882cf51a8184d724fd"
+          }
+        ]
+      },
+      "expected": {
+        "handshakeMessages": [
+          {
+            "$bytes": "6d21fec9141f3f37cc464e936a48b2d9521b5a44e0f3d960895d3c3fba30282f731f445c25e898e2534ac0536715b24308c108fc46bd260c887b36c3f68e3a05654fc8295c068ed53fb2022560961224e0b10b0835e1efc82fc587cd50f7178fe3d9eb06e0351c6e7334162c10bed670bfa2a105f7b2768a140b3fd597782601"
+          },
+          {
+            "$bytes": "e64e1fb8701c4f4bc3850b255fea657d4d835338b059c89acc99628fbe52473b41a4e79e3c1e6abc46bf80f078a005e15d8a3e04f989af3e6cb99b52031165006163ac3e17b928af8c116009d7bf4fb2"
+          }
+        ],
+        "transportMessages": [
+          {
+            "$bytes": "2bebe19102169cdfe79cf41e38930bfd20a5b2fc78ccf33e853ddd939c0983174656eb27b61464a607762848892ca1c0"
+          },
+          {
+            "$bytes": "c7c56da33b45d12f4754e17978bd49999c9c8f51d00db460f902aba2e6e245d0c46662f507915de8596f43b1d175f1db"
+          }
+        ]
+      }
+    },
+    {
+      "name": "snow/Noise_NX_25519_ChaChaPoly_SHA256",
+      "inputs": {
+        "source": "snow",
+        "protocolName": "Noise_NX_25519_ChaChaPoly_SHA256",
+        "pattern": "NX",
+        "role": {
+          "initiator": "client (§8.1)",
+          "responder": "node (§8.1)"
+        },
+        "initiatorPrologue": {
+          "$bytes": "5468657265206973206e6f20726967687420616e642077726f6e672e2054686572652773206f6e6c792066756e20616e6420626f72696e672e"
+        },
+        "responderPrologue": {
+          "$bytes": "5468657265206973206e6f20726967687420616e642077726f6e672e2054686572652773206f6e6c792066756e20616e6420626f72696e672e"
+        },
+        "testOnlyInitiatorEphemeralSecretKey": {
+          "$bytes": "b0a4bf0a51903ae922b724de6f62c87b3321e7bb66860d4f30ddfaa534b5f726"
+        },
+        "testOnlyResponderStaticSecretKey": {
+          "$bytes": "6c688cf73fa987ed9e48a40912d306224407b01991c8c62e0d3d282948ed7b34"
+        },
+        "testOnlyResponderEphemeralSecretKey": {
+          "$bytes": "6c3f2c1ffeb80066820fd103e9622ead4fbab6e0f56daf586f3e347909bc1ae6"
+        },
+        "handshakePayloads": [
+          {
+            "$bytes": "c1a4a3c900f0a0503b0f4a4a9b4ee58a930c50553ff3868aa4118328f6f335b3"
+          },
+          {
+            "$bytes": "4a7c6162360a02b103e524ce64927381120064aceeee40a66c3b604629fcf88d"
+          }
+        ],
+        "transportPayloads": [
+          {
+            "$bytes": "09afdb6ef35e083e92c5a7ec00f10766c6fb7debef5aacf1d8483da89b996285"
+          },
+          {
+            "$bytes": "941874c06a24257310c46d5744b8e5913882b10492fe2a199e3714eddd84d1ec"
+          }
+        ]
+      },
+      "expected": {
+        "handshakeMessages": [
+          {
+            "$bytes": "f71803ba6f7262acbd108f3a97844da235e1ba4fc649dfad66f8104d00a1140bc1a4a3c900f0a0503b0f4a4a9b4ee58a930c50553ff3868aa4118328f6f335b3"
+          },
+          {
+            "$bytes": "e08bfc2e21b197c71a9616b6af82d0cd8f4cd59e0b1d0454c24ece2efba6645a013bcce11acddae07eec0c3fb5d96b4e43cde41e88fbd648a454a76e59ee3b0a7bf298115c19205095ff74a56d9fa74ffbac466c0cc33ecae86e8ee7e0fc6ca03ed3c48ccdfae4c70eb8ce715e73c986aa0f194f6cf582aca5f65874bd4f4406"
+          }
+        ],
+        "transportMessages": [
+          {
+            "$bytes": "c4d97738a00c247f97f52961d66c6f96712c89f3ac16f35c45d4f5ce9de2ac80a8e270250cebc46ceadd55e8a8ad8ed9"
+          },
+          {
+            "$bytes": "121fc38f73a8d1d4eef1db06b109622b7d350b145d177aae10fac1971036e506ebb8ac37d924fb730a288966d22189e5"
+          }
+        ]
+      }
+    }
+  ]
+}
