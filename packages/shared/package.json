@@ -159,6 +159,10 @@
     "./sourceControlContextFormatter": {
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"
+    },
+    "./threadSettlement": {
+      "types": "./src/threadSettlement.ts",
+      "import": "./src/threadSettlement.ts"
     }
   },
   "scripts": {
