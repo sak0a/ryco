@@ -1,0 +1,666 @@
+{
+  "family": {
+    "number": 1,
+    "title": "Payload discrimination and chunk pipeline",
+    "sections": [
+      "4.2",
+      "4.3",
+      "4.5",
+      "3.3",
+      "3.4",
+      "9.1",
+      "11.4",
+      "16.3 F1"
+    ],
+    "summary": "The §4.2 send pipeline and the §4.3 receive pipeline over exact wire bytes: prelude ‖ envelope, the no-headroom path, the chunked path, prelude ‖ legacy JSON, both sides of the prelude-headroom boundary, ciphertext holding interior `RELAY_CHUNK_MAGIC` runs, a zero-length inner body, both sides of the §4.5 plaintext ceiling, and the two reachability paths to a zero-length post-strip payload in all three modes.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict. The mode machine is not implemented in packages/shared/src yet, so the row is carried as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The node and client transition rows themselves are family F10. Owned by the node and client phases.",
+    "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+  ],
+  "testKeyMaterial": {
+    "note": "This family needs no signing key. The session secrets below are fixed test constants standing in for §6.5 `Split()` outputs; the handshake that really produces them is families F6 and F7.",
+    "testOnlyEpochSecretC2N": {
+      "$bytes": "7171717171717171717171717171717171717171717171717171717171717171"
+    },
+    "testOnlyEpochSecretN2C": {
+      "$bytes": "7272727272727272727272727272727272727272727272727272727272727272"
+    },
+    "testOnlyExporterSecret": {
+      "$bytes": "7373737373737373737373737373737373737373737373737373737373737373"
+    },
+    "sessionBindingHash": {
+      "$bytes": "2425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40414243"
+    },
+    "suite": 1,
+    "sendDirection": "c2n"
+  },
+  "cases": [
+    {
+      "name": "size-budget-under-the-relay-initial-limits",
+      "sections": [
+        "4.5"
+      ],
+      "note": "The §4.5 ceilings under the limits the relay actually asserts by default, pinned as numbers so a change to `RELAY_MAX_RPC_MESSAGE_BYTES` or to `E2EE_ENVELOPE_OVERHEAD_BYTES` is visible here.",
+      "inputs": {
+        "maxQueuedBytes": 4194304,
+        "maxControlFrameBytes": 262144,
+        "relayMaxRpcMessageBytes": 4194304
+      },
+      "expected": {
+        "effectiveMessageCeiling": 3932160,
+        "plaintextCeiling": 3932128,
+        "establishable": true
+      }
+    },
+    {
+      "name": "size-budget-of-the-corpus-channel",
+      "sections": [
+        "4.5"
+      ],
+      "note": "The asserted limits every other case in this family runs under.",
+      "inputs": {
+        "maxQueuedBytes": 384,
+        "maxControlFrameBytes": 256
+      },
+      "expected": {
+        "effectiveMessageCeiling": 128,
+        "plaintextCeiling": 96,
+        "establishable": true
+      }
+    },
+    {
+      "name": "prelude-then-envelope",
+      "sections": [
+        "4.2 step 6",
+        "4.3 steps 1-2",
+        "3.4"
+      ],
+      "note": "§4.2 step 6: the envelope goes to the chunking layer UNCHANGED and takes the prelude like any other fitting message, so the peer's chunk-support latch behaves exactly as before this protocol.",
+      "inputs": {
+        "assertedMaxDataChunkBytes": 64,
+        "innerBodyBytes": 8,
+        "envelope": {
+          "$bytes": "0101010000000000000000000000008d18a2bfe2768026f9966be29aef93025d56c9e562cd022238"
+        },
+        "wirePayload": {
+          "$bytes": "20090d0a20090d0a0101010000000000000000000000008d18a2bfe2768026f9966be29aef93025d56c9e562cd022238"
+        }
+      },
+      "expected": {
+        "preludePresent": true,
+        "wirePayloadBytes": 48,
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": "0101010000000000000000000000008d18a2bfe2768026f9966be29aef93025d56c9e562cd022238"
+            },
+            "postStripBytes": 40,
+            "preludeStripped": true,
+            "peerSupportsChunkingLatch": true
+          },
+          "step2Discrimination": {
+            "class": "envelope"
+          }
+        },
+        "firstPostStripByte": 1
+      }
+    },
+    {
+      "name": "envelope-without-prelude-no-headroom-path",
+      "sections": [
+        "4.2 step 6",
+        "4.3 steps 1-2"
+      ],
+      "inputs": {
+        "assertedMaxDataChunkBytes": 64,
+        "innerBodyBytes": 32,
+        "wirePayload": {
+          "$bytes": "0101010000000000000000000000008d71cbd68b1fe94f9066ac53f8fda95980fcf4fc123511ed4f015550ad9a49a57c57888b10f743d6205556eba92c2337e1"
+        }
+      },
+      "expected": {
+        "preludePresent": false,
+        "wirePayloadBytes": 64,
+        "surfacedUnchanged": true,
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": "0101010000000000000000000000008d71cbd68b1fe94f9066ac53f8fda95980fcf4fc123511ed4f015550ad9a49a57c57888b10f743d6205556eba92c2337e1"
+            },
+            "postStripBytes": 64,
+            "preludeStripped": false,
+            "peerSupportsChunkingLatch": false
+          },
+          "step2Discrimination": {
+            "class": "envelope"
+          }
+        }
+      }
+    },
+    {
+      "name": "envelope-exactly-at-the-prelude-headroom-boundary",
+      "sections": [
+        "4.2 step 6",
+        "4.3 step 1"
+      ],
+      "note": "The prelude is prepended exactly when `len(message) + RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES ≤ assertedMaxDataChunkBytes`. These two cases sit on either side of that inequality.",
+      "inputs": {
+        "assertedMaxDataChunkBytes": 64,
+        "envelopeBytes": 56,
+        "wirePayload": {
+          "$bytes": "20090d0a20090d0a0101010000000000000000000000008d06bca1fc689e38e711db248f8ade2ef78b838b6542669a3895cf4fb8f756754da416b7243f8a56c1"
+        }
+      },
+      "expected": {
+        "preludePresent": true,
+        "wirePayloadBytes": 64,
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": "0101010000000000000000000000008d06bca1fc689e38e711db248f8ade2ef78b838b6542669a3895cf4fb8f756754da416b7243f8a56c1"
+            },
+            "postStripBytes": 56,
+            "preludeStripped": true,
+            "peerSupportsChunkingLatch": true
+          },
+          "step2Discrimination": {
+            "class": "envelope"
+          }
+        }
+      }
+    },
+    {
+      "name": "envelope-one-byte-over-the-prelude-headroom-boundary",
+      "sections": [
+        "4.2 step 6",
+        "4.3 step 1"
+      ],
+      "note": "The prelude is prepended exactly when `len(message) + RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES ≤ assertedMaxDataChunkBytes`. These two cases sit on either side of that inequality.",
+      "inputs": {
+        "assertedMaxDataChunkBytes": 64,
+        "envelopeBytes": 57,
+        "wirePayload": {
+          "$bytes": "0101010000000000000000000000008d06bca1fc689e38e711db248f8ade2ef78b838b6542669a38760e4452d907e3321da6de1a50b794d7b0"
+        }
+      },
+      "expected": {
+        "preludePresent": false,
+        "wirePayloadBytes": 57,
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": "0101010000000000000000000000008d06bca1fc689e38e711db248f8ade2ef78b838b6542669a38760e4452d907e3321da6de1a50b794d7b0"
+            },
+            "postStripBytes": 57,
+            "preludeStripped": false,
+            "peerSupportsChunkingLatch": false
+          },
+          "step2Discrimination": {
+            "class": "envelope"
+          }
+        }
+      }
+    },
+    {
+      "name": "chunked-envelope-reassembles-to-the-envelope",
+      "sections": [
+        "4.2 step 6",
+        "4.3 step 1",
+        "3.4"
+      ],
+      "note": "Every chunk payload begins `RELAY_CHUNK_MAGIC`, which is why §4.3 forbids discriminating raw wire bytes: the discriminator is read only AFTER the assembler.",
+      "inputs": {
+        "assertedMaxDataChunkBytes": 64,
+        "envelopeBytes": 128,
+        "envelope": {
+          "$bytes": "0101010000000000000000000000008d249e83de4abc1ac533f906ada8fc0cd5a9a1a9476044b81a540005f8cf1cf0291da5c73e2d2123ec550505d0dfc7cf9d7bad2e8b3d76b6a0086cad56d227c2d5d5fffa0c15bc53472b47e24622a286efc6dc1f1bc8afe065dc7a362c686ff89d4625d7e27f685196aa822db667cc1551"
+        },
+        "wirePayloads": [
+          {
+            "$bytes": "00010000000000800101010000000000000000000000008d249e83de4abc1ac533f906ada8fc0cd5a9a1a9476044b81a540005f8cf1cf0291da5c73e2d2123ec"
+          },
+          {
+            "$bytes": "0001000000000080550505d0dfc7cf9d7bad2e8b3d76b6a0086cad56d227c2d5d5fffa0c15bc53472b47e24622a286efc6dc1f1bc8afe065dc7a362c686ff89d"
+          },
+          {
+            "$bytes": "00010100000000804625d7e27f685196aa822db667cc1551"
+          }
+        ]
+      },
+      "expected": {
+        "chunkCount": 3,
+        "everyChunkStartsWithChunkMagic": true,
+        "chunkHeaderBytes": 8,
+        "reassembly": {
+          "pushResults": [
+            "pending",
+            "pending",
+            "done"
+          ],
+          "peerSupportsChunkingLatch": true,
+          "reassembled": {
+            "$bytes": "0101010000000000000000000000008d249e83de4abc1ac533f906ada8fc0cd5a9a1a9476044b81a540005f8cf1cf0291da5c73e2d2123ec550505d0dfc7cf9d7bad2e8b3d76b6a0086cad56d227c2d5d5fffa0c15bc53472b47e24622a286efc6dc1f1bc8afe065dc7a362c686ff89d4625d7e27f685196aa822db667cc1551"
+          },
+          "step2Discrimination": {
+            "class": "envelope"
+          }
+        },
+        "reassembledEqualsEnvelope": true
+      }
+    },
+    {
+      "name": "prelude-then-legacy-json",
+      "sections": [
+        "4.3 steps 1-2",
+        "3.4"
+      ],
+      "inputs": {
+        "assertedMaxDataChunkBytes": 64,
+        "wirePayload": {
+          "$bytes": "20090d0a20090d0a7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+        }
+      },
+      "expected": {
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+            },
+            "postStripBytes": 34,
+            "preludeStripped": true,
+            "peerSupportsChunkingLatch": true
+          },
+          "step2Discrimination": {
+            "class": "legacy-json"
+          }
+        }
+      }
+    },
+    {
+      "name": "ciphertext-with-interior-nul-runs",
+      "sections": [
+        "4.3 steps 1-3",
+        "3.3",
+        "3.4"
+      ],
+      "note": "Synthetic ciphertext: a sender cannot choose AEAD output, and the property under test is a framing one. The payload holds a sixteen-byte run of `RELAY_CHUNK_MAGIC` at an interior offset and is still not a chunk, because the chunk test reads the FIRST byte.",
+      "inputs": {
+        "postStripPayload": {
+          "$bytes": "010101000000000000000000000002030a1118000000000000000000000000000000008f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c"
+        },
+        "interiorNulRun": {
+          "offset": 19,
+          "length": 16
+        }
+      },
+      "expected": {
+        "isChunkedPayload": false,
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": "010101000000000000000000000002030a1118000000000000000000000000000000008f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c"
+            },
+            "postStripBytes": 63,
+            "preludeStripped": false,
+            "peerSupportsChunkingLatch": false
+          },
+          "step2Discrimination": {
+            "class": "envelope"
+          }
+        },
+        "envelopeDecode": {
+          "kind": "ok",
+          "version": 1,
+          "suite": 1,
+          "epoch": 0,
+          "counter": 2,
+          "header": {
+            "$bytes": "010101000000000000000000000002"
+          }
+        }
+      }
+    },
+    {
+      "name": "envelope-with-a-zero-length-inner-body",
+      "sections": [
+        "9.1",
+        "3.3",
+        "4.5"
+      ],
+      "note": "DISTINCT from the zero-length POST-STRIP payload cases below. A zero-length inner body is a valid §9.1 record; the envelope is exactly `E2EE_ENVELOPE_OVERHEAD_BYTES`, its minimum.",
+      "inputs": {
+        "innerType": 1,
+        "innerBodyBytes": 0
+      },
+      "expected": {
+        "send": {
+          "kind": "protected",
+          "epoch": 0,
+          "counter": 0,
+          "plaintextBytes": 1,
+          "envelopeBytes": 32
+        },
+        "envelope": {
+          "$bytes": "0101010000000000000000000000008dc01fc4c6829ee756734d9a20ca803e04"
+        },
+        "envelopeBytes": 32,
+        "envelopeOverheadBytes": 32,
+        "receive": {
+          "kind": "authenticated",
+          "innerType": 1,
+          "bodyBytes": 0,
+          "plaintextBytes": 1
+        }
+      }
+    },
+    {
+      "name": "inner-body-exactly-at-the-plaintext-ceiling",
+      "sections": [
+        "4.2 step 2",
+        "4.5"
+      ],
+      "inputs": {
+        "maxQueuedBytes": 384,
+        "maxControlFrameBytes": 256,
+        "plaintextCeiling": 96,
+        "innerBodyBytes": 96
+      },
+      "expected": {
+        "send": "protected",
+        "envelopeBytes": 128,
+        "envelope": {
+          "$bytes": "0101010000000000000000000000008d358f92cf5bad0bd422e817bcb9ed1dc4b8b0b8567155a90b451114e9de0de1380cb4d62f3c3032fd441414c1ced6de8c6abc3f9a2c67a7b1197dbc47c336d3c4c4eeeb1d04ad42563a56f35733b397fed7cd0e0ad9bef174cd6b273d797ee98c8f0df0191bdce98e9329bc6897c2cba2"
+        },
+        "transmittedRecords": 1
+      }
+    },
+    {
+      "name": "inner-body-one-byte-over-the-plaintext-ceiling",
+      "sections": [
+        "4.2 step 2",
+        "4.5",
+        "11.4"
+      ],
+      "note": "§4.2 step 2 is enforced BEFORE encryption: nothing is encrypted and nothing is transmitted, and `e2ee_message_too_large` is sender-local — the channel stays usable.",
+      "inputs": {
+        "plaintextCeiling": 96,
+        "innerBodyBytes": 97
+      },
+      "expected": {
+        "send": {
+          "kind": "refused",
+          "reason": "e2ee_message_too_large"
+        },
+        "transmittedRecords": 0,
+        "senderLocalError": "e2ee_message_too_large"
+      }
+    },
+    {
+      "name": "empty-post-strip-payload-zero-length-data-payload-in-negotiating",
+      "sections": [
+        "3.4",
+        "4.3 step 2",
+        "11.2 P6",
+        "11.3 Q6"
+      ],
+      "note": "A `data.payload` of length zero reaches the assembler, is not a chunk, carries no prelude, and surfaces as a zero-length post-strip payload.",
+      "inputs": {
+        "modeMachineState": "negotiating",
+        "wirePayload": {
+          "$bytes": ""
+        }
+      },
+      "expected": {
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": ""
+            },
+            "postStripBytes": 0,
+            "preludeStripped": false,
+            "peerSupportsChunkingLatch": false
+          },
+          "step2Discrimination": {
+            "class": "other",
+            "reason": "empty"
+          }
+        },
+        "fatal": "P6",
+        "disposition": "FATAL-PRE",
+        "neverSilentlyDropped": true,
+        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+      }
+    },
+    {
+      "name": "empty-post-strip-payload-zero-length-data-payload-in-e2ee",
+      "sections": [
+        "3.4",
+        "4.3 step 2",
+        "11.2 P6",
+        "11.3 Q6"
+      ],
+      "note": "A `data.payload` of length zero reaches the assembler, is not a chunk, carries no prelude, and surfaces as a zero-length post-strip payload.",
+      "inputs": {
+        "modeMachineState": "e2ee",
+        "wirePayload": {
+          "$bytes": ""
+        }
+      },
+      "expected": {
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": ""
+            },
+            "postStripBytes": 0,
+            "preludeStripped": false,
+            "peerSupportsChunkingLatch": false
+          },
+          "step2Discrimination": {
+            "class": "other",
+            "reason": "empty"
+          }
+        },
+        "fatal": "Q6",
+        "disposition": "FATAL-POST",
+        "neverSilentlyDropped": true,
+        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+      }
+    },
+    {
+      "name": "empty-post-strip-payload-zero-length-data-payload-in-legacy",
+      "sections": [
+        "3.4",
+        "4.3 step 2",
+        "11.2 P6",
+        "11.3 Q6"
+      ],
+      "note": "A `data.payload` of length zero reaches the assembler, is not a chunk, carries no prelude, and surfaces as a zero-length post-strip payload.",
+      "inputs": {
+        "modeMachineState": "legacy",
+        "wirePayload": {
+          "$bytes": ""
+        }
+      },
+      "expected": {
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": ""
+            },
+            "postStripBytes": 0,
+            "preludeStripped": false,
+            "peerSupportsChunkingLatch": false
+          },
+          "step2Discrimination": {
+            "class": "other",
+            "reason": "empty"
+          }
+        },
+        "fatal": "P6",
+        "disposition": "FATAL-PRE",
+        "neverSilentlyDropped": true,
+        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+      }
+    },
+    {
+      "name": "empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-negotiating",
+      "sections": [
+        "3.4",
+        "4.3 step 2",
+        "11.2 P6",
+        "11.3 Q6"
+      ],
+      "note": "The peer's chunk-support latch MUST still set before the fatal outcome is taken: the prelude was present and was stripped, and only then is the remainder found to be empty.",
+      "inputs": {
+        "modeMachineState": "negotiating",
+        "wirePayload": {
+          "$bytes": "20090d0a20090d0a"
+        }
+      },
+      "expected": {
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": ""
+            },
+            "postStripBytes": 0,
+            "preludeStripped": true,
+            "peerSupportsChunkingLatch": true
+          },
+          "step2Discrimination": {
+            "class": "other",
+            "reason": "empty"
+          }
+        },
+        "fatal": "P6",
+        "disposition": "FATAL-PRE",
+        "neverSilentlyDropped": true,
+        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+      }
+    },
+    {
+      "name": "empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-e2ee",
+      "sections": [
+        "3.4",
+        "4.3 step 2",
+        "11.2 P6",
+        "11.3 Q6"
+      ],
+      "note": "The peer's chunk-support latch MUST still set before the fatal outcome is taken: the prelude was present and was stripped, and only then is the remainder found to be empty.",
+      "inputs": {
+        "modeMachineState": "e2ee",
+        "wirePayload": {
+          "$bytes": "20090d0a20090d0a"
+        }
+      },
+      "expected": {
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": ""
+            },
+            "postStripBytes": 0,
+            "preludeStripped": true,
+            "peerSupportsChunkingLatch": true
+          },
+          "step2Discrimination": {
+            "class": "other",
+            "reason": "empty"
+          }
+        },
+        "fatal": "Q6",
+        "disposition": "FATAL-POST",
+        "neverSilentlyDropped": true,
+        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+      }
+    },
+    {
+      "name": "empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-legacy",
+      "sections": [
+        "3.4",
+        "4.3 step 2",
+        "11.2 P6",
+        "11.3 Q6"
+      ],
+      "note": "The peer's chunk-support latch MUST still set before the fatal outcome is taken: the prelude was present and was stripped, and only then is the remainder found to be empty.",
+      "inputs": {
+        "modeMachineState": "legacy",
+        "wirePayload": {
+          "$bytes": "20090d0a20090d0a"
+        }
+      },
+      "expected": {
+        "pipeline": {
+          "step1ChunkTest": {
+            "isChunkedPayload": false
+          },
+          "step1Assembler": {
+            "kind": "done",
+            "postStripPayload": {
+              "$bytes": ""
+            },
+            "postStripBytes": 0,
+            "preludeStripped": true,
+            "peerSupportsChunkingLatch": true
+          },
+          "step2Discrimination": {
+            "class": "other",
+            "reason": "empty"
+          }
+        },
+        "fatal": "P6",
+        "disposition": "FATAL-PRE",
+        "neverSilentlyDropped": true,
+        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+      }
+    }
+  ]
+}

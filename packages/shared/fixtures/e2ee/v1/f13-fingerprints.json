@@ -1,0 +1,157 @@
+{
+  "family": {
+    "number": 13,
+    "title": "Fingerprints",
+    "sections": [
+      "7.1",
+      "16.3 F13"
+    ],
+    "summary": "The three §7.1 fingerprint families over the corpus keys: the canonical-CBOR preimage `[domain, algorithm, bstr(publicKey)]`, its SHA-256 raw digest, and the `SHA256:` unpadded-base64url display form. The preimage is emitted so a reader can check the digest by hand without re-deriving the element list.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    }
+  },
+  "cases": [
+    {
+      "name": "node-identity-key-fingerprint",
+      "sections": [
+        "7.1"
+      ],
+      "inputs": {
+        "keyFamily": "node-identity",
+        "fingerprintDomain": "ryco.node-key.v1",
+        "algorithmLabel": "ed25519",
+        "publicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "preimage": {
+          "$bytes": "83707279636f2e6e6f64652d6b65792e76316765643235353139582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        }
+      },
+      "expected": {
+        "fingerprint": {
+          "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+        },
+        "display": "SHA256:AVbN7e5vhHl7KLe-gwSBlEg8wXFlsa56_nu8d-7fm2Q"
+      }
+    },
+    {
+      "name": "client-identity-key-fingerprint",
+      "sections": [
+        "7.1"
+      ],
+      "inputs": {
+        "keyFamily": "client-identity",
+        "fingerprintDomain": "ryco.client-key.v1",
+        "algorithmLabel": "p256",
+        "publicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "preimage": {
+          "$bytes": "83727279636f2e636c69656e742d6b65792e763164703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        }
+      },
+      "expected": {
+        "fingerprint": {
+          "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+        },
+        "display": "SHA256:qdYfGtZ1MjmJjm5vJi8uwX8EmPLDOszDt0SL-l8OiSc"
+      }
+    },
+    {
+      "name": "node-agreement-key-fingerprint",
+      "sections": [
+        "7.1"
+      ],
+      "inputs": {
+        "keyFamily": "agreement",
+        "fingerprintDomain": "ryco.e2ee-agreement-key.v1",
+        "algorithmLabel": "x25519",
+        "publicKey": {
+          "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "preimage": {
+          "$bytes": "83781a7279636f2e653265652d61677265656d656e742d6b65792e76316678323535313958207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        }
+      },
+      "expected": {
+        "fingerprint": {
+          "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "display": "SHA256:D0AEyX-g35GzyxlUek4LFvGze0QPfLYw-vgSkbN993k"
+      }
+    },
+    {
+      "name": "client-agreement-key-fingerprint",
+      "sections": [
+        "7.1"
+      ],
+      "inputs": {
+        "keyFamily": "agreement",
+        "fingerprintDomain": "ryco.e2ee-agreement-key.v1",
+        "algorithmLabel": "x25519",
+        "publicKey": {
+          "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+        },
+        "preimage": {
+          "$bytes": "83781a7279636f2e653265652d61677265656d656e742d6b65792e7631667832353531395820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+        }
+      },
+      "expected": {
+        "fingerprint": {
+          "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+        },
+        "display": "SHA256:a6zaeHJccAuwur5kKCMEG9Tq_5I3NpgTG-iuEW0TiNI"
+      }
+    }
+  ]
+}

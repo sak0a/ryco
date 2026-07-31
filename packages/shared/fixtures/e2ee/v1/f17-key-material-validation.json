@@ -1,0 +1,944 @@
+{
+  "family": {
+    "number": 17,
+    "title": "Key-material validation",
+    "sections": [
+      "7.1",
+      "8.1",
+      "14.3",
+      "3.5",
+      "7.2",
+      "16.3 F17"
+    ],
+    "summary": "The strict validation rules the headline guarantee assumes: the §8.1 all-zero X25519 shared secret in both the IK and NX handshake positions, the §7.1 P-256 public-key and ECDSA-signature encodings, the §14.3 Ed25519 canonicality rules, and the complete cross-domain signature substitution matrix behind the §7.2 no-ad-hoc-transcript rule — all five domain groups §16.3 F17 names, the node-identity domains of `nodeIdentity.ts` included, replayed into every other domain's verification path in both directions.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "Each case names the §11 row for the position the material occupies (P11 inside the IK client certificate, P10 for a Noise-level failure, K2/K3 and P15 inside a node-signed statement). The row for material inside a node-signed statement depends on the §5.2 verifier and the §12.1.1 selection classification, neither of which is in packages/shared/src; those rows are carried as §16.2 labels and the DERIVED value in every case is the validator's or the verification path's own verdict. Owned by the §5.2 statement verifier and the client phase.",
+    "A small-order Ed25519 public key is NOT emitted as a rejected encoding: the pinned primitive's strict public-key validation accepts it, and the rejection happens at verification. Asserting a validator rejection here would have been wrong, so the case is left to the verification-path rows above.",
+    "§16.4 cross-runtime equality: the P-256 cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyEd25519CanonicalitySeed": {
+      "$bytes": "3131313131313131313131313131313131313131313131313131313131313131"
+    },
+    "ed25519CanonicalityPublicKey": {
+      "$bytes": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd"
+    },
+    "curveParameters": {
+      "p256FieldPrime": "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+      "p256GroupOrder": "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551",
+      "ed25519FieldPrime": "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed",
+      "ed25519GroupOrder": "1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed"
+    }
+  },
+  "cases": [
+    {
+      "name": "x25519-all-zero-shared-secret-u-zero",
+      "sections": [
+        "8.1",
+        "14.3",
+        "11.2 P10"
+      ],
+      "note": "The IK position is the initiator's `es` against the advertised node static; the NX position is the responder's `ee` against the client ephemeral carried in message 1. Both are the FIRST DH each role performs, so the abort happens before any key schedule exists.",
+      "inputs": {
+        "lowOrderPublicKey": {
+          "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "prologue": {
+          "$bytes": "7279636f2d653265652d666978747572652d70726f6c6f677565"
+        },
+        "testOnlyClientEphemeralSecretKey": {
+          "$bytes": "6161616161616161616161616161616161616161616161616161616161616161"
+        },
+        "testOnlyNodeEphemeralSecretKey": {
+          "$bytes": "6262626262626262626262626262626262626262626262626262626262626262"
+        }
+      },
+      "expected": {
+        "ikInitiatorEsAborted": true,
+        "nxResponderEeAborted": true,
+        "fatal": "P10",
+        "disposition": "FATAL-PRE",
+        "mandatedBehavior": "abort; §8.1 admits no other handling of an all-zero shared secret"
+      }
+    },
+    {
+      "name": "x25519-all-zero-shared-secret-order-eight",
+      "sections": [
+        "8.1",
+        "14.3",
+        "11.2 P10"
+      ],
+      "note": "The IK position is the initiator's `es` against the advertised node static; the NX position is the responder's `ee` against the client ephemeral carried in message 1. Both are the FIRST DH each role performs, so the abort happens before any key schedule exists.",
+      "inputs": {
+        "lowOrderPublicKey": {
+          "$bytes": "e0eb7a7c3b41b8ae1656e3faf19fc46ada098deb9c32b1fd866205165f49b800"
+        },
+        "prologue": {
+          "$bytes": "7279636f2d653265652d666978747572652d70726f6c6f677565"
+        },
+        "testOnlyClientEphemeralSecretKey": {
+          "$bytes": "6161616161616161616161616161616161616161616161616161616161616161"
+        },
+        "testOnlyNodeEphemeralSecretKey": {
+          "$bytes": "6262626262626262626262626262626262626262626262626262626262626262"
+        }
+      },
+      "expected": {
+        "ikInitiatorEsAborted": true,
+        "nxResponderEeAborted": true,
+        "fatal": "P10",
+        "disposition": "FATAL-PRE",
+        "mandatedBehavior": "abort; §8.1 admits no other handling of an all-zero shared secret"
+      }
+    },
+    {
+      "name": "p256-public-key-off-the-curve",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "note": "Both coordinates are in range and the point is not on the curve.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5651"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-x-coordinate-at-the-field-prime",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "note": "The coordinate-range check is explicit because the pinned curve library decodes an uncompressed point without reducing first, so `X + p` would otherwise give one key two accepted encodings — and every §7.1 fingerprint is taken over the encoding.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "04ffffffff00000001000000000000000000000000ffffffffffffffffffffffffa8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-y-coordinate-above-the-field-prime",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "publicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25570f2626ff579062ff1b99ff91c24a0da16fb32b5be20148c9249f564f"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-is-the-identity",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "note": "The point at infinity, encoded as all-zero coordinates.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "0400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-compressed-prefix-02",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "note": "§7.1 fixes X9.63 uncompressed form; a compressed or hybrid prefix is rejected before any signature check.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "027a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-compressed-prefix-03",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "publicKey": {
+          "$bytes": "037a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-hybrid-prefix-06",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "publicKey": {
+          "$bytes": "067a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-hybrid-prefix-07",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "publicKey": {
+          "$bytes": "077a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "publicKeyBytes": 65
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-wrong-length",
+      "sections": [
+        "7.1",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "publicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56"
+        },
+        "publicKeyBytes": 64
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "rejectedBeforeAnySignatureCheck": true,
+        "fatal": "P11",
+        "positionNote": "P11 is the row for material inside the IK client certificate (§8.6 step 5); the same encoding inside a node-signed statement is rows K2/K3, and P15 when the channel's selection is latched."
+      }
+    },
+    {
+      "name": "p256-public-key-valid-control",
+      "sections": [
+        "7.1"
+      ],
+      "note": "The control for the rejections above: the corpus key itself, in X9.63 uncompressed form.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        }
+      },
+      "expected": {
+        "validationAccepted": true
+      }
+    },
+    {
+      "name": "p256-signature-asn1-der-instead-of-raw",
+      "sections": [
+        "7.1",
+        "14.3",
+        "11.2 P11"
+      ],
+      "note": "§7.1 fixes fixed-width raw `r ‖ s`. DER never has that length and is rejected on the length alone; the verification path will not parse DER at all.",
+      "inputs": {
+        "signature": {
+          "$bytes": "304402207fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf0220118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "signatureBytes": 70
+      },
+      "expected": {
+        "encodingValidation": {
+          "rejected": true
+        },
+        "verificationVerdict": false,
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "p256-signature-r-zero",
+      "sections": [
+        "7.1",
+        "14.3",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "signature": {
+          "$bytes": "0000000000000000000000000000000000000000000000000000000000000000118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "signatureBytes": 64
+      },
+      "expected": {
+        "encodingValidation": {
+          "rejected": true
+        },
+        "verificationVerdict": false,
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "p256-signature-s-zero",
+      "sections": [
+        "7.1",
+        "14.3",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "signatureBytes": 64
+      },
+      "expected": {
+        "encodingValidation": {
+          "rejected": true
+        },
+        "verificationVerdict": false,
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "p256-signature-r-at-the-group-order",
+      "sections": [
+        "7.1",
+        "14.3",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "signature": {
+          "$bytes": "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "signatureBytes": 64
+      },
+      "expected": {
+        "encodingValidation": {
+          "rejected": true
+        },
+        "verificationVerdict": false,
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "p256-signature-s-at-the-group-order",
+      "sections": [
+        "7.1",
+        "14.3",
+        "11.2 P11"
+      ],
+      "inputs": {
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bfffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"
+        },
+        "signatureBytes": 64
+      },
+      "expected": {
+        "encodingValidation": {
+          "rejected": true
+        },
+        "verificationVerdict": false,
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "p256-signature-r-above-the-group-order",
+      "sections": [
+        "7.1",
+        "14.3",
+        "11.2 P11"
+      ],
+      "note": "`r` is an x-coordinate already reduced modulo `n`, so a conforming signer can never emit one at or above the group order; the rejection is on the ENCODING and precedes any curve arithmetic. §16.3 F17 requires the above-the-order case for `r` as well as for `s`, because a validator that range-checked only `s` would pass every other signature case in this family.",
+      "inputs": {
+        "signature": {
+          "$bytes": "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632552118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "signatureBytes": 64
+      },
+      "expected": {
+        "encodingValidation": {
+          "rejected": true
+        },
+        "verificationVerdict": false,
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "p256-signature-s-above-the-group-order",
+      "sections": [
+        "7.1",
+        "14.3",
+        "11.2 P11"
+      ],
+      "note": "§7.1 accepts EITHER `s` value — the protocol derives no uniqueness from signature bytes — but both must lie in `[1, n − 1]`.",
+      "inputs": {
+        "signature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bfffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632552"
+        },
+        "signatureBytes": 64
+      },
+      "expected": {
+        "encodingValidation": {
+          "rejected": true
+        },
+        "verificationVerdict": false,
+        "fatal": "P11"
+      }
+    },
+    {
+      "name": "ed25519-public-key-y-at-the-field-prime",
+      "sections": [
+        "7.1",
+        "14.3"
+      ],
+      "note": "A non-canonical encoding of the point with `y = 0`: strict RFC 8032 decoding rejects a `y` coordinate at or above the field prime, where a ZIP215-style verifier would reduce it.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+        }
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "verificationVerdict": false
+      }
+    },
+    {
+      "name": "ed25519-public-key-y-above-the-field-prime",
+      "sections": [
+        "7.1",
+        "14.3"
+      ],
+      "note": "A non-canonical encoding of the identity point.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+        }
+      },
+      "expected": {
+        "validation": {
+          "rejected": true
+        },
+        "verificationVerdict": false
+      }
+    },
+    {
+      "name": "ed25519-signature-with-a-canonically-encoded-identity-r-control",
+      "sections": [
+        "14.3"
+      ],
+      "note": "THE CONTROL, and it is accepted: `R` is the identity point in its canonical encoding and the verification equation holds. It exists so the rejection below is known to be about the ENCODING and not about a broken equation.",
+      "inputs": {
+        "testOnlyIdentitySeed": {
+          "$bytes": "3131313131313131313131313131313131313131313131313131313131313131"
+        },
+        "publicKey": {
+          "$bytes": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd"
+        },
+        "message": {
+          "$bytes": "8d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f68391800"
+        },
+        "signature": {
+          "$bytes": "0100000000000000000000000000000000000000000000000000000000000000e0717a7ac3e9627568d6d5873b2cb8e9c38984ae286deac839c5947879532608"
+        },
+        "rEncoding": {
+          "$bytes": "0100000000000000000000000000000000000000000000000000000000000000"
+        }
+      },
+      "expected": {
+        "verificationVerdict": true
+      }
+    },
+    {
+      "name": "ed25519-signature-with-a-non-canonically-encoded-identity-r",
+      "sections": [
+        "7.1",
+        "14.3"
+      ],
+      "note": "The identical point, encoded as `y = p + 1`. §14.3 requires `zip215: false`, which is strict RFC 8032, so this is rejected; the pinned primitive additionally rejects it under `zip215: true`, which is recorded rather than assumed.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd"
+        },
+        "message": {
+          "$bytes": "8d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f68391800"
+        },
+        "signature": {
+          "$bytes": "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7fa09e2491d95cb5019712053b517631a84d2bde5bd65a400e762df921a3132406"
+        },
+        "rEncoding": {
+          "$bytes": "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+        }
+      },
+      "expected": {
+        "verificationVerdict": false,
+        "pinnedPrimitiveUnderZip215Relaxation": false,
+        "differsFromTheControlOnlyInTheEncodingOfR": true
+      }
+    },
+    {
+      "name": "ed25519-signature-scalar-at-the-group-order",
+      "sections": [
+        "7.1",
+        "14.3"
+      ],
+      "note": "A non-canonical SCALAR encoding: RFC 8032 requires `S < L`.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd"
+        },
+        "message": {
+          "$bytes": "8d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f68391800"
+        },
+        "signature": {
+          "$bytes": "f0acb3d82fa4bfc9b0ca3fab160fa3e64c3da8f17df16a4cdef760f2f6c48193edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010"
+        }
+      },
+      "expected": {
+        "verificationVerdict": false
+      }
+    },
+    {
+      "name": "ed25519-signature-scalar-above-the-group-order",
+      "sections": [
+        "7.1",
+        "14.3"
+      ],
+      "note": "A non-canonical SCALAR encoding: RFC 8032 requires `S < L`.",
+      "inputs": {
+        "publicKey": {
+          "$bytes": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd"
+        },
+        "message": {
+          "$bytes": "8d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f68391800"
+        },
+        "signature": {
+          "$bytes": "f0acb3d82fa4bfc9b0ca3fab160fa3e64c3da8f17df16a4cdef760f2f6c48193c9441c63f2be9e1674754390dba4eddad8d32d4ee3b71b96fc2477cf200c4612"
+        }
+      },
+      "expected": {
+        "verificationVerdict": false
+      }
+    },
+    {
+      "name": "cross-domain-signature-substitution",
+      "sections": [
+        "3.5",
+        "7.2",
+        "7.1"
+      ],
+      "note": "All five domain groups §16.3 F17 names — node prekey, client prekey, the capability statement through its §7.2.1 envelope, identity continuity, and the node-identity domains of `nodeIdentity.ts` — each one's valid signature replayed into every other one's verification path. The matrix is complete in both directions and spans both transcript families, which is what §3.5's closing rule asserts: every domain string is distinct ACROSS the node-identity and E2EE families, so no signature is liftable between them. Four of the six are signed by the same Ed25519 node identity key, so a substitution here fails on the transcript bytes alone and never on a key mismatch.",
+      "inputs": {
+        "domains": [
+          {
+            "domain": "ryco.node-e2ee-prekey.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "ed25519",
+            "publicKey": {
+              "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+            },
+            "message": {
+              "$bytes": "8d78187279636f2e6e6f64652d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781b6e6f64655f414141414141414141414141414141414141414141416765643235353139781b6e6b65795f42424242424242424242424242424242424242424242781a65706b5f45454545454545454545454545454545454545454545582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b6458207b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13653235353139665348413235361b0000019f683918001b000001a002b7e000"
+            },
+            "signature": {
+              "$bytes": "58f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c716207"
+            }
+          },
+          {
+            "domain": "ryco.node-identity-continuity.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "ed25519",
+            "publicKey": {
+              "$bytes": "884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b"
+            },
+            "message": {
+              "$bytes": "8d78207279636f2e6e6f64652d6964656e746974792d636f6e74696e756974792e76317768747470733a2f2f6875622e6578616d706c652e636f6d781a6e63745f46464646464646464646464646464646464646464646016765643235353139781b6e6b65795f434343434343434343434343434343434343434343435820884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b58207a0e704d9b065437dd99ad8633cb4ecf3ffc3d0352caaacbd689c6878e2f915b6765643235353139781b6e6b65795f444444444444444444444444444444444444444444445820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b0000019f68391800"
+            },
+            "signature": {
+              "$bytes": "493f1402f38d7f83cd022dc3abd9b51b4d4401cdf061fe7276d22c4bf1274dd65d1c14d8f33b3976f80cb2e21337564b1cabd79666a8a146de6edacf86078b0c"
+            }
+          },
+          {
+            "domain": "ryco.node-e2ee-capability-digest.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "ed25519",
+            "publicKey": {
+              "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+            },
+            "message": {
+              "$bytes": "8278237279636f2e6e6f64652d653265652d6361706162696c6974792d6469676573742e76315820db437f495b2364f83db5619f42055dce391cae46401c4fd2f092bc59974161eb"
+            },
+            "signature": {
+              "$bytes": "2aea508d3a152d8fc8d7bfc7237f862c32490fad58a84390d78bf4a666c305ad527dba4502bedea3e5539bb4c4b6738c491190087b0861e7e8f8299c646a0107"
+            }
+          },
+          {
+            "domain": "ryco.client-e2ee-prekey.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "p256",
+            "publicKey": {
+              "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+            },
+            "message": {
+              "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+            },
+            "signature": {
+              "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+            }
+          },
+          {
+            "domain": "ryco.node-auth.proof.v1",
+            "transcriptFamily": "node-identity",
+            "algorithm": "ed25519",
+            "publicKey": {
+              "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+            },
+            "message": {
+              "$bytes": "88777279636f2e6e6f64652d617574682e70726f6f662e76317768747470733a2f2f6875622e6578616d706c652e636f6d0100781b6e6f64655f41414141414141414141414141414141414141414141781b6e6b65795f424242424242424242424242424242424242424242421b000001a002b7e00058205a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "signature": {
+              "$bytes": "a612ee100dabee83ee276a46a4ebd78e99257393f664c24bbf07b33a2e9381bd0a2be355da3a619caee8814e6a043314d2025e6e70b6733c61b48ae9a032ed03"
+            }
+          },
+          {
+            "domain": "ryco.node-key-rotation.proof.v1",
+            "transcriptFamily": "node-identity",
+            "algorithm": "ed25519",
+            "publicKey": {
+              "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+            },
+            "message": {
+              "$bytes": "8d781f7279636f2e6e6f64652d6b65792d726f746174696f6e2e70726f6f662e76317768747470733a2f2f6875622e6578616d706c652e636f6d0100781b6e726f745f47474747474747474747474747474747474747474747781b6e6f64655f41414141414141414141414141414141414141414141781b6e6b65795f43434343434343434343434343434343434343434343781b6e6b65795f4444444444444444444444444444444444444444444467656432353531395820a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f05820507a7b4affcad69229c2a23b2c7f80b98ea1e033f500eaddf6b46a514a6806861b000001a002b7e00058205a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a"
+            },
+            "signature": {
+              "$bytes": "bb7039ade3ef00c3d7e60c6fc78adba0c653a5c1cb6997d589d308c69c63887d5717284441a8506240950e252360be403a474e53366fc09b0780203b63055b09"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "matrix": [
+          {
+            "verificationPath": "ryco.node-e2ee-prekey.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "ed25519",
+            "ownSignatureVerifies": true,
+            "substitutions": [
+              {
+                "signatureFrom": "ryco.node-identity-continuity.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-e2ee-capability-digest.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.client-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-auth.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-key-rotation.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              }
+            ]
+          },
+          {
+            "verificationPath": "ryco.node-identity-continuity.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "ed25519",
+            "ownSignatureVerifies": true,
+            "substitutions": [
+              {
+                "signatureFrom": "ryco.node-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-e2ee-capability-digest.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.client-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-auth.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-key-rotation.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              }
+            ]
+          },
+          {
+            "verificationPath": "ryco.node-e2ee-capability-digest.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "ed25519",
+            "ownSignatureVerifies": true,
+            "substitutions": [
+              {
+                "signatureFrom": "ryco.node-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-identity-continuity.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.client-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-auth.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-key-rotation.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              }
+            ]
+          },
+          {
+            "verificationPath": "ryco.client-e2ee-prekey.v1",
+            "transcriptFamily": "e2ee",
+            "algorithm": "p256",
+            "ownSignatureVerifies": true,
+            "substitutions": [
+              {
+                "signatureFrom": "ryco.node-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-identity-continuity.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-e2ee-capability-digest.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-auth.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-key-rotation.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              }
+            ]
+          },
+          {
+            "verificationPath": "ryco.node-auth.proof.v1",
+            "transcriptFamily": "node-identity",
+            "algorithm": "ed25519",
+            "ownSignatureVerifies": true,
+            "substitutions": [
+              {
+                "signatureFrom": "ryco.node-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-identity-continuity.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-e2ee-capability-digest.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.client-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-key-rotation.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              }
+            ]
+          },
+          {
+            "verificationPath": "ryco.node-key-rotation.proof.v1",
+            "transcriptFamily": "node-identity",
+            "algorithm": "ed25519",
+            "ownSignatureVerifies": true,
+            "substitutions": [
+              {
+                "signatureFrom": "ryco.node-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-identity-continuity.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-e2ee-capability-digest.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.client-e2ee-prekey.v1",
+                "signatureFromFamily": "e2ee",
+                "verifies": false
+              },
+              {
+                "signatureFrom": "ryco.node-auth.proof.v1",
+                "signatureFromFamily": "node-identity",
+                "verifies": false
+              }
+            ]
+          }
+        ],
+        "domainCount": 6,
+        "substitutionsTested": 30,
+        "crossFamilySubstitutionsTested": 16,
+        "everyOwnSignatureVerifies": true,
+        "everySubstitutionRejected": true
+      }
+    }
+  ]
+}

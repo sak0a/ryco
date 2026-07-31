@@ -1,0 +1,160 @@
+{
+  "family": {
+    "number": 18,
+    "title": "Node admission policy transitions",
+    "sections": [
+      "8.6",
+      "11.2 P25",
+      "12.4",
+      "12.6",
+      "16.3 F18"
+    ],
+    "summary": "The two parts of §16.3 F18 the landed modules decide: the §7.6 element 14 effective admitted pattern set under each policy, and the §11.2 P25 in-flight abort a policy withdrawal produces at §8.6 step 8 — with its generic fixed-size reject, its distinctness from §13.6's P12 abort, and their shared §11.5 observable.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "Every per-channel case of §16.3 F18: `requireE2EE` false → true over a `legacy`, an NX `e2ee`, and an IK `e2ee` channel; `requireApprovedClientE2EE` false → true over the same three; a suite leaving the advertised registry run twice against the same command with the established channel IK and NX; the widening that closes nothing while the policy generation still advances; the combined narrow-and-widen command; and the `negotiating` channel that is not swept and then fails closed on its next input. Each states a pre-change policy, a policy generation, and a live-channel set with per-channel mode, tier, suite, and snapshot. No node policy store and no channel registry exists in packages/shared/src, so there is nothing to derive the §12.6 policy-withdrawal test's per-channel verdict from. Owned by the node phase.",
+    "The §12.6 ordering cases: a hello reaching §8.6 step 2 AFTER the durable commit, and the row-N3 race in which a channel's transition lands concurrently with the sweep, run with the two enumerations attempted in both orders. These are properties of a single-snapshot sweep over a live registry. Owned by the node phase.",
+    "The §12.6 step (c) reported counts broken out by class, and the §12.5 non-interaction assertion that no fallback occurrence of either class is recorded by a withdrawal. Both need the node's occurrence counters and its channel registry. Owned by the node phase."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyClientEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyNodeEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyClientNonce": {
+      "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
+    },
+    "clientIdentityFingerprint": {
+      "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+    },
+    "clientAgreementFingerprint": {
+      "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+    },
+    "nodeIdentityFingerprint": {
+      "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+    },
+    "nodeAgreementFingerprint": {
+      "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+    },
+    "channel": {
+      "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+      "relayProtocolMajor": 1,
+      "relayProtocolMinor": 2,
+      "channelOpenCapability": "ryco.rpc",
+      "channelOpenEffectiveRole": "operator"
+    }
+  },
+  "cases": [
+    {
+      "name": "effective-admitted-patterns-by-policy",
+      "sections": [
+        "7.6 element 14",
+        "12.4",
+        "8.6 step 2"
+      ],
+      "note": "Element 14 is COMPUTED from `requireApprovedClientE2EE` rather than carried independently, which is what makes it impossible for a node to admit a tier it does not advertise. The §8.6 step 2 membership test reads exactly this set.",
+      "inputs": {
+        "requireApprovedClientE2EE": [
+          false,
+          true
+        ]
+      },
+      "expected": {
+        "compatibilityDefault": [
+          "IK",
+          "NX"
+        ],
+        "requireApprovedClientE2EE": [
+          "IK"
+        ],
+        "narrowingRemovesOnlyNx": true
+      }
+    },
+    {
+      "name": "in-flight-handshake-aborted-by-a-policy-withdrawal",
+      "sections": [
+        "8.6 step 2",
+        "8.6 step 8",
+        "11.2 P25",
+        "12.6"
+      ],
+      "note": "A handshake that passed §8.6 step 2 under the OLD policy and has not reached row N3. The abort names P25 and NOT P9: P9 is defined at step 2 and this handshake passed it. It takes the generic fixed-size `E2EEHandshakeReject`, byte-identical to the F12 reject cases, and never a `policy` code — which exists only post-key.",
+      "inputs": {
+        "passedStepTwoUnderTheOldPolicy": true,
+        "reachedRowN3": false,
+        "rowN3Transition": "refused: policy_withdrawn"
+      },
+      "expected": {
+        "kind": "fatal",
+        "row": "P25",
+        "reason": "policy_withdrawn",
+        "disposition": "FATAL-PRE",
+        "errorCodeEmitted": null,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        },
+        "authorizationWithdrawalRow": "P12",
+        "rowsAreDistinct": true,
+        "bothTakeTheIdenticalObservable": true
+      }
+    }
+  ]
+}

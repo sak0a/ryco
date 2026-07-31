@@ -1,0 +1,1561 @@
+{
+  "family": {
+    "number": 11,
+    "title": "Authenticated close",
+    "sections": [
+      "10.1",
+      "10.1.1",
+      "10.2",
+      "10.4",
+      "16.3 F11"
+    ],
+    "summary": "The §10 close machine driven end to end: the sequential clean close with all three records, their commitment preimages, and both Clean verdicts; the §16.3 F11 simultaneous table with its counters fixed, including the negative case whose ack declares the validator's current next-send instead of its anchor; the close anchor across an epoch boundary with its companion negative; passed-through, strict, commitment, and decode violations; the verdict-disambiguation cases; the close-phase keepalive prohibition and why it is load-bearing; `T_CLOSE` expiry at each waiting step; and the §3.2.2 L5 worst-case phase duration as a timed case.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "Ordering and linger behavior (§10.3) beyond the timed phase-duration case is not expressible as a deterministic wire vector and belongs to implementation tests rather than to this corpus, exactly as §16.3 F11 states."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyClientEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyNodeEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyClientNonce": {
+      "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
+    },
+    "clientIdentityFingerprint": {
+      "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+    },
+    "clientAgreementFingerprint": {
+      "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+    },
+    "nodeIdentityFingerprint": {
+      "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+    },
+    "nodeAgreementFingerprint": {
+      "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+    },
+    "channel": {
+      "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+      "relayProtocolMajor": 1,
+      "relayProtocolMinor": 2,
+      "channelOpenCapability": "ryco.rpc",
+      "channelOpenEffectiveRole": "operator"
+    }
+  },
+  "cases": [
+    {
+      "name": "sequential-clean-close",
+      "sections": [
+        "10.1",
+        "10.1.1",
+        "10.2",
+        "10.4"
+      ],
+      "note": "All three records of §10.2 — the initiator's `E2EEClose`, the responder's `E2EECloseAck`, and the initiator's final confirmation — with their declared fields, their commitment preimages, and both endpoints' verdicts, which MUST both be Clean. In the sequential branch each endpoint's anchor equals its current next-send, because it has sent nothing since its own first close-machine record.",
+      "inputs": {
+        "epoch": 0,
+        "initiatorFirstSendCounter": 0,
+        "responderFirstSendCounter": 0,
+        "sessionBindingHash": {
+          "$bytes": "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        },
+        "closeCommitmentDomain": "ryco.relay-e2ee.close.v1"
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000004400000000480000000000000000"
+            },
+            "closeCommitment": {
+              "$bytes": "31f664fe444f3119166bd42505f3dbfc7708a968a95bf8efe86dd5373ed222eb"
+            },
+            "body": {
+              "$bytes": "8544000000004800000000000000004400000000480000000000000000582031f664fe444f3119166bd42505f3dbfc7708a968a95bf8efe86dd5373ed222eb"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "0101010000000000000000000000007b00efd1e45f63a0b110e22d366cf0f14e4241e1b48b2848a13ed64cc98cda8adb55291fa9099209bf5f00d9472d296fc9a49d06598da27fb84c0a2d51a99f7428be88412f73ac4d363c9e6679915b7c"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000004400000000480000000000000001"
+            },
+            "closeCommitment": {
+              "$bytes": "2cec3a4c2733e444d044973db35c8ccbaba4e1b47530ae30a6194776803bbcd9"
+            },
+            "body": {
+              "$bytes": "854400000000480000000000000000440000000048000000000000000158202cec3a4c2733e444d044973db35c8ccbaba4e1b47530ae30a6194776803bbcd9"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000000000000000000000db500df7be55b5d0d925655aac44d2434c6fd04e588adfa361c724222723e2b1268316ea62d1347750e62bd98082ed107f9e88b57327cd44ecdf1c79d9ccfaca90b4ad988211e482edd797a00a7c6dd0"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "final_confirmation",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000014400000000480000000000000001"
+            },
+            "closeCommitment": {
+              "$bytes": "d34ca4620941ffe0858c9664052b4ffe40a584c88297a040eb58e0d5251da418"
+            },
+            "body": {
+              "$bytes": "85440000000048000000000000000144000000004800000000000000015820d34ca4620941ffe0858c9664052b4ffe40a584c88297a040eb58e0d5251da418"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000000000000000000001002ea16abfec65db29890f2fcaf2edfcaab55c741b0f5b5f34a55ad2dedb3574ab0b986feba3d131eaf325259f0e0f337688b962f7ecf72332c719a3e4d1f1998f572816abde45263851fc9740e70871"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-initiator-sends-close",
+            "initiatorState": "awaiting_ack",
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "waitsArmed": 1,
+            "mayProtectApplicationRecord": false
+          },
+          {
+            "step": "2-responder-authenticates-the-close",
+            "received": {
+              "kind": "close",
+              "branch": "sequential",
+              "finalSend": {
+                "epoch": 0,
+                "counter": 0
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 0
+              }
+            },
+            "responderState": "close_received",
+            "responderBranch": "sequential_responder",
+            "ackExpectedRecv": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "pendingRecord": "close_ack"
+          },
+          {
+            "step": "2-responder-sends-close-ack",
+            "responderState": "awaiting_confirmation",
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": 1
+            },
+            "waitsArmed": 1
+          },
+          {
+            "step": "3-initiator-validates-the-ack-against-its-anchor",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": false,
+              "finalSend": {
+                "epoch": 0,
+                "counter": 0
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 1
+              }
+            },
+            "initiatorState": "confirmation_due",
+            "initiatorBranch": "sequential_initiator",
+            "pendingRecord": "final_confirmation"
+          },
+          {
+            "step": "3-initiator-sends-the-final-confirmation",
+            "initiatorState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": true
+          },
+          {
+            "step": "4-responder-validates-the-final-confirmation",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 0,
+                "counter": 1
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 1
+              }
+            },
+            "responderState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": false
+          }
+        ],
+        "initiatorVerdict": "clean",
+        "responderVerdict": "clean",
+        "bothVerdictsClean": true,
+        "initiatorWaitsArmed": 1,
+        "responderWaitsArmed": 1,
+        "closeRecordsReserved": 2,
+        "initiatorCloseRecordsSent": 2,
+        "responderCloseRecordsSent": 1,
+        "keepalivePingAfterTheFirstCloseRecord": {
+          "kind": "unavailable",
+          "reason": "application_phase_closed"
+        },
+        "keepalivePingRecordsOnTheWire": 0,
+        "keepalivePingDiscardedNotBuffered": true
+      }
+    },
+    {
+      "name": "simultaneous-close-passing",
+      "sections": [
+        "10.1.1",
+        "10.2",
+        "10.4"
+      ],
+      "note": "The §16.3 F11 table, with its counters fixed: epoch 0 throughout, the initiator's next-send `(0, 7)`, the responder's `(0, 4)`. Each ack satisfies the strict rule against the VALIDATOR'S ANCHOR — the initiator's `(0, 8)` and the responder's `(0, 5)` — and never against its current next-send, which in this branch is permanently one advance ahead of anything the peer could have acknowledged.",
+      "inputs": {
+        "epoch": 0,
+        "initiatorNextSend": {
+          "epoch": 0,
+          "counter": 7
+        },
+        "responderNextSend": {
+          "epoch": 0,
+          "counter": 4
+        }
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": 7
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 7
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000074400000000480000000000000004"
+            },
+            "closeCommitment": {
+              "$bytes": "a92a5dc95a1a1b8b178e888fdfd0295c0803d8bef3dd6fb297d30a089f97250b"
+            },
+            "body": {
+              "$bytes": "85440000000048000000000000000744000000004800000000000000045820a92a5dc95a1a1b8b178e888fdfd0295c0803d8bef3dd6fb297d30a089f97250b"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000000000000000000007575ba3f7ae0e5292f9e43fd8d8142d92235b8da2c12bdbe1e804d5ac31492ca4e748c75aebf0624bdb04490e060d495561d3eeed6152b8c48b5415f6e043454f9501b286511902b624bd6a0845dce461"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 7
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763102636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000044400000000480000000000000007"
+            },
+            "closeCommitment": {
+              "$bytes": "3639c8625ff4d3fd5fbdb99c2a1563bdf787ae219de1bd38ef58547eceff8aa5"
+            },
+            "body": {
+              "$bytes": "854400000000480000000000000004440000000048000000000000000758203639c8625ff4d3fd5fbdb99c2a1563bdf787ae219de1bd38ef58547eceff8aa5"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "0101010000000000000000000000045531b313ec6df2731f15aade3eaa3f8ed71f58536a7205155ffb7058e354123c33d51a09c0a2b2dbd3d44413f7c972e93be341e2263cf1c333474cb41d86a7b4313bcd3409b995f1ad225d638750f119"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000084400000000480000000000000005"
+            },
+            "closeCommitment": {
+              "$bytes": "acc49a758fe5727a498c50db16e66b2972b7c22d3ea80797c81ba1964725e5be"
+            },
+            "body": {
+              "$bytes": "85440000000048000000000000000844000000004800000000000000055820acc49a758fe5727a498c50db16e66b2972b7c22d3ea80797c81ba1964725e5be"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000000000000000000008000c6b196869dde54b11bb7a8de52f2f8dd2714b32ac0d966e89218d4fc1d12c3b7840425874b05be2009e86605220f53cef8ae881c6066265e0b68409d43e29d2c88377ec41f9629d890b8fe01e983a"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000054400000000480000000000000008"
+            },
+            "closeCommitment": {
+              "$bytes": "0cdbe4c42775dfa52ed6ff04fd20a202d627a5daebfdc41c32b3a997888ec539"
+            },
+            "body": {
+              "$bytes": "854400000000480000000000000005440000000048000000000000000858200cdbe4c42775dfa52ed6ff04fd20a202d627a5daebfdc41c32b3a997888ec539"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000000000000000000005f470b84ddc0974f3cbb6a9edf763a5937b0049ea3923660f492d3fb843bbcf5dce548eace853a4cdf6e36ab82c056f6faab9e69b888df263ae3e289fa48632afd3427aae34832f878d39db3590741672"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-both-endpoints-send-close",
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "2-each-side-validates-the-peer-close-under-the-passed-through-rule",
+            "atInitiator": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 0,
+                "counter": 4
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 7
+              }
+            },
+            "atResponder": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 0,
+                "counter": 7
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 4
+              }
+            },
+            "initiatorBranch": "simultaneous",
+            "responderBranch": "simultaneous",
+            "initiatorAckExpectedRecv": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "responderAckExpectedRecv": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "3-each-side-validates-the-peer-ack-against-its-own-anchor",
+            "atInitiator": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 0,
+                "counter": 5
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 8
+              }
+            },
+            "atResponder": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 0,
+                "counter": 8
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 5
+              }
+            },
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "initiatorVerdict": "clean",
+            "responderVerdict": "clean",
+            "initiatorExchangeComplete": true,
+            "responderExchangeComplete": true,
+            "initiatorWaitsArmed": 2,
+            "responderWaitsArmed": 2
+          }
+        ],
+        "initiatorAnchor": {
+          "epoch": 0,
+          "counter": 8
+        },
+        "responderAnchor": {
+          "epoch": 0,
+          "counter": 5
+        },
+        "initiatorVerdict": "clean",
+        "responderVerdict": "clean",
+        "bothVerdictsClean": true,
+        "bothEndpointsAreLastRecordSenders": true
+      }
+    },
+    {
+      "name": "simultaneous-close-ack-declaring-current-next-send",
+      "sections": [
+        "10.1",
+        "10.1.1",
+        "10.4",
+        "11.3 Q7"
+      ],
+      "note": "A conforming implementation MUST reject this record; accepting it is the disallowed reading of the strict rule. The declaration `(0, 9)` is the initiator's current next-send after it sent its own ack; the strict rule reads the anchor `(0, 8)` instead.",
+      "inputs": {
+        "initiatorAnchor": {
+          "epoch": 0,
+          "counter": 8
+        },
+        "initiatorCurrentNextSend": {
+          "epoch": 0,
+          "counter": 9
+        },
+        "declaredExpectedRecv": {
+          "epoch": 0,
+          "counter": 9
+        }
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": 7
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 7
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000074400000000480000000000000004"
+            },
+            "closeCommitment": {
+              "$bytes": "a92a5dc95a1a1b8b178e888fdfd0295c0803d8bef3dd6fb297d30a089f97250b"
+            },
+            "body": {
+              "$bytes": "85440000000048000000000000000744000000004800000000000000045820a92a5dc95a1a1b8b178e888fdfd0295c0803d8bef3dd6fb297d30a089f97250b"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000000000000000000007575ba3f7ae0e5292f9e43fd8d8142d92235b8da2c12bdbe1e804d5ac31492ca4e748c75aebf0624bdb04490e060d495561d3eeed6152b8c48b5415f6e043454f9501b286511902b624bd6a0845dce461"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 7
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763102636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000044400000000480000000000000007"
+            },
+            "closeCommitment": {
+              "$bytes": "3639c8625ff4d3fd5fbdb99c2a1563bdf787ae219de1bd38ef58547eceff8aa5"
+            },
+            "body": {
+              "$bytes": "854400000000480000000000000004440000000048000000000000000758203639c8625ff4d3fd5fbdb99c2a1563bdf787ae219de1bd38ef58547eceff8aa5"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "0101010000000000000000000000045531b313ec6df2731f15aade3eaa3f8ed71f58536a7205155ffb7058e354123c33d51a09c0a2b2dbd3d44413f7c972e93be341e2263cf1c333474cb41d86a7b4313bcd3409b995f1ad225d638750f119"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000084400000000480000000000000005"
+            },
+            "closeCommitment": {
+              "$bytes": "acc49a758fe5727a498c50db16e66b2972b7c22d3ea80797c81ba1964725e5be"
+            },
+            "body": {
+              "$bytes": "85440000000048000000000000000844000000004800000000000000055820acc49a758fe5727a498c50db16e66b2972b7c22d3ea80797c81ba1964725e5be"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000000000000000000008000c6b196869dde54b11bb7a8de52f2f8dd2714b32ac0d966e89218d4fc1d12c3b7840425874b05be2009e86605220f53cef8ae881c6066265e0b68409d43e29d2c88377ec41f9629d890b8fe01e983a"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "nonConforming": true,
+            "position": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 9
+            },
+            "body": {
+              "$bytes": "8544000000004800000000000000054400000000480000000000000009582098f8029d4e26f294e8e2b7e7ef5c6fe29cc508b23c1f944a8993fd765980d9e2"
+            },
+            "envelope": {
+              "$bytes": "010101000000000000000000000005f470b84ddc0974f3cbb6a9edf763a5937b0049ea3923660f492d3fb843bacf5d5a7768f5810089fc30d7225b3e79a28fe05b4bf35f6fa235151e7c7e75882e748f99a24c529754b431703e3121af170c"
+            },
+            "envelopeBytes": 95
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-both-endpoints-send-close",
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "2-each-side-validates-the-peer-close-under-the-passed-through-rule",
+            "atInitiator": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 0,
+                "counter": 4
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 7
+              }
+            },
+            "atResponder": {
+              "kind": "close",
+              "branch": "simultaneous",
+              "finalSend": {
+                "epoch": 0,
+                "counter": 7
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 4
+              }
+            },
+            "initiatorBranch": "simultaneous",
+            "responderBranch": "simultaneous",
+            "initiatorAckExpectedRecv": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "responderAckExpectedRecv": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "initiatorWaitsArmed": 1,
+            "responderWaitsArmed": 1
+          },
+          {
+            "step": "3-each-side-validates-the-peer-ack-against-its-own-anchor",
+            "atInitiator": {
+              "kind": "fatal",
+              "row": "Q7",
+              "reason": "strict_rule"
+            },
+            "atResponder": {
+              "kind": "close_ack",
+              "exchangeComplete": false,
+              "finalSend": {
+                "epoch": 0,
+                "counter": 8
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 5
+              }
+            },
+            "initiatorAnchor": {
+              "epoch": 0,
+              "counter": 8
+            },
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "initiatorVerdict": "failed",
+            "responderVerdict": null,
+            "initiatorExchangeComplete": false,
+            "responderExchangeComplete": false,
+            "initiatorWaitsArmed": 2,
+            "responderWaitsArmed": 1
+          }
+        ],
+        "initiatorVerdict": "failed",
+        "disposition": "FATAL-POST",
+        "errorCode": "protocol_violation",
+        "acceptingItIsTheDisallowedReading": true
+      }
+    },
+    {
+      "name": "close-anchor-across-an-epoch-boundary",
+      "sections": [
+        "9.4",
+        "10.1.1",
+        "10.2"
+      ],
+      "note": "The initiator's `E2EEClose` is the last record of epoch 0 under the §9.4 record threshold, so the anchor is the §9.2/§9.4 ADVANCE of that position — `(1, 0)` and never counter + 1. The responder computes the same value from the `epochCompleted` flag its own authentication reported.",
+      "inputs": {
+        "rekeyMaxRecords": 65536,
+        "initiatorClosePosition": {
+          "epoch": 0,
+          "counter": 65535
+        }
+      },
+      "expected": {
+        "records": [
+          {
+            "purpose": "close",
+            "innerType": 2,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 0,
+              "counter": 65535
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 65535
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048000000000000ffff4400000000480000000000000004"
+            },
+            "closeCommitment": {
+              "$bytes": "f9613d7a65b19b4a873a3d9ee517778d1a5458d5a844b55b9374a769cb423fbf"
+            },
+            "body": {
+              "$bytes": "85440000000048000000000000ffff44000000004800000000000000045820f9613d7a65b19b4a873a3d9ee517778d1a5458d5a844b55b9374a769cb423fbf"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "01010100000000000000000000ffffeb8a68c96078ded4da74807b6db3210d500269f3124f34a88703793034726002c0d31f6627a121e110b479dc4acbcfa68c8e44aa3aa196cf786416e141be23f1b05127d183d0532ba98c5cc8bc67169e"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": true
+          },
+          {
+            "purpose": "close_ack",
+            "innerType": 4,
+            "senderDirection": "n2c",
+            "position": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "declaredFinalSend": {
+              "epoch": 0,
+              "counter": 4
+            },
+            "declaredExpectedRecv": {
+              "epoch": 1,
+              "counter": 0
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e763104636e326358205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000004800000000000000044400000001480000000000000000"
+            },
+            "closeCommitment": {
+              "$bytes": "e09ccbc67721962091257fa756571a1217e184365940f93b737ab5500e0b5d84"
+            },
+            "body": {
+              "$bytes": "85440000000048000000000000000444000000014800000000000000005820e09ccbc67721962091257fa756571a1217e184365940f93b737ab5500e0b5d84"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "0101010000000000000000000000045331b313ec6df2731f15aade3eaa3f8ed71f58536b7205155ffb7058e353123ce57019ade877f7061d4c82288b8b0b46db856bf5e29db5c0af65ad9add7270950a23f5cec886e604ed8e64cd53ffe520"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          },
+          {
+            "purpose": "final_confirmation",
+            "innerType": 4,
+            "senderDirection": "c2n",
+            "position": {
+              "epoch": 1,
+              "counter": 0
+            },
+            "declaredFinalSend": {
+              "epoch": 1,
+              "counter": 0
+            },
+            "declaredExpectedRecv": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "commitmentPreimage": {
+              "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631046363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6744000000014800000000000000004400000000480000000000000005"
+            },
+            "closeCommitment": {
+              "$bytes": "baa6903ec12acee8a975375d83cd900692dc7a99bea933221fe7179c51ffcd0e"
+            },
+            "body": {
+              "$bytes": "85440000000148000000000000000044000000004800000000000000055820baa6903ec12acee8a975375d83cd900692dc7a99bea933221fe7179c51ffcd0e"
+            },
+            "bodyBytes": 63,
+            "envelope": {
+              "$bytes": "010101000000010000000000000000356d2541f858646087c4937235f667079ae9208c49f472b084d477c6716df77daa080eeb7201ccdde8f40a8ac865a6acd54e341e4d318428848f08d0cccdf11c8fa254254edd67b44f614a7742f7e4d7"
+            },
+            "envelopeBytes": 95,
+            "epochCompleted": false
+          }
+        ],
+        "steps": [
+          {
+            "step": "1-initiator-sends-close",
+            "initiatorState": "awaiting_ack",
+            "initiatorAnchor": {
+              "epoch": 1,
+              "counter": 0
+            },
+            "waitsArmed": 1,
+            "mayProtectApplicationRecord": false
+          },
+          {
+            "step": "2-responder-authenticates-the-close",
+            "received": {
+              "kind": "close",
+              "branch": "sequential",
+              "finalSend": {
+                "epoch": 0,
+                "counter": 65535
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 4
+              }
+            },
+            "responderState": "close_received",
+            "responderBranch": "sequential_responder",
+            "ackExpectedRecv": {
+              "epoch": 1,
+              "counter": 0
+            },
+            "pendingRecord": "close_ack"
+          },
+          {
+            "step": "2-responder-sends-close-ack",
+            "responderState": "awaiting_confirmation",
+            "responderAnchor": {
+              "epoch": 0,
+              "counter": 5
+            },
+            "waitsArmed": 1
+          },
+          {
+            "step": "3-initiator-validates-the-ack-against-its-anchor",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": false,
+              "finalSend": {
+                "epoch": 0,
+                "counter": 4
+              },
+              "expectedRecv": {
+                "epoch": 1,
+                "counter": 0
+              }
+            },
+            "initiatorState": "confirmation_due",
+            "initiatorBranch": "sequential_initiator",
+            "pendingRecord": "final_confirmation"
+          },
+          {
+            "step": "3-initiator-sends-the-final-confirmation",
+            "initiatorState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": true
+          },
+          {
+            "step": "4-responder-validates-the-final-confirmation",
+            "received": {
+              "kind": "close_ack",
+              "exchangeComplete": true,
+              "finalSend": {
+                "epoch": 1,
+                "counter": 0
+              },
+              "expectedRecv": {
+                "epoch": 0,
+                "counter": 5
+              }
+            },
+            "responderState": "complete",
+            "exchangeComplete": true,
+            "verdict": "clean",
+            "isLastRecordSender": false
+          }
+        ],
+        "initiatorAnchor": {
+          "epoch": 1,
+          "counter": 0
+        },
+        "anchorIsTheEpochAdvance": true,
+        "initiatorVerdict": "clean",
+        "responderVerdict": "clean"
+      }
+    },
+    {
+      "name": "close-anchor-across-an-epoch-boundary-declaring-counter-plus-one",
+      "sections": [
+        "9.4",
+        "10.1.1",
+        "11.3 Q7"
+      ],
+      "note": "The companion negative of the case above: an ack that declares `(e, counter + 1)` where the epoch-completing close advanced the anchor to `(e + 1, 0)`. It MUST fail as Q7.",
+      "inputs": {
+        "initiatorAnchor": {
+          "epoch": 1,
+          "counter": 0
+        },
+        "conformingDeclaration": {
+          "epoch": 1,
+          "counter": 0
+        },
+        "declaredExpectedRecv": {
+          "epoch": 0,
+          "counter": 65536
+        },
+        "craftedAckBody": {
+          "$bytes": "854400000000480000000000000004440000000048000000000001000058201bced0b4c335955b96b73fd1dd73bd27da311679144dfadcbb72b83ed9360ca1"
+        },
+        "craftedAckEnvelope": {
+          "$bytes": "0101010000000000000000000000045331b313ec6df2731f15aade3eaa3f8ed71f58536a7205155ffb7059e353123c1e2202df5c63f47d1adec25e00afac731655f9baaf90b627676da0f40a4f21b06ebd6486e650a04458650e15d2ba96cb"
+        }
+      },
+      "expected": {
+        "closeRecord": {
+          "purpose": "close",
+          "innerType": 2,
+          "senderDirection": "c2n",
+          "position": {
+            "epoch": 0,
+            "counter": 65535
+          },
+          "declaredFinalSend": {
+            "epoch": 0,
+            "counter": 65535
+          },
+          "declaredExpectedRecv": {
+            "epoch": 0,
+            "counter": 4
+          },
+          "commitmentPreimage": {
+            "$bytes": "8878187279636f2e72656c61792d653265652e636c6f73652e7631026363326e58205f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67440000000048000000000000ffff4400000000480000000000000004"
+          },
+          "closeCommitment": {
+            "$bytes": "f9613d7a65b19b4a873a3d9ee517778d1a5458d5a844b55b9374a769cb423fbf"
+          },
+          "body": {
+            "$bytes": "85440000000048000000000000ffff44000000004800000000000000045820f9613d7a65b19b4a873a3d9ee517778d1a5458d5a844b55b9374a769cb423fbf"
+          },
+          "bodyBytes": 63,
+          "envelope": {
+            "$bytes": "01010100000000000000000000ffffeb8a68c96078ded4da74807b6db3210d500269f3124f34a88703793034726002c0d31f6627a121e110b479dc4acbcfa68c8e44aa3aa196cf786416e141be23f1b05127d183d0532ba98c5cc8bc67169e"
+          },
+          "envelopeBytes": 95,
+          "epochCompleted": true
+        },
+        "received": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "strict_rule"
+        },
+        "initiatorVerdict": "failed",
+        "disposition": "FATAL-POST",
+        "errorCode": "protocol_violation"
+      }
+    },
+    {
+      "name": "strict-rule-violation",
+      "sections": [
+        "10.1",
+        "10.1.1",
+        "11.3 Q7"
+      ],
+      "note": "The strict rule is EXACT EQUALITY against the anchor: one past it fails exactly as one short of it would.",
+      "inputs": {
+        "initiatorAnchor": {
+          "epoch": 0,
+          "counter": 1
+        },
+        "declaredExpectedRecv": {
+          "epoch": 0,
+          "counter": 2
+        },
+        "craftedAckBody": {
+          "$bytes": "8544000000004800000000000000004400000000480000000000000002582040036bf1a7f73f5cd424c94537be4a3b9ef67c29fbf3061c147b3edfbd9b21ca"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "strict_rule"
+        },
+        "initiatorVerdict": "failed",
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "passed-through-rule-violation",
+      "sections": [
+        "10.1",
+        "11.3 Q7"
+      ],
+      "note": "The passed-through rule is `≤ the receiver's CURRENT next-send` in lexicographic order — a state the peer's receive window could legitimately hold, since records may still be in flight. `(0, 9)` against a receiver whose next-send is `(0, 0)` is past anything it could have sent.",
+      "inputs": {
+        "receiverCurrentNextSend": {
+          "epoch": 0,
+          "counter": 0
+        },
+        "declaredExpectedRecv": {
+          "epoch": 0,
+          "counter": 9
+        },
+        "body": {
+          "$bytes": "854400000000480000000000000000440000000048000000000000000958207007545bd260e74cfbe548b1fad288a569cfe2ab72aa566e1d21e19558a8d00c"
+        },
+        "envelope": {
+          "$bytes": "0101010000000000000000000000007b00efd1e45f63a0b110e22d366cf0f14e4241e1b48b2848a13ed64cc985da8a9aa419ba3f26445c52d19c4db80c7a36d763d6c5827c0cfe4d003e8f37d36d932b488cc9265e261997803c0570bcb9e2"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "passed_through_rule"
+        },
+        "verdict": "failed",
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "commitment-mismatch",
+      "sections": [
+        "10.1",
+        "11.3 Q7"
+      ],
+      "note": "Field 4 recomputed over DIFFERENT declared fields than the body carries. The encoder cannot build this — `encodeE2eeCloseRecordBody` computes the commitment from the same fields it writes — so the body is a peer-supplied mutation of the canonical bytes.",
+      "inputs": {
+        "body": {
+          "$bytes": "8544000000004800000000000000004400000000480000000000000000582046895bd6eff0f09cf85e96f63aa9dec51bbc2cf7fc6fdd88abd7e6a62fefe825"
+        },
+        "substitutedCommitment": {
+          "$bytes": "46895bd6eff0f09cf85e96f63aa9dec51bbc2cf7fc6fdd88abd7e6a62fefe825"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "commitment_mismatch"
+        },
+        "verdict": "failed",
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "malformed-close-body",
+      "sections": [
+        "3.6",
+        "10.1",
+        "11.3 Q7"
+      ],
+      "note": "Four elements where §10.1 fixes five. The strict decode of §3.6 — including the re-encode byte-equality rule — runs before any field is compared.",
+      "inputs": {
+        "body": {
+          "$bytes": "8444000000004800000000000000004400000000480000000000000000"
+        }
+      },
+      "expected": {
+        "received": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "malformed_body"
+        },
+        "verdict": "failed",
+        "disposition": "FATAL-POST"
+      }
+    },
+    {
+      "name": "truncation-at-close",
+      "sections": [
+        "10.4"
+      ],
+      "note": "A partial reassembled message at close IS truncation, regardless of any other state — so it supersedes the Clean verdict the completed exchange recorded, and does NOT supersede a Failed one.",
+      "inputs": {
+        "exchangeCompleted": true,
+        "incompleteReassembly": true
+      },
+      "expected": {
+        "verdictAtExchangeCompletion": "clean",
+        "verdictAtChannelEnd": "unclean_truncation",
+        "wireRecordsEmitted": 0
+      }
+    },
+    {
+      "name": "envelope-beyond-the-machines-expectation",
+      "sections": [
+        "10.2",
+        "10.4",
+        "11.3 Q7",
+        "11.5"
+      ],
+      "note": "An extra protected record arriving after the endpoint's exchange is complete, carrying an inner type other than `E2EEError`. The discarded reading produced neither an error record nor a Failed verdict; this one produces both, and the error record is the ONLY record protected after the close machine.",
+      "inputs": {
+        "exchangeCompleted": true,
+        "strayInnerType": 1,
+        "strayBody": {
+          "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374227d"
+        },
+        "strayEnvelope": {
+          "$bytes": "0101010000000000000000000000018013c29274b599d3848b2916ab384c3e01b4913a87380e076dc9ac196b942857ce42e16e70caa9cee94dccc1"
+        }
+      },
+      "expected": {
+        "strayAuthenticated": {
+          "kind": "authenticated",
+          "innerType": 1,
+          "bodyBytes": 27,
+          "epoch": 0,
+          "counter": 1,
+          "plaintextBytes": 28,
+          "epochCompleted": false
+        },
+        "received": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "record_beyond_machine"
+        },
+        "verdict": "failed",
+        "verdictIsNotUncleanAbrupt": true,
+        "errorRecordEmitted": true,
+        "errorBody": {
+          "$bytes": "8101"
+        },
+        "errorEnvelope": {
+          "$bytes": "010101000000000000000000000002df9544cdd0afe2515f45bcc6853bd404d17390"
+        },
+        "errorEnvelopeBytes": 34,
+        "errorPosition": {
+          "epoch": 0,
+          "counter": 2
+        },
+        "secondErrorRecord": {
+          "kind": "unavailable",
+          "reason": "terminal_record_protected"
+        },
+        "secondErrorRecordsOnTheWire": 0,
+        "closeMachineRecordsSent": 2,
+        "observable": {
+          "lengthUniformEncryptedRecords": 1,
+          "closeReason": "channel_rejected"
+        }
+      }
+    },
+    {
+      "name": "peer-terminal-error-after-a-completed-exchange",
+      "sections": [
+        "10.2",
+        "10.4",
+        "11.3"
+      ],
+      "note": "An authenticated `E2EEError` arriving after the receiving endpoint's own exchange completed is the peer's TERMINAL record, not a Q7 envelope: the receiver erases secrets and closes WITHOUT replying. The Q7 reading would have the two endpoints answer each other's terminal errors indefinitely.",
+      "inputs": {
+        "exchangeCompleted": true,
+        "errorEnvelope": {
+          "$bytes": "010101000000000000000000000002df9544cdd0afe2515f45bcc6853bd404d17390"
+        },
+        "errorCode": 1
+      },
+      "expected": {
+        "received": {
+          "kind": "terminal_error",
+          "errorCode": 1
+        },
+        "isQ7": false,
+        "verdict": "failed",
+        "mayProtectTerminalErrorAfterwards": false,
+        "secondErrorRecordRefusedByTheCloseMachine": {
+          "rejected": true
+        },
+        "replyRecordsOnTheWire": 0,
+        "secretsErased": true
+      }
+    },
+    {
+      "name": "legacy-json-during-the-close-phase",
+      "sections": [
+        "4.3 step 2",
+        "10.2",
+        "10.4",
+        "11.3 Q6"
+      ],
+      "note": "legacy JSON delivered while the close phase is in progress. The close phase adds no exemption to rows N11/K18: the payload never reaches the record layer at all, because §4.3 step 2 classifies it before decryption, and the outcome is FATAL-POST Q6 with verdict Failed.",
+      "inputs": {
+        "modeMachineState": "e2ee",
+        "closePhaseActive": true,
+        "payload": {
+          "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+        }
+      },
+      "expected": {
+        "step2Discrimination": {
+          "class": "legacy-json"
+        },
+        "fatal": "Q6",
+        "disposition": "FATAL-POST",
+        "verdict": "failed",
+        "closePhaseGrantsNoExemption": true
+      }
+    },
+    {
+      "name": "negotiation-record-during-the-close-phase",
+      "sections": [
+        "4.3 step 2",
+        "10.2",
+        "10.4",
+        "11.3 Q6"
+      ],
+      "note": "a negotiation record delivered while the close phase is in progress. The close phase adds no exemption to rows N11/K18: the payload never reaches the record layer at all, because §4.3 step 2 classifies it before decryption, and the outcome is FATAL-POST Q6 with verdict Failed.",
+      "inputs": {
+        "modeMachineState": "e2ee",
+        "closePhaseActive": true,
+        "payload": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b707a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        }
+      },
+      "expected": {
+        "step2Discrimination": {
+          "class": "negotiation"
+        },
+        "fatal": "Q6",
+        "disposition": "FATAL-POST",
+        "verdict": "failed",
+        "closePhaseGrantsNoExemption": true
+      }
+    },
+    {
+      "name": "t-close-expiry-sequential-initiator",
+      "sections": [
+        "10.2",
+        "10.3",
+        "10.4"
+      ],
+      "note": "The contrast case that fixes which events this protocol declines to attribute: a `T_CLOSE` expiry is **Unclean — abrupt** with NO wire record, because it may equally be network failure, denial of service, or the peer's own local send failure.",
+      "inputs": {
+        "waitStep": "initiator-awaiting-close-ack",
+        "tClose": 1500,
+        "expiredAt": 1
+      },
+      "expected": {
+        "waitsArmed": 1,
+        "waitDeadlineOffsetFromRecord": 1500,
+        "verdict": "unclean_abrupt",
+        "wireRecordsEmitted": 0,
+        "attributable": false
+      }
+    },
+    {
+      "name": "t-close-expiry-sequential-responder",
+      "sections": [
+        "10.2",
+        "10.3",
+        "10.4"
+      ],
+      "inputs": {
+        "waitStep": "responder-awaiting-final-confirmation",
+        "tClose": 1500,
+        "expiredAt": 1
+      },
+      "expected": {
+        "waitsArmed": 1,
+        "waitDeadlineOffsetFromRecord": 1500,
+        "verdict": "unclean_abrupt",
+        "wireRecordsEmitted": 0
+      }
+    },
+    {
+      "name": "t-close-expiry-simultaneous-second-wait",
+      "sections": [
+        "10.2",
+        "10.3",
+        "10.4"
+      ],
+      "note": "The simultaneous branch's SECOND wait. The transition into the branch does not end the first wait's obligation and nothing restarts or extends either; no path admits a third.",
+      "inputs": {
+        "waitStep": "simultaneous-awaiting-peer-ack",
+        "tClose": 1500,
+        "expiredAt": 1
+      },
+      "expected": {
+        "waitsArmed": 2,
+        "maximumWaitsPerClosePhase": 2,
+        "verdict": "unclean_abrupt",
+        "wireRecordsEmitted": 0
+      }
+    },
+    {
+      "name": "incomplete-reassembly-with-a-q7-violation",
+      "sections": [
+        "10.4"
+      ],
+      "note": "A trace combining an incomplete reassembly with a Q7 violation. §10.4's precedence is Failed, then Unclean — truncation, then Unclean — abrupt, then Clean: the detected protocol violation is the more specific fact and is what the endpoint reports.",
+      "inputs": {
+        "q7Violation": true,
+        "incompleteReassembly": true
+      },
+      "expected": {
+        "verdictAtViolation": "failed",
+        "verdictAtChannelEnd": "failed",
+        "isNotUncleanTruncation": true
+      }
+    },
+    {
+      "name": "no-keepalive-ping-after-the-first-close-machine-record",
+      "sections": [
+        "3.2.2 L5",
+        "10.1.1",
+        "10.2",
+        "11.3 Q7"
+      ],
+      "note": "The prohibition binds EVERY role — the sequential initiator from its `E2EEClose`, the sequential responder from its `E2EECloseAck`, and each simultaneous side from its own `E2EEClose` — and the case carries all three. A conforming sender cannot protect the `Ping` at all — it is an ordinary application RPC record and the send path latched at the first close-machine record, so it is DISCARDED, never buffered for a later flush. A conforming responder rejects a stray one as Q7. And a responder that instead answered from its advanced expected-receive state would declare an `expectedRecv` past the initiator's close anchor, which the initiator MUST reject as Q7 — which is why the prohibition is load-bearing rather than tidy.",
+      "inputs": {
+        "initiatorCloseAnchor": {
+          "epoch": 0,
+          "counter": 1
+        },
+        "strayPingPosition": {
+          "epoch": 0,
+          "counter": 1
+        }
+      },
+      "expected": {
+        "mayProtectApplicationRecord": false,
+        "conformingKeepaliveAttempt": {
+          "kind": "unavailable",
+          "reason": "application_phase_closed"
+        },
+        "conformingKeepaliveRecordsOnTheWire": 0,
+        "keepaliveDiscardedNotBuffered": true,
+        "strayPingAtResponder": {
+          "kind": "fatal",
+          "row": "Q7",
+          "reason": "record_beyond_machine"
+        },
+        "responderVerdict": "failed",
+        "sequentialResponderRole": {
+          "mayProtectApplicationRecord": false,
+          "keepaliveAttempt": {
+            "kind": "unavailable",
+            "reason": "application_phase_closed"
+          },
+          "keepaliveRecordsOnTheWire": 0
+        },
+        "simultaneousRole": {
+          "mayProtectApplicationRecord": false,
+          "keepaliveAttempt": {
+            "kind": "unavailable",
+            "reason": "application_phase_closed"
+          },
+          "peerKeepaliveAttempt": {
+            "kind": "unavailable",
+            "reason": "application_phase_closed"
+          },
+          "keepaliveRecordsOnTheWire": 0
+        },
+        "ackDeclaringPastTheAnchor": {
+          "declaredExpectedRecv": {
+            "epoch": 0,
+            "counter": 2
+          },
+          "anchor": {
+            "epoch": 0,
+            "counter": 1
+          },
+          "received": {
+            "kind": "fatal",
+            "row": "Q7",
+            "reason": "strict_rule"
+          },
+          "initiatorVerdict": "failed"
+        }
+      }
+    },
+    {
+      "name": "late-simultaneous-phase-duration",
+      "sections": [
+        "3.2.2 L5",
+        "10.2",
+        "10.3",
+        "10.4"
+      ],
+      "note": "The worst-case close phase §3.2.2 L5 is derived from, as a TIMED case rather than a byte vector. It is the case that fails against constants chosen for a one-wait model, and against an implementation that re-arms `T_CLOSE` on any other event: the simultaneous transition neither restarted nor extended the first wait, and the second wait was armed by this endpoint's own ack.",
+      "inputs": {
+        "tClose": 1500,
+        "tCloseLingerMax": 1000,
+        "keepaliveFlushMargin": 500,
+        "rpcKeepaliveInterval": 5000,
+        "ownCloseAt": 0,
+        "peerCloseDeliveredAt": 1499,
+        "peerAckDeliveredAt": 2998,
+        "peerChannelCloseWithheld": true
+      },
+      "expected": {
+        "firstWaitDeadlineOffset": 1500,
+        "deadlineUnchangedByTheSimultaneousTransition": true,
+        "secondWaitDeadlineOffset": 2999,
+        "waitsArmed": 2,
+        "lingerDeadlineOffset": 2499,
+        "totalPhaseMilliseconds": 2998,
+        "phaseBound": 4000,
+        "withinPhaseBound": true,
+        "phaseBoundPlusFlushMarginWithinKeepaliveInterval": true,
+        "received": {
+          "kind": "close_ack",
+          "exchangeComplete": true,
+          "finalSend": {
+            "epoch": 0,
+            "counter": 5
+          },
+          "expectedRecv": {
+            "epoch": 0,
+            "counter": 8
+          }
+        },
+        "verdict": "clean"
+      }
+    }
+  ]
+}

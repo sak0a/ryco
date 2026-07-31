@@ -1,0 +1,278 @@
+{
+  "family": {
+    "number": 14,
+    "title": "Safety number and WebSAS",
+    "sections": [
+      "13.4",
+      "13.5",
+      "3.2.1 S10",
+      "3.2.1 S11",
+      "16.3 F14"
+    ],
+    "summary": "The two owner-facing verification values: the §13.4 native safety number and the §13.5 `WebSAS`, each with its canonical-CBOR input array, its intermediate (`safetyNumberSecret`; `prk`), its HKDF output, and its exact rendered display string. Every rendering case additionally carries its displayed entropy against the §3.2.1 S10 and S11 floors, so both floors are discharged by fixture rather than by inspection.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "deferred": [
+    "§16.4 cross-runtime equality: the `WebSAS` half of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
+  ],
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    }
+  },
+  "cases": [
+    {
+      "name": "safety-number-short-account-id",
+      "sections": [
+        "13.4",
+        "3.2.1 S10"
+      ],
+      "note": "The digest is the HKDF-Expand pseudorandom key DIRECTLY: §13.4 has no Extract step and no salt. `info` is the §3.5 label, which equals the input array's domain.",
+      "inputs": {
+        "nodeIdentityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "clientIdentityPublicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "hubOrigin": "https://hub.example.com",
+        "accountId": "acct_0123456789",
+        "hkdfInfo": "ryco.relay-e2ee.safety-number.v1"
+      },
+      "expected": {
+        "inputArray": {
+          "$bytes": "8978207279636f2e72656c61792d653265652e7361666574792d6e756d6265722e7631646e6f64656765643235353139582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b866636c69656e7464703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56507768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f30313233343536373839"
+        },
+        "safetyNumberSecret": {
+          "$bytes": "4e1a80be0ac182b0989931a911967373402bd94e29a6b63829a82dc37b447780"
+        },
+        "hkdfOutput": {
+          "$bytes": "814bef6b88bbef7d9213b3c2ddcc279597139874e52179f143c2fbdecf188b5ddc9f6a90e4a043f19110661fa8576cc5b1f05411a98b2987181fd838"
+        },
+        "display": "63016 68371 61607 70932 50531 38648 93962 99025 86152 50224 76745 25112",
+        "displayFormat": {
+          "digits": 60,
+          "groups": 12,
+          "digitsPerGroup": 5
+        },
+        "displayedEntropyBits": 199.31568569324173,
+        "minimumDisplayedEntropyBits": 60,
+        "satisfiesS10": true
+      }
+    },
+    {
+      "name": "safety-number-max-length-account-id",
+      "sections": [
+        "13.4",
+        "3.2.1 S10"
+      ],
+      "note": "The digest is the HKDF-Expand pseudorandom key DIRECTLY: §13.4 has no Extract step and no salt. `info` is the §3.5 label, which equals the input array's domain.",
+      "inputs": {
+        "nodeIdentityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "clientIdentityPublicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "hubOrigin": "https://hub.example.com",
+        "accountId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "hkdfInfo": "ryco.relay-e2ee.safety-number.v1"
+      },
+      "expected": {
+        "inputArray": {
+          "$bytes": "8978207279636f2e72656c61792d653265652e7361666574792d6e756d6265722e7631646e6f64656765643235353139582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b866636c69656e7464703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56507768747470733a2f2f6875622e6578616d706c652e636f6d79010061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161"
+        },
+        "safetyNumberSecret": {
+          "$bytes": "9a01acaf7a169daeea0f378a037f2ff23a81660bb391ef680ef72a7a248c7b0a"
+        },
+        "hkdfOutput": {
+          "$bytes": "1570829a6adeff491e7f0280c557ed903ed8a6f9a66d411298842ae8c958bdf5f68be720abf957fc5c4e2336cf2e1dcca57089e4db83aceaa8942dd2"
+        },
+        "display": "20618 21727 51341 76537 52280 82040 94535 98396 21871 46576 10892 30610",
+        "displayFormat": {
+          "digits": 60,
+          "groups": 12,
+          "digitsPerGroup": 5
+        },
+        "displayedEntropyBits": 199.31568569324173,
+        "minimumDisplayedEntropyBits": 60,
+        "satisfiesS10": true
+      }
+    },
+    {
+      "name": "safety-number-is-namespace-bound",
+      "sections": [
+        "13.4"
+      ],
+      "note": "The same two identity keys under a different Hub origin MUST render a different number: the namespace is what makes the value long-term-meaningful.",
+      "inputs": {
+        "nodeIdentityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "clientIdentityPublicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "accountId": "acct_0123456789",
+        "hubOriginA": "https://hub.example.com",
+        "hubOriginB": "https://other.example.com"
+      },
+      "expected": {
+        "displayA": "63016 68371 61607 70932 50531 38648 93962 99025 86152 50224 76745 25112",
+        "displayB": "82099 79631 50010 60729 76500 11407 50412 91759 65273 92255 83647 96669",
+        "differs": true
+      }
+    },
+    {
+      "name": "web-sas-session-one",
+      "sections": [
+        "13.5",
+        "3.2.1 S11"
+      ],
+      "note": "Unlike §13.4 this derivation HAS an Extract step and the salt is `sessionBindingHash`; that salt is the whole of the session binding. The value is per session and is NOT unforgeable against an active interposer (§13.5, §17.5).",
+      "inputs": {
+        "nodeIdentityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "testOnlyWebEphemeralSecretKey": {
+          "$bytes": "1313131313131313131313131313131313131313131313131313131313131313"
+        },
+        "webEphemeralPublicKey": {
+          "$bytes": "197fc2c567dc03ee2aadf0ed86681dac24daa76e83ca555875dd3be7376e5306"
+        },
+        "sessionBindingHash": {
+          "$bytes": "505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f"
+        },
+        "hkdfInfo": "ryco.relay-e2ee.web-sas.v1"
+      },
+      "expected": {
+        "inputArray": {
+          "$bytes": "87781a7279636f2e72656c61792d653265652e7765622d7361732e7631646e6f64656765643235353139582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b863776562667832353531395820197fc2c567dc03ee2aadf0ed86681dac24daa76e83ca555875dd3be7376e5306"
+        },
+        "prk": {
+          "$bytes": "e17b74e90d37215b2dd1e663e77c45f5e9b9346a7936d31aba7039b14821faa0"
+        },
+        "hkdfOutput": {
+          "$bytes": "aefe929165"
+        },
+        "display": "NVZ9-54B5",
+        "displayFormat": {
+          "chars": 8,
+          "groups": 2,
+          "charsPerGroup": 4
+        },
+        "displayedEntropyBits": 40,
+        "minimumDisplayedEntropyBits": 30,
+        "satisfiesS11": true
+      }
+    },
+    {
+      "name": "web-sas-session-two",
+      "sections": [
+        "13.5",
+        "3.2.1 S11"
+      ],
+      "note": "Unlike §13.4 this derivation HAS an Extract step and the salt is `sessionBindingHash`; that salt is the whole of the session binding. The value is per session and is NOT unforgeable against an active interposer (§13.5, §17.5).",
+      "inputs": {
+        "nodeIdentityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "testOnlyWebEphemeralSecretKey": {
+          "$bytes": "1313131313131313131313131313131313131313131313131313131313131313"
+        },
+        "webEphemeralPublicKey": {
+          "$bytes": "197fc2c567dc03ee2aadf0ed86681dac24daa76e83ca555875dd3be7376e5306"
+        },
+        "sessionBindingHash": {
+          "$bytes": "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
+        },
+        "hkdfInfo": "ryco.relay-e2ee.web-sas.v1"
+      },
+      "expected": {
+        "inputArray": {
+          "$bytes": "87781a7279636f2e72656c61792d653265652e7765622d7361732e7631646e6f64656765643235353139582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b863776562667832353531395820197fc2c567dc03ee2aadf0ed86681dac24daa76e83ca555875dd3be7376e5306"
+        },
+        "prk": {
+          "$bytes": "b8df804cf14079c424cbc1074caddda6d8f48ba53dc694ebbe271cac45c4c415"
+        },
+        "hkdfOutput": {
+          "$bytes": "86f87c3386"
+        },
+        "display": "GVW7-RCW6",
+        "displayFormat": {
+          "chars": 8,
+          "groups": 2,
+          "charsPerGroup": 4
+        },
+        "displayedEntropyBits": 40,
+        "minimumDisplayedEntropyBits": 30,
+        "satisfiesS11": true
+      }
+    },
+    {
+      "name": "web-sas-changes-every-session",
+      "sections": [
+        "13.5"
+      ],
+      "note": "The same node key and the same web ephemeral under two session-binding hashes MUST render differently, which is what makes the value non-precomputable.",
+      "inputs": {
+        "sessionBindingHashA": {
+          "$bytes": "505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f"
+        },
+        "sessionBindingHashB": {
+          "$bytes": "909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeaf"
+        }
+      },
+      "expected": {
+        "displayA": "NVZ9-54B5",
+        "displayB": "GVW7-RCW6",
+        "differs": true
+      }
+    }
+  ]
+}

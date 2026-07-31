@@ -1,0 +1,270 @@
+{
+  "family": {
+    "number": 6,
+    "title": "IK handshake",
+    "sections": [
+      "8",
+      "16.3 F6"
+    ],
+    "summary": "One complete deterministic IK handshake with every §16.3 F6 named intermediate as an expected output — the §8.3 context block and commitment, the §8.4 prologue, the §8.5 hello wire bytes and its encrypted message-1 payload, `ServerAcceptTBS`, the §6.5 secrets, `serverConfirmationKey`, `confirmationTranscript`, `serverConfirmation`, the final `E2EEServerAccept` wire bytes, `sessionBindingHash`, both epoch-0 AEAD keys, and the first protected envelope in each direction with the §8.9 implicit finish.",
+    "generator": "scripts/generate-e2ee-fixtures.ts"
+  },
+  "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
+  "testKeyMaterial": {
+    "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
+    "testOnlyNodeIdentitySeed": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "nodeIdentityPublicKey": {
+      "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+    },
+    "testOnlyNodeAgreementSecretKey": {
+      "$bytes": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "nodeAgreementPublicKey": {
+      "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+    },
+    "testOnlyClientIdentitySecretKey": {
+      "$bytes": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    },
+    "clientIdentityPublicKey": {
+      "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+    },
+    "testOnlyClientAgreementSecretKey": {
+      "$bytes": "1212121212121212121212121212121212121212121212121212121212121212"
+    },
+    "clientAgreementPublicKey": {
+      "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+    },
+    "testOnlyNodeOldIdentitySeed": {
+      "$bytes": "2121212121212121212121212121212121212121212121212121212121212121"
+    },
+    "testOnlyNodeNewIdentitySeed": {
+      "$bytes": "2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    "testOnlyUnrelatedIdentitySeed": {
+      "$bytes": "2323232323232323232323232323232323232323232323232323232323232323"
+    },
+    "identifiers": {
+      "hubOrigin": "https://hub.example.com",
+      "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+      "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+      "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+      "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      "accountId": "acct_0123456789"
+    },
+    "timestamps": {
+      "createdAt": 1784160000000,
+      "expiresAt": 1786752000000,
+      "issuedAt": 1784160030000,
+      "now": 1784160030000
+    },
+    "testOnlyClientEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyNodeEphemeralSecretKey": {
+      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "testOnlyClientNonce": {
+      "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
+    },
+    "clientIdentityFingerprint": {
+      "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+    },
+    "clientAgreementFingerprint": {
+      "$bytes": "6bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2"
+    },
+    "nodeIdentityFingerprint": {
+      "$bytes": "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64"
+    },
+    "nodeAgreementFingerprint": {
+      "$bytes": "0f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+    },
+    "channel": {
+      "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+      "relayProtocolMajor": 1,
+      "relayProtocolMinor": 2,
+      "channelOpenCapability": "ryco.rpc",
+      "channelOpenEffectiveRole": "operator"
+    }
+  },
+  "cases": [
+    {
+      "name": "ik-handshake-complete-trace",
+      "sections": [
+        "8.1",
+        "8.3",
+        "8.4",
+        "8.5",
+        "8.6",
+        "8.7",
+        "8.8",
+        "8.9",
+        "6.5"
+      ],
+      "note": "One deterministic IK handshake, end to end, with every §16.3 F6 named intermediate. Both endpoints ran the LANDED state machines against each other; `bothEndpointsDerivedIdenticalSecrets` is the assertion that they agreed on all four §6.5 secrets rather than the generator asserting it of itself.",
+      "inputs": {
+        "tier": "native",
+        "pattern": "IK",
+        "selectedSuite": 1,
+        "offeredSuites": [
+          1
+        ],
+        "hubOrigin": "https://hub.example.com",
+        "channelId": "ch_GGGGGGGGGGGGGGGGGGGGGG",
+        "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+        "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+        "continuityId": "nct_FFFFFFFFFFFFFFFFFFFFFF",
+        "continuityChainLength": 0,
+        "accountId": "acct_0123456789",
+        "intendedCapability": "ryco.rpc",
+        "intendedRole": "operator",
+        "clientPrekeyTranscript": {
+          "$bytes": "8b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e000"
+        },
+        "clientPrekeySignature": {
+          "$bytes": "7fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e"
+        },
+        "now": 1784160030000
+      },
+      "expected": {
+        "contextBlock": {
+          "$bytes": "92781a7279636f2e72656c61792d653265652e636f6e746578742e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141676564323535313958200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b646f616363745f30313233343536373839687279636f2e727063686f70657261746f72687279636f2e727063686f70657261746f728158200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779825820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e892758206bacda78725c700bb0babe642823041bd4eaff92373698131be8ae116d1388d2781a6e63745f46464646464646464646464646464646464646464646"
+        },
+        "contextBlockBytes": 339,
+        "contextCommitment": {
+          "$bytes": "86d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d78"
+        },
+        "prologue": {
+          "$bytes": "89781b7279636f2e72656c61792d653265652e70726f6c6f6775652e76317768747470733a2f2f6875622e6578616d706c652e636f6d781963685f4747474747474747474747474747474747474747474701020101781b6e6f64655f41414141414141414141414141414141414141414141582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d78"
+        },
+        "clientHello": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b707a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        },
+        "clientHelloBytes": 524,
+        "noiseMessage1": {
+          "$bytes": "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        },
+        "message1PayloadPlaintext": {
+          "$bytes": "8558f08b781a7279636f2e636c69656e742d653265652d7072656b65792e76317768747470733a2f2f6875622e6578616d706c652e636f6d6f616363745f3031323334353637383964703235365841047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f56505820a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e89275820052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843653235353139665348413235361b0000019f683918001b000001a002b7e00058407fc435a5b1bf83437dd2599f05a73434b8e1d3165be4f85a6a4f9907274389bf118b014d5e96e23a5237b2899b166ea67112cc900ac4d794ebcbb4c7276e7f7e6f616363745f30313233343536373839687279636f2e727063686f70657261746f72"
+        },
+        "message1PayloadPlaintextBytes": 343,
+        "serverAcceptTbs": {
+          "$bytes": "02028401781a65706b5f45454545454545454545454545454545454545454545582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d7858655869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67bb13e712e2d79ffe5479f893d5255f767e736270d77c4d46aebba6d01338e774bcff68792b06e98786db90b08d6a159910da44b2dba57b8a02f627acd8dca23db4cb8a13714"
+        },
+        "noiseMessage2": {
+          "$bytes": "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67bb13e712e2d79ffe5479f893d5255f767e736270d77c4d46aebba6d01338e774bcff68792b06e98786db90b08d6a159910da44b2dba57b8a02f627acd8dca23db4cb8a13714"
+        },
+        "message2PayloadPlaintext": {
+          "$bytes": "83687279636f2e727063686f70657261746f7258200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"
+        },
+        "exporterSecret": {
+          "$bytes": "3df08be20cc319578a156b636a3ae5d017a6622899a48847ae8d99d3b084f722"
+        },
+        "serverConfirmationKey": {
+          "$bytes": "46d17787aa5f5ec03d51247fe85c3f6178bd40272d76b19ce0fef8bba1c6738a"
+        },
+        "confirmationTranscript": {
+          "$bytes": "69766ec90b453819624d5735a421d2d32c931b3699c8947e4ebff2e877a7ba8e"
+        },
+        "serverConfirmation": {
+          "$bytes": "1d7653f44a48d31ef9d689ecd25a1a566f98c2939a4513e9784bfdd1206e3d34"
+        },
+        "serverAccept": {
+          "$bytes": "02028501781a65706b5f45454545454545454545454545454545454545454545582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d7858655869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67bb13e712e2d79ffe5479f893d5255f767e736270d77c4d46aebba6d01338e774bcff68792b06e98786db90b08d6a159910da44b2dba57b8a02f627acd8dca23db4cb8a1371458201d7653f44a48d31ef9d689ecd25a1a566f98c2939a4513e9784bfdd1206e3d34"
+        },
+        "serverAcceptBytes": 203,
+        "sessionBindingHash": {
+          "$bytes": "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67"
+        },
+        "epochSecretC2N": {
+          "$bytes": "b89ee30677c2855a7b9e88f6d4e9f85b1a317007734895653baac3463b19204d"
+        },
+        "epochSecretN2C": {
+          "$bytes": "b1acc4b4ce50246a35b4075217acda93c68e4201eee1b5c307f1b2fec5adf290"
+        },
+        "aeadKeyC2NEpoch0": {
+          "$bytes": "99a6a5b035262ec751e2623691d6afe37a3328ab418d4df6a7cbdb445efe86ad"
+        },
+        "aeadKeyN2CEpoch0": {
+          "$bytes": "e0f13593d4e14f5304cb6082e5bade70addbc1db7e8946958bf42c691a99ff79"
+        },
+        "bothEndpointsDerivedIdenticalSecrets": true,
+        "admittedAuthority": {
+          "hubOrigin": "https://hub.example.com",
+          "accountId": "acct_0123456789",
+          "clientIdentityFingerprint": {
+            "$bytes": "a9d61f1ad6753239898e6e6f262f2ec17f0498f2c33accc3b7448bfa5f0e8927"
+          },
+          "status": "approved",
+          "maxRole": "owner",
+          "capabilitySet": [
+            "ryco.rpc"
+          ]
+        },
+        "firstProtectedEnvelopes": {
+          "clientToNode": {
+            "innerBody": {
+              "$bytes": "7b225f746167223a227279636f2e7270632e70696e67227d"
+            },
+            "envelope": {
+              "$bytes": "01010100000000000000000000000078fe898e903e04ca8b3290545503de837a216f91ddad4f6adcb8b6ae1f2c456e4edca85e0ad5e7458b"
+            },
+            "envelopeBytes": 56,
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "aad": {
+              "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6763326e"
+            },
+            "receivedByNode": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 24,
+              "epoch": 0,
+              "counter": 0,
+              "plaintextBytes": 25,
+              "epochCompleted": false
+            }
+          },
+          "implicitFinish": {
+            "beforeFirstClientEnvelope": {
+              "mayInvokeRpcHandler": false,
+              "mayEmitApplicationRpc": false
+            },
+            "result": "finished",
+            "mayInvokeRpcHandlerAfter": true,
+            "mayEmitApplicationRpcAfter": true,
+            "deadlineAt": 1784160040000
+          },
+          "nodeToClient": {
+            "innerBody": {
+              "$bytes": "7b225f746167223a227279636f2e7270632e706f6e67227d"
+            },
+            "envelope": {
+              "$bytes": "010101000000000000000000000000deae6ba8ca34d2bae3071723cf2bfc31780cfe3e37acb8811c1a82f236a76629825f8ff5c878cd3429"
+            },
+            "envelopeBytes": 56,
+            "position": {
+              "epoch": 0,
+              "counter": 0
+            },
+            "aad": {
+              "$bytes": "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a676e3263"
+            },
+            "receivedByClient": {
+              "kind": "authenticated",
+              "innerType": 1,
+              "bodyBytes": 24,
+              "epoch": 0,
+              "counter": 0,
+              "plaintextBytes": 25,
+              "epochCompleted": false
+            }
+          }
+        }
+      }
+    }
+  ]
+}
