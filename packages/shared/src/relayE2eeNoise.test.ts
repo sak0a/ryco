@@ -132,6 +132,42 @@ const nxNode = (overrides: Partial<E2eeNoiseHandshakeOptions> = {}): E2eeNoiseHa
     ...overrides,
   });
 
+/**
+ * A secret key that counts every full read of itself. Both ways this module
+ * consumes one — `Uint8Array.from`, which is the copy it takes ownership of,
+ * and `x25519.getPublicKey` — read it through the array iterator, so overriding
+ * that is how a test observes WHETHER the constructor has touched the caller's
+ * key material at the point a later step fails.
+ */
+class WatchedSecret extends Uint8Array {
+  reads = 0;
+
+  override [Symbol.iterator]() {
+    this.reads += 1;
+    return super[Symbol.iterator]();
+  }
+}
+
+const watchedSecret = (value: Uint8Array): WatchedSecret => {
+  const watched = new WatchedSecret(value.byteLength);
+  watched.set(value);
+  watched.reads = 0;
+  return watched;
+};
+
+const UNREADABLE_PROLOGUE_MESSAGE = "test-only unreadable prologue";
+
+/**
+ * A §8.4 prologue that passes the constructor's `instanceof` check and then
+ * fails when Noise `MixHash` reads it. It stands in for every way the symmetric
+ * steps of the constructor can throw on material the caller supplied.
+ */
+class UnreadablePrologue extends Uint8Array {
+  override get length(): number {
+    throw new Error(UNREADABLE_PROLOGUE_MESSAGE);
+  }
+}
+
 /** Reason of an `E2eeNoiseHandshakeError`, asserting the class on the way. */
 function reasonOf(run: () => unknown): string {
   try {
@@ -575,6 +611,40 @@ describe("§6.5 and §9.5 erasure", () => {
     const unused = Uint8Array.from(CLIENT_EPHEMERAL_SECRET);
     ikClient({ testOnlyEphemeralSecretKey: unused }).destroy();
     expect(hex(unused)).toBe(hex(new Uint8Array(32)));
+  });
+
+  it("acquires no key material until the constructor's fallible steps are done", () => {
+    // §9.5's failure mode, in the one place a constructor can produce it: key
+    // material acquired, and then a statement that can throw before any funnel
+    // could erase it. The constructor's answer is to acquire LAST — the
+    // symmetric state, the §8.4 prologue mix, and the IK pre-message mix all
+    // run before the caller's static is read at all — so a constructor that
+    // fails owns nothing and both of the caller's buffers are untouched.
+    //
+    // `WATCHED` counts every full read of the buffer: `Uint8Array.from` (the
+    // copy this object would own) and `x25519.getPublicKey` both take it
+    // through the iterator, and neither has run when the prologue fails. The
+    // control below is what keeps that from passing vacuously.
+    const staticSecretKey = watchedSecret(CLIENT_STATIC_SECRET);
+    const ephemeral = Uint8Array.from(CLIENT_EPHEMERAL_SECRET);
+    expect(() =>
+      ikClient({
+        staticSecretKey,
+        prologue: new UnreadablePrologue(6),
+        testOnlyEphemeralSecretKey: ephemeral,
+      }),
+    ).toThrow(UNREADABLE_PROLOGUE_MESSAGE);
+    expect(staticSecretKey.reads).toBe(0);
+    // The injected ephemeral was never adopted either, so ownership never
+    // transferred and it is still the caller's to reuse or erase.
+    expect(hex(ephemeral)).toBe(hex(CLIENT_EPHEMERAL_SECRET));
+
+    // Control: a construction that completes does read the static — once to
+    // derive its public key and once to copy it — so the assertion above is
+    // about the ordering and not about an unread buffer.
+    const used = watchedSecret(CLIENT_STATIC_SECRET);
+    ikClient({ staticSecretKey: used }).destroy();
+    expect(used.reads).toBeGreaterThan(0);
   });
 
   it("leaves the caller's own static key untouched and hands back independent buffers", () => {

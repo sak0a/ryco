@@ -28,6 +28,18 @@
       "types": "./src/relayE2eeKeys.ts",
       "import": "./src/relayE2eeKeys.ts"
     },
+    "./relayE2eeClose": {
+      "types": "./src/relayE2eeClose.ts",
+      "import": "./src/relayE2eeClose.ts"
+    },
+    "./relayE2eeSession": {
+      "types": "./src/relayE2eeSession.ts",
+      "import": "./src/relayE2eeSession.ts"
+    },
+    "./relayE2eeHandshake": {
+      "types": "./src/relayE2eeHandshake.ts",
+      "import": "./src/relayE2eeHandshake.ts"
+    },
     "./relayE2eeTranscripts": {
       "types": "./src/relayE2eeTranscripts.ts",
       "import": "./src/relayE2eeTranscripts.ts"

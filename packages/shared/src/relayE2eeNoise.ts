@@ -151,12 +151,39 @@ function noiseFailure(reason: E2eeNoiseFailureReason): never {
   throw new E2eeNoiseHandshakeError(reason);
 }
 
-/** Exact-length check plus a defensive copy, for material this module then owns. */
-function copyExactBytes(value: Uint8Array, expectedLength: number): Uint8Array {
+/**
+ * Exact-length check for material this module READS. It acquires nothing, which
+ * is what lets a caller validate before it acquires — see the constructor of
+ * `E2eeNoiseHandshake`, and the ownership rule stated in `relayE2eeSession.ts`.
+ */
+function requireExactBytes(value: Uint8Array, expectedLength: number): void {
   if (!(value instanceof Uint8Array) || value.byteLength !== expectedLength) {
     noiseFailure("invalid_key_material");
   }
+}
+
+/** Exact-length check plus a defensive copy, for material this module then owns. */
+function copyExactBytes(value: Uint8Array, expectedLength: number): Uint8Array {
+  requireExactBytes(value, expectedLength);
   return Uint8Array.from(value);
+}
+
+/**
+ * §9.5 erasure of buffers this module may or may not hold, TOTAL: it never
+ * throws, whatever it is handed. Every use of it is on a path where key
+ * material must be zeroed before a failure propagates, and an erasure that
+ * threw would replace that failure with its own and strand the rest of the
+ * buffers.
+ */
+function eraseBytes(...buffers: readonly (Uint8Array | undefined)[]): void {
+  for (const buffer of buffers) {
+    if (!(buffer instanceof Uint8Array)) continue;
+    try {
+      clean(buffer);
+    } catch {
+      // One unusable buffer must not stop the rest from being zeroed.
+    }
+  }
 }
 
 // ─── Noise §4.3 / §5.1 HKDF and the §6.5 exporter ────────────────────────────
@@ -182,11 +209,22 @@ function noiseHkdf2(
   inputKeyMaterial: Uint8Array,
 ): [Uint8Array, Uint8Array] {
   const tempKey = extract(sha256, inputKeyMaterial, chainingKey);
-  const output = expand(sha256, tempKey, undefined, 2 * HASH_LEN);
-  const first = output.slice(0, HASH_LEN);
-  const second = output.slice(HASH_LEN);
-  clean(tempKey, output);
-  return [first, second];
+  let output: Uint8Array | undefined;
+  let first: Uint8Array | undefined;
+  try {
+    output = expand(sha256, tempKey, undefined, 2 * HASH_LEN);
+    first = output.slice(0, HASH_LEN);
+    const second = output.slice(HASH_LEN);
+    return [first, second];
+  } catch (error) {
+    // §9.5: every byte this function derives is either returned or zeroed. The
+    // second slice is the only statement that can fail with the first already
+    // split out, and a caller that never receives them cannot erase them.
+    eraseBytes(first);
+    throw error;
+  } finally {
+    eraseBytes(tempKey, output);
+  }
 }
 
 /**
@@ -250,10 +288,15 @@ class NoiseCipherState {
   #k: Uint8Array | undefined = undefined;
   #n = 0n;
 
-  /** Noise §5.1 `InitializeKey(key)`. Takes ownership of `key`; resets `n` to zero. */
+  /**
+   * Noise §5.1 `InitializeKey(key)`. Takes ownership of `key`; resets `n` to
+   * zero. The length check and the erasure of the previous key both precede the
+   * acquisition, and the erasure is total, so nothing between them can throw
+   * with `key` held by neither the caller nor this object.
+   */
   initializeKey(key: Uint8Array): void {
     if (key.byteLength !== KEY_LEN) noiseFailure("invalid_key_material");
-    if (this.#k !== undefined) clean(this.#k);
+    eraseBytes(this.#k);
     this.#k = key;
     this.#n = 0n;
   }
@@ -291,7 +334,7 @@ class NoiseCipherState {
 
   /** §9.5 erasure: overwrite the key bytes with zeros before releasing them. */
   erase(): void {
-    if (this.#k !== undefined) clean(this.#k);
+    eraseBytes(this.#k);
     this.#k = undefined;
     this.#n = 0n;
   }
@@ -333,15 +376,23 @@ class NoiseSymmetricState {
   /** Noise §5.2 `MixKey(input_key_material)`. */
   mixKey(inputKeyMaterial: Uint8Array): void {
     const [chainingKey, temporaryKey] = noiseHkdf2(this.#ck, inputKeyMaterial);
-    clean(this.#ck);
-    this.#ck = chainingKey;
-    this.#cipher.initializeKey(temporaryKey);
+    try {
+      eraseBytes(this.#ck);
+      this.#ck = chainingKey;
+      this.#cipher.initializeKey(temporaryKey);
+    } catch (error) {
+      // The chaining key is this object's from the assignment above and `erase`
+      // will find it; the cipher key is nobody's until `initializeKey` takes it,
+      // and its length check is the one statement here that can refuse.
+      eraseBytes(temporaryKey);
+      throw error;
+    }
   }
 
   /** Noise §5.2 `MixHash(data)`. */
   mixHash(data: Uint8Array): void {
     const next = sha256(concatBytes(this.#h, data));
-    clean(this.#h);
+    eraseBytes(this.#h);
     this.#h = next;
   }
 
@@ -372,14 +423,24 @@ class NoiseSymmetricState {
    */
   splitAndExport(): E2eeNoiseSessionKeys {
     const [first, second] = noiseHkdf2(this.#ck, EMPTY_BYTES);
-    const exporterSecret = e2eeNoiseExporterSecret(this.#ck);
-    this.erase();
-    return { epochSecretC2N: first, epochSecretN2C: second, exporterSecret };
+    // The two `Split()` outputs are live and owned by nobody until this returns
+    // them, and both the exporter derivation and the erasure below can still
+    // fail, so they run inside the §9.5 funnel: either the caller receives all
+    // three values or all three are zeroed.
+    let exporterSecret: Uint8Array | undefined;
+    try {
+      exporterSecret = e2eeNoiseExporterSecret(this.#ck);
+      this.erase();
+      return { epochSecretC2N: first, epochSecretN2C: second, exporterSecret };
+    } catch (error) {
+      eraseBytes(first, second, exporterSecret);
+      throw error;
+    }
   }
 
   /** §9.5 erasure of the chaining key, the handshake hash, and the cipher state. */
   erase(): void {
-    clean(this.#ck, this.#h);
+    eraseBytes(this.#ck, this.#h);
     this.#cipher.erase();
   }
 }
@@ -510,6 +571,22 @@ export class E2eeNoiseHandshake {
    * re)`: derive the protocol name from the pattern, initialize the symmetric
    * state, mix the prologue, then mix the pre-message public keys in Noise §7
    * order — for IK that is the responder's static, hashed by both parties.
+   *
+   * ACQUIRE LAST (§9.5; the ownership rule is stated in `relayE2eeSession.ts`).
+   * Everything that can fail runs BEFORE the first byte of key material is
+   * acquired: the option shape, the §8.1 role matrix, both key lengths, the
+   * remote static's copy, the symmetric state, the §8.4 prologue mix, the
+   * public-key derivation, and the IK pre-message mix. The acquisitions are the
+   * last statements in the body, and the only one of them that can fail — the
+   * copy — leaves nothing behind when it does.
+   *
+   * A CONSTRUCTOR THAT FAILS THEREFORE OWNS NOTHING: it has not copied the
+   * caller's static secret and it has not adopted `testOnlyEphemeralSecretKey`,
+   * so both buffers are untouched and remain the caller's to reuse or erase.
+   * There is no half-built handshake holding key material that no `destroy()`
+   * will ever reach — which is what the erasure funnel that used to sit here
+   * could not promise, because the symmetric state, the prologue, and the
+   * pre-message all ran after it had closed.
    */
   constructor(options: E2eeNoiseHandshakeOptions) {
     const pattern = options.pattern;
@@ -531,30 +608,47 @@ export class E2eeNoiseHandshake {
       noiseFailure("invalid_options");
     }
 
+    // Lengths are CHECKED here and nothing is taken: the caller's two secret
+    // buffers are read no earlier than the pre-message mix that needs one of
+    // them, and copied no earlier than the acquisition at the end.
+    const staticSecretKey = options.staticSecretKey;
+    if (staticSecretKey !== undefined) requireExactBytes(staticSecretKey, DH_LEN);
+    const injectedEphemeralSecretKey = options.testOnlyEphemeralSecretKey;
+    if (injectedEphemeralSecretKey !== undefined) {
+      requireExactBytes(injectedEphemeralSecretKey, DH_LEN);
+    }
+    const remoteStaticPublicKey =
+      options.remoteStaticPublicKey === undefined
+        ? undefined
+        : copyExactBytes(options.remoteStaticPublicKey, DH_LEN);
+
     this.#role = role;
     this.#messages = MESSAGE_PATTERNS[pattern];
-    if (options.staticSecretKey !== undefined) {
-      const secretKey = copyExactBytes(options.staticSecretKey, DH_LEN);
-      this.#s = { secretKey, publicKey: x25519.getPublicKey(secretKey) };
-    }
-    if (options.remoteStaticPublicKey !== undefined) {
-      this.#rs = copyExactBytes(options.remoteStaticPublicKey, DH_LEN);
-    }
-    if (options.testOnlyEphemeralSecretKey !== undefined) {
-      const injected = options.testOnlyEphemeralSecretKey;
-      if (!(injected instanceof Uint8Array) || injected.byteLength !== DH_LEN) {
-        noiseFailure("invalid_key_material");
-      }
-      this.#pendingEphemeralSecretKey = injected;
-    }
-
-    this.#symmetric = new NoiseSymmetricState(e2eeNoiseProtocolName(pattern));
-    this.#symmetric.mixHash(options.prologue);
+    this.#rs = remoteStaticPublicKey;
+    const symmetric = new NoiseSymmetricState(e2eeNoiseProtocolName(pattern));
+    symmetric.mixHash(options.prologue);
+    // Deriving the public key READS the caller's secret and takes nothing: the
+    // output is public, and the copy this object owns is made further down. A
+    // caller that mutates its own buffer between the two gets a key pair that
+    // disagrees with itself and a handshake its peer rejects — never a leaked
+    // copy.
+    const staticPublicKey =
+      staticSecretKey === undefined ? undefined : x25519.getPublicKey(staticSecretKey);
     if (pattern === E2EE_NOISE_PATTERN_IK) {
       // Noise §5.3: one MixHash per pre-message public key. IK's only
-      // pre-message is `<- s`, so both parties hash the responder's static.
-      this.#symmetric.mixHash(role === "initiator" ? this.#rs! : this.#s!.publicKey);
+      // pre-message is `<- s`, so both parties hash the responder's static. The
+      // §8.1 matrix above makes exactly one of the two defined for each role.
+      symmetric.mixHash(role === "initiator" ? remoteStaticPublicKey! : staticPublicKey!);
     }
+    this.#symmetric = symmetric;
+
+    // THE ACQUISITION, and the end of the constructor. The copy is the only
+    // statement below that can fail, and a failure leaves it unmade rather than
+    // unowned; the ephemeral's adoption and the status are plain assignments.
+    if (staticSecretKey !== undefined) {
+      this.#s = { secretKey: Uint8Array.from(staticSecretKey), publicKey: staticPublicKey! };
+    }
+    this.#pendingEphemeralSecretKey = injectedEphemeralSecretKey;
     this.#status = role === "initiator" ? "awaiting_write" : "awaiting_read";
   }
 
@@ -707,12 +801,20 @@ export class E2eeNoiseHandshake {
    */
   split(): E2eeNoiseSessionKeys {
     this.#requireTurn("awaiting_split");
+    // The §6.5 outputs are live from `splitAndExport` and belong to the caller
+    // only once this returns them, so the funnel that spends the object on a
+    // failure erases them too: `destroy()` reaches this object's own key
+    // material and nothing else.
+    let keys: E2eeNoiseSessionKeys | undefined;
     try {
-      const keys = this.#symmetric.splitAndExport();
+      keys = this.#symmetric.splitAndExport();
       this.#eraseSecrets();
       this.#status = "complete";
       return keys;
     } catch (error) {
+      if (keys !== undefined) {
+        eraseBytes(keys.epochSecretC2N, keys.epochSecretN2C, keys.exporterSecret);
+      }
       this.destroy();
       throw error;
     }
@@ -755,8 +857,13 @@ export class E2eeNoiseHandshake {
   #generateEphemeral(): NoiseKeyPair {
     const injected = this.#pendingEphemeralSecretKey;
     if (injected !== undefined) {
+      // The derivation precedes the hand-off: clearing the pending slot first
+      // would put the injected secret beyond the reach of `#eraseSecrets` while
+      // a statement that can still fail runs, and the caller of this method
+      // assigns the pair to `#e` with nothing fallible in between.
+      const publicKey = x25519.getPublicKey(injected);
       this.#pendingEphemeralSecretKey = undefined;
-      return { secretKey: injected, publicKey: x25519.getPublicKey(injected) };
+      return { secretKey: injected, publicKey };
     }
     // §14.5: the CSPRNG is the primitive's, and it fails closed when the runtime
     // has no `crypto.getRandomValues` rather than falling back to anything.
@@ -802,15 +909,19 @@ export class E2eeNoiseHandshake {
     // table edit, not a runtime condition.
     if (local === undefined || remote === undefined) noiseFailure("out_of_sequence");
     const sharedSecret = x25519.getSharedSecret(local.secretKey, remote);
-    this.#symmetric.mixKey(sharedSecret);
-    clean(sharedSecret);
+    try {
+      this.#symmetric.mixKey(sharedSecret);
+    } finally {
+      // §9.5: the DH output is key material and `mixKey` can fail — on the HKDF
+      // itself, or on the cipher key it hands over — so the erasure is a
+      // `finally` rather than a statement the failure path skips.
+      eraseBytes(sharedSecret);
+    }
   }
 
-  /** §6.5, §9.5: zero the private key material this object holds. */
+  /** §6.5, §9.5: zero the private key material this object holds. Total. */
   #eraseSecrets(): void {
-    if (this.#e !== undefined) clean(this.#e.secretKey);
-    if (this.#s !== undefined) clean(this.#s.secretKey);
-    if (this.#pendingEphemeralSecretKey !== undefined) clean(this.#pendingEphemeralSecretKey);
+    eraseBytes(this.#e?.secretKey, this.#s?.secretKey, this.#pendingEphemeralSecretKey);
     this.#e = undefined;
     this.#s = undefined;
     this.#pendingEphemeralSecretKey = undefined;
