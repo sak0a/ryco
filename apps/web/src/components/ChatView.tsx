@@ -417,6 +417,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const alwaysUseBuildMode = useUiStateStore((store) => store.alwaysUseBuildMode);
   const activeThreadLastVisitedAt = useUiStateStore((store) =>
     routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
   );
@@ -611,8 +612,9 @@ export default function ChatView(props: ChatViewProps) {
   const deferredActiveThreadId = useDeferredValue(activeThreadIdRaw);
   const isActiveThreadIdFresh = deferredActiveThreadId === activeThreadIdRaw;
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
-  const interactionMode =
-    composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  const interactionMode = alwaysUseBuildMode
+    ? DEFAULT_INTERACTION_MODE
+    : (composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE);
   const tokenMode =
     composerTokenMode ??
     activeThread?.tokenMode ??
@@ -1887,6 +1889,7 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
+    if (alwaysUseBuildMode) return;
     const askModeSupported = getProviderSupportsAskMode(providerStatuses, selectedProvider);
     const nextMode: ProviderInteractionMode =
       interactionMode === "default"
@@ -1895,7 +1898,13 @@ export default function ChatView(props: ChatViewProps) {
           ? "ask"
           : "default";
     handleInteractionModeChange(nextMode);
-  }, [handleInteractionModeChange, interactionMode, providerStatuses, selectedProvider]);
+  }, [
+    alwaysUseBuildMode,
+    handleInteractionModeChange,
+    interactionMode,
+    providerStatuses,
+    selectedProvider,
+  ]);
   const setOverviewSidebarOpen = useCallback(
     (open: boolean) => {
       setPlanSidebarOpen(open);

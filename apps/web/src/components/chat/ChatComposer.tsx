@@ -115,6 +115,7 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { hydrateImagesFromPersistedWithFailures } from "../../composerDraftPersistence";
 import { usePromptStashStore } from "../../promptStashStore";
+import { useUiStateStore } from "../../uiStateStore";
 import { resolveShortcutCommand, shouldIgnoreGlobalNavigationShortcut } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -649,15 +650,15 @@ export const ChatComposer = memo(
 
     const selectedPromptEffort = composerProviderState.promptEffort;
     const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
+    const alwaysUseBuildMode = useUiStateStore((state) => state.alwaysUseBuildMode);
     const composerProviderControls = useMemo(
       () => ({
-        showInteractionModeToggle: getProviderInteractionModeToggle(
-          providerStatuses,
-          selectedProvider,
-        ),
+        showInteractionModeToggle:
+          !alwaysUseBuildMode &&
+          getProviderInteractionModeToggle(providerStatuses, selectedProvider),
         askModeSupported: getProviderSupportsAskMode(providerStatuses, selectedProvider),
       }),
-      [providerStatuses, selectedProvider],
+      [alwaysUseBuildMode, providerStatuses, selectedProvider],
     );
     const selectedModelSelection = useMemo<ModelSelection>(
       () =>

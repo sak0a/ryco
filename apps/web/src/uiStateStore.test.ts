@@ -19,6 +19,7 @@ import {
   renameProjectFolder,
   reorderProjects,
   reorderProjectTreeItem,
+  setAlwaysUseBuildMode,
   setDefaultAdvertisedEndpointKey,
   setProjectFolderExpanded,
   setProjectExpanded,
@@ -53,6 +54,7 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     reasoningIndicatorStyle: "icon-dots",
     tokenModeControlStyle: "icon-text",
     wideComposerControlsAutoCollapse: true,
+    alwaysUseBuildMode: false,
     ...overrides,
   };
 }
@@ -1165,5 +1167,28 @@ describe("uiStateStore — reasoningIndicatorStyle", () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!) as PersistedUiState;
     expect(parsed.wideComposerControlsAutoCollapse).toBe(false);
+  });
+
+  it("defaults always use Build mode to disabled", () => {
+    expect(makeUiState().alwaysUseBuildMode).toBe(false);
+  });
+
+  it("setAlwaysUseBuildMode returns a new state with the chosen value", () => {
+    const next = setAlwaysUseBuildMode(makeUiState(), true);
+    expect(next.alwaysUseBuildMode).toBe(true);
+  });
+
+  it("setAlwaysUseBuildMode is a no-op when value is unchanged", () => {
+    const state = makeUiState({ alwaysUseBuildMode: true });
+    expect(setAlwaysUseBuildMode(state, true)).toBe(state);
+  });
+
+  it("persists always use Build mode and reads it back", () => {
+    const state = setAlwaysUseBuildMode(makeUiState(), true);
+    persistState(state);
+    const raw = localStorageStub.getItem(PERSISTED_STATE_KEY);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!) as PersistedUiState;
+    expect(parsed.alwaysUseBuildMode).toBe(true);
   });
 });

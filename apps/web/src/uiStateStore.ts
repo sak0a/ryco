@@ -23,6 +23,7 @@ export type TokenModeControlStyle = "icon-text" | "icon" | "text";
 const DEFAULT_REASONING_INDICATOR_STYLE: ReasoningIndicatorStyle = "icon-dots";
 const DEFAULT_TOKEN_MODE_CONTROL_STYLE: TokenModeControlStyle = "icon-text";
 const DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE = true;
+const DEFAULT_ALWAYS_USE_BUILD_MODE = false;
 
 function sanitizeReasoningIndicatorStyle(value: unknown): ReasoningIndicatorStyle {
   return value === "text" || value === "dots" || value === "icon-dots"
@@ -40,6 +41,10 @@ function sanitizeWideComposerControlsAutoCollapse(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE;
 }
 
+function sanitizeAlwaysUseBuildMode(value: unknown): boolean {
+  return typeof value === "boolean" ? value : DEFAULT_ALWAYS_USE_BUILD_MODE;
+}
+
 export interface PersistedUiState {
   collapsedProjectCwds?: string[];
   expandedProjectCwds?: string[];
@@ -53,6 +58,7 @@ export interface PersistedUiState {
   reasoningIndicatorStyle?: ReasoningIndicatorStyle;
   tokenModeControlStyle?: TokenModeControlStyle;
   wideComposerControlsAutoCollapse?: boolean;
+  alwaysUseBuildMode?: boolean;
 }
 
 export type UiProjectFolderId = string;
@@ -110,6 +116,7 @@ export interface UiState extends UiProjectState, UiThreadState, UiEndpointState 
   reasoningIndicatorStyle: ReasoningIndicatorStyle;
   tokenModeControlStyle: TokenModeControlStyle;
   wideComposerControlsAutoCollapse: boolean;
+  alwaysUseBuildMode: boolean;
 }
 
 export interface SyncProjectInput {
@@ -141,6 +148,7 @@ const initialState: UiState = {
   reasoningIndicatorStyle: DEFAULT_REASONING_INDICATOR_STYLE,
   tokenModeControlStyle: DEFAULT_TOKEN_MODE_CONTROL_STYLE,
   wideComposerControlsAutoCollapse: DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE,
+  alwaysUseBuildMode: DEFAULT_ALWAYS_USE_BUILD_MODE,
 };
 
 const persistedCollapsedProjectCwds = new Set<string>();
@@ -459,6 +467,7 @@ function readPersistedState(): UiState {
       wideComposerControlsAutoCollapse: sanitizeWideComposerControlsAutoCollapse(
         parsed.wideComposerControlsAutoCollapse,
       ),
+      alwaysUseBuildMode: sanitizeAlwaysUseBuildMode(parsed.alwaysUseBuildMode),
     };
   } catch {
     return initialState;
@@ -582,6 +591,7 @@ export function persistState(state: UiState): void {
         reasoningIndicatorStyle: state.reasoningIndicatorStyle,
         tokenModeControlStyle: state.tokenModeControlStyle,
         wideComposerControlsAutoCollapse: state.wideComposerControlsAutoCollapse,
+        alwaysUseBuildMode: state.alwaysUseBuildMode,
       } satisfies PersistedUiState),
     );
     if (!legacyKeysCleanedUp) {
@@ -1193,6 +1203,16 @@ export function setWideComposerControlsAutoCollapse(state: UiState, enabled: boo
   };
 }
 
+export function setAlwaysUseBuildMode(state: UiState, enabled: boolean): UiState {
+  if (state.alwaysUseBuildMode === enabled) {
+    return state;
+  }
+  return {
+    ...state,
+    alwaysUseBuildMode: enabled,
+  };
+}
+
 export function toggleProject(state: UiState, projectId: string): UiState {
   const expanded = state.projectExpandedById[projectId] ?? true;
   return {
@@ -1529,6 +1549,7 @@ interface UiStateStore extends UiState {
   setReasoningIndicatorStyle: (style: ReasoningIndicatorStyle) => void;
   setTokenModeControlStyle: (style: TokenModeControlStyle) => void;
   setWideComposerControlsAutoCollapse: (enabled: boolean) => void;
+  setAlwaysUseBuildMode: (enabled: boolean) => void;
   toggleProject: (projectId: string) => void;
   setProjectExpanded: (projectId: string, expanded: boolean) => void;
   createProjectFolder: (name: string, initialProjectKeys?: readonly string[]) => void;
@@ -1582,6 +1603,7 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   setTokenModeControlStyle: (style) => set((state) => setTokenModeControlStyle(state, style)),
   setWideComposerControlsAutoCollapse: (enabled) =>
     set((state) => setWideComposerControlsAutoCollapse(state, enabled)),
+  setAlwaysUseBuildMode: (enabled) => set((state) => setAlwaysUseBuildMode(state, enabled)),
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),
