@@ -115,6 +115,7 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { hydrateImagesFromPersistedWithFailures } from "../../composerDraftPersistence";
 import { usePromptStashStore } from "../../promptStashStore";
+import { useUiStateStore } from "../../uiStateStore";
 import { resolveShortcutCommand, shouldIgnoreGlobalNavigationShortcut } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -649,15 +650,17 @@ export const ChatComposer = memo(
 
     const selectedPromptEffort = composerProviderState.promptEffort;
     const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
+    const alwaysUseBuildMode = useUiStateStore((state) => state.alwaysUseBuildMode);
+    // The web phone tier is frozen (see AGENTS.md): the Build-mode lock only
+    // applies to non-phone presentation tiers.
+    const enforceBuildMode = alwaysUseBuildMode && usePresentationTier() !== "phone";
     const composerProviderControls = useMemo(
       () => ({
-        showInteractionModeToggle: getProviderInteractionModeToggle(
-          providerStatuses,
-          selectedProvider,
-        ),
+        showInteractionModeToggle:
+          !enforceBuildMode && getProviderInteractionModeToggle(providerStatuses, selectedProvider),
         askModeSupported: getProviderSupportsAskMode(providerStatuses, selectedProvider),
       }),
-      [providerStatuses, selectedProvider],
+      [enforceBuildMode, providerStatuses, selectedProvider],
     );
     const selectedModelSelection = useMemo<ModelSelection>(
       () =>

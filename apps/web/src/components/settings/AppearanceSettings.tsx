@@ -185,6 +185,8 @@ export function AppearanceSettingsPanel() {
   const setWideComposerControlsAutoCollapse = useUiStateStore(
     (state) => state.setWideComposerControlsAutoCollapse,
   );
+  const alwaysUseBuildMode = useUiStateStore((state) => state.alwaysUseBuildMode);
+  const setAlwaysUseBuildMode = useUiStateStore((state) => state.setAlwaysUseBuildMode);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ThemeDefinition | null>(null);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
@@ -819,6 +821,25 @@ export function AppearanceSettingsPanel() {
               checked={wideComposerControlsAutoCollapse}
               onCheckedChange={(checked) => setWideComposerControlsAutoCollapse(Boolean(checked))}
               aria-label="Auto-collapse wide composer labels"
+            />
+          }
+        />
+        <SettingsRow
+          title="Always use Build mode"
+          description="Hide the mode selector in the composer and send every turn in Build mode."
+          resetAction={
+            alwaysUseBuildMode ? (
+              <SettingResetButton
+                label="always use Build mode"
+                onClick={() => setAlwaysUseBuildMode(false)}
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={alwaysUseBuildMode}
+              onCheckedChange={(checked) => setAlwaysUseBuildMode(Boolean(checked))}
+              aria-label="Always use Build mode"
             />
           }
         />
