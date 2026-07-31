@@ -191,6 +191,10 @@
     "./deviceHelperCache": {
       "types": "./src/deviceHelperCache.ts",
       "import": "./src/deviceHelperCache.ts"
+    },
+    "./threadSettlement": {
+      "types": "./src/threadSettlement.ts",
+      "import": "./src/threadSettlement.ts"
     }
   },
   "scripts": {
