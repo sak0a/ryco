@@ -452,6 +452,7 @@ function createBrowserComposerImage(input: {
   name?: string;
   bytes?: Uint8Array;
   arrayBuffer?: () => Promise<ArrayBuffer>;
+  previewUrl?: string;
 }): ComposerImageAttachment {
   const bytes = input.bytes ?? new Uint8Array([1, 2, 3]);
   const name = input.name ?? `${input.id}.png`;
@@ -470,7 +471,7 @@ function createBrowserComposerImage(input: {
     name,
     mimeType: "image/png",
     sizeBytes: file.size,
-    previewUrl: `data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`,
+    previewUrl: input.previewUrl ?? `data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`,
     file,
   };
 }
@@ -1868,7 +1869,10 @@ function dispatchChatNewLocalShortcut(): void {
   );
 }
 
-function dispatchComposerStashShortcut(overrides: Partial<KeyboardEventInit> = {}): KeyboardEvent {
+function dispatchComposerStashShortcut(
+  overrides: Partial<KeyboardEventInit> = {},
+  target: EventTarget = document.activeElement ?? window,
+): KeyboardEvent {
   const useMetaForMod = isMacPlatform(navigator.platform);
   const event = new KeyboardEvent("keydown", {
     key: "s",
@@ -1878,7 +1882,7 @@ function dispatchComposerStashShortcut(overrides: Partial<KeyboardEventInit> = {
     cancelable: true,
     ...overrides,
   });
-  window.dispatchEvent(event);
+  target.dispatchEvent(event);
   return event;
 }
 
@@ -2406,7 +2410,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForComposerStashBinding("s");
-      const saveEvent = dispatchComposerStashShortcut();
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      const saveEvent = dispatchComposerStashShortcut({}, composerEditor);
       expect(saveEvent.defaultPrevented).toBe(true);
 
       let stashedId = "";
@@ -2446,6 +2452,17 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => document.querySelector('[data-prompt-stash-picker="true"]'),
         "Empty stash shortcut should reopen the picker.",
       );
+      const outsidePickerButton = document.createElement("button");
+      document.body.append(outsidePickerButton);
+      outsidePickerButton.focus();
+      const outsidePickerArrow = new KeyboardEvent("keydown", {
+        key: "ArrowDown",
+        bubbles: true,
+        cancelable: true,
+      });
+      outsidePickerButton.dispatchEvent(outsidePickerArrow);
+      expect(outsidePickerArrow.defaultPrevented).toBe(false);
+      outsidePickerButton.remove();
 
       const switchedSelection = createModelSelection(
         ProviderInstanceId.make("claudeAgent"),
@@ -2546,6 +2563,40 @@ describe("ChatView timeline estimator parity (full app)", () => {
         );
       });
 
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-prompt-stash-picker="true"]')).toBeNull();
+      });
+
+      const entriesBeforeIgnoredShortcuts = usePromptStashStore.getState().entries;
+      const alreadyHandledShortcut = new KeyboardEvent("keydown", {
+        key: "s",
+        metaKey: isMacPlatform(navigator.platform),
+        ctrlKey: !isMacPlatform(navigator.platform),
+        bubbles: true,
+        cancelable: true,
+      });
+      alreadyHandledShortcut.preventDefault();
+      window.dispatchEvent(alreadyHandledShortcut);
+      expect(usePromptStashStore.getState().entries).toBe(entriesBeforeIgnoredShortcuts);
+
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      const dialogInput = document.createElement("input");
+      dialog.append(dialogInput);
+      document.body.append(dialog);
+      dialogInput.focus();
+      const ignoredInDialog = dispatchComposerStashShortcut({}, dialogInput);
+      expect(ignoredInDialog.defaultPrevented).toBe(false);
+      expect(usePromptStashStore.getState().entries).toBe(entriesBeforeIgnoredShortcuts);
+      dialog.remove();
+
       const terminalInput = document.createElement("textarea");
       terminalInput.className = "xterm-helper-textarea";
       document.body.append(terminalInput);
@@ -2553,6 +2604,56 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const unresolvedInTerminal = dispatchComposerStashShortcut();
       expect(unresolvedInTerminal.defaultPrevented).toBe(false);
       terminalInput.remove();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("separates restored text from retained terminal placeholders", async () => {
+    const draftStore = useComposerDraftStore.getState();
+    draftStore.setPrompt(THREAD_REF, "Separated stash text");
+    draftStore.addTerminalContext(
+      THREAD_REF,
+      createTerminalContext({
+        id: "stash-separator-terminal",
+        terminalLabel: "Terminal 1",
+        lineStart: 3,
+        lineEnd: 4,
+        text: "git status",
+      }),
+    );
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-stash-separator" as MessageId,
+        targetText: "stash separator target",
+      }),
+      configureFixture: enableComposerStashShortcut,
+    });
+
+    try {
+      await waitForComposerStashBinding("s");
+      const composerEditor = await waitForComposerEditor();
+      composerEditor.focus();
+      dispatchComposerStashShortcut();
+      await vi.waitFor(() => {
+        expect(usePromptStashStore.getState().entries).toHaveLength(1);
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
+          INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
+        );
+      });
+
+      dispatchComposerStashShortcut();
+      const row = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-prompt-stash-row]"),
+        "Unable to find the terminal-separator stash row.",
+      );
+      row.click();
+      await vi.waitFor(() => {
+        expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
+          `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}\n\nSeparated stash text`,
+        );
+      });
     } finally {
       await mounted.cleanup();
     }
@@ -2621,6 +2722,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       id: "delayed-image",
       name: "delayed.png",
       arrayBuffer: () => delayedImageBytes,
+      previewUrl: "blob:delayed-image",
     });
     const draftStore = useComposerDraftStore.getState();
     draftStore.setPrompt(THREAD_REF, "Image prompt");
@@ -2634,6 +2736,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       }),
       configureFixture: enableComposerStashShortcut,
     });
+    const originalRevokeObjectUrl = URL.revokeObjectURL;
+    const revokeObjectUrl = vi.fn();
+    URL.revokeObjectURL = revokeObjectUrl;
 
     try {
       await waitForComposerStashBinding("s");
@@ -2652,6 +2757,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)?.prompt).toBe(
           "Typed while saving",
         );
+        expect(revokeObjectUrl).toHaveBeenCalledWith("blob:delayed-image");
       });
 
       const finalizedImageBadge = await waitForElement(
@@ -2733,6 +2839,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
     } finally {
       await mounted.cleanup();
+      URL.revokeObjectURL = originalRevokeObjectUrl;
     }
   });
 

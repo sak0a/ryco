@@ -115,7 +115,7 @@ import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { hydrateImagesFromPersistedWithFailures } from "../../composerDraftPersistence";
 import { usePromptStashStore } from "../../promptStashStore";
-import { resolveShortcutCommand } from "../../keybindings";
+import { resolveShortcutCommand, shouldIgnoreGlobalNavigationShortcut } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { ComposerStashBadge } from "./ComposerStashBadge";
@@ -163,9 +163,7 @@ function isInsideComposerFloatingLayer(element: Element): boolean {
 
 function mergeStashedPrompt(currentPrompt: string, stashedPrompt: string): string {
   if (stashedPrompt.trim().length === 0) return currentPrompt;
-  if (stripInlineTerminalContextPlaceholders(currentPrompt).trim().length === 0) {
-    return `${currentPrompt}${stashedPrompt}`;
-  }
+  if (currentPrompt.length === 0) return stashedPrompt;
   return `${currentPrompt}\n\n${stashedPrompt}`;
 }
 
@@ -183,6 +181,22 @@ function stashSnapshotKey(
   const targetKey =
     typeof target === "string" ? target : `${target.environmentId}:${target.threadId}`;
   return `${targetKey}\u0000${prompt}\u0000${images.map((image) => image.id).join("\u0001")}`;
+}
+
+function revokeUnreferencedStashPreviewUrls(images: ReadonlyArray<ComposerImageAttachment>): void {
+  if (typeof URL === "undefined" || typeof URL.revokeObjectURL !== "function") {
+    return;
+  }
+  const referencedPreviewUrls = new Set(
+    Object.values(useComposerDraftStore.getState().draftsByThreadKey).flatMap((draft) =>
+      draft.images.map((image) => image.previewUrl),
+    ),
+  );
+  for (const image of images) {
+    if (image.previewUrl.startsWith("blob:") && !referencedPreviewUrls.has(image.previewUrl)) {
+      URL.revokeObjectURL(image.previewUrl);
+    }
+  }
 }
 
 // --------------------------------------------------------------------------
@@ -727,6 +741,26 @@ export const ChatComposer = memo(
       >(),
     );
     const stashCommandHandlerRef = useRef<() => void>(() => {});
+
+    const releaseStashSnapshot = useCallback((id: string) => {
+      const snapshot = stashSnapshotsRef.current.get(id);
+      if (!snapshot) return;
+      stashSnapshotsRef.current.delete(id);
+      inFlightStashKeysRef.current.delete(snapshot.key);
+      revokeUnreferencedStashPreviewUrls(snapshot.images);
+    }, []);
+
+    useEffect(
+      () => () => {
+        const snapshots = [...stashSnapshotsRef.current.values()];
+        stashSnapshotsRef.current.clear();
+        inFlightStashKeysRef.current.clear();
+        for (const snapshot of snapshots) {
+          revokeUnreferencedStashPreviewUrls(snapshot.images);
+        }
+      },
+      [],
+    );
 
     // ------------------------------------------------------------------
     // Derived: composer send state
@@ -1627,10 +1661,7 @@ export const ChatComposer = memo(
         }
 
         setIsStashPickerOpen(false);
-        stashSnapshotsRef.current.delete(id);
-        if (memorySnapshot) {
-          inFlightStashKeysRef.current.delete(memorySnapshot.key);
-        }
+        releaseStashSnapshot(id);
         scheduleComposerFocus();
 
         if (!durable) {
@@ -1687,6 +1718,7 @@ export const ChatComposer = memo(
         composerDraftTarget,
         composerImagesRef,
         promptRef,
+        releaseStashSnapshot,
         scheduleComposerFocus,
         setPrompt,
         takeStashEntry,
@@ -1697,11 +1729,7 @@ export const ChatComposer = memo(
       (id: string) => {
         const { entry, durable } = takeStashEntry(id);
         if (!entry) return;
-        const memorySnapshot = stashSnapshotsRef.current.get(id);
-        stashSnapshotsRef.current.delete(id);
-        if (memorySnapshot) {
-          inFlightStashKeysRef.current.delete(memorySnapshot.key);
-        }
+        releaseStashSnapshot(id);
         if (!durable) {
           toastManager.add({
             type: "warning",
@@ -1711,7 +1739,7 @@ export const ChatComposer = memo(
           });
         }
       },
-      [takeStashEntry],
+      [releaseStashSnapshot, takeStashEntry],
     );
 
     const stashCurrentPrompt = useCallback(() => {
@@ -1762,11 +1790,7 @@ export const ChatComposer = memo(
 
       stashSnapshotsRef.current.set(entryId, { key: snapshotKey, images });
       if (write.evicted) {
-        const evictedSnapshot = stashSnapshotsRef.current.get(write.evicted.id);
-        if (evictedSnapshot) {
-          inFlightStashKeysRef.current.delete(evictedSnapshot.key);
-          stashSnapshotsRef.current.delete(write.evicted.id);
-        }
+        releaseStashSnapshot(write.evicted.id);
       }
 
       clearComposerDraftPromptAndImages(composerDraftTarget);
@@ -1885,7 +1909,7 @@ export const ChatComposer = memo(
           });
         }
       })().finally(() => {
-        inFlightStashKeysRef.current.delete(snapshotKey);
+        releaseStashSnapshot(entryId);
       });
     }, [
       clearComposerDraftPromptAndImages,
@@ -1897,6 +1921,7 @@ export const ChatComposer = memo(
       isMobileViewport,
       pendingUserInputs.length,
       promptRef,
+      releaseStashSnapshot,
       restoreStashEntry,
       stashEntry,
     ]);
@@ -1905,6 +1930,21 @@ export const ChatComposer = memo(
 
     useLayoutEffect(() => {
       const handler = (event: globalThis.KeyboardEvent) => {
+        if (event.defaultPrevented || event.isComposing) {
+          return;
+        }
+        const isComposerTarget =
+          composerFormRef.current !== null &&
+          event.composedPath().includes(composerFormRef.current);
+        const isDocumentRootTarget =
+          event.target === window || event.target === document || event.target === document.body;
+        if (
+          !isComposerTarget &&
+          !isDocumentRootTarget &&
+          shouldIgnoreGlobalNavigationShortcut(event)
+        ) {
+          return;
+        }
         const command = resolveShortcutCommand(event, keybindings, {
           context: {
             terminalFocus: isTerminalFocused(),

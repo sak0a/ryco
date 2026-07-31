@@ -76,6 +76,9 @@ export const ComposerStashPicker = memo(function ComposerStashPicker(props: {
         onClose();
         return;
       }
+      if (!pickerRef.current?.contains(document.activeElement)) {
+        return;
+      }
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         if (entries.length === 0) return;
         event.preventDefault();
@@ -113,7 +116,7 @@ export const ComposerStashPicker = memo(function ComposerStashPicker(props: {
   return (
     <div
       ref={pickerRef}
-      role="dialog"
+      role="region"
       aria-label="Stashed prompts"
       tabIndex={-1}
       data-prompt-stash-picker="true"
