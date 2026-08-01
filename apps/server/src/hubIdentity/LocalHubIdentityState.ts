@@ -1,9 +1,8 @@
-import { randomBytes, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname } from "node:path";
+import { randomBytes } from "node:crypto";
 
 import { canonicalizeHubOrigin, normalizeHubNodeName } from "@ryco/shared/nodeIdentity";
+
+import { openProtectedStateFile, type ProtectedStateFileFailure } from "./ProtectedStateFile.ts";
 
 export interface PendingHubEnrollmentState {
   readonly hubOrigin: string;
@@ -44,11 +43,32 @@ export interface ActiveHubNodeState {
   readonly enrolledAt: number;
 }
 
+/**
+ * What an identity rotation does to the §7.5 continuity chain.
+ *
+ * §7.5 forbids the node from deciding this for itself: a rotation motivated by
+ * compromise of the outgoing key MUST break the chain, because a continuity
+ * certificate signed by a key an adversary also holds proves nothing, and the
+ * operator is the only party that knows which case this is. The choice is made
+ * when the rotation is staged and must survive to the promotion that consumes
+ * it, which is why it is persisted here rather than passed along in memory.
+ */
+export type NodeRotationContinuityMode = "continue" | "break";
+
 export interface StagedHubRotationState {
   readonly hubOrigin: string;
   readonly rotationRequestId: string;
   readonly newKeyId: string;
   readonly newKeySecretName: string;
+  /**
+   * Absent on records written before this field existed, and read as `"break"`.
+   *
+   * Fail-closed by construction: §7.5 says a node that cannot determine the
+   * rotation's continuity disposition MUST NOT synthesize a link, and a
+   * deliberate break costs a re-verification while a fabricated certificate
+   * costs the guarantee.
+   */
+  readonly continuityMode: NodeRotationContinuityMode;
   readonly stagedAt: number;
   readonly activatedAt: number | null;
 }
@@ -86,6 +106,14 @@ export interface LocalHubIdentityState {
   readonly activeNode: ActiveHubNodeState | null;
   readonly stagedRotation: StagedHubRotationState | null;
   readonly pendingTeardown: PendingHubTeardownState | null;
+  // The identity-key destroy queue is deliberately NOT here. `parseState` below
+  // reconstructs this record from its known keys alone, so a binary older than
+  // any field deletes it on the next write — and the one thing a rotation
+  // promotion cannot afford to lose is the name of the outgoing private key,
+  // because the protected store has no listing and a forgotten name is a key
+  // nothing can ever collect. It lives in `NodeIdentityKeyRetirementStore`, a
+  // record of its own whose parser preserves unknown top-level keys, for the
+  // same reason the §7.5 lineage and the §6.4 prekey slots do.
 }
 
 export type LocalHubIdentityStateErrorCode =
@@ -109,7 +137,19 @@ export interface LocalHubIdentityStateStore {
   readonly update: (
     change: (current: LocalHubIdentityState) => LocalHubIdentityState,
   ) => Promise<LocalHubIdentityState>;
-  /** Discard the identity entirely and mint a fresh `EnvironmentId`. */
+  /**
+   * Discard the identity entirely and mint a fresh `EnvironmentId`.
+   *
+   * Scoped to this record on purpose. The §7.5 identity-continuity lineage lives
+   * in its own durable record precisely so that erasing a Hub identity does not
+   * erase the node's lineage anchor as a side effect; a leave breaks the chain,
+   * and it does so explicitly rather than by deleting the state that proves the
+   * break happened (`NodeIdentityContinuityStore`).
+   *
+   * For the same reason it does not clear the destroy queue: that record names
+   * private keys this reset would otherwise make unreachable, so a leave erases
+   * them first and resets it explicitly (`NodeIdentityKeyRetirementStore`).
+   */
   readonly reset: () => Promise<LocalHubIdentityState>;
 }
 
@@ -239,6 +279,16 @@ function parseActive(value: unknown): ActiveHubNodeState | null {
   };
 }
 
+function parseContinuityMode(value: unknown): NodeRotationContinuityMode {
+  // Absent reads as `"break"` — the fail-closed disposition of §7.5 — while a
+  // value that is present and unrecognized is corruption: something wrote a
+  // disposition this binary cannot honour, and guessing which way it meant is
+  // precisely the synthesis §7.5 forbids.
+  if (value === undefined || value === null) return "break";
+  if (value === "continue" || value === "break") return value;
+  return stateError("identity_state_corrupt");
+}
+
 function parseRotation(value: unknown): StagedHubRotationState | null {
   if (value === null) return null;
   if (typeof value !== "object" || value === null) return stateError("identity_state_corrupt");
@@ -265,6 +315,7 @@ function parseRotation(value: unknown): StagedHubRotationState | null {
     rotationRequestId: candidate.rotationRequestId,
     newKeyId: candidate.newKeyId,
     newKeySecretName: candidate.newKeySecretName,
+    continuityMode: parseContinuityMode(candidate.continuityMode),
     stagedAt: candidate.stagedAt,
     activatedAt: candidate.activatedAt,
   };
@@ -315,6 +366,27 @@ function parseState(value: unknown): LocalHubIdentityState {
   return state;
 }
 
+/**
+ * Every identity secret this record currently calls in service.
+ *
+ * The destroy queue lives in a record of its own and cannot be compared against
+ * this one by a parser, so the comparison happens where the destruction does:
+ * a queued name that appears here belongs to a promotion that has not committed
+ * yet, and destroying it would erase the key the node authenticates with
+ * (`NodeIdentityKeyRetirementStore`).
+ */
+export function identitySecretsInService(state: LocalHubIdentityState): ReadonlySet<string> {
+  return new Set(
+    [
+      state.activeNode?.activeKeySecretName,
+      state.activeNode?.cleanupPollingSecretName,
+      state.stagedRotation?.newKeySecretName,
+      state.pendingEnrollment?.keySecretName,
+      state.pendingEnrollment?.pollingSecretName,
+    ].filter((name): name is string => typeof name === "string"),
+  );
+}
+
 function makeInitialState(): LocalHubIdentityState {
   return {
     version: 1,
@@ -328,177 +400,46 @@ function makeInitialState(): LocalHubIdentityState {
   };
 }
 
-async function readState(path: string): Promise<LocalHubIdentityState | null> {
-  try {
-    const stat = await lstat(path);
-    if (
-      !stat.isFile() ||
-      stat.isSymbolicLink() ||
-      stat.nlink !== 1 ||
-      stat.size > MAX_STATE_BYTES
-    ) {
-      return stateError("identity_state_corrupt");
-    }
-    if (process.platform !== "win32" && (stat.mode & 0o777) !== 0o600) {
-      return stateError("identity_state_corrupt");
-    }
-    const bytes = await readFile(path);
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_STATE_BYTES) {
-      return stateError("identity_state_corrupt");
-    }
-    return parseState(JSON.parse(bytes.toString("utf8")) as unknown);
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    if (error instanceof LocalHubIdentityStateError) throw error;
-    return stateError("identity_state_corrupt");
-  }
-}
-
-async function writeState(path: string, state: LocalHubIdentityState): Promise<void> {
-  const validated = parseState(state);
-  const encoded = Buffer.from(`${JSON.stringify(validated)}\n`, "utf8");
-  if (encoded.byteLength > MAX_STATE_BYTES) return stateError("identity_state_operation_failed");
-  const temporaryPath = `${path}.${randomUUID()}.tmp`;
-  let file;
-  try {
-    file = await open(
-      temporaryPath,
-      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-      0o600,
-    );
-    await file.writeFile(encoded);
-    await file.sync();
-    await file.close();
-    file = undefined;
-    await rename(temporaryPath, path);
-    if (process.platform !== "win32") await chmod(path, 0o600);
-    const directory = await open(dirname(path), constants.O_RDONLY);
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } catch (error: unknown) {
-    await file?.close().catch(() => undefined);
-    await rm(temporaryPath, { force: true }).catch(() => undefined);
-    if (error instanceof LocalHubIdentityStateError) throw error;
-    return stateError("identity_state_operation_failed");
-  }
-}
-
-async function assertStateDirectory(path: string, requireSecureMode: boolean): Promise<void> {
-  try {
-    const stat = await lstat(path);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      return stateError("identity_state_unavailable");
-    }
-    if (process.platform !== "win32") {
-      const uid = process.getuid?.();
-      if (
-        uid === undefined ||
-        stat.uid !== uid ||
-        (requireSecureMode && (stat.mode & 0o777) !== 0o700)
-      ) {
-        return stateError("identity_state_unavailable");
-      }
-    }
-  } catch (error: unknown) {
-    if (error instanceof LocalHubIdentityStateError) throw error;
-    return stateError("identity_state_unavailable");
-  }
-}
+const FAILURE_CODES: Readonly<Record<ProtectedStateFileFailure, LocalHubIdentityStateErrorCode>> = {
+  unavailable: "identity_state_unavailable",
+  locked: "identity_state_locked",
+  corrupt: "identity_state_corrupt",
+  operation_failed: "identity_state_operation_failed",
+};
 
 export async function makeLocalHubIdentityStateStore(
   statePath: string,
 ): Promise<LocalHubIdentityStateStore> {
-  const directory = dirname(statePath);
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  await assertStateDirectory(directory, false);
-  if (process.platform !== "win32") await chmod(directory, 0o700);
-  await assertStateDirectory(directory, true);
-  const lockPath = `${statePath}.lock`;
+  const file = await openProtectedStateFile({
+    path: statePath,
+    maxBytes: MAX_STATE_BYTES,
+    fail: (failure) => stateError(FAILURE_CODES[failure]),
+  });
 
-  const reclaimAbandonedLock = async (): Promise<boolean> => {
-    let initial;
-    try {
-      initial = await lstat(lockPath);
-      if (
-        !initial.isFile() ||
-        initial.isSymbolicLink() ||
-        initial.nlink !== 1 ||
-        initial.size < 2 ||
-        initial.size > 32 ||
-        (process.platform !== "win32" && (initial.mode & 0o777) !== 0o600)
-      ) {
-        return false;
-      }
-      const rawPid = (await readFile(lockPath, "utf8")).trim();
-      if (!/^[1-9][0-9]{0,19}$/.test(rawPid)) return false;
-      const pid = Number(rawPid);
-      if (!Number.isSafeInteger(pid)) return false;
-      try {
-        process.kill(pid, 0);
-        return false;
-      } catch (error: unknown) {
-        const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "ESRCH") return false;
-      }
-      const current = await lstat(lockPath);
-      if (current.dev !== initial.dev || current.ino !== initial.ino) return false;
-      await rm(lockPath);
-      return true;
-    } catch (error: unknown) {
-      return (error as NodeJS.ErrnoException).code === "ENOENT";
-    }
+  const readState = async (): Promise<LocalHubIdentityState | null> => {
+    const raw = await file.readJson();
+    return raw === null ? null : parseState(raw);
   };
 
-  const withLock = async <T>(operation: () => Promise<T>): Promise<T> => {
-    let lock;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        lock = await open(
-          lockPath,
-          constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
-          0o600,
-        );
-        break;
-      } catch (error: unknown) {
-        if (
-          (error as NodeJS.ErrnoException).code !== "EEXIST" ||
-          attempt !== 0 ||
-          !(await reclaimAbandonedLock())
-        ) {
-          return stateError(
-            (error as NodeJS.ErrnoException).code === "EEXIST"
-              ? "identity_state_locked"
-              : "identity_state_unavailable",
-          );
-        }
-      }
-    }
-    if (lock === undefined) return stateError("identity_state_locked");
-    try {
-      await lock.writeFile(`${process.pid}\n`);
-      await lock.sync();
-      return await operation();
-    } finally {
-      await lock.close().catch(() => undefined);
-      await rm(lockPath, { force: true }).catch(() => undefined);
-    }
-  };
+  // Re-validating on the way out is not redundant: it is what makes a value the
+  // caller mutated into an impossible shape fail before it reaches the disk.
+  const writeState = (state: LocalHubIdentityState): Promise<void> =>
+    file.writeJson(parseState(state));
+
+  const withLock = file.withLock;
 
   const readOrCreate = (): Promise<LocalHubIdentityState> =>
     withLock(async () => {
-      const existing = await readState(statePath);
+      const existing = await readState();
       if (existing !== null) return existing;
       const initial = makeInitialState();
-      await writeState(statePath, initial);
+      await writeState(initial);
       return initial;
     });
 
   const update: LocalHubIdentityStateStore["update"] = (change) =>
     withLock(async () => {
-      const current = await readState(statePath);
+      const current = await readState();
       if (current === null) return stateError("identity_state_operation_failed");
       const proposed = parseState(change(current));
       if (
@@ -507,7 +448,7 @@ export async function makeLocalHubIdentityStateStore(
       ) {
         return stateError("identity_state_operation_failed");
       }
-      await writeState(statePath, proposed);
+      await writeState(proposed);
       return proposed;
     });
 
@@ -523,7 +464,7 @@ export async function makeLocalHubIdentityStateStore(
   const reset: LocalHubIdentityStateStore["reset"] = () =>
     withLock(async () => {
       const fresh = makeInitialState();
-      await writeState(statePath, fresh);
+      await writeState(fresh);
       return fresh;
     });
 

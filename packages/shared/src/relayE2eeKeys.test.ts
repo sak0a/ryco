@@ -1,4 +1,4 @@
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519, x25519 } from "@noble/curves/ed25519";
 import { describe, expect, it } from "vite-plus/test";
 
 import { fingerprintNodePublicKey, formatNodePublicKeyFingerprint } from "./nodeIdentity.ts";
@@ -11,9 +11,11 @@ import {
   E2EE_NODE_IDENTITY_ALGORITHM,
   E2EE_NODE_KEY_FINGERPRINT_DOMAIN,
   RelayE2eeValidationError,
+  deriveE2eeAgreementPublicKey,
   e2eeBytesEqual,
   e2eeKeyFingerprint,
   formatE2eeKeyFingerprint,
+  generateE2eeAgreementKeyPair,
   validateE2eeAgreementPublicKey,
   validateE2eeClientIdentityPublicKey,
   validateE2eeClientSignature,
@@ -322,5 +324,76 @@ describe("relay E2EE signature verification choke point (§14.3)", () => {
     }
     expect(error).toBeInstanceOf(RelayE2eeValidationError);
     expect(String(error)).not.toContain(canary);
+  });
+});
+
+describe("relay E2EE static agreement key generation (§6.2)", () => {
+  it("produces a matching, protocol-valid X25519 pair on every call", () => {
+    const first = generateE2eeAgreementKeyPair();
+    const second = generateE2eeAgreementKeyPair();
+
+    expect(Object.keys(first).toSorted()).toEqual(["publicKey", "secretKey"]);
+    expect(first.secretKey).toHaveLength(32);
+    expect(first.publicKey).toHaveLength(32);
+    // The public half is exactly what §7.1 will accept in a §7.3 certificate.
+    expect(validateE2eeAgreementPublicKey(first.publicKey)).toEqual(first.publicKey);
+    expect(hex(deriveE2eeAgreementPublicKey(first.secretKey))).toBe(hex(first.publicKey));
+
+    // Fresh material per call: §6.2 gives the node ONE active prekey, and a
+    // generator that could repeat itself would make rotation meaningless.
+    expect(hex(second.secretKey)).not.toBe(hex(first.secretKey));
+    expect(hex(second.publicKey)).not.toBe(hex(first.publicKey));
+  });
+
+  it("agrees with the primitive both endpoints of a handshake will use", () => {
+    const node = generateE2eeAgreementKeyPair();
+    const client = generateE2eeAgreementKeyPair();
+    expect(hex(x25519.getSharedSecret(node.secretKey, client.publicKey))).toBe(
+      hex(x25519.getSharedSecret(client.secretKey, node.publicKey)),
+    );
+  });
+
+  it("derives without copying, mutating, or zeroizing the caller's secret", () => {
+    const pair = generateE2eeAgreementKeyPair();
+    const before = hex(pair.secretKey);
+    deriveE2eeAgreementPublicKey(pair.secretKey);
+    // Custody owns the lifetime of the secret (§6.3); this function must not
+    // erase a buffer the caller still needs to hand to its store.
+    expect(hex(pair.secretKey)).toBe(before);
+  });
+
+  it("rejects anything that is not a 32-byte scalar, without reflecting it", () => {
+    const canary = "do-not-reflect-agreement-secret";
+    for (const invalid of [
+      new Uint8Array(0),
+      new Uint8Array(31),
+      new Uint8Array(33),
+      new TextEncoder().encode(canary),
+    ]) {
+      let error: unknown;
+      try {
+        deriveE2eeAgreementPublicKey(invalid);
+      } catch (cause) {
+        error = cause;
+      }
+      expect(error).toBeInstanceOf(RelayE2eeValidationError);
+      expect(String(error)).not.toContain(canary);
+    }
+    expect(() => deriveE2eeAgreementPublicKey(undefined as unknown as Uint8Array)).toThrow(
+      RelayE2eeValidationError,
+    );
+  });
+
+  it("never emits the degenerate material that would make every agreement fail", () => {
+    const zero = hex(new Uint8Array(32));
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const pair = generateE2eeAgreementKeyPair();
+      // §8.1/§14.3 abort the handshake on an all-zero shared secret. A generator
+      // that could emit the zero scalar or the identity point would produce a
+      // key that is durably stored and permanently unusable.
+      expect(hex(pair.secretKey)).not.toBe(zero);
+      expect(hex(pair.publicKey)).not.toBe(zero);
+      expect(hex(e2eeKeyFingerprint("agreement", pair.publicKey))).toHaveLength(64);
+    }
   });
 });

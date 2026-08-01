@@ -56,6 +56,13 @@ const unavailableIdentity = (): HubIdentityRuntimeShape => {
     stageKeyRotation: unavailable,
     resumeKeyRotation: unavailable,
     confirmAuthenticatedKey: unavailable,
+    readE2eePrekeyCertificate: unavailable,
+    rotateE2eePrekey: unavailable,
+    withE2eePrekeySecret: unavailable,
+    readE2eeContinuity: unavailable,
+    breakE2eeContinuity: unavailable,
+    adoptE2eeContinuityId: unavailable,
+    remintE2eeContinuityId: unavailable,
   };
 };
 
@@ -110,6 +117,13 @@ const readOnlyIdentity = (options: {
     stageKeyRotation: unavailable,
     resumeKeyRotation: unavailable,
     confirmAuthenticatedKey: unavailable,
+    readE2eePrekeyCertificate: unavailable,
+    rotateE2eePrekey: unavailable,
+    withE2eePrekeySecret: unavailable,
+    readE2eeContinuity: unavailable,
+    breakE2eeContinuity: unavailable,
+    adoptE2eeContinuityId: unavailable,
+    remintE2eeContinuityId: unavailable,
   };
 };
 

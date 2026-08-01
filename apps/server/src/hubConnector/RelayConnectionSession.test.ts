@@ -89,7 +89,26 @@ function identity(): HubIdentityRuntimeShape {
     },
     stageKeyRotation: async () => ({ status: "awaiting_owner" }),
     resumeKeyRotation: async () => ({ status: "awaiting_owner" }),
-    confirmAuthenticatedKey: async () => undefined,
+    confirmAuthenticatedKey: async () => ({ continuityBreak: null }),
+    readE2eePrekeyCertificate: async () => {
+      throw new Error("unused");
+    },
+    rotateE2eePrekey: async () => {
+      throw new Error("unused");
+    },
+    withE2eePrekeySecret: async () => {
+      throw new Error("unused");
+    },
+    readE2eeContinuity: async () => {
+      throw new Error("unused");
+    },
+    breakE2eeContinuity: async () => undefined,
+    adoptE2eeContinuityId: async () => {
+      throw new Error("unused");
+    },
+    remintE2eeContinuityId: async () => {
+      throw new Error("unused");
+    },
   };
 }
 

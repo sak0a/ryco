@@ -6,7 +6,12 @@ import {
   type NodePublicKeyDescriptor,
 } from "@ryco/shared/nodeIdentity";
 
-import type { LocalHubIdentityStateStore } from "./LocalHubIdentityState.ts";
+import {
+  identitySecretsInService,
+  type LocalHubIdentityStateStore,
+  type NodeRotationContinuityMode,
+} from "./LocalHubIdentityState.ts";
+import type { NodeIdentityKeyRetirementStore } from "./NodeIdentityKeyRetirementStore.ts";
 import type { NodeSigningIdentity } from "./NodeSigningIdentity.ts";
 
 export interface HubKeyRotationChallenge {
@@ -61,20 +66,92 @@ export class HubKeyRotationClientError extends Error {
   }
 }
 
+/**
+ * What the promotion step must do to the §7.5 continuity chain.
+ *
+ * The rotation client holds the one moment at which a continuity certificate can
+ * exist at all: the outgoing key is still in custody, the incoming key is known,
+ * and neither has been promoted yet. §7.5 requires the certificate to be signed
+ * by the outgoing key and durably retained *before* that key is destroyed, so
+ * `issue` is called ahead of the deletion and its failure aborts the promotion
+ * with nothing lost — the operator can retry, or re-stage as a deliberate break.
+ */
+export interface HubKeyRotationContinuity {
+  readonly issue: (input: {
+    readonly hubOrigin: string;
+    readonly oldKeyId: string;
+    readonly oldKeySecretName: string;
+    readonly newKeyId: string;
+    readonly newKeySecretName: string;
+  }) => Promise<void>;
+  /** §7.5: a rotation that does not issue a certificate breaks the chain, explicitly. */
+  readonly break: (input: { readonly hubOrigin: string }) => Promise<void>;
+}
+
+/**
+ * What a committed promotion did to the §7.5 chain.
+ *
+ * `null` when the rotation carried the chain forward — the certificate was
+ * issued and durably retained before the promotion, and its failure aborted the
+ * promotion, so there is nothing left to report.
+ *
+ * For a deliberate break the recording happens AFTER the commit and is therefore
+ * best-effort, like every other post-commit step: the promotion is durable by
+ * then, and reporting a failed follow-up as the promotion's failure would tell
+ * the caller the rotation did not happen when it did. `deferred` is how the
+ * caller still learns the break did not reach the record — self-healing, because
+ * the §7.5 startup cross-check finds the same condition and records it, but a
+ * fact an operator surface should be able to show rather than infer.
+ */
+export type HubKeyRotationContinuityOutcome = "recorded" | "deferred" | null;
+
+export interface HubKeyRotationPromotion {
+  readonly continuityBreak: HubKeyRotationContinuityOutcome;
+}
+
 export interface HubKeyRotationClient {
-  readonly stage: (hubOrigin: string) => Promise<HubKeyRotationStatus>;
+  /**
+   * §7.5 makes the continuity disposition an operator decision that this client
+   * may not infer, so it is a required argument rather than a defaulted option:
+   * a compromise rotation MUST break the chain, and only the caller knows.
+   */
+  readonly stage: (
+    hubOrigin: string,
+    options: { readonly continuity: NodeRotationContinuityMode },
+  ) => Promise<HubKeyRotationStatus>;
   readonly resume: (hubOrigin: string) => Promise<HubKeyRotationStatus>;
   readonly authenticationKey: (hubOrigin: string) => Promise<{
     readonly keyId: string;
     readonly secretName: string;
   }>;
-  readonly confirmNewKeyAuthenticated: (hubOrigin: string, keyId: string) => Promise<void>;
+  readonly confirmNewKeyAuthenticated: (
+    hubOrigin: string,
+    keyId: string,
+  ) => Promise<HubKeyRotationPromotion>;
+  /**
+   * Destroy every identity secret the durable queue holds.
+   *
+   * The resumable half of a promotion: the queue is written before the promotion
+   * commits, so a destruction interrupted by a crash, or refused by a credential
+   * store that was briefly unavailable, is finished by the next call rather than
+   * lost. Idempotent and safe to call at any time.
+   *
+   * A queued name that the identity state still calls in service is SKIPPED and
+   * left queued: it belongs to a promotion that has not committed, so destroying
+   * it would erase the key the node authenticates with, and dequeuing it would
+   * orphan that key the moment the promotion did commit. A name whose deletion
+   * fails also stays queued.
+   */
+  readonly destroyRetiredKeys: () => Promise<void>;
 }
 
 export interface HubKeyRotationClientDependencies {
   readonly transport: HubKeyRotationTransport;
   readonly signingIdentity: NodeSigningIdentity;
   readonly stateStore: LocalHubIdentityStateStore;
+  /** The durable destroy queue (`NodeIdentityKeyRetirementStore`). */
+  readonly retirement: NodeIdentityKeyRetirementStore;
+  readonly continuity: HubKeyRotationContinuity;
   readonly now?: () => number;
 }
 
@@ -226,7 +303,7 @@ export function makeHubKeyRotationClient(
     }
   };
 
-  const stage: HubKeyRotationClient["stage"] = async (rawHubOrigin) => {
+  const stage: HubKeyRotationClient["stage"] = async (rawHubOrigin, options) => {
     let hubOrigin: string;
     try {
       hubOrigin = canonicalizeHubOrigin(rawHubOrigin);
@@ -274,6 +351,10 @@ export function makeHubKeyRotationClient(
             rotationRequestId: challenge.rotationRequestId,
             newKeyId: challenge.newKeyId,
             newKeySecretName,
+            // Recorded now, consumed at promotion. The two are separated by an
+            // owner approval that may take days and a restart or three, so the
+            // operator's §7.5 choice has to be durable rather than in flight.
+            continuityMode: options.continuity,
             stagedAt: now(),
             activatedAt: null,
           },
@@ -360,6 +441,32 @@ export function makeHubKeyRotationClient(
     };
   };
 
+  const destroyRetiredKeys: HubKeyRotationClient["destroyRetiredKeys"] = async () => {
+    const queued = await dependencies.retirement.names();
+    if (queued.length === 0) return;
+    // The queue and the identity state are two records, so an entry means "this
+    // key is retired unless the promotion that queued it never committed". This
+    // is where that is resolved, against the record that knows.
+    const inService = identitySecretsInService(await dependencies.stateStore.readOrCreate());
+    const destroyed: string[] = [];
+    for (const name of queued) {
+      if (inService.has(name)) continue;
+      try {
+        await dependencies.signingIdentity.delete(name);
+        destroyed.push(name);
+      } catch {
+        // Left queued. A credential store that cannot delete right now must not
+        // lose the only handle the node has on the key.
+      }
+    }
+    if (destroyed.length === 0) return;
+    // Dequeued only after the key is gone, and never before: the reverse order
+    // is exactly the orphaned secret this queue exists to prevent. A failure
+    // here leaves the name queued and the next pass deletes an already-absent
+    // key, which is a no-op.
+    await dependencies.retirement.dequeue(destroyed);
+  };
+
   const confirmNewKeyAuthenticated: HubKeyRotationClient["confirmNewKeyAuthenticated"] = async (
     rawHubOrigin,
     keyId,
@@ -378,7 +485,50 @@ export function makeHubKeyRotationClient(
     ) {
       return rotationError("rotation_not_available");
     }
-    await dependencies.signingIdentity.delete(active.activeKeySecretName);
+    // §7.5, in this exact order and for this exact reason: the certificate is
+    // signed by the outgoing key and durably synced BEFORE that key is
+    // destroyed and before the promotion it describes completes. A failure here
+    // aborts the promotion with the outgoing key intact, which is the fail-closed
+    // outcome — the alternative would be a key gone and a link that was never
+    // written, i.e. an unannounced chain break.
+    //
+    // The break case is the mirror image and therefore runs AFTER the promotion,
+    // not here: dropping the chain first would spend it on a rotation that may
+    // still fail, leaving the old key live and every pinned client facing a
+    // re-verification for a rotation that never happened. Deferring it is safe
+    // because a promotion that commits without the break recorded is exactly
+    // what the §7.5 startup cross-check detects and records — it is the one
+    // failure this system already repairs by itself.
+    if (staged.continuityMode === "continue") {
+      await dependencies.continuity.issue({
+        hubOrigin,
+        oldKeyId: active.activeKeyId,
+        oldKeySecretName: active.activeKeySecretName,
+        newKeyId: staged.newKeyId,
+        newKeySecretName: staged.newKeySecretName,
+      });
+    }
+    // Drained before anything is queued, so the queue holds at most the one key
+    // this promotion retires and its bound is headroom rather than a limit.
+    await destroyRetiredKeys().catch(() => undefined);
+    // QUEUE, THEN COMMIT, THEN DESTROY — never any other order.
+    //
+    // The promotion and the destruction of the outgoing key span two stores, so
+    // one of them happens first and a crash can land between them. Destroying
+    // first is unrecoverable: the key is gone, this record still names it as
+    // active, the promotion cannot be completed (nothing can sign as the old
+    // key again) and cannot be rolled back (there is no key to roll back to).
+    //
+    // The queue is what makes the destruction resumable, and it lives in a
+    // record of its own so that a downgrade cannot silently delete the only
+    // name a live private key still has (`NodeIdentityKeyRetirementStore`).
+    // That record is not the one the promotion commits to, so it is written
+    // BEFORE the commit rather than with it: a crash in between leaves a queued
+    // name that is still in service, which the drain skips and this operation's
+    // retry re-queues and commits, while the reverse order leaves an outgoing
+    // key that nothing names at all. A failure here therefore aborts the
+    // promotion, with the outgoing key intact and nothing spent.
+    await dependencies.retirement.enqueue(active.activeKeySecretName);
     await dependencies.stateStore.update((current) => {
       if (
         current.activeNode?.activeKeyId !== active.activeKeyId ||
@@ -397,7 +547,31 @@ export function makeHubKeyRotationClient(
         stagedRotation: null,
       };
     });
+    // Best effort by design: the promotion has already committed, so reporting a
+    // failed deletion as the promotion's failure would be a lie, and the queue
+    // is what makes the deletion finish later regardless.
+    await destroyRetiredKeys().catch(() => undefined);
+    if (staged.continuityMode === "continue") return { continuityBreak: null };
+    // The promotion is committed, so the chain now ends at a key this node no
+    // longer holds and cannot be advertised. Recording the break here makes it
+    // explicit and keeps the generation mark, which is what stops the next
+    // rotation from reusing a generation §7.5 forbids reusing.
+    //
+    // Best effort for the same reason as every other post-commit step, and it
+    // was the only one that was not: an unreadable continuity anchor made a
+    // promotion that had durably committed report failure, which would send an
+    // operator to retry a rotation that already happened. The outcome is
+    // returned instead, so the caller can still show that the break did not
+    // record — and the §7.5 startup cross-check records the same break by
+    // itself, because a committed promotion leaves a chain that reaches no key
+    // in custody.
+    try {
+      await dependencies.continuity.break({ hubOrigin });
+      return { continuityBreak: "recorded" };
+    } catch {
+      return { continuityBreak: "deferred" };
+    }
   };
 
-  return { stage, resume, authenticationKey, confirmNewKeyAuthenticated };
+  return { stage, resume, authenticationKey, confirmNewKeyAuthenticated, destroyRetiredKeys };
 }

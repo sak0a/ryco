@@ -94,7 +94,26 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
       }) as RelayNodeAuthHandshake,
     stageKeyRotation: async () => ({ status: "awaiting_owner" }),
     resumeKeyRotation: async () => ({ status: "awaiting_owner" }),
-    confirmAuthenticatedKey: async () => undefined,
+    confirmAuthenticatedKey: async () => ({ continuityBreak: null }),
+    readE2eePrekeyCertificate: async () => {
+      throw new Error("unused");
+    },
+    rotateE2eePrekey: async () => {
+      throw new Error("unused");
+    },
+    withE2eePrekeySecret: async () => {
+      throw new Error("unused");
+    },
+    readE2eeContinuity: async () => {
+      throw new Error("unused");
+    },
+    breakE2eeContinuity: async () => undefined,
+    adoptE2eeContinuityId: async () => {
+      throw new Error("unused");
+    },
+    remintE2eeContinuityId: async () => {
+      throw new Error("unused");
+    },
     ...overrides,
   };
 }
@@ -773,6 +792,7 @@ describe("HubConnector", () => {
         rotationRequestId: `rot_${"R".repeat(22)}`,
         newKeyId: `nkey_${"Q".repeat(22)}`,
         newKeySecretName: "node-key.new",
+        continuityMode: "continue" as const,
         stagedAt: 2,
         activatedAt: 3,
       },
@@ -784,6 +804,7 @@ describe("HubConnector", () => {
         readState: async () => activeState,
         confirmAuthenticatedKey: async (_origin, keyId) => {
           confirmed.push(keyId);
+          return { continuityBreak: null };
         },
       }),
       transport: { open: () => socket },

@@ -1,4 +1,4 @@
-import { ed25519 } from "@noble/curves/ed25519";
+import { ed25519, x25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/nist";
 import { sha256 } from "@noble/hashes/sha2";
 import { encode, rfc8949EncodeOptions } from "cborg";
@@ -283,6 +283,78 @@ export function e2eeBytesEqual(left: Uint8Array, right: Uint8Array): boolean {
     if (left[index] !== right[index]) return false;
   }
   return true;
+}
+
+// ─── §6.2 static agreement key generation ────────────────────────────────────
+
+/**
+ * X25519 secret-scalar length (RFC 7748 §5).
+ *
+ * Deliberately NOT a §3.2 constant: §3.2 names the lengths of values this
+ * protocol puts on a wire or in a signed structure, and no structure carries an
+ * agreement secret key. It exists here only to bound the input of
+ * `deriveE2eeAgreementPublicKey`.
+ */
+const X25519_SECRET_KEY_BYTES = 32;
+
+/**
+ * A static X25519 agreement keypair (§6.2).
+ *
+ * The secret half is a live secret from the moment it is returned: the caller
+ * owns its buffer and MUST zeroize it once it has been handed to its custody
+ * layer (§6.3).
+ */
+export interface E2eeAgreementKeyPair {
+  /** The X25519 secret scalar. Caller-owned; zeroize after use (§6.3). */
+  readonly secretKey: Uint8Array;
+  /** `E2EE_AGREEMENT_PUBLIC_KEY_BYTES` (§7.1). */
+  readonly publicKey: Uint8Array;
+}
+
+/**
+ * Generate a static X25519 agreement keypair — the node agreement prekey (§6.2,
+ * §6.4) and the native client's per-device agreement key (§6.2, §7.4).
+ *
+ * This lives here, and not in the endpoint that stores the key, for the reason
+ * §14.2 gives: every curve operation in this protocol is a call into the pinned
+ * primitive packages through their documented entry points, and this module is
+ * the one place either curve is reached from outside the §14.1 Noise module.
+ * An endpoint that generated its own agreement key would be a second,
+ * unreviewed path to the same primitive.
+ *
+ * Handshake ephemerals are NOT generated here: §6.2 makes them per-handshake
+ * state owned by the Noise module, which generates and erases them itself.
+ *
+ * §14.5: the CSPRNG is the primitive's, and it fails closed when the runtime has
+ * no `crypto.getRandomValues` rather than falling back to anything.
+ */
+export function generateE2eeAgreementKeyPair(): E2eeAgreementKeyPair {
+  const keyPair = x25519.keygen();
+  return { secretKey: keyPair.secretKey, publicKey: keyPair.publicKey };
+}
+
+/**
+ * Recover the public half of a stored static agreement key (§6.2, §6.3).
+ *
+ * A custody layer that persists only the secret scalar — which is the whole of
+ * an X25519 private key — derives the public key on load rather than trusting a
+ * separately stored copy that could disagree with it.
+ *
+ * The returned key is validated as a §7.1 agreement public key, so a caller can
+ * hand it straight to a §7 encoder. The input is not copied and not zeroized:
+ * the secret belongs to the caller, which is the only party that knows when its
+ * borrow ends.
+ */
+export function deriveE2eeAgreementPublicKey(secretKey: Uint8Array): Uint8Array {
+  if (!(secretKey instanceof Uint8Array) || secretKey.byteLength !== X25519_SECRET_KEY_BYTES) {
+    invalidRelayE2eeInput();
+  }
+  try {
+    return validateE2eeAgreementPublicKey(x25519.getPublicKey(secretKey));
+  } catch (error: unknown) {
+    if (error instanceof RelayE2eeValidationError) throw error;
+    return invalidRelayE2eeInput();
+  }
 }
 
 // ─── §7.1, §14.3 signature verification ──────────────────────────────────────
