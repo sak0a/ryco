@@ -179,6 +179,104 @@ P-256 point validation, and fail-closed React Native randomness via the `expo-cr
   as built; version 1 uses software X25519 agreement keys cross-signed by the identity keys,
   and the envelope's suite field keeps the hardware migration path open.
 
+## Node relay seams
+
+The node-side relay path carries no E2EE code. It carries the seams an E2EE layer will attach
+to, and each one exists because the specification names a behavior the previous shape could not
+express. They are listed here because a seam that cannot actually be driven is worse than none
+— it reads as a solved problem — so each entry states what drives it.
+
+- **Payload discrimination before the RPC decoder** (`makeRpcByteSession`, `interceptor`).
+  Discrimination has to happen after chunk reassembly and prelude stripping (§4.3), and an
+  authenticating layer has to be able to stop unauthenticated bytes from reaching the parser.
+  With no interceptor installed, every payload decodes exactly as before. The interceptor
+  deliberately has **no fatal disposition**: it runs on the session's consumer fiber, so a
+  verdict returned from it could not reach the caller of `receive` for the payload that
+  produced it. `RelayRpcChannelSession.receive` therefore stays a plain backpressure bit.
+- **Channel context at open** (`RelayChannelSessionFactory.open`): channel id, the capability
+  and effective role the peer named, the negotiated relay protocol major/minor (taken from the
+  relay contract constants, since the connection accepts a `ready` naming exactly those), and
+  the connection identity. Together these are §8.3 elements 1–4 and 13–14. The connection
+  identity is passed as a **getter, read at each use**: the node id is assigned while the
+  connection authenticates, and the first connect after enrollment approval routinely opens
+  channels before that read completes. A captured value would leave such a channel without an
+  identity for its whole lifetime, silently disabling E2EE on it.
+- **An out-of-band send handle** sharing the channel's outbound sequence, chunk-support latch
+  and refusal handling with the RPC path, so a negotiation record cannot run a second,
+  competing sequence. It is all-or-nothing across the frames of one message
+  (`RelaySendQueue.enqueueDataBatch`): a refusal produces no wire record at all, which is what
+  §11.4 requires of `e2ee_send_unavailable`. It names **why** it refused —
+  `message_too_large`, `peer_unsupported`, `queue_full`, `channel_closed`,
+  `sequence_exhausted` — because §11.4 makes a size failure and unavailable transmission
+  admission different errors with different remedies.
+- **An acceptance announcement** (`onAccepted`), awaited before any inbound frame is
+  delivered, so a carrier that must occupy outbound sequence 0 (§5.4) actually can. It may be
+  asynchronous and is awaited; a failure closes the channel with `channel_rejected`, the same
+  reason every other open-time rejection produces, because §11.5 requires pre-key fatal
+  conditions to be externally indistinguishable.
+- **A session-driven close naming its reason**, with the channel's queued data drained to the
+  socket before the outer `channel.close` is enqueued. This is how §11.2, §11.3 and §10.3
+  select a close reason and get a final record out ahead of the close: emit the record through
+  the send handle, then call `close("channel_rejected")`. The drain is performed by the close
+  path itself (`RelaySendQueue.flushChannel`), not by a notification the connection owner may
+  defer, so the ordering does not depend on how the owner schedules flushes.
+
+**The drain is best effort, and knowingly so.** A channel the peer has flow-paused cannot be
+drained without violating the pause, and a socket that cannot take the bytes cannot be made to;
+in both cases the queued record is discarded with the channel. This is exactly the relay
+behavior §10.3 already assumes — queued data at close has no delivery guarantee — and it is why
+the close machine takes its evidence from an encrypted peer proof rather than from a successful
+enqueue.
+
+### Declared behavior changes
+
+Every change to existing behavior made while introducing these seams, including ones that are
+plainly correct:
+
+1. **A refused relay send no longer kills the RPC server fiber.** The byte session's sink used
+   to `orDie`, so a full outbound queue became a defect that tore down the RPC server and every
+   in-flight request on the channel. It is now a typed `RpcOutputRefusedError` that drops the
+   one response and leaves the fiber running. This is required by §11.4 — backpressure MUST NOT
+   be escalated to a channel-fatal condition — and it is correct without E2EE too: the registry
+   already reacts to the refusal by closing the channel and naming the cause, so dying here
+   punished unrelated requests for a condition that was already handled. Genuine sink defects
+   remain defects. Observable difference with no interceptor installed: where a saturated
+   outbound queue previously produced a fiber defect _and_ the registry's close, it now
+   produces only the registry's close.
+2. **A close no longer discards queued data before it can be written.** `closeChannel` drains
+   the channel's outbound queue before enqueueing the `channel.close`. Previously the queue was
+   purged first, so a message enqueued immediately before a close was destroyed even when the
+   socket could have taken it.
+3. **A peer-initiated `channel.close` explicitly does not drain.** The relay no longer knows
+   the channel, so pushing its queued data would emit data frames for a channel that is gone.
+4. **`onAccepted` failure closes with `channel_rejected`, not `internal_error`** (see above).
+5. **A stale node id is cleared.** A post-authentication identity read reporting no active node
+   now clears the cached id instead of leaving the previous enrollment's value in place.
+6. **A socket write failure during the close drain is reported as `internal_error` rather than
+   `network`.** The drain reports a failed write instead of throwing, so the connection failure
+   surfaces through the subsequent control-frame refusal. Both classifications retry
+   identically; only the recorded failure label differs, in a corner reachable only when the
+   socket fails during a channel close.
+7. **The relay protocol version the registry stamps on frames now comes from the relay contract
+   constants** instead of a module-local literal. Same values today, by construction: the
+   connection accepts no other `ready`.
+
+### Carried forward to the record-protection phase
+
+**§9.3 requires transmission admission for the entire record _before_ the `(epoch, counter)`
+pair is assigned, and the send handle's refusal report does not by itself satisfy that.** The
+handle reports a refusal after the caller has already produced the bytes it wanted to send. A
+layer that encrypts under counter N, is refused, and rolls its counter back would reuse that
+nonce with different plaintext — a catastrophic AEAD misuse, and precisely the failure §9.3's
+ordering exists to prevent. The refusal report is what makes the correct behavior _possible_
+(no wire record is produced, so nothing was consumed at the relay layer), not what implements
+it. The record-protection phase MUST obtain admission first — reserving capacity for every
+chunk of the encrypted record, whose size is known before encryption from the plaintext length
+and the published envelope overhead — and only then assign the pair and invoke the AEAD, taking
+`e2ee_send_unavailable` (§11.4) on refusal without consuming a pair. A sender that instead
+encrypts first and rolls back on refusal is non-conforming even though every relay-layer
+assertion in this phase still passes.
+
 ## Verification
 
 Phase 0 ships no implementation code; the specification itself must pass a dedicated

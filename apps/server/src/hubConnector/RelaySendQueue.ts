@@ -64,23 +64,73 @@ export class RelaySendQueue {
   }
 
   enqueueData(frame: RelayDataFrame): boolean {
+    return this.enqueueDataBatch([frame]);
+  }
+
+  /**
+   * Enqueue every frame of one message, or none of them.
+   *
+   * One message can be several data frames, and a partial enqueue leaves the
+   * peer's reassembler holding a truncated message that the remaining frames
+   * will never complete. Refusing atomically is also what makes a refusal
+   * reportable rather than necessarily fatal: a caller that treats backpressure
+   * as recoverable needs the guarantee that a refused message produced no wire
+   * record at all.
+   */
+  enqueueDataBatch(frames: readonly RelayDataFrame[]): boolean {
     if (this.#closed) return false;
-    const entry = this.#encode(frame);
+    const entries = frames.map((frame) => this.#encode(frame));
     const dataCapacity = this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes;
-    if (this.ownedBytes + entry.reservedBytes > dataCapacity) {
-      entry.bytes.fill(0);
+    const reserved = entries.reduce((total, entry) => total + entry.reservedBytes, 0);
+    if (this.ownedBytes + reserved > dataCapacity) {
+      for (const entry of entries) entry.bytes.fill(0);
       return false;
     }
-    const channelId = frame.channelId as string;
-    let queue = this.#data.get(channelId);
-    if (queue === undefined) {
-      queue = [];
-      this.#data.set(channelId, queue);
-      this.#channelOrder.push(channelId);
+    for (const [index, entry] of entries.entries()) {
+      const channelId = frames[index]!.channelId as string;
+      let queue = this.#data.get(channelId);
+      if (queue === undefined) {
+        queue = [];
+        this.#data.set(channelId, queue);
+        this.#channelOrder.push(channelId);
+      }
+      queue.push(entry);
+      this.#queuedBytes += entry.reservedBytes;
     }
-    queue.push(entry);
-    this.#queuedBytes += entry.reservedBytes;
     return true;
+  }
+
+  /**
+   * Drain the queue and report whether this channel's data reached the socket.
+   *
+   * The owner of this queue decides *when* to flush, but a channel that is
+   * about to be torn down cannot wait for that decision: whatever is still
+   * queued for it is discarded by `removeChannel`, and the `channel.close` that
+   * follows would overtake it anyway because control frames drain first. So the
+   * close path drives this directly rather than through a notification the
+   * owner may or may not act on.
+   *
+   * It drives the ordinary `flush()` rather than writing this channel's frames
+   * out of band, so control-before-data ordering — including this channel's own
+   * `channel.accept` — is preserved exactly as on every other path.
+   *
+   * Returns false when something is still queued for the channel: the peer has
+   * flow-paused it, the socket cannot take more, or the socket failed (in which
+   * case this queue is already closed). A send failure is reported rather than
+   * thrown, because the caller is already tearing the channel down.
+   */
+  flushChannel(channelId: RelayChannelId): boolean {
+    // A closed queue has already discarded everything it held, so reporting
+    // "drained" would claim a delivery that did not happen.
+    if (this.#closed) return false;
+    const key = channelId as string;
+    if ((this.#data.get(key)?.length ?? 0) === 0) return true;
+    try {
+      this.flush();
+    } catch {
+      return false;
+    }
+    return (this.#data.get(key)?.length ?? 0) === 0;
   }
 
   pause(channelId: RelayChannelId): void {
