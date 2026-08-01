@@ -17,22 +17,23 @@ export function SidebarInboxFilters(props: {
   readonly onWorktreeChange: (value: string) => void;
 }) {
   return (
-    <div className="shrink-0 bg-sidebar px-3 pb-2 pt-1">
+    <div className="shrink-0 bg-background px-3 pb-2 pt-1">
       <div className="relative">
         <SearchIcon
           aria-hidden
           className="pointer-events-none absolute left-2.5 top-1/2 z-10 size-3 -translate-y-1/2 text-muted-foreground"
+          data-testid="inbox-search-icon"
         />
         <SidebarInput
           aria-label="Search Inbox"
-          className="h-7 pl-7 text-xs"
+          className="h-7 text-xs [&_input]:h-7 [&_input]:py-0 [&_input]:pr-2 [&_input]:pl-7 [&_input]:leading-7"
           onChange={(event) => props.onTextChange(event.target.value)}
           placeholder="Search threads"
           type="search"
           value={props.text}
         />
       </div>
-      <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+      <div className="mt-1 grid grid-cols-3 gap-1">
         <InboxFilterCombobox
           allArtwork={<MonitorIcon />}
           allLabel="Environment"

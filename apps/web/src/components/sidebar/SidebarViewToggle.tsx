@@ -37,7 +37,7 @@ export const SidebarViewToggle = memo(function SidebarViewToggle({
     <div className="px-3 pb-1.5" data-testid="sidebar-view-toggle">
       <div
         aria-label="Sidebar view"
-        className="grid grid-cols-2 gap-0.5 rounded-lg bg-sidebar-accent/45 p-0.5"
+        className="grid grid-cols-2 gap-0.5 rounded-lg border border-border/70 bg-foreground/[0.025] p-0.5 shadow-inner shadow-black/5 dark:shadow-black/20"
         role="tablist"
       >
         {OPTIONS.map((option) => {
@@ -52,10 +52,10 @@ export const SidebarViewToggle = memo(function SidebarViewToggle({
               aria-controls={`sidebar-${option.value}-panel`}
               aria-selected={selected}
               className={cn(
-                "inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 text-[11px] font-medium outline-hidden ring-ring transition-colors focus-visible:ring-2",
+                "inline-flex h-7 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-transparent px-2 text-[11px] font-medium outline-hidden ring-ring transition-[background-color,border-color,color,box-shadow] focus-visible:ring-2",
                 selected
-                  ? "bg-sidebar text-sidebar-foreground shadow-xs"
-                  : "text-muted-foreground hover:text-sidebar-foreground",
+                  ? "border-ring/30 bg-foreground/[0.08] text-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
               )}
               id={`sidebar-${option.value}-tab`}
               onClick={() => onChange(option.value)}

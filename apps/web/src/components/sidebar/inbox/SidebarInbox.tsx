@@ -426,7 +426,7 @@ export function SidebarInbox({
     const renderVirtualRow = ({ item }: LegendListRenderItemProps<VirtualInboxRow>) => {
       if (item.kind === "entry") {
         return (
-          <div className="pb-0.5">
+          <div className="pb-1">
             <SidebarInboxRow
               entry={item.entry}
               onNavigate={handleNavigate}
@@ -490,7 +490,7 @@ export function SidebarInbox({
           <LegendList<VirtualInboxRow>
             className="min-h-0 flex-1 overscroll-y-contain pb-2"
             data={rows}
-            estimatedItemSize={78}
+            estimatedItemSize={82}
             keyExtractor={(item) => item.key}
             ListHeaderComponent={
               <div className="pb-1">
@@ -526,7 +526,7 @@ export function SidebarInbox({
             <span className="tabular-nums text-muted-foreground/60">{model.active.length}</span>
           </div>
           {model.active.length > 0 ? (
-            <div className="space-y-0.5">
+            <div className="space-y-1">
               {model.active.map((entry) => (
                 <SidebarInboxRow
                   key={entry.key}
@@ -604,7 +604,7 @@ export function SidebarInbox({
             </span>
           </button>
           {settledOpen ? (
-            <div className="space-y-0.5 pb-1">
+            <div className="space-y-1 pb-1">
               {visibleSettled.map((entry) => (
                 <SidebarInboxRow
                   key={entry.key}

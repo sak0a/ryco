@@ -189,28 +189,46 @@ function ComboboxItem({
   contentClassName,
   children,
   hideIndicator = false,
+  indicatorPosition = "start",
   ...props
 }: ComboboxPrimitive.Item.Props & {
   contentClassName?: string;
   hideIndicator?: boolean;
+  indicatorPosition?: "start" | "end";
 }) {
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-sm py-1 ps-2 pe-4 text-base outline-none hover:bg-accent/70 data-disabled:pointer-events-none data-selected:bg-accent/50 data-selected:text-foreground data-highlighted:bg-accent/80 data-highlighted:text-accent-foreground [&[data-highlighted][data-selected]]:bg-accent/90 [&[data-highlighted][data-selected]]:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default items-center gap-2 rounded-sm py-1 text-base outline-none hover:bg-accent/70 data-disabled:pointer-events-none data-selected:bg-accent/50 data-selected:text-foreground data-highlighted:bg-accent/80 data-highlighted:text-accent-foreground [&[data-highlighted][data-selected]]:bg-accent/90 [&[data-highlighted][data-selected]]:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        indicatorPosition === "start"
+          ? "grid-cols-[1rem_minmax(0,1fr)] ps-2 pe-4"
+          : "grid-cols-[minmax(0,1fr)_1rem] ps-2 pe-2",
         className,
       )}
       data-slot="combobox-item"
       {...props}
     >
-      <ComboboxPrimitive.ItemIndicator className={cn("col-start-1", hideIndicator && "hidden")}>
+      <ComboboxPrimitive.ItemIndicator
+        className={cn(
+          "inline-flex items-center justify-center",
+          indicatorPosition === "start" ? "col-start-1" : "col-start-2",
+          hideIndicator && "hidden",
+        )}
+        data-slot="combobox-item-indicator"
+      >
         <CheckIcon />
       </ComboboxPrimitive.ItemIndicator>
       <div
         className={cn(
-          hideIndicator ? "col-start-1 col-span-full" : "col-start-2",
+          "min-w-0",
+          hideIndicator
+            ? "col-start-1 col-span-full"
+            : indicatorPosition === "start"
+              ? "col-start-2"
+              : "col-start-1",
           contentClassName,
         )}
+        data-slot="combobox-item-content"
       >
         {children}
       </div>

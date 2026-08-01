@@ -109,7 +109,7 @@ function resolveProviderPresentation(
 function ProjectArtwork({ entry, className }: { entry: ThreadInboxEntry; className?: string }) {
   if (!entry.project) {
     return (
-      <FolderIcon aria-hidden className={cn("shrink-0 text-muted-foreground/55", className)} />
+      <FolderIcon aria-hidden className={cn("shrink-0 text-muted-foreground/70", className)} />
     );
   }
   return (
@@ -277,8 +277,8 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
       className={cn(
         "col-span-2 col-start-1 row-start-1 min-w-0 cursor-pointer rounded-lg text-left outline-hidden ring-ring focus-visible:ring-2",
         settled
-          ? "grid h-9 grid-cols-[auto_minmax(0,1fr)_auto_4rem] items-center gap-2 px-2.5"
-          : "h-[78px] px-2.5 py-2",
+          ? "grid h-full grid-cols-[auto_minmax(0,1fr)_auto_4rem] items-center gap-2 px-2.5"
+          : "h-full px-2.5 py-2",
       )}
       onClick={() => onNavigate(entry)}
       type="button"
@@ -286,7 +286,7 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
       {settled ? (
         <>
           <ProjectArtwork className="size-3.5 opacity-65 grayscale" entry={entry} />
-          <span className="min-w-0 flex-1 truncate text-xs text-sidebar-foreground/75">
+          <span className="min-w-0 flex-1 truncate text-xs text-foreground/75">
             {entry.title || "Untitled thread"}
           </span>
           {provider ? (
@@ -348,7 +348,7 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
             </span>
           </span>
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
-            <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-4 text-sidebar-foreground">
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-4 text-foreground">
               {entry.title || "Untitled thread"}
             </span>
             {entry.pinned ? (
@@ -413,9 +413,12 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
         render={
           <div
             className={cn(
-              "group/inbox-row relative mx-2 grid min-w-0 grid-cols-[minmax(0,1fr)_4rem] rounded-lg transition-colors",
+              "group/inbox-row relative mx-2 grid min-w-0 grid-cols-[minmax(0,1fr)_4rem] rounded-lg border border-border/60 bg-foreground/[0.025] transition-[background-color,border-color,box-shadow]",
+              settled ? "h-9" : "h-[78px]",
               settled && "opacity-85",
-              entry.current ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/65",
+              entry.current
+                ? "border-ring/35 bg-foreground/[0.08] shadow-xs"
+                : "hover:border-border hover:bg-foreground/[0.05] focus-within:border-border focus-within:bg-foreground/[0.05]",
             )}
             data-thread-key={entry.key}
           />
@@ -432,8 +435,7 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
           aria-label={`${actionLabel}: ${entry.title || "Untitled thread"}`}
           className={cn(
             "pointer-events-none col-start-2 row-start-1 mt-1.5 mr-2.5 inline-flex h-6 translate-y-0.5 items-center justify-center justify-self-end rounded-md px-1.5 text-[10px] font-medium text-muted-foreground opacity-0 outline-hidden ring-ring transition-[opacity,transform,color,background-color] duration-150 motion-reduce:translate-y-0 motion-reduce:transition-none group-hover/inbox-row:pointer-events-auto group-hover/inbox-row:translate-y-0 group-hover/inbox-row:opacity-100 group-focus-within/inbox-row:pointer-events-auto group-focus-within/inbox-row:translate-y-0 group-focus-within/inbox-row:opacity-100 focus-visible:pointer-events-auto focus-visible:ring-2",
-            !actionDisabled &&
-              "cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-foreground",
+            !actionDisabled && "cursor-pointer hover:bg-accent hover:text-foreground",
             actionDisabled &&
               "cursor-not-allowed group-hover/inbox-row:opacity-35 group-focus-within/inbox-row:opacity-35",
           )}
