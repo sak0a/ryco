@@ -81,7 +81,83 @@ describe("overview panel layouts", () => {
   it("renders expandable lanes in the status board layout", () => {
     setPanelLayout("board");
     const markup = renderToStaticMarkup(<PlanSidebar {...baseProps} />);
-    expect(markup).toContain('aria-expanded="true"');
+    expect(markup.match(/aria-expanded="true"/g)).toHaveLength(1);
+    expect(markup).toContain('data-slot="overview-section-lane-header"');
+    expect(markup).toContain("min-h-10");
     expect(markup).toContain("Changes");
+    expect(markup).toContain("3 files");
+  });
+
+  it("renders environment metadata once without an empty disclosure", () => {
+    setPanelLayout("board");
+    const markup = renderToStaticMarkup(
+      <PlanSidebar
+        {...baseProps}
+        activePlan={null}
+        overviewItems={[
+          { label: "Environment", value: "Local", detail: "local", icon: "environment" },
+        ]}
+      />,
+    );
+
+    expect(markup.match(/>Local</g)).toHaveLength(1);
+    expect(markup).not.toContain(">local<");
+    expect(markup).not.toContain(">Target<");
+    expect(markup).not.toContain(">Status<");
+    expect(markup).toContain('data-expandable="false"');
+    expect(markup).not.toContain("aria-expanded");
+  });
+
+  it("keeps a distinct environment status visible once", () => {
+    setPanelLayout("board");
+    const markup = renderToStaticMarkup(
+      <PlanSidebar
+        {...baseProps}
+        activePlan={null}
+        overviewItems={[
+          {
+            label: "Environment",
+            value: "Remote",
+            detail: "disconnected",
+            icon: "environment",
+          },
+        ]}
+      />,
+    );
+
+    expect(markup.match(/>Remote</g)).toHaveLength(1);
+    expect(markup.match(/>disconnected</g)).toHaveLength(1);
+    expect(markup).toContain('data-expandable="false"');
+    expect(markup).not.toContain("aria-expanded");
+  });
+
+  it("renders an independent pull request link only when a URL exists", () => {
+    setPanelLayout("board");
+    const pullRequest = {
+      number: 264,
+      title: "Make the status board compact",
+      url: "https://github.com/ryco/ryco/pull/264",
+      state: "open",
+      checkStatus: null,
+      checksLoading: false,
+      hasMergeConflicts: true,
+      activeCheckCount: 0,
+      runs: [],
+      latestRuns: [],
+    };
+
+    const markup = renderToStaticMarkup(<PlanSidebar {...baseProps} pullRequest={pullRequest} />);
+    expect(markup).toContain("Pull Request #264");
+    expect(markup).toContain('href="https://github.com/ryco/ryco/pull/264"');
+    expect(markup).toContain('target="_blank"');
+    expect(markup).toContain('rel="noreferrer"');
+    expect(markup).toContain('aria-label="Open pull request #264 in a new tab"');
+    expect(markup.match(/Make the status board compact/g)).toHaveLength(1);
+
+    const { url: _url, ...pullRequestWithoutUrl } = pullRequest;
+    const markupWithoutUrl = renderToStaticMarkup(
+      <PlanSidebar {...baseProps} pullRequest={pullRequestWithoutUrl} />,
+    );
+    expect(markupWithoutUrl).not.toContain("Open pull request #264 in a new tab");
   });
 });

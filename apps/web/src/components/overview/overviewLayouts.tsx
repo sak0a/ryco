@@ -6,6 +6,7 @@ import {
   SparklesIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { cn } from "~/lib/utils";
 
 import type { PanelLayout } from "../../themes/appearancePreferences";
 import {
@@ -31,7 +32,6 @@ import {
   PullRequestContent,
   SECTION_ICON,
   SectionLane,
-  SparkBar,
   SubagentRows,
 } from "./overviewSections";
 import type { OverviewLayoutProps } from "./overviewTypes";
@@ -126,6 +126,15 @@ function environmentSummaryBadge(detail: string | undefined): ReactNode {
       <span className="size-1.5 rounded-full bg-current" /> ready
     </OverviewBadge>
   );
+}
+
+/** Suppress environment status text that only repeats the target with different casing. */
+function distinctEnvironmentStatus(target: string, detail: string | undefined): string | undefined {
+  const normalizedDetail = detail?.trim();
+  if (!normalizedDetail) return undefined;
+  return normalizedDetail.toLocaleLowerCase() === target.trim().toLocaleLowerCase()
+    ? undefined
+    : normalizedDetail;
 }
 
 /* ------------------------------------------------------------------ *
@@ -461,6 +470,7 @@ function HybridLayout(props: OverviewLayoutProps) {
 
 function StatusBoardLayout(props: OverviewLayoutProps) {
   const summary = getOverviewSummary(props);
+  const changesItem = pickChangesItem(props.overviewItems);
   const envItem = pickEnvironmentItem(props.overviewItems);
   const subagents = props.subagents ?? [];
   const activeStep =
@@ -471,28 +481,37 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
     .slice(0, 2)
     .map((subagent) => subagent.name)
     .join(", ");
+  const changesFileLabel =
+    summary.fileCount > 0 ? plural(summary.fileCount, "file") : changesItem?.value;
+  const environmentStatus = envItem
+    ? distinctEnvironmentStatus(envItem.value, envItem.detail)
+    : undefined;
 
   return (
     <div>
-      {summary.fileCount > 0 || Boolean(pickChangesItem(props.overviewItems)) ? (
+      {summary.fileCount > 0 || Boolean(changesItem) ? (
         <SectionLane
           icon={SECTION_ICON.changes}
           title="Changes"
-          subtitle={plural(summary.fileCount, "file")}
           summary={
             <>
+              {changesFileLabel ? (
+                <span
+                  className={cn(
+                    "font-mono text-[10px] text-muted-foreground tabular-nums",
+                    summary.hasDiff && "border-r border-border pr-1.5",
+                  )}
+                >
+                  {changesFileLabel}
+                </span>
+              ) : null}
               {summary.hasDiff ? (
-                <SparkBar
+                <DiffStat
                   additions={summary.additions}
                   deletions={summary.deletions}
-                  className="w-[38px]"
+                  className="text-[10px]"
                 />
               ) : null}
-              <DiffStat
-                additions={summary.additions}
-                deletions={summary.deletions}
-                className="text-[11px]"
-              />
             </>
           }
           defaultOpen
@@ -582,10 +601,8 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
       {props.pullRequest && props.pullRequest.number != null ? (
         <SectionLane
           icon={SECTION_ICON.pr}
-          title="Pull Request"
-          subtitle={`#${props.pullRequest.number}${
-            props.pullRequest.title ? ` · ${props.pullRequest.title}` : ""
-          }`}
+          title={`Pull Request #${props.pullRequest.number}`}
+          subtitle={props.pullRequest.title}
           summary={
             <>
               {props.pullRequest.state ? (
@@ -596,7 +613,14 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
               ) : null}
             </>
           }
-          defaultOpen
+          externalLink={
+            props.pullRequest.url
+              ? {
+                  href: props.pullRequest.url,
+                  ariaLabel: `Open pull request #${props.pullRequest.number} in a new tab`,
+                }
+              : undefined
+          }
         >
           <PullRequestContent
             pullRequest={props.pullRequest}
@@ -612,10 +636,8 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
           icon={SECTION_ICON.env}
           title="Environment"
           subtitle={envItem.value}
-          summary={environmentSummaryBadge(envItem.detail)}
-        >
-          <EnvironmentContent overviewItems={props.overviewItems} />
-        </SectionLane>
+          summary={environmentSummaryBadge(environmentStatus)}
+        />
       ) : null}
     </div>
   );

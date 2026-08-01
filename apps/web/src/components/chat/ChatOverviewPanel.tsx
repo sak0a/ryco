@@ -291,8 +291,8 @@ export function useOverviewPanelControls(input: OverviewPanelControlsInput): Ove
     () =>
       branchControlThread && isGitRepo ? (
         <BranchToolbarBranchSelector
-          appearance="pill"
-          className="max-w-[200px]"
+          appearance="panelRow"
+          className="w-full"
           environmentId={branchControlThread.environmentId}
           threadId={branchControlThread.id}
           {...(routeKind === "draft" && draftId ? { draftId } : {})}

@@ -181,4 +181,140 @@ describe("PlanSidebar overview panel", () => {
       host.remove();
     }
   });
+
+  it("keeps status-board lanes compact and separates the pull request link", async () => {
+    localStorage.setItem(
+      APPEARANCE_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ panelLayout: "board" }),
+    );
+
+    const host = document.createElement("div");
+    host.style.width = "380px";
+    host.style.height = "640px";
+    document.body.append(host);
+
+    const mounted = await render(
+      <PlanSidebar
+        activePlan={null}
+        activeProposedPlan={null}
+        changes={{
+          files: [
+            { path: "overviewLayouts.tsx", insertions: 68, deletions: 12 },
+            { path: "overviewSections.tsx", insertions: 51, deletions: 18 },
+            { path: "PlanSidebar.tsx", insertions: 24, deletions: 4 },
+            { path: "PlanSidebar.browser.tsx", insertions: 22, deletions: 3 },
+            { path: "overviewLayouts.test.tsx", insertions: 19, deletions: 5 },
+          ],
+          insertions: 184,
+          deletions: 42,
+          refName: "feat/overview-redesign",
+          aheadCount: 2,
+          behindCount: 0,
+        }}
+        pullRequest={{
+          number: 264,
+          title: "Make the status board compact",
+          url: "https://github.com/ryco/ryco/pull/264",
+          state: "open",
+          checkStatus: null,
+          checksLoading: false,
+          hasMergeConflicts: true,
+          activeCheckCount: 0,
+          runs: [],
+          latestRuns: [],
+        }}
+        branchControl={
+          <button
+            type="button"
+            className="h-9 w-full truncate text-left"
+            data-testid="overview-branch-selector"
+          >
+            feat/overview-redesign-with-a-long-name
+          </button>
+        }
+        sourceControlActions={<button type="button">Existing Git actions</button>}
+        overviewItems={[
+          { label: "Environment", value: "Local", detail: "local", icon: "environment" },
+        ]}
+        environmentId={EnvironmentId.make("environment-local")}
+        markdownCwd={undefined}
+        workspaceRoot={undefined}
+        mode="sidebar"
+      />,
+      { container: host },
+    );
+
+    try {
+      const laneButtons = Array.from(
+        host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]"),
+      );
+      const changesButton =
+        laneButtons.find((button) => (button.textContent ?? "").includes("Changes")) ?? null;
+      const pullRequestButton =
+        laneButtons.find((button) => (button.textContent ?? "").includes("Pull Request #264")) ??
+        null;
+      const pullRequestLink = host.querySelector<HTMLAnchorElement>(
+        'a[aria-label="Open pull request #264 in a new tab"]',
+      );
+      const environmentHeader = Array.from(
+        host.querySelectorAll<HTMLElement>('[data-slot="overview-section-lane-header"]'),
+      ).find((header) => (header.textContent ?? "").includes("Environment"));
+      const branchHeader = host.querySelector<HTMLElement>('[data-slot="overview-branch-header"]');
+      const branchControl = host.querySelector<HTMLElement>(
+        '[data-slot="overview-branch-control"]',
+      );
+      const branchSelector = host.querySelector<HTMLElement>(
+        '[data-testid="overview-branch-selector"]',
+      );
+
+      expect(branchHeader).not.toBeNull();
+      expect(branchControl).not.toBeNull();
+      expect(branchSelector).not.toBeNull();
+      const branchSelectorHeight = Math.round(branchSelector!.getBoundingClientRect().height);
+      expect(branchSelectorHeight).toBe(36);
+      expect(Math.round(branchHeader!.getBoundingClientRect().height)).toBe(
+        branchSelectorHeight + 1,
+      );
+      expect(branchControl!.getBoundingClientRect().width).toBeGreaterThan(200);
+      expect(Math.round(branchSelector!.getBoundingClientRect().width)).toBe(
+        Math.round(branchControl!.getBoundingClientRect().width),
+      );
+
+      expect(changesButton).not.toBeNull();
+      expect(changesButton!.getAttribute("aria-expanded")).toBe("true");
+      expect(changesButton!.textContent).toContain("5 files");
+      expect(changesButton!.textContent).toContain("+184");
+      expect(changesButton!.textContent).toContain("−42");
+      expect(Math.round(changesButton!.getBoundingClientRect().height)).toBe(40);
+
+      expect(pullRequestButton).not.toBeNull();
+      expect(pullRequestButton!.getAttribute("aria-expanded")).toBe("false");
+      expect(Math.round(pullRequestButton!.getBoundingClientRect().height)).toBe(40);
+      expect(pullRequestButton!.textContent).toContain("Make the status board compact");
+
+      expect(environmentHeader).not.toBeUndefined();
+      expect(environmentHeader!.dataset.expandable).toBe("false");
+      expect(environmentHeader!.querySelector("button")).toBeNull();
+      expect(Math.round(environmentHeader!.getBoundingClientRect().height)).toBe(40);
+      expect(environmentHeader!.textContent).toContain("Local");
+      expect(environmentHeader!.textContent).not.toContain("local");
+
+      expect(pullRequestLink).not.toBeNull();
+      expect(pullRequestLink!.target).toBe("_blank");
+      expect(pullRequestLink!.rel).toBe("noreferrer");
+      pullRequestLink!.addEventListener("click", (event) => event.preventDefault(), { once: true });
+      pullRequestLink!.click();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(pullRequestButton!.getAttribute("aria-expanded")).toBe("false");
+
+      pullRequestButton!.click();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(pullRequestButton!.getAttribute("aria-expanded")).toBe("true");
+      expect(host.textContent).toContain("Make the status board compact");
+      expect(host.textContent).toContain("Existing Git actions");
+    } finally {
+      await mounted.unmount();
+      host.remove();
+    }
+  });
 });

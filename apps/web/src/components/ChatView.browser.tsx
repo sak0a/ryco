@@ -9083,6 +9083,33 @@ describe("ChatView timeline estimator parity (full app)", () => {
         () => document.querySelector<HTMLElement>('button[aria-label="Close overview"]'),
         "Unable to find the overview close affordance.",
       );
+      const branchHeader = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="overview-branch-header"]'),
+        "Unable to find the overview branch header.",
+      );
+      const branchSelector = await waitForElement(
+        () => branchHeader.querySelector<HTMLElement>('[data-appearance="panelRow"]'),
+        "Unable to find the full-width overview branch selector.",
+      );
+      await waitForLayout();
+      const branchSelectorHeight = Math.round(branchSelector.getBoundingClientRect().height);
+      expect(branchSelectorHeight).toBe(36);
+      expect(Math.round(branchHeader.getBoundingClientRect().height)).toBe(
+        branchSelectorHeight + 1,
+      );
+      expect(branchSelector.getBoundingClientRect().width).toBeGreaterThan(200);
+
+      const branchTrigger = branchSelector.querySelector<HTMLButtonElement>(
+        '[data-slot="combobox-trigger"]',
+      );
+      expect(branchTrigger).not.toBeNull();
+      branchTrigger!.click();
+      await waitForElement(
+        () => document.querySelector<HTMLInputElement>('input[placeholder="Search refs..."]'),
+        "Unable to open the overview branch picker.",
+      );
+      await userEvent.keyboard("{Escape}");
+
       closeOverview.click();
       await vi.waitFor(() => {
         expect(document.querySelector('button[aria-label="Close overview"]')).toBeNull();
