@@ -92,6 +92,7 @@ import {
   e2eeEnvelopeAad,
   e2eeNegotiationRecordBound,
   e2eeNegotiationRecordDirection,
+  encodeE2eeCapabilityCarrier,
   encodeE2eeDirectionLabel,
   encodeE2eeEnvelopeHeader,
   encodeE2eeHandshakeReject,
@@ -672,6 +673,23 @@ describe("§16.3 F3 capability statement (§5.2, §7.2.1, §7.6)", () => {
       hex(fixtureBytes(valid.expected.statement)),
     );
     expect(valid.expected.carrierFixedBytesMatchesJsonStringify).toBe(true);
+  });
+
+  it("reproduces every fixture carrier from the shared §5.3 encoder", () => {
+    // The node's own encoder against the normative bytes, over every case that
+    // carries a statement — including the maximum-size one, whose base64url is
+    // where a hand-rolled expansion would first disagree.
+    let checked = 0;
+    for (const entry of F03.cases) {
+      const statement = entry.expected.statement;
+      const carrier = entry.expected.carrier;
+      if (statement === undefined || typeof carrier !== "string") continue;
+      const built = encodeE2eeCapabilityCarrier(fixtureBytes(statement));
+      expect(new TextDecoder().decode(built), entry.name).toBe(carrier);
+      expect(built.byteLength, entry.name).toBe(entry.expected.carrierBytes);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });
 

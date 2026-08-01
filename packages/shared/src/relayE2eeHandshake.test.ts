@@ -51,6 +51,7 @@ import {
   type E2eeIkHelloPayload,
   type E2eeModeTransition,
   type E2eeNodeAdmissionPolicy,
+  type E2eeNodeModeTransitionSelection,
 } from "./relayE2eeHandshake.ts";
 import { RelayE2eeValidationError, e2eeKeyFingerprint } from "./relayE2eeKeys.ts";
 import { E2eeNoiseHandshake } from "./relayE2eeNoise.ts";
@@ -293,7 +294,7 @@ interface NodeOverrides {
   readonly lookupClientAuthorization?: (
     key: E2eeClientAuthorizationKey,
   ) => E2eeClientAuthorization | undefined;
-  readonly enterE2eeMode?: () => E2eeModeTransition;
+  readonly enterE2eeMode?: (selection: E2eeNodeModeTransitionSelection) => E2eeModeTransition;
   readonly advertisedVersionMin?: number;
   readonly advertisedVersionMax?: number;
   readonly advertisementEmittedAt?: number;
@@ -1338,6 +1339,57 @@ describe("§8.6 responder processing", () => {
         authorization: { status: "approved", maxRole: "operator", capabilitySet: ["ryco.rpc"] },
       }).receiveHello(hello.record, NOW).kind,
     ).toBe("accepted");
+  });
+
+  it("hands row N3 the selection both withdrawal tests are evaluated against", () => {
+    // §12.6 tests the channel's tier and selected suite and §13.6 tests the
+    // §8.6 step 6 snapshot; none of the three is knowable to a caller before
+    // `receiveHello` runs, so a transition that could not read them would have
+    // to answer its question from a second decode of the same wrapper bytes.
+    const ik: unknown[] = [];
+    expect(
+      makeNode({
+        enterE2eeMode: (selection) => {
+          ik.push(selection);
+          return { kind: "entered" };
+        },
+      }).receiveHello(expectHello(makeClient("native")).record, NOW).kind,
+    ).toBe("accepted");
+    expect(ik).toEqual([
+      {
+        tier: "native",
+        pattern: E2EE_NOISE_PATTERN_IK,
+        suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        admittedAuthority: {
+          hubOrigin: HUB_ORIGIN,
+          accountId: ACCOUNT_ID,
+          clientIdentityFingerprint: CLIENT_IDENTITY_FINGERPRINT,
+          status: "approved",
+          maxRole: "owner",
+          capabilitySet: ["ryco.rpc"],
+        },
+      },
+    ]);
+
+    // NX carries no Branch A record and therefore no snapshot: no withdrawal can
+    // name an NX channel, and §12.4's node policy governs it instead.
+    const nx: unknown[] = [];
+    expect(
+      makeNode({
+        enterE2eeMode: (selection) => {
+          nx.push(selection);
+          return { kind: "entered" };
+        },
+      }).receiveHello(expectHello(makeClient("web")).record, NOW).kind,
+    ).toBe("accepted");
+    expect(nx).toEqual([
+      {
+        tier: "web",
+        pattern: E2EE_NOISE_PATTERN_NX,
+        suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        admittedAuthority: undefined,
+      },
+    ]);
   });
 
   it("aborts in flight when a policy or authorization withdrawal lands at row N3", () => {

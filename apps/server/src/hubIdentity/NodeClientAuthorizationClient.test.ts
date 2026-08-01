@@ -889,6 +889,36 @@ describe("node client authorization withdrawal crash ordering", () => {
     expect(admission).toBe("authorization_withdrawn");
   });
 
+  it("sweeps a row-N3 test that never completed as an in-flight handshake", async () => {
+    const test = await harness(approvedSeed);
+    const events: string[] = [];
+    const admission = test.client
+      .registerInFlightHandshake({
+        admittedAuthority: snapshot,
+        abort: () => void events.push("abort"),
+      })
+      .establish({ close: () => void events.push("close") });
+    if (admission.kind !== "entered") throw new Error(admission.reason);
+
+    // §13.6's active E2EE channel is "a channel whose node-side mode machine is
+    // in the `e2ee` state of §4.4". This one's accept has not reached the send
+    // path, so it is a handshake: the FATAL-PRE abort with the generic reject,
+    // never the `policy` code, which §13.6 reserves for the post-key side where
+    // the peer is already authenticated.
+    expect(await test.client.revoke(key(1))).toEqual({
+      closedChannels: 0,
+      abortedHandshakes: 1,
+    });
+    expect(events).toEqual(["abort"]);
+
+    // And the phase change cannot resurrect what the sweep already terminated.
+    admission.established();
+    expect(
+      await test.client.approve({ key: key(1), maxRole: "owner", capabilitySet: [CAPABILITY] }),
+    ).toEqual({ closedChannels: 0, abortedHandshakes: 0 });
+    expect(events).toEqual(["abort"]);
+  });
+
   it("does not abort a handshake row N3 already refused earlier in the same sweep", async () => {
     const test = await harness(approvedSeed);
     const events: string[] = [];

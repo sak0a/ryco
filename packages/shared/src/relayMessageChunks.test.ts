@@ -298,12 +298,31 @@ describe("RelayMessageAssembler", () => {
     expect(out).toEqual(message);
   });
 
+  it("reports whether a message is part-way through reassembly", () => {
+    const assembler = new RelayMessageAssembler();
+    expect(assembler.incompleteMessage).toBe(false);
+    const chunks = splitRelayMessage(new Uint8Array(200).fill(0x5a), LIMIT);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks.slice(0, -1)) {
+      expect(assembler.push(Uint8Array.from(chunk)).kind).toBe("pending");
+      // What a channel teardown asks: is a message being held that can no
+      // longer complete?
+      expect(assembler.incompleteMessage).toBe(true);
+    }
+    expect(assembler.push(Uint8Array.from(chunks.at(-1)!)).kind).toBe("done");
+    expect(assembler.incompleteMessage).toBe(false);
+    // An unchunked payload passes straight through and holds nothing.
+    expect(assembler.push(bytes(0x7b, 0x7d)).kind).toBe("done");
+    expect(assembler.incompleteMessage).toBe(false);
+  });
+
   it("drops held bytes on reset", () => {
     const assembler = new RelayMessageAssembler();
     const first = Uint8Array.from(splitRelayMessage(new Uint8Array(200).fill(0x7f), LIMIT)[0]!);
     assembler.push(first);
     assembler.reset();
     expect(assembler.heldBytes).toBe(0);
+    expect(assembler.incompleteMessage).toBe(false);
     expect([...first.subarray(RELAY_CHUNK_HEADER_BYTES)]).toEqual(
       Array.from({ length: first.byteLength - RELAY_CHUNK_HEADER_BYTES }, () => 0),
     );

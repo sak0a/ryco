@@ -185,4 +185,38 @@ describe("RelaySendQueue", () => {
     expect(queue.queuedBytes).toBe(0);
     expect(queue.closed).toBe(true);
   });
+  it("holds capacity for a message whose bytes do not exist yet", () => {
+    const { queue } = harness();
+    const dataCapacity = 4_096 - 1_024;
+    expect(queue.reserveData(channelA, dataCapacity)).toBe(true);
+    expect(queue.reservedBytes).toBe(dataCapacity);
+    // The reservation is counted against the same budget every enqueue is, so
+    // nothing else on the connection can take the capacity it holds.
+    expect(queue.reserveData(channelB, 1)).toBe(false);
+    expect(queue.enqueueData(data(channelB, 0, 1))).toBe(false);
+    // ...and the message it was taken for is admitted, because a reservation is
+    // an upper bound on what its own frames will charge.
+    expect(queue.enqueueDataBatch([data(channelA, 0, 1)], { admittedBytes: dataCapacity })).toBe(
+      true,
+    );
+    expect(queue.reservedBytes).toBe(0);
+  });
+
+  it("gives a reservation back on release and on channel removal", () => {
+    const { queue } = harness();
+    expect(queue.reserveData(channelA, 1_000)).toBe(true);
+    queue.releaseReservation(channelA, 1_000);
+    expect(queue.reservedBytes).toBe(0);
+    expect(queue.reserveData(channelA, 2_000)).toBe(true);
+    // A channel that dies with an unspent reservation must not hold the
+    // capacity for a message nothing can ever enqueue.
+    queue.removeChannel(channelA);
+    expect(queue.reservedBytes).toBe(0);
+    // A release naming more than the channel holds cannot borrow another
+    // channel's capacity.
+    expect(queue.reserveData(channelA, 500)).toBe(true);
+    expect(queue.reserveData(channelB, 500)).toBe(true);
+    queue.releaseReservation(channelA, 5_000);
+    expect(queue.reservedBytes).toBe(500);
+  });
 });

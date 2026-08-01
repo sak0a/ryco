@@ -1678,6 +1678,26 @@ export interface E2eeNodeAdmissionPolicy {
   readonly suiteRegistry: readonly number[];
 }
 
+/**
+ * What row N3 is decided from (§4.4, §8.6 step 8).
+ *
+ * The §12.6 withdrawal test reads the channel's tier and selected suite, and the
+ * §13.6 test reads the admitted-authority snapshot; all three are fixed by steps
+ * 2, 4 and 6 and none of them is knowable to a caller before `receiveHello`
+ * runs. Handing them to the transition is what lets an implementation evaluate
+ * both tests inside the same synchronous turn as the reads that produced them,
+ * which is exactly the atomicity §8.6 steps 2 and 6 require — rather than
+ * re-deriving the selection from a second decode of the same wrapper bytes.
+ */
+export interface E2eeNodeModeTransitionSelection {
+  readonly tier: E2eeTier;
+  /** §7.6 element 14's vocabulary; `e2eeTierNoisePattern(tier)`, computed once here. */
+  readonly pattern: E2eeNoisePattern;
+  readonly suite: E2eeSuiteId;
+  /** §8.6 step 6; IK only — NX carries no Branch A record and no snapshot. */
+  readonly admittedAuthority: E2eeAdmittedAuthoritySnapshot | undefined;
+}
+
 /** Row N3 (§4.4): the channel's transition into `e2ee`. */
 export type E2eeModeTransition =
   | { readonly kind: "entered" }
@@ -1724,8 +1744,14 @@ export interface E2eeNodeHandshakeOptions {
    * inside whatever serialization makes the step-2 and step-6 reads atomic with
    * respect to the §12.6 and §13.6 commits, and refuses when a withdrawal
    * landed in between. Omitted means "entered".
+   *
+   * It is handed the selection those steps fixed, because both withdrawal tests
+   * are evaluated against it and neither is answerable from state the caller
+   * holds before the hello is processed.
    */
-  readonly enterE2eeMode?: (() => E2eeModeTransition) | undefined;
+  readonly enterE2eeMode?:
+    | ((selection: E2eeNodeModeTransitionSelection) => E2eeModeTransition)
+    | undefined;
   /** TEST AND FIXTURE-GENERATOR USE ONLY (§16.1). */
   readonly testOnlyEphemeralSecretKey?: Uint8Array | undefined;
 }
@@ -2058,7 +2084,12 @@ export class E2eeNodeHandshake {
     }
 
     // ── Step 8: build and send `E2EEServerAccept` (row N3) ──────────────────
-    const transition = options.enterE2eeMode?.() ?? { kind: "entered" as const };
+    const transition = options.enterE2eeMode?.({
+      tier,
+      pattern: e2eeTierNoisePattern(tier),
+      suite,
+      admittedAuthority: snapshot,
+    }) ?? { kind: "entered" as const };
     if (transition.kind === "refused") {
       noise.destroy();
       return this.#fail(

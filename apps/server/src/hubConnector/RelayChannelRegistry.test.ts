@@ -708,4 +708,52 @@ describe("RelayChannelRegistry", () => {
     expect(sessions.get(channelA as string)!.closes).toBe(1);
     expect(fatalCalls()).toBe(1);
   });
+  it("never admits a message for less than the send queue then charges it", async () => {
+    const { registry, sendQueue, sessions, opens } = harness();
+    await registry.handle(openFrame(channelA));
+    sessions.get(channelA as string)!.chunkSupport = true;
+    const admit = opens[0]!.admit;
+    // Both shapes `prepareRelayMessage` produces: a fitting message that gets
+    // the capability prelude, and one split into several chunks.
+    for (const size of [1, 64, limits.maxDataChunkBytes - 32, limits.maxDataChunkBytes * 2 + 7]) {
+      sendQueue.flush();
+      const admission = admit(size);
+      if (admission === undefined) continue;
+      const reserved = sendQueue.reservedBytes;
+      const before = sendQueue.queuedBytes;
+      expect(admission.send(new Uint8Array(size)).accepted).toBe(true);
+      // The whole point of the reservation: what the queue actually charges is
+      // never more than what admission held for it, so an admitted message is
+      // never then refused.
+      expect(sendQueue.queuedBytes - before).toBeLessThanOrEqual(reserved);
+      expect(sendQueue.reservedBytes).toBe(0);
+    }
+  });
+
+  it("refuses admission when the connection budget is spoken for, and holds it until settled", async () => {
+    const { registry, sendQueue, opens, sent } = harness();
+    await registry.handle(openFrame(channelA));
+    const admit = opens[0]!.admit;
+    sendQueue.flush();
+    const dataCapacity = limits.maxQueuedBytes - limits.maxControlFrameBytes;
+    expect(sendQueue.reserveData(channelA, dataCapacity)).toBe(true);
+    // Nothing was built and nothing was sent: a refusal is a value.
+    expect(admit(16)).toBeUndefined();
+    const before = sent.length;
+    sendQueue.flush();
+    expect(sent).toHaveLength(before);
+    sendQueue.releaseReservation(channelA, dataCapacity);
+
+    // An abandoned admission gives the capacity back; a spent one does not have
+    // to be released twice.
+    const abandoned = admit(16)!;
+    expect(sendQueue.reservedBytes).toBeGreaterThan(0);
+    abandoned.release();
+    abandoned.release();
+    expect(sendQueue.reservedBytes).toBe(0);
+    const spent = admit(16)!;
+    expect(spent.send(new Uint8Array(16)).accepted).toBe(true);
+    spent.release();
+    expect(sendQueue.reservedBytes).toBe(0);
+  });
 });

@@ -9,6 +9,7 @@ import {
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 
 import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
+import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import type { HubRelaySocket, HubRelaySocketEventMap } from "./HubRelayTransport.ts";
 import {
   relayErrorKind,
@@ -108,6 +109,40 @@ function identity(): HubIdentityRuntimeShape {
     },
     remintE2eeContinuityId: async () => {
       throw new Error("unused");
+    },
+    e2eePolicy: () => NODE_E2EE_FAIL_CLOSED_POLICY,
+    readE2eeAdvertisement: async () => ({
+      kind: "unavailable" as const,
+      reason: "identity_unavailable" as const,
+    }),
+    recordE2eeFallback: async () => undefined,
+    stopE2eeInstrumentation: async () => undefined,
+    readE2eeFallbackState: () => ({
+      windowStartedAt: undefined,
+      classes: {
+        "peer-legacy": { occurrences: 0, ringOverflows: 0, lastOccurrenceAt: undefined },
+        "advertisement-unavailable": {
+          occurrences: 0,
+          ringOverflows: 0,
+          lastOccurrenceAt: undefined,
+        },
+      },
+      ring: [],
+    }),
+    registerE2eeChannel: () => ({
+      selectHandshake: () => ({
+        establish: () => ({ kind: "entered" as const, established: () => undefined }),
+      }),
+      lockLegacy: () => ({ kind: "entered" as const }),
+      release: () => undefined,
+    }),
+    e2eeClientAuthorization: {
+      lookupClientAuthorization: () => undefined,
+      reReadAuthorization: () => undefined,
+      registerInFlightHandshake: () => ({
+        establish: () => ({ kind: "refused" as const, reason: "authorization_withdrawn" as const }),
+        release: () => undefined,
+      }),
     },
   };
 }

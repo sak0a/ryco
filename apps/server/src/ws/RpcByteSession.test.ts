@@ -1,7 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Deferred, Effect, Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
-import { RELAY_CHUNK_CAPABILITY_PRELUDE } from "@ryco/shared/relayMessageChunks";
+import {
+  prepareRelayMessage,
+  RELAY_CHUNK_CAPABILITY_PRELUDE,
+} from "@ryco/shared/relayMessageChunks";
 
 import { makeRpcByteSession, RpcOutputRefusedError } from "./RpcByteSession.ts";
 
@@ -152,6 +155,39 @@ describe("RpcByteSession", () => {
         const response = new TextDecoder().decode(yield* Deferred.await(delivered));
         expect(response).toContain('"requestId":"2"');
         expect(refusals).toBe(1);
+      }),
+    ),
+  );
+
+  it.effect("reports an incomplete reassembly while a chunked message is in flight", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const output = yield* Deferred.make<Uint8Array>();
+        const session = yield* makeRpcByteSession(TestGroup, echoHandlers, (bytes) =>
+          Deferred.succeed(output, Uint8Array.from(bytes)).pipe(Effect.asVoid),
+        );
+        expect(session.incompleteReassembly()).toBe(false);
+
+        const prepared = prepareRelayMessage(request("1", "relay".repeat(400)), {
+          maxChunkBytes: 512,
+          maxMessageBytes: 512 * 1_024,
+          peerSupportsChunking: true,
+        });
+        if (prepared.kind !== "ready") throw new Error(prepared.reason);
+        expect(prepared.payloads.length).toBeGreaterThan(1);
+
+        expect(yield* session.receive(prepared.payloads[0]!)).toBe(true);
+        for (let turn = 0; turn < 8; turn += 1) yield* Effect.yieldNow;
+        // The channel-owning layer reads exactly this at teardown: a message the
+        // assembler holds and can no longer complete is truncation (§10.4), and
+        // it is knowable nowhere else.
+        expect(session.incompleteReassembly()).toBe(true);
+
+        for (const payload of prepared.payloads.slice(1)) {
+          expect(yield* session.receive(payload)).toBe(true);
+        }
+        yield* Deferred.await(output);
+        expect(session.incompleteReassembly()).toBe(false);
       }),
     ),
   );

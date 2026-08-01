@@ -23,6 +23,22 @@ export class RelaySendQueue {
   readonly #data = new Map<string, QueueEntry[]>();
   readonly #channelOrder: string[] = [];
   readonly #paused = new Set<string>();
+  /**
+   * Data capacity promised to a message whose bytes do not exist yet, per
+   * channel.
+   *
+   * A caller that must know a whole message will be admitted *before* it can
+   * produce the message — a payload-encryption layer that assigns a nonce is the
+   * case this exists for — cannot be served by trying the enqueue and reacting
+   * to a refusal: by then the bytes exist and the nonce is spent. So capacity is
+   * committed here first, counted against the same data budget every enqueue is
+   * counted against, and consumed by the enqueue that follows.
+   *
+   * Per channel so `removeChannel` can drop a reservation whose channel died
+   * before it was spent; the budget itself is connection-wide, as the queue is.
+   */
+  readonly #reserved = new Map<string, number>();
+  #reservedBytes = 0;
   #queuedBytes = 0;
   #roundRobinIndex = 0;
   #closed = false;
@@ -63,6 +79,42 @@ export class RelaySendQueue {
     return true;
   }
 
+  /** Capacity committed to messages that have not been built yet. */
+  get reservedBytes(): number {
+    return this.#reservedBytes;
+  }
+
+  /**
+   * Commit data capacity for one whole message before its bytes exist.
+   *
+   * The amount MUST be an upper bound on what the message's frames will
+   * actually reserve, because the guarantee this buys is one-directional: an
+   * admitted message must not then be refused. `releaseReservation` gives it
+   * back — the enqueue that spends it does so itself — and a reservation that is
+   * neither spent nor released holds capacity until its channel is removed,
+   * which is why every caller releases in a `finally`.
+   */
+  reserveData(channelId: RelayChannelId, bytes: number): boolean {
+    if (this.#closed) return false;
+    if (!Number.isSafeInteger(bytes) || bytes < 0) return false;
+    const dataCapacity = this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes;
+    if (this.ownedBytes + this.#reservedBytes + bytes > dataCapacity) return false;
+    const key = channelId as string;
+    this.#reserved.set(key, (this.#reserved.get(key) ?? 0) + bytes);
+    this.#reservedBytes += bytes;
+    return true;
+  }
+
+  /** Give back capacity `reserveData` committed, spent or abandoned. */
+  releaseReservation(channelId: RelayChannelId, bytes: number): void {
+    const key = channelId as string;
+    const held = this.#reserved.get(key) ?? 0;
+    const released = Math.min(held, Math.max(0, bytes));
+    if (released === held) this.#reserved.delete(key);
+    else this.#reserved.set(key, held - released);
+    this.#reservedBytes -= released;
+  }
+
   enqueueData(frame: RelayDataFrame): boolean {
     return this.enqueueDataBatch([frame]);
   }
@@ -76,15 +128,36 @@ export class RelaySendQueue {
    * reportable rather than necessarily fatal: a caller that treats backpressure
    * as recoverable needs the guarantee that a refused message produced no wire
    * record at all.
+   *
+   * `admittedBytes` names a `reserveData` reservation this message is spending.
+   * It is measured against the rest of the pool rather than against itself, and
+   * because a reservation is an upper bound on what its message reserves, the
+   * check below cannot then refuse — which is the whole point of reserving.
    */
-  enqueueDataBatch(frames: readonly RelayDataFrame[]): boolean {
+  enqueueDataBatch(
+    frames: readonly RelayDataFrame[],
+    options: { readonly admittedBytes?: number } = {},
+  ): boolean {
     if (this.#closed) return false;
     const entries = frames.map((frame) => this.#encode(frame));
     const dataCapacity = this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes;
     const reserved = entries.reduce((total, entry) => total + entry.reservedBytes, 0);
-    if (this.ownedBytes + reserved > dataCapacity) {
+    const reservationChannel = frames[0]?.channelId;
+    // Clamped to what this channel actually holds, so a caller naming more than
+    // it reserved cannot spend another channel's capacity.
+    const admitted =
+      reservationChannel === undefined
+        ? 0
+        : Math.min(
+            this.#reserved.get(reservationChannel as string) ?? 0,
+            Math.max(0, options.admittedBytes ?? 0),
+          );
+    if (this.ownedBytes + (this.#reservedBytes - admitted) + reserved > dataCapacity) {
       for (const entry of entries) entry.bytes.fill(0);
       return false;
+    }
+    if (admitted > 0 && reservationChannel !== undefined) {
+      this.releaseReservation(reservationChannel, admitted);
     }
     for (const [index, entry] of entries.entries()) {
       const channelId = frames[index]!.channelId as string;
@@ -143,6 +216,9 @@ export class RelaySendQueue {
 
   removeChannel(channelId: RelayChannelId): void {
     const key = channelId as string;
+    // An unspent reservation dies with its channel; leaving it would hold data
+    // capacity for a message nothing can ever enqueue.
+    this.releaseReservation(channelId, this.#reserved.get(key) ?? 0);
     const queue = this.#data.get(key);
     if (queue !== undefined) {
       for (const entry of queue) {
@@ -190,6 +266,8 @@ export class RelaySendQueue {
     this.#data.clear();
     this.#channelOrder.length = 0;
     this.#paused.clear();
+    this.#reserved.clear();
+    this.#reservedBytes = 0;
     this.#queuedBytes = 0;
     this.#roundRobinIndex = 0;
   }

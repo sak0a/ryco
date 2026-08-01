@@ -3,7 +3,11 @@ import { WsRpcGroup } from "@ryco/contracts";
 
 import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
-import { makeRpcByteSession, RpcOutputRefusedError } from "../ws/RpcByteSession.ts";
+import {
+  makeRpcByteSession,
+  RpcInboundRejectedError,
+  RpcOutputRefusedError,
+} from "../ws/RpcByteSession.ts";
 import { relayRpcPrincipal } from "../ws/RpcPrincipal.ts";
 import { makeServerWsRpcLayer } from "../ws.ts";
 import { HubConnector } from "./HubConnector.ts";
@@ -13,8 +17,20 @@ import {
   makeHubIdentityRuntime,
 } from "./HubIdentityRuntime.ts";
 import { makeLocalHubIdentityStateStore } from "../hubIdentity/LocalHubIdentityState.ts";
+import type { NodeE2eeAdvertisementResult } from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
+import type { NodeE2eeFallbackState } from "../hubIdentity/NodeE2eeFallbackCounter.ts";
+import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import { makeHubRelayTransport } from "./HubRelayTransport.ts";
-import type { RelayChannelSessionFactory, RelayRpcChannelSession } from "./RelayChannelRegistry.ts";
+import { makeNodeE2eeChannelAdvertiser } from "./NodeE2eeChannelAdvertiser.ts";
+import {
+  makeNodeE2eeChannelSession,
+  makeNodeE2eeHandshakeRateLimiter,
+} from "./NodeE2eeChannelSession.ts";
+import {
+  makeNodeE2eeRelayChannelSession,
+  nodeE2eeChannelPlaintextCeiling,
+} from "./NodeE2eeRelayChannel.ts";
+import type { RelayChannelSessionFactory } from "./RelayChannelRegistry.ts";
 
 export interface HubConnectorServiceShape {
   readonly status: HubConnector["status"];
@@ -33,6 +49,65 @@ export class HubConnectorService extends Context.Service<
 >()("ryco/hubConnector/HubConnectorService") {}
 
 /**
+ * The E2EE surface of a runtime that can never serve a channel.
+ *
+ * Both stubs below are used in configurations where no relay channel is
+ * reachable at all — the connector is switched off, or it is permanently
+ * degraded — so nothing here decides a live channel's disposition. It is still
+ * §12.4's fail-closed answer rather than a permissive one: a runtime that cannot
+ * read its durable policy does not know what it promised, so it promises the
+ * most and advertises nothing (§5.5 U2, §5.7).
+ */
+const offlineE2eeSurface = {
+  e2eePolicy: () => NODE_E2EE_FAIL_CLOSED_POLICY,
+  readE2eeAdvertisement: async (): Promise<NodeE2eeAdvertisementResult> => ({
+    kind: "unavailable",
+    reason: "identity_unavailable",
+  }),
+  recordE2eeFallback: async () => undefined,
+  stopE2eeInstrumentation: async () => undefined,
+  readE2eeFallbackState: (): NodeE2eeFallbackState => ({
+    windowStartedAt: undefined,
+    classes: {
+      "peer-legacy": { occurrences: 0, ringOverflows: 0, lastOccurrenceAt: undefined },
+      "advertisement-unavailable": {
+        occurrences: 0,
+        ringOverflows: 0,
+        lastOccurrenceAt: undefined,
+      },
+    },
+    ring: [],
+  }),
+  // A channel that cannot exist needs no sweep registration and no Branch A
+  // read. These are the shapes those seams have, answering "nothing is
+  // registered" and "no record exists" — which is also §8.6 step 6's refusal.
+  registerE2eeChannel: () => ({
+    selectHandshake: () => ({
+      establish: () => ({ kind: "entered" as const, established: () => undefined }),
+    }),
+    lockLegacy: () => ({ kind: "entered" as const }),
+    release: () => undefined,
+  }),
+  e2eeClientAuthorization: {
+    lookupClientAuthorization: () => undefined,
+    reReadAuthorization: () => undefined,
+    registerInFlightHandshake: () => ({
+      establish: () => ({ kind: "refused" as const, reason: "authorization_withdrawn" as const }),
+      release: () => undefined,
+    }),
+  },
+} as const satisfies Pick<
+  HubIdentityRuntimeShape,
+  | "e2eePolicy"
+  | "readE2eeAdvertisement"
+  | "recordE2eeFallback"
+  | "readE2eeFallbackState"
+  | "stopE2eeInstrumentation"
+  | "registerE2eeChannel"
+  | "e2eeClientAuthorization"
+>;
+
+/**
  * The runtime a node gets when key custody could not be constructed at all.
  *
  * Every method throws for the lifetime of the process, so `resume()` provably
@@ -45,6 +120,7 @@ const unavailableIdentity = (): HubIdentityRuntimeShape => {
     throw new HubIdentityRuntimeError("identity_store_unavailable");
   };
   return {
+    ...offlineE2eeSurface,
     backend: "permissioned-file",
     readState: unavailable,
     readPendingEnrollment: unavailable,
@@ -87,6 +163,7 @@ const readOnlyIdentity = (options: {
     throw new HubIdentityRuntimeError("identity_unavailable");
   };
   return {
+    ...offlineE2eeSurface,
     backend: "permissioned-file",
     readState: async () => {
       const store = await makeLocalHubIdentityStateStore(options.statePath);
@@ -143,6 +220,14 @@ export const HubConnectorLive = Layer.effect(
               statePath: config.hubIdentityStatePath,
               fileSecretRoot: `${config.secretsDir}/hub-node`,
               allowFileFallback: config.hubConnector?.allowFileSecretStore ?? false,
+              // §12.4: an option no configuration source set stays unset here,
+              // where it means "leave the committed value alone" — never
+              // "false". The proposal is the operator's statement for this run,
+              // and a narrowing one runs the full §12.6 procedure.
+              e2eePolicy: {
+                requireE2EE: config.hubE2eePolicy?.requireE2EE,
+                requireApprovedClientE2EE: config.hubE2eePolicy?.requireApprovedClientE2EE,
+              },
             }),
           catch: () => new HubIdentityRuntimeError("identity_unavailable"),
         }).pipe(Effect.orElseSucceed(unavailableIdentity))
@@ -152,8 +237,112 @@ export const HubConnectorLive = Layer.effect(
           allowFileFallback: config.hubConnector?.allowFileSecretStore ?? false,
         });
 
+    /**
+     * The §5.2 advertiser for this connector's origin.
+     *
+     * Built even when the connector is disabled or its origin is unset: it is
+     * only ever driven from a live relay connection, which neither configuration
+     * can reach, and giving it a placeholder origin keeps the factory below one
+     * shape rather than two. The statement builder refuses a non-origin at its
+     * own boundary (§7.1), so the placeholder cannot become an advertisement.
+     */
+    const advertiser = makeNodeE2eeChannelAdvertiser({
+      hubOrigin: config.hubConnector?.origin ?? "",
+      readAdvertisement: (hubOrigin) => identity.readE2eeAdvertisement(hubOrigin),
+      policy: () => identity.e2eePolicy(),
+      recordFallback: (occurrence) => identity.recordE2eeFallback(occurrence),
+      // Node-local and never wire-visible (§5.5, §11.2). It names the condition
+      // and, for U1, both figures §5.5 requires; it carries no account, channel,
+      // session, key, or payload data, and no statement bytes.
+      onDiagnostic: (diagnostic) => {
+        void runPromise(Effect.logWarning("relay E2EE advertisement unavailable", diagnostic));
+      },
+    });
+
+    /**
+     * §15 / §8.6 step 1: the pre-authentication handshake-attempt bucket, per
+     * Hub origin and therefore per connector rather than per channel.
+     */
+    const handshakeRateLimiter = makeNodeE2eeHandshakeRateLimiter();
+
+    /**
+     * §4.5's `plaintextCeiling`, taken once from the connection's asserted
+     * limits through the single derivation `e2eeChannelSizeBudget` owns.
+     *
+     * A property of the connection and not of a channel, which is exactly what
+     * `connectionReady` is for. `undefined` until a `ready` frame settles the
+     * limits, which the registry makes unreachable — it calls `connectionReady`
+     * as it is constructed, and a channel can only be opened through a
+     * constructed registry.
+     */
+    let plaintextCeiling: number | undefined;
+
     const channelFactory: RelayChannelSessionFactory = {
-      open: async ({ channelId, effectiveRole, send }) => {
+      connectionReady: ({ limits }) => {
+        plaintextCeiling = nodeE2eeChannelPlaintextCeiling(limits);
+        advertiser.connectionReady({ maxDataChunkBytes: limits.maxDataChunkBytes });
+      },
+      open: async ({
+        channelId,
+        capability,
+        effectiveRole,
+        protocolMajor,
+        protocolMinor,
+        connection,
+        send,
+        admit,
+        close,
+      }) => {
+        // Ahead of the announcement hook, deliberately: this reads key custody
+        // and may sign, and the hook may do neither (§5.4,
+        // `RelayRpcChannelSession.onAccepted`). By the time `onAccepted` runs,
+        // the carrier is bytes in hand and the announcement is one `send`.
+        const announcement = await advertiser.openChannel();
+        const connectionIdentity = connection();
+        const e2ee = makeNodeE2eeChannelSession({
+          // §8.3: the node's own channel state, never a value a peer supplies.
+          // The Hub origin is the one this connector is configured for and the
+          // one the advertised statement was built for; a channel that opened
+          // before the connection authenticated has no node id yet, and the
+          // handshake's own context reconstruction refuses such a channel rather
+          // than inventing one.
+          channel: {
+            hubOrigin: connectionIdentity?.hubOrigin ?? config.hubConnector?.origin ?? "",
+            channelId,
+            relayProtocolMajor: protocolMajor,
+            relayProtocolMinor: protocolMinor,
+            channelOpenCapability: capability,
+            channelOpenEffectiveRole: effectiveRole,
+          },
+          announcement,
+          plaintextCeiling: plaintextCeiling ?? 0,
+          send,
+          admit,
+          close,
+          policy: () => identity.e2eePolicy(),
+          registerPolicyChannel: () => identity.registerE2eeChannel(),
+          authorization: identity.e2eeClientAuthorization,
+          withPrekeySecret: (prekeyId, use) =>
+            identity.withE2eePrekeySecret(
+              connectionIdentity?.hubOrigin ?? config.hubConnector?.origin ?? "",
+              prekeyId,
+              use,
+            ),
+          rateLimiter: handshakeRateLimiter,
+          recordPeerLegacyFallback: () => {
+            void identity
+              .recordE2eeFallback({
+                hubOrigin: connectionIdentity?.hubOrigin ?? config.hubConnector?.origin ?? "",
+                reason: "peer-legacy",
+              })
+              .catch(() => undefined);
+          },
+          // Node-local and never wire-visible (§11.4): a §11 row and a §10.4
+          // verdict, both computed here, and no payload, key, or account detail.
+          onDiagnostic: (value) => {
+            void runPromise(Effect.logDebug("relay E2EE channel terminated", value));
+          },
+        });
         const scope = await runPromise(Scope.make("sequential"));
         try {
           const session = await runPromise(
@@ -162,21 +351,49 @@ export const HubConnectorLive = Layer.effect(
               makeServerWsRpcLayer(relayRpcPrincipal(effectiveRole, channelId)),
               // A refused response is reported, not thrown: the registry already
               // closes the channel naming the cause, and a defect here would
-              // instead kill the RPC server fiber and every request on it.
+              // instead kill the RPC server fiber and every request on it. On an
+              // `e2ee` channel this is also the §4.2 send pipeline — the ceiling,
+              // the §9.3 admission, the pair, the AEAD, and the envelope.
               (bytes) =>
-                Effect.suspend(() =>
-                  send(bytes).accepted ? Effect.void : Effect.fail(new RpcOutputRefusedError()),
+                Effect.promise(() => e2ee.emit(bytes)).pipe(
+                  Effect.flatMap((accepted) =>
+                    accepted ? Effect.void : Effect.fail(new RpcOutputRefusedError()),
+                  ),
                 ),
-              { queueCapacity: 64 },
+              {
+                queueCapacity: 64,
+                // §4.3: discrimination on the reassembled, prelude-stripped
+                // payload, and the only path to the RPC parser.
+                interceptor: (message) =>
+                  Effect.promise(() => e2ee.intercept(message)).pipe(
+                    Effect.flatMap((disposition) =>
+                      disposition.kind === "rejected"
+                        ? Effect.fail(new RpcInboundRejectedError())
+                        : Effect.succeed(disposition),
+                    ),
+                  ),
+                // The channel-fatal verdict has already emitted its §11 record
+                // and asked for the close by the time this runs; nothing further
+                // is owed here.
+                onInboundRejected: () => undefined,
+              },
             ).pipe(Effect.provideService(Scope.Scope, scope)),
           );
-          return {
-            receive: (bytes) => runPromise(session.receive(bytes)),
-            queuedBytes: () => runPromise(session.queuedBytes),
-            supportsChunkedMessages: session.supportsChunkedMessages,
-            close: () => runPromise(Scope.close(scope, Exit.void)),
-          } satisfies RelayRpcChannelSession;
+          // The lifecycle — §10's close, §10.4's truncation input, and the §5.4
+          // announcement — belongs to the binding, so the channel's only signal
+          // that it is ending cannot silently bypass the authenticated close.
+          return makeNodeE2eeRelayChannelSession({
+            e2ee,
+            rpc: {
+              receive: (bytes) => runPromise(session.receive(bytes)),
+              queuedBytes: () => runPromise(session.queuedBytes),
+              supportsChunkedMessages: session.supportsChunkedMessages,
+              incompleteReassembly: session.incompleteReassembly,
+            },
+            release: () => runPromise(Scope.close(scope, Exit.void)),
+          });
         } catch (error: unknown) {
+          e2ee.dispose();
           await runPromise(Scope.close(scope, Exit.void));
           throw error;
         }
@@ -210,7 +427,14 @@ export const HubConnectorLive = Layer.effect(
         void connector.start();
         return connector;
       }),
-      (active) => Effect.promise(() => active.stop()),
+      // The connector first, then §12.5's clean-shutdown flush: an occurrence
+      // recorded by a channel the teardown closes must be in the commit, not
+      // behind it.
+      (active) =>
+        Effect.promise(async () => {
+          await active.stop();
+          await identity.stopE2eeInstrumentation();
+        }),
     );
     return {
       status: () => connector.status(),

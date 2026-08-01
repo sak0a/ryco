@@ -14,7 +14,11 @@ import {
   RELAY_PROTOCOL_MAJOR,
   RELAY_PROTOCOL_MINOR,
 } from "@ryco/contracts/relay";
-import { prepareRelayMessage } from "@ryco/shared/relayMessageChunks";
+import { RELAY_CHUNK_HEADER_BYTES } from "@ryco/contracts/relay";
+import {
+  prepareRelayMessage,
+  RELAY_CHUNK_CAPABILITY_PRELUDE,
+} from "@ryco/shared/relayMessageChunks";
 
 import { defaultRelayScheduler, type RelaySessionScheduler } from "./RelayConnectionSession.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
@@ -105,6 +109,93 @@ export type RelayChannelSendHandle = (
   options?: RelayChannelSendOptions,
 ) => RelayChannelSendResult;
 
+/**
+ * Transmission admission for one whole message, obtained *before* the message
+ * exists.
+ *
+ * This is the other half of the note on `RelayChannelSendHandle`. A layer that
+ * consumes a nonce, a sequence number, or any other one-shot value to produce
+ * its bytes cannot learn from a refusal after the fact: rolling the value back
+ * and reusing it with different plaintext is exactly the failure the note
+ * describes. So capacity is committed here first, against the same connection
+ * budget every enqueue is measured against, and the permission to send *is* this
+ * object — there is no way to obtain admission for one message and spend it on
+ * another, and no way to spend it twice.
+ *
+ * Single use: the first of `send` and `release` settles it and the other becomes
+ * a no-op. A caller that obtains one and neither sends nor releases holds
+ * capacity until its channel closes, so every caller releases in a `finally`.
+ */
+export interface RelayChannelAdmission {
+  /** Send the message this admission was obtained for. */
+  readonly send: (bytes: Uint8Array, options?: RelayChannelSendOptions) => RelayChannelSendResult;
+  /** Give the capacity back unsent. Idempotent, and a no-op after `send`. */
+  readonly release: () => void;
+}
+
+/**
+ * Ask whether a message of this many bytes would be admitted, and hold the
+ * capacity if it would.
+ *
+ * `undefined` is a refusal, and it is ordinary backpressure: nothing was
+ * committed, nothing was sent, and the channel is untouched. It also covers the
+ * two permanent refusals `send` reports — a message the channel cannot carry at
+ * all, and one needing chunking from a peer that has not advertised support —
+ * because a caller that must decide before it builds the bytes has the same
+ * answer to give in all three cases and no bytes to attach a reason to.
+ */
+export type RelayChannelAdmitHandle = (messageBytes: number) => RelayChannelAdmission | undefined;
+
+/**
+ * A ceiling on what one data frame costs the send queue beyond its payload.
+ *
+ * A relay data frame is a small canonical CBOR map — the type, both protocol
+ * numbers, the channel id, the sequence, and the payload's own byte-string
+ * header — and the send queue charges a fixed per-entry overhead on top of the
+ * encoded frame. Admission must never under-count: under-counting would admit a
+ * message the enqueue then refuses, which is the one outcome a reservation
+ * exists to make impossible. Over-counting merely refuses a send a few bytes
+ * early, which is backpressure the caller already handles. The value is
+ * therefore deliberately generous rather than exact, and
+ * `RelayChannelRegistry.test.ts` holds it to the real encoded cost.
+ */
+const DATA_FRAME_ADMISSION_OVERHEAD_BYTES = 256;
+
+/**
+ * The payload sizes `prepareRelayMessage` would produce for a message of this
+ * length, or `undefined` when it would refuse one.
+ *
+ * Arithmetic rather than a dry run, because admission runs before the bytes
+ * exist and allocating a message-sized buffer to measure it would defeat the
+ * purpose. It mirrors `prepareRelayMessage` exactly: a fitting message carries
+ * the capability prelude when there is headroom for it, an oversized one is
+ * split into `maxChunkBytes` chunks with a header each, and the two refusals are
+ * the same two.
+ */
+function plannedRelayPayloadSizes(
+  messageBytes: number,
+  options: {
+    readonly maxChunkBytes: number;
+    readonly maxMessageBytes: number;
+    readonly peerSupportsChunking: boolean;
+  },
+): readonly number[] | undefined {
+  if (!Number.isSafeInteger(messageBytes) || messageBytes < 0) return undefined;
+  if (messageBytes > options.maxMessageBytes) return undefined;
+  if (messageBytes <= options.maxChunkBytes) {
+    const advertised = messageBytes + RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength;
+    return [advertised <= options.maxChunkBytes ? advertised : messageBytes];
+  }
+  if (!options.peerSupportsChunking) return undefined;
+  const capacity = options.maxChunkBytes - RELAY_CHUNK_HEADER_BYTES;
+  if (capacity <= 0) return undefined;
+  const sizes: number[] = [];
+  for (let offset = 0; offset < messageBytes; offset += capacity) {
+    sizes.push(RELAY_CHUNK_HEADER_BYTES + Math.min(capacity, messageBytes - offset));
+  }
+  return sizes;
+}
+
 /** Connection-scoped identity a channel session may need to bind to. */
 export interface RelayConnectionIdentity {
   readonly hubOrigin: string;
@@ -161,6 +252,23 @@ export interface RelayRpcChannelSession {
 }
 
 export interface RelayChannelSessionFactory {
+  /**
+   * Called once per relay connection, as its registry is constructed.
+   *
+   * This is the earliest point at which the connection's asserted limits are
+   * known — the `ready` frame settled them — and it is strictly before any
+   * channel on the connection can be opened, because a channel is only ever
+   * opened through a constructed registry. A protocol whose serviceability is a
+   * property of the connection rather than of a channel evaluates it here, once,
+   * and a protocol with expensive per-connection preparation starts it here so
+   * the first channel does not pay for it.
+   *
+   * The limits are the ones the Hub asserted and both endpoints adopt verbatim;
+   * neither endpoint proposes or vetoes them. Synchronous and best effort: it
+   * returns nothing, and a registry that has been constructed is usable whether
+   * or not the factory did anything with them.
+   */
+  readonly connectionReady?: (input: { readonly limits: RelayLimits }) => void;
   readonly open: (input: {
     readonly channelId: RelayChannelId;
     /** The capability the peer named on `channel.open`. */
@@ -181,14 +289,30 @@ export interface RelayChannelSessionFactory {
     readonly connection: () => RelayConnectionIdentity | undefined;
     readonly send: RelayChannelSendHandle;
     /**
+     * Obtain transmission admission for a message before building it.
+     *
+     * The seam exists for one reason and it is stated on `RelayChannelAdmission`:
+     * a sender that consumes a one-shot value to produce its bytes must know the
+     * whole message is admitted before it consumes anything.
+     */
+    readonly admit: RelayChannelAdmitHandle;
+    /**
      * Close this channel from the session side, naming the reason.
      *
      * Deferred to a microtask, like every other close the send path schedules,
      * so a session may call it from inside `receive` without re-entering the
      * registry mid-frame. Anything the session enqueued before calling this is
      * drained to the socket ahead of the `channel.close` — see `closeChannel`.
+     *
+     * With no reason and no `notifyPeer` the channel is torn down locally and
+     * the peer is told nothing. A protocol that ends a channel cleanly wants the
+     * other shape — a `channel.close` carrying no reason — and asks for it with
+     * `notifyPeer`.
      */
-    readonly close: (reason?: RelayCloseReason) => void;
+    readonly close: (
+      reason?: RelayCloseReason,
+      options?: { readonly notifyPeer?: boolean },
+    ) => void;
   }) => Promise<RelayRpcChannelSession>;
 }
 
@@ -260,6 +384,12 @@ export class RelayChannelRegistry {
     this.#onOutboundReady = options.onOutboundReady ?? (() => undefined);
     this.#connection = options.connection ?? (() => undefined);
     this.#scheduler = options.scheduler ?? defaultRelayScheduler;
+    // Last, and inside the constructor rather than on the first `channel.open`:
+    // "before any channel on this connection is accepted" is the guarantee the
+    // hook exists to give, and it is only a guarantee if nothing can reach the
+    // registry first. A throw here is the factory's own defect and belongs to
+    // the caller constructing this registry, not to a channel.
+    this.#factory.connectionReady?.({ limits: this.#limits });
   }
 
   get size(): number {
@@ -363,11 +493,18 @@ export class RelayChannelRegistry {
    * needs that record to reach the socket ahead of the `channel.close`. The two
    * paths that pass false are the ones where a drain has no addressee — a close
    * the peer initiated, and connection teardown (`closeAll`).
+   *
+   * `notifyPeer` defaults to "whenever a reason was named", which is the
+   * historical behavior and the only one anything needed until a protocol
+   * arrived that ends a channel *cleanly*: the relay frame carries the reason as
+   * an optional field, so an orderly close is a `channel.close` with no reason,
+   * and it is a different thing from tearing a channel down locally and telling
+   * the peer nothing. Passing it explicitly is how a caller asks for the first.
    */
   async closeChannel(
     channelId: RelayChannelId,
     reason?: RelayCloseReason,
-    options: { readonly flushQueued?: boolean } = {},
+    options: { readonly flushQueued?: boolean; readonly notifyPeer?: boolean } = {},
   ) {
     const key = channelId as string;
     const entry = this.#channels.get(key);
@@ -392,12 +529,12 @@ export class RelayChannelRegistry {
     this.#sendQueue.removeChannel(channelId);
     let controlError: RelayChannelQueueError | undefined;
     try {
-      if (reason !== undefined) {
+      if (options.notifyPeer ?? reason !== undefined) {
         this.#enqueueControl({
           type: "channel.close",
           ...version,
           channelId,
-          reason,
+          ...(reason === undefined ? {} : { reason }),
         });
       }
     } catch (error: unknown) {
@@ -549,7 +686,19 @@ export class RelayChannelRegistry {
     try {
       const role = frame.effectiveRole;
       let outputSequence = 0;
-      const send: RelayChannelSendHandle = (bytes, options = {}) => {
+      const messageLimits = () => ({
+        maxChunkBytes: this.#limits.maxDataChunkBytes,
+        maxMessageBytes: Math.min(
+          RELAY_MAX_RPC_MESSAGE_BYTES,
+          this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes,
+        ),
+        peerSupportsChunking: entry?.session.supportsChunkedMessages() ?? false,
+      });
+      const emit = (
+        bytes: Uint8Array,
+        options: RelayChannelSendOptions,
+        admittedBytes: number,
+      ): RelayChannelSendResult => {
         if (entry === undefined || entry.closed) {
           return this.#refuse(frame.channelId, "channel_closed", options);
         }
@@ -561,14 +710,7 @@ export class RelayChannelRegistry {
         // here, so they cannot interleave with another message, and they go in
         // together or not at all so a refusal never leaves a truncated message
         // the peer can never complete.
-        const prepared = prepareRelayMessage(bytes, {
-          maxChunkBytes: this.#limits.maxDataChunkBytes,
-          maxMessageBytes: Math.min(
-            RELAY_MAX_RPC_MESSAGE_BYTES,
-            this.#limits.maxQueuedBytes - this.#limits.maxControlFrameBytes,
-          ),
-          peerSupportsChunking: entry.session.supportsChunkedMessages(),
-        });
+        const prepared = prepareRelayMessage(bytes, messageLimits());
         // `prepareRelayMessage`'s two error reasons are carried through rather
         // than collapsed: they are different failures with different remedies.
         if (prepared.kind === "error") {
@@ -582,12 +724,38 @@ export class RelayChannelRegistry {
             sequence: (outputSequence + index) as RelayDataFrame["sequence"],
             payload: Uint8Array.from(payload),
           })),
+          { admittedBytes },
         );
         if (!accepted) return this.#refuse(frame.channelId, "queue_full", options);
         outputSequence += prepared.payloads.length;
         entry.outboundSequence = outputSequence;
         this.#onOutboundReady();
         return ACCEPTED;
+      };
+      const send: RelayChannelSendHandle = (bytes, options = {}) => emit(bytes, options, 0);
+      const admit: RelayChannelAdmitHandle = (messageBytes) => {
+        if (entry === undefined || entry.closed) return undefined;
+        if (outputSequence > 0xffff_ffff) return undefined;
+        const sizes = plannedRelayPayloadSizes(messageBytes, messageLimits());
+        if (sizes === undefined) return undefined;
+        const reservedBytes = sizes.reduce(
+          (total, size) => total + size + DATA_FRAME_ADMISSION_OVERHEAD_BYTES,
+          0,
+        );
+        if (!this.#sendQueue.reserveData(frame.channelId, reservedBytes)) return undefined;
+        let settled = false;
+        return {
+          send: (bytes, options = {}) => {
+            if (settled) return emit(bytes, options, 0);
+            settled = true;
+            return emit(bytes, options, reservedBytes);
+          },
+          release: () => {
+            if (settled) return;
+            settled = true;
+            this.#sendQueue.releaseReservation(frame.channelId, reservedBytes);
+          },
+        };
       };
       const session = await this.#factory.open({
         channelId: frame.channelId,
@@ -596,9 +764,10 @@ export class RelayChannelRegistry {
         ...version,
         connection: this.#connection,
         send,
-        close: (reason) => {
+        admit,
+        close: (reason, closeOptions = {}) => {
           queueMicrotask(() => {
-            void this.closeChannel(frame.channelId, reason).catch(this.#onFatal);
+            void this.closeChannel(frame.channelId, reason, closeOptions).catch(this.#onFatal);
           });
         },
       });

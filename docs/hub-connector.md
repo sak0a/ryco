@@ -71,6 +71,76 @@ generation, and closes every live channel the narrowed policy no longer admits, 
 it closed in each class and how many in-flight handshakes it aborted. Widening a policy takes
 effect on channels admitted afterwards and never closes an open one.
 
+### Capability advertisement
+
+An E2EE-capable node tells clients so by advertising, never by being probed. On every relay channel
+it accepts, the node emits one signed capability statement — its identity, agreement prekey
+certificate, identity-continuity chain, suite registry, admission policy, policy generation, and a
+bounded validity interval — as the **first** node-to-client payload, at relay data sequence 0,
+through the same ordered send path as every other message. The carrier is a single reserved-tag
+JSON object that existing clients demonstrably ignore, so a client that predates this protocol is
+unaffected by it. Normative definition: `docs/relay-e2ee-protocol.md` §5.2–§5.5.
+
+The statement is built and signed ahead of the channel, and it is rebuilt whenever anything it
+carries changes — a policy change, a prekey rotation, an identity rotation, or the end of its
+validity window. There is no way to advertise a stale one.
+
+A node can fail to have an advertisement for a channel in exactly two ways, and neither is silent:
+
+- **Undersized connection** — the relay asserted a `maxDataChunkBytes` too small to carry any
+  conforming carrier. This is decided once per connection, from a value the relay operator chooses
+  and neither endpoint can veto.
+- **No conforming statement** — the node's own self-check failed: an over-long canonical Hub origin,
+  a continuity chain past its bound, a refused signing call, or a continuity id the startup
+  cross-check could not resolve.
+
+Under an effective `--hub-require-e2ee` either condition is fatal: the affected channels are closed
+with the ordinary `channel_rejected` reason, indistinguishable on the wire from every other
+pre-key rejection, and the node logs an operator diagnostic naming the condition — and, for an
+undersized connection, both the asserted limit and the minimum this protocol needs. Otherwise the
+node suppresses the advertisement, serves the channel as an ordinary legacy channel, and records
+one occurrence in the **advertisement-unavailable** class of its fallback counters. That class is
+counted and displayed separately from genuine legacy peers on purpose: "this node could not
+advertise" is a fact about the node, and letting a relay-asserted chunk limit inflate the
+legacy-peer count would let the relay operator hold the rollout open indefinitely.
+
+The node keeps three further state files beside its identity state for this: the durable admission
+policy record, the bounded fallback counters, and the approved-client records the encrypted
+handshake checks. None of them holds channel, session, key, or payload data, and the client
+records hold key fingerprints rather than keys. The policy record is the operator's own and
+survives leaving a Hub; the client records are Hub-scoped and are erased with the enrollment.
+
+### What a channel does after the advertisement
+
+Every accepted channel runs one receiver mode machine, created at `channel.accept` and destroyed
+when the channel closes. It starts in `negotiating` and reaches exactly one of two settled modes,
+one way only: `e2ee` through a complete authenticated handshake, or `legacy` when fallback policy
+accepts the peer's first plaintext message. There is no mid-channel upgrade and no downgrade.
+Normative definition: `docs/relay-e2ee-protocol.md` §4.3–§4.4, §8–§11.
+
+Every inbound payload is classified **after** relay chunk reassembly and prelude stripping, never
+on raw wire bytes, and what the class is allowed to be depends on the mode. The consequence worth
+stating plainly is that on an `e2ee` channel the only route to the RPC parser is a successfully
+authenticated encrypted record: a plaintext message arriving after encryption is established ends
+the channel rather than being served. An unknown first byte — and an empty payload, which has none
+— is fatal in every mode and is never treated as a harmless no-op.
+
+Outbound, an RPC response on an `e2ee` channel is encrypted before it reaches the relay's chunking
+layer, and **transmission admission for the whole record is obtained before the record's nonce is
+assigned**. That ordering is not an optimization: a sender that encrypted first and rolled its
+counter back when the send queue refused would reuse a nonce with different plaintext. A refused
+send therefore consumes nothing, emits nothing, and leaves the channel usable — ordinary
+backpressure, exactly as on a legacy channel.
+
+Failures are deliberately uniform on the wire. Before session keys exist, every fatal condition
+produces the same fixed-size rejection record and the same `channel_rejected` close reason,
+whatever the cause was — an unknown client key, a signature failure, a policy refusal, or an owner
+revocation landing mid-handshake are indistinguishable to whoever is on the other end. After keys
+exist, it is one length-uniform encrypted error record and the same close reason. The node logs
+which rule fired; the wire does not carry it. An orderly close is different from both: the two
+ends exchange authenticated close records first, and only then does the channel close with no
+reason at all.
+
 The desktop app deliberately owns these four values for its bundled server. It persists them in
 desktop settings, removes matching `RYCO_HUB_*` variables from the backend child environment, and
 passes the values over the private bootstrap channel. This keeps the visible desktop controls
