@@ -97,7 +97,6 @@ function AboutVersionTitle() {
 }
 
 const REPOSITORY_URL = "https://github.com/sak0a/ryco";
-const CREATOR_URL = "https://github.com/sak0a";
 
 const ABOUT_LOGO_BY_STAGE = {
   Beta: aboutLogoBeta,
@@ -126,16 +125,6 @@ function AboutBrandingHeader() {
       <img src={logoSrc} alt="" aria-hidden="true" className="size-14 rounded-xl shadow-sm" />
       <h3 className="text-base font-semibold tracking-tight text-foreground">{APP_BASE_NAME}</h3>
       <div className="space-y-0.5 text-[11px] text-muted-foreground">
-        <p>
-          Created by{" "}
-          <button
-            type="button"
-            onClick={() => openExternalLink(CREATOR_URL)}
-            className="font-medium text-foreground/80 underline-offset-2 hover:text-foreground hover:underline"
-          >
-            Laurin (saka)
-          </button>
-        </p>
         <p>
           <button
             type="button"
