@@ -4,6 +4,9 @@ import {
   E2EE_AAD_BYTES,
   E2EE_AEAD_NONCE_BYTES,
   E2EE_AEAD_TAG_BYTES,
+  E2EE_CAPABILITY_CARRIER_MAX_BYTES,
+  E2EE_CAPABILITY_CARRIER_TAG,
+  E2EE_CAPABILITY_STATEMENT_MAX_BYTES,
   E2EE_CLIENT_HELLO_MAX_BYTES,
   E2EE_COUNTER_FIELD_BYTES,
   E2EE_COUNTER_MAX,
@@ -640,4 +643,80 @@ export function decodeE2eeNegotiationRecord(
     return { kind: "error", reason: "non_canonical_reject" };
   }
   return { kind: "ok", value: { recordType, body } };
+}
+
+// ─── §5.3 legacy-safe capability carrier ─────────────────────────────────────
+
+/**
+ * Build the §5.3 carrier for one signed capability statement.
+ *
+ * The bytes are `JSON.stringify` of the two-member object §5.3 fixes, in that
+ * member order, UTF-8 encoded. THE ENCODER IS THE POINT and hand assembly is
+ * forbidden: a legacy client does not ignore a malformed carrier — a JSON parse
+ * failure fails every in-flight request on the connection — so the carrier must
+ * come from a real JSON encoder, whatever the statement bytes happen to
+ * base64url into (§5.3, §5.6 C1–C4).
+ *
+ * `statement` is the complete `[ bstr(transcript), bstr(signature) ]` CBOR of
+ * §7.6, and the encoding is unpadded base64url. Both §5.3 bounds are enforced
+ * here rather than left to the caller's §7.6.1 self-check: this is the one place
+ * the carrier exists as bytes, and a carrier over `E2EE_CAPABILITY_CARRIER_MAX_BYTES`
+ * is one no conforming node may put on a channel (§5.5).
+ *
+ * Throws, like every other encoder here: reaching either guard means the caller
+ * built a statement its own self-check would have refused.
+ */
+export function encodeE2eeCapabilityCarrier(statement: Uint8Array): Uint8Array {
+  if (
+    !(statement instanceof Uint8Array) ||
+    statement.byteLength === 0 ||
+    statement.byteLength > E2EE_CAPABILITY_STATEMENT_MAX_BYTES
+  ) {
+    throw new TypeError("Relay E2EE capability statement is outside its §5.3 bound.");
+  }
+  const carrier = new TextEncoder().encode(
+    JSON.stringify({
+      _tag: E2EE_CAPABILITY_CARRIER_TAG,
+      statement: base64urlUnpadded(statement),
+    }),
+  );
+  if (carrier.byteLength > E2EE_CAPABILITY_CARRIER_MAX_BYTES) {
+    throw new TypeError("Relay E2EE capability carrier is outside its §5.3 bound.");
+  }
+  return carrier;
+}
+
+const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+/**
+ * Unpadded base64url of the statement CBOR (§5.3).
+ *
+ * Written out rather than taken from a runtime helper because this module is
+ * shared by the node, the browser, and Hermes, and only one of those three has
+ * `Buffer`. The output is exactly `⌈4 · len / 3⌉` characters, which is the
+ * expansion §3.2.1 S5 derives `E2EE_CAPABILITY_CARRIER_MAX_BYTES` from.
+ */
+function base64urlUnpadded(bytes: Uint8Array): string {
+  let out = "";
+  let index = 0;
+  for (; index + 2 < bytes.byteLength; index += 3) {
+    const word = (bytes[index]! << 16) | (bytes[index + 1]! << 8) | bytes[index + 2]!;
+    out +=
+      BASE64URL_ALPHABET[(word >> 18) & 63]! +
+      BASE64URL_ALPHABET[(word >> 12) & 63]! +
+      BASE64URL_ALPHABET[(word >> 6) & 63]! +
+      BASE64URL_ALPHABET[word & 63]!;
+  }
+  const remaining = bytes.byteLength - index;
+  if (remaining === 1) {
+    const word = bytes[index]! << 16;
+    out += BASE64URL_ALPHABET[(word >> 18) & 63]! + BASE64URL_ALPHABET[(word >> 12) & 63]!;
+  } else if (remaining === 2) {
+    const word = (bytes[index]! << 16) | (bytes[index + 1]! << 8);
+    out +=
+      BASE64URL_ALPHABET[(word >> 18) & 63]! +
+      BASE64URL_ALPHABET[(word >> 12) & 63]! +
+      BASE64URL_ALPHABET[(word >> 6) & 63]!;
+  }
+  return out;
 }

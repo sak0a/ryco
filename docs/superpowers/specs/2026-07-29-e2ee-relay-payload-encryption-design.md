@@ -261,7 +261,17 @@ plainly correct:
    constants** instead of a module-local literal. Same values today, by construction: the
    connection accepts no other `ready`.
 
-### Carried forward to the record-protection phase
+### Carried forward to the record-protection phase — discharged
+
+The requirement below is implemented. `RelaySendQueue` gained a reservation counted against the
+same connection data budget every enqueue is counted against; `RelayChannelRegistry` hands each
+channel session a `RelayChannelAdmission` handle that reserves capacity for a message before its
+bytes exist and _is_ the permission to send it, so an admission cannot be obtained for one
+message and spent on another, nor spent twice; and `NodeE2eeChannelSession` wires that handle
+into `E2eeRecordSession.protect`'s `admit` callback, which runs before the pair is assigned. A
+refused admission is `e2ee_send_unavailable`, consumes no pair, and produces no wire record —
+asserted from the peer's own §9.2 sequencing rather than from the node's internal state, because
+a consumed-then-discarded pair is exactly the gap that rule makes fatal.
 
 **§9.3 requires transmission admission for the entire record _before_ the `(epoch, counter)`
 pair is assigned, and the send handle's refusal report does not by itself satisfy that.** The

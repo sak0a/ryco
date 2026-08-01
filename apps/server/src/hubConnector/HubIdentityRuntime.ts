@@ -35,6 +35,27 @@ import {
 } from "../hubIdentity/LocalHubIdentityState.ts";
 import { makeNodeAgreementIdentity } from "../hubIdentity/NodeAgreementIdentity.ts";
 import { makeNodeContinuityAnchor } from "../hubIdentity/NodeContinuityAnchor.ts";
+import { makeNodeClientAuthorizationClient } from "../hubIdentity/NodeClientAuthorizationClient.ts";
+import { makeNodeClientAuthorizationStore } from "../hubIdentity/NodeClientAuthorizationStore.ts";
+import type { NodeE2eeChannelAuthorization } from "./NodeE2eeChannelSession.ts";
+import {
+  makeNodeE2eeCapabilityStatementClient,
+  type NodeE2eeAdvertisementResult,
+} from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
+import {
+  type E2eeFallbackReason,
+  makeNodeE2eeFallbackCounter,
+  type NodeE2eeFallbackState,
+} from "../hubIdentity/NodeE2eeFallbackCounter.ts";
+import {
+  makeNodeE2eePolicyClient,
+  type NodeE2eeChannelRegistration,
+} from "../hubIdentity/NodeE2eePolicyClient.ts";
+import {
+  type EffectiveNodeE2eePolicy,
+  makeNodeE2eePolicyStore,
+  type NodeE2eePolicyProposal,
+} from "../hubIdentity/NodeE2eePolicyStore.ts";
 import {
   makeNodeE2eePrekeyClient,
   type NodeE2eePrekeyCertificate,
@@ -251,6 +272,66 @@ export interface HubIdentityRuntimeShape {
     prekeyId: string,
     use: (secretKey: Uint8Array) => Promise<A> | A,
   ) => Promise<A>;
+  /**
+   * The committed admission policy, for §5.5's disposition and every §4.4 row.
+   *
+   * Synchronous by contract, exactly as `NodeE2eePolicyClient.policy` is: §8.6
+   * step 2 requires the policy read and the row-N3 transition to be atomic with
+   * respect to §12.6's commit. Before a durable read succeeds this is §12.4's
+   * fail-closed policy, so a runtime that cannot read its record admits the
+   * least rather than the most.
+   */
+  readonly e2eePolicy: () => EffectiveNodeE2eePolicy;
+  /**
+   * The §5.2 statement to advertise on a new channel, or the §5.5 U2 reason
+   * there is none.
+   *
+   * Cheap and cached while §5.7 permits, and NEVER called from the acceptance
+   * announcement: it reads key custody and may sign.
+   */
+  readonly readE2eeAdvertisement: (hubOrigin: string) => Promise<NodeE2eeAdvertisementResult>;
+  /**
+   * §12.6: one channel's handle on the policy-withdrawal sweep, taken as the
+   * channel opens and released when it ends.
+   *
+   * Handed out per channel rather than exposing the client, because the sweep's
+   * correctness rests on every channel being exactly one registration: two
+   * collections, or a second registration for one channel, is how a channel
+   * crossing row N3 ends up in neither enumeration.
+   */
+  readonly registerE2eeChannel: () => NodeE2eeChannelRegistration;
+  /**
+   * §13.6: the Branch A reads and the in-flight registration the relay path
+   * needs, and nothing else.
+   *
+   * Narrowed deliberately. The owner-facing commands — approve, narrow, revoke,
+   * the pairing window — are on the same client, and a relay path that could
+   * reach them is one that could mutate authority from peer input.
+   */
+  readonly e2eeClientAuthorization: NodeE2eeChannelAuthorization;
+  /**
+   * Record one §12.5 fallback occurrence. At most one per channel.
+   *
+   * Never rejects — instrumentation must not be able to fail a channel — so the
+   * returned promise is safe to ignore on the receive path and is awaited only
+   * by a caller that wants to observe the durable write.
+   */
+  readonly recordE2eeFallback: (occurrence: {
+    readonly hubOrigin: string;
+    readonly reason: E2eeFallbackReason;
+  }) => Promise<void>;
+  /** The §12.5 counters, for the node CLI's display. */
+  readonly readE2eeFallbackState: () => NodeE2eeFallbackState;
+  /**
+   * §12.5's clean-shutdown flush: commit anything still coalesced and cancel
+   * the write interval. Idempotent, and never rejects.
+   *
+   * Called from the connector's release rather than left to the process exiting:
+   * §12.5 names clean shutdown as one of the two flush points, and an armed
+   * interval timer outliving the runtime that owns it is a handle nothing can
+   * reach to cancel.
+   */
+  readonly stopE2eeInstrumentation: () => Promise<void>;
 }
 
 export class HubIdentityRuntime extends Context.Service<
@@ -559,6 +640,28 @@ export async function makeHubIdentityRuntime(options: {
    * sibling of the state directory rather than a child of it.
    */
   readonly continuityAnchorPath?: string;
+  /**
+   * The §12.4 admission-policy record. Defaults to a sibling of the identity
+   * state, for the reason every other sibling has.
+   *
+   * It is NOT Hub-scoped and a `leave` does not erase it: it is the operator's
+   * own policy, and §12.4's rule is that absence never weakens one
+   * (`NodeE2eePolicyStore`).
+   */
+  readonly e2eePolicyStatePath?: string;
+  /** The §12.5 fallback counters. Defaults to a sibling of the identity state. */
+  readonly e2eeFallbackStatePath?: string;
+  /** The §13.6 Branch A record set. Defaults to a sibling of the identity state. */
+  readonly clientAuthorizationStatePath?: string;
+  /**
+   * The operator's configured policy for this run (§12.4).
+   *
+   * An option left unset by every configuration source stays unset all the way
+   * to here, where it means "leave the committed value alone" and never "false"
+   * — which is what makes a restart in a shell without the environment variable
+   * incapable of weakening the policy.
+   */
+  readonly e2eePolicy?: NodeE2eePolicyProposal;
   readonly fileSecretRoot: string;
   readonly allowFileFallback: boolean;
   readonly secretStore?: ProtectedSecretStore;
@@ -607,6 +710,31 @@ export async function makeHubIdentityRuntime(options: {
   const continuityStore = await makeNodeIdentityContinuityStore({
     path: options.continuityStatePath ?? join(stateDirectory, "hub-continuity.json"),
     anchor: continuityAnchor,
+  });
+  // Shares the §5.7 anchor with the continuity store: the policy generation and
+  // the rotation generation are both high-water marks that an operator restore
+  // of the state directory must not be able to lower.
+  const policyClient = makeNodeE2eePolicyClient({
+    store: await makeNodeE2eePolicyStore({
+      path: options.e2eePolicyStatePath ?? join(stateDirectory, "hub-e2ee-policy.json"),
+      anchor: continuityAnchor,
+    }),
+  });
+  const fallbackCounter = await makeNodeE2eeFallbackCounter({
+    path: options.e2eeFallbackStatePath ?? join(stateDirectory, "hub-e2ee-fallback.json"),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  // §13.6's Branch A record set. Hub-scoped, so a `leave` erases it, and read
+  // synchronously from the in-memory index at §8.6 step 6 — which is what makes
+  // that read atomic with respect to the withdrawal write.
+  const clientAuthorizationStore = await makeNodeClientAuthorizationStore({
+    path:
+      options.clientAuthorizationStatePath ??
+      join(stateDirectory, "hub-e2ee-client-authorization.json"),
+  });
+  const authorizationClient = await makeNodeClientAuthorizationClient({
+    store: clientAuthorizationStore,
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
 
   /**
@@ -828,6 +956,68 @@ export async function makeHubIdentityRuntime(options: {
   };
 
   /**
+   * The public half of an identity key, by protected-store name.
+   *
+   * Memoized because the statement builder reads it on every channel open and
+   * reading it opens the credential store — a keychain access per channel, in
+   * the steady state, for a value that cannot change: a secret name identifies
+   * one keypair for its whole life, and a rotation creates a new name rather
+   * than replacing the material behind an existing one. A `leave` erases the
+   * secret, but it also clears `activeNode`, so the caller below never reaches
+   * this for a name that has been erased.
+   */
+  const identityPublicKeys = new Map<string, Uint8Array>();
+  const identityPublicKey = async (secretName: string): Promise<Uint8Array> => {
+    const cached = identityPublicKeys.get(secretName);
+    if (cached !== undefined) return cached;
+    const descriptor = await signingIdentity.getPublicDescriptor(secretName);
+    identityPublicKeys.set(secretName, descriptor.publicKey);
+    return descriptor.publicKey;
+  };
+
+  /**
+   * The §5.2 statement builder, over this runtime's own custody and stores.
+   *
+   * Every source is the same one the rest of this runtime already publishes, so
+   * there is no second reading of identity, prekey, continuity or policy state
+   * that could disagree with the first. The builder owns the §5.7 freshness rule
+   * and the §7.6.1 self-check; this runtime owns nothing about the statement
+   * except handing it the node's state.
+   */
+  const statements = makeNodeE2eeCapabilityStatementClient({
+    identity: async (hubOrigin) => {
+      const state = await stateStore.readOrCreate();
+      const active = state.activeNode;
+      if (active === null || active.hubOrigin !== hubOrigin) {
+        throw new HubIdentityRuntimeError("identity_unavailable");
+      }
+      // The same selector the relay proof and the prekey certificate use, so a
+      // staged rotation that has already activated advertises — and signs under
+      // — the key that will actually authenticate.
+      const selected = await rotation.authenticationKey(hubOrigin);
+      return {
+        nodeId: active.nodeId,
+        identityKeyId: selected.keyId,
+        identityPublicKey: await identityPublicKey(selected.secretName),
+        sign: (envelope) => signingIdentity.sign(selected.secretName, envelope),
+      };
+    },
+    prekey: (hubOrigin) => prekeys.advertised(hubOrigin),
+    continuity: async (hubOrigin) => {
+      const status = await evaluateContinuity(hubOrigin);
+      // §5.5 U2: a node that cannot say which lineage it belongs to declines to
+      // advertise rather than asserting a fresh one, because asserting one is a
+      // fleet-wide re-verification event.
+      return status.status === "advertisable"
+        ? { continuityId: status.continuityId, chain: status.chain }
+        : undefined;
+    },
+    policy: () => policyClient.policy(),
+    generation: () => policyClient.generation(),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+
+  /**
    * Collect every protected-store name an identity owns.
    *
    * A leave must erase all of them: the active signing key, a staged rotation
@@ -872,6 +1062,14 @@ export async function makeHubIdentityRuntime(options: {
     // enrollment was.
     await prekeyStore.reset().catch(() => undefined);
     await retirementStore.reset().catch(() => undefined);
+    // §6.3, §13.6: the Branch A records are Hub-scoped — they say which clients
+    // this node's owner approved at THIS Hub — so they go with the enrollment.
+    // The admission policy does not, and is deliberately absent here: it is the
+    // operator's own, and §12.4's rule is that absence never weakens one.
+    await clientAuthorizationStore.reset().catch(() => undefined);
+    // The in-memory index republished, so a synchronous §8.6 step 6 read after a
+    // leave cannot answer from a record the disk no longer holds.
+    await authorizationClient.reload().catch(() => undefined);
     await stateStore.reset();
   };
 
@@ -951,6 +1149,25 @@ export async function makeHubIdentityRuntime(options: {
     if (state.activeNode === null) return;
     await evaluateContinuity(state.activeNode.hubOrigin);
   })().catch(() => undefined);
+
+  // §12.4: the effective policy is recomputed deterministically from durable
+  // configuration on every start, and an absent configured value leaves the
+  // committed one untouched.
+  //
+  // A failure here does NOT fail startup, and the consequence is deliberate
+  // rather than lenient: the client stays at §12.4's fail-closed policy with
+  // generation 0, so this node advertises nothing (§5.7) and every channel takes
+  // the effective-`requireE2EE` branch of §5.5 — FATAL-PRE with the generic
+  // §11.2 surface. That is §7.6.1's "fail rather than start and close every
+  // channel one at a time", applied to the connector rather than to the whole
+  // server: the alternative reachable here is a process abort whose operator
+  // message would name the wrong remedy, and the §5.7 condition this most often
+  // is — a generation below the anchor's high-water mark — is repaired by the
+  // recovery command, not by a restart.
+  await policyClient
+    .start(options.e2eePolicy ?? {})
+    .then(() => undefined)
+    .catch(() => undefined);
 
   return {
     backend: secretStore.backend,
@@ -1070,6 +1287,13 @@ export async function makeHubIdentityRuntime(options: {
     rotateE2eePrekey: (hubOrigin) => prekeys.rotate(hubOrigin),
     withE2eePrekeySecret: (hubOrigin, prekeyId, use) =>
       prekeys.withPrekeySecret(hubOrigin, prekeyId, use),
+    e2eePolicy: () => policyClient.policy(),
+    readE2eeAdvertisement: (hubOrigin) => statements.advertised(hubOrigin),
+    registerE2eeChannel: () => policyClient.registerChannel(),
+    e2eeClientAuthorization: authorizationClient,
+    recordE2eeFallback: (occurrence) => fallbackCounter.record(occurrence),
+    readE2eeFallbackState: () => fallbackCounter.read(),
+    stopE2eeInstrumentation: () => fallbackCounter.stop().catch(() => undefined),
   };
 }
 

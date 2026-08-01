@@ -212,9 +212,25 @@ export interface NodeClientAuthorizationChangeResult {
   readonly abortedHandshakes: number;
 }
 
-/** The row N3 seam: enter `e2ee` and become visible to the sweep, or refuse. */
+/**
+ * The row N3 seam: the withdrawal test, then — through `established` — the
+ * phase change that makes the channel an ACTIVE E2EE channel for the sweep.
+ *
+ * §13.6 defines that term as "a channel whose node-side mode machine is in the
+ * `e2ee` state of §4.4", so the phase may not change while the accept is still
+ * being built: the test has to be decided first, because a refusal must stop the
+ * accept existing at all, but between it and the completed row N3 the §8.6 step
+ * 8 work can still fail — and that failure lands in a later turn than the test.
+ * Until `established` is called the entry stays in the `in_flight` phase, where
+ * the sweep's FATAL-PRE abort with the generic reject is the truthful
+ * disposition for a peer that has received no accept.
+ *
+ * `established` MUST be called in the same synchronous turn as the `establish`
+ * that returned it — row N3 is one transition — and is idempotent. It never
+ * resurrects a registration a sweep or a release has already retired.
+ */
 export type NodeClientChannelAdmission =
-  | { readonly kind: "entered"; readonly release: () => void }
+  | { readonly kind: "entered"; readonly release: () => void; readonly established: () => void }
   | { readonly kind: "refused"; readonly reason: "authorization_withdrawn" };
 
 /**
@@ -226,7 +242,7 @@ export type NodeClientChannelAdmission =
  * collections.
  */
 export interface NodeClientHandshakeRegistration {
-  /** Row N3 (§4.4, §8.6 step 8): the withdrawal test plus the phase change, atomically. */
+  /** Row N3 (§4.4, §8.6 step 8): the withdrawal test, and the phase change on its result. */
   readonly establish: (input: {
     /** FATAL-POST with error code `policy` (§11.3 Q9). */
     readonly close: () => void | Promise<void>;
@@ -1347,11 +1363,17 @@ export async function makeNodeClientAuthorizationClient(options: {
     ) {
       return { kind: "refused", reason: "authorization_withdrawn" };
     }
-    registration.phase = "e2ee";
     return {
       kind: "entered",
       release: () => {
         registrations.delete(registration);
+      },
+      // The phase change is the caller's to make, once the accept is on the send
+      // path and the mode machine is in `e2ee` — §13.6's own definition of an
+      // active E2EE channel. See `NodeClientChannelAdmission`.
+      established: () => {
+        if (!registrations.has(registration)) return;
+        registration.phase = "e2ee";
       },
     };
   };
@@ -1368,8 +1390,13 @@ export async function makeNodeClientAuthorizationClient(options: {
     const admission = establishOn(registration);
     // Registered only once the test has passed, so a refused channel never
     // appears in a snapshot at all — there is nothing to close and nothing to
-    // count.
-    if (admission.kind === "entered") registrations.add(registration);
+    // count. The phase change follows immediately: this seam's caller holds a
+    // channel that IS in `e2ee` already, which is the whole difference between
+    // it and `registerInFlightHandshake`.
+    if (admission.kind === "entered") {
+      registrations.add(registration);
+      admission.established();
+    }
     return admission;
   };
 

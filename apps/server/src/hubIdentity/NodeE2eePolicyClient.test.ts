@@ -22,6 +22,13 @@ import {
 } from "./NodeE2eePolicyStore.ts";
 
 const SUITE = E2EE_SUITE_25519_CHACHAPOLY_SHA256;
+/** §12.6(c) with nothing terminated. */
+const NO_WITHDRAWALS = {
+  legacy: 0,
+  nxE2ee: 0,
+  suiteWithdrawn: 0,
+  abortedHandshakes: 0,
+} as const;
 /** A suite id this version does not define; only a stub store ever holds one. */
 const FUTURE_SUITE = 0x02 as unknown as E2eeSuiteId;
 
@@ -93,7 +100,12 @@ function e2eeChannel(
     suite,
     abort: () => void events.push(`${name}:abort`),
   });
-  selected.establish({ close: () => void events.push(`${name}:close`) });
+  const admission = selected.establish({ close: () => void events.push(`${name}:close`) });
+  // Row N3 in full: the test, and then the phase change the completed row makes
+  // — the accept away and the mode flipped, which is what a live channel has
+  // done and an in-flight handshake has not.
+  if (admission.kind !== "entered") throw new Error(admission.reason);
+  admission.established();
   return { registration, events };
 }
 
@@ -330,9 +342,9 @@ describe("node E2EE policy client", () => {
       suite: SUITE,
       abort: () => void events.push("abort"),
     });
-    expect(selected.establish({ close: () => void events.push("close") })).toEqual({
-      kind: "entered",
-    });
+    const admission = selected.establish({ close: () => void events.push("close") });
+    if (admission.kind !== "entered") throw new Error(admission.reason);
+    admission.established();
     // The state the sweep reads is the selection's own, so the NX clause names
     // this channel rather than passing over a pattern nothing ever set.
     const result = await context.client.applyChange({ requireApprovedClientE2EE: true });
@@ -350,7 +362,7 @@ describe("node E2EE policy client", () => {
     // entries behind it leave the set: one takes row N3 and is refused there,
     // the other is released by the channel it belongs to.
     const first = context.client.registerChannel();
-    first
+    const firstAdmission = first
       .selectHandshake({
         pattern: "NX",
         suite: SUITE,
@@ -364,6 +376,8 @@ describe("node E2EE policy client", () => {
           releasing.registration.release();
         },
       });
+    if (firstAdmission.kind !== "entered") throw new Error(firstAdmission.reason);
+    firstAdmission.established();
     const leaving = context.client.registerChannel().selectHandshake({
       pattern: "NX",
       suite: SUITE,
@@ -382,6 +396,42 @@ describe("node E2EE policy client", () => {
       abortedHandshakes: 0,
     });
     expect(releasing.events).toEqual([]);
+  });
+
+  it("sweeps a row-N3 test that never completed as an in-flight handshake", async () => {
+    const context = await open();
+    await context.client.start();
+    const events: string[] = [];
+    const admission = context.client
+      .registerChannel()
+      .selectHandshake({
+        pattern: "NX",
+        suite: SUITE,
+        abort: () => void events.push("abort"),
+      })
+      .establish({ close: () => void events.push("close") });
+    if (admission.kind !== "entered") throw new Error(admission.reason);
+
+    // The test passed, but §8.6 step 8's remaining work — the Noise write, the
+    // §4.5 ceiling, the accept onto the send path — has not run, so the channel
+    // has NOT reached row N3. §12.6 dispatches "still pre-N3" as the FATAL-PRE
+    // abort (`P25`), and counts it in the in-flight class; treating it as an
+    // established channel would send an encrypted `Q12` to a peer holding no
+    // keys and report a channel closed that was never open.
+    const result = await context.client.applyChange({ requireApprovedClientE2EE: true });
+    expect(events).toEqual(["abort"]);
+    expect(result.counts).toEqual({
+      legacy: 0,
+      nxE2ee: 0,
+      suiteWithdrawn: 0,
+      abortedHandshakes: 1,
+    });
+
+    // And the phase change cannot resurrect what the sweep already terminated.
+    admission.established();
+    const after = await context.client.applyChange({ requireE2EE: true });
+    expect(after.counts).toEqual(NO_WITHDRAWALS);
+    expect(events).toEqual(["abort"]);
   });
 
   it("released registrations are not swept", async () => {

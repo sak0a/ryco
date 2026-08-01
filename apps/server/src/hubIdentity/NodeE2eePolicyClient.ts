@@ -124,6 +124,35 @@ export type NodeE2eeChannelAdmission =
   | { readonly kind: "refused"; readonly reason: "policy_withdrawn" };
 
 /**
+ * Row N3's admission verdict for a handshake, and the second half of the row.
+ *
+ * Row N3 is "run the responder handshake; **on success emit
+ * `E2EEServerAccept`**", resulting state `e2ee` (§4.4, §8.6 step 8). The test
+ * below is decided before the accept exists — it has to be, because a refusal
+ * must stop the accept from being built at all — so passing it is not yet the
+ * transition. `established` is: the caller calls it once the accept is on the
+ * send path and its own mode machine is in `e2ee`, and only then does the sweep
+ * see an established `e2ee` channel.
+ *
+ * Until it is called the registration stays on the §15 in-flight handshake list,
+ * where a sweep takes the FATAL-PRE abort (`P25`). That is the truthful
+ * disposition for a channel whose peer has received no accept: §12.6 dispatches
+ * "still pre-N3" as `P25` and "already `e2ee`" as `Q12`, and the step-8 work
+ * between the test and the accept can still fail — a Noise failure, the §4.5
+ * ceiling, a send the queue will not take — with the failure landing in a LATER
+ * turn than the test.
+ *
+ * IT MUST BE CALLED IN THE SAME SYNCHRONOUS TURN AS THE `establish` THAT
+ * RETURNED IT. Row N3 is one transition and both halves of it are one turn's
+ * work; a caller that awaited in between would leave the sweep's frozen dispatch
+ * reading a phase the channel has since left. It is idempotent and never
+ * resurrects a registration a sweep or a release has already retired.
+ */
+export type NodeE2eeHandshakeAdmission =
+  | { readonly kind: "entered"; readonly established: () => void }
+  | { readonly kind: "refused"; readonly reason: "policy_withdrawn" };
+
+/**
  * The row-N3 transition, and the ONLY way to reach it.
  *
  * It is what `selectHandshake` returns rather than a method on the channel
@@ -139,15 +168,18 @@ export type NodeE2eeChannelAdmission =
  */
 export interface NodeE2eeSelectedHandshake {
   /**
-   * Row N3: the channel entered `e2ee`.
+   * Row N3's test, and — through `established` on the result — the phase change
+   * the completed row makes.
    *
    * `close` is the FATAL-POST disposition of §11.3 Q12: one `E2EEError` with
    * error code `policy` when the send path is usable, then `channel.close` with
-   * reason `channel_rejected`.
+   * reason `channel_rejected`. It is installed by `established`, alongside the
+   * phase it belongs to, so no snapshot can ever freeze an `e2ee` entry whose
+   * close callback is missing.
    */
   readonly establish: (input: {
     readonly close: () => void | Promise<void>;
-  }) => NodeE2eeChannelAdmission;
+  }) => NodeE2eeHandshakeAdmission;
 }
 
 /**
@@ -262,6 +294,10 @@ function stateOf(registration: Registration): E2eeChannelPolicyState {
  * exactly the condition `establish` re-checks at row N3 — so it cannot become
  * `e2ee` behind the sweep and be aborted as a handshake it is no longer. The
  * converse holds too: an entry the in-flight clause skips is one row N3 admits.
+ *
+ * Splitting the transition into the test and `established` does not weaken that:
+ * the two are one turn's work by contract, so the phase a snapshot freezes is
+ * still one a test under the CURRENT policy admitted.
  */
 type Disposition = E2eeWithdrawnChannelClass | "handshake" | undefined;
 
@@ -477,7 +513,7 @@ export function makeNodeE2eePolicyClient(options: {
     registration: Registration,
     selection: { readonly pattern: E2eeNoisePattern; readonly suite: E2eeSuiteId },
     transition: { readonly close: () => void | Promise<void> },
-  ): NodeE2eeChannelAdmission => {
+  ): NodeE2eeHandshakeAdmission => {
     // The cheap second line §12.6 asks for on top of §8.6 step 2's atomicity: a
     // handshake that passed step 2 under the old policy and reaches row N3 after
     // the commit is refused here rather than admitted and swept, so the
@@ -497,9 +533,20 @@ export function makeNodeE2eePolicyClient(options: {
       registrations.delete(registration);
       return { kind: "refused", reason: "policy_withdrawn" };
     }
-    registration.phase = "e2ee";
-    registration.close = transition.close;
-    return { kind: "entered" };
+    // The phase stays `in_flight` until the caller reports the accept away and
+    // its own mode flipped. Passing the test is not the transition: see
+    // `NodeE2eeHandshakeAdmission`.
+    return {
+      kind: "entered",
+      established: () => {
+        // Never resurrects a registration a sweep or a release has retired: a
+        // channel that has been terminated is not one this phase change may put
+        // back on the list under a disposition nothing will act on.
+        if (!registrations.has(registration)) return;
+        registration.phase = "e2ee";
+        registration.close = transition.close;
+      },
+    };
   };
 
   const registerChannel: NodeE2eePolicyClient["registerChannel"] = () => {

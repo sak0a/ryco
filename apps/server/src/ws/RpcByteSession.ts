@@ -8,6 +8,16 @@ import type { RpcGroup } from "effect/unstable/rpc";
 export interface RpcByteSession {
   readonly receive: (bytes: Uint8Array) => Effect.Effect<boolean>;
   readonly supportsChunkedMessages: () => boolean;
+  /**
+   * Does the relay chunk assembler still hold an incomplete reassembled message?
+   *
+   * Read at the moment the channel ends by a layer that has to report it — a
+   * partial reassembled message at close is truncation, and an owner that cannot
+   * tell truncation from an ordinary abrupt end cannot tell a squeezed
+   * connection from a discarded tail. Synchronous, because the caller asking it
+   * is on a teardown path where an `Effect` would sequence after the reset.
+   */
+  readonly incompleteReassembly: () => boolean;
   readonly close: Effect.Effect<void>;
   readonly queuedMessages: Effect.Effect<number>;
   readonly queuedBytes: Effect.Effect<number>;
@@ -257,6 +267,7 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
         );
       },
       supportsChunkedMessages: () => assembler.peerSupportsChunking,
+      incompleteReassembly: () => assembler.incompleteMessage,
       close: Effect.sync(() => {
         queuedBytes = 0;
         assembler.reset();

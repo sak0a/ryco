@@ -190,6 +190,17 @@ export class RelayMessageAssembler {
     return this.#received;
   }
 
+  /**
+   * Is a chunked message part-way through reassembly?
+   *
+   * Stated as its own fact rather than left to `heldBytes > 0`: a layer that has
+   * to report an incomplete message at teardown is asking about reassembly
+   * state, not about a byte count that happens to agree with it today.
+   */
+  get incompleteMessage(): boolean {
+    return this.#total !== 0;
+  }
+
   get peerSupportsChunking(): boolean {
     return this.#peerSupportsChunking;
   }
