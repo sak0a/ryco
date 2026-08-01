@@ -1,9 +1,15 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
+import { E2EE_PREKEY_ROTATION_OVERLAP } from "@ryco/shared/relayE2eeConstants";
+import { deriveE2eeAgreementPublicKey } from "@ryco/shared/relayE2eeKeys";
 import { describe, expect, it } from "vite-plus/test";
 
+import { makeNodeContinuityAnchor } from "../hubIdentity/NodeContinuityAnchor.ts";
+import { makeNodeE2eePrekeyStore } from "../hubIdentity/NodeE2eePrekeyStore.ts";
+import { makeNodeIdentityContinuityStore } from "../hubIdentity/NodeIdentityContinuityStore.ts";
+import { makeNodeIdentityKeyRetirementStore } from "../hubIdentity/NodeIdentityKeyRetirementStore.ts";
 import { makeNodeSigningIdentity } from "../hubIdentity/NodeSigningIdentity.ts";
 import {
   type ProtectedSecretStore,
@@ -52,7 +58,17 @@ const enrollmentFetch = async (input: string | URL | Request) => {
   throw new Error("unexpected route");
 };
 
-async function writeLegacyActiveState(statePath: string, options?: { readonly staged?: boolean }) {
+async function writeLegacyActiveState(
+  statePath: string,
+  options?: {
+    readonly staged?: boolean;
+    readonly nodeId?: string;
+    /** Set to make the staged rotation one the Hub has already activated. */
+    readonly activatedAt?: number;
+    readonly continuityMode?: "continue" | "break";
+  },
+) {
+  await mkdir(dirname(statePath), { recursive: true, mode: 0o700 });
   await writeFile(
     statePath,
     JSON.stringify({
@@ -62,7 +78,7 @@ async function writeLegacyActiveState(statePath: string, options?: { readonly st
       pendingEnrollment: null,
       activeNode: {
         hubOrigin: "https://relay.example",
-        nodeId: `node_${"N".repeat(22)}`,
+        nodeId: options?.nodeId ?? `node_${"N".repeat(22)}`,
         activeKeyId: `nkey_${"K".repeat(22)}`,
         activeKeySecretName: "node-key.active",
         cleanupPollingSecretName: null,
@@ -74,8 +90,11 @@ async function writeLegacyActiveState(statePath: string, options?: { readonly st
             rotationRequestId: `nrot_${"R".repeat(22)}`,
             newKeyId: `nkey_${"Q".repeat(22)}`,
             newKeySecretName: "node-key.staged",
+            ...(options.continuityMode === undefined
+              ? {}
+              : { continuityMode: options.continuityMode }),
             stagedAt: 2,
-            activatedAt: null,
+            activatedAt: options.activatedAt ?? null,
           }
         : null,
       pendingTeardown: null,
@@ -286,6 +305,42 @@ describe("HubIdentityRuntime", () => {
     expect((await runtime.readState()).environmentId).toBe(after.environmentId);
   });
 
+  it("erases an identity key still queued for destruction, and drops the queue with it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-leave-queued-"));
+    const store = makeMemoryStore();
+    const statePath = join(root, "hub-identity.json");
+    const runtime = await makeHubIdentityRuntime({
+      statePath,
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      fetch: enrollmentFetch,
+      now: () => 100_000,
+    });
+    await runtime.startEnrollment("https://relay.example", {
+      label: "Ryco node",
+      platformOs: "linux",
+      platformArch: "x64",
+      clientVersion: "0.1.8",
+    });
+
+    // A promotion committed and its destruction did not: the key is out of
+    // service and the only thing naming it is the durable queue, which lives in
+    // a record of its own so a downgrade cannot delete that name.
+    const retirement = await makeNodeIdentityKeyRetirementStore({
+      path: join(root, "hub-identity-retirement.json"),
+    });
+    await store.create("node-key.retired", new Uint8Array(32).fill(0x7a));
+    await retirement.enqueue("node-key.retired");
+
+    await runtime.leave();
+
+    // A leave that skipped it would orphan a live identity private key in the
+    // credential store, where nothing could ever name it again.
+    expect(await store.get("node-key.retired")).toBeNull();
+    expect(await retirement.names()).toEqual([]);
+  });
+
   it("finishes an interrupted leave on the next start, even with the keys already gone", async () => {
     const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-leave-resume-"));
     const store = makeMemoryStore();
@@ -437,6 +492,374 @@ describe("HubIdentityRuntime", () => {
     await expect(
       makeHubIdentityRuntime({ ...options, allowFileFallback: false }),
     ).rejects.toMatchObject({ code: "identity_store_unavailable" });
+  });
+
+  it("issues, re-signs, and erases the E2EE agreement prekey alongside the identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-e2ee-prekey-"));
+    const statePath = join(root, "hub-identity.json");
+    const prekeyStatePath = join(root, "hub-e2ee-prekey.json");
+    const store = makeMemoryStore();
+    await makeNodeSigningIdentity(store).generate("node-key.active");
+    await writeLegacyActiveState(statePath);
+    let clock = 1_700_000_000_000;
+    const options = {
+      statePath,
+      prekeyStatePath,
+      continuityStatePath: join(root, "hub-continuity.json"),
+      continuityAnchorPath: join(root, "anchor", "hub-continuity.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      now: () => clock,
+    } as const;
+    const readPrekeys = async () =>
+      (await makeNodeE2eePrekeyStore({ path: prekeyStatePath })).read();
+
+    // §6.4: the node validates its own prekey certificate at startup, which for
+    // a node that has never had one means issuing the first.
+    const runtime = await makeHubIdentityRuntime(options);
+    const issued = await runtime.readE2eePrekeyCertificate("https://relay.example");
+    const first = (await readPrekeys()).e2eePrekey!;
+    expect(first.prekeyId).toBe(issued.prekeyId);
+    expect(first.createdAt).toBe(clock);
+    // Public material in the record; the scalar only in the protected store.
+    expect(store.values.get(first.secretName)).toHaveLength(32);
+    expect(
+      Buffer.from(deriveE2eeAgreementPublicKey(store.values.get(first.secretName)!)).toString(
+        "base64url",
+      ),
+    ).toBe(first.agreementPublicKey);
+    expect(JSON.stringify(await readPrekeys())).not.toContain(
+      Buffer.from(store.values.get(first.secretName)!).toString("base64url"),
+    );
+    // And not in the identity record at all: a binary older than this feature
+    // reconstructs that file from its known keys, which would drop the only
+    // handle the node has on a live agreement key.
+    expect(JSON.stringify(await runtime.readState())).not.toContain(first.secretName);
+
+    // A restart inside the rotation overlap re-signs, and the displaced key
+    // stays alive for the overlap window.
+    clock = issued.expiresAt - E2EE_PREKEY_ROTATION_OVERLAP;
+    const restarted = await makeHubIdentityRuntime(options);
+    const renewed = (await readPrekeys()).e2eePrekey!;
+    const outgoing = (await readPrekeys()).outgoingE2eePrekey!;
+    expect(renewed.prekeyId).not.toBe(first.prekeyId);
+    expect(outgoing.prekeyId).toBe(first.prekeyId);
+    expect(store.values.has(outgoing.secretName)).toBe(true);
+
+    // The forced rotation §6.4 requires of the CLI.
+    const forced = await restarted.rotateE2eePrekey("https://relay.example");
+    expect(forced.prekeyId).not.toBe(renewed.prekeyId);
+    const borrowed = await restarted.withE2eePrekeySecret(
+      "https://relay.example",
+      forced.prekeyId,
+      (secretKey) => Buffer.from(deriveE2eeAgreementPublicKey(secretKey)).toString("hex"),
+    );
+    expect(borrowed).toBe(Buffer.from(forced.agreementPublicKey).toString("hex"));
+
+    // A leave must erase both agreement keys. Omitting either from the owned
+    // set would orphan key material in the credential store forever.
+    const finalPrekeys = await readPrekeys();
+    const agreementNames = [
+      finalPrekeys.e2eePrekey!.secretName,
+      finalPrekeys.outgoingE2eePrekey!.secretName,
+    ];
+    await restarted.leave();
+    for (const name of agreementNames) expect(await store.get(name)).toBeNull();
+    expect(await store.get("node-key.active")).toBeNull();
+    const cleared = await readPrekeys();
+    expect(cleared.e2eePrekey).toBeNull();
+    expect(cleared.outgoingE2eePrekey).toBeNull();
+  });
+
+  it("re-issues the prekey when a rotation activates, without waiting for a restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-e2ee-rebind-"));
+    const statePath = join(root, "hub-identity.json");
+    const prekeyStatePath = join(root, "hub-e2ee-prekey.json");
+    const store = makeMemoryStore();
+    const signing = makeNodeSigningIdentity(store);
+    await signing.generate("node-key.active");
+    await signing.generate("node-key.staged");
+    await writeLegacyActiveState(statePath, { staged: true });
+    const now = 1_700_000_000_000;
+    const newKeyId = `nkey_${"Q".repeat(22)}`;
+    const runtime = await makeHubIdentityRuntime({
+      statePath,
+      prekeyStatePath,
+      continuityStatePath: join(root, "hub-continuity.json"),
+      continuityAnchorPath: join(root, "anchor", "hub-continuity.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      now: () => now,
+      fetch: async (input: string | URL | Request) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.endsWith("/api/node/key-rotations/status")) {
+          return Response.json({ status: "activated", activatedAt: now });
+        }
+        throw new Error("unexpected route");
+      },
+    });
+
+    const before = await runtime.readE2eePrekeyCertificate("https://relay.example");
+    expect(before.identityKeyId).toBe(`nkey_${"K".repeat(22)}`);
+
+    // Activation is the moment the authentication-key selector starts returning
+    // the incoming key, so it is the moment §7.3 element 4 stops matching. The
+    // certificate has to be re-issued here rather than at the next restart:
+    // under effective `requireE2EE` a node with no advertisable prekey is a
+    // fatal pre-key condition on every channel (§11.2), for as long as it runs.
+    const status = await runtime.resumeKeyRotation("https://relay.example");
+    expect(status.status).toBe("activated");
+
+    const after = await runtime.readE2eePrekeyCertificate("https://relay.example");
+    expect(after.identityKeyId).toBe(newKeyId);
+    expect(after.prekeyId).not.toBe(before.prekeyId);
+    const record = await (await makeNodeE2eePrekeyStore({ path: prekeyStatePath })).read();
+    expect(record.e2eePrekey?.identityKeyId).toBe(newKeyId);
+    // The displaced prekey keeps its §6.4 overlap: a channel that already
+    // advertised it must still be able to complete against it.
+    expect(record.outgoingE2eePrekey?.prekeyId).toBe(before.prekeyId);
+  });
+
+  it("keeps one continuity lineage across restarts, and across a leave", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-continuity-"));
+    // Laid out the way the connector lays it out: everything the operator
+    // restores under one state directory, and the §5.7 anchor outside it.
+    const statePath = join(root, "userdata", "hub-identity.json");
+    const continuityStatePath = join(root, "userdata", "hub-continuity.json");
+    const continuityAnchorPath = join(root, "anchors", "userdata", "hub-continuity.json");
+    const store = makeMemoryStore();
+    await makeNodeSigningIdentity(store).generate("node-key.active");
+    await writeLegacyActiveState(statePath);
+    const options = {
+      statePath,
+      continuityStatePath,
+      continuityAnchorPath,
+      prekeyStatePath: join(root, "userdata", "hub-e2ee-prekey.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      now: () => 1_700_000_000_000,
+    } as const;
+    const anchor = await makeNodeContinuityAnchor({ path: continuityAnchorPath });
+
+    const runtime = await makeHubIdentityRuntime(options);
+    const first = await runtime.readE2eeContinuity("https://relay.example");
+    expect(first).toMatchObject({ status: "advertisable", chain: [], generation: 0, repair: null });
+    if (first.status !== "advertisable") throw new Error("unreachable");
+    expect(first.continuityId).toMatch(/^nct_[A-Za-z0-9_-]{22}$/);
+    // §5.7 property (b): the anchor lives OUTSIDE the state directory, which is
+    // the half of §7.5 an operator restore of that directory cannot roll back.
+    expect(continuityAnchorPath.startsWith(dirname(statePath))).toBe(false);
+    expect((await anchor.read())?.continuityId).toBe(first.continuityId);
+
+    const restarted = await makeHubIdentityRuntime(options);
+    const second = await restarted.readE2eeContinuity("https://relay.example");
+    expect(second).toMatchObject({
+      status: "advertisable",
+      continuityId: first.continuityId,
+      repair: null,
+    });
+
+    // A leave erases the Hub identity and deliberately breaks the chain, but it
+    // is not allowed to erase the lineage: keeping the id is what leaves the
+    // §13.3 re-verification path reachable for a client pinned to the old key.
+    await restarted.leave();
+    expect(await store.get("node-key.active")).toBeNull();
+    expect((await anchor.read())?.continuityId).toBe(first.continuityId);
+    const continuity = await makeNodeIdentityContinuityStore({
+      path: continuityStatePath,
+      anchor,
+    });
+    const record = await continuity.read();
+    expect(record.continuityId).toBe(first.continuityId);
+    expect(record.chain).toEqual([]);
+    expect(record.lastBreak).toMatchObject({ reason: "left_hub" });
+  });
+
+  it("completes a promotion whose certificate was already retained, with the outgoing key gone", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-promotion-retry-"));
+    const statePath = join(root, "hub-identity.json");
+    const continuityStatePath = join(root, "hub-continuity.json");
+    const continuityAnchorPath = join(root, "anchor", "hub-continuity.json");
+    const store = makeMemoryStore();
+    const signing = makeNodeSigningIdentity(store);
+    const outgoing = await signing.generate("node-key.active");
+    const incoming = await signing.generate("node-key.staged");
+    await writeLegacyActiveState(statePath, {
+      staged: true,
+      activatedAt: 3,
+      continuityMode: "continue",
+    });
+    const options = {
+      statePath,
+      continuityStatePath,
+      continuityAnchorPath,
+      prekeyStatePath: join(root, "hub-e2ee-prekey.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      now: () => 1_700_000_000_000,
+    } as const;
+
+    const runtime = await makeHubIdentityRuntime(options);
+    const lineage = await runtime.readE2eeContinuity("https://relay.example");
+    if (lineage.status !== "advertisable") throw new Error("unreachable");
+
+    // The state a promotion is left in when it retained its §7.5 certificate and
+    // then failed: the link exists, the promotion does not. `append` is
+    // idempotent precisely so the operator can retry from here.
+    const continuity = await makeNodeIdentityContinuityStore({
+      path: continuityStatePath,
+      anchor: await makeNodeContinuityAnchor({ path: continuityAnchorPath }),
+    });
+    await continuity.append({
+      hubOrigin: "https://relay.example",
+      continuityId: lineage.continuityId,
+      oldKeyId: `nkey_${"K".repeat(22)}`,
+      oldPublicKey: outgoing.publicKey,
+      newKeyId: `nkey_${"Q".repeat(22)}`,
+      newPublicKey: incoming.publicKey,
+      createdAt: 1_700_000_000_000,
+      sign: (transcript) => signing.sign("node-key.active", transcript),
+    });
+    // ...and the outgoing key is already gone, which is the case that used to
+    // wedge: resolving its public half through the credential store fails, so
+    // the retry never reached the idempotent append that exists to make it safe.
+    await store.remove("node-key.active");
+
+    await runtime.confirmAuthenticatedKey("https://relay.example", `nkey_${"Q".repeat(22)}`);
+
+    const promoted = await runtime.readState();
+    expect(promoted.activeNode?.activeKeyId).toBe(`nkey_${"Q".repeat(22)}`);
+    expect(promoted.stagedRotation).toBeNull();
+    // Exactly one certificate: a second one for the same rotation would be a
+    // chain whose links no longer meet.
+    const record = await continuity.read();
+    expect(record.chain).toHaveLength(1);
+    expect(record.generationHighWater).toBe(1);
+    expect(await runtime.readE2eeContinuity("https://relay.example")).toMatchObject({
+      status: "advertisable",
+      continuityId: lineage.continuityId,
+      generation: 1,
+      chainBreak: null,
+    });
+  });
+
+  it("reports a chain that reaches no key in custody, rather than throwing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-lost-key-"));
+    const statePath = join(root, "hub-identity.json");
+    const store = makeMemoryStore();
+    await makeNodeSigningIdentity(store).generate("node-key.active");
+    await writeLegacyActiveState(statePath);
+    const runtime = await makeHubIdentityRuntime({
+      statePath,
+      continuityStatePath: join(root, "hub-continuity.json"),
+      continuityAnchorPath: join(root, "anchor", "hub-continuity.json"),
+      prekeyStatePath: join(root, "hub-e2ee-prekey.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+      now: () => 1_700_000_000_000,
+    });
+    const before = await runtime.readE2eeContinuity("https://relay.example");
+    if (before.status !== "advertisable") throw new Error("unreachable");
+
+    // The identity record names a key the node no longer holds. §7.5 has an
+    // answer for that — the chain reaches nothing in custody, so it is broken —
+    // and the caller of this operation has only `advertisable` and `unavailable`
+    // to act on, so a raw signing error would be an answer it cannot use.
+    await store.remove("node-key.active");
+    const after = await runtime.readE2eeContinuity("https://relay.example");
+    expect(after).toMatchObject({
+      status: "advertisable",
+      continuityId: before.continuityId,
+      chain: [],
+    });
+  });
+
+  it("declines to advertise, rather than minting, when two values claim the lineage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-continuity-conflict-"));
+    const statePath = join(root, "hub-identity.json");
+    const continuityStatePath = join(root, "hub-continuity.json");
+    const continuityAnchorPath = join(root, "anchor", "hub-continuity.json");
+    const store = makeMemoryStore();
+    await makeNodeSigningIdentity(store).generate("node-key.active");
+    await writeLegacyActiveState(statePath);
+    const options = {
+      statePath,
+      continuityStatePath,
+      continuityAnchorPath,
+      prekeyStatePath: join(root, "hub-e2ee-prekey.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+    } as const;
+
+    const runtime = await makeHubIdentityRuntime(options);
+    const resolved = await runtime.readE2eeContinuity("https://relay.example");
+    if (resolved.status !== "advertisable") throw new Error("unreachable");
+
+    // An anchor that disagrees with the stored value: §5.5 U2. The node has no
+    // conforming statement to build, and minting one would be a fleet-wide
+    // re-verification event it must not cause by itself.
+    await (
+      await makeNodeContinuityAnchor({ path: continuityAnchorPath })
+    ).setContinuityId(`nct_${"Y".repeat(22)}`);
+    const conflicted = await (
+      await makeHubIdentityRuntime(options)
+    ).readE2eeContinuity("https://relay.example");
+    expect(conflicted).toMatchObject({ status: "unavailable", reason: "anchor_disagrees" });
+    // Startup is unaffected: whether a node that cannot advertise may still
+    // relay is a policy decision, not a custody failure.
+    expect((await runtime.readState()).activeNode?.activeKeySecretName).toBe("node-key.active");
+
+    // The explicit recovery: re-adopt the value the operator confirms.
+    const readopted = await runtime.adoptE2eeContinuityId(resolved.continuityId);
+    expect(readopted).toBe(resolved.continuityId);
+    expect(await runtime.readE2eeContinuity("https://relay.example")).toMatchObject({
+      status: "advertisable",
+      continuityId: resolved.continuityId,
+    });
+
+    // The other outcome mints a fresh lineage, deliberately.
+    const reminted = await runtime.remintE2eeContinuityId();
+    expect(reminted).not.toBe(resolved.continuityId);
+    expect(await runtime.readE2eeContinuity("https://relay.example")).toMatchObject({
+      status: "advertisable",
+      continuityId: reminted,
+    });
+  });
+
+  it("starts without E2EE rather than failing when no prekey can be issued", async () => {
+    const root = await mkdtemp(join(tmpdir(), "ryco-hub-identity-e2ee-unserviceable-"));
+    const statePath = join(root, "hub-identity.json");
+    const store = makeMemoryStore();
+    await makeNodeSigningIdentity(store).generate("node-key.active");
+    await writeLegacyActiveState(statePath, { nodeId: `node_${"L".repeat(30)}` });
+
+    // A Hub-minted node id longer than the §7.1 identifier format admits cannot
+    // be encoded into a §7.3 transcript. That decides whether this node can SERVE
+    // E2EE, not whether it can run.
+    const prekeyStatePath = join(root, "hub-e2ee-prekey.json");
+    const runtime = await makeHubIdentityRuntime({
+      statePath,
+      prekeyStatePath,
+      continuityStatePath: join(root, "hub-continuity.json"),
+      continuityAnchorPath: join(root, "anchor", "hub-continuity.json"),
+      fileSecretRoot: join(root, "secrets"),
+      allowFileFallback: false,
+      secretStore: store,
+    });
+    expect(
+      (await (await makeNodeE2eePrekeyStore({ path: prekeyStatePath })).read()).e2eePrekey,
+    ).toBeNull();
+    await expect(runtime.readE2eePrekeyCertificate("https://relay.example")).rejects.toMatchObject({
+      code: "e2ee_prekey_unavailable",
+    });
+    // The relay path is unaffected.
+    expect((await runtime.readState()).activeNode?.activeKeySecretName).toBe("node-key.active");
   });
 
   it("migrates a legacy file identity only when exactly one store owns its keys", async () => {

@@ -1,7 +1,10 @@
+import { basename, dirname, join } from "node:path";
+
 import { Context, Effect, Layer } from "effect";
 
 import type { RelayNodeAuthHandshake } from "@ryco/contracts/relay";
 import { canonicalizeHubOrigin } from "@ryco/shared/nodeIdentity";
+import type { NodeIdentityContinuityChainEntry } from "@ryco/shared/relayE2eeTranscripts";
 
 import { ServerConfig } from "../config.ts";
 import {
@@ -12,6 +15,8 @@ import {
 } from "../hubIdentity/HubEnrollmentClient.ts";
 import { makeHubEnrollmentHttpTransport } from "../hubIdentity/HubEnrollmentHttpTransport.ts";
 import {
+  type HubKeyRotationContinuity,
+  type HubKeyRotationPromotion,
   makeHubKeyRotationClient,
   type HubKeyRotationStatus,
 } from "../hubIdentity/HubKeyRotationClient.ts";
@@ -26,7 +31,26 @@ import {
   type HubProtectedStoreBackend,
   type LocalHubIdentityState,
   makeLocalHubIdentityStateStore,
+  type NodeRotationContinuityMode,
 } from "../hubIdentity/LocalHubIdentityState.ts";
+import { makeNodeAgreementIdentity } from "../hubIdentity/NodeAgreementIdentity.ts";
+import { makeNodeContinuityAnchor } from "../hubIdentity/NodeContinuityAnchor.ts";
+import {
+  makeNodeE2eePrekeyClient,
+  type NodeE2eePrekeyCertificate,
+} from "../hubIdentity/NodeE2eePrekeyClient.ts";
+import { makeNodeE2eePrekeyStore } from "../hubIdentity/NodeE2eePrekeyStore.ts";
+import {
+  makeNodeIdentityContinuityStore,
+  newestRetainedContinuityCertificate,
+  type NodeIdentityContinuityBreak,
+  type NodeIdentityContinuityChainBreak,
+  nodeIdentityContinuityChainStatus,
+  NodeIdentityContinuityError,
+  type NodeIdentityContinuityRepair,
+  type NodeIdentityContinuityUnresolvable,
+} from "../hubIdentity/NodeIdentityContinuityStore.ts";
+import { makeNodeIdentityKeyRetirementStore } from "../hubIdentity/NodeIdentityKeyRetirementStore.ts";
 import { makeNodeSigningIdentity } from "../hubIdentity/NodeSigningIdentity.ts";
 import {
   makeOsProtectedSecretStore,
@@ -81,6 +105,37 @@ export interface PendingHubEnrollmentDetail {
   readonly pollIntervalMs: number | null;
 }
 
+/**
+ * What this node may carry as §7.6 elements 11 and 18 right now.
+ *
+ * `unavailable` is §5.5 U2 `statement-unavailable`: the node holds no conforming
+ * statement because it cannot say which lineage it belongs to, so it declines to
+ * advertise rather than assert a fresh one. It is deliberately not an error at
+ * this boundary — under effective `requireE2EE` the caller turns it into a
+ * FATAL-PRE channel disposition (§11.2 P23), and otherwise it suppresses the
+ * advertisement (row N16) — and those are policy decisions, not custody ones.
+ */
+export type NodeE2eeContinuityStatus =
+  | {
+      readonly status: "advertisable";
+      /** §7.6 element 18. */
+      readonly continuityId: string;
+      /** §7.6 element 11, in carried order. Empty for a node that has never rotated. */
+      readonly chain: readonly NodeIdentityContinuityChainEntry[];
+      /** The highest rotation generation this node has issued (§7.5). */
+      readonly generation: number;
+      /** Set when the startup cross-check repaired the stored continuity id (§7.5, §17.11). */
+      readonly repair: NodeIdentityContinuityRepair | null;
+      /** Set when this pass found and recorded a chain break. */
+      readonly chainBreak: NodeIdentityContinuityChainBreak | null;
+      readonly lastBreak: NodeIdentityContinuityBreak | null;
+    }
+  | {
+      readonly status: "unavailable";
+      readonly reason: NodeIdentityContinuityUnresolvable;
+      readonly remedy: string;
+    };
+
 export interface HubIdentityRuntimeShape {
   readonly backend: ProtectedSecretStoreBackend;
   readonly readState: () => Promise<LocalHubIdentityState>;
@@ -89,6 +144,15 @@ export interface HubIdentityRuntimeShape {
    *
    * Idempotent and resumable: a crash mid-teardown leaves a durable marker that
    * the next start completes.
+   *
+   * **This deliberately breaks the §7.5 continuity chain, and records that it
+   * did.** The chain is authenticated by an identity key a leave destroys, so it
+   * cannot survive; what does survive is the continuity id and its anchor, which
+   * are node-local lineage and not Hub identity. Keeping them is what leaves the
+   * §13.3 path reachable: a client pinned to the old identity resolves the
+   * re-enrolled node to its existing pin, finds a chain that no longer reaches
+   * it, and takes the re-verification path — rather than seeing an unrecognized
+   * node and treating a substitution-shaped event as routine first contact.
    */
   readonly leave: () => Promise<void>;
   /** Null when no ceremony is pending for this origin. */
@@ -103,9 +167,90 @@ export interface HubIdentityRuntimeShape {
     hubOrigin: string,
     protocol: { readonly protocolMajor: number; readonly protocolMinor: number },
   ) => Promise<RelayNodeAuthHandshake>;
-  readonly stageKeyRotation: (hubOrigin: string) => Promise<HubKeyRotationStatus>;
+  /**
+   * §7.5 makes the continuity disposition an explicit operator choice that no
+   * layer below may infer, so it is a required argument all the way down: a
+   * rotation motivated by compromise of the outgoing key MUST be a deliberate
+   * break, because a certificate signed by a key an adversary also holds proves
+   * nothing (§13.3 custody caveat, §17.12).
+   */
+  readonly stageKeyRotation: (
+    hubOrigin: string,
+    options: { readonly continuity: NodeRotationContinuityMode },
+  ) => Promise<HubKeyRotationStatus>;
   readonly resumeKeyRotation: (hubOrigin: string) => Promise<HubKeyRotationStatus>;
-  readonly confirmAuthenticatedKey: (hubOrigin: string, keyId: string) => Promise<void>;
+  /**
+   * Promote the rotated-to key and retire the outgoing one.
+   *
+   * Reports what the committed promotion did to the §7.5 chain. A deliberate
+   * break is recorded after the commit and is therefore best-effort, like every
+   * other post-commit step; `continuityBreak: "deferred"` is how an operator
+   * surface learns it did not record without being told the rotation failed.
+   */
+  readonly confirmAuthenticatedKey: (
+    hubOrigin: string,
+    keyId: string,
+  ) => Promise<HubKeyRotationPromotion>;
+  // ─── OPERATOR SURFACE: OWNED BY THE CLI SLICE, NOT YET BUILT ──────────────
+  //
+  // §6.4, §7.5, and §5.7 each require a node CLI command — forced prekey
+  // rotation, continuity recovery with its two deliberate outcomes, the
+  // deliberate chain break, and the policy-generation recovery — and every
+  // "remedy" string this package exports is written in the words such a command
+  // must use. The runtime operations below are those commands' backing
+  // implementation and are complete and tested; the commands themselves, and
+  // the surfaces that print the remedies, are the CLI slice's work and do not
+  // exist yet. Until they do, an operator who reaches one of these conditions
+  // has no way to act on it. That is a known, deliberate gap in this slice and
+  // not an oversight in these methods.
+  //
+  // `stageKeyRotation` and `confirmAuthenticatedKey` sit in the same position
+  // and already did before this slice: the §7.5 continuity argument threaded
+  // through `stageKeyRotation` is likewise unreachable until the command exists.
+
+  /**
+   * The §7.5 material a capability statement carries, after the startup
+   * cross-check has run and any repair it mandates has been committed.
+   */
+  readonly readE2eeContinuity: (hubOrigin: string) => Promise<NodeE2eeContinuityStatus>;
+  /**
+   * §7.5's deliberate break, for the operator surface.
+   *
+   * Drops the chain and keeps the lineage: every pinned client takes the §13.3
+   * re-verification path, and the generation high-water mark is retained so no
+   * generation is ever reused.
+   */
+  readonly breakE2eeContinuity: () => Promise<void>;
+  /**
+   * §7.5 recovery, outcome one: re-adopt a continuity id the operator confirms.
+   * Restores every existing pin when the confirmed value is the one this node
+   * advertised.
+   */
+  readonly adoptE2eeContinuityId: (continuityId: string) => Promise<string>;
+  /**
+   * §7.5 recovery, outcome two: deliberately break continuity and mint a fresh
+   * id. Equivalent in effect to a deliberate chain break — every paired client
+   * needs a fresh §13.2 ceremony — and the operator surface MUST say so at the
+   * point of use.
+   */
+  readonly remintE2eeContinuityId: () => Promise<string>;
+  /**
+   * The §7.3 prekey certificate to advertise on a new channel (§5.2).
+   *
+   * These three reject with `NodeE2eePrekeyError` rather than
+   * `HubIdentityRuntimeError`: §6.4 gives prekey expiry its own named local
+   * diagnostic, and flattening it into the identity error union would erase the
+   * distinction the spec asks callers to act on.
+   */
+  readonly readE2eePrekeyCertificate: (hubOrigin: string) => Promise<NodeE2eePrekeyCertificate>;
+  /** §6.4's forced rotation, the operation the node CLI command drives. */
+  readonly rotateE2eePrekey: (hubOrigin: string) => Promise<NodeE2eePrekeyCertificate>;
+  /** Borrow the secret half of the prekey a channel advertised (§6.4, §8). */
+  readonly withE2eePrekeySecret: <A>(
+    hubOrigin: string,
+    prekeyId: string,
+    use: (secretKey: Uint8Array) => Promise<A> | A,
+  ) => Promise<A>;
 }
 
 export class HubIdentityRuntime extends Context.Service<
@@ -130,17 +275,45 @@ const bounded = async <A>(
 const protectedStoreClass = (backend: ProtectedSecretStoreBackend): HubProtectedStoreBackend =>
   backend === "permissioned-file" ? "permissioned-file" : "os";
 
-const identitySecretNames = (state: LocalHubIdentityState): ReadonlyArray<string> =>
+/**
+ * Every identity-key name this record owns, whatever its lifecycle stage.
+ *
+ * Identity keys only. The §6.3 agreement keys are named by a record of their
+ * own (`NodeE2eePrekeyStore`) and are added to the leave list from there: they
+ * are optional material that a node re-issues freely, so they prove nothing
+ * about which store class holds this identity and must not decide the affinity
+ * probe. The §7.5 continuity anchor is not in either list — it is node lineage
+ * rather than Hub identity, and `leave` explains why keeping it is what leaves
+ * the §13.3 path reachable after a re-enrollment.
+ */
+const allIdentitySecretNames = (
+  state: LocalHubIdentityState,
+  // Keys a promotion queued for destruction but has not destroyed yet. They are
+  // no longer in service and are still in the protected store, so a leave that
+  // skipped them would orphan them there with nothing left to name them. They
+  // live in a record of their own (`NodeIdentityKeyRetirementStore`) and are
+  // therefore passed in rather than read off the state.
+  retiringSecretNames: ReadonlyArray<string>,
+): ReadonlyArray<string> =>
   [
     state.activeNode?.activeKeySecretName,
     state.activeNode?.cleanupPollingSecretName,
     state.stagedRotation?.newKeySecretName,
     state.pendingEnrollment?.keySecretName,
     state.pendingEnrollment?.pollingSecretName,
-    ...(state.pendingTeardown?.secretNames ?? []),
+    ...retiringSecretNames,
   ].filter((name, index, names): name is string => {
     return typeof name === "string" && names.indexOf(name) === index;
   });
+
+const identitySecretNames = (
+  state: LocalHubIdentityState,
+  retiringSecretNames: ReadonlyArray<string>,
+): ReadonlyArray<string> =>
+  [
+    ...allIdentitySecretNames(state, retiringSecretNames),
+    ...(state.pendingTeardown?.secretNames ?? []),
+  ].filter((name, index, names) => names.indexOf(name) === index);
 
 const requiredIdentitySecretNames = (state: LocalHubIdentityState): ReadonlySet<string> => {
   const names = new Set<string>();
@@ -149,6 +322,10 @@ const requiredIdentitySecretNames = (state: LocalHubIdentityState): ReadonlySet<
   // unambiguous custody class and finish clearing state, not require a key that
   // the teardown protocol intentionally removed.
   if (state.pendingTeardown !== null) return names;
+  // The agreement key cannot appear here at all. §6.4 makes a missing or
+  // unusable prekey a re-signing trigger, not a custody failure: a node that
+  // lost it can still authenticate, still relay, and simply re-issues. Requiring
+  // it would turn an optional capability into an unstartable node.
   if (state.activeNode !== null) names.add(state.activeNode.activeKeySecretName);
   if (state.stagedRotation !== null) names.add(state.stagedRotation.newKeySecretName);
   if (state.pendingEnrollment !== null) {
@@ -188,6 +365,14 @@ const protectedStoreUnavailable = (): never => {
 
 async function selectProtectedSecretStore(options: {
   readonly stateStore: Awaited<ReturnType<typeof makeLocalHubIdentityStateStore>>;
+  /**
+   * Identity keys awaiting destruction, read once before selection.
+   *
+   * They belong in the affinity probe — they are identity keys, held in the same
+   * store class as the rest — and nothing can change them before the store is
+   * chosen, because every writer of that record is constructed after this.
+   */
+  readonly retiringSecretNames: ReadonlyArray<string>;
   readonly fileSecretRoot: string;
   readonly allowFileFallback: boolean;
   readonly secretStore?: ProtectedSecretStore;
@@ -251,7 +436,7 @@ async function selectProtectedSecretStore(options: {
   } else if (state.protectedStoreBackend === "permissioned-file") {
     selected = (await optionalStore(makeFile)) ?? protectedStoreUnavailable();
   } else {
-    const names = identitySecretNames(state);
+    const names = identitySecretNames(state, options.retiringSecretNames);
     if (names.length === 0) {
       selected =
         (await optionalStore(makeOs)) ??
@@ -296,8 +481,11 @@ async function selectProtectedSecretStore(options: {
   }
 
   const latest = await options.stateStore.readOrCreate();
-  if (latest.protectedStoreBackend === null && identitySecretNames(latest).length > 0) {
-    const names = identitySecretNames(latest);
+  if (
+    latest.protectedStoreBackend === null &&
+    identitySecretNames(latest, options.retiringSecretNames).length > 0
+  ) {
+    const names = identitySecretNames(latest, options.retiringSecretNames);
     const requiredNames = requiredIdentitySecretNames(latest);
     const inspection = await bounded("identity_store_unavailable", () =>
       inspectProtectedStore(selected, names, requiredNames),
@@ -337,6 +525,40 @@ async function selectProtectedSecretStore(options: {
 
 export async function makeHubIdentityRuntime(options: {
   readonly statePath: string;
+  /**
+   * The §7.5 continuity record. Defaults to a sibling of the identity state.
+   *
+   * A sibling and not a section of it: the identity parser reconstructs from its
+   * known keys alone, so a binary older than this feature would delete the
+   * lineage on its next write, and §7.5's whole purpose is to survive exactly
+   * that class of operator action (`NodeIdentityContinuityStore`).
+   */
+  readonly continuityStatePath?: string;
+  /**
+   * The §6.4 prekey record. Defaults to a sibling of the identity state.
+   *
+   * A sibling for the same downgrade reason, applied to the one thing it holds
+   * that cannot be regenerated: the protected-store names of live agreement
+   * private keys (`NodeE2eePrekeyStore`).
+   */
+  readonly prekeyStatePath?: string;
+  /**
+   * The identity-key destroy queue. Defaults to a sibling of the identity state.
+   *
+   * A sibling for the same downgrade reason, applied to the one thing it holds:
+   * the protected-store name of an outgoing identity private key that nothing
+   * else references any more (`NodeIdentityKeyRetirementStore`).
+   */
+  readonly retirementStatePath?: string;
+  /**
+   * The §5.7 anchor. REQUIRED to be outside the state directory.
+   *
+   * This is property (b) of §5.7 — residence outside the operator-restorable
+   * state and configuration set — and it is a property of the path, so it is
+   * the caller's to satisfy and nothing below can check it. The default is a
+   * sibling of the state directory rather than a child of it.
+   */
+  readonly continuityAnchorPath?: string;
   readonly fileSecretRoot: string;
   readonly allowFileFallback: boolean;
   readonly secretStore?: ProtectedSecretStore;
@@ -350,8 +572,15 @@ export async function makeHubIdentityRuntime(options: {
   readonly sleep?: (milliseconds: number) => Promise<void>;
 }): Promise<HubIdentityRuntimeShape> {
   const stateStore = await makeLocalHubIdentityStateStore(options.statePath);
+  const stateDirectory = dirname(options.statePath);
+  // Opened before the protected store is selected, because the names it holds
+  // are identity keys and belong to the affinity probe below.
+  const retirementStore = await makeNodeIdentityKeyRetirementStore({
+    path: options.retirementStatePath ?? join(stateDirectory, "hub-identity-retirement.json"),
+  });
   const secretStore = await selectProtectedSecretStore({
     stateStore,
+    retiringSecretNames: await retirementStore.names(),
     fileSecretRoot: options.fileSecretRoot,
     allowFileFallback: options.allowFileFallback,
     ...(options.secretStore === undefined ? {} : { secretStore: options.secretStore }),
@@ -361,6 +590,116 @@ export async function makeHubIdentityRuntime(options: {
       : { makeFileStore: options.makeFileSecretStore }),
   });
   const signingIdentity = makeNodeSigningIdentity(secretStore);
+  const now = options.now ?? (() => Date.now());
+  const prekeyStore = await makeNodeE2eePrekeyStore({
+    path: options.prekeyStatePath ?? join(stateDirectory, "hub-e2ee-prekey.json"),
+  });
+  // Outside the state directory by default, because that is the whole
+  // requirement §5.7 places on it: a restore of the state directory must not be
+  // able to lower either mark it holds. A sibling directory is not immune to an
+  // operator who wipes everything — nothing durable is — but it is outside the
+  // set §5.7 names, which is the property the cross-checks depend on.
+  const continuityAnchor = await makeNodeContinuityAnchor({
+    path:
+      options.continuityAnchorPath ??
+      join(dirname(stateDirectory), "anchors", basename(stateDirectory), "hub-continuity.json"),
+  });
+  const continuityStore = await makeNodeIdentityContinuityStore({
+    path: options.continuityStatePath ?? join(stateDirectory, "hub-continuity.json"),
+    anchor: continuityAnchor,
+  });
+
+  /**
+   * The §7.5 lineage id this node may advertise, or a hard refusal.
+   *
+   * Every caller that needs the id goes through here, so the startup cross-check
+   * and its mint have exactly one implementation and the "unresolvable" state is
+   * impossible to route around.
+   */
+  const requireContinuityId = async (): Promise<string> => {
+    const resolution = await continuityStore.resolveContinuityId();
+    if (resolution.status === "unresolvable") {
+      throw new NodeIdentityContinuityError("continuity_unresolvable");
+    }
+    return resolution.continuityId;
+  };
+
+  /**
+   * The outgoing key's PUBLIC half, without requiring that the node still holds
+   * the secret half.
+   *
+   * `append` is idempotent on the old-to-new pair precisely so that a promotion
+   * interrupted after the certificate was retained can be retried. Reaching that
+   * idempotent path through a descriptor lookup would defeat it: the lookup
+   * needs the private key, and the retry that most needs to succeed is the one
+   * taken after that key is gone. So custody is tried first — it is the only
+   * source for a certificate that does not exist yet — and a chain that already
+   * ends at exactly this rotation answers when custody cannot.
+   *
+   * Both sources are the same 32 bytes. The retained certificate carries the
+   * outgoing public key as a signed element and is signature-verified before it
+   * is believed, so this is not a weaker answer than the descriptor, only a
+   * differently sourced one.
+   */
+  const outgoingIdentityPublicKey = async (input: {
+    readonly hubOrigin: string;
+    readonly continuityId: string;
+    readonly oldKeyId: string;
+    readonly oldKeySecretName: string;
+    readonly newKeyId: string;
+  }): Promise<Uint8Array> => {
+    const held = await signingIdentity
+      .getPublicDescriptor(input.oldKeySecretName)
+      .catch(() => null);
+    if (held !== null) return held.publicKey;
+    const retained = newestRetainedContinuityCertificate(await continuityStore.read());
+    if (
+      retained !== null &&
+      retained.hubOrigin === input.hubOrigin &&
+      retained.continuityId === input.continuityId &&
+      retained.oldKeyId === input.oldKeyId &&
+      retained.newKeyId === input.newKeyId
+    ) {
+      return retained.oldPublicKey;
+    }
+    // Neither custody nor the retained chain can say what the outgoing key was,
+    // and §7.5 forbids synthesizing it. The rotation must be re-staged as a
+    // deliberate break.
+    throw new NodeIdentityContinuityError("continuity_generation_unavailable");
+  };
+
+  const rotationContinuity: HubKeyRotationContinuity = {
+    issue: async ({ hubOrigin, oldKeyId, oldKeySecretName, newKeyId, newKeySecretName }) => {
+      const continuityId = await requireContinuityId();
+      const oldPublicKey = await outgoingIdentityPublicKey({
+        hubOrigin,
+        continuityId,
+        oldKeyId,
+        oldKeySecretName,
+        newKeyId,
+      });
+      const newKey = await signingIdentity.getPublicDescriptor(newKeySecretName);
+      await continuityStore.append({
+        hubOrigin,
+        continuityId,
+        oldKeyId,
+        oldPublicKey,
+        newKeyId,
+        newPublicKey: newKey.publicKey,
+        createdAt: now(),
+        // §7.2: the signed bytes come from the named encoder inside the store,
+        // and the outgoing key signs the rotation away from itself. Never
+        // reached on the idempotent retry above, which returns before signing —
+        // and if it is reached without the key, refusing is the only correct
+        // outcome.
+        sign: (transcript) => signingIdentity.sign(oldKeySecretName, transcript),
+      });
+    },
+    break: async () => {
+      await continuityStore.recordBreak({ reason: "rotation_break", at: now() });
+    },
+  };
+
   const enrollment = makeHubEnrollmentClient({
     transport: makeHubEnrollmentHttpTransport(options.fetch, { timeoutMs: 10_000 }),
     signingIdentity,
@@ -373,6 +712,18 @@ export async function makeHubIdentityRuntime(options: {
     transport: makeHubKeyRotationHttpTransport(options.fetch, { timeoutMs: 10_000 }),
     signingIdentity,
     stateStore,
+    retirement: retirementStore,
+    continuity: rotationContinuity,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  const prekeys = makeNodeE2eePrekeyClient({
+    agreementIdentity: makeNodeAgreementIdentity(secretStore),
+    signingIdentity,
+    // §7.3 element 4 must name the key that will actually authenticate, so the
+    // certificate follows the same selector the relay proof does.
+    keySelector: rotation,
+    stateStore,
+    prekeyStore,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   const proof = makeHubNodeProofClient({
@@ -383,23 +734,115 @@ export async function makeHubIdentityRuntime(options: {
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 
-  const now = options.now ?? (() => Date.now());
+  /**
+   * The §7.5 startup cross-check, and the one place a chain break is detected.
+   *
+   * Run at startup for its repair side effects and again on every read, because
+   * the answer changes with a rotation and the §7.6.1 self-check is required
+   * after every one of them. It is cheap — two owner-only files and one anchor
+   * read — and a cached copy would be a second source of truth for the exact
+   * value §5.2 step 6 makes channel-fatal.
+   */
+  const evaluateContinuity = async (rawHubOrigin: string): Promise<NodeE2eeContinuityStatus> => {
+    let hubOrigin: string;
+    let state: LocalHubIdentityState;
+    try {
+      hubOrigin = canonicalizeHubOrigin(rawHubOrigin);
+      state = await stateStore.readOrCreate();
+    } catch {
+      // Neither an origin this node could serve nor a state it can read is a
+      // continuity condition, so neither becomes a continuity error: they are
+      // the same "this node has no identity to speak for" the gate below
+      // reports, and the two error types this operation documents are the two
+      // it may raise.
+      throw new HubIdentityRuntimeError("identity_unavailable");
+    }
+    const active = state.activeNode;
+    // Gated on an enrolled identity: §7.5 mints "before the first statement
+    // carrying it is advertised", and a node with nothing to advertise must not
+    // create an anchor — that would bind the protected-store class for a node
+    // that may never enroll.
+    if (active === null || active.hubOrigin !== hubOrigin) {
+      throw new HubIdentityRuntimeError("identity_unavailable");
+    }
+    const resolution = await continuityStore.resolveContinuityId();
+    if (resolution.status === "unresolvable") {
+      return { status: "unavailable", reason: resolution.reason, remedy: resolution.remedy };
+    }
+    // Neither key is required to be present. §7.5 has an answer for a chain that
+    // reaches no key in custody — it is broken, and this pass records it — so a
+    // key the state names but the node no longer holds must not surface as a
+    // raw signing error to a caller whose contract is `advertisable` or
+    // `unavailable`. The active key can be missing after a promotion that was
+    // interrupted between its commit and the destruction of the outgoing key,
+    // and the staged key after one interrupted anywhere.
+    const activeKey = await signingIdentity
+      .getPublicDescriptor(active.activeKeySecretName)
+      .catch(() => undefined);
+    const stagedKey =
+      state.stagedRotation === null
+        ? undefined
+        : await signingIdentity
+            .getPublicDescriptor(state.stagedRotation.newKeySecretName)
+            .catch(() => undefined);
+    // The record the resolution returned, not a second read: one snapshot,
+    // taken under the same lock acquisition that performed any repair, so a
+    // rotation cannot land between the two and be judged against the lineage
+    // the first read saw.
+    const record = resolution.record;
+    const status = nodeIdentityContinuityChainStatus({
+      record,
+      continuityId: resolution.continuityId,
+      hubOrigin,
+      activeIdentityPublicKey: activeKey?.publicKey,
+      ...(stagedKey === undefined ? {} : { stagedIdentityPublicKey: stagedKey.publicKey }),
+    });
+    if (status.status === "broken") {
+      // §7.5 backup-rollback rule: never reuse a generation, never synthesize
+      // the missing links, treat the chain as broken. Recording it is what makes
+      // the break explicit and what keeps the high-water mark, so the next
+      // rotation cannot land on a generation this node already issued.
+      const broken = await continuityStore.recordBreak({
+        reason: status.reason === "rolled_back" ? "rollback_detected" : "cross_check_failed",
+        at: now(),
+      });
+      return {
+        status: "advertisable",
+        continuityId: resolution.continuityId,
+        chain: [],
+        generation: broken.generationHighWater,
+        repair: resolution.repair,
+        chainBreak: status.reason,
+        lastBreak: broken.lastBreak,
+      };
+    }
+    return {
+      status: "advertisable",
+      continuityId: resolution.continuityId,
+      chain: status.entries,
+      generation: status.generation,
+      repair: resolution.repair,
+      chainBreak: null,
+      lastBreak: record.lastBreak,
+    };
+  };
 
   /**
    * Collect every protected-store name an identity owns.
    *
    * A leave must erase all of them: the active signing key, a staged rotation
-   * key, a pending ceremony's key, and any polling secret still awaiting
-   * cleanup. Missing one orphans key material in the OS credential store.
+   * key, a pending ceremony's key, any polling secret still awaiting cleanup,
+   * and both agreement keys. Missing one orphans key material in the credential
+   * store, where nothing can ever collect it — the store has no listing, so a
+   * forgotten name is a private key that outlives every reason to hold it.
    */
-  const ownedSecretNames = (state: LocalHubIdentityState): ReadonlyArray<string> =>
-    [
-      state.activeNode?.activeKeySecretName,
-      state.activeNode?.cleanupPollingSecretName,
-      state.stagedRotation?.newKeySecretName,
-      state.pendingEnrollment?.keySecretName,
-      state.pendingEnrollment?.pollingSecretName,
-    ].filter((name): name is string => typeof name === "string");
+  const ownedSecretNames = async (state: LocalHubIdentityState): Promise<ReadonlyArray<string>> => {
+    const agreement = await prekeyStore.secretNames().catch(() => []);
+    const retiring = await retirementStore.names().catch((): ReadonlyArray<string> => []);
+    return [...allIdentitySecretNames(state, retiring), ...agreement].filter(
+      (name, index, names) => names.indexOf(name) === index,
+    );
+  };
 
   /**
    * Phase two and three of the teardown: erase the recorded secrets, then drop
@@ -411,12 +854,48 @@ export async function makeHubIdentityRuntime(options: {
    * state that references it is gone.
    */
   const completeTeardown = async (secretNames: ReadonlyArray<string>): Promise<void> => {
+    // §7.5: a leave is a deliberate chain break and must be recorded as one.
+    // First, because the chain is authenticated by the key about to be erased —
+    // once that key is gone the retained certificates chain to nothing this node
+    // holds, and a chain nobody can walk must not be advertised. Best effort for
+    // the same reason the deletions are: a failure here is self-healing, since
+    // the startup cross-check finds and records the same break.
+    await continuityStore.recordBreak({ reason: "left_hub", at: now() }).catch(() => undefined);
     for (const name of secretNames) {
       await signingIdentity.delete(name).catch(() => undefined);
       await secretStore.remove(name).catch(() => undefined);
     }
+    // The prekey slots and the destroy queue go with the identity they were
+    // bound to; every secret either names is in the list just erased, which is
+    // why they are dropped only after it. The continuity id and its anchor
+    // survive: they are what this machine's lineage is, not what its Hub
+    // enrollment was.
+    await prekeyStore.reset().catch(() => undefined);
+    await retirementStore.reset().catch(() => undefined);
     await stateStore.reset();
   };
+
+  /**
+   * Re-issue the prekey whenever the identity it is signed under changes.
+   *
+   * §7.3 element 4 binds the certificate to one identity key id, so the moment
+   * a rotation activates — the selector switches to the incoming key then, not
+   * at promotion — the stored certificate stops being advertisable. Enrollment
+   * is the same event from the other direction: a node that just gained an
+   * identity has no certificate at all.
+   *
+   * Best effort, and it has to be: the rotation or enrollment that triggered it
+   * has already committed, so reporting a prekey failure as that operation's
+   * failure would be a lie. What makes the failure non-permanent is that
+   * `advertised` re-issues on demand, so the next channel repairs whatever this
+   * could not.
+   */
+  const maintainPrekey = async (): Promise<void> => {
+    const state = await stateStore.readOrCreate();
+    if (state.activeNode === null) return;
+    await prekeys.ensure(state.activeNode.hubOrigin);
+  };
+  const maintainPrekeyQuietly = (): Promise<void> => maintainPrekey().catch(() => undefined);
 
   // Resume an interrupted leave before anything reads key custody: the keys it
   // names may already be gone, which would otherwise fail the validation below
@@ -428,6 +907,13 @@ export async function makeHubIdentityRuntime(options: {
     }
   });
 
+  // Finish a promotion's outstanding destruction. The promotion itself is
+  // already committed — that is the ordering rule — so what is left here is a
+  // key that is no longer in service and must not be left in the protected
+  // store. Best effort: an undeletable key stays queued, and a node must start
+  // whether or not its credential store is cooperating this minute.
+  await rotation.destroyRetiredKeys().catch(() => undefined);
+
   await bounded("identity_unavailable", async () => {
     const state = await stateStore.readOrCreate();
     if (state.activeNode !== null) {
@@ -438,6 +924,33 @@ export async function makeHubIdentityRuntime(options: {
       await signingIdentity.getPublicDescriptor(state.stagedRotation.newKeySecretName);
     }
   });
+
+  // §6.4's node remedy: validate this node's own prekey certificate at startup
+  // and re-sign a fresh one when it is expired or would expire within
+  // `E2EE_PREKEY_ROTATION_OVERLAP`. This also destroys an outgoing agreement key
+  // whose overlap window elapsed while the node was down.
+  //
+  // A failure here does NOT fail startup. The prekey decides whether this node
+  // can SERVE E2EE, not whether it can run: a node that cannot issue one relays
+  // exactly as before and simply has nothing to advertise. The condition stays
+  // reportable — the forced-rotation command below surfaces the same failure
+  // with its §6.4 diagnostic instead of hiding it behind a start-up abort.
+  await maintainPrekeyQuietly();
+
+  // §7.5's startup pass, for its repairs: mint the continuity id once if this
+  // node has never advertised, restore it from the anchor if a restore rolled
+  // the stored copy back, adopt a stored value into a lost anchor, and record a
+  // chain break if the retained chain no longer reaches a key this node holds.
+  //
+  // Like the prekey pass above, a failure here does NOT fail startup. Under
+  // effective `requireE2EE` the disposition is a policy decision the caller
+  // makes from `readE2eeContinuity` (§5.5 U2, §11.2 P23); custody has nothing to
+  // say about whether a node that cannot advertise may still relay.
+  await (async () => {
+    const state = await stateStore.readOrCreate();
+    if (state.activeNode === null) return;
+    await evaluateContinuity(state.activeNode.hubOrigin);
+  })().catch(() => undefined);
 
   return {
     backend: secretStore.backend,
@@ -451,7 +964,7 @@ export async function makeHubIdentityRuntime(options: {
           await completeTeardown(state.pendingTeardown.secretNames);
           return;
         }
-        const secretNames = ownedSecretNames(state);
+        const secretNames = await ownedSecretNames(state);
         if (
           state.activeNode === null &&
           state.pendingEnrollment === null &&
@@ -493,7 +1006,14 @@ export async function makeHubIdentityRuntime(options: {
       }),
     startEnrollment: (hubOrigin, metadata) =>
       bounded("enrollment_failed", () => enrollment.start(hubOrigin, metadata)),
-    pollEnrollment: (hubOrigin) => bounded("enrollment_failed", () => enrollment.poll(hubOrigin)),
+    pollEnrollment: async (hubOrigin) => {
+      const result = await bounded("enrollment_failed", () => enrollment.poll(hubOrigin));
+      // An enrollment that completed is a node that now has an identity and no
+      // certificate bound to it. Issuing here rather than at the next restart
+      // is what lets the first channel after enrollment advertise E2EE.
+      if (result.status === "approved") await maintainPrekeyQuietly();
+      return result;
+    },
     cancelEnrollment: (hubOrigin) =>
       bounded("enrollment_failed", () => enrollment.cancel(hubOrigin)),
     createRelayAuthenticationFrame: async (hubOrigin, protocol) => {
@@ -505,10 +1025,51 @@ export async function makeHubIdentityRuntime(options: {
         );
       }
     },
-    stageKeyRotation: (hubOrigin) => bounded("rotation_failed", () => rotation.stage(hubOrigin)),
-    resumeKeyRotation: (hubOrigin) => bounded("rotation_failed", () => rotation.resume(hubOrigin)),
+    // Both rotation entry points re-issue the prekey the moment the rotation
+    // reaches `activated`, because that is the moment the authentication-key
+    // selector starts returning the incoming key and the stored certificate
+    // stops matching §7.3 element 4. Waiting for a restart would take the node
+    // off E2EE for as long as it keeps running, which under effective
+    // `requireE2EE` is a fatal pre-key condition on every channel (§11.2).
+    stageKeyRotation: async (hubOrigin, rotationOptions) => {
+      const status = await bounded("rotation_failed", () =>
+        rotation.stage(hubOrigin, rotationOptions),
+      );
+      if (status.status === "activated") await maintainPrekeyQuietly();
+      return status;
+    },
+    resumeKeyRotation: async (hubOrigin) => {
+      const status = await bounded("rotation_failed", () => rotation.resume(hubOrigin));
+      if (status.status === "activated") await maintainPrekeyQuietly();
+      return status;
+    },
     confirmAuthenticatedKey: (hubOrigin, keyId) =>
       bounded("rotation_failed", () => rotation.confirmNewKeyAuthenticated(hubOrigin, keyId)),
+    // These four report `NodeIdentityContinuityError` rather than flattening
+    // continuity failures into the identity error union, for the reason the
+    // prekey operations do: §7.5's unresolvable state has its own remedy and its
+    // own §5.5 U2 disposition, and `identity_unavailable` would erase the
+    // distinction the operator has to act on.
+    //
+    // `readE2eeContinuity` additionally reports `HubIdentityRuntimeError` with
+    // `identity_unavailable`, and only that, for the one condition that is not
+    // about continuity at all: this node has no identity enrolled at the origin
+    // asked about, so there is no lineage question to answer. It never raises a
+    // signing or custody error — §7.5's own answer for key material the node no
+    // longer holds is a broken chain, which it returns as `advertisable` with a
+    // `chainBreak` — and it never raises the unresolvable state as an error,
+    // because §5.5 U2 is a status this contract returns.
+    readE2eeContinuity: (hubOrigin) => evaluateContinuity(hubOrigin),
+    breakE2eeContinuity: async () => {
+      await continuityStore.recordBreak({ reason: "operator_break", at: now() });
+    },
+    adoptE2eeContinuityId: (continuityId) => continuityStore.adoptContinuityId(continuityId, now()),
+    remintE2eeContinuityId: () =>
+      continuityStore.breakAndRemint({ reason: "operator_break", at: now() }),
+    readE2eePrekeyCertificate: (hubOrigin) => prekeys.advertised(hubOrigin),
+    rotateE2eePrekey: (hubOrigin) => prekeys.rotate(hubOrigin),
+    withE2eePrekeySecret: (hubOrigin, prekeyId, use) =>
+      prekeys.withPrekeySecret(hubOrigin, prekeyId, use),
   };
 }
 
