@@ -69,6 +69,17 @@ export class HubConnector {
   #started = false;
   #stopping = false;
   #connecting = false;
+  /**
+   * The Hub-issued id of the identity this connector authenticates with.
+   *
+   * Cached from every identity read rather than fetched on demand: a channel
+   * session that has to bind to it reads it synchronously, and it is exposed to
+   * the registry as a getter so a channel opened before the read completes
+   * still sees the value once it lands. Cleared whenever a read reports no
+   * active node, so a later channel can never be handed the id of an
+   * enrollment that no longer exists.
+   */
+  #nodeId: string | undefined;
   #session: RelayConnectionSession | undefined;
   #sendQueue: RelaySendQueue | undefined;
   #registry: RelayChannelRegistry | undefined;
@@ -138,6 +149,7 @@ export class HubConnector {
       });
       return;
     }
+    this.#nodeId = identity.activeNode.nodeId;
     await this.#connect();
   }
 
@@ -181,6 +193,7 @@ export class HubConnector {
       });
       return;
     }
+    this.#nodeId = identity.activeNode.nodeId;
     await this.#connect();
   }
 
@@ -397,6 +410,7 @@ export class HubConnector {
       // route replaces this error with a bounded message.
       throw new Error("Hub identity could not be erased.", { cause: error });
     }
+    this.#nodeId = undefined;
     // `disabled` is legal from every state and is literally true here: no
     // socket, timer, or channel survives the teardown above. `enrolling` is only
     // honest once the connector is actually configured to enroll.
@@ -458,11 +472,18 @@ export class HubConnector {
           this.#flushAndScheduleDrain(generation);
           this.#state.updateOnlineMetrics(registry.size, sendQueue.ownedBytes);
         },
+        connection: () =>
+          this.#nodeId === undefined ? undefined : { hubOrigin: origin, nodeId: this.#nodeId },
       });
       this.#sendQueue = sendQueue;
       this.#registry = registry;
       try {
         const authenticatedState = await this.#identity.readState();
+        // Assigned unconditionally, including to undefined: a read that reports
+        // no active node means this connector no longer has the identity it
+        // last saw, and leaving the previous id in place would hand a later
+        // channel the id of an enrollment that is gone.
+        this.#nodeId = authenticatedState.activeNode?.nodeId;
         const rotation = authenticatedState.stagedRotation;
         if (rotation?.hubOrigin === origin && rotation.activatedAt !== null) {
           await this.#identity.confirmAuthenticatedKey(origin, rotation.newKeyId);
@@ -557,6 +578,11 @@ export class HubConnector {
       return;
     }
     this.#attempt = 0;
+    // The approval response is the first place this node learns its own id, and
+    // it arrives before the connection that will carry the first channels.
+    // Without this the first connect after approval publishes the registry
+    // before any identity read has completed.
+    this.#nodeId = result.nodeId;
     await this.#connect();
   }
 

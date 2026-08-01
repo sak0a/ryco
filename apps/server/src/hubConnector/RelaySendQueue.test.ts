@@ -85,6 +85,78 @@ describe("RelaySendQueue", () => {
     expect(sent).toHaveLength(3);
   });
 
+  it("enqueues every frame of a message or none of them", () => {
+    // A message can be several data frames, and a partial enqueue leaves the
+    // peer's reassembler holding a truncated message the remaining frames will
+    // never complete. It is also what makes a refusal safely reportable rather
+    // than necessarily fatal: the caller needs to know that a refused message
+    // produced no wire record at all.
+    const { queue, sent } = harness();
+    const batch = [data(channelA, 0, 1), data(channelA, 1, 2), data(channelA, 2, 3)];
+    expect(queue.enqueueDataBatch(batch)).toBe(true);
+    queue.flush();
+    expect(sent).toHaveLength(3);
+
+    // Fill the data budget so that only part of the next message would fit.
+    sent.length = 0;
+    let sequence = 0;
+    while (queue.enqueueData(data(channelB, sequence, 1))) sequence += 1;
+    const admitted = queue.queuedBytes;
+    const oversizedBatch = [
+      data(channelA, 0, 7),
+      { ...data(channelA, 1, 7), payload: new Uint8Array(2_048) },
+    ];
+    expect(queue.enqueueDataBatch(oversizedBatch)).toBe(false);
+    // Not one frame of the refused message was admitted, and the queue is
+    // exactly as it was.
+    expect(queue.queuedBytes).toBe(admitted);
+    queue.flush();
+    expect(
+      sent.every((bytes) => {
+        const decoded = decodeRelayFrame(bytes);
+        return decoded.ok && decoded.value.type === "data" && decoded.value.channelId === channelB;
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses a whole message when only its first frames would fit", () => {
+    const { queue, socket } = harness();
+    // Room for the first frame but not the second.
+    socket.bufferedAmount = 1_800;
+    expect(
+      queue.enqueueDataBatch([
+        { ...data(channelA, 0, 1), payload: new Uint8Array(512) },
+        { ...data(channelA, 1, 2), payload: new Uint8Array(512) },
+      ]),
+    ).toBe(false);
+    expect(queue.queuedBytes).toBe(0);
+    expect(
+      queue.enqueueDataBatch([{ ...data(channelA, 0, 1), payload: new Uint8Array(512) }]),
+    ).toBe(true);
+  });
+
+  it("drains one channel on demand and reports what it could not send", () => {
+    const { queue, sent } = harness();
+    queue.enqueueData(data(channelA, 0, 1));
+    queue.enqueueData(data(channelB, 0, 2));
+    expect(queue.flushChannel(channelA)).toBe(true);
+    expect(sent).toHaveLength(2);
+
+    // Nothing queued is trivially drained.
+    expect(queue.flushChannel(channelA)).toBe(true);
+
+    // A channel the peer paused cannot be drained without violating the pause.
+    queue.pause(channelA);
+    queue.enqueueData(data(channelA, 1, 3));
+    expect(queue.flushChannel(channelA)).toBe(false);
+    expect(sent).toHaveLength(2);
+
+    // Neither can a closed queue, which has already discarded what it held.
+    queue.resume(channelA);
+    queue.close();
+    expect(queue.flushChannel(channelA)).toBe(false);
+  });
+
   it("reserves control capacity, accounts native buffering, and cleans channels", () => {
     const { queue, socket } = harness();
     let sequence = 0;

@@ -3,7 +3,7 @@ import { Deferred, Effect, Schema } from "effect";
 import { Rpc, RpcGroup } from "effect/unstable/rpc";
 import { RELAY_CHUNK_CAPABILITY_PRELUDE } from "@ryco/shared/relayMessageChunks";
 
-import { makeRpcByteSession } from "./RpcByteSession.ts";
+import { makeRpcByteSession, RpcOutputRefusedError } from "./RpcByteSession.ts";
 
 const EchoRpc = Rpc.make("echo", {
   payload: Schema.Struct({ value: Schema.String }),
@@ -21,6 +21,14 @@ const request = (id: string, value: string) =>
       headers: [],
     }),
   );
+
+const echoHandlers = TestGroup.toLayer(
+  Effect.succeed(
+    TestGroup.of({
+      echo: ({ value }) => Effect.succeed({ value }),
+    }),
+  ),
+);
 
 describe("RpcByteSession", () => {
   it.effect("records a legacy-compatible chunk capability advertisement", () =>
@@ -83,6 +91,67 @@ describe("RpcByteSession", () => {
         });
         yield* session.close;
         expect(yield* session.receive(request("2", "closed"))).toBe(false);
+      }),
+    ),
+  );
+
+  it.effect("keeps a claimed payload away from the RPC parser", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const output = yield* Deferred.make<Uint8Array>();
+        const seen: Uint8Array[] = [];
+        const session = yield* makeRpcByteSession(
+          TestGroup,
+          echoHandlers,
+          (bytes) => Deferred.succeed(output, Uint8Array.from(bytes)).pipe(Effect.asVoid),
+          {
+            interceptor: (message) =>
+              Effect.sync(() => {
+                seen.push(Uint8Array.from(message));
+                return message[0] === 0x2a ? { kind: "claimed" } : { kind: "rpc", message };
+              }),
+          },
+        );
+
+        // The interceptor sees the payload the RPC decoder would have seen:
+        // reassembled and with the chunk-capability prelude already stripped.
+        const claimed = new Uint8Array(RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + 3);
+        claimed.set(RELAY_CHUNK_CAPABILITY_PRELUDE);
+        claimed.set(Uint8Array.of(0x2a, 0x01, 0x02), RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength);
+        expect(yield* session.receive(claimed)).toBe(true);
+        expect(yield* session.receive(request("1", "relay"))).toBe(true);
+
+        // Only the payload the interceptor passed through produced a response,
+        // so the claimed bytes never reached the parser.
+        const response = new TextDecoder().decode(yield* Deferred.await(output));
+        expect(response).toContain('"requestId":"1"');
+        expect(seen).toEqual([Uint8Array.of(0x2a, 0x01, 0x02), request("1", "relay")]);
+      }),
+    ),
+  );
+
+  it.effect("drops a refused response instead of failing the session", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const delivered = yield* Deferred.make<Uint8Array>();
+        let refusals = 0;
+        const session = yield* makeRpcByteSession(TestGroup, echoHandlers, (bytes) =>
+          Effect.suspend(() => {
+            if (refusals === 0) {
+              refusals += 1;
+              return Effect.fail(new RpcOutputRefusedError());
+            }
+            return Deferred.succeed(delivered, Uint8Array.from(bytes)).pipe(Effect.asVoid);
+          }),
+        );
+
+        expect(yield* session.receive(request("1", "first"))).toBe(true);
+        expect(yield* session.receive(request("2", "second"))).toBe(true);
+        // A refusal used to be a defect, which took the RPC server fiber and
+        // every other request on the channel with it.
+        const response = new TextDecoder().decode(yield* Deferred.await(delivered));
+        expect(response).toContain('"requestId":"2"');
+        expect(refusals).toBe(1);
       }),
     ),
   );

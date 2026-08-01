@@ -218,7 +218,7 @@ describe("hosted relay session integration", () => {
               handlerLayer,
               (bytes) =>
                 Effect.sync(() => {
-                  if (!send(bytes)) throw new Error("Test relay output queue is full.");
+                  if (!send(bytes).accepted) throw new Error("Test relay output queue is full.");
                 }),
               { queueCapacity: 8 },
             ).pipe(Effect.provideService(Scope.Scope, scope)),

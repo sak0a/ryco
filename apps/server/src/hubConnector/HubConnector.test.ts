@@ -13,6 +13,7 @@ import { DEFAULT_HUB_CONNECTOR_CONFIG, type HubConnectorConfig } from "../config
 import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
 import type { HubRelaySocket, HubRelaySocketEventMap } from "./HubRelayTransport.ts";
 import { HubConnector, type HubConnectorScheduler } from "./HubConnector.ts";
+import type { RelayChannelSendHandle } from "./RelayChannelRegistry.ts";
 
 class FakeSocket implements HubRelaySocket {
   bufferedAmount = 0;
@@ -308,7 +309,7 @@ describe("HubConnector", () => {
   it("flushes asynchronous channel output without waiting for another inbound frame", async () => {
     const socket = new FakeSocket();
     const channelId = `ch_${"W".repeat(22)}` as RelayChannelId;
-    let sendChannelBytes: ((bytes: Uint8Array) => boolean) | undefined;
+    let sendChannelBytes: RelayChannelSendHandle | undefined;
     const connector = new HubConnector({
       config: enabledConfig,
       identity: identity(),
@@ -354,7 +355,7 @@ describe("HubConnector", () => {
       value: { type: "channel.accept", channelId },
     });
 
-    expect(sendChannelBytes?.(Uint8Array.of(0, 255, 7))).toBe(true);
+    expect(sendChannelBytes?.(Uint8Array.of(0, 255, 7))).toEqual({ accepted: true });
     await Promise.resolve();
     const output = decodeRelayFrame(socket.sent.at(-1)!);
     expect(output).toMatchObject({
@@ -366,6 +367,208 @@ describe("HubConnector", () => {
         output.value.type === "data" &&
         stripRelayChunkCapabilityPrelude(output.value.payload).message,
     ).toEqual(Uint8Array.of(0, 255, 7));
+    await connector.stop();
+  });
+
+  it("puts a channel's last record on the wire before the outer channel.close", async () => {
+    // The ordering §10.3-style close protocols depend on, asserted through the
+    // production wiring rather than a test hook: the registry drains the
+    // channel itself, so this holds however the connector schedules flushes.
+    const socket = new FakeSocket();
+    const channelId = `ch_${"F".repeat(22)}` as RelayChannelId;
+    let sendChannelBytes: ((bytes: Uint8Array) => boolean) | undefined;
+    let closeChannel: ((reason: "channel_rejected") => void) | undefined;
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity(),
+      transport: { open: () => socket },
+      channels: {
+        open: async ({ send, close }) => {
+          sendChannelBytes = (bytes) => send(bytes).accepted;
+          closeChannel = close;
+          return {
+            receive: async () => true,
+            queuedBytes: async () => 0,
+            supportsChunkedMessages: () => false,
+            close: async () => undefined,
+          };
+        },
+      },
+      enrollmentMetadata,
+    });
+    const starting = connector.start();
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await starting;
+    socket.emit("message", {
+      data: encoded({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+    } as MessageEvent);
+    await settle();
+    socket.sent.length = 0;
+
+    expect(sendChannelBytes?.(Uint8Array.of(0xff, 0x03))).toBe(true);
+    closeChannel?.("channel_rejected");
+    await settle();
+
+    const frames = socket.sent.map((bytes) => {
+      const decoded = decodeRelayFrame(bytes);
+      if (!decoded.ok) throw new Error(decoded.error.code);
+      return decoded.value;
+    });
+    expect(frames.map((frame) => frame.type)).toEqual(["data", "channel.close"]);
+    expect(
+      frames[0]?.type === "data" && stripRelayChunkCapabilityPrelude(frames[0].payload).message,
+    ).toEqual(Uint8Array.of(0xff, 0x03));
+    expect(frames[1]).toMatchObject({ channelId, reason: "channel_rejected" });
+    await connector.stop();
+  });
+
+  it("gives the first channel after enrollment approval a connection identity", async () => {
+    // The first connect after approval publishes the registry before its
+    // post-authentication identity read completes, so a channel opened in that
+    // window used to be handed no Hub origin and no node id — for its entire
+    // lifetime, since the value was captured once at open.
+    const clock = scheduler();
+    const socket = new FakeSocket();
+    const channelId = `ch_${"E".repeat(22)}` as RelayChannelId;
+    const nodeId = `node_${"N".repeat(22)}`;
+    let pending = false;
+    let readCalls = 0;
+    let releaseIdentityRead: (() => void) | undefined;
+    const identityRead = new Promise<void>((resolve) => {
+      releaseIdentityRead = resolve;
+    });
+    let connection:
+      | (() => { readonly hubOrigin: string; readonly nodeId: string } | undefined)
+      | undefined;
+    const connector = new HubConnector({
+      config: enabledConfig,
+      identity: identity({
+        readState: async () => {
+          readCalls += 1;
+          // The post-authentication read, and only that one, is held open.
+          if (readCalls > 2) await identityRead;
+          return {
+            version: 1,
+            revision: 1,
+            environmentId: `env_${"E".repeat(22)}`,
+            protectedStoreBackend: "os" as const,
+            pendingEnrollment: pending
+              ? {
+                  hubOrigin: "https://relay.example",
+                  keySecretName: "node-key.fixture",
+                  pollingSecretName: "enrollment-poll.fixture",
+                  label: "Test node",
+                  deviceCode: "ABCD-EFGH",
+                  createdAt: 1,
+                  expiresAt: 2_000_000,
+                  pollIntervalMs: 1_000,
+                  cleanupRequested: false,
+                }
+              : null,
+            activeNode:
+              readCalls > 2
+                ? {
+                    hubOrigin: "https://relay.example",
+                    nodeId,
+                    activeKeyId: `nkey_${"K".repeat(22)}`,
+                    activeKeySecretName: "node-key.fixture",
+                    cleanupPollingSecretName: null,
+                    enrolledAt: 1,
+                  }
+                : null,
+            stagedRotation: null,
+            pendingTeardown: null,
+          };
+        },
+        startEnrollment: async () => {
+          pending = true;
+          return {
+            deviceCode: "ABCD-EFGH",
+            expiresAt: 2_000_000,
+            pollIntervalMs: 1_000,
+            environmentId: `env_${"E".repeat(22)}`,
+            publicKey: {
+              algorithm: "ed25519" as const,
+              publicKey: new Uint8Array(32),
+              fingerprint: new Uint8Array(32),
+            },
+          };
+        },
+        pollEnrollment: async () => ({
+          status: "approved" as const,
+          nodeId,
+          environmentId: `env_${"E".repeat(22)}`,
+          activeKeyId: `nkey_${"K".repeat(22)}`,
+          enrolledAt: 1,
+        }),
+      }),
+      transport: { open: () => socket },
+      channels: {
+        open: async (input) => {
+          connection = input.connection;
+          return {
+            receive: async () => true,
+            queuedBytes: async () => 0,
+            supportsChunkedMessages: () => false,
+            close: async () => undefined,
+          };
+        },
+      },
+      enrollmentMetadata,
+      scheduler: clock.value,
+    });
+    await connector.start();
+    await connector.enroll();
+    await clock.advance(1_000);
+    await settle();
+    socket.emit("open", {} as Event);
+    socket.emit("message", {
+      data: encoded({
+        type: "ready",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        limits: RELAY_INITIAL_LIMITS,
+      }),
+    } as MessageEvent);
+    await Promise.resolve();
+    socket.emit("message", {
+      data: encoded({
+        type: "channel.open",
+        protocolMajor: 1,
+        protocolMinor: 2,
+        channelId,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+      }),
+    } as MessageEvent);
+    await settle();
+
+    // The channel is live while the identity read is still outstanding, and it
+    // already knows who this connection is.
+    expect(connector.status().state).toBe("authenticating");
+    expect(connection?.()).toEqual({ hubOrigin: "https://relay.example", nodeId });
+
+    releaseIdentityRead?.();
+    await settle();
+    expect(connector.status()).toMatchObject({ state: "online", activeChannels: 1 });
+    // Still read live, not captured at open.
+    expect(connection?.()).toEqual({ hubOrigin: "https://relay.example", nodeId });
     await connector.stop();
   });
 

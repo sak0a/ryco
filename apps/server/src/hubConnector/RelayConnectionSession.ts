@@ -35,7 +35,7 @@ export interface RelaySessionScheduler {
   readonly clearTimeout: (handle: unknown) => void;
 }
 
-const defaultScheduler: RelaySessionScheduler = {
+export const defaultRelayScheduler: RelaySessionScheduler = {
   setTimeout: (callback, milliseconds) => setTimeout(callback, milliseconds),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
@@ -133,7 +133,7 @@ export class RelayConnectionSession {
     this.#identity = options.identity;
     this.#transport = options.transport;
     this.#hubOrigin = options.hubOrigin;
-    this.#scheduler = options.scheduler ?? defaultScheduler;
+    this.#scheduler = options.scheduler ?? defaultRelayScheduler;
     this.#onFrame = options.onFrame;
     this.#onTerminal = options.onTerminal;
   }

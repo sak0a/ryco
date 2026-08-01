@@ -7,16 +7,25 @@ import type {
   RelayFrame,
   RelayLimits,
 } from "@ryco/contracts/relay";
-import { RELAY_MAX_RPC_MESSAGE_BYTES } from "@ryco/contracts/relay";
+import {
+  RELAY_MAX_RPC_MESSAGE_BYTES,
+  RELAY_PROTOCOL_MAJOR,
+  RELAY_PROTOCOL_MINOR,
+} from "@ryco/contracts/relay";
 import { decodeRelayFrame } from "@ryco/shared/relayCodec";
 import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 
 import {
   RelayChannelProtocolError,
   RelayChannelRegistry,
+  type RelayChannelSendHandle,
+  type RelayChannelSessionFactory,
+  type RelayConnectionIdentity,
   type RelayRpcChannelSession,
 } from "./RelayChannelRegistry.ts";
 import { RelaySendQueue } from "./RelaySendQueue.ts";
+
+type ChannelOpenInput = Parameters<RelayChannelSessionFactory["open"]>[0];
 
 const channelA = `ch_${"A".repeat(22)}` as RelayChannelId;
 const channelB = `ch_${"B".repeat(22)}` as RelayChannelId;
@@ -50,7 +59,12 @@ function decodeAll(sent: Uint8Array[]): RelayFrame[] {
   });
 }
 
-function harness() {
+function harness(
+  options: {
+    readonly connection?: () => RelayConnectionIdentity | undefined;
+    readonly onAccepted?: (input: ChannelOpenInput) => void | Promise<void>;
+  } = {},
+) {
   const sent: Uint8Array[] = [];
   const socket = {
     bufferedAmount: 0,
@@ -59,36 +73,46 @@ function harness() {
   let fatalCalls = 0;
   const sendQueue = new RelaySendQueue(socket, limits);
   const received = new Map<string, Uint8Array[]>();
+  const opens: ChannelOpenInput[] = [];
   const sessions = new Map<
     string,
     RelayRpcChannelSession & {
       queued: number;
       closes: number;
       chunkSupport: boolean;
-      send: (bytes: Uint8Array) => boolean;
+      accept: boolean;
+      send: RelayChannelSendHandle;
+      requestClose: ChannelOpenInput["close"];
     }
   >();
   const registry = new RelayChannelRegistry({
     limits,
     sendQueue,
     factory: {
-      open: async ({ channelId, send }) => {
+      open: async (input) => {
+        opens.push(input);
+        const { channelId, send } = input;
         const values: Uint8Array[] = [];
         received.set(channelId as string, values);
         const session = {
           queued: 0,
           closes: 0,
           chunkSupport: false,
+          accept: true,
           send,
+          requestClose: input.close,
           receive: async (bytes: Uint8Array) => {
             values.push(Uint8Array.from(bytes));
-            return true;
+            return session.accept;
           },
           queuedBytes: async () => session.queued,
           supportsChunkedMessages: () => session.chunkSupport,
           close: async () => {
             session.closes += 1;
           },
+          ...(options.onAccepted === undefined
+            ? {}
+            : { onAccepted: () => options.onAccepted?.(input) }),
         };
         sessions.set(channelId as string, session);
         return session;
@@ -97,8 +121,20 @@ function harness() {
     onFatal: () => {
       fatalCalls += 1;
     },
+    // Deliberately no `onOutboundReady`: every ordering guarantee asserted
+    // below must hold without the owner wiring a flush at all.
+    ...(options.connection === undefined ? {} : { connection: options.connection }),
   });
-  return { registry, sendQueue, sent, received, sessions, socket, fatalCalls: () => fatalCalls };
+  return {
+    registry,
+    sendQueue,
+    sent,
+    received,
+    opens,
+    sessions,
+    socket,
+    fatalCalls: () => fatalCalls,
+  };
 }
 
 describe("RelayChannelRegistry", () => {
@@ -117,7 +153,9 @@ describe("RelayChannelRegistry", () => {
     });
     expect(received.get(channelA as string)).toEqual([payload]);
 
-    expect(sessions.get(channelA as string)!.send(Uint8Array.of(9, 0, 8))).toBe(true);
+    expect(sessions.get(channelA as string)!.send(Uint8Array.of(9, 0, 8))).toEqual({
+      accepted: true,
+    });
     sendQueue.flush();
     const output = decodeAll(sent).at(-1);
     expect(output).toMatchObject({ type: "data", channelId: channelA, sequence: 0 });
@@ -142,7 +180,10 @@ describe("RelayChannelRegistry", () => {
     // only one above the reassembly ceiling is rejected — and when it is, the
     // reason must name the real cause.
     const session = sessions.get(channelA as string)!;
-    expect(session.send(new Uint8Array(RELAY_MAX_RPC_MESSAGE_BYTES + 1))).toBe(false);
+    expect(session.send(new Uint8Array(RELAY_MAX_RPC_MESSAGE_BYTES + 1))).toEqual({
+      accepted: false,
+      refusal: "message_too_large",
+    });
 
     await Promise.resolve();
     sendQueue.flush();
@@ -167,7 +208,7 @@ describe("RelayChannelRegistry", () => {
     for (let i = 0; i < message.byteLength; i += 1) message[i] = i % 251;
     const session = sessions.get(channelA as string)!;
     session.chunkSupport = true;
-    expect(session.send(message)).toBe(true);
+    expect(session.send(message)).toEqual({ accepted: true });
     sendQueue.flush();
 
     const frames = decodeAll(sent);
@@ -193,7 +234,10 @@ describe("RelayChannelRegistry", () => {
     sent.length = 0;
 
     const message = new Uint8Array(limits.maxDataChunkBytes + 1);
-    expect(sessions.get(channelA as string)!.send(message)).toBe(false);
+    expect(sessions.get(channelA as string)!.send(message)).toEqual({
+      accepted: false,
+      refusal: "peer_unsupported",
+    });
     await Promise.resolve();
     sendQueue.flush();
 
@@ -358,12 +402,307 @@ describe("RelayChannelRegistry", () => {
     ).toBe(true);
   });
 
+  it("hands a session its channel context and a send handle usable outside the RPC path", async () => {
+    let connection: RelayConnectionIdentity | undefined;
+    const { registry, sendQueue, sent, opens } = harness({ connection: () => connection });
+    await registry.handle(openFrame(channelA, "owner"));
+    sendQueue.flush();
+    sent.length = 0;
+
+    // Everything a session needs to bind itself to this channel, which it
+    // previously had no way to learn: the capability and role the peer named,
+    // the protocol version the channel speaks, and who this connection is.
+    expect(opens[0]).toMatchObject({
+      channelId: channelA,
+      capability: "ryco.rpc",
+      effectiveRole: "owner",
+      protocolMajor: RELAY_PROTOCOL_MAJOR,
+      protocolMinor: RELAY_PROTOCOL_MINOR,
+    });
+
+    // Read at each use, not captured at open. A channel opened before the
+    // connection knows its own node id — which is every channel of the first
+    // connect after enrollment approval — would otherwise be stuck without an
+    // identity for its whole lifetime.
+    expect(opens[0]!.connection()).toBeUndefined();
+    connection = { hubOrigin: "https://hub.example", nodeId: "nd_example" };
+    expect(opens[0]!.connection()).toEqual(connection);
+
+    // Out-of-band sends share the channel's outbound sequence with the RPC
+    // path rather than running a second, competing one.
+    expect(registry.send(channelA, Uint8Array.of(1, 2))).toEqual({ accepted: true });
+    expect(registry.send(channelA, Uint8Array.of(3, 4))).toEqual({ accepted: true });
+    expect(registry.send(channelB, Uint8Array.of(5))).toEqual({
+      accepted: false,
+      refusal: "channel_closed",
+    });
+    sendQueue.flush();
+    const frames = decodeAll(sent);
+    expect(frames.map((frame) => (frame.type === "data" ? frame.sequence : -1))).toEqual([0, 1]);
+  });
+
+  it("awaits an asynchronous acceptance announcement before delivering any inbound frame", async () => {
+    // Void-return bivariance accepts an async announcement silently. If it is
+    // not awaited, the message it is emitting at sequence 0 can be overtaken by
+    // whatever the peer sends next — the one thing a sequence-0 carrier cannot
+    // survive.
+    let released: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      released = resolve;
+    });
+    const { registry, sendQueue, sent, received } = harness({
+      onAccepted: async (input) => {
+        await gate;
+        input.send(Uint8Array.of(0xc0, 0xff, 0xee));
+      },
+    });
+    const opening = registry.handle(openFrame(channelA));
+    for (let turn = 0; turn < 4; turn += 1) await Promise.resolve();
+    expect(registry.has(channelA)).toBe(true);
+    released?.();
+    await opening;
+
+    // The frame chain could only deliver this once `handle` resolved, which is
+    // the guarantee: the announcement completed first.
+    await registry.handle({
+      type: "data",
+      ...version,
+      channelId: channelA,
+      sequence: 0 as never,
+      payload: Uint8Array.of(1),
+    });
+    expect(received.get(channelA as string)).toHaveLength(1);
+
+    sendQueue.flush();
+    const frames = decodeAll(sent);
+    expect(frames.map((frame) => frame.type)).toEqual(["channel.accept", "data"]);
+    expect(frames[1]?.type === "data" && frames[1].sequence).toBe(0);
+  });
+
+  it("closes as channel_rejected, not internal_error, when acceptance announcement fails", async () => {
+    // A failed announcement must be indistinguishable on the wire from every
+    // other open-time rejection: a distinct reason would partition an
+    // authentication layer's pre-key failures by cause.
+    const { registry, sendQueue, sent, sessions } = harness({
+      onAccepted: () => {
+        throw new Error("announcement failed");
+      },
+    });
+    await registry.handle(openFrame(channelA));
+
+    expect(registry.has(channelA)).toBe(false);
+    expect(sessions.get(channelA as string)!.closes).toBe(1);
+    sendQueue.flush();
+    expect(decodeAll(sent).map((frame) => frame.type)).toEqual(["channel.accept", "channel.close"]);
+    expect(decodeAll(sent).at(-1)).toMatchObject({
+      type: "channel.close",
+      channelId: channelA,
+      reason: "channel_rejected",
+    });
+  });
+
+  it("flushes a record queued before a close ahead of the outer channel.close", async () => {
+    // Regression: the close purged the channel's queue with no intervening
+    // flush, and control frames drain ahead of data anyway, so a record
+    // enqueued immediately before a close could never reach the wire first.
+    //
+    // This harness wires no outbound-ready hook at all, so the drain has to be
+    // the close path's own doing. A fix that only worked when the owner
+    // happened to flush would leave nothing behind here.
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    expect(sessions.get(channelA as string)!.send(Uint8Array.of(7, 7, 7))).toEqual({
+      accepted: true,
+    });
+    expect(sendQueue.queuedBytes).toBeGreaterThan(0);
+    await registry.closeChannel(channelA, "channel_rejected");
+    // The data is already on the socket at this point; only the close frame
+    // still needs the owner's flush, which is exactly the ordering required.
+    expect(decodeAll(sent).map((frame) => frame.type)).toEqual(["data"]);
+    sendQueue.flush();
+
+    const frames = decodeAll(sent);
+    expect(frames.map((frame) => frame.type)).toEqual(["data", "channel.close"]);
+    expect(
+      frames[0]?.type === "data" && stripRelayChunkCapabilityPrelude(frames[0].payload).message,
+    ).toEqual(Uint8Array.of(7, 7, 7));
+  });
+
+  it("gets a session's last record out before the close it requests itself", async () => {
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    // The sequence a payload-authentication layer performs on a fatal
+    // condition: emit the final record, then close naming the reason.
+    const session = sessions.get(channelA as string)!;
+    expect(session.send(Uint8Array.of(0xff, 0x03))).toEqual({ accepted: true });
+    session.requestClose("channel_rejected");
+    for (let turn = 0; turn < 4; turn += 1) await Promise.resolve();
+    sendQueue.flush();
+
+    expect(decodeAll(sent).map((frame) => frame.type)).toEqual(["data", "channel.close"]);
+    expect(decodeAll(sent).at(-1)).toMatchObject({ reason: "channel_rejected" });
+  });
+
+  it("does not push a flow-paused channel's queued record past the pause on close", async () => {
+    // The documented limit of the close drain: the peer asked this channel to
+    // stop, so its queued record is lost rather than sent in violation. A
+    // protocol that needs delivery proof cannot take an accepted enqueue for
+    // one.
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    await registry.handle({ type: "flow.pause", ...version, channelId: channelA });
+    expect(sessions.get(channelA as string)!.send(Uint8Array.of(7))).toEqual({ accepted: true });
+    await registry.closeChannel(channelA, "channel_rejected");
+    sendQueue.flush();
+
+    expect(decodeAll(sent).map((frame) => frame.type)).toEqual(["channel.close"]);
+    expect(sendQueue.queuedBytes).toBe(0);
+  });
+
+  it("does not drain a channel the peer has already closed", async () => {
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    expect(sessions.get(channelA as string)!.send(Uint8Array.of(7))).toEqual({ accepted: true });
+    // The relay no longer knows this channel, so its queued data has nowhere
+    // to go and must not be pushed after the peer's close.
+    await registry.handle({ type: "channel.close", ...version, channelId: channelA });
+    sendQueue.flush();
+    expect(sent).toEqual([]);
+    expect(sendQueue.queuedBytes).toBe(0);
+  });
+
+  it("reports a refused send without disturbing the channel", async () => {
+    const { registry, sendQueue, sent, sessions, socket } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    socket.bufferedAmount = limits.maxQueuedBytes;
+    const session = sessions.get(channelA as string)!;
+    expect(session.send(Uint8Array.of(9), { onRefused: "report" })).toEqual({
+      accepted: false,
+      refusal: "queue_full",
+    });
+    for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+
+    // The default disposition would have closed the channel here.
+    expect(registry.has(channelA)).toBe(true);
+    expect(session.closes).toBe(0);
+    expect(sent).toEqual([]);
+    socket.bufferedAmount = 0;
+    expect(session.send(Uint8Array.of(9))).toEqual({ accepted: true });
+  });
+
+  it("keeps a size refusal distinguishable from backpressure", async () => {
+    // A sender that must map these onto different errors — permanent versus
+    // retryable — cannot do it from one bit.
+    const { registry, sendQueue, sessions, socket } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+
+    const session = sessions.get(channelA as string)!;
+    const report = { onRefused: "report" } as const;
+    expect(session.send(new Uint8Array(limits.maxDataChunkBytes + 1), report)).toEqual({
+      accepted: false,
+      refusal: "peer_unsupported",
+    });
+    session.chunkSupport = true;
+    expect(session.send(new Uint8Array(RELAY_MAX_RPC_MESSAGE_BYTES + 1), report)).toEqual({
+      accepted: false,
+      refusal: "message_too_large",
+    });
+    socket.bufferedAmount = limits.maxQueuedBytes;
+    expect(session.send(Uint8Array.of(1), report)).toEqual({
+      accepted: false,
+      refusal: "queue_full",
+    });
+    expect(registry.has(channelA)).toBe(true);
+  });
+
+  it("enqueues every chunk of a message or none of them", async () => {
+    const { registry, sendQueue, sessions, socket } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+
+    const session = sessions.get(channelA as string)!;
+    session.chunkSupport = true;
+    // Room for one frame of this message but not both. Enqueuing the first and
+    // refusing the second would leave the peer's reassembler holding a
+    // truncated message that nothing will ever complete.
+    socket.bufferedAmount = 1_500;
+    expect(
+      session.send(new Uint8Array(limits.maxDataChunkBytes * 2 - 64), {
+        onRefused: "report",
+      }),
+    ).toEqual({ accepted: false, refusal: "queue_full" });
+    expect(sendQueue.queuedBytes).toBe(0);
+  });
+
+  it("closes a channel from the session side with the reason the session names", async () => {
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    sessions.get(channelA as string)!.requestClose("channel_rejected");
+    for (let turn = 0; turn < 4; turn += 1) await Promise.resolve();
+
+    expect(registry.has(channelA)).toBe(false);
+    expect(sessions.get(channelA as string)!.closes).toBe(1);
+    sendQueue.flush();
+    expect(decodeAll(sent)).toEqual([
+      expect.objectContaining({
+        type: "channel.close",
+        channelId: channelA,
+        reason: "channel_rejected",
+      }),
+    ]);
+  });
+
+  it("still closes a refusing receiver as a slow consumer", async () => {
+    const { registry, sendQueue, sent, sessions } = harness();
+    await registry.handle(openFrame(channelA));
+    sendQueue.flush();
+    sent.length = 0;
+
+    sessions.get(channelA as string)!.accept = false;
+    await registry.handle({
+      type: "data",
+      ...version,
+      channelId: channelA,
+      sequence: 0 as never,
+      payload: Uint8Array.of(1),
+    });
+
+    expect(registry.has(channelA)).toBe(false);
+    sendQueue.flush();
+    expect(decodeAll(sent)).toEqual([
+      expect.objectContaining({
+        type: "channel.close",
+        channelId: channelA,
+        reason: "slow_consumer",
+      }),
+    ]);
+  });
+
   it("closes a channel and signals fatal when outbound buffering cannot retain a close", async () => {
     const { registry, sendQueue, sessions, socket, fatalCalls } = harness();
     await registry.handle(openFrame(channelA));
     sendQueue.flush();
     socket.bufferedAmount = limits.maxQueuedBytes;
-    expect(sessions.get(channelA as string)!.send(Uint8Array.of(9))).toBe(false);
+    expect(sessions.get(channelA as string)!.send(Uint8Array.of(9)).accepted).toBe(false);
     for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
     expect(registry.has(channelA)).toBe(false);
     expect(sessions.get(channelA as string)!.closes).toBe(1);

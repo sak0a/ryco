@@ -84,7 +84,7 @@ describe("relay RPC integration", () => {
               handlerLayer,
               (bytes) =>
                 Effect.sync(() => {
-                  if (!send(bytes)) throw new Error("relay output full");
+                  if (!send(bytes).accepted) throw new Error("relay output full");
                 }),
               { queueCapacity: 4 },
             ).pipe(Effect.provideService(Scope.Scope, scope)),
