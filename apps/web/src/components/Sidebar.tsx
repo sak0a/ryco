@@ -89,6 +89,7 @@ import { SidebarProjectsContent, PROJECT_ROOT_DROP_ID } from "./sidebar/SidebarP
 import { SidebarProjectItem } from "./sidebar/SidebarProjectItem";
 import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrome";
 import { SidebarViewToggle } from "./sidebar/SidebarViewToggle";
+import { SidebarGlobalSearch } from "./sidebar/SidebarGlobalSearch";
 import { SidebarInbox } from "./sidebar/inbox/SidebarInbox";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
@@ -1076,6 +1077,8 @@ export default function Sidebar() {
     <>
       <SidebarChromeHeader isElectron={isElectron} />
 
+      <SidebarGlobalSearch shortcutLabel={commandPaletteShortcutLabel} />
+
       {!isMobile ? (
         <SidebarViewToggle value={sidebarViewMode} onChange={handleSidebarViewModeChange} />
       ) : null}
@@ -1099,7 +1102,6 @@ export default function Sidebar() {
           handleProjectDragEnd={handleProjectDragEnd}
           handleProjectDragCancel={handleProjectDragCancel}
           projectTreeRows={projectTreeRows}
-          commandPaletteShortcutLabel={commandPaletteShortcutLabel}
           attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
           projectsLength={projects.length}
           renderProjectRow={(project, dragHandleProps, onNewFolderWithProject) => (

@@ -53,20 +53,20 @@ function activeStatus(entry: ThreadInboxEntry, failure: string | null): ActiveSt
   const blocker = entry.lifecycle.settlementBlocker;
   if (blocker === "pending-approval") {
     return {
-      label: "Approval needed",
+      label: "Approval",
       dotClassName: "bg-amber-500",
       pulse: false,
     };
   }
   if (blocker === "pending-user-input") {
     return {
-      label: "Input needed",
+      label: "Input",
       dotClassName: "bg-violet-500",
       pulse: false,
     };
   }
   if (blocker === "session-running" || blocker === "session-starting") {
-    return { label: "Agent running", dotClassName: "bg-sky-500", pulse: true };
+    return { label: "Running", dotClassName: "bg-sky-500", pulse: true };
   }
   if (blocker === "local-queue" || blocker === "queued-turn") {
     return { label: "Queued", dotClassName: "bg-teal-500", pulse: false };
@@ -275,8 +275,10 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
     <button
       aria-current={entry.current ? "page" : undefined}
       className={cn(
-        "min-w-0 flex-1 cursor-pointer rounded-lg text-left outline-hidden ring-ring focus-visible:ring-2",
-        settled ? "flex h-9 items-center gap-2 px-2.5 pr-9" : "h-[78px] px-2.5 py-2 pr-9",
+        "col-span-2 col-start-1 row-start-1 min-w-0 cursor-pointer rounded-lg text-left outline-hidden ring-ring focus-visible:ring-2",
+        settled
+          ? "grid h-9 grid-cols-[auto_minmax(0,1fr)_auto_4rem] items-center gap-2 px-2.5"
+          : "h-[78px] px-2.5 py-2",
       )}
       onClick={() => onNavigate(entry)}
       type="button"
@@ -288,16 +290,32 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
             {entry.title || "Untitled thread"}
           </span>
           {provider ? (
-            <ProviderInstanceIcon
-              accentColor={provider.accentColor}
-              className="size-3 opacity-55"
-              displayName={provider.displayName}
-              driverKind={provider.driverKind}
-              iconClassName="size-3"
-            />
+            <span
+              aria-label={provider.displayName}
+              className="inline-flex shrink-0"
+              data-testid="inbox-row-provider"
+              title={
+                provider.modelLabel
+                  ? `${provider.displayName} · ${provider.modelLabel}`
+                  : provider.displayName
+              }
+            >
+              <ProviderInstanceIcon
+                accentColor={provider.accentColor}
+                className="size-3 opacity-55"
+                displayName={provider.displayName}
+                driverKind={provider.driverKind}
+                iconClassName="size-3"
+              />
+            </span>
           ) : null}
-          <span className="shrink-0 text-[9px] tabular-nums text-muted-foreground/55 transition-opacity group-hover/inbox-row:opacity-0 group-focus-within/inbox-row:opacity-0">
-            {formatRelativeTimeLabel(timestamp)}
+          <span className="inline-flex w-full justify-end overflow-hidden">
+            <span
+              className="shrink-0 text-[9px] tabular-nums text-muted-foreground/55 transition-[opacity,transform] duration-150 motion-reduce:transition-none group-hover/inbox-row:-translate-y-0.5 group-hover/inbox-row:opacity-0 group-focus-within/inbox-row:-translate-y-0.5 group-focus-within/inbox-row:opacity-0"
+              data-testid="inbox-row-resting-slot"
+            >
+              {formatRelativeTimeLabel(timestamp)}
+            </span>
           </span>
         </>
       ) : (
@@ -307,21 +325,26 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
             <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-muted-foreground">
               {projectLabel}
             </span>
-            <span className="inline-flex shrink-0 items-center gap-1 text-[9px] tabular-nums text-muted-foreground/65 transition-opacity group-hover/inbox-row:opacity-0 group-focus-within/inbox-row:opacity-0">
-              {status ? (
-                <>
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      status.dotClassName,
-                      status.pulse && "animate-pulse",
-                    )}
-                  />
-                  <span className={cn(failure && "text-red-500")}>{status.label}</span>
-                </>
-              ) : (
-                formatRelativeTimeLabel(timestamp)
-              )}
+            <span className="inline-flex h-6 w-16 shrink-0 items-center justify-end overflow-hidden">
+              <span
+                className="inline-flex shrink-0 items-center gap-1 text-[9px] tabular-nums text-muted-foreground/65 transition-[opacity,transform] duration-150 motion-reduce:transition-none group-hover/inbox-row:-translate-y-0.5 group-hover/inbox-row:opacity-0 group-focus-within/inbox-row:-translate-y-0.5 group-focus-within/inbox-row:opacity-0"
+                data-testid="inbox-row-resting-slot"
+              >
+                {status ? (
+                  <>
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        status.dotClassName,
+                        status.pulse && "animate-pulse",
+                      )}
+                    />
+                    <span className={cn(failure && "text-red-500")}>{status.label}</span>
+                  </>
+                ) : (
+                  formatRelativeTimeLabel(timestamp)
+                )}
+              </span>
             </span>
           </span>
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
@@ -341,30 +364,43 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
                   : (branchLabel ?? workspaceLabel ?? "no branch")}
               </span>
             </span>
-            {prState ? (
-              <span
-                aria-label={`Pull request ${prState}`}
-                className={cn(
-                  "inline-flex shrink-0 items-center gap-0.5",
-                  prState === "merged" && "text-violet-500",
-                )}
-              >
-                <GitPullRequestIcon aria-hidden className="size-2.5" />
-                {prState}
-              </span>
-            ) : null}
-            {showEnvironment ? (
-              <CloudIcon aria-label={entry.environment.label} className="size-2.5 shrink-0" />
-            ) : null}
-            {provider ? (
-              <ProviderInstanceIcon
-                accentColor={provider.accentColor}
-                className="size-3"
-                displayName={provider.displayName}
-                driverKind={provider.driverKind}
-                iconClassName="size-3"
-              />
-            ) : null}
+            <span className="inline-flex shrink-0 items-center gap-1.5">
+              {prState ? (
+                <span
+                  aria-label={`Pull request ${prState}`}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-0.5",
+                    prState === "merged" && "text-violet-500",
+                  )}
+                >
+                  <GitPullRequestIcon aria-hidden className="size-2.5" />
+                  {prState}
+                </span>
+              ) : null}
+              {showEnvironment ? (
+                <CloudIcon aria-label={entry.environment.label} className="size-2.5 shrink-0" />
+              ) : null}
+              {provider ? (
+                <span
+                  aria-label={provider.displayName}
+                  className="inline-flex shrink-0"
+                  data-testid="inbox-row-provider"
+                  title={
+                    provider.modelLabel
+                      ? `${provider.displayName} · ${provider.modelLabel}`
+                      : provider.displayName
+                  }
+                >
+                  <ProviderInstanceIcon
+                    accentColor={provider.accentColor}
+                    className="size-3"
+                    displayName={provider.displayName}
+                    driverKind={provider.driverKind}
+                    iconClassName="size-3"
+                  />
+                </span>
+              ) : null}
+            </span>
           </span>
         </>
       )}
@@ -377,7 +413,7 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
         render={
           <div
             className={cn(
-              "group/inbox-row relative mx-2 flex min-w-0 items-center rounded-lg transition-colors",
+              "group/inbox-row relative mx-2 grid min-w-0 grid-cols-[minmax(0,1fr)_4rem] rounded-lg transition-colors",
               settled && "opacity-85",
               entry.current ? "bg-sidebar-accent" : "hover:bg-sidebar-accent/65",
             )}
@@ -395,11 +431,13 @@ export const SidebarInboxRow = memo(function SidebarInboxRow({
         <button
           aria-label={`${actionLabel}: ${entry.title || "Untitled thread"}`}
           className={cn(
-            "absolute right-1.5 top-1.5 inline-flex h-6 items-center justify-center rounded-md px-1.5 text-[10px] font-medium text-muted-foreground opacity-0 outline-hidden ring-ring transition-[opacity,color,background-color] group-hover/inbox-row:opacity-100 group-focus-within/inbox-row:opacity-100 focus-visible:ring-2",
+            "pointer-events-none col-start-2 row-start-1 mt-1.5 mr-2.5 inline-flex h-6 translate-y-0.5 items-center justify-center justify-self-end rounded-md px-1.5 text-[10px] font-medium text-muted-foreground opacity-0 outline-hidden ring-ring transition-[opacity,transform,color,background-color] duration-150 motion-reduce:translate-y-0 motion-reduce:transition-none group-hover/inbox-row:pointer-events-auto group-hover/inbox-row:translate-y-0 group-hover/inbox-row:opacity-100 group-focus-within/inbox-row:pointer-events-auto group-focus-within/inbox-row:translate-y-0 group-focus-within/inbox-row:opacity-100 focus-visible:pointer-events-auto focus-visible:ring-2",
             !actionDisabled &&
               "cursor-pointer hover:bg-sidebar-accent hover:text-sidebar-foreground",
-            actionDisabled && "cursor-not-allowed opacity-35 group-hover/inbox-row:opacity-35",
+            actionDisabled &&
+              "cursor-not-allowed group-hover/inbox-row:opacity-35 group-focus-within/inbox-row:opacity-35",
           )}
+          data-testid="inbox-row-action-slot"
           disabled={actionDisabled}
           onClick={(event) => {
             event.stopPropagation();

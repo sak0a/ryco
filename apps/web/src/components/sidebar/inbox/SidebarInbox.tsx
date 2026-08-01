@@ -15,7 +15,14 @@ import {
 } from "@ryco/client-runtime/state/threads";
 import type { DraftId } from "@ryco/client-runtime/state/composer";
 import type { EnvironmentId } from "@ryco/contracts";
-import { ChevronDownIcon, ChevronRightIcon, InboxIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CloudIcon,
+  GitBranchIcon,
+  InboxIcon,
+  MonitorIcon,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -39,7 +46,9 @@ import { useServerProviders } from "../../../rpc/serverState";
 import { SidebarContent } from "../../ui/sidebar";
 import { TooltipProvider } from "../../ui/tooltip";
 import { SidebarInboxRow } from "./SidebarInboxRow";
+import { ProjectFavicon } from "../../ProjectFavicon";
 import { SidebarInboxFilters } from "./SidebarInboxFilters";
+import type { InboxFilterOption } from "./InboxFilterCombobox";
 import {
   SETTLED_PAGE_SIZE,
   shouldVirtualizeInbox,
@@ -51,11 +60,6 @@ interface SidebarInboxProps {
   readonly currentThreadKey: string | null;
   readonly onNavigateThread: (entry: ThreadInboxEntry) => void;
   readonly onNavigateDraft: (draftId: DraftId) => void;
-}
-
-interface SelectOption {
-  readonly value: string;
-  readonly label: string;
 }
 
 type VirtualInboxRow =
@@ -86,7 +90,7 @@ function draftTitle(prompt: string | undefined): string {
   return firstLine.length > 72 ? `${firstLine.slice(0, 71)}…` : firstLine;
 }
 
-function sortedOptions(options: Iterable<SelectOption>): SelectOption[] {
+function sortedOptions(options: Iterable<InboxFilterOption>): InboxFilterOption[] {
   return [...options].toSorted((left, right) => left.label.localeCompare(right.label));
 }
 
@@ -188,9 +192,15 @@ export function SidebarInbox({
         environments.map((environment) => ({
           value: environment.environmentId,
           label: environment.label,
+          artwork:
+            primaryDescriptor?.environmentId === environment.environmentId ? (
+              <MonitorIcon />
+            ) : (
+              <CloudIcon />
+            ),
         })),
       ),
-    [environments],
+    [environments, primaryDescriptor],
   );
 
   const providerEntriesByEnvironment = useMemo(() => {
@@ -212,7 +222,10 @@ export function SidebarInbox({
   }, [environments, primaryDescriptor, primaryProviders, savedRuntimeById]);
 
   const logicalProjects = useMemo(() => {
-    const byKey = new Map<string, { label: string; projectKeys: string[] }>();
+    const byKey = new Map<
+      string,
+      { label: string; projectKeys: string[]; artworkProject: Project }
+    >();
     for (const project of projects) {
       if (environmentFilter !== "all" && project.environmentId !== environmentFilter) continue;
       const key = logicalProjectKey(project);
@@ -224,7 +237,11 @@ export function SidebarInbox({
       if (existing) {
         existing.projectKeys.push(scopedKey);
       } else {
-        byKey.set(key, { label: project.name, projectKeys: [scopedKey] });
+        byKey.set(key, {
+          label: project.name,
+          projectKeys: [scopedKey],
+          artworkProject: project,
+        });
       }
     }
     return byKey;
@@ -236,6 +253,15 @@ export function SidebarInbox({
         [...logicalProjects].map(([value, project]) => ({
           value,
           label: project.label,
+          artwork: (
+            <ProjectFavicon
+              className="size-3.5"
+              customAvatarContentHash={project.artworkProject.customAvatarContentHash ?? null}
+              cwd={project.artworkProject.cwd}
+              environmentId={project.artworkProject.environmentId}
+              projectId={project.artworkProject.id}
+            />
+          ),
         })),
       ),
     [logicalProjects],
@@ -253,6 +279,8 @@ export function SidebarInbox({
           {
             value: scopedInboxWorktreeKey(worktree.environmentId, worktree.id),
             label: worktree.title ?? worktree.branch,
+            searchText: worktree.branch,
+            artwork: <GitBranchIcon />,
           },
         ];
       }),

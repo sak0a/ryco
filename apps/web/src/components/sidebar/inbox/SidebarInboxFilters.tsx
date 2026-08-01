@@ -1,47 +1,16 @@
-import { SearchIcon } from "lucide-react";
+import { FolderIcon, GitBranchIcon, MonitorIcon, SearchIcon } from "lucide-react";
 
 import { SidebarInput } from "../../ui/sidebar";
-
-interface SelectOption {
-  readonly value: string;
-  readonly label: string;
-}
-
-const FILTER_SELECT_CLASS_NAME =
-  "h-6 min-w-0 cursor-pointer rounded-md border border-sidebar-border bg-sidebar px-1.5 text-[10px] text-muted-foreground outline-hidden ring-ring focus-visible:ring-2";
-
-function InboxFilterSelect(props: {
-  readonly label: string;
-  readonly allLabel: string;
-  readonly value: string;
-  readonly options: readonly SelectOption[];
-  readonly onChange: (value: string) => void;
-}) {
-  return (
-    <select
-      aria-label={props.label}
-      className={FILTER_SELECT_CLASS_NAME}
-      onChange={(event) => props.onChange(event.target.value)}
-      value={props.value}
-    >
-      <option value="all">{props.allLabel}</option>
-      {props.options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
-}
+import { InboxFilterCombobox, type InboxFilterOption } from "./InboxFilterCombobox";
 
 export function SidebarInboxFilters(props: {
   readonly text: string;
   readonly environment: string;
   readonly project: string;
   readonly worktree: string;
-  readonly environmentOptions: readonly SelectOption[];
-  readonly projectOptions: readonly SelectOption[];
-  readonly worktreeOptions: readonly SelectOption[];
+  readonly environmentOptions: readonly InboxFilterOption[];
+  readonly projectOptions: readonly InboxFilterOption[];
+  readonly worktreeOptions: readonly InboxFilterOption[];
   readonly onTextChange: (value: string) => void;
   readonly onEnvironmentChange: (value: string) => void;
   readonly onProjectChange: (value: string) => void;
@@ -63,24 +32,27 @@ export function SidebarInboxFilters(props: {
           value={props.text}
         />
       </div>
-      <div className="mt-1.5 grid grid-cols-3 gap-1">
-        <InboxFilterSelect
-          allLabel="All environments"
-          label="Filter by environment"
+      <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+        <InboxFilterCombobox
+          allArtwork={<MonitorIcon />}
+          allLabel="Environment"
+          category="environment"
           onChange={props.onEnvironmentChange}
           options={props.environmentOptions}
           value={props.environment}
         />
-        <InboxFilterSelect
-          allLabel="All projects"
-          label="Filter by project"
+        <InboxFilterCombobox
+          allArtwork={<FolderIcon />}
+          allLabel="Project"
+          category="project"
           onChange={props.onProjectChange}
           options={props.projectOptions}
           value={props.project}
         />
-        <InboxFilterSelect
-          allLabel="All worktrees"
-          label="Filter by worktree"
+        <InboxFilterCombobox
+          allArtwork={<GitBranchIcon />}
+          allLabel="Worktree"
+          category="worktree"
           onChange={props.onWorktreeChange}
           options={props.worktreeOptions}
           value={props.worktree}
