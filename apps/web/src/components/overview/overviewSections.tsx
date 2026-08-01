@@ -7,6 +7,7 @@ import {
   ChevronRightIcon,
   ClockIcon,
   EllipsisIcon,
+  ExternalLinkIcon,
   GitCommitHorizontalIcon,
   GitPullRequestIcon,
   LoaderIcon,
@@ -495,6 +496,7 @@ export function SectionLane({
   title,
   subtitle,
   summary,
+  externalLink,
   defaultOpen = false,
   children,
 }: {
@@ -502,42 +504,86 @@ export function SectionLane({
   title: ReactNode;
   subtitle?: ReactNode;
   summary?: ReactNode;
+  externalLink?:
+    | {
+        href: string;
+        ariaLabel: string;
+      }
+    | undefined;
   defaultOpen?: boolean;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="border-b border-border last:border-b-0">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className="grid w-full grid-cols-[24px_1fr_auto_16px] items-center gap-2.5 px-3 py-[11px] text-left transition-colors hover:bg-accent"
+  const expandable = children !== undefined && children !== null && children !== false;
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const open = expandable && uncontrolledOpen;
+  const headerClassName = cn(
+    "relative grid min-h-10 w-full grid-cols-[20px_minmax(0,1fr)_auto] items-center gap-[7px] py-1 pl-2.5 text-left",
+    expandable && "transition-colors hover:bg-accent",
+    externalLink ? "pr-14" : expandable ? "pr-8" : "pr-2.5",
+  );
+  const headerContent = (
+    <>
+      <span
+        className={cn(
+          "grid size-5 place-items-center rounded-md bg-secondary text-muted-foreground transition-colors [&_svg]:size-3",
+          open && "bg-primary/12 text-primary dark:text-info-foreground",
+        )}
       >
-        <span
-          className={cn(
-            "grid size-6 place-items-center rounded-[7px] bg-secondary text-muted-foreground transition-colors [&_svg]:size-3.5",
-            open && "bg-primary/12 text-primary dark:text-info-foreground",
-          )}
-        >
-          {icon}
-        </span>
-        <span className="min-w-0">
-          <span className="block truncate text-[13px] font-semibold">{title}</span>
-          {subtitle ? (
-            <span className="block truncate text-[10.5px] font-normal text-muted-foreground">
-              {subtitle}
-            </span>
-          ) : null}
-        </span>
-        <span className="flex items-center justify-self-end gap-[7px]">{summary}</span>
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-[11.5px] leading-[14px] font-semibold">{title}</span>
+        {subtitle ? (
+          <span className="mt-px block truncate text-[10px] leading-3 text-muted-foreground">
+            {subtitle}
+          </span>
+        ) : null}
+      </span>
+      {summary ? (
+        <span className="flex shrink-0 items-center justify-self-end gap-1.5">{summary}</span>
+      ) : null}
+      {expandable ? (
         <ChevronRightIcon
           className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            "absolute top-1/2 right-2.5 size-3 -translate-y-1/2 text-muted-foreground transition-transform",
             open && "rotate-90",
           )}
         />
-      </button>
+      ) : null}
+    </>
+  );
+  return (
+    <div className="border-b border-border last:border-b-0">
+      <div
+        className="relative min-h-10"
+        data-slot="overview-section-lane-header"
+        data-expandable={expandable ? "true" : "false"}
+      >
+        {expandable ? (
+          <button
+            type="button"
+            onClick={() => setUncontrolledOpen((value) => !value)}
+            aria-expanded={open}
+            className={headerClassName}
+          >
+            {headerContent}
+          </button>
+        ) : (
+          <div className={headerClassName}>{headerContent}</div>
+        )}
+        {externalLink ? (
+          <a
+            href={externalLink.href}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={externalLink.ariaLabel}
+            title={externalLink.ariaLabel}
+            className="absolute top-1/2 right-7 z-10 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <ExternalLinkIcon className="size-3" />
+          </a>
+        ) : null}
+      </div>
       {open ? <div className="pb-1.5">{children}</div> : null}
     </div>
   );

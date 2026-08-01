@@ -127,8 +127,13 @@ const PlanSidebar = memo(function PlanSidebar({
       style={mode === "sidebar" ? { maxHeight: "calc(100% - 1.5rem)" } : undefined}
     >
       {!empty && layoutProps.branchControl ? (
-        <div className="flex min-w-0 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-2.5">
-          <div className="flex min-w-0 items-center">{layoutProps.branchControl}</div>
+        <div
+          className="flex min-h-9 min-w-0 shrink-0 items-center justify-between gap-1 border-b border-border/60 pr-2"
+          data-slot="overview-branch-header"
+        >
+          <div className="flex min-w-0 flex-1 items-center" data-slot="overview-branch-control">
+            {layoutProps.branchControl}
+          </div>
           {closeButton ? (
             <div className="flex shrink-0 items-center gap-1.5">
               <HeaderTrailing layout={layout} layoutProps={layoutProps} />
