@@ -40,6 +40,37 @@ The boolean flags use standard presence syntax and support the canonical
 `--no-hub-connector-enabled` and `--no-hub-allow-file-secret-store` forms for explicit `false`
 overrides.
 
+## Relay end-to-end encryption admission policy
+
+Two further options govern which relay channels the node admits. They follow the same
+flag → environment → bootstrap-envelope precedence, and are defined normatively in
+`docs/relay-e2ee-protocol.md` §12.3, §12.4 and §12.6.
+
+| CLI flag                             | Environment fallback                    | Default |
+| ------------------------------------ | --------------------------------------- | ------- |
+| `--hub-require-e2ee`                 | `RYCO_HUB_REQUIRE_E2EE`                 | `false` |
+| `--hub-require-approved-client-e2ee` | `RYCO_HUB_REQUIRE_APPROVED_CLIENT_E2EE` | `false` |
+
+Unlike the connector settings above, these two are **durable node state, not per-process
+configuration**. A value given on a start is committed to the node's policy record; a value left
+unset on a later start leaves the committed value exactly as it was. That is deliberate: an
+operator who enables a policy in one shell must not have it silently withdrawn by the next start
+from a launcher or a service manager. Only an explicit `false` widens the policy back.
+
+`--hub-require-e2ee` accepts only end-to-end encrypted channels. It closes the plaintext
+downgrade path; it still admits unsigned web sessions.
+
+**`--hub-require-approved-client-e2ee` disables web and legacy access entirely.** Only approved
+native clients reach application payload, and if every approved native client key is lost, remote
+access to this node is stranded until it is recovered locally. Local node recovery never relaxes
+the admission policy. This option implies `--hub-require-e2ee` even when that flag is false.
+
+Enabling either option — or removing a suite from the advertised registry — is a **policy
+withdrawal**: before the change is acknowledged the node durably commits it, increments its policy
+generation, and closes every live channel the narrowed policy no longer admits, reporting how many
+it closed in each class and how many in-flight handshakes it aborted. Widening a policy takes
+effect on channels admitted afterwards and never closes an open one.
+
 The desktop app deliberately owns these four values for its bundled server. It persists them in
 desktop settings, removes matching `RYCO_HUB_*` variables from the backend child environment, and
 passes the values over the private bootstrap channel. This keeps the visible desktop controls

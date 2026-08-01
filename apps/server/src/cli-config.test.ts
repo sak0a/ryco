@@ -8,8 +8,10 @@ import { NetService } from "@ryco/shared/Net";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_HUB_CONNECTOR_CONFIG,
+  DEFAULT_NODE_E2EE_POLICY_CONFIG,
   deriveServerPaths,
   resolveHubConnectorConfig,
+  resolveNodeE2eePolicyConfig,
 } from "./config.ts";
 import { resolveServerConfig } from "./cli.ts";
 
@@ -65,6 +67,38 @@ it("resolves bounded connector defaults and invalid enabled configuration withou
   expect(JSON.stringify(invalidName)).not.toContain("private-canary");
 });
 
+it("resolves the E2EE admission policy as a tri-state and reports invalid input", () => {
+  // Unconfigured is NOT `false`: it means "leave the durable policy alone", so a
+  // restart in a shell without the environment variable cannot silently withdraw
+  // a policy the operator enabled (§12.4).
+  expect(resolveNodeE2eePolicyConfig({})).toEqual(DEFAULT_NODE_E2EE_POLICY_CONFIG);
+  expect(
+    resolveNodeE2eePolicyConfig({ requireE2EE: "true", requireApprovedClientE2EE: "false" }),
+  ).toEqual({
+    requireE2EE: true,
+    requireApprovedClientE2EE: false,
+    configurationIssue: undefined,
+  });
+
+  // As strict as every other boolean here: a guess changes what the node admits.
+  const invalid = resolveNodeE2eePolicyConfig({ requireE2EE: "yes" });
+  expect(invalid).toEqual({
+    requireE2EE: undefined,
+    requireApprovedClientE2EE: undefined,
+    configurationIssue: "configuration_invalid",
+  });
+  // And it can only ever leave the durable policy as it was, never widen it.
+  expect(invalid.requireE2EE).toBeUndefined();
+
+  expect(
+    resolveNodeE2eePolicyConfig({ requireE2EE: "true", requireApprovedClientE2EE: "1" }),
+  ).toEqual({
+    requireE2EE: true,
+    requireApprovedClientE2EE: undefined,
+    configurationIssue: "configuration_invalid",
+  });
+});
+
 it.layer(NodeServices.layer)("cli config resolution", (it) => {
   const defaultObservabilityConfig = {
     traceMinLevel: "Info",
@@ -77,7 +111,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     otlpExportIntervalMs: 10_000,
     otlpServiceName: "ryco-server",
   } as const;
-  const defaultConnectorConfig = { hubConnector: DEFAULT_HUB_CONNECTOR_CONFIG } as const;
+  const defaultConnectorConfig = {
+    hubConnector: DEFAULT_HUB_CONNECTOR_CONFIG,
+    hubE2eePolicy: DEFAULT_NODE_E2EE_POLICY_CONFIG,
+  } as const;
 
   const openBootstrapFd = Effect.fn(function* (payload: Record<string, unknown>) {
     const fs = yield* FileSystem.FileSystem;
@@ -448,6 +485,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         hubOrigin: "https://bootstrap.example",
         hubNodeName: "Bootstrap node",
         hubAllowFileSecretStore: true,
+        hubRequireE2EE: true,
+        hubRequireApprovedClientE2EE: false,
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
       });
@@ -493,6 +532,13 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           origin: "https://bootstrap.example",
           nodeName: "Bootstrap node",
           allowFileSecretStore: true,
+        },
+        // The envelope is the lowest-precedence source and the only one the
+        // desktop uses, so an operator policy set there must survive.
+        hubE2eePolicy: {
+          requireE2EE: true,
+          requireApprovedClientE2EE: false,
+          configurationIssue: undefined,
         },
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -643,6 +689,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         hubOrigin: "https://bootstrap.example",
         hubNodeName: "Bootstrap node",
         hubAllowFileSecretStore: true,
+        hubRequireE2EE: false,
+        hubRequireApprovedClientE2EE: false,
       });
       const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"));
 
@@ -658,6 +706,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           bootstrapFd: Option.none(),
           autoBootstrapProjectFromCwd: Option.none(),
           logWebSocketEvents: Option.none(),
+          hubRequireApprovedClientE2EE: Option.some(true),
           tailscaleServeEnabled: Option.none(),
           tailscaleServePort: Option.none(),
         },
@@ -678,6 +727,8 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
                   RYCO_HUB_ORIGIN: "https://environment.example",
                   RYCO_HUB_NODE_NAME: "Environment node",
                   RYCO_HUB_ALLOW_FILE_SECRET_STORE: "false",
+                  RYCO_HUB_REQUIRE_E2EE: "true",
+                  RYCO_HUB_REQUIRE_APPROVED_CLIENT_E2EE: "false",
                 },
               }),
             ),
@@ -695,6 +746,14 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
           origin: "https://environment.example",
           nodeName: "Environment node",
           allowFileSecretStore: false,
+        },
+        // Flag beats env beats envelope, independently per option: the flag
+        // wins `requireApprovedClientE2EE` and the env wins `requireE2EE`,
+        // both over an envelope that said false for each.
+        hubE2eePolicy: {
+          requireE2EE: true,
+          requireApprovedClientE2EE: true,
+          configurationIssue: undefined,
         },
         mode: "web",
         port: 8788,

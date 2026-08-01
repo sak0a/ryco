@@ -1,8 +1,9 @@
 import { openProtectedStateFile, type ProtectedStateFile } from "./ProtectedStateFile.ts";
 
-// The §7.5 continuity anchor — docs/relay-e2ee-protocol.md §7.5 (the
-// continuity-id anchor) and §5.7 (the two properties both high-water anchors
-// must have).
+// The §7.5 continuity anchor and the §5.7 policy-generation anchor —
+// docs/relay-e2ee-protocol.md §7.5 (the continuity-id anchor) and §5.7 (the two
+// properties every high-water anchor must have, and the policy-generation mark
+// itself).
 //
 // WHAT AN ANCHOR IS FOR. §5.7 requires a durable mark that is (a) updated
 // crash-atomically and (b) resident outside the operator-restorable state and
@@ -21,7 +22,18 @@ import { openProtectedStateFile, type ProtectedStateFile } from "./ProtectedStat
 // does not: that root is caller-chosen and the connector derives it from the
 // state directory. A record of this module's own, under a caller-chosen root
 // that the connector places OUTSIDE the state directory, satisfies both
-// properties on every backend and for both values, so both live here together.
+// properties on every backend and for every value that needs them, so they all
+// live here together.
+//
+// WHY THE §5.7 POLICY GENERATION IS HERE TOO, AND NOT IN A SECOND ANCHOR. §5.7
+// asks for the same two properties for the policy-generation high-water mark as
+// §7.5 asks for the rotation generation, in the same paragraph. A second anchor
+// file would be a second copy of the placement argument, a second
+// crash-atomicity argument, and a second thing an operator can move or restore
+// out from under the first — and the failure that would cause, a generation the
+// node has advertised that no mark records, is precisely the one an anchor
+// exists to prevent. One file, two independent monotone pairs, no shared
+// arithmetic between them.
 //
 // What that does NOT buy: immunity from an operator who deletes or restores the
 // whole base directory, or from a disk image rollback. Nothing durable on the
@@ -36,11 +48,19 @@ import { openProtectedStateFile, type ProtectedStateFile } from "./ProtectedStat
 // existence and integrity, not confidentiality. It is owner-only all the same,
 // because integrity is exactly what it is for.
 //
-// CONCURRENCY. This module takes no lock. Every mutation happens while the
-// caller holds the continuity record's single-writer lock, which is what keeps
-// the anchor and the record it anchors from being updated by two writers in
-// different orders. Giving the anchor a second lock would add a second
-// acquisition order and buy nothing.
+// CONCURRENCY. Every mutation here takes this file's own single-writer lock,
+// and every one of them is a read-modify-write of the WHOLE record. That lock is
+// not redundant with the callers' locks, and the reason is the paragraph above:
+// the two monotone pairs are reached from two different records, so the
+// continuity lineage's lock is held for one of them and the §12.6 policy
+// record's lock for the other, and neither excludes the other. Without a lock
+// here a policy-generation commit and a continuity-id write racing on this one
+// file would each write back the record they read, and one of the two marks
+// would be silently rolled back — the exact failure the anchor is for.
+//
+// This lock is always the LEAF: callers take their own record's lock and then
+// reach the anchor, never the reverse, so there is one acquisition order and no
+// cycle. Nothing in this module calls back into a caller.
 
 export type NodeContinuityAnchorErrorCode =
   /** The anchor could not be read or written at all. */
@@ -72,6 +92,8 @@ const KNOWN_KEYS: ReadonlySet<string> = new Set([
   "continuityId",
   "generationHighWater",
   "pendingGeneration",
+  "policyGenerationHighWater",
+  "pendingPolicyGeneration",
 ]);
 
 const FORBIDDEN_FORWARD_KEYS: ReadonlySet<string> = new Set([
@@ -99,6 +121,26 @@ export interface NodeContinuityAnchorRecord {
    * is exactly what an interrupted rotation looks like.
    */
   readonly pendingGeneration: number;
+  /**
+   * The highest §5.7 POLICY generation this node has durably committed.
+   *
+   * Read by the startup cross-check: a stored policy record whose generation is
+   * below this mark was rolled back, which §5.7 makes a hard startup condition
+   * rather than a silently reusable value.
+   */
+  readonly policyGenerationHighWater: number;
+  /**
+   * The highest policy generation this node has ever begun issuing.
+   *
+   * Reserved before the policy record carrying it is written, which is what
+   * satisfies §5.7's "updated crash-atomically BEFORE the corresponding
+   * generation is first advertised". Like `pendingGeneration` it never declares
+   * a rollback on its own: a crash between the reservation and the commit leaves
+   * it above `policyGenerationHighWater`, and that gap is an interrupted change,
+   * not evidence of a restore. The recovery command reads it so the value it
+   * jumps to is above anything that may have been advertised.
+   */
+  readonly pendingPolicyGeneration: number;
 }
 
 interface StoredAnchorFile {
@@ -116,20 +158,60 @@ export interface NodeContinuityAnchor {
   /** Record that `generation` is durably part of the chain. Monotonic. */
   readonly commitGeneration: (generation: number) => Promise<void>;
   /**
-   * Replace an anchor this binary cannot read.
+   * Record that a §5.7 policy generation is about to be committed and advertised.
    *
-   * The one operation that does not read before it writes, and the only way out
-   * of §7.5's `anchor_unreadable` state — which the recovery command exists to
-   * resolve and which every other operation here fails closed on. It is
-   * therefore reachable only from that command, never from a startup path, and
-   * the caller is responsible for supplying a high-water mark no lower than any
-   * evidence it still holds.
+   * MUST return before the policy record carrying it is written; that ordering
+   * is the whole of §5.7's crash-atomicity requirement for this mark.
    */
-  readonly reset: (record: NodeContinuityAnchorRecord) => Promise<void>;
+  readonly reservePolicyGeneration: (generation: number) => Promise<void>;
+  /** Record that a policy generation is durably held by the policy record. Monotonic. */
+  readonly commitPolicyGeneration: (generation: number) => Promise<void>;
+  /**
+   * Replace an anchor this binary cannot read, for the §7.5 continuity pair only.
+   *
+   * The only way out of §7.5's `anchor_unreadable` state — which the recovery
+   * command exists to resolve and which every other operation here fails closed
+   * on. It is therefore reachable only from that command, never from a startup
+   * path, and the caller is responsible for supplying a mark no lower than any
+   * evidence it still holds.
+   *
+   * IT TAKES ONLY THE PAIR ITS CALLER OWNS, AND IT LOWERS NOTHING. An earlier
+   * shape took the whole record, so the continuity-driven repair passed zero for
+   * the §5.7 policy pair it holds no evidence for, and the argument offered for
+   * that was that the policy record is its own evidence — the cross-check raises
+   * the mark to meet it. The argument is circular: the policy record lives in
+   * the operator-restorable state directory and the mark does not, and the ONLY
+   * thing that can tell a restored record from a current one is the mark. Zero it
+   * and a restored policy record is silently blessed at whatever generation the
+   * restore carried, which is precisely the rollback the anchor exists to make
+   * unmistakable. So the policy pair is salvaged from whatever the existing file
+   * still yields and never lowered; a file that yields nothing leaves it at zero,
+   * which reads as "this node has never advertised" — the correct reading of a
+   * node that has nothing left.
+   */
+  readonly reset: (record: {
+    readonly continuityId: string | null;
+    readonly generationHighWater: number;
+    readonly pendingGeneration: number;
+  }) => Promise<void>;
 }
 
 function isGeneration(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * A mark an anchor written before this binary does not carry at all.
+ *
+ * Absent reads as zero — "nothing issued" — rather than as corruption, because
+ * an anchor minted by a release that predates the §5.7 policy generation is a
+ * valid anchor for everything it does record. Zero is also the safe reading: it
+ * accuses nothing of a rollback, and the first policy commit lifts it.
+ */
+function parseAbsentableGeneration(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (!isGeneration(value)) return anchorError("anchor_corrupt");
+  return value;
 }
 
 function parseFile(value: unknown): StoredAnchorFile {
@@ -145,6 +227,11 @@ function parseFile(value: unknown): StoredAnchorFile {
     // conforming node, and reading it would understate what has been issued.
     candidate.pendingGeneration < candidate.generationHighWater
   ) {
+    return anchorError("anchor_corrupt");
+  }
+  const policyGenerationHighWater = parseAbsentableGeneration(candidate.policyGenerationHighWater);
+  const pendingPolicyGeneration = parseAbsentableGeneration(candidate.pendingPolicyGeneration);
+  if (pendingPolicyGeneration < policyGenerationHighWater) {
     return anchorError("anchor_corrupt");
   }
   if (
@@ -164,6 +251,8 @@ function parseFile(value: unknown): StoredAnchorFile {
       continuityId: candidate.continuityId ?? null,
       generationHighWater: candidate.generationHighWater,
       pendingGeneration: candidate.pendingGeneration,
+      policyGenerationHighWater,
+      pendingPolicyGeneration,
     },
     forwardFields,
   };
@@ -174,7 +263,13 @@ function encodeFile(file: StoredAnchorFile): unknown {
 }
 
 const EMPTY: StoredAnchorFile = {
-  record: { continuityId: null, generationHighWater: 0, pendingGeneration: 0 },
+  record: {
+    continuityId: null,
+    generationHighWater: 0,
+    pendingGeneration: 0,
+    policyGenerationHighWater: 0,
+    pendingPolicyGeneration: 0,
+  },
   forwardFields: {},
 };
 
@@ -206,29 +301,68 @@ export async function makeNodeContinuityAnchor(options: {
     return raw === null ? null : parseFile(raw);
   };
 
-  const mutate = async (
-    change: (current: NodeContinuityAnchorRecord) => NodeContinuityAnchorRecord,
-  ): Promise<void> => {
-    const current = (await load()) ?? EMPTY;
-    const next = change(current.record);
-    // A no-op writes nothing, so an anchor that has never been written stays
-    // unwritten. That is what keeps "this node has never advertised" — the one
-    // state in which §7.5 permits a mint — distinguishable from every other.
-    if (
-      next.continuityId === current.record.continuityId &&
-      next.generationHighWater === current.record.generationHighWater &&
-      next.pendingGeneration === current.record.pendingGeneration
-    ) {
-      return;
+  /**
+   * The §5.7 policy marks the existing file still yields, for `reset`.
+   *
+   * The repair runs precisely when the record as a whole cannot be validated, so
+   * this reads the two marks on their own rather than through `parseFile`: a
+   * file whose continuity fields are unreadable can still carry an intact policy
+   * mark, and discarding it there would hand a restored policy record a clean
+   * bill of health. Only a value that is already a generation is taken — a
+   * missing or malformed one reads as zero — and every mark this returns is used
+   * as a floor, so a salvaged value can only ever raise what is written back.
+   */
+  const salvagePolicyMarks = async (): Promise<{
+    readonly policyGenerationHighWater: number;
+    readonly pendingPolicyGeneration: number;
+  }> => {
+    let raw: unknown;
+    try {
+      raw = await file.readJson();
+    } catch {
+      raw = null;
     }
-    await file.writeJson(encodeFile({ record: next, forwardFields: current.forwardFields }));
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      return { policyGenerationHighWater: 0, pendingPolicyGeneration: 0 };
+    }
+    const candidate = raw as Record<string, unknown>;
+    const mark = candidate["policyGenerationHighWater"];
+    const pending = candidate["pendingPolicyGeneration"];
+    return {
+      policyGenerationHighWater: isGeneration(mark) ? mark : 0,
+      pendingPolicyGeneration: isGeneration(pending) ? pending : 0,
+    };
   };
+
+  const mutate = (
+    change: (current: NodeContinuityAnchorRecord) => NodeContinuityAnchorRecord,
+  ): Promise<void> =>
+    // Under this file's own lock: the two monotone pairs are driven from two
+    // different records with two different locks, so nothing above excludes
+    // them from each other (see the CONCURRENCY note).
+    file.withLock(async () => {
+      const current = (await load()) ?? EMPTY;
+      const next = change(current.record);
+      // A no-op writes nothing, so an anchor that has never been written stays
+      // unwritten. That is what keeps "this node has never advertised" — the one
+      // state in which §7.5 permits a mint — distinguishable from every other.
+      if (
+        next.continuityId === current.record.continuityId &&
+        next.generationHighWater === current.record.generationHighWater &&
+        next.pendingGeneration === current.record.pendingGeneration &&
+        next.policyGenerationHighWater === current.record.policyGenerationHighWater &&
+        next.pendingPolicyGeneration === current.record.pendingPolicyGeneration
+      ) {
+        return;
+      }
+      await file.writeJson(encodeFile({ record: next, forwardFields: current.forwardFields }));
+    });
 
   return {
     read: async () => (await load())?.record ?? null,
     setContinuityId: (continuityId) => mutate((current) => ({ ...current, continuityId })),
-    // Both marks are monotonic in the record itself, not only in their callers:
-    // a lower value reaching either of them would be the rollback these exist to
+    // Every mark is monotonic in the record itself, not only in its callers:
+    // a lower value reaching one of them would be the rollback these exist to
     // detect, and accepting it would erase the evidence.
     reserveGeneration: (generation) =>
       mutate((current) => ({
@@ -241,15 +375,35 @@ export async function makeNodeContinuityAnchor(options: {
         generationHighWater: Math.max(current.generationHighWater, generation),
         pendingGeneration: Math.max(current.pendingGeneration, generation),
       })),
+    reservePolicyGeneration: (generation) =>
+      mutate((current) => ({
+        ...current,
+        pendingPolicyGeneration: Math.max(current.pendingPolicyGeneration, generation),
+      })),
+    commitPolicyGeneration: (generation) =>
+      mutate((current) => ({
+        ...current,
+        policyGenerationHighWater: Math.max(current.policyGenerationHighWater, generation),
+        pendingPolicyGeneration: Math.max(current.pendingPolicyGeneration, generation),
+      })),
     reset: (record) =>
-      file.writeJson(
-        encodeFile({
-          record: {
-            ...record,
-            pendingGeneration: Math.max(record.pendingGeneration, record.generationHighWater),
-          },
-          forwardFields: {},
-        }),
-      ),
+      file.withLock(async () => {
+        const salvaged = await salvagePolicyMarks();
+        await file.writeJson(
+          encodeFile({
+            record: {
+              continuityId: record.continuityId,
+              generationHighWater: record.generationHighWater,
+              pendingGeneration: Math.max(record.pendingGeneration, record.generationHighWater),
+              policyGenerationHighWater: salvaged.policyGenerationHighWater,
+              pendingPolicyGeneration: Math.max(
+                salvaged.pendingPolicyGeneration,
+                salvaged.policyGenerationHighWater,
+              ),
+            },
+            forwardFields: {},
+          }),
+        );
+      }),
   };
 }
