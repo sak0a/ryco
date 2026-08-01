@@ -37,6 +37,7 @@ import {
 import {
   DEFAULT_PORT,
   resolveHubConnectorConfig,
+  resolveNodeE2eePolicyConfig,
   deriveServerPaths,
   ensureServerDirectories,
   resolveStaticDir,
@@ -90,6 +91,8 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   hubOrigin: Schema.optional(Schema.String),
   hubNodeName: Schema.optional(Schema.String),
   hubAllowFileSecretStore: Schema.optional(Schema.Boolean),
+  hubRequireE2EE: Schema.optional(Schema.Boolean),
+  hubRequireApprovedClientE2EE: Schema.optional(Schema.Boolean),
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
 });
@@ -159,6 +162,18 @@ const hubNodeNameFlag = Flag.string("hub-node-name").pipe(
 const hubAllowFileSecretStoreFlag = Flag.boolean("hub-allow-file-secret-store").pipe(
   Flag.withDescription(
     "Allow the permissioned-file Hub secret-store fallback (overrides RYCO_HUB_ALLOW_FILE_SECRET_STORE).",
+  ),
+  Flag.optional,
+);
+const hubRequireE2EEFlag = Flag.boolean("hub-require-e2ee").pipe(
+  Flag.withDescription(
+    "Accept only end-to-end encrypted relay channels; open plaintext channels are closed (overrides RYCO_HUB_REQUIRE_E2EE).",
+  ),
+  Flag.optional,
+);
+const hubRequireApprovedClientE2EEFlag = Flag.boolean("hub-require-approved-client-e2ee").pipe(
+  Flag.withDescription(
+    "Accept only approved native clients over the relay. Disables web and legacy access entirely, closes the live channels it no longer admits, and can strand remote access if every approved client key is lost (overrides RYCO_HUB_REQUIRE_APPROVED_CLIENT_E2EE).",
   ),
   Flag.optional,
 );
@@ -259,6 +274,18 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  // Strings, like the other Hub policy inputs, so an unparseable value reaches
+  // `resolveNodeE2eePolicyConfig` and is reported as `configuration_invalid`
+  // rather than being coerced by the config layer into a policy the operator did
+  // not ask for.
+  hubRequireE2EE: Config.string("RYCO_HUB_REQUIRE_E2EE").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  hubRequireApprovedClientE2EE: Config.string("RYCO_HUB_REQUIRE_APPROVED_CLIENT_E2EE").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
 });
 
 interface CliServerFlags {
@@ -277,6 +304,8 @@ interface CliServerFlags {
   readonly hubOrigin?: Option.Option<string>;
   readonly hubNodeName?: Option.Option<string>;
   readonly hubAllowFileSecretStore?: Option.Option<boolean>;
+  readonly hubRequireE2EE?: Option.Option<boolean>;
+  readonly hubRequireApprovedClientE2EE?: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
 }
@@ -331,6 +360,8 @@ export const resolveServerConfig = (
       hubOrigin: flags.hubOrigin ?? Option.none(),
       hubNodeName: flags.hubNodeName ?? Option.none(),
       hubAllowFileSecretStore: flags.hubAllowFileSecretStore ?? Option.none(),
+      hubRequireE2EE: flags.hubRequireE2EE ?? Option.none(),
+      hubRequireApprovedClientE2EE: flags.hubRequireApprovedClientE2EE ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
     } satisfies CliServerFlags;
@@ -508,6 +539,26 @@ export const resolveServerConfig = (
         ),
       ),
     });
+    // Same flag > env > envelope precedence as everything above. An option left
+    // unset by all three stays unset all the way through to
+    // `NodeE2eePolicyStore`, where it means "leave the committed policy alone" —
+    // never "false" (§12.4).
+    const hubE2eePolicy = resolveNodeE2eePolicyConfig({
+      requireE2EE: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.map(normalizedFlags.hubRequireE2EE, String),
+          Option.fromUndefinedOr(env.hubRequireE2EE),
+          Option.map(Option.fromUndefinedOr(bootstrap?.hubRequireE2EE), String),
+        ),
+      ),
+      requireApprovedClientE2EE: Option.getOrUndefined(
+        resolveOptionPrecedence(
+          Option.map(normalizedFlags.hubRequireApprovedClientE2EE, String),
+          Option.fromUndefinedOr(env.hubRequireApprovedClientE2EE),
+          Option.map(Option.fromUndefinedOr(bootstrap?.hubRequireApprovedClientE2EE), String),
+        ),
+      ),
+    });
 
     const config: ServerConfigShape = {
       logLevel,
@@ -544,6 +595,7 @@ export const resolveServerConfig = (
       tailscaleServeEnabled,
       tailscaleServePort,
       hubConnector,
+      hubE2eePolicy,
     };
 
     return config;
@@ -1086,6 +1138,8 @@ const sharedServerCommandFlags = {
   hubOrigin: hubOriginFlag,
   hubNodeName: hubNodeNameFlag,
   hubAllowFileSecretStore: hubAllowFileSecretStoreFlag,
+  hubRequireE2EE: hubRequireE2EEFlag,
+  hubRequireApprovedClientE2EE: hubRequireApprovedClientE2EEFlag,
   tailscaleServeEnabled: tailscaleServeFlag,
   tailscaleServePort: tailscaleServePortFlag,
 } as const;

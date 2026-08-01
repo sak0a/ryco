@@ -99,6 +99,16 @@ export const E2EE_NODE_CAPABILITY_DIGEST_DOMAIN = "ryco.node-e2ee-capability-dig
 export const E2EE_CONTEXT_DOMAIN = "ryco.relay-e2ee.context.v1" as const;
 /** Noise prologue array (§8.4). */
 export const E2EE_PROLOGUE_DOMAIN = "ryco.relay-e2ee.prologue.v1" as const;
+/**
+ * Fallback-occurrence origin-hash input array (§12.5).
+ *
+ * The one §3.5 domain that is never signed and never leaves the node: it names
+ * the input to the `originHash` of a §12.5 ring entry, whose whole purpose is to
+ * let a node tell two Hub origins apart in its own instrumentation WITHOUT
+ * retaining the origin. It is listed in §3.5 with the rest so the distinctness
+ * rule covers it too.
+ */
+export const E2EE_FALLBACK_ORIGIN_DOMAIN = "ryco.relay-e2ee.fallback-origin.v1" as const;
 
 // ─── §3.4 Noise usage literals ───────────────────────────────────────────────
 
@@ -226,7 +236,21 @@ export function decodeCanonicalE2eeCbor(bytes: Uint8Array): E2eeDecoded<unknown>
   return { kind: "ok", value };
 }
 
-function encodeCanonical(elements: readonly unknown[]): Uint8Array {
+/**
+ * The §3.6 canonical encoder, as an array — the one form every structure in this
+ * protocol takes.
+ *
+ * Exported narrowly, and deliberately not as a general `encode`: §7.2's
+ * no-ad-hoc-transcript rule is enforced by there being exactly one encoder per
+ * domain in this module, and a general canonical `encode` in the public API
+ * would be an invitation to build a transcript somewhere else. The one caller
+ * outside this module is §12.5's `originHash`, which is a purely local
+ * instrumentation digest under `E2EE_FALLBACK_ORIGIN_DOMAIN` — nothing signs it
+ * and nothing verifies it — but it MUST be produced by the same canonical
+ * profile as everything else, because a second CBOR encoder in the tree is a
+ * second definition of "canonical".
+ */
+export function encodeCanonicalE2eeCbor(elements: readonly unknown[]): Uint8Array {
   return Uint8Array.from(encode(elements, rfc8949EncodeOptions));
 }
 
@@ -484,7 +508,7 @@ function encodeNodeE2eePrekeyTranscriptBytes(
   const createdAt = assertUnsignedSafeInteger(input.createdAt);
   const expiresAt = assertUnsignedSafeInteger(input.expiresAt);
   return assertDirectSigningBound(
-    encodeCanonical([
+    encodeCanonicalE2eeCbor([
       E2EE_NODE_PREKEY_TRANSCRIPT_DOMAIN,
       hubOrigin,
       nodeId,
@@ -533,7 +557,7 @@ export function encodeClientE2eePrekeyTranscript(
   const createdAt = assertUnsignedSafeInteger(input.createdAt);
   const expiresAt = assertUnsignedSafeInteger(input.expiresAt);
   return assertDirectSigningBound(
-    encodeCanonical([
+    encodeCanonicalE2eeCbor([
       E2EE_CLIENT_PREKEY_TRANSCRIPT_DOMAIN,
       hubOrigin,
       accountId,
@@ -585,7 +609,7 @@ export function encodeNodeIdentityContinuityTranscript(
   const newFingerprint = e2eeKeyFingerprint("node-identity", newPublicKey);
   const createdAt = assertUnsignedSafeInteger(input.createdAt);
   return assertDirectSigningBound(
-    encodeCanonical([
+    encodeCanonicalE2eeCbor([
       E2EE_NODE_IDENTITY_CONTINUITY_TRANSCRIPT_DOMAIN,
       hubOrigin,
       continuityId,
@@ -993,7 +1017,7 @@ export function encodeNodeE2eeCapabilityTranscript(
   const continuityId = assertIdentifier(input.continuityId, CONTINUITY_ID);
 
   return assertCapabilityTranscriptBound(
-    encodeCanonical([
+    encodeCanonicalE2eeCbor([
       E2EE_NODE_CAPABILITY_TRANSCRIPT_DOMAIN,
       hubOrigin,
       nodeId,
@@ -1054,7 +1078,7 @@ export function encodeNodeE2eeCapabilitySigningEnvelope(transcript: Uint8Array):
   }
   const digest = sha256(transcript);
   if (digest.byteLength !== E2EE_TRANSCRIPT_DIGEST_BYTES) invalidRelayE2eeInput();
-  const envelope = encodeCanonical([E2EE_NODE_CAPABILITY_DIGEST_DOMAIN, digest]);
+  const envelope = encodeCanonicalE2eeCbor([E2EE_NODE_CAPABILITY_DIGEST_DOMAIN, digest]);
   if (envelope.byteLength !== E2EE_CAPABILITY_SIGNING_ENVELOPE_BYTES) invalidRelayE2eeInput();
   return envelope;
 }
@@ -1245,7 +1269,7 @@ export function encodeE2eeAuthorizationContext(input: E2eeAuthorizationContextIn
         ]
       : [];
 
-  return encodeCanonical([
+  return encodeCanonicalE2eeCbor([
     E2EE_CONTEXT_DOMAIN,
     hubOrigin,
     channelId,
@@ -1325,7 +1349,7 @@ export function encodeE2eeNoisePrologue(input: E2eeNoisePrologueInput): Uint8Arr
   ) {
     invalidRelayE2eeInput();
   }
-  return encodeCanonical([
+  return encodeCanonicalE2eeCbor([
     E2EE_PROLOGUE_DOMAIN,
     hubOrigin,
     channelId,

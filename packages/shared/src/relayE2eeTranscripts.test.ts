@@ -28,6 +28,8 @@ import {
   RelayE2eeCapabilityBoundError,
   canonicalizeE2eeHubOrigin,
   decodeCanonicalE2eeCbor,
+  encodeCanonicalE2eeCbor,
+  E2EE_FALLBACK_ORIGIN_DOMAIN,
   decodeNodeIdentityContinuityTranscript,
   e2eeAuthorizationContextCommitment,
   e2eeEffectiveAdmittedPatterns,
@@ -222,6 +224,7 @@ describe("relay E2EE transcript domains and literals (§3.5, §7)", () => {
     expect(E2EE_NODE_CAPABILITY_DIGEST_DOMAIN).toBe("ryco.node-e2ee-capability-digest.v1");
     expect(E2EE_CONTEXT_DOMAIN).toBe("ryco.relay-e2ee.context.v1");
     expect(E2EE_PROLOGUE_DOMAIN).toBe("ryco.relay-e2ee.prologue.v1");
+    expect(E2EE_FALLBACK_ORIGIN_DOMAIN).toBe("ryco.relay-e2ee.fallback-origin.v1");
     expect(E2EE_NOISE_DH).toBe("25519");
     expect(E2EE_NOISE_HASH).toBe("SHA256");
   });
@@ -1064,6 +1067,26 @@ describe("§7.2 domain separation and §3.6 canonical decoding", () => {
     expect(prekey).not.toBe(capability);
     // Neither transcript is a prefix of the other: the domain differs at byte 1.
     expect(prekey.slice(0, 8)).not.toBe(capability.slice(0, 8));
+  });
+
+  it("exports the canonical array encoder the §12.5 origin hash needs", () => {
+    // Exported narrowly and only as an array encoder: §7.2's
+    // no-ad-hoc-transcript rule rests on there being one encoder per domain, and
+    // §12.5's `originHash` is the one local digest that has no encoder of its
+    // own. What it MUST NOT do is become a second definition of "canonical".
+    expect(hex(encodeCanonicalE2eeCbor([1]))).toBe("8101");
+    expect(decodeCanonicalE2eeCbor(encodeCanonicalE2eeCbor([1]))).toEqual({
+      kind: "ok",
+      value: [1],
+    });
+    const originArray = encodeCanonicalE2eeCbor([
+      E2EE_FALLBACK_ORIGIN_DOMAIN,
+      "https://hub.example.com",
+    ]);
+    expect(decodeCanonicalE2eeCbor(originArray)).toEqual({
+      kind: "ok",
+      value: [E2EE_FALLBACK_ORIGIN_DOMAIN, "https://hub.example.com"],
+    });
   });
 
   it("applies the re-encode equality rule", () => {

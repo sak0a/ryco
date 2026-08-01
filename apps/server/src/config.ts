@@ -153,6 +153,74 @@ export function resolveHubConnectorConfig(raw: RawHubConnectorConfig): HubConnec
 }
 
 /**
+ * NodeE2eePolicyConfig - the operator's E2EE admission policy for this run.
+ *
+ * TRI-STATE ON PURPOSE. `undefined` means "not configured on this start", which
+ * is NOT the same as `false`. The durable record
+ * (`hubIdentity/NodeE2eePolicyStore`) is what the node actually admits under;
+ * this carries only what the operator stated, and an absent value leaves the
+ * committed value untouched.
+ *
+ * That distinction is the whole point. A boolean defaulted to `false` here would
+ * mean an operator who enabled `requireE2EE` by exporting an environment
+ * variable in one shell gets it silently withdrawn by the next start from a
+ * launcher or service manager — precisely the silent weakening §12.4 forbids.
+ * The effective policy is never computed here; §12.4's rule lives in exactly one
+ * function, `effectiveNodeE2eePolicy`.
+ */
+export interface NodeE2eePolicyConfig {
+  /** §12.3, raw. `undefined` when this start configured nothing. */
+  readonly requireE2EE: boolean | undefined;
+  /** §12.4, raw. Implies effective `requireE2EE`; the implication is applied downstream. */
+  readonly requireApprovedClientE2EE: boolean | undefined;
+  readonly configurationIssue: "configuration_invalid" | undefined;
+}
+
+export const DEFAULT_NODE_E2EE_POLICY_CONFIG: NodeE2eePolicyConfig = {
+  requireE2EE: undefined,
+  requireApprovedClientE2EE: undefined,
+  configurationIssue: undefined,
+};
+
+interface RawNodeE2eePolicyConfig {
+  readonly requireE2EE?: string | undefined;
+  readonly requireApprovedClientE2EE?: string | undefined;
+}
+
+/**
+ * `"unset"` for absent, the boolean for `"true"`/`"false"`, `undefined` for
+ * anything else.
+ *
+ * Deliberately as strict as `parseBoolean`: `1`, `yes` and `TRUE` are refused
+ * rather than guessed at, because a guess here changes what the node admits.
+ */
+const parseTriStateBoolean = (value: string | undefined): boolean | "unset" | undefined => {
+  if (value === undefined) return "unset";
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+};
+
+/**
+ * Resolve the configured policy, reporting invalid input rather than guessing.
+ *
+ * An invalid value resolves to "not configured", so it can only ever leave the
+ * durable policy as it was — it can never widen it. `configurationIssue` is what
+ * makes that loud instead of silent.
+ */
+export function resolveNodeE2eePolicyConfig(raw: RawNodeE2eePolicyConfig): NodeE2eePolicyConfig {
+  const requireE2EE = parseTriStateBoolean(raw.requireE2EE);
+  const requireApprovedClientE2EE = parseTriStateBoolean(raw.requireApprovedClientE2EE);
+  const invalid = requireE2EE === undefined || requireApprovedClientE2EE === undefined;
+  return {
+    requireE2EE: typeof requireE2EE === "boolean" ? requireE2EE : undefined,
+    requireApprovedClientE2EE:
+      typeof requireApprovedClientE2EE === "boolean" ? requireApprovedClientE2EE : undefined,
+    configurationIssue: invalid ? "configuration_invalid" : undefined,
+  };
+}
+
+/**
  * ServerConfigShape - Process/runtime configuration required by the server.
  */
 export interface ServerConfigShape extends ServerDerivedPaths {
@@ -187,6 +255,13 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
   readonly hubConnector?: HubConnectorConfig;
+  /**
+   * Kept beside `hubConnector` rather than inside it: `resolveHubConnectorConfig`
+   * returns the defaults wholesale when the connector is disabled, and a policy
+   * an operator configured must not be discarded because the connector happened
+   * to be off on the start that read it.
+   */
+  readonly hubE2eePolicy?: NodeE2eePolicyConfig;
 }
 
 export function resolveManagedWorktreesRoot(
@@ -294,6 +369,7 @@ export class ServerConfig extends Context.Service<ServerConfig, ServerConfigShap
           tailscaleServeEnabled: false,
           tailscaleServePort: 443,
           hubConnector: DEFAULT_HUB_CONNECTOR_CONFIG,
+          hubE2eePolicy: DEFAULT_NODE_E2EE_POLICY_CONFIG,
           port: 0,
           host: undefined,
           desktopBootstrapToken: undefined,

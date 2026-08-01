@@ -574,6 +574,8 @@ const EMPTY_ANCHOR: NodeContinuityAnchorRecord = {
   continuityId: null,
   generationHighWater: 0,
   pendingGeneration: 0,
+  policyGenerationHighWater: 0,
+  pendingPolicyGeneration: 0,
 };
 
 export async function makeNodeIdentityContinuityStore(options: {
@@ -652,6 +654,11 @@ export async function makeNodeIdentityContinuityStore(options: {
   const resetAnchor = (continuityId: string, record: StoredContinuityRecord): Promise<void> => {
     const observed = decodeNewestCertificate(record)?.generation ?? 0;
     return writeAnchor(() =>
+      // The §5.7 policy pair is deliberately absent: this store holds no
+      // evidence for it and must not be able to lower it. The anchor salvages
+      // that pair itself and never lowers it, because the policy record it
+      // polices is restorable and the mark is the only thing that can tell a
+      // restored one from a current one.
       options.anchor.reset({
         continuityId,
         generationHighWater: observed,
