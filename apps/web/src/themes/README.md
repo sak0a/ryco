@@ -45,7 +45,7 @@ apps/web/src/
 
 What shipped:
 
-- **Tokenized remaining hard-coded colors** in `index.css`: scrollbar thumbs (regular + thin variants) and noise overlay opacity now use CSS variables (`--scrollbar-thumb*`, `--noise-opacity`).
+- **Tokenized remaining hard-coded colors** in `index.css`: scrollbar thumbs (regular + thin variants) use CSS variables (`--scrollbar-thumb*`). The historical `--noise-opacity` token remains import-compatible with older custom themes, but the continuously composited noise overlay is no longer rendered or editable.
 - **Theme schema** (`types.ts`): `ThemeDefinition` with `id`, `name`, `description`, `builtIn`, `light`, `dark`. Token names are an allow-list (`THEME_TOKEN_NAMES`) for type safety + future validation.
 - **Default theme as data** (`builtin.ts`): mirrors current `index.css` values — so when the active theme is `default`, no overrides are injected and the CSS file does all the work.
 - **Theme registry** (`registry.ts`): `getAllThemes()`, `findTheme()`, `getActiveThemeId()`, `setActiveThemeId()`, `getCustomThemes()`, `setCustomThemes()`, `applyThemeToDocument()`. Storage keys `ryco:active-theme` and `ryco:custom-themes`.

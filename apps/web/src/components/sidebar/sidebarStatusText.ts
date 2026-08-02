@@ -6,17 +6,15 @@ const SIDEBAR_STATUS_TEXT_CLASSNAMES: Record<SidebarStatusBucket, string> = {
   done: "sidebar-status-text sidebar-status-text--done",
   idle: "",
   in_progress: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",
-  review: "sidebar-status-text sidebar-status-text--review sidebar-status-text--shimmer",
+  review: "sidebar-status-text sidebar-status-text--review",
 };
 
 const THREAD_STATUS_TEXT_CLASSNAMES: Record<ThreadStatusPill["label"], string> = {
-  "Awaiting Input":
-    "sidebar-status-text sidebar-status-text--awaiting-input sidebar-status-text--shimmer",
+  "Awaiting Input": "sidebar-status-text sidebar-status-text--awaiting-input",
   Completed: "sidebar-status-text sidebar-status-text--done",
   Connecting: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",
-  "Pending Approval":
-    "sidebar-status-text sidebar-status-text--pending-approval sidebar-status-text--shimmer",
-  "Plan Ready": "sidebar-status-text sidebar-status-text--plan-ready sidebar-status-text--shimmer",
+  "Pending Approval": "sidebar-status-text sidebar-status-text--pending-approval",
+  "Plan Ready": "sidebar-status-text sidebar-status-text--plan-ready",
   Working: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",
 };
 

@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
 import { Effect } from "effect";
+import { vi } from "vite-plus/test";
 
 import type { ServerConfigShape } from "../../config.ts";
 import type { EffectTraceRecord, TraceRecord } from "../../observability/TraceRecord.ts";
@@ -150,6 +151,96 @@ describe("Diagnostics", () => {
       },
     );
   });
+
+  it.effect("samples resources only while a diagnostics snapshot is requested", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-diag-"));
+        const config = makeDiagnosticsConfig(tempDir);
+        const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+
+        try {
+          const diagnostics = yield* makeDiagnosticsService(config);
+          assert.equal(setIntervalSpy.mock.calls.length, 0);
+
+          const first = yield* diagnostics.getSnapshot({ providers: [], terminals: [] });
+          assert.equal(first.resources.history.length, 1);
+          assert.equal(first.resources.current, first.resources.history[0]);
+          assert.equal(setIntervalSpy.mock.calls.length, 0);
+
+          fs.appendFileSync(
+            config.serverLogPath,
+            "2026-08-02T00:00:00.000Z error cached-second-failure\n",
+          );
+          const second = yield* diagnostics.getSnapshot({ providers: [], terminals: [] });
+          assert.equal(second.resources.history.length, 2);
+          assert.equal(second.resources.current, second.resources.history[1]);
+          assert.equal(setIntervalSpy.mock.calls.length, 0);
+          assert.equal(
+            second.failures.latest.some((failure) =>
+              failure.message.includes("cached-second-failure"),
+            ),
+            false,
+          );
+        } finally {
+          setIntervalSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }),
+    ),
+  );
+
+  it.effect("includes bounded local timing and trace persistence health", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ryco-diag-"));
+        const config = makeDiagnosticsConfig(tempDir);
+
+        try {
+          const diagnostics = yield* makeDiagnosticsService(config, {
+            traceSinkHealth: () => ({
+              bufferedBytes: 128,
+              bufferedRecords: 1,
+              maxBufferedBytes: 1_024,
+              maxBufferedRecords: 50,
+              droppedRecords: 2,
+              writeFailures: 3,
+              retryDelayMs: 500,
+              lastWriteFailureAt: "2026-08-02T00:00:00.000Z",
+            }),
+          });
+          const snapshot = yield* diagnostics.getSnapshot({
+            providers: [],
+            terminals: [],
+            localMetrics: {
+              turnQuiescenceAvgMs: 120,
+              checkpointDurationP95Ms: 250,
+              latestThreadSnapshotDurationMs: 40,
+              threadSnapshotDurationP95Ms: 80,
+              wsReconnectCount: 2,
+              windowSampleCounts: {
+                turnQuiescence: 3,
+                checkpointDuration: 4,
+                threadSnapshotDuration: 5,
+              },
+              capturedAt: "2026-08-02T00:00:00.000Z",
+            },
+          });
+
+          if (snapshot.performance === undefined) {
+            return assert.fail("Expected operational performance diagnostics");
+          }
+          assert.equal(snapshot.performance.local.latestThreadSnapshotDurationMs, 40);
+          assert.equal(snapshot.performance.local.wsReconnectCount, 2);
+          assert.equal(snapshot.performance.traceSink?.bufferedBytes, 128);
+          assert.equal(snapshot.performance.traceSink?.droppedRecords, 2);
+          assert.equal(snapshot.performance.snapshotCollectionDurationMs >= 0, true);
+        } finally {
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      }),
+    ),
+  );
 
   it.effect("aggregates retained traces into diagnostics snapshots", () =>
     Effect.scoped(

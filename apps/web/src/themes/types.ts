@@ -29,6 +29,8 @@ export const THEME_TOKEN_NAMES = [
   "scrollbar-thumb-hover",
   "scrollbar-thumb-thin",
   "scrollbar-thumb-thin-hover",
+  // Retained so existing custom themes still import after the composited
+  // full-screen noise layer was removed. It is no longer rendered or edited.
   "noise-opacity",
   "radius",
   "font-family-sans",

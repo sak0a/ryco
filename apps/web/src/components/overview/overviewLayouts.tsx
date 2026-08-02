@@ -52,7 +52,7 @@ function isPlanActive(props: OverviewLayoutProps): boolean {
 
 /** Animated pulse dot indicating an in-progress operation. */
 function RunningDot() {
-  return <span className="ml-px size-2 shrink-0 rounded-full bg-sky-400 animate-pulse" />;
+  return <span className="ml-px size-2 shrink-0 rounded-full bg-sky-400 animate-status-pulse" />;
 }
 
 /** Format a count and word pair with proper pluralization. */

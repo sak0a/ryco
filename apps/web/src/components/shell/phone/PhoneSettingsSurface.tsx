@@ -158,7 +158,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       {section === "keybindings" ? <LazyKeybindingsSettingsPanel /> : null}
       {section === "source-control" ? <LazySourceControlSettingsPanel /> : null}
       {section === "connections" ? <LazyConnectionsSettings /> : null}
-      {section === "diagnostics" ? <LazyDiagnosticsSettings /> : null}
+      {section === "diagnostics" ? <LazyDiagnosticsSettings presentation="phone-legacy" /> : null}
       {section === "statistics" ? <LazyStatisticsPanel /> : null}
       {section === "archived" ? <ArchivedThreadsPanel /> : null}
     </Suspense>

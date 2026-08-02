@@ -80,10 +80,41 @@ describe("DiagnosticsSnapshot", () => {
       client: {
         slowRpcAcks: [],
       },
+      performance: {
+        local: {
+          turnQuiescenceAvgMs: null,
+          checkpointDurationP95Ms: null,
+          latestThreadSnapshotDurationMs: null,
+          threadSnapshotDurationP95Ms: null,
+          wsReconnectCount: 0,
+          windowSampleCounts: {
+            turnQuiescence: 0,
+            checkpointDuration: 0,
+            threadSnapshotDuration: 0,
+          },
+          capturedAt: "2026-06-14T12:00:00.000Z",
+        },
+        queues: {
+          runtimeDepthTotal: 0,
+          runtimeHighWaterMax: 0,
+          replayDepthMax: 0,
+          liveBufferDepthTotal: 0,
+          liveBufferHighWaterMax: 0,
+          liveBufferOverflowCount: 0,
+          replayLagMax: 0,
+          providerLogDroppedRecords: 0,
+        },
+        traceSink: null,
+        snapshotCollectionDurationMs: 1,
+      },
       warnings: [],
     });
 
     expect(parsed.liveProcesses.providers[0]?.instanceId).toBe("codex");
     expect(parsed.resources.current.cpu.utilizationPercent).toBe(2.5);
+    expect(parsed.performance?.snapshotCollectionDurationMs).toBe(1);
+
+    const { performance: _performance, ...legacyPayload } = parsed;
+    expect(decodeDiagnosticsSnapshot(legacyPayload).performance).toBeUndefined();
   });
 });

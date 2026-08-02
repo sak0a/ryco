@@ -1357,27 +1357,43 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       );
     }
 
-    const [unstagedNumstatStdout, stagedNumstatStdout, defaultRefResult, hasPrimaryRemote] =
-      yield* Effect.all(
-        [
-          runGitStdout("GitVcsDriver.statusDetails.unstagedNumstat", cwd, ["diff", "--numstat"]),
-          runGitStdout("GitVcsDriver.statusDetails.stagedNumstat", cwd, [
-            "diff",
-            "--cached",
-            "--numstat",
-          ]),
-          executeGit(
-            "GitVcsDriver.statusDetails.defaultRef",
-            cwd,
-            ["symbolic-ref", "refs/remotes/origin/HEAD"],
-            {
-              allowNonZeroExit: true,
-            },
-          ),
-          originRemoteExists(cwd).pipe(Effect.catch(() => Effect.succeed(false))),
-        ],
-        { concurrency: "unbounded" },
-      );
+    const [trackedNumstatResult, defaultRefResult, hasPrimaryRemote] = yield* Effect.all(
+      [
+        executeGit(
+          "GitVcsDriver.statusDetails.trackedNumstat",
+          cwd,
+          ["diff", "HEAD", "--numstat"],
+          { allowNonZeroExit: true },
+        ),
+        executeGit(
+          "GitVcsDriver.statusDetails.defaultRef",
+          cwd,
+          ["symbolic-ref", "refs/remotes/origin/HEAD"],
+          {
+            allowNonZeroExit: true,
+          },
+        ),
+        originRemoteExists(cwd).pipe(Effect.catch(() => Effect.succeed(false))),
+      ],
+      { concurrency: "unbounded" },
+    );
+    const trackedNumstatStdout =
+      trackedNumstatResult.exitCode === 0
+        ? trackedNumstatResult.stdout
+        : yield* Effect.all(
+            [
+              runGitStdout("GitVcsDriver.statusDetails.unstagedNumstat", cwd, [
+                "diff",
+                "--numstat",
+              ]),
+              runGitStdout("GitVcsDriver.statusDetails.stagedNumstat", cwd, [
+                "diff",
+                "--cached",
+                "--numstat",
+              ]),
+            ],
+            { concurrency: "unbounded" },
+          ).pipe(Effect.map((outputs) => outputs.join("\n")));
     const statusStdout = statusResult.stdout;
     const defaultBranch =
       defaultRefResult.exitCode === 0
@@ -1442,10 +1458,9 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             );
     }
 
-    const stagedEntries = parseNumstatEntries(stagedNumstatStdout);
-    const unstagedEntries = parseNumstatEntries(unstagedNumstatStdout);
+    const trackedEntries = parseNumstatEntries(trackedNumstatStdout);
     const fileStatMap = new Map<string, { insertions: number; deletions: number }>();
-    for (const entry of [...stagedEntries, ...unstagedEntries]) {
+    for (const entry of trackedEntries) {
       const existing = fileStatMap.get(entry.path) ?? { insertions: 0, deletions: 0 };
       existing.insertions += entry.insertions;
       existing.deletions += entry.deletions;

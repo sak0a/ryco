@@ -262,7 +262,7 @@ const CHECK_DOT_TONE: Record<string, string> = {
   success: "bg-success",
   failure: "bg-destructive",
   error: "bg-destructive",
-  running: "bg-sky-400 animate-pulse",
+  running: "bg-sky-400 animate-status-pulse",
   pending: "bg-warning/55",
 };
 
@@ -723,7 +723,7 @@ function PlanStepMarker({ status }: { status: string }) {
   if (status === "inProgress") {
     return (
       <span className="flex size-[17px] shrink-0 items-center justify-center rounded-full border-[1.5px] border-primary">
-        <span className="size-[7px] animate-pulse rounded-full bg-primary" />
+        <span className="size-[7px] animate-status-pulse rounded-full bg-primary" />
       </span>
     );
   }
@@ -898,7 +898,7 @@ function subagentStatusLabel(status: ThreadSubagentView["status"]): string {
 
 const SUBAGENT_DOT_TONE: Record<ThreadSubagentView["status"], string> = {
   running:
-    "bg-sky-400 animate-pulse shadow-[0_0_0_3px_color-mix(in_srgb,var(--sky)_22%,transparent)]",
+    "bg-sky-400 animate-status-pulse shadow-[0_0_0_3px_color-mix(in_srgb,var(--sky)_22%,transparent)]",
   finished: "bg-success",
   failed: "bg-destructive",
   idle: "bg-muted-foreground/40",

@@ -9,10 +9,13 @@ import {
 export interface ServerLocalDiagnosticsMetricsSnapshot {
   readonly turnQuiescenceAvgMs: number | null;
   readonly checkpointDurationP95Ms: number | null;
+  readonly latestThreadSnapshotDurationMs: number | null;
+  readonly threadSnapshotDurationP95Ms: number | null;
   readonly wsReconnectCount: number;
   readonly windowSampleCounts: {
     readonly turnQuiescence: number;
     readonly checkpointDuration: number;
+    readonly threadSnapshotDuration: number;
   };
   readonly capturedAt: string;
 }
@@ -20,6 +23,7 @@ export interface ServerLocalDiagnosticsMetricsSnapshot {
 export interface LocalDiagnosticsMetricsShape {
   readonly recordTurnQuiescenceMs: (durationMs: number) => Effect.Effect<void>;
   readonly recordCheckpointDurationMs: (durationMs: number) => Effect.Effect<void>;
+  readonly recordThreadSnapshotDurationMs: (durationMs: number) => Effect.Effect<void>;
   readonly recordWsReconnect: () => Effect.Effect<void>;
   readonly snapshot: Effect.Effect<ServerLocalDiagnosticsMetricsSnapshot>;
 }
@@ -38,6 +42,11 @@ export const makeLocalDiagnosticsMetrics = Effect.sync(() => {
     maxSamples: DEFAULT_ROLLING_WINDOW_MAX_SAMPLES,
     maxWindowMs: DEFAULT_ROLLING_WINDOW_MS,
   });
+  const threadSnapshotDurationWindow = new RollingDurationWindow({
+    maxSamples: DEFAULT_ROLLING_WINDOW_MAX_SAMPLES,
+    maxWindowMs: DEFAULT_ROLLING_WINDOW_MS,
+  });
+  let latestThreadSnapshotDurationMs: number | null = null;
   let wsReconnectCount = 0;
 
   const snapshot = Effect.gen(function* () {
@@ -45,10 +54,13 @@ export const makeLocalDiagnosticsMetrics = Effect.sync(() => {
     return {
       turnQuiescenceAvgMs: turnQuiescenceWindow.average(),
       checkpointDurationP95Ms: checkpointDurationWindow.percentile(95),
+      latestThreadSnapshotDurationMs,
+      threadSnapshotDurationP95Ms: threadSnapshotDurationWindow.percentile(95),
       wsReconnectCount,
       windowSampleCounts: {
         turnQuiescence: turnQuiescenceWindow.count(),
         checkpointDuration: checkpointDurationWindow.count(),
+        threadSnapshotDuration: threadSnapshotDurationWindow.count(),
       },
       capturedAt: DateTime.formatIso(capturedAt),
     } satisfies ServerLocalDiagnosticsMetricsSnapshot;
@@ -62,6 +74,12 @@ export const makeLocalDiagnosticsMetrics = Effect.sync(() => {
     recordCheckpointDurationMs: (durationMs) =>
       Effect.sync(() => {
         checkpointDurationWindow.record(durationMs);
+      }),
+    recordThreadSnapshotDurationMs: (durationMs) =>
+      Effect.sync(() => {
+        if (!Number.isFinite(durationMs) || durationMs < 0) return;
+        latestThreadSnapshotDurationMs = durationMs;
+        threadSnapshotDurationWindow.record(durationMs);
       }),
     recordWsReconnect: () =>
       Effect.sync(() => {

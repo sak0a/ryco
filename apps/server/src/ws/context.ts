@@ -1,4 +1,4 @@
-import { Cause, Effect, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Metric, Option, Schema, Stream } from "effect";
 import {
   AuthSessionId,
   CommandId,
@@ -525,11 +525,17 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const loadDiagnosticsMetrics = localDiagnosticsMetrics.snapshot;
     const loadAdvertisedEndpoints = advertisedEndpointRegistry.list;
     const loadDiagnosticsSnapshot = Effect.gen(function* () {
-      const providers = yield* providerRegistry.getProviders;
-      const terminals = yield* terminalManager.listDiagnostics;
+      const [providers, terminals, localMetrics, metricSnapshots] = yield* Effect.all([
+        providerRegistry.getProviders,
+        terminalManager.listDiagnostics,
+        localDiagnosticsMetrics.snapshot,
+        Metric.snapshot,
+      ]);
       return yield* diagnostics.getSnapshot({
         providers: providers.map(toDiagnosticsProviderProcess),
         terminals,
+        localMetrics,
+        metricSnapshots,
       });
     });
 
@@ -680,6 +686,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       loadAdvertisedEndpoints,
       loadDiagnosticsMetrics,
       loadDiagnosticsSnapshot,
+      recordThreadSnapshotDurationMs: localDiagnosticsMetrics.recordThreadSnapshotDurationMs,
       loadAuthAccessSnapshot,
       refreshLinkedWorktreeSourceControlStates,
       refreshStateForLinkedReference,

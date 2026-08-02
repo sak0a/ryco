@@ -1076,7 +1076,7 @@ function NewBranchTab(props: {
           >
             {props.branchNameMode === "ai" ? (
               <SparklesIcon
-                className={props.isGenerating ? "size-3.5 animate-pulse" : "size-3.5"}
+                className={props.isGenerating ? "size-3.5 animate-status-pulse" : "size-3.5"}
               />
             ) : (
               <SparklesIcon className="size-3.5" />
@@ -1362,7 +1362,7 @@ function IssueSummary(props: {
                 aria-label="Generate issue branch name"
               >
                 <SparklesIcon
-                  className={props.isGenerating ? "size-3.5 animate-pulse" : "size-3.5"}
+                  className={props.isGenerating ? "size-3.5 animate-status-pulse" : "size-3.5"}
                 />
               </Button>
             </div>
@@ -1545,7 +1545,7 @@ export function WorkItemSummaryPanel(props: {
                   aria-label="Generate Jira branch name"
                 >
                   <SparklesIcon
-                    className={props.isGenerating ? "size-3.5 animate-pulse" : "size-3.5"}
+                    className={props.isGenerating ? "size-3.5 animate-status-pulse" : "size-3.5"}
                   />
                 </Button>
               </div>

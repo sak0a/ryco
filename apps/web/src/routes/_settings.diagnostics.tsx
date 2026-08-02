@@ -1,7 +1,7 @@
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
 
-import { DiagnosticsPanel } from "../components/settings/DiagnosticsPanel";
+import { DiagnosticsSettings } from "../components/settings/DiagnosticsSettings";
 import { HostedConnectionControl } from "../components/hostedHub/HostedConnectionControls";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
@@ -40,7 +40,7 @@ function DiagnosticsRouteView() {
         </header>
 
         <ScrollArea className="min-h-0 flex-1">
-          <DiagnosticsPanel />
+          <DiagnosticsSettings />
         </ScrollArea>
       </div>
     </SidebarInset>

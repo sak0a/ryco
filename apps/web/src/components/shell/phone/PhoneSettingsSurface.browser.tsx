@@ -541,6 +541,10 @@ describe("PhoneSettingsSurface", () => {
     // gate itself stays `import.meta.env.DEV` in DiagnosticsSettings).
     await vi.waitFor(() => {
       expect(settingsPopup()?.textContent).toContain("Presentation tier preview");
+      expect(settingsPopup()?.textContent).toContain("Overview");
+      expect(settingsPopup()?.textContent).not.toContain("Performance now");
+      expect(settingsPopup()?.textContent).not.toContain("Why was this slow?");
+      expect(settingsPopup()?.textContent).not.toContain("Advanced diagnostics");
     });
   });
 

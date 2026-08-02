@@ -206,6 +206,53 @@ export const DiagnosticsClient = Schema.Struct({
 });
 export type DiagnosticsClient = typeof DiagnosticsClient.Type;
 
+export const DiagnosticsLocalPerformance = Schema.Struct({
+  turnQuiescenceAvgMs: Schema.NullOr(Schema.Number),
+  checkpointDurationP95Ms: Schema.NullOr(Schema.Number),
+  latestThreadSnapshotDurationMs: Schema.NullOr(Schema.Number),
+  threadSnapshotDurationP95Ms: Schema.NullOr(Schema.Number),
+  wsReconnectCount: NonNegativeInt,
+  windowSampleCounts: Schema.Struct({
+    turnQuiescence: NonNegativeInt,
+    checkpointDuration: NonNegativeInt,
+    threadSnapshotDuration: NonNegativeInt,
+  }),
+  capturedAt: IsoDateTime,
+});
+export type DiagnosticsLocalPerformance = typeof DiagnosticsLocalPerformance.Type;
+
+export const DiagnosticsQueuePressure = Schema.Struct({
+  runtimeDepthTotal: NonNegativeInt,
+  runtimeHighWaterMax: NonNegativeInt,
+  replayDepthMax: NonNegativeInt,
+  liveBufferDepthTotal: NonNegativeInt,
+  liveBufferHighWaterMax: NonNegativeInt,
+  liveBufferOverflowCount: NonNegativeInt,
+  replayLagMax: NonNegativeInt,
+  providerLogDroppedRecords: NonNegativeInt,
+});
+export type DiagnosticsQueuePressure = typeof DiagnosticsQueuePressure.Type;
+
+export const DiagnosticsTraceSinkHealth = Schema.Struct({
+  bufferedBytes: NonNegativeInt,
+  bufferedRecords: NonNegativeInt,
+  maxBufferedBytes: NonNegativeInt,
+  maxBufferedRecords: NonNegativeInt,
+  droppedRecords: NonNegativeInt,
+  writeFailures: NonNegativeInt,
+  retryDelayMs: NonNegativeInt,
+  lastWriteFailureAt: Schema.NullOr(IsoDateTime),
+});
+export type DiagnosticsTraceSinkHealth = typeof DiagnosticsTraceSinkHealth.Type;
+
+export const DiagnosticsOperationalPerformance = Schema.Struct({
+  local: DiagnosticsLocalPerformance,
+  queues: DiagnosticsQueuePressure,
+  traceSink: Schema.NullOr(DiagnosticsTraceSinkHealth),
+  snapshotCollectionDurationMs: Schema.Number,
+});
+export type DiagnosticsOperationalPerformance = typeof DiagnosticsOperationalPerformance.Type;
+
 export const DiagnosticsLimits = Schema.Struct({
   traceRecordLimit: NonNegativeInt,
   resourceSampleLimit: NonNegativeInt,
@@ -224,6 +271,7 @@ export const DiagnosticsSnapshot = Schema.Struct({
   tracing: DiagnosticsTracing,
   failures: DiagnosticsFailures,
   client: DiagnosticsClient,
+  performance: Schema.optional(DiagnosticsOperationalPerformance),
   warnings: Schema.Array(DiagnosticsWarning),
 });
 export type DiagnosticsSnapshot = typeof DiagnosticsSnapshot.Type;
