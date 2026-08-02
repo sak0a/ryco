@@ -1,7 +1,7 @@
 import { EDITORS, type EditorId } from "@ryco/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { EDITOR_ICONS, getEditorLabel } from "./SettingsPanels.editor";
+import { EDITOR_ICONS, getEditorLabel, resolveEditorOptions } from "./SettingsPanels.editor";
 
 describe("getEditorLabel", () => {
   it("uses platform-native names for the file manager editor", () => {
@@ -11,13 +11,38 @@ describe("getEditorLabel", () => {
     expect(getEditorLabel("file-manager", "Linux x86_64")).toBe("Files");
   });
 
-  it("uses the contract label for every non-file-manager editor", () => {
+  it("uses the platform-native name for Terminal on Windows", () => {
+    expect(getEditorLabel("terminal", "MacIntel")).toBe("Terminal");
+    expect(getEditorLabel("terminal", "Win32")).toBe("Windows Terminal");
+    expect(getEditorLabel("terminal", "Linux x86_64")).toBe("Terminal");
+  });
+
+  it("uses the contract label for every editor without a platform-specific label", () => {
     for (const editor of EDITORS) {
-      if (editor.id === "file-manager") continue;
+      if (editor.id === "file-manager" || editor.id === "terminal") continue;
       expect(getEditorLabel(editor.id, "MacIntel")).toBe(editor.label);
       expect(getEditorLabel(editor.id, "Win32")).toBe(editor.label);
       expect(getEditorLabel(editor.id, "Linux x86_64")).toBe(editor.label);
     }
+  });
+});
+
+describe("resolveEditorOptions", () => {
+  it("returns available editors in contract order with exhaustive display metadata", () => {
+    const options = resolveEditorOptions("MacIntel", [
+      "terminal",
+      "android-studio",
+      "windsurf",
+      "file-manager",
+    ]);
+
+    expect(options.map(({ label, value }) => ({ label, value }))).toEqual([
+      { label: "Windsurf", value: "windsurf" },
+      { label: "Android Studio", value: "android-studio" },
+      { label: "Terminal", value: "terminal" },
+      { label: "Finder", value: "file-manager" },
+    ]);
+    for (const option of options) expect(option.Icon).toBeDefined();
   });
 });
 

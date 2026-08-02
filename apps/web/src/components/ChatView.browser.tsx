@@ -3226,6 +3226,128 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("filters expanded app options and keeps Terminal from replacing the favorite editor", async () => {
+    localStorage.setItem("ryco:last-editor", JSON.stringify("vscode"));
+    setDraftThreadWithoutWorktree();
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          availableEditors: ["vscode", "windsurf", "xcode", "android-studio", "terminal"],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const menuButton = await waitForElement(
+        () => document.querySelector('button[aria-label="Copy options"]'),
+        "Unable to find Open picker button.",
+      );
+      (menuButton as HTMLButtonElement).click();
+
+      const androidStudioItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Android Studio"),
+          ) ?? null,
+        "Unable to find Android Studio menu item.",
+      );
+      expect(androidStudioItem.querySelector("svg image")).not.toBeNull();
+
+      const windsurfItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Windsurf"),
+          ) ?? null,
+        "Unable to find Windsurf menu item.",
+      );
+      expect(windsurfItem.querySelector("svg image")).not.toBeNull();
+
+      const xcodeItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Xcode"),
+          ) ?? null,
+        "Unable to find Xcode menu item.",
+      );
+      expect(xcodeItem.querySelector("svg image")).not.toBeNull();
+      expect(
+        Array.from(document.querySelectorAll('[data-slot="menu-item"]')).some((item) =>
+          item.textContent?.includes("Positron"),
+        ),
+      ).toBe(false);
+
+      (androidStudioItem as HTMLElement).click();
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === WS_METHODS.shellOpenInEditor &&
+                request.editor === "android-studio",
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      (menuButton as HTMLButtonElement).click();
+      const reopenedWindsurfItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Windsurf"),
+          ) ?? null,
+        "Unable to find Windsurf menu item after reopening the picker.",
+      );
+      (reopenedWindsurfItem as HTMLElement).click();
+      await vi.waitFor(
+        () => {
+          expect(
+            wsRequests.some(
+              (request) =>
+                request._tag === WS_METHODS.shellOpenInEditor && request.editor === "windsurf",
+            ),
+          ).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      (menuButton as HTMLButtonElement).click();
+
+      const terminalItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Terminal"),
+          ) ?? null,
+        "Unable to find Terminal menu item.",
+      );
+      expect(terminalItem.querySelector("svg")).not.toBeNull();
+      (terminalItem as HTMLElement).click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) =>
+              request._tag === WS_METHODS.shellOpenInEditor && request.editor === "terminal",
+          );
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.shellOpenInEditor,
+            cwd: "/repo/project",
+            editor: "terminal",
+          });
+          expect(localStorage.getItem("ryco:last-editor")).toBe(JSON.stringify("windsurf"));
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("filters the open picker menu and opens VSCodium from the menu", async () => {
     setDraftThreadWithoutWorktree();
 
