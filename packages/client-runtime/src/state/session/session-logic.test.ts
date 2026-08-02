@@ -593,6 +593,69 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
+  it("carries the tool.started timestamp onto the surviving lifecycle entry", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-start",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        summary: "Tool call",
+        kind: "tool.started",
+        payload: { data: { toolCallId: "call-1" } },
+      }),
+      makeActivity({
+        id: "tool-complete",
+        createdAt: "2026-02-23T00:00:05.000Z",
+        summary: "Tool call complete",
+        kind: "tool.completed",
+        payload: { data: { toolCallId: "call-1" } },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.startedAt).toBe("2026-02-23T00:00:02.000Z");
+    expect(entries[0]?.lastActivityAt).toBe("2026-02-23T00:00:05.000Z");
+  });
+
+  it("spans the folded lifecycle when no tool.started activity exists", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-updated",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        summary: "Tool call",
+        kind: "tool.updated",
+        payload: { data: { toolCallId: "call-2" } },
+      }),
+      makeActivity({
+        id: "tool-complete",
+        createdAt: "2026-02-23T00:00:06.000Z",
+        summary: "Tool call complete",
+        kind: "tool.completed",
+        payload: { data: { toolCallId: "call-2" } },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.startedAt).toBe("2026-02-23T00:00:02.000Z");
+    expect(entries[0]?.lastActivityAt).toBe("2026-02-23T00:00:06.000Z");
+  });
+
+  it("leaves startedAt unset for a lone completion with no correlatable start", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "tool-complete-orphan",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        summary: "Tool call complete",
+        kind: "tool.completed",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries[0]?.startedAt).toBeUndefined();
+    expect(entries[0]?.lastActivityAt).toBe("2026-02-23T00:00:03.000Z");
+  });
+
   it("omits task.started but shows task.progress and task.completed", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

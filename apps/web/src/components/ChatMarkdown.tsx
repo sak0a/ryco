@@ -13,6 +13,7 @@ import React, {
   use,
   useCallback,
   memo,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -37,6 +38,7 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { useLongPress } from "../hooks/useLongPress";
 import { usePresentationTier } from "../hooks/usePresentationTier";
+import { useSmoothStreamedText } from "../hooks/useSmoothStreamedText";
 import { resolveMarkdownFileLinkMeta, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readLocalApi } from "../localApi";
 import { cn } from "../lib/utils";
@@ -76,7 +78,6 @@ const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
-const STREAMING_MARKDOWN_THROTTLE_MS = 75;
 const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_ENTRIES,
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
@@ -303,10 +304,11 @@ interface MarkdownFileLinkProps {
 }
 
 const MARKDOWN_LINK_HREF_PATTERN = /\[[^\]]*]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
-const MARKDOWN_FILE_LINK_CLASS_NAME =
-  "chat-markdown-file-link relative top-[2px] max-w-full no-underline";
-const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon size-3.5 shrink-0";
-const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label truncate";
+// Plain inline flow — sizing and color live in the stylesheet so the chip sits
+// on the same line box (and caret strut) as the prose around it.
+const MARKDOWN_FILE_LINK_CLASS_NAME = "chat-markdown-file-link";
+const MARKDOWN_FILE_LINK_ICON_CLASS_NAME = "chat-markdown-file-link-icon";
+const MARKDOWN_FILE_LINK_LABEL_CLASS_NAME = "chat-markdown-file-link-label";
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -380,70 +382,6 @@ function extractMarkdownLinkHrefs(text: string): string[] {
 
 function normalizeMarkdownLinkHrefKey(href: string): string {
   return rewriteMarkdownFileUriHref(href.trim()) ?? href.trim();
-}
-
-function useThrottledStreamingMarkdownText(text: string, isStreaming: boolean): string {
-  const [displayText, setDisplayText] = useState(text);
-  const latestTextRef = useRef(text);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastFlushAtRef = useRef(0);
-  const wasStreamingRef = useRef(isStreaming);
-
-  const clearScheduledFlush = useCallback(() => {
-    if (timeoutRef.current !== null) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    latestTextRef.current = text;
-
-    if (isStreaming && !wasStreamingRef.current) {
-      clearScheduledFlush();
-      lastFlushAtRef.current = 0;
-      setDisplayText(latestTextRef.current);
-      return;
-    }
-
-    if (!isStreaming) {
-      clearScheduledFlush();
-      lastFlushAtRef.current = Date.now();
-      setDisplayText(text);
-      return;
-    }
-
-    const now = Date.now();
-    const elapsedMs = now - lastFlushAtRef.current;
-    if (lastFlushAtRef.current === 0 || elapsedMs >= STREAMING_MARKDOWN_THROTTLE_MS) {
-      clearScheduledFlush();
-      lastFlushAtRef.current = now;
-      setDisplayText(text);
-      return;
-    }
-
-    if (timeoutRef.current !== null) {
-      return;
-    }
-
-    timeoutRef.current = setTimeout(() => {
-      timeoutRef.current = null;
-      lastFlushAtRef.current = Date.now();
-      setDisplayText(latestTextRef.current);
-    }, STREAMING_MARKDOWN_THROTTLE_MS - elapsedMs);
-  }, [clearScheduledFlush, isStreaming, text]);
-
-  useEffect(() => {
-    wasStreamingRef.current = isStreaming;
-  }, [isStreaming]);
-
-  useEffect(() => clearScheduledFlush, [clearScheduledFlush]);
-
-  if (!isStreaming || !wasStreamingRef.current) {
-    return text;
-  }
-
-  return displayText;
 }
 
 const MarkdownFileLink = memo(function MarkdownFileLink({
@@ -620,7 +558,17 @@ function areMarkdownFileLinkPropsEqual(
 }
 
 function ChatMarkdown(props: ChatMarkdownProps) {
-  const displayText = useThrottledStreamingMarkdownText(props.text, Boolean(props.isStreaming));
+  const isStreaming = Boolean(props.isStreaming);
+  // Reveal streamed text at a steady, adaptive cadence so tokens appear fluidly
+  // instead of in the bursts that land in the store. Governs cadence only.
+  const smoothedText = useSmoothStreamedText(props.text, isStreaming);
+  // Bounding the markdown re-parse is the deferred value's job, not a fixed
+  // timer's: React coalesces adaptively, so a cheap parse updates every frame
+  // (which is what makes the smoothing above visible) while an expensive one
+  // backs off on its own. A fixed throttle stepped the reveal at a constant
+  // ~13fps regardless of how much headroom there was.
+  const deferredText = useDeferredValue(smoothedText);
+  const displayText = isStreaming ? deferredText : smoothedText;
 
   return <RenderedChatMarkdown {...props} text={displayText} />;
 }
@@ -753,7 +701,10 @@ const RenderedChatMarkdown = memo(function RenderedChatMarkdown({
         if (typeof parentSuffix === "string" && parentSuffix.length > 0) {
           labelParts.push(parentSuffix);
         }
-        if (fileLinkMeta.line) {
+        // A bare `L1` says nothing a link to the file doesn't already say — it
+        // is where the file opens anyway — so only a real position is worth the
+        // extra label segment. `L1:C12` still points somewhere, so it stays.
+        if (fileLinkMeta.line && (fileLinkMeta.line !== 1 || fileLinkMeta.column)) {
           labelParts.push(
             `L${fileLinkMeta.line}${fileLinkMeta.column ? `:C${fileLinkMeta.column}` : ""}`,
           );

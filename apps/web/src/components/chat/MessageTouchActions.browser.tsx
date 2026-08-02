@@ -70,6 +70,7 @@ function buildProps() {
     onOpenTurnDiff: vi.fn(),
     revertTurnCountByUserMessageId: new Map([[USER_MESSAGE_ID, 1]]),
     onRevertUserMessage: vi.fn(),
+    onUndoTurn: vi.fn(),
     isRevertingCheckpoint: false,
     onImageExpand: vi.fn(),
     activeThreadEnvironmentId: EnvironmentId.make("environment-local"),
@@ -338,7 +339,7 @@ describe("message touch actions", () => {
     expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
   });
 
-  it("expands truncated tool detail in place on phone instead of tooltip-only", async () => {
+  it("expands truncated tool detail in place on every tier instead of tooltip-only", async () => {
     const longDetail =
       "Inspecting repository state across apps/web, apps/server, and packages/contracts before the refactor";
     mounted = await render(
@@ -369,22 +370,24 @@ describe("message touch actions", () => {
     expect(expandRow.getAttribute("aria-expanded")).toBe("false");
     expandRow.click();
     const detailBlock = await vi.waitFor(() => {
-      const block = document.querySelector<HTMLElement>('[data-work-entry-phone-detail="true"]');
+      const block = document.querySelector<HTMLElement>('[data-work-entry-detail="true"]');
       expect(block).not.toBeNull();
       return block!;
     });
-    // Phone: the full text is part of the expanded panel.
+    // Phone: the full text is part of the expanded panel's Activity card.
     expect(detailBlock.textContent).toBe(longDetail);
     expect(getComputedStyle(detailBlock).display).not.toBe("none");
 
-    // Desktop keeps the tooltip presentation; the phone block stays hidden.
+    // Desktop still offers the hover tooltip, but the panel is the single
+    // source of the full text — it is not a phone-only fallback.
     await page.viewport(1_280, 720);
     await vi.waitFor(() => {
       expect(getPresentationTier()).toBe("desktop");
     });
     await vi.waitFor(() => {
-      expect(getComputedStyle(detailBlock).display).toBe("none");
+      expect(getComputedStyle(detailBlock).display).not.toBe("none");
     });
+    expect(detailBlock.textContent).toBe(longDetail);
   });
 
   it("keeps the code-block copy button always visible on phone and hover-revealed on desktop", async () => {
