@@ -130,7 +130,10 @@ import {
   type LinkedWorktreeItem,
 } from "./worktrees/LinkedWorktreeItemDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
-import { deriveRevertTurnCountByUserMessageId } from "./chat/MessagesTimeline.logic";
+import {
+  deriveRevertTurnCountByUserMessageId,
+  deriveUndoTurnCountByTurnId,
+} from "./chat/MessagesTimeline.logic";
 import { ThreadMessageSearchBar } from "./chat/ThreadMessageSearchBar";
 import {
   buildThreadMessageSearchOccurrences,
@@ -1573,6 +1576,12 @@ export default function ChatView(props: ChatViewProps) {
       inferredCheckpointTurnCountByTurnId,
     });
   }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  const undoTurnCountByTurnId = useMemo(() => {
+    return deriveUndoTurnCountByTurnId({
+      turnDiffSummaries,
+      inferredCheckpointTurnCountByTurnId,
+    });
+  }, [inferredCheckpointTurnCountByTurnId, turnDiffSummaries]);
 
   const gitCwd = activeProject
     ? projectScriptCwd({
@@ -3056,6 +3065,12 @@ export default function ChatView(props: ChatViewProps) {
     }
     void onRevertToTurnCountRef.current(targetTurnCount);
   }, []);
+  // The changed-files card already resolved its rollback target when the row
+  // was derived, so this only has to dispatch. Same ref indirection as above so
+  // the callback identity never busts the timeline's stable context.
+  const onUndoTurn = useCallback((turnCount: number) => {
+    void onRevertToTurnCountRef.current(turnCount);
+  }, []);
 
   useEffect(() => {
     if (!workspacePanelOpen) {
@@ -3256,6 +3271,8 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 onCloseDiff={onCloseDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
+                undoTurnCountByTurnId={undoTurnCountByTurnId}
+                onUndoTurn={onUndoTurn}
                 onRevertUserMessage={onRevertUserMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}

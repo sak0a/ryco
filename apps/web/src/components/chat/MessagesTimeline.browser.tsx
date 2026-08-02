@@ -76,6 +76,7 @@ function buildProps() {
     onOpenTurnDiff: vi.fn(),
     revertTurnCountByUserMessageId: new Map(),
     onRevertUserMessage: vi.fn(),
+    onUndoTurn: vi.fn(),
     isRevertingCheckpoint: false,
     onImageExpand: vi.fn(),
     activeThreadEnvironmentId: EnvironmentId.make("environment-local"),
@@ -126,13 +127,13 @@ describe("MessagesTimeline", () => {
       await expect
         .element(page.getByText("Send a message to start the conversation."))
         .not.toBeInTheDocument();
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
     } finally {
       await screen.unmount();
     }
   });
 
-  it("reserves the scrollbar gutter to avoid width shifts when the terminal drawer opens", async () => {
+  it("hides the transcript scrollbar so the content column never shifts width", async () => {
     const screen = await render(
       <MessagesTimeline
         {...buildProps()}
@@ -156,7 +157,11 @@ describe("MessagesTimeline", () => {
     try {
       const list = document.querySelector<HTMLElement>('[data-testid="legend-list"]');
       expect(list).not.toBeNull();
-      expect(list!.className).toContain("[scrollbar-gutter:stable]");
+      expect(list!.className).toContain("[scrollbar-width:none]");
+      expect(getComputedStyle(list!).scrollbarWidth).toBe("none");
+      // No gutter to reserve once the scrollbar is gone, so the visible width
+      // stays put whether or not the transcript overflows.
+      expect(list!.offsetWidth - list!.clientWidth).toBe(0);
     } finally {
       await screen.unmount();
     }
@@ -350,7 +355,7 @@ describe("MessagesTimeline", () => {
         />,
       );
 
-      await expect.element(page.getByText("Thinking - Inspecting repository state")).toBeVisible();
+      await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
       expect(scrollToEndSpy).toHaveBeenCalledWith({ animated: false });
       expect(requestAnimationFrameSpy).toHaveBeenCalled();
@@ -717,7 +722,7 @@ describe("MessagesTimeline", () => {
       await expect
         .element(page.getByText("I am checking the current implementation."))
         .toBeVisible();
-      await expect.element(page.getByText("Latest command - bun typecheck")).toBeVisible();
+      await expect.element(page.getByText("Latest command · bun typecheck")).toBeVisible();
       await expect.element(page.getByText("+1 previous tool call")).toBeVisible();
 
       runningFold.element().focus();
@@ -789,8 +794,10 @@ describe("MessagesTimeline", () => {
       });
       previousToolsToggle.element().focus();
       await userEvent.keyboard(" ");
-      await expect.element(page.getByText("First command - rg -n Working")).toBeVisible();
-      await expect.element(page.getByText("Show fewer tool calls")).toBeVisible();
+      await expect.element(page.getByText("First command · rg -n Working")).toBeVisible();
+      // The recap keeps its label in both states — the chevron carries the
+      // open/closed meaning, so the row does not rewrite itself on toggle.
+      await expect.element(previousToolsToggle).toHaveAttribute("aria-expanded", "true");
     } finally {
       await screen.unmount();
     }

@@ -390,6 +390,11 @@
   --destructive-foreground: var(--color-red-700);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
+  /* Every link in a chat reply — URLs and openable file mentions alike. Tracks
+     `--primary` so a theme that restyles its accent restyles links for free;
+     override this token alone to give links their own color. `--info-*` stays
+     what it says it is: a status tone, not an interaction color. */
+  --chat-link: var(--primary);
   --success: var(--color-emerald-500);
   --success-foreground: var(--color-emerald-700);
   --warning: var(--color-amber-500);
@@ -1083,9 +1088,9 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown a {
-  color: var(--info-foreground);
+  color: var(--chat-link);
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--info-foreground) 40%, transparent);
+  text-decoration-color: color-mix(in srgb, var(--chat-link) 40%, transparent);
 }
 
 .chat-markdown a:hover {
@@ -1122,45 +1127,47 @@ label:has(> select#reasoning-effort) select {
   font-size: 0.75rem;
 }
 
+/* Inline file mention in a reply. Reads as a link in running prose, not as a
+   boxed chip: no border or fill, the label takes the accent color, and the
+   filetype glyph sits at 1em beside it. Hover reveals the underline, which is
+   the only affordance an inline link needs. */
 .chat-markdown-file-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.28rem;
-  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--muted) 88%, var(--background));
-  padding: 0.08rem 0.34rem;
-  color: var(--foreground);
-  font-family: var(--font-family-mono);
-  font-size: 0.75rem;
-  line-height: 1.15;
-  vertical-align: text-bottom;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease,
-    opacity 120ms ease;
+  display: inline;
+  color: var(--chat-link);
+  font-weight: 500;
+  text-decoration: none;
+  vertical-align: baseline;
+  cursor: pointer;
+  transition: color 120ms ease;
 }
 
 .chat-markdown-file-link:hover {
-  opacity: 1;
-  color: var(--foreground);
-  border-color: color-mix(in srgb, var(--border) 65%, var(--foreground));
-  background: color-mix(in srgb, var(--muted) 72%, var(--background));
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .chat-markdown-file-link:focus-visible {
   outline: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring) 70%, transparent);
+  border-radius: var(--radius-sm);
 }
 
+/* Inline-block at 1em so the glyph shares the label's line box and never
+   pushes the surrounding line height around. Keeps its own filetype color. */
 .chat-markdown-file-link-icon {
-  opacity: 0.72;
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+  vertical-align: middle;
+  margin-right: 0.25em;
+  transform: translateY(-1px);
 }
 
 .chat-markdown-file-link-label {
-  color: color-mix(in srgb, var(--foreground) 88%, transparent);
-  line-height: 1.1;
+  display: inline;
 }
 
 .chat-markdown pre {
@@ -1361,4 +1368,118 @@ label:has(> select#reasoning-effort) select {
 
 .model-picker-list::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-thin-hover);
+}
+
+/* ---------------------------------------------------------------------------
+   Text shimmer utility — vendored verbatim from shadcn 4.12.0
+   (dist/tailwind.css `@utility shimmer`). The full `shadcn` stylesheet is not
+   imported because it would clash with this project's theme, so the
+   self-contained shimmer block lives here instead. Applied on the transcript's
+   live "Thinking" status line via the `shimmer` class. Provides `shimmer`,
+   `shimmer-duration-*`, `shimmer-spread-*`, `shimmer-angle-*`,
+   `shimmer-color-*`, `shimmer-once`, `shimmer-reverse`, and `shimmer-none`.
+   Docs: https://ui.shadcn.com/docs/utils/shimmer
+   --------------------------------------------------------------------------- */
+@property --shimmer-angle {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 20deg;
+}
+@property --shimmer-image {
+  syntax: "*";
+  inherits: false;
+}
+@property --shimmer-text-fill {
+  syntax: "*";
+  inherits: false;
+}
+
+@theme inline {
+  @keyframes tw-shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: 0 0;
+    }
+  }
+}
+
+@utility shimmer {
+  --_spread: var(--shimmer-spread, calc(3ch + 40px));
+  --_base: currentColor;
+  --_highlight: var(--shimmer-color, oklch(from currentColor l c h / calc(alpha* 0.2)));
+
+  background-image: var(
+    --shimmer-image,
+    linear-gradient(
+      calc(90deg + var(--shimmer-angle)),
+      var(--_base) calc(50% - var(--_spread)),
+      color-mix(in oklch, var(--_highlight), var(--_base) 50%) calc(50% - var(--_spread) * 0.5),
+      var(--_highlight) 50%,
+      color-mix(in oklch, var(--_highlight), var(--_base) 50%) calc(50% + var(--_spread) * 0.5),
+      var(--_base) calc(50% + var(--_spread))
+    )
+  );
+  background-repeat: no-repeat;
+  background-size: calc(200% + var(--_spread) * 2) 100%;
+  background-position: 0 0;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: var(--shimmer-text-fill, transparent);
+  animation: tw-shimmer var(--shimmer-duration, 2s) linear infinite;
+
+  @variant dark {
+    --_highlight: var(
+      --shimmer-color,
+      oklch(from currentColor max(0.8, calc(l + 0.4)) c h / calc(alpha + 0.4))
+    );
+  }
+
+  &:where([dir="rtl"], [dir="rtl"] *) {
+    animation-direction: reverse;
+  }
+}
+
+@utility shimmer-once {
+  animation-iteration-count: 1;
+}
+
+@utility shimmer-reverse {
+  animation-direction: reverse;
+}
+
+@utility shimmer-none {
+  --shimmer-image: none;
+  --shimmer-text-fill: currentColor;
+}
+
+@utility shimmer-color-* {
+  --shimmer-color: --value(--color, [color]);
+  --shimmer-color: color-mix(
+    in oklch,
+    --value(--color, [color]) calc(--modifier(integer) * 1%),
+    transparent
+  );
+}
+
+@utility shimmer-duration-* {
+  --shimmer-duration: calc(--value(integer) * 1ms);
+}
+
+@utility shimmer-spread-* {
+  --shimmer-spread: calc(var(--spacing) * --value(integer));
+  --shimmer-spread: --value([length], [percentage]);
+}
+
+@utility shimmer-angle-* {
+  --shimmer-angle: calc(--value(integer) * 1deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+  }
 }

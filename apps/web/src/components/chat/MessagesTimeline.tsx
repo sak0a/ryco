@@ -25,13 +25,15 @@ import {
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
+  FileDiffIcon,
+  GitBranchIcon,
   GlobeIcon,
   HammerIcon,
   type LucideIcon,
-  SquarePenIcon,
+  PencilIcon,
+  SearchIcon,
   TerminalIcon,
   Undo2Icon,
   WrenchIcon,
@@ -40,8 +42,8 @@ import {
 import { Button } from "../ui/button";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
-import { ChangedFilesTree } from "./ChangedFilesTree";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
+import { VscodeEntryIcon } from "./VscodeEntryIcon";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
   buildTimelineStableState,
@@ -91,6 +93,21 @@ import {
 } from "./userMessageTerminalContexts";
 import { SkillInlineText, type SkillInlineTextSearchHighlight } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
+import { DisclosureChevron } from "../ui/DisclosureChevron";
+import { DisclosureRegion } from "../ui/DisclosureRegion";
+import { DISCLOSURE_CLEANUP_BUFFER_MS, DISCLOSURE_TRANSITION_MS } from "../../lib/disclosureMotion";
+import {
+  basenameOfPath,
+  deriveReadableCommandDisplay,
+  normalizeToolTextForComparison,
+  resolveCommandVisualKind,
+} from "../../lib/toolCallLabel";
+import {
+  formatWorkEntryElapsed,
+  formatWorkEntryStatusLabel,
+  resolveWorkEntryStatus,
+  workEntryActivityMeta,
+} from "./workEntryActivity";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by row components via useContext. Split into
@@ -144,7 +161,9 @@ interface MessagesTimelineProps {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff?: () => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
+  undoTurnCountByTurnId?: ReadonlyMap<TurnId, number> | undefined;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onUndoTurn: (turnCount: number) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -180,7 +199,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onOpenTurnDiff,
   onCloseDiff,
   revertTurnCountByUserMessageId,
+  undoTurnCountByTurnId,
   onRevertUserMessage,
+  onUndoTurn,
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -200,6 +221,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
   revertTurnCountRef.current = revertTurnCountByUserMessageId;
+  const undoTurnCountRef = useRef(undoTurnCountByTurnId);
+  undoTurnCountRef.current = undoTurnCountByTurnId;
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
@@ -212,6 +235,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId: revertTurnCountRef.current,
+        undoTurnCountByTurnId: undoTurnCountRef.current,
       }),
     [
       timelineEntries,
@@ -396,6 +420,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         threadMessageSearchOccurrencesByMessageId,
         activeThreadMessageSearchOccurrence,
         onRevertUserMessage,
+        onUndoTurn,
         onImageExpand,
         onOpenTurnDiff,
         onCloseDiff: onCloseDiff ?? NOOP_CLOSE_DIFF,
@@ -414,6 +439,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       threadMessageSearchOccurrencesByMessageId,
       activeThreadMessageSearchOccurrence,
       onRevertUserMessage,
+      onUndoTurn,
       onImageExpand,
       onOpenTurnDiff,
       onCloseDiff,
@@ -457,7 +483,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             maintainScrollAtEndThreshold={0.1}
             maintainVisibleContentPosition
             onScroll={handleScroll}
-            className="h-full overflow-x-hidden overscroll-y-contain px-3 [scrollbar-gutter:stable] sm:px-5"
+            // The transcript scrolls without a visible scrollbar. Hiding it
+            // also removes the gutter entirely, so the content column no longer
+            // shifts when overflow appears — which is what `scrollbar-gutter:
+            // stable` used to reserve space for.
+            className="h-full overflow-x-hidden overscroll-y-contain px-3 [scrollbar-width:none] sm:px-5 [&::-webkit-scrollbar]:hidden"
             ListHeaderComponent={TIMELINE_LIST_HEADER}
             ListFooterComponent={TIMELINE_LIST_FOOTER}
           />
@@ -928,6 +958,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                 {!assistantResponseStillInProgress && (
                   <AssistantChangedFilesSection
                     turnSummary={row.assistantTurnDiffSummary}
+                    undoTurnCount={row.assistantUndoTurnCount}
                     routeThreadKey={ctx.routeThreadKey}
                     resolvedTheme={ctx.resolvedTheme}
                     openDiffTurnId={ctx.openDiffTurnId}
@@ -984,18 +1015,27 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
   );
 }
 
+// The settled turn's disclosure and its live twin share one label tone, size,
+// and full-width divider, so a turn folding shut is a status change rather than
+// a change of shape. `-ml-0.5` optically aligns the leading "W" with the reply
+// text below: the box is flush already, but the glyph carries a left side
+// bearing that reads as an inset.
+const TURN_FOLD_LABEL_CLASS_NAME = "-ml-0.5 text-[13px] text-muted-foreground/70 tabular-nums";
+
 function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
   const { routeThreadKey } = use(TimelineStableCtx);
   const setExpanded = useUiStateStore((store) => store.setThreadTurnFoldExpanded);
-  const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="border-b border-border/60 pt-1 pb-2" data-turn-fold-status={row.status}>
+    <div className="pt-1 pb-2" data-turn-fold-status={row.status}>
       <button
         type="button"
         aria-expanded={row.expanded}
         onClick={() => setExpanded(routeThreadKey, row.foldId, !row.expanded)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors duration-150 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className={cn(
+          TURN_FOLD_LABEL_CLASS_NAME,
+          "flex cursor-pointer select-none items-center gap-1 pb-2 transition-colors duration-200 hover:text-muted-foreground/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        )}
       >
         <span>
           {row.status === "running" ? (
@@ -1010,23 +1050,31 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
             (row.label ?? "Worked")
           )}
         </span>
-        <Icon className="size-3.5" aria-hidden />
+        <DisclosureChevron open={row.expanded} className="text-muted-foreground/55" />
       </button>
+      <div className="h-px w-full bg-border" />
     </div>
   );
 }
 
+/**
+ * The live twin of a settled turn's "Worked for …" disclosure: the same label
+ * tone and divider counting up, with a waving "Thinking" line beneath it so an
+ * agent that has not emitted anything yet still reads as busy rather than stuck.
+ */
 function PendingWorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
   return (
-    <div className="border-b border-border/60 pt-1 pb-2">
-      <div className="flex items-center px-1 text-xs text-muted-foreground tabular-nums">
-        {row.createdAt ? (
-          <>
+    <div className="pt-1 pb-2">
+      {row.createdAt ? (
+        <>
+          <div className={cn(TURN_FOLD_LABEL_CLASS_NAME, "flex items-center pb-2")}>
             Working for <WorkingTimer createdAt={row.createdAt} />
-          </>
-        ) : (
-          "Working…"
-        )}
+          </div>
+          <div className="h-px w-full bg-border" />
+        </>
+      ) : null}
+      <div className="pt-1.5 text-[13px] text-muted-foreground/70">
+        <span className="shimmer">Thinking</span>
       </div>
     </div>
   );
@@ -1094,7 +1142,12 @@ function LiveMessageMeta({
 // ---------------------------------------------------------------------------
 
 const COMPACT_WORK_ROW_CLASS_NAME =
-  "grid min-h-[30px] w-full grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 text-left";
+  "group/tool-row grid min-h-[30px] w-full grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-2 text-left";
+
+// One muted resting tone for a tool row's glyph, label, and chevron; the whole
+// row brightens to foreground together on hover/focus instead of taking a fill.
+const WORK_ROW_TONE_CLASS_NAME =
+  "text-muted-foreground/70 transition-colors duration-200 group-hover/tool-row:text-foreground group-focus-visible/tool-row:text-foreground";
 
 /** Renders one already-derived group while individual entry state stays row-local. */
 const WorkGroupSection = memo(function WorkGroupSection({
@@ -1162,6 +1215,13 @@ function WorkGroupToggleTimelineRow({
     : row.hiddenCount === 1
       ? "log entry"
       : "log entries";
+  // A recap only exists for a settled run of plain tool calls; anything else
+  // (errors, approvals, a single hidden row) keeps the explicit count.
+  const label =
+    row.summary && !row.summary.hasRunningEntry
+      ? row.summary.label
+      : `+${row.hiddenCount} previous ${labelNoun}`;
+  const SummaryIcon = row.summary ? workEntryIcon(row.summary.iconEntry) : ChevronDownIcon;
 
   return (
     <button
@@ -1171,24 +1231,20 @@ function WorkGroupToggleTimelineRow({
       data-work-group-toggle="true"
       className={cn(
         COMPACT_WORK_ROW_CLASS_NAME,
-        "cursor-pointer text-[11px] leading-5 transition-colors duration-150 hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+        "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
       )}
     >
-      <span className="flex size-5 items-center justify-center text-muted-foreground/65">
-        <ChevronDownIcon
-          className={cn(
-            "size-3.5 opacity-70 transition-transform duration-200",
-            row.expanded && "rotate-180",
-          )}
-          aria-hidden
-        />
+      {/* The recap wears its first folded entry's glyph, so collapsing a run
+          keeps the leading icon of the row it hides. */}
+      <span className={cn("flex size-5 items-center justify-center", WORK_ROW_TONE_CLASS_NAME)}>
+        <SummaryIcon className="size-3.5" aria-hidden />
       </span>
-      <span className="font-medium text-foreground/82">
-        {row.expanded
-          ? `Show fewer ${row.onlyToolEntries ? "tool calls" : "log entries"}`
-          : `+${row.hiddenCount} previous ${labelNoun}`}
+      <span className={cn("truncate text-[12px] leading-5", WORK_ROW_TONE_CLASS_NAME)}>
+        {label}
       </span>
-      <span className="size-5" aria-hidden />
+      <span className="flex size-5 items-center justify-center">
+        <DisclosureChevron open={row.expanded} className={cn("size-3", WORK_ROW_TONE_CLASS_NAME)} />
+      </span>
     </button>
   );
 }
@@ -1222,6 +1278,7 @@ const ContextCompactionMarkerRow = memo(function ContextCompactionMarkerRow({
  *  so toggling re-renders only this component — not the entire list. */
 const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection({
   turnSummary,
+  undoTurnCount,
   routeThreadKey,
   resolvedTheme,
   openDiffTurnId,
@@ -1229,6 +1286,7 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
   onCloseDiff,
 }: {
   turnSummary: TurnDiffSummary | undefined;
+  undoTurnCount: number | undefined;
   routeThreadKey: string;
   resolvedTheme: "light" | "dark";
   openDiffTurnId: TurnId | null;
@@ -1243,6 +1301,7 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
     <AssistantChangedFilesSectionInner
       turnSummary={turnSummary}
       checkpointFiles={checkpointFiles}
+      undoTurnCount={undoTurnCount}
       routeThreadKey={routeThreadKey}
       resolvedTheme={resolvedTheme}
       openDiffTurnId={openDiffTurnId}
@@ -1252,11 +1311,15 @@ const AssistantChangedFilesSection = memo(function AssistantChangedFilesSection(
   );
 });
 
+// Long file lists collapse to this many rows; the rest hide behind "Show N more".
+const MAX_VISIBLE_CHANGED_FILES = 6;
+
 /** Inner component that only mounts when there are actual changed files,
  *  so the store subscription is unconditional (no hooks after early return). */
 function AssistantChangedFilesSectionInner({
   turnSummary,
   checkpointFiles,
+  undoTurnCount,
   routeThreadKey,
   resolvedTheme,
   openDiffTurnId,
@@ -1265,46 +1328,70 @@ function AssistantChangedFilesSectionInner({
 }: {
   turnSummary: TurnDiffSummary;
   checkpointFiles: TurnDiffSummary["files"];
+  undoTurnCount: number | undefined;
   routeThreadKey: string;
   resolvedTheme: "light" | "dark";
   openDiffTurnId: TurnId | null;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
 }) {
-  const allDirectoriesExpanded = useUiStateStore(
+  const { onUndoTurn } = use(TimelineStableCtx);
+  const { isRevertingCheckpoint } = use(TimelineStreamingCtx);
+  const expanded = useUiStateStore(
     (store) => store.threadChangedFilesExpandedById[routeThreadKey]?.[turnSummary.turnId] ?? true,
   );
   const setExpanded = useUiStateStore((store) => store.setThreadChangedFilesExpanded);
+  const [fileListExpanded, setFileListExpanded] = useState(false);
+
   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-  const changedFileCountLabel = String(checkpointFiles.length);
   const diffOpenForTurn = openDiffTurnId === turnSummary.turnId;
+  const editedFilesLabel = `Edited ${checkpointFiles.length} ${
+    checkpointFiles.length === 1 ? "file" : "files"
+  }`;
+  const visibleFiles = fileListExpanded
+    ? checkpointFiles
+    : checkpointFiles.slice(0, MAX_VISIBLE_CHANGED_FILES);
+  const overflowCount = checkpointFiles.length - visibleFiles.length;
+  const canUndo = undoTurnCount !== undefined;
 
   return (
-    <div className="chat-final-diff-section mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-          <span>Changed files ({changedFileCountLabel})</span>
-          {hasNonZeroStat(summaryStat) && (
-            <>
-              <span className="mx-1">•</span>
-              <DiffStatLabel additions={summaryStat.additions} deletions={summaryStat.deletions} />
-            </>
+    <div className="chat-final-diff-section mt-2 mb-1 overflow-hidden rounded-[0.65rem] border border-border/70">
+      <div
+        className={cn(
+          "flex items-center justify-between gap-3 bg-muted/40 px-3 py-1.5",
+          expanded && "border-b border-border/70",
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-hidden />
+          <div className="min-w-0">
+            <div className="truncate text-[12px] text-foreground/92">{editedFilesLabel}</div>
+            {hasNonZeroStat(summaryStat) && (
+              <div className="text-[12px] tabular-nums">
+                <DiffStatLabel
+                  additions={summaryStat.additions}
+                  deletions={summaryStat.deletions}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {canUndo && (
+            <button
+              type="button"
+              data-changed-files-undo="true"
+              disabled={isRevertingCheckpoint}
+              className="flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => onUndoTurn(undoTurnCount)}
+            >
+              Undo
+              <Undo2Icon className="size-3" aria-hidden />
+            </button>
           )}
-        </p>
-        <div className="flex items-center gap-1.5">
-          <Button
+          <button
             type="button"
-            size="xs"
-            variant="outline"
-            data-scroll-anchor-ignore
-            onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !allDirectoriesExpanded)}
-          >
-            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-          </Button>
-          <Button
-            type="button"
-            size="xs"
-            variant="outline"
+            className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => {
               if (diffOpenForTurn) {
                 onCloseDiff();
@@ -1313,18 +1400,84 @@ function AssistantChangedFilesSectionInner({
               onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path);
             }}
           >
-            {diffOpenForTurn ? "Close diff" : "View diff"}
-          </Button>
+            {diffOpenForTurn ? "Close diff" : "Review changes"}
+          </button>
+          <button
+            type="button"
+            data-scroll-anchor-ignore
+            aria-expanded={expanded}
+            aria-label={expanded ? "Collapse changed files list" : "Expand changed files list"}
+            className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-foreground/5 hover:text-foreground/80"
+            onClick={() => setExpanded(routeThreadKey, turnSummary.turnId, !expanded)}
+          >
+            <DisclosureChevron open={expanded} className="size-3.5" />
+          </button>
         </div>
       </div>
-      <ChangedFilesTree
-        key={`changed-files-tree:${turnSummary.turnId}`}
-        files={checkpointFiles}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onSelectFile={(filePath) => onOpenTurnDiff(turnSummary.turnId, filePath)}
-      />
+      <DisclosureRegion open={expanded}>
+        {visibleFiles.map((file) => (
+          <ChangedFileRow
+            key={file.path}
+            file={file}
+            resolvedTheme={resolvedTheme}
+            onOpen={() => onOpenTurnDiff(turnSummary.turnId, file.path)}
+          />
+        ))}
+        {overflowCount > 0 || fileListExpanded ? (
+          <button
+            type="button"
+            data-scroll-anchor-ignore
+            aria-expanded={fileListExpanded}
+            className="flex w-full items-center gap-1.5 border-t border-border/70 px-3 py-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            onClick={() => setFileListExpanded(!fileListExpanded)}
+          >
+            <DisclosureChevron open={fileListExpanded} className="size-3.5" />
+            <span>
+              {fileListExpanded
+                ? "Show less"
+                : `Show ${overflowCount} more ${overflowCount === 1 ? "file" : "files"}`}
+            </span>
+          </button>
+        ) : null}
+      </DisclosureRegion>
     </div>
+  );
+}
+
+/** One file in the changed-files card: icon, path, and its own +N/-M. */
+function ChangedFileRow(props: {
+  file: TurnDiffSummary["files"][number];
+  resolvedTheme: "light" | "dark";
+  onOpen: () => void;
+}) {
+  const { file, resolvedTheme, onOpen } = props;
+  const additions = file.additions ?? 0;
+  const deletions = file.deletions ?? 0;
+  const hasDiffStat = additions + deletions > 0;
+
+  return (
+    <button
+      type="button"
+      data-changed-file-row="true"
+      title={file.path}
+      className="group/file-row flex w-full items-center gap-2 border-t border-border/70 px-3 py-2 text-left transition-colors first:border-t-0 hover:bg-foreground/5"
+      onClick={onOpen}
+    >
+      <VscodeEntryIcon
+        pathValue={file.path}
+        kind="file"
+        theme={resolvedTheme}
+        className="size-4 shrink-0 opacity-80"
+      />
+      <span className="truncate text-[12px] text-foreground/88 underline-offset-2 group-hover/file-row:underline">
+        {file.path}
+      </span>
+      {hasDiffStat && (
+        <span className="ml-auto shrink-0 text-[12px] tabular-nums">
+          <DiffStatLabel additions={additions} deletions={deletions} />
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -1570,89 +1723,134 @@ function formatMessageMeta(
   return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
 }
 
-function workToneIcon(tone: TimelineWorkEntry["tone"]): {
-  icon: LucideIcon;
-  className: string;
-} {
-  if (tone === "error") {
-    return {
-      icon: CircleAlertIcon,
-      className: "text-foreground/92",
-    };
-  }
-  if (tone === "thinking") {
-    return {
-      icon: BotIcon,
-      className: "text-foreground/92",
-    };
-  }
-  if (tone === "info") {
-    return {
-      icon: CheckIcon,
-      className: "text-foreground/92",
-    };
-  }
-  return {
-    icon: ZapIcon,
-    className: "text-foreground/92",
-  };
+function workToneIcon(tone: TimelineWorkEntry["tone"]): LucideIcon {
+  if (tone === "error") return CircleAlertIcon;
+  if (tone === "thinking") return BotIcon;
+  if (tone === "info") return CheckIcon;
+  return ZapIcon;
 }
 
-function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
-  if (tone === "error") return "text-rose-300/50 dark:text-rose-300/50";
-  if (tone === "tool") return "text-muted-foreground/70";
-  if (tone === "thinking") return "text-muted-foreground/50";
-  return "text-muted-foreground/40";
-}
-
+/**
+ * The short trailing phrase after the row's verb: the humanized command target,
+ * a filename, or a clean detail line. Returns null when the heading already
+ * says everything, so a row never reads "Read - Read".
+ */
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
+  workEntry: Pick<
+    TimelineWorkEntry,
+    "detail" | "command" | "rawCommand" | "changedFiles" | "requestKind" | "itemType"
+  >,
   workspaceRoot: string | undefined,
-) {
-  if (workEntry.command) return workEntry.command;
-  if (workEntry.detail) return workEntry.detail;
-  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
-  const [firstPath] = workEntry.changedFiles ?? [];
-  if (!firstPath) return null;
-  const displayPath = formatWorkspaceRelativePath(firstPath, workspaceRoot);
-  return workEntry.changedFiles!.length === 1
-    ? displayPath
-    : `${displayPath} +${workEntry.changedFiles!.length - 1} more`;
+): string | null {
+  const command = workEntry.command ?? workEntry.rawCommand;
+  if (command) {
+    return deriveReadableCommandDisplay(command).target;
+  }
+
+  if ((workEntry.changedFiles?.length ?? 0) > 0) {
+    const changedFiles = workEntry.changedFiles!;
+    const [firstPath] = changedFiles;
+    if (firstPath) {
+      return changedFiles.length === 1
+        ? basenameOfPath(formatWorkspaceRelativePath(firstPath, workspaceRoot))
+        : `${changedFiles.length} files`;
+    }
+  }
+
+  const detail = workEntry.detail?.trim();
+  if (!detail) {
+    return null;
+  }
+
+  const filePath = extractFilePathFromDetail(detail);
+  if (filePath) {
+    return basenameOfPath(filePath);
+  }
+
+  const isFileRelated =
+    workEntry.requestKind === "file-read" ||
+    workEntry.requestKind === "file-change" ||
+    workEntry.itemType === "file_change";
+  // For file rows the heading alone is enough — never surface raw arguments.
+  if (isFileRelated) {
+    return null;
+  }
+  if (detail.startsWith("{") || detail.startsWith("[")) {
+    return null;
+  }
+  return detail;
+}
+
+/**
+ * Pulls a file path out of a detail string that may be a JSON argument blob,
+ * so a `Read {"file_path":"/a/b.ts"}` row can show just `b.ts`.
+ */
+function extractFilePathFromDetail(detail: string): string | null {
+  const plainPathMatch = /^(.+?\.[A-Za-z0-9][A-Za-z0-9._-]*)(?::\d+)?(?::\d+)?$/u.exec(
+    detail.trim(),
+  );
+  if (plainPathMatch?.[1]?.includes("/")) {
+    return plainPathMatch[1].trim();
+  }
+  const jsonMatch = /"(?:file_path|filePath|path|filename)"\s*:\s*"([^"]+)"/u.exec(detail);
+  return jsonMatch?.[1]?.trim() ?? null;
 }
 
 function workEntryRawCommand(
   workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
 ): string | null {
-  const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
-    return null;
+  return workEntry.rawCommand?.trim() || workEntry.command?.trim() || null;
+}
+
+// Command rows reuse the wrapper-aware classifier so wrapped git/gh commands get
+// the branch mark and read-only inspections get the search glyph, rather than
+// every command collapsing to one terminal icon.
+function commandWorkEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
+  const command = workEntry.command ?? workEntry.rawCommand;
+  switch (command ? resolveCommandVisualKind(command) : "terminal") {
+    case "inspect":
+      return SearchIcon;
+    case "git":
+    case "github":
+      return GitBranchIcon;
+    case "terminal":
+      return TerminalIcon;
   }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
+}
+
+// Provider read tools (e.g. Claude's `Read`) arrive as generic dynamic tool calls
+// without a `file-read` requestKind, so match the tool name to surface the search
+// icon instead of the generic tool fallback.
+function isFileReadToolEntry(workEntry: TimelineWorkEntry): boolean {
+  const name = (workEntry.toolTitle ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  return name === "read" || name === "readfile" || name === "viewfile";
 }
 
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
-  if (workEntry.requestKind === "command") return TerminalIcon;
-  if (workEntry.requestKind === "file-read") return EyeIcon;
-  if (workEntry.requestKind === "file-change") return SquarePenIcon;
+  if (workEntry.requestKind === "command") return commandWorkEntryIcon(workEntry);
+  if (workEntry.requestKind === "file-read") return SearchIcon;
+  if (workEntry.requestKind === "file-change") return PencilIcon;
 
   if (workEntry.itemType === "command_execution" || workEntry.command) {
-    return TerminalIcon;
+    return commandWorkEntryIcon(workEntry);
   }
   if (workEntry.itemType === "file_change" || (workEntry.changedFiles?.length ?? 0) > 0) {
-    return SquarePenIcon;
+    return PencilIcon;
   }
   if (workEntry.itemType === "web_search") return GlobeIcon;
   if (workEntry.itemType === "image_view") return EyeIcon;
+  if (isFileReadToolEntry(workEntry)) return SearchIcon;
 
   switch (workEntry.itemType) {
     case "mcp_tool_call":
       return WrenchIcon;
     case "dynamic_tool_call":
-    case "collab_agent_tool_call":
       return HammerIcon;
+    case "collab_agent_tool_call":
+      return BotIcon;
   }
 
-  return workToneIcon(workEntry.tone).icon;
+  return workToneIcon(workEntry.tone);
 }
 
 function capitalizePhrase(value: string): string {
@@ -1668,6 +1866,20 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
     return capitalizePhrase(normalizeCompactToolLabel(workEntry.label));
   }
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
+}
+
+/**
+ * Joins heading and preview with the same middot the rest of a row's clauses
+ * use, dropping the preview when it just repeats the heading so a row never
+ * reads "Read · Read".
+ */
+function combineWorkEntryDisplayText(heading: string, preview: string | null): string {
+  if (!preview) {
+    return heading;
+  }
+  return normalizeToolTextForComparison(heading) === normalizeToolTextForComparison(preview)
+    ? heading
+    : `${heading} · ${preview}`;
 }
 
 function isFileEditWorkEntry(workEntry: TimelineWorkEntry): boolean {
@@ -1723,100 +1935,87 @@ function CompactDiffStatLabel(props: { additions: number; deletions: number }) {
   );
 }
 
-const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
+/**
+ * Inner content of a tool-call row: leading glyph, then one truncating line of
+ * "Heading · target · Status · 1s elapsed". Both tones brighten together on row
+ * hover/focus so the row reads as a single unit rather than a fill highlight.
+ * Callers own the interactive wrapper and supply the `group/tool-row` class.
+ */
+const WorkEntryRowContent = memo(function WorkEntryRowContent(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
-  const iconConfig = workToneIcon(workEntry.tone);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
-  const rawPreview = workEntryPreview(workEntry, workspaceRoot);
-  const preview =
-    rawPreview &&
-    normalizeCompactToolLabel(rawPreview).toLowerCase() ===
-      normalizeCompactToolLabel(heading).toLowerCase()
-      ? null
-      : rawPreview;
+  const preview = workEntryPreview(workEntry, workspaceRoot);
   const rawCommand = workEntryRawCommand(workEntry);
-  const displayText = preview ? `${heading} - ${preview}` : heading;
+  // A command row always has something to say after the verb, falling back to
+  // the humanized target when there is no preview of its own.
+  const displayText = combineWorkEntryDisplayText(
+    heading,
+    preview ?? (rawCommand ? deriveReadableCommandDisplay(rawCommand).target : null),
+  );
+  const metaText = workEntryActivityMeta(workEntry);
+  const fullText = metaText ? `${displayText} · ${metaText}` : displayText;
 
   return (
     <>
       <span
-        className={cn("flex size-5 items-center justify-center", iconConfig.className)}
+        className={cn("flex size-5 items-center justify-center", WORK_ROW_TONE_CLASS_NAME)}
         data-work-entry-icon="true"
       >
-        <EntryIcon className="size-3" />
+        <EntryIcon className="size-3.5" />
       </span>
-      <div className="min-w-0 overflow-hidden transition-[opacity,translate] duration-200">
-        {rawCommand ? (
-          <div className="max-w-full">
-            <p
-              className={cn(
-                "truncate text-[11px] leading-5",
-                workToneClass(workEntry.tone),
-                preview ? "text-muted-foreground/70" : "",
-              )}
-              title={displayText}
-            >
-              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-                {heading}
-              </span>
-              {preview && (
-                <Tooltip>
-                  <TooltipTrigger
-                    closeDelay={0}
-                    delay={75}
-                    render={
-                      <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
-                        {" "}
-                        - {preview}
-                      </span>
-                    }
-                  />
-                  <TooltipPopup
-                    align="start"
-                    className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
-                    side="top"
-                  >
-                    <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
-                      {rawCommand}
-                    </div>
-                  </TooltipPopup>
-                </Tooltip>
-              )}
-            </p>
-          </div>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger
-              className="block min-w-0 w-full text-left"
-              title={displayText}
-              aria-label={displayText}
-            >
+      <Tooltip>
+        <TooltipTrigger
+          className="block min-w-0 w-full text-left"
+          aria-label={fullText}
+          render={
+            <div className="min-w-0 overflow-hidden">
               <p
-                className={cn(
-                  "truncate text-[11px] leading-5",
-                  workToneClass(workEntry.tone),
-                  preview ? "text-muted-foreground/70" : "",
-                )}
+                className={cn("truncate text-[12px] leading-5", WORK_ROW_TONE_CLASS_NAME)}
+                data-work-entry-display-text="true"
               >
-                <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-                  {heading}
-                </span>
-                {preview && <span className="text-muted-foreground/55"> - {preview}</span>}
+                <span>{displayText}</span>
+                {metaText ? <span data-work-entry-meta="true"> · {metaText}</span> : null}
               </p>
-            </TooltipTrigger>
-            <TooltipPopup className="max-w-[min(720px,calc(100vw-2rem))]">
-              <p className="whitespace-pre-wrap wrap-break-word text-xs leading-5">{displayText}</p>
-            </TooltipPopup>
-          </Tooltip>
-        )}
-      </div>
+            </div>
+          }
+        />
+        <TooltipPopup side="top" align="start" className="max-w-[min(56rem,calc(100vw-2rem))]">
+          <WorkEntryTooltipContent displayText={fullText} rawCommand={rawCommand} />
+        </TooltipPopup>
+      </Tooltip>
     </>
   );
 });
+
+/**
+ * Hover card for a tool row. A command row shows the summary above its full raw
+ * call, since the row itself only has space for the humanized form.
+ */
+function WorkEntryTooltipContent(props: { displayText: string; rawCommand: string | null }) {
+  if (!props.rawCommand) {
+    return (
+      <p className="whitespace-pre-wrap wrap-break-word text-xs leading-5">{props.displayText}</p>
+    );
+  }
+  return (
+    <div className="space-y-2 text-xs leading-5">
+      <div className="space-y-0.5">
+        <div className="text-muted-foreground/70">Summary</div>
+        <div className="whitespace-pre-wrap wrap-break-word">{props.displayText}</div>
+      </div>
+      <div className="space-y-0.5">
+        <div className="text-muted-foreground/70">Raw call</div>
+        <code className="block whitespace-pre-wrap wrap-break-word font-mono text-[11px] text-foreground/92">
+          {props.rawCommand}
+        </code>
+      </div>
+    </div>
+  );
+}
 
 const FileEditWorkEntryRow = memo(function FileEditWorkEntryRow(props: {
   isEditing: boolean;
@@ -1847,9 +2046,8 @@ const FileEditWorkEntryRow = memo(function FileEditWorkEntryRow(props: {
     <div
       className={cn(
         COMPACT_WORK_ROW_CLASS_NAME,
-        "chat-file-edit-row transition-colors duration-150 hover:bg-foreground/5",
+        "chat-file-edit-row",
         changedFiles.length > 1 && "items-start py-1.5",
-        isEditing && "bg-success/[0.045]",
       )}
       data-tool-entry-row="true"
       data-tool-entry-kind="file-edit"
@@ -1858,18 +2056,19 @@ const FileEditWorkEntryRow = memo(function FileEditWorkEntryRow(props: {
     >
       <span
         className={cn(
-          "flex size-5 items-center justify-center text-muted-foreground/75",
+          "flex size-5 items-center justify-center",
+          WORK_ROW_TONE_CLASS_NAME,
           changedFiles.length > 1 && "mt-0.5",
-          isEditing && "text-success/85",
         )}
         data-work-entry-icon="true"
       >
-        <SquarePenIcon className="size-3" />
+        <PencilIcon className="size-3.5" />
       </span>
       <div className="min-w-0">
         <p
           className={cn(
-            "chat-file-edit-text truncate text-[11px] leading-5 font-medium text-foreground/80",
+            "chat-file-edit-text truncate text-[12px] leading-5",
+            WORK_ROW_TONE_CLASS_NAME,
             isEditing && "chat-file-edit-text--active",
           )}
           title={primaryLabel}
@@ -1920,8 +2119,8 @@ const FileEditWorkEntryRow = memo(function FileEditWorkEntryRow(props: {
 });
 
 // ---------------------------------------------------------------------------
-// Expandable wrapper — renders a SimpleWorkEntryRow as a click target with
-// a trailing chevron, conditionally mounting WorkEntryExpandedPanel below.
+// Expandable wrapper — the row is a disclosure summary with a trailing chevron;
+// the panel below carries the Activity card and the command transcript.
 // ---------------------------------------------------------------------------
 
 const ANSI_SGR_RE = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
@@ -1943,6 +2142,23 @@ const ExpandableWorkEntryRow = memo(function ExpandableWorkEntryRow(props: {
   const isOpen = stored ?? isErroredWorkEntry(workEntry);
   const panelId = workEntryExpandPanelId(workEntry.id);
   const heading = toolWorkEntryHeading(workEntry);
+  // The panel animates open/closed via a grid-row transition, so its children
+  // must outlive the toggle by the length of the close animation.
+  const [keepPanelMounted, setKeepPanelMounted] = useState(isOpen);
+
+  useEffect(() => {
+    if (isOpen) {
+      setKeepPanelMounted(true);
+      return;
+    }
+    if (!keepPanelMounted) return;
+    const cleanup = window.setTimeout(
+      () => setKeepPanelMounted(false),
+      DISCLOSURE_TRANSITION_MS + DISCLOSURE_CLEANUP_BUFFER_MS,
+    );
+    return () => window.clearTimeout(cleanup);
+  }, [isOpen, keepPanelMounted]);
+
   const toggle = () => {
     setExpanded(routeThreadKey, workEntry.id, !isOpen);
   };
@@ -1965,23 +2181,19 @@ const ExpandableWorkEntryRow = memo(function ExpandableWorkEntryRow(props: {
         data-tool-entry-kind="expandable"
         className={cn(
           COMPACT_WORK_ROW_CLASS_NAME,
-          "cursor-pointer transition-colors duration-150 hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+          "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
         )}
       >
-        <SimpleWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />
+        <WorkEntryRowContent workEntry={workEntry} workspaceRoot={workspaceRoot} />
         <span className="flex size-5 items-center justify-center">
-          <ChevronRightIcon
-            aria-hidden
-            className={cn(
-              "size-3 text-muted-foreground/55 transition-transform duration-150",
-              isOpen ? "rotate-90" : "",
-            )}
-          />
+          <DisclosureChevron open={isOpen} className={cn("size-3", WORK_ROW_TONE_CLASS_NAME)} />
         </span>
       </div>
-      {isOpen && (
-        <WorkEntryExpandedPanel workEntry={workEntry} panelId={panelId} headingLabel={heading} />
-      )}
+      <DisclosureRegion open={isOpen} contentClassName="min-w-0 pl-9">
+        {keepPanelMounted ? (
+          <WorkEntryExpandedPanel workEntry={workEntry} panelId={panelId} headingLabel={heading} />
+        ) : null}
+      </DisclosureRegion>
     </div>
   );
 });
@@ -1992,69 +2204,137 @@ const WorkEntryExpandedPanel = memo(function WorkEntryExpandedPanel(props: {
   headingLabel: string;
 }) {
   const { workEntry, panelId, headingLabel } = props;
-  const inputLine = workEntry.rawCommand?.trim() || workEntry.command?.trim() || null;
+  const { markdownCwd, timestampFormat } = use(TimelineStableCtx);
+  const inputLine = workEntryRawCommand(workEntry);
   const cleanedOutput = workEntry.output ? workEntry.output.replace(ANSI_SGR_RE, "") : "";
   const hasOutput = cleanedOutput.length > 0;
-  const showExitChip = workEntry.exitCode !== undefined && workEntry.exitCode !== 0;
-  // The collapsed row truncates its detail and reveals the full text only in
-  // a hover tooltip; on phone the expanded panel carries the full text
-  // instead so tooltip-only content stays reachable by tap.
-  const phoneDetailText = workEntry.detail?.trim() || null;
+  // The collapsed row truncates its detail behind a hover tooltip, which taps
+  // cannot reach; the panel carries the full text so it stays available.
+  const detailText = workEntry.detail?.trim() || null;
 
   return (
     <div
       id={panelId}
       role="region"
       aria-label={`${headingLabel} details`}
-      className="mt-1 border-t border-border/40 pt-1.5 pl-9"
+      className="space-y-3 pt-2 pb-1"
     >
-      {phoneDetailText && phoneDetailText !== inputLine && (
-        <p
-          data-work-entry-phone-detail="true"
-          className="hidden whitespace-pre-wrap wrap-break-word pb-1 text-[11px] leading-4 text-foreground/85 phone:block"
-        >
-          {phoneDetailText}
-        </p>
+      <WorkEntryActivitySection
+        workEntry={workEntry}
+        detailText={detailText !== inputLine ? detailText : null}
+        timestampFormat={timestampFormat}
+      />
+
+      {inputLine || hasOutput ? (
+        <ChatMarkdown
+          text={buildShellTranscriptFence(inputLine, cleanedOutput, workEntry.exitCode)}
+          cwd={markdownCwd}
+          isStreaming={false}
+        />
+      ) : (
+        <p className="text-[11px] italic text-muted-foreground/45">No output was captured.</p>
       )}
-      {inputLine && (
-        <div className="flex items-start gap-1.5 overflow-x-auto">
-          <span className="mt-0.5 shrink-0 font-mono text-[10px] text-muted-foreground/55">
-            {">_"}
-          </span>
-          <pre className="font-mono text-[11px] leading-4 text-foreground/85 whitespace-nowrap">
-            {inputLine}
-          </pre>
-        </div>
-      )}
-      <div className={cn("flex flex-col gap-1", inputLine ? "mt-1.5" : "")}>
-        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/60">
-          Output:
-        </span>
-        {hasOutput ? (
-          <pre className="max-h-[400px] overflow-auto rounded-md border border-border/40 bg-background/40 p-1.5 font-mono text-[11px] leading-4 whitespace-pre text-foreground/85">
-            {cleanedOutput}
-          </pre>
-        ) : (
-          <span className="italic text-muted-foreground/40">(no output)</span>
-        )}
-      </div>
-      <div className="mt-1.5 flex items-center justify-between">
-        {showExitChip ? (
-          <span className="rounded-md border border-rose-500/30 bg-rose-500/10 px-1.5 py-0.5 font-mono text-[10px] text-rose-300">
-            exit {workEntry.exitCode}
-          </span>
-        ) : (
-          <span />
-        )}
-        {hasOutput && (
-          <MessageCopyButton
-            text={cleanedOutput}
-            size="icon-xs"
-            ariaLabel="Copy output"
-            className="border-border/40 bg-background/40 text-muted-foreground/60 shadow-none hover:text-foreground/80"
-          />
-        )}
-      </div>
     </div>
   );
 });
+
+/**
+ * Status/timing card for one tool call. Rows are omitted rather than shown
+ * empty: `startedAt` only exists once a start event was correlated, so a lone
+ * completion reports what it knows and nothing more.
+ */
+function WorkEntryActivitySection(props: {
+  workEntry: TimelineWorkEntry;
+  detailText: string | null;
+  timestampFormat: TimestampFormat;
+}) {
+  const { workEntry, detailText, timestampFormat } = props;
+  const statusLabel = formatWorkEntryStatusLabel(resolveWorkEntryStatus(workEntry));
+  const elapsed = formatWorkEntryElapsed(workEntry);
+  const lastActivityAt = workEntry.lastActivityAt ?? workEntry.createdAt;
+
+  return (
+    <section className="space-y-2">
+      <h3 className="text-[11px] font-medium text-muted-foreground/56">Activity</h3>
+      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 rounded-lg border border-border/45 bg-background/60 px-3 py-2.5 text-[11px]">
+        <dt className="text-muted-foreground/56">Status</dt>
+        <dd className="text-foreground/84">{statusLabel}</dd>
+        {workEntry.startedAt ? (
+          <>
+            <dt className="text-muted-foreground/56">Started</dt>
+            <dd className="text-foreground/84">
+              <time dateTime={workEntry.startedAt} title={workEntry.startedAt}>
+                {formatTimestamp(workEntry.startedAt, timestampFormat)}
+              </time>
+            </dd>
+          </>
+        ) : null}
+        <dt className="text-muted-foreground/56">Last activity</dt>
+        <dd className="text-foreground/84">
+          <time dateTime={lastActivityAt} title={lastActivityAt}>
+            {formatTimestamp(lastActivityAt, timestampFormat)}
+          </time>
+        </dd>
+        {elapsed ? (
+          <>
+            <dt className="text-muted-foreground/56">Elapsed</dt>
+            <dd className="tabular-nums text-foreground/84">{elapsed}</dd>
+          </>
+        ) : null}
+        {detailText ? (
+          <>
+            <dt className="text-muted-foreground/56">Detail</dt>
+            {/* The collapsed row truncates this and reveals the rest on hover,
+                which a touch device cannot do — so the panel carries the full
+                text on every tier, not just phone. */}
+            <dd data-work-entry-detail="true" className="wrap-break-word text-foreground/84">
+              {detailText}
+            </dd>
+          </>
+        ) : null}
+      </dl>
+    </section>
+  );
+}
+
+/**
+ * Renders the command and its output as one `bash` fence so the shared markdown
+ * code block handles syntax highlighting, wrapping, and copy — the transcript
+ * gets the same treatment as any other code in a reply.
+ */
+function buildShellTranscriptFence(
+  command: string | null,
+  output: string,
+  exitCode: number | undefined,
+): string {
+  const lines: string[] = [];
+  if (command) {
+    const [first, ...rest] = command.split("\n");
+    lines.push(`$ ${first ?? ""}`, ...rest);
+  }
+  if (output) {
+    if (lines.length > 0) lines.push("");
+    lines.push(output.replace(/\s+$/, ""));
+  }
+  if (exitCode !== undefined && exitCode !== 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push(`Exit code ${exitCode}`);
+  }
+  // A fence long enough to survive any backtick run inside the captured output.
+  const fence = "`".repeat(Math.max(3, longestBacktickRun(lines.join("\n")) + 1));
+  return `${fence}bash\n${lines.join("\n")}\n${fence}`;
+}
+
+function longestBacktickRun(value: string): number {
+  let longest = 0;
+  let current = 0;
+  for (const char of value) {
+    if (char === "`") {
+      current += 1;
+      longest = Math.max(longest, current);
+      continue;
+    }
+    current = 0;
+  }
+  return longest;
+}

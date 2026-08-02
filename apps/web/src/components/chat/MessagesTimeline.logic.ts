@@ -21,6 +21,7 @@ import {
 import { type TimestampFormat } from "@ryco/contracts/settings";
 import { type ExpandedImagePreview } from "./ExpandedImagePreview";
 import type { ThreadMessageSearchOccurrence } from "./ThreadMessageSearch.logic";
+import { summarizeToolCallGroup, type ToolCallGroupSummary } from "./toolCallGroup.logic";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
@@ -152,6 +153,7 @@ export interface TimelineStableState {
   >;
   activeThreadMessageSearchOccurrence: ThreadMessageSearchOccurrence | null;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onUndoTurn: (turnCount: number) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
@@ -192,6 +194,7 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     threadMessageSearchOccurrencesByMessageId: input.threadMessageSearchOccurrencesByMessageId,
     activeThreadMessageSearchOccurrence: input.activeThreadMessageSearchOccurrence,
     onRevertUserMessage: input.onRevertUserMessage,
+    onUndoTurn: input.onUndoTurn,
     onImageExpand: input.onImageExpand,
     onOpenTurnDiff: input.onOpenTurnDiff,
     onCloseDiff: input.onCloseDiff,
@@ -227,6 +230,8 @@ export type MessagesTimelineRow =
       showAssistantCopyButton: boolean;
       assistantTurnDiffSummary?: TurnDiffSummary | undefined;
       revertTurnCount?: number | undefined;
+      /** Turn count to roll back to when undoing this assistant turn's edits. */
+      assistantUndoTurnCount?: number | undefined;
     }
   | {
       kind: "turn-fold";
@@ -247,6 +252,8 @@ export type MessagesTimelineRow =
       hiddenCount: number;
       expanded: boolean;
       onlyToolEntries: boolean;
+      /** Compact recap of the folded run ("Ran 9 commands, Read 1 file"). */
+      summary: ToolCallGroupSummary | null;
     }
   | {
       kind: "proposed-plan";
@@ -602,6 +609,41 @@ export function deriveRevertTurnCountByUserMessageId(input: {
   return byUserMessageId;
 }
 
+/**
+ * Rollback target for each turn whose edits can still be undone, keyed by turn.
+ *
+ * A turn is undoable only when its checkpoint is real and reachable: a missing
+ * or errored summary has nothing to restore, and a `provider-diff:` ref is a
+ * reported diff rather than a checkpoint we captured, so there is no commit to
+ * roll back to. The stored count is the turn *before* this one — undoing means
+ * returning the tree to how it looked when the turn started.
+ */
+export function deriveUndoTurnCountByTurnId(input: {
+  turnDiffSummaries: ReadonlyArray<TurnDiffSummary>;
+  inferredCheckpointTurnCountByTurnId: Readonly<Partial<Record<TurnDiffSummary["turnId"], number>>>;
+}): Map<TurnId, number> {
+  const byTurnId = new Map<TurnId, number>();
+
+  for (const summary of input.turnDiffSummaries) {
+    if (summary.status === "missing" || summary.status === "error") {
+      continue;
+    }
+    if (summary.checkpointRef === undefined || summary.checkpointRef.startsWith("provider-diff:")) {
+      continue;
+    }
+    if (summary.files.length === 0) {
+      continue;
+    }
+    const turnCount =
+      summary.checkpointTurnCount ?? input.inferredCheckpointTurnCountByTurnId[summary.turnId];
+    if (typeof turnCount === "number") {
+      byTurnId.set(summary.turnId, Math.max(0, turnCount - 1));
+    }
+  }
+
+  return byTurnId;
+}
+
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   latestTurn?: TimelineLatestTurn | null;
@@ -612,6 +654,8 @@ export function deriveMessagesTimelineRows(input: {
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
+  /** Per-turn rollback target for the changed-files card's Undo action. */
+  undoTurnCountByTurnId?: ReadonlyMap<TurnId, number> | undefined;
 }): MessagesTimelineRow[] {
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
@@ -696,14 +740,8 @@ export function deriveMessagesTimelineRows(input: {
         const visibleEntries = groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES);
         const renderedEntries = expanded ? [...hiddenEntries, ...visibleEntries] : visibleEntries;
 
-        for (const workEntry of renderedEntries) {
-          nextRows.push({
-            kind: "work",
-            id: workEntry.id,
-            createdAt: workEntry.createdAt,
-            groupedEntries: [workEntry],
-          });
-        }
+        // The recap leads the group: it reads as the heading of the run it
+        // folds, and expanding it reveals the rows directly beneath.
         nextRows.push({
           kind: "work-toggle",
           id: `work-toggle:${timelineEntry.id}`,
@@ -712,7 +750,16 @@ export function deriveMessagesTimelineRows(input: {
           hiddenCount: hiddenEntries.length,
           expanded,
           onlyToolEntries: groupedEntries.every((entry) => entry.tone === "tool"),
+          summary: summarizeToolCallGroup(hiddenEntries),
         });
+        for (const workEntry of renderedEntries) {
+          nextRows.push({
+            kind: "work",
+            id: workEntry.id,
+            createdAt: workEntry.createdAt,
+            groupedEntries: [workEntry],
+          });
+        }
       }
       index = cursor - 1;
       continue;
@@ -738,6 +785,13 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    // Resolved once: the summary supplies both the changed-files card and the
+    // turn identity its Undo action rolls back to.
+    const assistantTurnDiffSummary =
+      timelineEntry.message.role === "assistant"
+        ? input.turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
+        : undefined;
+
     nextRows.push({
       kind: "message",
       id: timelineEntry.id,
@@ -748,14 +802,14 @@ export function deriveMessagesTimelineRows(input: {
       showAssistantCopyButton:
         timelineEntry.message.role === "assistant" &&
         terminalAssistantMessageIds.has(timelineEntry.message.id),
-      assistantTurnDiffSummary:
-        timelineEntry.message.role === "assistant"
-          ? input.turnDiffSummaryByAssistantMessageId.get(timelineEntry.message.id)
-          : undefined,
+      assistantTurnDiffSummary,
       revertTurnCount:
         timelineEntry.message.role === "user"
           ? input.revertTurnCountByUserMessageId.get(timelineEntry.message.id)
           : undefined,
+      assistantUndoTurnCount: assistantTurnDiffSummary
+        ? input.undoTurnCountByTurnId?.get(assistantTurnDiffSummary.turnId)
+        : undefined,
     });
   }
 
@@ -817,7 +871,10 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.groupId === bw.groupId &&
         a.hiddenCount === bw.hiddenCount &&
         a.expanded === bw.expanded &&
-        a.onlyToolEntries === bw.onlyToolEntries
+        a.onlyToolEntries === bw.onlyToolEntries &&
+        // The label is derived from the folded run's composition, so it changes
+        // exactly when the recap would render differently.
+        a.summary?.label === bw.summary?.label
       );
     }
 
@@ -837,7 +894,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.durationStart === bm.durationStart &&
         a.showAssistantCopyButton === bm.showAssistantCopyButton &&
         a.assistantTurnDiffSummary === bm.assistantTurnDiffSummary &&
-        a.revertTurnCount === bm.revertTurnCount
+        a.revertTurnCount === bm.revertTurnCount &&
+        a.assistantUndoTurnCount === bm.assistantUndoTurnCount
       );
     }
   }
@@ -898,7 +956,9 @@ function areWorkLogEntriesUnchanged(previous: WorkLogEntry, next: WorkLogEntry):
       previous.requestKind === next.requestKind &&
       previous.turnId === next.turnId &&
       previous.output === next.output &&
-      previous.exitCode === next.exitCode)
+      previous.exitCode === next.exitCode &&
+      previous.startedAt === next.startedAt &&
+      previous.lastActivityAt === next.lastActivityAt)
   );
 }
 

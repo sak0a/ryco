@@ -71,6 +71,14 @@ export interface WorkLogEntry {
   output?: string;
   /** Process exit code when the activity reported one. */
   exitCode?: number;
+  /**
+   * When the tool call began. Sourced from the matching `tool.started` activity
+   * (which is itself filtered out of the log), falling back to the first
+   * lifecycle event folded into this entry. Absent when neither is available.
+   */
+  startedAt?: string;
+  /** Timestamp of the newest lifecycle event folded into this entry. */
+  lastActivityAt?: string;
 }
 
 export interface ContextCompactionTimelineEntry {
@@ -578,13 +586,38 @@ export function deriveWorkLogEntries(
   latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  // `tool.started` never becomes a row of its own, but it carries the only
+  // authoritative start time for a tool call. Index it first so the surviving
+  // lifecycle entries can report how long their call actually took.
+  const startedAtByToolCallId = collectToolStartTimestamps(ordered);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
     if (shouldIncludeActivityInWorkLog(activity, latestTurnId)) {
-      entries.push(toDerivedWorkLogEntry(activity));
+      entries.push(toDerivedWorkLogEntry(activity, startedAtByToolCallId));
     }
   }
   return toWorkLogEntries(entries);
+}
+
+function collectToolStartTimestamps(
+  ordered: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyMap<string, string> {
+  const startedAtByToolCallId = new Map<string, string>();
+  for (const activity of ordered) {
+    if (activity.kind !== "tool.started") {
+      continue;
+    }
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const toolCallId = extractToolCallId(payload);
+    // Activities are already ordered, so the first sighting is the earliest.
+    if (toolCallId && !startedAtByToolCallId.has(toolCallId)) {
+      startedAtByToolCallId.set(toolCallId, activity.createdAt);
+    }
+  }
+  return startedAtByToolCallId;
 }
 
 function shouldIncludeActivityInWorkLog(
@@ -623,7 +656,10 @@ function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): bool
   return typeof payload?.detail === "string" && payload.detail.startsWith("ExitPlanMode:");
 }
 
-function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry {
+function toDerivedWorkLogEntry(
+  activity: OrchestrationThreadActivity,
+  startedAtByToolCallId: ReadonlyMap<string, string>,
+): DerivedWorkLogEntry {
   const payload =
     activity.payload && typeof activity.payload === "object"
       ? (activity.payload as Record<string, unknown>)
@@ -696,7 +732,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (toolCallId) {
     entry.toolCallId = toolCallId;
+    const startedAt = startedAtByToolCallId.get(toolCallId);
+    if (startedAt) {
+      entry.startedAt = startedAt;
+    }
   }
+  entry.lastActivityAt = activity.createdAt;
   if (fullOutput) {
     entry.output = fullOutput;
   }
@@ -772,9 +813,15 @@ function mergeDerivedWorkLogEntries(
   const toolCallId = next.toolCallId ?? previous.toolCallId;
   const output = next.output ?? previous.output;
   const exitCode = next.exitCode ?? previous.exitCode;
+  // `previous` is the earlier lifecycle event, so its own timestamp stands in as
+  // the start when no `tool.started` was recorded for this call.
+  const startedAt = previous.startedAt ?? next.startedAt ?? previous.createdAt;
+  const lastActivityAt = next.lastActivityAt ?? next.createdAt;
   return {
     ...previous,
     ...next,
+    startedAt,
+    lastActivityAt,
     ...(detail ? { detail } : {}),
     ...(command ? { command } : {}),
     ...(rawCommand ? { rawCommand } : {}),
@@ -1590,6 +1637,7 @@ export function deriveThreadActivityViewModel(
   latestTurnId: TurnId | null | undefined,
 ): ThreadActivityViewModel {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const startedAtByToolCallId = collectToolStartTimestamps(ordered);
   const effectiveLatestTurnId = latestTurnId ?? undefined;
   const pendingApprovalState = new Map<ApprovalRequestId, PendingApproval>();
   const pendingUserInputState = new Map<ApprovalRequestId, PendingUserInput>();
@@ -1626,7 +1674,7 @@ export function deriveThreadActivityViewModel(
     }
 
     if (shouldIncludeActivityInWorkLog(activity, effectiveLatestTurnId)) {
-      workLogState.push(toDerivedWorkLogEntry(activity));
+      workLogState.push(toDerivedWorkLogEntry(activity, startedAtByToolCallId));
     }
   }
 

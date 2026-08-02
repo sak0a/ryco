@@ -77,7 +77,9 @@ describe("ChatMarkdown", () => {
     );
 
     try {
-      const link = page.getByRole("link", { name: "PermissionRule.ts · L1" });
+      // `L1` is dropped from the label — it is where the file opens anyway —
+      // but the anchor and the position it resolves to must survive.
+      const link = page.getByRole("link", { name: "PermissionRule.ts" });
       await expect.element(link).toBeInTheDocument();
       await expect.element(link).toHaveAttribute("href", `${filePath}#L1`);
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
 import { type WorkLogEntry } from "../../session-logic";
+import { type TurnDiffSummary } from "../../types";
 import {
   buildTimelineStableState,
   buildTimelineStreamingState,
@@ -9,6 +10,7 @@ import {
   deriveMessagesTimelineRows,
   deriveRevertTurnCountByUserMessageId,
   deriveTimelineMinimapItems,
+  deriveUndoTurnCountByTurnId,
   isErroredWorkEntry,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -647,9 +649,11 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     };
 
+    // The disclosure leads the group, so the recap reads as the heading of the
+    // run it folds and expanding it reveals the rows directly beneath.
     const collapsed = deriveMessagesTimelineRows(baseInput);
-    expect(collapsed.map((row) => row.id)).toEqual(["work-2", "work-toggle:work-entry-1"]);
-    expect(collapsed[1]).toEqual(
+    expect(collapsed.map((row) => row.id)).toEqual(["work-toggle:work-entry-1", "work-2"]);
+    expect(collapsed[0]).toEqual(
       expect.objectContaining({
         kind: "work-toggle",
         hiddenCount: 1,
@@ -662,7 +666,51 @@ describe("deriveMessagesTimelineRows", () => {
       ...baseInput,
       workGroupExpandedById: { "work-group:work-entry-1": true },
     });
-    expect(expanded.map((row) => row.id)).toEqual(["work-1", "work-2", "work-toggle:work-entry-1"]);
+    expect(expanded.map((row) => row.id)).toEqual(["work-toggle:work-entry-1", "work-1", "work-2"]);
+  });
+
+  it("recaps a folded run of tool calls by category", () => {
+    const timelineEntries = [
+      {
+        id: "work-entry-1",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        entry: makeWorkEntry({
+          id: "work-1",
+          createdAt: "2026-01-01T00:00:01Z",
+          command: "bun typecheck",
+        }),
+      },
+      {
+        id: "work-entry-2",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:02Z",
+        entry: makeWorkEntry({
+          id: "work-2",
+          createdAt: "2026-01-01T00:00:02Z",
+          command: "cat src/app.ts",
+        }),
+      },
+      {
+        id: "work-entry-3",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:03Z",
+        entry: makeWorkEntry({ id: "work-3", createdAt: "2026-01-01T00:00:03Z" }),
+      },
+    ];
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    const toggle = rows.find((row) => row.kind === "work-toggle");
+    expect(toggle?.kind === "work-toggle" ? toggle.summary?.label : null).toBe(
+      "Ran 1 command, Read 1 file",
+    );
   });
 
   it("uses authoritative timing and a stopped label for an interrupted turn", () => {
@@ -801,6 +849,53 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(userRow?.revertTurnCount).toBe(1);
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
+  });
+});
+
+describe("deriveUndoTurnCountByTurnId", () => {
+  const summary = (
+    turnId: string,
+    overrides: Partial<Record<keyof TurnDiffSummary, unknown>> = {},
+  ): TurnDiffSummary =>
+    ({
+      turnId: TurnId.make(turnId),
+      completedAt: "2026-01-01T00:00:10Z",
+      files: [{ path: "src/app.ts", additions: 2, deletions: 1 }],
+      checkpointRef: "checkpoint-abc",
+      checkpointTurnCount: 3,
+      ...overrides,
+    }) as TurnDiffSummary;
+
+  it("targets the turn before the one being undone", () => {
+    const result = deriveUndoTurnCountByTurnId({
+      turnDiffSummaries: [summary("turn-1")],
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+    expect(result.get(TurnId.make("turn-1"))).toBe(2);
+  });
+
+  it("falls back to the inferred checkpoint count", () => {
+    const result = deriveUndoTurnCountByTurnId({
+      turnDiffSummaries: [summary("turn-1", { checkpointTurnCount: undefined })],
+      inferredCheckpointTurnCountByTurnId: { [TurnId.make("turn-1")]: 5 },
+    });
+    expect(result.get(TurnId.make("turn-1"))).toBe(4);
+  });
+
+  it("skips turns with nothing restorable", () => {
+    const result = deriveUndoTurnCountByTurnId({
+      turnDiffSummaries: [
+        summary("missing", { status: "missing" }),
+        summary("errored", { status: "error" }),
+        // A reported provider diff is not a checkpoint we can roll back to.
+        summary("provider", { checkpointRef: "provider-diff:xyz" }),
+        summary("uncaptured", { checkpointRef: undefined }),
+        summary("empty", { files: [] }),
+        summary("no-count", { checkpointTurnCount: undefined }),
+      ],
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+    expect(result.size).toBe(0);
   });
 });
 
@@ -1173,6 +1268,7 @@ describe("timeline context split", () => {
     "threadMessageSearchOccurrencesByMessageId",
     "activeThreadMessageSearchOccurrence",
     "onRevertUserMessage",
+    "onUndoTurn",
     "onImageExpand",
     "onOpenTurnDiff",
     "onCloseDiff",
@@ -1198,6 +1294,7 @@ describe("timeline context split", () => {
       threadMessageSearchOccurrencesByMessageId: new Map(),
       activeThreadMessageSearchOccurrence: null,
       onRevertUserMessage: () => {},
+      onUndoTurn: () => {},
       onImageExpand: () => {},
       onOpenTurnDiff: () => {},
       onCloseDiff: () => {},

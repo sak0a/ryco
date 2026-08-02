@@ -651,9 +651,13 @@ export const ChatComposer = memo(
     const selectedPromptEffort = composerProviderState.promptEffort;
     const selectedModelOptionsForDispatch = composerProviderState.modelOptionsForDispatch;
     const alwaysUseBuildMode = useUiStateStore((state) => state.alwaysUseBuildMode);
+    // Read unconditionally: behind a `&&` this hook would be skipped whenever
+    // the Build-mode lock is off, so toggling the setting would change the
+    // component's hook count mid-flight and tear down the tree.
+    const presentationTier = usePresentationTier();
     // The web phone tier is frozen (see AGENTS.md): the Build-mode lock only
     // applies to non-phone presentation tiers.
-    const enforceBuildMode = alwaysUseBuildMode && usePresentationTier() !== "phone";
+    const enforceBuildMode = alwaysUseBuildMode && presentationTier !== "phone";
     const composerProviderControls = useMemo(
       () => ({
         showInteractionModeToggle:
@@ -718,7 +722,7 @@ export const ChatComposer = memo(
     // The collapse-to-pill behavior follows the presentation tier (not the
     // old <640 px query), so 640-767 px viewports and coarse-pointer
     // landscape phones collapse consistently with the rest of the phone UI.
-    const isMobileViewport = usePresentationTier() === "phone";
+    const isMobileViewport = presentationTier === "phone";
     const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
 
     // ------------------------------------------------------------------
@@ -2196,7 +2200,13 @@ export const ChatComposer = memo(
             ref={composerSurfaceRef}
             data-chat-composer-mobile-collapsed={isComposerCollapsedMobile ? "true" : "false"}
             className={cn(
-              "rounded-[max(0px,calc(var(--radius-3xl)-2px))] border-0 bg-card/82 shadow-[0_6px_18px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.05)] outline-none transition-[background-color,box-shadow] duration-200 hover:bg-card/92 hover:shadow-[0_8px_22px_rgba(0,0,0,0.08),0_1px_4px_rgba(0,0,0,0.06)] has-focus-visible:bg-card/95 has-focus-visible:shadow-[0_8px_24px_rgba(0,0,0,0.09),0_1px_4px_rgba(0,0,0,0.07)]",
+              // The fill never changes on hover or focus. This is a persistent
+              // surface the pointer crosses on its way to the transcript and
+              // clicks into constantly, so re-tinting it read as a flicker
+              // rather than an affordance. Focus still lifts the shadow — the
+              // one state worth signalling — and a drag-over still tints,
+              // because that one has to read as a drop target.
+              "rounded-[max(0px,calc(var(--radius-3xl)-2px))] border-0 bg-card/82 shadow-[0_6px_18px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.05)] outline-none transition-[background-color,box-shadow] duration-200 has-focus-visible:shadow-[0_8px_24px_rgba(0,0,0,0.09),0_1px_4px_rgba(0,0,0,0.07)]",
               isDragOverComposer
                 ? "bg-accent/30 shadow-lg/12 ring-1 ring-inset ring-primary/45"
                 : null,
