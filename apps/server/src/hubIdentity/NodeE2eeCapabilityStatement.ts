@@ -121,6 +121,15 @@ export interface NodeE2eeAdvertisement {
   readonly issuedAt: number;
   readonly expiresAt: number;
   /**
+   * §7.6 element 6, as advertised on this channel.
+   *
+   * Carried alongside its fingerprint rather than in place of it: §8.3 element 9
+   * is the fingerprint and nothing here changes that, but §13.5 derives the
+   * `WebSAS` over the node identity PUBLIC KEY, and a channel that held only the
+   * fingerprint could not compute the value its own operator is asked to compare.
+   */
+  readonly nodeIdentityPublicKey: Uint8Array;
+  /**
    * §7.6 elements 7–8, as advertised on this channel.
    *
    * Carried rather than re-read as a constant because §8.6 step 2 checks a
@@ -442,6 +451,7 @@ export function makeNodeE2eeCapabilityStatementClient(
       policyGeneration: inputs.generation,
       issuedAt,
       expiresAt,
+      nodeIdentityPublicKey: inputs.identity.identityPublicKey,
       e2eeVersionMin: E2EE_PROTOCOL_VERSION,
       e2eeVersionMax: E2EE_PROTOCOL_VERSION,
       material: {

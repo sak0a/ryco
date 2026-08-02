@@ -2,6 +2,8 @@ import { decode } from "cborg";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
+import { RELAY_CHUNK_HEADER_BYTES, RELAY_CHUNK_MAGIC } from "@ryco/contracts/relay";
+
 import {
   E2EE_AAD_BYTES,
   E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
@@ -9,6 +11,7 @@ import {
   E2EE_CLIENT_HELLO_MAX_BYTES,
   E2EE_CLOSE_RECORDS_RESERVED,
   E2EE_COUNTER_MAX,
+  E2EE_ENVELOPE_HEADER_BYTES,
   E2EE_ENVELOPE_OVERHEAD_BYTES,
   E2EE_ERROR_RECORDS_RESERVED,
   E2EE_HANDSHAKE_REJECT_BYTES,
@@ -24,6 +27,8 @@ import {
 } from "./relayE2eeConstants.ts";
 import {
   E2EE_CLOSE_COMMITMENT_DOMAIN,
+  E2EE_ERROR_CODE_POLICY,
+  E2EE_ERROR_CODE_PROTOCOL_VIOLATION,
   e2eeCloseCommitment,
   encodeE2eeCloseCommitmentPreimage,
   encodeE2eeCloseRecordBody,
@@ -35,9 +40,13 @@ import {
 } from "./relayE2eeClose.ts";
 import {
   E2EE_POST_APPLICATION_RESERVE_RECORDS,
+  E2eeRecordSession,
   deriveE2eeAeadKey,
   deriveE2eeEpochKeys,
   deriveE2eeServerConfirmationKey,
+  type E2eeDirectionState,
+  type E2eeProtectResult,
+  type E2eeSessionSecrets,
 } from "./relayE2eeSession.ts";
 import {
   E2EE_CLIENT_IDENTITY_ALGORITHM,
@@ -82,11 +91,13 @@ import { deriveE2eeSafetyNumber, deriveE2eeWebSas } from "./relayE2eeVerificatio
 import {
   E2EE_DIRECTION_CLIENT_TO_NODE,
   E2EE_DIRECTION_NODE_TO_CLIENT,
+  E2EE_INNER_TYPE_RPC,
   E2EE_NEGOTIATION_TYPE_CLIENT_HELLO,
   E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT,
   E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
   classifyPostStripPayload,
+  decodeE2eeEnvelope,
   decodeE2eeNegotiationRecord,
   e2eeAeadNonce,
   e2eeEnvelopeAad,
@@ -97,12 +108,18 @@ import {
   encodeE2eeEnvelopeHeader,
   encodeE2eeHandshakeReject,
   type E2eeDirection,
+  type E2eeInnerRecordType,
 } from "./relayE2eeWire.ts";
 import {
   RelayMessageAssembler,
   isChunkedPayload,
   prepareRelayMessage,
 } from "./relayMessageChunks.ts";
+import {
+  E2EE_CORPUS_CASE_LIVENESS,
+  E2EE_CORPUS_DELEGATED_LEAF_READS,
+  E2eeCorpusLivenessRecorder,
+} from "./relayE2eeCorpusLiveness.ts";
 
 // The CONSUMING side of the §16.3 corpus. It reads the committed family files
 // and re-derives each case's expectations from that case's own INPUTS, through
@@ -138,9 +155,16 @@ interface FixtureFamily {
   readonly cases: readonly FixtureCase[];
 }
 
+/**
+ * Every family is loaded THROUGH the read-liveness recorder, so that the last
+ * test in this file can say which committed cases this suite actually reads and
+ * which carry leaves nothing touches. See `relayE2eeCorpusLiveness.ts`.
+ */
+const LIVENESS = new E2eeCorpusLivenessRecorder();
+
 function readFamily(name: string): FixtureFamily {
   const text = new TextDecoder().decode(readFileSync(new URL(name, FIXTURE_ROOT)));
-  return JSON.parse(text) as FixtureFamily;
+  return LIVENESS.watch(name, JSON.parse(text) as FixtureFamily);
 }
 
 /** §16.2: byte strings are `{"$bytes": "<lowercase hex>"}` and nothing else. */
@@ -278,6 +302,85 @@ interface CorpusManifest {
     readonly doesNotProve: string;
     readonly reviewObligation: string;
     readonly whyNotAutomated: string;
+    /** The obligations the corpus carries and nothing asserts. */
+    readonly unassertedObligations: {
+      readonly count: number;
+      readonly note: string;
+      readonly ids: readonly string[];
+      readonly ownedBy: readonly string[];
+    };
+  };
+  /**
+   * The measured read-liveness of the corpus, per family. See the liveness
+   * describe at the bottom of this file, and `relayE2eeCorpusLiveness.ts`.
+   */
+  readonly livenessCensus: {
+    readonly section: string;
+    readonly status: string;
+    readonly measuredOn: string;
+    readonly unit: string;
+    readonly method: string;
+    readonly whatLiveMeans: string;
+    readonly perCaseClaims: string;
+    /**
+     * What the per-case rule actually enforces, stated as the floor it is rather
+     * than as the coverage claim a reader would otherwise take it for.
+     */
+    readonly perCaseFloor: string;
+    /**
+     * Whether an assertion-liveness figure exists for THIS corpus. It does not;
+     * this block says so and names the cost of producing one.
+     */
+    readonly assertionLiveness: {
+      readonly currentCorpus: string;
+      readonly published: string;
+      readonly staleFigure: string;
+      readonly refreshCost: string;
+      readonly ownedBy: string;
+    };
+    readonly independentMutationSweep: {
+      readonly method: string;
+      readonly measuredAgainst: string;
+      readonly liveLeaves: number;
+      readonly inertLeaves: number;
+      readonly totalLeaves: number;
+      readonly casesWithNoLiveLeaf: number;
+      readonly note: string;
+    };
+    readonly totals: {
+      readonly cases: number;
+      readonly expectedLeaves: number;
+      readonly liveLeaves: number;
+      readonly inertLeaves: number;
+      readonly livePercent: number;
+      readonly casesWithNoLiveLeaf: number;
+    };
+    /**
+     * THE SHAPE, not one number. `casesWithNoLiveLeaf` alone invites the reading
+     * that every other case asserts something substantial; this is the histogram
+     * that shows how many cases sit one or two leaves above the floor.
+     */
+    readonly casesByLiveLeafCount: {
+      readonly note: string;
+      readonly buckets: readonly {
+        readonly liveLeaves: string;
+        readonly cases: number;
+      }[];
+      readonly atMostTwoLiveLeaves: number;
+      readonly atMostFiveLiveLeaves: number;
+    };
+    readonly families: readonly {
+      readonly family: number;
+      readonly file: string;
+      readonly cases: number;
+      readonly expectedLeaves: number;
+      readonly liveLeaves: number;
+      readonly inertLeaves: number;
+      readonly livePercent: number;
+      readonly casesWithNoLiveLeaf: number;
+      readonly residual: string;
+      readonly residualOwner: string;
+    }[];
   };
 }
 
@@ -301,6 +404,22 @@ function position(value: unknown): E2eeSequencePosition {
   return { epoch: BigInt(pair.epoch), counter: BigInt(pair.counter) };
 }
 
+/** One direction's §9.2 state in the shape the corpus writes it. */
+function directionState(state: E2eeDirectionState): JsonRecord {
+  const value = (sequence: bigint | undefined): number | string | null => {
+    if (sequence === undefined) return null;
+    const asNumber = Number(sequence);
+    return Number.isSafeInteger(asNumber) ? asNumber : sequence.toString(10);
+  };
+  return {
+    epoch: value(state.epoch),
+    counter: value(state.counter),
+    epochRecords: state.epochRecords,
+    epochBytes: state.epochBytes,
+    exhausted: state.exhausted,
+  };
+}
+
 function caseByName(family: FixtureFamily, name: string): FixtureCase {
   const found = family.cases.find((entry) => entry.name === name);
   if (found === undefined) throw new Error(`Fixture case ${name} is missing from the corpus.`);
@@ -311,6 +430,40 @@ function caseByName(family: FixtureFamily, name: string): FixtureCase {
 function casesMatching(family: FixtureFamily, pattern: RegExp): readonly FixtureCase[] {
   const found = family.cases.filter((entry) => pattern.test(entry.name));
   expect(found.length, String(pattern)).toBeGreaterThan(0);
+  return found;
+}
+
+/**
+ * The cases of `family` that carry `field` under `expected`, PINNED TO AN EXACT
+ * COUNT.
+ *
+ * This exists because of a defect that ran through this file: an assertion
+ * written as `if (entry.expected.someField !== undefined) { expect(…) }`, or one
+ * that read the field with a `??` default, DELETES ITSELF the moment the
+ * generator stops emitting the field. Nothing fails; the loop simply stops
+ * finding anything to check, and the suite goes on reporting green over a
+ * corpus that no longer carries the value. Thirty-five assertions were written
+ * that way.
+ *
+ * A field that only SOME cases carry is legitimate — a row that states no
+ * `errorCode` is a row that emits no error record. What is not legitimate is
+ * leaving how many carry it unstated. Pinning the count makes both directions
+ * fail: the field disappearing from a case, and a case quietly growing it.
+ *
+ * Presence is tested with `Object.hasOwn`, which does not READ the value, so a
+ * field named here but never asserted still reads as inert in the liveness
+ * census rather than being marked live by its own bookkeeping.
+ */
+function carrying(
+  cases: readonly FixtureCase[],
+  field: string,
+  count: number,
+): readonly FixtureCase[] {
+  const found = cases.filter((entry) => Object.hasOwn(entry.expected, field));
+  expect(
+    found.length,
+    `${String(found.length)} of ${String(cases.length)} cases carry expected.${field}, the suite requires exactly ${String(count)} — update this number in the same commit as the case`,
+  ).toBe(count);
   return found;
 }
 
@@ -402,6 +555,9 @@ describe("§16.3 F14 safety number and WebSAS (§13.4, §13.5)", () => {
 });
 
 describe("§16.3 F5 continuity chains (§7.5, §13.3)", () => {
+  /** Exactly the cases whose verdict is nested under `expected.chain`. */
+  const nestedChainVerdicts = new Set(carrying(F05.cases, "chain", 2).map((entry) => entry.name));
+
   it("reproduces every chain verdict from the case's own carried entries", () => {
     for (const entry of F05.cases) {
       const chain = (entry.inputs.chain as readonly JsonRecord[]).map((link) => ({
@@ -416,22 +572,28 @@ describe("§16.3 F5 continuity chains (§7.5, §13.3)", () => {
         identityPublicKey: fixtureBytes(entry.inputs.identityPublicKey),
         pinnedIdentityFingerprint: pinned === undefined ? undefined : fixtureBytes(pinned),
       });
-      const expected = (entry.expected.chain ?? entry.expected) as JsonRecord;
+      // Two cases state the verdict under a `chain` sub-object because they also
+      // state carrier sizes beside it; the rest state it at the top level. WHICH
+      // two is pinned, so the `??` this used to be written as can no longer
+      // silently fall through to the wrong object when a key moves.
+      const expected = (
+        nestedChainVerdicts.has(entry.name) ? entry.expected.chain : entry.expected
+      ) as JsonRecord;
       expect(result.kind, entry.name).toBe(expected.kind);
       if (result.kind === "error") {
         expect(result.failure, entry.name).toBe(expected.failure);
         continue;
       }
       expect(result.certificates.length, entry.name).toBe(expected.certificates);
-      if (expected.pinnedFingerprintUnchanged !== undefined) {
-        expect(result.pinnedFingerprintUnchanged, entry.name).toBe(
-          expected.pinnedFingerprintUnchanged,
-        );
-        // §13.3: reaching the pin THROUGH the chain is the silent pin update.
-        expect(expected.silentPinUpdate, entry.name).toBe(
-          result.pinnedFingerprintUnchanged === false,
-        );
-      }
+      // §13.3: reaching the pin THROUGH the chain is the silent pin update. Only
+      // the two chains presented against a pin state it, and both must.
+      if (!nestedChainVerdicts.has(entry.name)) continue;
+      expect(result.pinnedFingerprintUnchanged, entry.name).toBe(
+        expected.pinnedFingerprintUnchanged,
+      );
+      expect(expected.silentPinUpdate, entry.name).toBe(
+        result.pinnedFingerprintUnchanged === false,
+      );
     }
   });
 
@@ -461,7 +623,14 @@ describe("§16.3 F5 continuity chains (§7.5, §13.3)", () => {
   it("covers every invalid shape §16.3 F5 enumerates", () => {
     const failures = new Set(
       F05.cases
-        .map((entry) => ((entry.expected.chain ?? entry.expected) as JsonRecord).failure)
+        .map(
+          (entry) =>
+            (
+              (nestedChainVerdicts.has(entry.name)
+                ? entry.expected.chain
+                : entry.expected) as JsonRecord
+            ).failure,
+        )
         .filter((failure): failure is string => typeof failure === "string"),
     );
     for (const failure of [
@@ -693,6 +862,12 @@ describe("§16.3 F3 capability statement (§5.2, §7.2.1, §7.6)", () => {
   });
 });
 
+/** §4.5's ceiling for the channel every record case of F1 runs under. */
+const PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL = e2eeChannelSizeBudget({
+  maxQueuedBytes: 384,
+  maxControlFrameBytes: 256,
+}).plaintextCeiling;
+
 describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4.5)", () => {
   it("reproduces the §4.3 receive pipeline for every case that carries one wire payload", () => {
     for (const entry of F01.cases) {
@@ -703,7 +878,6 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
       expect((pipeline.step1ChunkTest as JsonRecord).isChunkedPayload, entry.name).toBe(
         isChunkedPayload(bytes),
       );
-
       const assembler = new RelayMessageAssembler();
       const pushed = assembler.push(bytes);
       expect(pushed.kind, entry.name).toBe((pipeline.step1Assembler as JsonRecord).kind);
@@ -713,28 +887,216 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
       expect(hex(pushed.message), entry.name).toBe(hex(fixtureBytes(step1.postStripPayload)));
       expect(pushed.message.byteLength, entry.name).toBe(step1.postStripBytes);
       expect(assembler.peerSupportsChunking, entry.name).toBe(step1.peerSupportsChunkingLatch);
+      // WHETHER the prelude was there, stated three ways across this family and
+      // checked as one: the payload carries it, step 1 stripped it, and what
+      // came out is shorter by exactly its length. All three were free before —
+      // a case could claim the prelude was stripped from a payload that never
+      // carried one, which is the §4.3 step-1 behaviour the family exists to
+      // pin.
+      const carriedThePrelude =
+        bytes.byteLength >= RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES &&
+        hex(bytes.subarray(0, RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES)) ===
+          hex(RELAY_CHUNK_CAPABILITY_PRELUDE);
+      expect(step1.preludeStripped, entry.name).toBe(carriedThePrelude);
 
       const classified = classifyPostStripPayload(pushed.message);
       const step2 = pipeline.step2Discrimination as JsonRecord;
       expect(classified.kind, entry.name).toBe(step2.class);
       if (classified.kind === "other") expect(classified.reason, entry.name).toBe(step2.reason);
+
+      // The §9.1 header fields, read off the very bytes the pipeline surfaced.
+      const decode = entry.expected.envelopeDecode as JsonRecord | undefined;
+      if (decode === undefined) continue;
+      const envelope = decodeE2eeEnvelope(pushed.message);
+      expect(envelope.kind, entry.name).toBe(decode.kind);
+      if (envelope.kind !== "ok") continue;
+      expect(envelope.value.version, entry.name).toBe(decode.version);
+      expect(envelope.value.suite, entry.name).toBe(decode.suite);
+      expect(Number(envelope.value.epoch), entry.name).toBe(decode.epoch);
+      expect(Number(envelope.value.counter), entry.name).toBe(decode.counter);
+      expect(hex(envelope.value.header), entry.name).toBe(hex(fixtureBytes(decode.header)));
     }
+  });
+
+  it("checks every top-level restatement of a §4.3 step-1 fact against the step itself", () => {
+    // These five fields were each read behind `if (… !== undefined)` inside the
+    // pipeline loop above, so a generator that stopped emitting one deleted its
+    // own assertion in silence. Each is now driven from a PINNED set of
+    // carriers: the field vanishing from a case fails here, and a case growing
+    // it without this number moving fails here too.
+    const payloadOf = (entry: FixtureCase): Uint8Array =>
+      fixtureBytes(entry.inputs.wirePayload ?? entry.inputs.postStripPayload);
+    const surfaced = (entry: FixtureCase): Uint8Array => {
+      const pushed = new RelayMessageAssembler().push(payloadOf(entry));
+      if (pushed.kind !== "done") throw new Error(`${entry.name}: §4.3 step 1 did not complete`);
+      return pushed.message;
+    };
+
+    for (const entry of carrying(F01.cases, "isChunkedPayload", 1)) {
+      expect(entry.expected.isChunkedPayload, entry.name).toBe(isChunkedPayload(payloadOf(entry)));
+    }
+    for (const entry of carrying(F01.cases, "wirePayloadBytes", 4)) {
+      expect(entry.expected.wirePayloadBytes, entry.name).toBe(payloadOf(entry).byteLength);
+    }
+    for (const entry of carrying(F01.cases, "preludePresent", 4)) {
+      const bytes = payloadOf(entry);
+      expect(entry.expected.preludePresent, entry.name).toBe(
+        bytes.byteLength >= RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES &&
+          hex(bytes.subarray(0, RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES)) ===
+            hex(RELAY_CHUNK_CAPABILITY_PRELUDE),
+      );
+    }
+    for (const entry of carrying(F01.cases, "surfacedUnchanged", 1)) {
+      expect(entry.expected.surfacedUnchanged, entry.name).toBe(
+        hex(surfaced(entry)) === hex(payloadOf(entry)),
+      );
+    }
+    for (const entry of carrying(F01.cases, "firstPostStripByte", 1)) {
+      expect(entry.expected.firstPostStripByte, entry.name).toBe(surfaced(entry)[0]);
+    }
+  });
+
+  it("re-protects the two inner-body boundary cases from the family's own secrets", () => {
+    // `send`, `receive`, `envelope` and the overhead were carried and read by
+    // nothing: a case could state a counter it never used, a plaintext length
+    // that contradicted its own body, or envelope bytes that were not the bytes
+    // it carried. They are all outputs of ONE operation, so the operation is run
+    // here — with this family's own §6.5 stand-in secrets — and every field is
+    // checked against what it returned, the envelope included, byte for byte.
+    const session = (): E2eeRecordSession =>
+      new E2eeRecordSession({
+        secrets: {
+          epochSecretC2N: fixtureBytes(F01.testKeyMaterial.testOnlyEpochSecretC2N),
+          epochSecretN2C: fixtureBytes(F01.testKeyMaterial.testOnlyEpochSecretN2C),
+          exporterSecret: fixtureBytes(F01.testKeyMaterial.testOnlyExporterSecret),
+          serverConfirmationKey: deriveE2eeServerConfirmationKey(
+            fixtureBytes(F01.testKeyMaterial.testOnlyExporterSecret),
+          ),
+        },
+        suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        sessionBindingHash: fixtureBytes(F01.testKeyMaterial.sessionBindingHash),
+        sendDirection: F01.testKeyMaterial.sendDirection as E2eeDirection,
+        plaintextCeiling: PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL,
+      });
+
+    const protect = async (
+      entry: FixtureCase,
+    ): Promise<{ result: E2eeProtectResult; envelope: Uint8Array | undefined }> => {
+      let envelope: Uint8Array | undefined;
+      const result = await session().protect({
+        innerType: (entry.inputs.innerType ?? E2EE_INNER_TYPE_RPC) as E2eeInnerRecordType,
+        body: new Uint8Array(entry.inputs.innerBodyBytes as number).fill(
+          (entry.inputs.innerBodyFill as number | undefined) ?? 0,
+        ),
+        admit: () => true,
+        transmit: (bytes) => {
+          envelope = Uint8Array.from(bytes);
+          return { kind: "sent" };
+        },
+      });
+      return { result, envelope };
+    };
+
+    return (async (): Promise<void> => {
+      // A zero-length inner body is a VALID §9.1 record, and the case's `send`
+      // and `receive` blocks are the two halves of that one round trip.
+      const zero = caseByName(F01, "envelope-with-a-zero-length-inner-body");
+      const zeroRun = await protect(zero);
+      const send = zero.expected.send as JsonRecord;
+      expect(zeroRun.result.kind).toBe(send.kind);
+      if (zeroRun.result.kind !== "protected") throw new Error("the zero-length body was refused");
+      expect(Number(zeroRun.result.epoch)).toBe(send.epoch);
+      expect(Number(zeroRun.result.counter)).toBe(send.counter);
+      expect(zeroRun.result.plaintextBytes).toBe(send.plaintextBytes);
+      expect(zeroRun.result.envelopeBytes).toBe(send.envelopeBytes);
+      expect(hex(zeroRun.envelope!)).toBe(hex(fixtureBytes(zero.expected.envelope)));
+      expect(zero.expected.envelopeBytes).toBe(zeroRun.envelope!.byteLength);
+      expect(zero.expected.envelopeOverheadBytes).toBe(E2EE_ENVELOPE_OVERHEAD_BYTES);
+      // …and the peer's side of it, from a session holding the same secrets in
+      // the receiving direction.
+      const peer = new E2eeRecordSession({
+        secrets: {
+          epochSecretC2N: fixtureBytes(F01.testKeyMaterial.testOnlyEpochSecretC2N),
+          epochSecretN2C: fixtureBytes(F01.testKeyMaterial.testOnlyEpochSecretN2C),
+          exporterSecret: fixtureBytes(F01.testKeyMaterial.testOnlyExporterSecret),
+          serverConfirmationKey: deriveE2eeServerConfirmationKey(
+            fixtureBytes(F01.testKeyMaterial.testOnlyExporterSecret),
+          ),
+        },
+        suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        sessionBindingHash: fixtureBytes(F01.testKeyMaterial.sessionBindingHash),
+        sendDirection: E2EE_DIRECTION_NODE_TO_CLIENT,
+        plaintextCeiling: PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL,
+      });
+      const received = peer.unprotect(zeroRun.envelope!);
+      const receive = zero.expected.receive as JsonRecord;
+      expect(received.kind).toBe(receive.kind);
+      if (received.kind !== "authenticated") throw new Error("the round trip did not authenticate");
+      expect(received.innerType).toBe(receive.innerType);
+      expect(received.body.byteLength).toBe(receive.bodyBytes);
+      expect(received.plaintextBytes).toBe(receive.plaintextBytes);
+
+      // The ceiling pair: the last body that fits is sent, and the first that
+      // does not is refused sender-locally with nothing on the wire.
+      const at = caseByName(F01, "inner-body-exactly-at-the-plaintext-ceiling");
+      const atRun = await protect(at);
+      expect(atRun.result.kind).toBe(at.expected.send);
+      expect(hex(atRun.envelope!)).toBe(hex(fixtureBytes(at.expected.envelope)));
+      expect(at.expected.envelopeBytes).toBe(atRun.envelope!.byteLength);
+      expect(at.expected.transmittedRecords).toBe(1);
+
+      const over = caseByName(F01, "inner-body-one-byte-over-the-plaintext-ceiling");
+      const overRun = await protect(over);
+      const refused = over.expected.send as JsonRecord;
+      expect(overRun.result.kind).toBe(refused.kind);
+      if (overRun.result.kind !== "refused") throw new Error("the over-ceiling body was sent");
+      expect(overRun.result.reason).toBe(refused.reason);
+      expect(over.expected.senderLocalError).toBe(overRun.result.reason);
+      expect(over.expected.transmittedRecords).toBe(overRun.envelope === undefined ? 0 : 1);
+    })();
   });
 
   it("reassembles the chunked envelope to the exact envelope bytes", () => {
     const entry = caseByName(F01, "chunked-envelope-reassembles-to-the-envelope");
     const payloads = (entry.inputs.wirePayloads as readonly FixtureBytes[]).map(fixtureBytes);
+    // `chunkCount` and `chunkHeaderBytes` were emitted and read by nothing: the
+    // case could have claimed one chunk beside three payloads, or a header size
+    // the framing does not use, and the reassembly below still passed. Both are
+    // derivable — one from the payloads the case carries, the other from the
+    // framing constant every chunk is built with — so both are derived.
+    expect(entry.expected.chunkCount, "one count per carried wire payload").toBe(payloads.length);
+    expect(entry.expected.chunkHeaderBytes, "§4.5's chunk framing").toBe(RELAY_CHUNK_HEADER_BYTES);
+    expect(entry.expected.everyChunkStartsWithChunkMagic).toBe(
+      payloads.every((payload) => payload[0] === RELAY_CHUNK_MAGIC),
+    );
     expect(entry.expected.everyChunkStartsWithChunkMagic).toBe(true);
     const assembler = new RelayMessageAssembler();
     let message: Uint8Array | undefined;
+    const pushResults: string[] = [];
     for (const payload of payloads) {
       expect(isChunkedPayload(payload)).toBe(true);
+      // Every chunk carries the header, so the body is what the header leaves.
+      expect(payload.byteLength, "header plus body").toBeGreaterThan(
+        entry.expected.chunkHeaderBytes as number,
+      );
       const pushed = assembler.push(payload);
+      pushResults.push(pushed.kind);
       if (pushed.kind === "done") message = pushed.message;
     }
     expect(message).toBeDefined();
     expect(hex(message!)).toBe(hex(fixtureBytes(entry.inputs.envelope)));
     expect(classifyPostStripPayload(message!).kind).toBe("envelope");
+    // The reassembly block, against the assembler that produced it.
+    const reassembly = entry.expected.reassembly as JsonRecord;
+    expect(reassembly.pushResults).toEqual(pushResults);
+    expect(reassembly.peerSupportsChunkingLatch).toBe(assembler.peerSupportsChunking);
+    expect(hex(fixtureBytes(reassembly.reassembled))).toBe(hex(message!));
+    expect((reassembly.step2Discrimination as JsonRecord).class).toBe(
+      classifyPostStripPayload(message!).kind,
+    );
+    expect(entry.expected.reassembledEqualsEnvelope).toBe(
+      hex(message!) === hex(fixtureBytes(entry.inputs.envelope)),
+    );
   });
 
   it("puts the prelude on exactly one side of the headroom boundary", () => {
@@ -913,8 +1275,25 @@ describe("§16.3 F17 key-material validation (§7.1, §8.1, §14.3)", () => {
       expect(decoded[0], String(domain.domain)).toBe(domain.domain);
     }
 
+    // THE MATRIX IS THE ASSERTION TARGET, not a restatement beside one.
+    //
+    // The substitutions were driven through `verifyE2eeSignature` before this,
+    // but against the INPUT domains alone: the 114-leaf `expected.matrix` block
+    // that records the result row by row was read by nothing, so it could have
+    // said a substitution verifies and no test would have moved. Every row and
+    // every cell is now compared against what the verification path returned.
+    const matrix = entry.expected.matrix as readonly JsonRecord[];
+    expect(matrix.map((row) => row.verificationPath)).toEqual(
+      domains.map((domain) => domain.domain),
+    );
+
     let substitutions = 0;
-    for (const verifier of domains) {
+    for (const row of matrix) {
+      const verifier = domains.find((domain) => domain.domain === row.verificationPath);
+      if (verifier === undefined) throw new Error(`no domain for ${String(row.verificationPath)}`);
+      const path = String(row.verificationPath);
+      expect(row.transcriptFamily, path).toBe(verifier.transcriptFamily);
+      expect(row.algorithm, path).toBe(verifier.algorithm);
       // Each verification path runs under its OWN public key, carried with the
       // case: four of the six domains are signed by the same Ed25519 node
       // identity key, so a substitution across them fails on the transcript
@@ -926,14 +1305,26 @@ describe("§16.3 F17 key-material validation (§7.1, §8.1, §14.3)", () => {
           message: fixtureBytes(verifier.message),
           signature,
         });
-      expect(verify(fixtureBytes(verifier.signature)), String(verifier.domain)).toBe(true);
-      for (const source of domains) {
-        if (source.domain === verifier.domain) continue;
+      expect(row.ownSignatureVerifies, path).toBe(verify(fixtureBytes(verifier.signature)));
+      expect(row.ownSignatureVerifies, path).toBe(true);
+
+      const replays = row.substitutions as readonly JsonRecord[];
+      // Every OTHER domain, in order: the row is the full off-diagonal of its
+      // column and not a sample of it.
+      expect(
+        replays.map((replay) => replay.signatureFrom),
+        path,
+      ).toEqual(
+        domains.filter((domain) => domain.domain !== row.verificationPath).map((d) => d.domain),
+      );
+      for (const replay of replays) {
+        const source = domains.find((domain) => domain.domain === replay.signatureFrom);
+        if (source === undefined) throw new Error(`no domain for ${String(replay.signatureFrom)}`);
+        const label = `${String(replay.signatureFrom)} -> ${path}`;
         substitutions += 1;
-        expect(
-          verify(fixtureBytes(source.signature)),
-          `${String(source.domain)} -> ${String(verifier.domain)}`,
-        ).toBe(false);
+        expect(replay.signatureFromFamily, label).toBe(source.transcriptFamily);
+        expect(replay.verifies, label).toBe(verify(fixtureBytes(source.signature)));
+        expect(replay.verifies, label).toBe(false);
       }
     }
     // The matrix is complete in both directions, not a sampled diagonal.
@@ -1136,6 +1527,161 @@ describe("§16.3 F8 record protection (§9.1–§9.3)", () => {
     for (const entry of casesMatching(F08, /^tampered-header-/)) {
       expect(entry.expected.ciphertextDecrypted, entry.name).toBe(false);
     }
+  });
+
+  it("drives every tampered envelope through the real §4.3 receive path", () => {
+    // THE OBLIGATION THAT WAS COMMITTED, CLAIMED, AND EXECUTED BY NOTHING.
+    //
+    // `inputs.tamperedEnvelope` — the whole point of these six cases — had ZERO
+    // references in any consuming suite. The test above reads only the `reason`
+    // string beside it, so the corpus could have carried an envelope that opens
+    // cleanly, or one tampered in a completely different field, and the case
+    // would still have passed by agreeing with itself. The bytes are the case;
+    // running them is the only thing that makes it a vector rather than a label.
+    //
+    // The session comes from F6: these envelopes are records of that IK trace,
+    // and F6 carries its §6.5 outputs, so opening them here is a derivation
+    // ACROSS families rather than a restatement of either.
+    const trace = caseByName(F06, "ik-handshake-complete-trace").expected;
+    const receiver = (): E2eeRecordSession =>
+      new E2eeRecordSession({
+        secrets: {
+          epochSecretC2N: fixtureBytes(trace.epochSecretC2N),
+          epochSecretN2C: fixtureBytes(trace.epochSecretN2C),
+          exporterSecret: fixtureBytes(trace.exporterSecret),
+          serverConfirmationKey: fixtureBytes(trace.serverConfirmationKey),
+        },
+        suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        sessionBindingHash: fixtureBytes(trace.sessionBindingHash),
+        // Each case's envelope was sent client-to-node by a fresh sender, so the
+        // receiver is a fresh node session at (epoch 0, counter 0).
+        sendDirection: E2EE_DIRECTION_NODE_TO_CLIENT,
+        plaintextCeiling: PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL,
+      });
+
+    for (const entry of casesMatching(F08, /^tampered-/)) {
+      const clean = fixtureBytes(entry.inputs.envelope);
+      const tampered = fixtureBytes(entry.inputs.tamperedEnvelope);
+
+      // The untampered envelope opens, so a failure below is attributable to the
+      // tamper and not to a mis-built session or a stale trace.
+      expect(receiver().unprotect(clean).kind, entry.name).toBe("authenticated");
+
+      // The tamper is exactly what the case says it is: one byte, at the
+      // declared index, and nothing else moved.
+      expect(tampered.byteLength, entry.name).toBe(clean.byteLength);
+      const differing = [...clean].flatMap((byte, index) =>
+        byte === tampered[index] ? [] : [index],
+      );
+      expect(differing, entry.name).toEqual([entry.inputs.tamperedByteIndex]);
+
+      // …and the real receive path takes the §11.3 row the case names.
+      const received = receiver().unprotect(tampered);
+      const expected = entry.expected.received as JsonRecord;
+      expect(received.kind, entry.name).toBe(expected.kind);
+      if (received.kind !== "fatal") {
+        throw new Error(`${entry.name}: the tampered envelope authenticated`);
+      }
+      expect(received.reason, entry.name).toBe(expected.reason);
+      // §4.3's ordering as an OBSERVATION rather than a claim: a header field's
+      // own comparison fires before an AEAD is selected, so a header tamper can
+      // only surface as that field's mismatch and never as an authentication
+      // failure. `ciphertextDecrypted` is exactly that distinction.
+      if (entry.name.startsWith("tampered-header-")) {
+        expect(entry.expected.ciphertextDecrypted, entry.name).toBe(false);
+        expect(received.reason === "authentication_failed", entry.name).toBe(false);
+      } else {
+        expect(
+          Object.hasOwn(entry.expected, "ciphertextDecrypted"),
+          `${entry.name}: an AEAD failure decrypts nothing either, and says so by not claiming it`,
+        ).toBe(false);
+        expect(received.reason, entry.name).toBe("authentication_failed");
+      }
+      // Keys exist by definition here — the record was protected — so §11.3
+      // puts every one of these on the post-key side of the disposition split.
+      expect(entry.expected.disposition, entry.name).toBe("FATAL-POST");
+    }
+  });
+
+  it("re-protects both counter-zero-and-one traces from the F6 session's own secrets", () => {
+    // Both cases were entirely inert: `records`, `senderNextSend` and
+    // `receiverExpectedNext` were read by nothing, so the envelopes, their AADs,
+    // their positions and both endpoints' resulting states were free numbers.
+    // They are all outputs of one round trip, so the round trip is run.
+    const trace = caseByName(F06, "ik-handshake-complete-trace").expected;
+    const secrets = (): E2eeSessionSecrets => ({
+      epochSecretC2N: fixtureBytes(trace.epochSecretC2N),
+      epochSecretN2C: fixtureBytes(trace.epochSecretN2C),
+      exporterSecret: fixtureBytes(trace.exporterSecret),
+      serverConfirmationKey: fixtureBytes(trace.serverConfirmationKey),
+    });
+    const session = (sendDirection: E2eeDirection): E2eeRecordSession =>
+      new E2eeRecordSession({
+        secrets: secrets(),
+        suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        sessionBindingHash: fixtureBytes(trace.sessionBindingHash),
+        sendDirection,
+        plaintextCeiling: PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL,
+      });
+
+    return (async (): Promise<void> => {
+      for (const entry of casesMatching(F08, /^envelopes-at-counters-zero-and-one-/)) {
+        const sendDirection = entry.inputs.sendDirection as E2eeDirection;
+        const sender = session(sendDirection);
+        const peer = session(
+          sendDirection === E2EE_DIRECTION_CLIENT_TO_NODE
+            ? E2EE_DIRECTION_NODE_TO_CLIENT
+            : E2EE_DIRECTION_CLIENT_TO_NODE,
+        );
+        for (const record of entry.expected.records as readonly JsonRecord[]) {
+          const label = `${entry.name} ${JSON.stringify(record.position)}`;
+          let envelope: Uint8Array | undefined;
+          const sent = await sender.protect({
+            innerType: E2EE_INNER_TYPE_RPC,
+            body: fixtureBytes(record.innerBody),
+            admit: () => true,
+            transmit: (bytes) => {
+              envelope = Uint8Array.from(bytes);
+              return { kind: "sent" };
+            },
+          });
+          if (sent.kind !== "protected") throw new Error(`${label}: the record was refused`);
+          expect(hex(envelope!), label).toBe(hex(fixtureBytes(record.envelope)));
+          expect(sent.envelopeBytes, label).toBe(record.envelopeBytes);
+          expect({ epoch: Number(sent.epoch), counter: Number(sent.counter) }, label).toEqual(
+            record.position,
+          );
+          expect(
+            hex(
+              e2eeEnvelopeAad({
+                header: envelope!.subarray(0, E2EE_ENVELOPE_HEADER_BYTES),
+                sessionBindingHash: fixtureBytes(trace.sessionBindingHash),
+                direction: sendDirection,
+              }),
+            ),
+            label,
+          ).toBe(hex(fixtureBytes(record.aad)));
+
+          const received = peer.unprotect(envelope!);
+          const expectedReceive = record.received as JsonRecord;
+          expect(received.kind, label).toBe(expectedReceive.kind);
+          if (received.kind !== "authenticated") throw new Error(`${label}: it did not open`);
+          expect(received.innerType, label).toBe(expectedReceive.innerType);
+          expect(received.body.byteLength, label).toBe(expectedReceive.bodyBytes);
+          expect(Number(received.epoch), label).toBe(expectedReceive.epoch);
+          expect(Number(received.counter), label).toBe(expectedReceive.counter);
+          expect(received.plaintextBytes, label).toBe(expectedReceive.plaintextBytes);
+          expect(received.epochCompleted, label).toBe(expectedReceive.epochCompleted);
+        }
+        // Both endpoints' resulting §9.2 state, from the sessions themselves.
+        expect(directionState(sender.sendState), entry.name).toEqual(entry.expected.senderNextSend);
+        expect(directionState(peer.receiveState), entry.name).toEqual(
+          entry.expected.receiverExpectedNext,
+        );
+        sender.erase();
+        peer.erase();
+      }
+    })();
   });
 
   it("isolates the direction label from the direction-keyed schedule", () => {
@@ -1372,8 +1918,12 @@ describe("§16.3 F9 rekey boundaries (§9.4–§9.6)", () => {
 });
 
 describe("§16.3 F11 authenticated close (§10)", () => {
-  const closeRecords = (name: string): readonly JsonRecord[] =>
-    (caseByName(F11, name).expected.records ?? []) as readonly JsonRecord[];
+  /** The four F11 cases that carry a record list, pinned so none can vanish. */
+  const casesWithRecords = new Set(carrying(F11.cases, "records", 4).map((entry) => entry.name));
+  const closeRecords = (name: string): readonly JsonRecord[] => {
+    expect(casesWithRecords.has(name), `${name} must carry expected.records`).toBe(true);
+    return caseByName(F11, name).expected.records as readonly JsonRecord[];
+  };
 
   it("rebuilds every close-machine body and commitment from its own declared fields", () => {
     for (const name of [
@@ -1836,45 +2386,212 @@ describe("§16.3 F2 carrier compatibility (§5.5, §5.6)", () => {
 
 describe("§16.3 F10 mode machine (§4.4, §11.2)", () => {
   it("keeps the three legacy-lock rows disjoint by the §11.2 partition", () => {
+    const injections = casesMatching(F10, /^legacy-lock-injection-/);
     const rows = new Map(
-      F10.cases.map((entry) => [entry.name, entry.expected.fatal as string] as const),
+      injections.map((entry) => [entry.name, entry.expected.fatal as string] as const),
     );
     expect(rows.get("legacy-lock-injection-envelope-is-p5")).toBe("P5");
     expect(rows.get("legacy-lock-injection-client-hello-at-the-node-is-p24")).toBe("P24");
     expect(rows.get("legacy-lock-injection-server-accept-at-the-client-is-p24")).toBe("P24");
     expect(rows.get("legacy-lock-injection-unknown-first-byte-is-p6")).toBe("P6");
     expect(rows.get("legacy-lock-injection-absent-first-byte-is-p6")).toBe("P6");
-    for (const entry of F10.cases) {
+    const preKeyRows = [...injections, ...casesMatching(F10, /-is-p3$/)];
+    for (const entry of preKeyRows) {
       expect(entry.expected.disposition, entry.name).toBe("FATAL-PRE");
-      if (entry.expected.sessionKeysExist !== undefined) {
-        expect(entry.expected.sessionKeysExist, entry.name).toBe(false);
-      }
-      const payload = entry.inputs.postStripPayload;
-      if (payload === undefined) continue;
-      const bytes = fixtureBytes(payload);
-      const step2 = entry.expected.step2Discrimination as JsonRecord | undefined;
-      if (step2 !== undefined) {
-        expect(classifyPostStripPayload(bytes).kind, entry.name).toBe(step2.class);
-      }
+    }
+    // Five of the seven restate the same fact as `sessionKeysExist`. WHICH five
+    // is pinned, so the restatement cannot be dropped without failing here.
+    for (const entry of carrying(preKeyRows, "sessionKeysExist", 5)) {
+      expect(entry.expected.sessionKeysExist, entry.name).toBe(false);
     }
   });
 
+  it("re-derives the §4.3 step 2 class of every payload the family carries", () => {
+    // The one part of this family a shared module decides, and it decides it for
+    // the transition rows too: the row a §4.4 machine takes is selected by the
+    // input CLASS, so a fixture whose stated class the classifier does not
+    // produce would send the node-side consumer down a different row than the
+    // one it is asserting.
+    let checked = 0;
+    for (const entry of F10.cases) {
+      const payload = entry.inputs.postStripPayload;
+      if (payload === undefined) continue;
+      const step2 = entry.expected.step2Discrimination as JsonRecord | undefined;
+      if (step2 === undefined) continue;
+      expect(classifyPostStripPayload(fixtureBytes(payload)).kind, entry.name).toBe(step2.class);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThanOrEqual(20);
+  });
+
+  it("gives every node row its §4.4 action, next state, and §11 row", () => {
+    // The STRUCTURE of the transition rows, which is all this side can check:
+    // whether the runtime actually takes them is the subject of
+    // `apps/server/src/hubConnector/relayE2eeNodeCorpus.test.ts`, which cannot
+    // be reached from this package. What is asserted here is that no row is
+    // carried without the four fields §16.3 F10 requires of one, and that every
+    // pre-key row's §11.5 observable is the SAME observable — §11.2's anti-oracle
+    // rule, stated over the corpus rather than over an implementation.
+    const rows = casesMatching(F10, /^row-n\d/);
+    const numbered = new Set<string>();
+    const observables = new Set<string>();
+    for (const entry of rows) {
+      const row = entry.inputs.row as string;
+      expect(row, entry.name).toMatch(/^N(?:[1-9]|1[0-7])$/);
+      numbered.add(row);
+      expect(entry.expected.row, entry.name).toBe(row);
+      expect(typeof entry.expected.action, entry.name).toBe("string");
+      expect(typeof entry.expected.nextState, entry.name).toBe("string");
+      if (entry.expected.disposition === "FATAL-PRE") {
+        expect(hex(fixtureBytes((entry.expected.observable as JsonRecord).handshakeReject))).toBe(
+          hex(encodeE2eeHandshakeReject()),
+        );
+        observables.add(JSON.stringify(entry.expected.observable));
+      }
+    }
+    // One case per §4.4 node row, N1 through N17.
+    for (let row = 1; row <= 17; row += 1) {
+      expect(numbered.has(`N${String(row)}`), `row N${String(row)}`).toBe(true);
+    }
+    expect(observables.size, "§11.2: one observable for every pre-key cause").toBe(1);
+  });
+
+  it("arms the §8.9 deadline under every policy and row N8 under only one", () => {
+    // The distinction §16.3 F10 singles out, and the reason the two halves are
+    // one timer: row N8 is guarded on effective `requireE2EE`, because a
+    // default-policy node holding an idle channel slot costs nothing; §8.9's
+    // half is armed unconditionally, because between row N3 and the finish the
+    // node is holding live session keys.
+    const n8 = caseByName(F10, "row-n8-the-handshake-deadline-under-effective-require-e2ee");
+    expect((n8.inputs.guards as JsonRecord).effectiveRequireE2EE).toBe(true);
+    expect(n8.expected.fatal).toBe("P7");
+
+    const unarmed = caseByName(
+      F10,
+      "node-deadline-n8-does-not-fire-under-the-compatibility-default",
+    );
+    expect((unarmed.inputs.guards as JsonRecord).effectiveRequireE2EE).toBe(false);
+    expect(unarmed.expected.rowN8Fires).toBe(false);
+    expect(unarmed.expected.nextState).toBe("negotiating");
+
+    const afterN3 = casesMatching(F10, /^node-deadline-after-row-n3-/);
+    expect(afterN3).toHaveLength(2);
+    expect(
+      new Set(afterN3.map((entry) => (entry.inputs.guards as JsonRecord).effectiveRequireE2EE)),
+    ).toEqual(new Set([true, false]));
+    for (const entry of afterN3) {
+      expect(entry.expected.row, entry.name).toBe("Q8");
+      expect(entry.expected.disposition, entry.name).toBe("FATAL-POST");
+      expect(entry.expected.armedUnderThisPolicy, entry.name).toBe(true);
+    }
+  });
+
+  it("states the §12.5 accounting rows N15–N17 turn on", () => {
+    // §16.3 F10 names these fields specifically: the asserted `maxDataChunkBytes`,
+    // the §7.6.1 self-check result, the effective `requireE2EE` value, and which
+    // §12.5 class recorded an occurrence — with N17 asserting that NO peer-legacy
+    // occurrence is added on top of N16's.
+    for (const entry of casesMatching(F10, /^row-n1[56]-/)) {
+      const guards = entry.inputs.guards as JsonRecord;
+      expect(typeof guards.assertedMaxDataChunkBytes, entry.name).toBe("number");
+      expect(typeof guards.effectiveRequireE2EE, entry.name).toBe("boolean");
+      expect(guards.selfCheck, entry.name).toBeDefined();
+      expect(entry.expected.carrierEmitted, entry.name).toBe(false);
+    }
+    const n16 = casesMatching(F10, /^row-n16-/);
+    for (const entry of n16) {
+      expect((entry.expected.fallbackOccurrence as JsonRecord).class, entry.name).toBe(
+        "advertisement-unavailable",
+      );
+      expect((entry.expected.fallbackOccurrence as JsonRecord).count, entry.name).toBe(1);
+      expect(entry.expected.peerLegacyOccurrence, entry.name).toBe(0);
+    }
+    const n17 = caseByName(F10, "row-n17-legacy-json-on-a-channel-that-never-advertised");
+    expect(n17.expected.peerLegacyOccurrenceAddedOnTopOfN16).toBe(0);
+    expect(n17.expected.fallbackOccurrencesForThisChannel).toEqual({
+      "peer-legacy": 0,
+      "advertisement-unavailable": 1,
+    });
+  });
+
   it("proves the P24 records are neither over-bound nor misdirected", () => {
-    for (const entry of casesMatching(F10, /-is-p24$/)) {
-      const record = fixtureBytes(entry.inputs.postStripPayload);
+    // Every field of the §11.2 partition test, derived from the record itself.
+    // Seven of them per case — `decodes`, `recordBytes`, `boundMaxBytes`,
+    // `boundIsExact`, `withinItsBound`, `overBound`, `misdirected` — were
+    // carried and read by nothing, which is how a case can state a bound the
+    // registry does not give and a verdict the bound does not support.
+    const partition = casesMatching(F10, /-is-p(?:24|3)$/);
+    const derived = new Map<string, Record<string, unknown>>();
+    for (const entry of partition) {
       const recordType = entry.inputs.recordType as
         | typeof E2EE_NEGOTIATION_TYPE_CLIENT_HELLO
         | typeof E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT
         | typeof E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT;
-      const decoded = decodeE2eeNegotiationRecord(record);
-      expect(decoded.kind, entry.name).toBe("ok");
       const bound = e2eeNegotiationRecordBound(recordType);
-      expect(record.byteLength <= bound.maxBytes, entry.name).toBe(true);
-      expect(e2eeNegotiationRecordDirection(recordType), entry.name).toBe(
-        entry.expected.registryDirection,
+      const direction = e2eeNegotiationRecordDirection(recordType);
+      const receivedBy = entry.inputs.receivingEndpoint as string | undefined;
+      const payload = entry.inputs.postStripPayload;
+      const recordBytes =
+        payload === undefined
+          ? (entry.inputs.recordBytes as number)
+          : fixtureBytes(payload).byteLength;
+      const withinItsBound = recordBytes <= bound.maxBytes;
+      // §11.2's partition, as the row each case takes: over-bound OR misdirected
+      // is `P3`, and a record that is neither is `P24`. `misdirected` is derived
+      // here rather than read, so a row that omits it cannot change the verdict.
+      const addressedHere =
+        receivedBy === undefined || direction === (receivedBy === "node" ? "c2n" : "n2c");
+      expect(entry.expected.fatal, entry.name).toBe(
+        !withinItsBound || !addressedHere ? "P3" : "P24",
       );
-      expect(entry.expected.directedCorrectlyForThisEndpoint, entry.name).toBe(true);
-      expect(entry.expected.notP3, entry.name).toBe(true);
+      derived.set(entry.name, {
+        boundMaxBytes: bound.maxBytes,
+        boundIsExact: bound.exact,
+        registryDirection: direction,
+        directedCorrectlyForThisEndpoint: addressedHere,
+        misdirected: !addressedHere,
+        recordBytes,
+        withinItsBound,
+        overBound: !withinItsBound,
+        notP3: withinItsBound && addressedHere,
+        decodes:
+          payload === undefined
+            ? undefined
+            : decodeE2eeNegotiationRecord(fixtureBytes(payload)).kind,
+      });
+    }
+    // Each restatement of one of those derivations, over the EXACT set of cases
+    // that carries it. Written as `if (… !== undefined)` before, which is an
+    // assertion that deletes itself the moment the generator stops emitting the
+    // field; the counts below are what makes that a failure instead.
+    const restated = (field: string, count: number): void => {
+      for (const entry of carrying(partition, field, count)) {
+        expect(entry.expected[field], `${entry.name}.${field}`).toBe(
+          derived.get(entry.name)![field],
+        );
+      }
+    };
+    restated("boundMaxBytes", 2);
+    restated("boundIsExact", 2);
+    restated("registryDirection", 3);
+    restated("directedCorrectlyForThisEndpoint", 3);
+    restated("misdirected", 3);
+    restated("recordBytes", 2);
+    restated("withinItsBound", 3);
+    restated("overBound", 3);
+    restated("notP3", 2);
+    // …and the decode verdict of the two cases that carry a record to decode.
+    // The third states `decodes: "error"` for a record too large to be built at
+    // all, and is asserted below against its own §11 reason. `?? "ok"` is
+    // exactly the default that would have hidden the field disappearing.
+    for (const entry of carrying(
+      partition.filter((one) => one.inputs.postStripPayload !== undefined),
+      "decodes",
+      2,
+    )) {
+      expect(entry.expected.decodes, `${entry.name}.decodes`).toBe(
+        derived.get(entry.name)!.decodes,
+      );
     }
     // …and the two P3 contrast cases that fix the boundary of that partition.
     const misdirected = caseByName(F10, "misdirected-negotiation-record-is-p3");
@@ -1884,8 +2601,237 @@ describe("§16.3 F10 mode machine (§4.4, §11.2)", () => {
     );
     const overBound = caseByName(F10, "over-bound-negotiation-record-is-p3");
     expect(overBound.inputs.recordBytes).toBe(E2EE_CLIENT_HELLO_MAX_BYTES + 1);
+    expect(overBound.expected.decodes).toBe("error");
     expect(overBound.expected.reason).toBe("too_large");
     expect(overBound.expected.bodyParsed).toBe(false);
+  });
+
+  it("unprotects rows N9 and N10 with the F6 session those rows were traced from", () => {
+    // Rows N9 and N10 carry an `unprotect` block that nothing read: the node
+    // consumer drives them with a record its OWN identity produced, so it cannot
+    // compare these bytes, and the shared consumer had no session to open them
+    // with. Every number in the block was free — an epoch, a counter, a body
+    // length, and on N10 the §4.3 step-3 check that failed.
+    //
+    // The session does exist in the corpus: both payloads are records of the F6
+    // IK trace, and F6 carries that trace's §6.5 outputs. Opening them here is a
+    // derivation across the two families rather than a restatement of either.
+    const trace = caseByName(F06, "ik-handshake-complete-trace").expected;
+    const receiving = (): E2eeRecordSession =>
+      new E2eeRecordSession({
+        secrets: {
+          epochSecretC2N: fixtureBytes(trace.epochSecretC2N),
+          epochSecretN2C: fixtureBytes(trace.epochSecretN2C),
+          exporterSecret: fixtureBytes(trace.exporterSecret),
+          serverConfirmationKey: fixtureBytes(trace.serverConfirmationKey),
+        },
+        suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+        sessionBindingHash: fixtureBytes(trace.sessionBindingHash),
+        // The NODE receives client-to-node records, so it sends the other way.
+        sendDirection: E2EE_DIRECTION_NODE_TO_CLIENT,
+        plaintextCeiling: PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL,
+      });
+
+    const n9 = caseByName(F10, "row-n9-an-authenticated-envelope-is-delivered-to-the-rpc-parser");
+    const authenticated = receiving().unprotect(fixtureBytes(n9.inputs.postStripPayload));
+    const expectedN9 = n9.expected.unprotect as JsonRecord;
+    expect(authenticated.kind).toBe(expectedN9.kind);
+    if (authenticated.kind !== "authenticated") throw new Error("row N9's envelope did not open");
+    expect(authenticated.innerType).toBe(expectedN9.innerType);
+    expect(authenticated.body.byteLength).toBe(expectedN9.bodyBytes);
+    expect(Number(authenticated.epoch)).toBe(expectedN9.epoch);
+    expect(Number(authenticated.counter)).toBe(expectedN9.counter);
+    expect(authenticated.plaintextBytes).toBe(expectedN9.plaintextBytes);
+    expect(authenticated.epochCompleted).toBe(expectedN9.epochCompleted);
+
+    // N10 is the same record with one ciphertext bit flipped, so it must fail
+    // the §4.3 step-3 check the tampering belongs to — the same reason F8's
+    // tampered-ciphertext case names, because it is the same tampering.
+    const n10 = caseByName(F10, "row-n10-an-envelope-failing-a-step-3-check");
+    const rejected = receiving().unprotect(fixtureBytes(n10.inputs.postStripPayload));
+    const expectedN10 = n10.expected.unprotect as JsonRecord;
+    expect(rejected.kind).toBe(expectedN10.kind);
+    if (rejected.kind !== "fatal") throw new Error("row N10's corrupted envelope opened");
+    expect(rejected.reason).toBe(expectedN10.reason);
+    expect(expectedN10.reason).toBe(
+      (caseByName(F08, "tampered-ciphertext-byte").expected.received as JsonRecord).reason,
+    );
+  });
+
+  it("derives the misdirection verdict of every row that states one", () => {
+    // Row N5 states `misdirected` beside guards that already decide it: the
+    // registry direction of the record's own type, against the endpoint that
+    // received it. The field was free, so the row could have claimed a correctly
+    // directed record was misdirected and still taken `P3`.
+    // Every row that states one, over a PINNED set: the guard was
+    // `if (… === undefined) continue`, which stops finding rows the moment the
+    // generator stops emitting the field and reports the same green either way.
+    for (const entry of carrying(F10.cases, "misdirected", 4)) {
+      const guards = entry.inputs.guards as JsonRecord | undefined;
+      const recordType = (entry.inputs.recordType ??
+        (entry.inputs.input as JsonRecord | undefined)?.type) as
+        | typeof E2EE_NEGOTIATION_TYPE_CLIENT_HELLO
+        | typeof E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT
+        | typeof E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT;
+      expect(recordType, `${entry.name}: a misdirection verdict needs a record type`).toBeDefined();
+      const direction = e2eeNegotiationRecordDirection(recordType);
+      const receivedBy = (entry.inputs.receivingEndpoint ?? entry.inputs.endpoint) as string;
+      const addressedHere = direction === (receivedBy === "node" ? "c2n" : "n2c");
+      expect(entry.expected.misdirected, entry.name).toBe(!addressedHere);
+      if (guards === undefined) continue;
+      expect(guards.registryDirection, entry.name).toBe(direction);
+      expect(guards.directedCorrectlyForThisEndpoint, entry.name).toBe(addressedHere);
+    }
+  });
+
+  it("derives every §4.3 step 2 reason, and the fields that restate it", () => {
+    // `matchesExpectedReason` and `neverSilentlyDropped` are two claims about a
+    // case that carried them and nothing that read them: the first says the
+    // classifier produced the reason the case names, the second says the payload
+    // ended in a §11 row rather than being dropped. Both are decidable from the
+    // case itself, so neither is a free boolean any more.
+    let checked = 0;
+    const reasonOf = new Map<string, boolean>();
+    for (const entry of F10.cases) {
+      const payload = entry.inputs.postStripPayload;
+      const step2 = entry.expected.step2Discrimination as JsonRecord | undefined;
+      if (payload === undefined || step2 === undefined) continue;
+      const classified = classifyPostStripPayload(fixtureBytes(payload));
+      if (step2.reason !== undefined) {
+        expect(classified.kind === "other" ? classified.reason : undefined, entry.name).toBe(
+          step2.reason,
+        );
+      }
+      reasonOf.set(entry.name, classified.kind === "other" && classified.reason === step2.reason);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThanOrEqual(20);
+    // The two restatements, over the exact sets that carry them.
+    for (const entry of carrying(F10.cases, "matchesExpectedReason", 2)) {
+      expect(entry.expected.matchesExpectedReason, entry.name).toBe(reasonOf.get(entry.name));
+    }
+    for (const entry of carrying(F10.cases, "neverSilentlyDropped", 4)) {
+      // Not dropped means: it named a §11 row and closed the channel.
+      expect(entry.expected.neverSilentlyDropped, entry.name).toBe(
+        Object.hasOwn(entry.expected, "fatal") && entry.expected.fatal !== null,
+      );
+    }
+  });
+
+  it("derives each row's post-key facts from the §11 table its row belongs to", () => {
+    // `sessionKeysExist`, `errorCode` and the §12.5 occurrence block were free.
+    // They are not: §11.2 is the pre-key table and §11.3 the post-key one, so a
+    // row's letter decides whether keys exist and whether the row can carry a
+    // protected `E2EEError` at all — and §11.3's code for every one of these
+    // rows is `protocol_violation`, since `policy` is §12.6's and belongs to a
+    // withdrawal rather than to a mode-machine violation.
+    // A row's §11 letter, from whichever field the row states it in. `fatal` and
+    // `row` are the two spellings the corpus uses; reading them as
+    // `fatal ?? row` silently accepted a case that had lost BOTH, so which
+    // spelling each case uses is pinned instead.
+    const carriesFatal = new Set(carrying(F10.cases, "fatal", 32).map((entry) => entry.name));
+    const carriesRow = new Set(carrying(F10.cases, "row", 27).map((entry) => entry.name));
+    const letterOf = (entry: FixtureCase): string | null => {
+      expect(
+        carriesFatal.has(entry.name) || carriesRow.has(entry.name),
+        `${entry.name}: states its §11 row in neither \`fatal\` nor \`row\``,
+      ).toBe(true);
+      return (carriesFatal.has(entry.name) ? entry.expected.fatal : entry.expected.row) as
+        | string
+        | null;
+    };
+    const postKeyOf = (entry: FixtureCase): boolean => {
+      const row = letterOf(entry);
+      return typeof row === "string" && row.startsWith("Q");
+    };
+
+    for (const entry of carrying(F10.cases, "sessionKeysExist", 8)) {
+      expect(entry.expected.sessionKeysExist, entry.name).toBe(postKeyOf(entry));
+    }
+    for (const entry of carrying(F10.cases, "disposition", 26)) {
+      const row = letterOf(entry);
+      if (typeof row !== "string") continue;
+      expect(entry.expected.disposition, entry.name).toBe(
+        postKeyOf(entry) ? "FATAL-POST" : "FATAL-PRE",
+      );
+    }
+    for (const entry of carrying(F10.cases, "errorCode", 6)) {
+      expect(postKeyOf(entry), `${entry.name}: only a §11.3 row protects an error record`).toBe(
+        true,
+      );
+      expect(entry.expected.errorCode, entry.name).toBe(E2EE_ERROR_CODE_PROTOCOL_VIOLATION);
+      expect(entry.expected.errorRecordsOnTheWire, entry.name).toBe(1);
+    }
+    // The four §5.5 rows whose whole subject is that NO capability carrier went
+    // out. `carrierEmitted ?? false` read the same green whether the field was
+    // there or not, which is the one thing these rows exist to state.
+    for (const entry of carrying(F10.cases, "carrierEmitted", 4)) {
+      expect(entry.expected.carrierEmitted, entry.name).toBe(false);
+      expect(entry.name, "only the §5.5 advertisement rows state it").toMatch(/^row-n1[56]-/);
+    }
+
+    for (const entry of F10.cases) {
+      // §12.5's two classes: the occurrence block is either absent, or `null`
+      // meaning this row records nothing, or an object naming exactly one class
+      // with the reason the row's own guard states.
+      if (!("fallbackOccurrence" in entry.expected)) continue;
+      const occurrence = entry.expected.fallbackOccurrence as JsonRecord | null;
+      if (occurrence === null) continue;
+      expect(Object.keys(occurrence).toSorted(), entry.name).toEqual(
+        occurrence.reason === undefined ? ["class", "count"] : ["class", "count", "reason"],
+      );
+      expect(occurrence.count, entry.name).toBe(1);
+      const guards = entry.inputs.guards as JsonRecord | undefined;
+      if (occurrence.class === "advertisement-unavailable") {
+        expect(occurrence.reason, entry.name).toBe(guards?.advertisementUnavailableReason);
+      }
+    }
+  });
+
+  it("pins row N3's accept to the same record the P24 case is built from", () => {
+    // Row N3's `serverAccept` is key-dependent, so the node-side consumer drives
+    // the row with an accept its own identity produced and cannot compare these
+    // bytes. That left the accept, its length and its registry direction carried
+    // and unread here. They are checkable without the keys: the record decodes,
+    // it is the SERVER_ACCEPT type whose registry direction is `n2c`, its length
+    // is the length stated — and it is byte-identical to the record the P24
+    // legacy-lock case injects, which is what makes the two cases one record
+    // seen in two states rather than two records that happen to agree.
+    const n3 = caseByName(F10, "row-n3-client-hello-runs-the-responder-and-enters-e2ee");
+    const accept = fixtureBytes(n3.expected.serverAccept);
+    expect(n3.expected.serverAcceptBytes).toBe(accept.byteLength);
+    const decoded = decodeE2eeNegotiationRecord(accept);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") throw new Error("row N3's accept does not decode");
+    expect(decoded.value.recordType).toBe(E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT);
+    expect(n3.expected.registryDirection).toBe(
+      e2eeNegotiationRecordDirection(E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT),
+    );
+    expect(accept.byteLength).toBeLessThanOrEqual(
+      e2eeNegotiationRecordBound(E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT).maxBytes,
+    );
+    const p24 = caseByName(F10, "legacy-lock-injection-server-accept-at-the-client-is-p24");
+    expect(hex(accept), "the same accept, injected after a legacy lock").toBe(
+      hex(fixtureBytes(p24.inputs.postStripPayload)),
+    );
+  });
+
+  it("derives the operator diagnostic of every suppressed advertisement", () => {
+    // §12.5 makes the reason label part of the occurrence AND of the operator's
+    // diagnostic, and the two must be the same label: a node that recorded
+    // `undersized-connection` and told the operator `statement-unavailable`
+    // would misreport which condition fired. Both were free strings.
+    let checked = 0;
+    for (const entry of F10.cases) {
+      const diagnostic = entry.expected.operatorDiagnostic as JsonRecord | undefined;
+      if (diagnostic === undefined) continue;
+      const guards = entry.inputs.guards as JsonRecord;
+      expect(diagnostic.code, entry.name).toBe("e2ee_advertisement_unavailable");
+      expect(diagnostic.reason, entry.name).toBe(guards.advertisementUnavailableReason);
+      expect(entry.expected.carrierEmitted, entry.name).toBe(false);
+      checked += 1;
+    }
+    expect(checked, "rows N15 and N16, in both §5.5 reasons").toBe(4);
   });
 });
 
@@ -1902,10 +2848,436 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
     expect(abort.errorCodeEmitted).toBeNull();
     expect(abort.authorizationWithdrawalRow).toBe("P12");
     expect(abort.rowsAreDistinct).toBe(true);
-    // The two aborts fire on different grounds and share one observable.
-    expect(hex(fixtureBytes((abort.observable as JsonRecord).handshakeReject))).toBe(
-      hex(encodeE2eeHandshakeReject()),
+    // `kind` and `disposition` follow from the row and are not free: `P25` is a
+    // §11.2 row, so it is fatal, and every §11.2 row is FATAL-PRE by definition
+    // of the table it is in. Stating them without checking them left two fields
+    // that could name a non-fatal outcome on a row that closes the channel.
+    expect(abort.kind).toBe("fatal");
+    expect(abort.disposition).toBe("FATAL-PRE");
+    // The two aborts fire on different grounds and share one observable — which
+    // is the anti-oracle claim `bothTakeTheIdenticalObservable` makes, so the
+    // claim is checked against the OTHER row's own committed observable rather
+    // than believed. F16 carries `P12` for the §13.6 withdrawal; if the two ever
+    // diverged, a peer could tell a policy withdrawal from an authorization one.
+    const observable = abort.observable as JsonRecord;
+    expect(hex(fixtureBytes(observable.handshakeReject))).toBe(hex(encodeE2eeHandshakeReject()));
+    expect(observable.handshakeRejectRecords).toBe(1);
+    expect(observable.handshakeRejectBytes).toBe(E2EE_HANDSHAKE_REJECT_BYTES);
+    expect(observable.applicationPayloadBytes).toBe(0);
+    expect(observable.closeReason).toBe("channel_rejected");
+    const p12 = caseByName(F16, "withdrawal-between-step-6-and-row-n3").expected;
+    expect(p12.row, "the row F18 names as the other in-flight abort").toBe(
+      abort.authorizationWithdrawalRow,
     );
+    expect(abort.bothTakeTheIdenticalObservable).toBe(
+      JSON.stringify(p12.observable) === JSON.stringify(observable),
+    );
+    expect(abort.bothTakeTheIdenticalObservable, "§11.2: one observable per cause").toBe(true);
+  });
+
+  it("derives the family-wide §12.5 non-interaction claim from the family", () => {
+    // `recordedByAnyWithdrawal` is the ONE case that names §12.6's closing
+    // prohibition, and it is a claim about every OTHER case: "no withdrawal in
+    // this family recorded a fallback occurrence of either class". So it is the
+    // sum of what those cases carry, and it is derived from them here rather
+    // than restated — a hand-written pair of zeros beside a family that had
+    // grown a nonzero occurrence would read as the invariant holding.
+    const named = caseByName(F18, "no-withdrawal-records-a-fallback-occurrence-of-either-class");
+    const total = { "peer-legacy": 0, "advertisement-unavailable": 0 };
+    for (const entry of F18.cases) {
+      const recorded = entry.expected.noFallbackOccurrenceRecorded as Record<string, number>;
+      total["peer-legacy"] += recorded["peer-legacy"]!;
+      total["advertisement-unavailable"] += recorded["advertisement-unavailable"]!;
+    }
+    expect(named.expected.recordedByAnyWithdrawal).toEqual(total);
+    expect(named.expected.sweepIsAnOperatorActionNotALegacyAcceptance).toBe(true);
+  });
+
+  it("derives every transition case's element 14 from its own policy", () => {
+    // The one value in a §12.6 transition case that a shared module decides. It
+    // is what the per-channel NX bullet reads, so a case whose stated admitted
+    // pattern set disagreed with §12.4's derivation would be asserting a sweep
+    // over a policy the node cannot hold.
+    let checked = 0;
+    for (const entry of F18.cases) {
+      for (const key of ["policyBefore", "policyAfter"] as const) {
+        const policy = (entry.inputs[key] ?? entry.expected[key]) as JsonRecord | undefined;
+        if (policy === undefined) continue;
+        expect(policy.effectiveAdmittedPatterns, `${entry.name}.${key}`).toEqual([
+          ...e2eeEffectiveAdmittedPatterns(policy.requireApprovedClientE2EE as boolean),
+        ]);
+        checked += 1;
+      }
+    }
+    expect(checked).toBeGreaterThanOrEqual(10);
+  });
+
+  it("gives the suite clause both tiers against one command", () => {
+    // §12.6's suite bullet is unqualified by tier ON PURPOSE, and a generator
+    // free to pick one would leave the rule pinned by prose alone. The IK run
+    // additionally carries an unchanged `approved` record, because "the record
+    // is still approved" is the plausible wrong exemption.
+    const runs = casesMatching(F18, /^a-suite-leaving-the-registry-closes-the-/);
+    expect(runs).toHaveLength(2);
+    for (const entry of runs) {
+      const withdrawn = (entry.expected.perChannel as readonly JsonRecord[])[0]!;
+      expect(withdrawn.class, entry.name).toBe("suite_withdrawn");
+      expect(withdrawn.row, entry.name).toBe("Q12");
+      expect(entry.expected.counts, entry.name).toEqual({
+        legacy: 0,
+        nxE2ee: 0,
+        suiteWithdrawn: 1,
+        abortedHandshakes: 0,
+      });
+    }
+    expect(
+      caseByName(F18, "a-suite-leaving-the-registry-closes-the-ik-channel-established-on-it")
+        .expected.closedDespiteAnUnchangedApprovedRecord,
+    ).toBe(true);
+  });
+
+  it("states what a negotiating channel does AFTER the command, not only that it survived", () => {
+    // §12.6 leaves a `negotiating` channel out of both enumerations, and the
+    // second half of that bullet is what makes the first half safe: the channel
+    // must then fail closed on its next input under the COMMITTED policy. Three
+    // fields carry that half — `sweptByTheWithdrawal`, `nextInputRow`, and
+    // `failsClosed` — and until this test they were carried and read by nobody:
+    // the generic per-case check reads `perChannel` and the counts, both of
+    // which stay correct however those three are set. The node-side consuming
+    // test drives them against the real runtime; this side pins the pair the
+    // fixture states, so a row swapped between the two cases fails here too.
+    const cases = casesMatching(
+      F18,
+      /^a-negotiating-channel-is-not-swept-and-then-fails-closed-on-/,
+    );
+    expect(cases).toHaveLength(2);
+    const rows = new Set<string>();
+    for (const entry of cases) {
+      expect(entry.expected.sweptByTheWithdrawal, entry.name).toBe(false);
+      expect(entry.expected.isWithdrawal, entry.name).toBe(true);
+      for (const channel of entry.expected.perChannel as readonly JsonRecord[]) {
+        expect(channel.withdrawn, entry.name).toBe(false);
+        expect(channel.disposition, entry.name).toBe("untouched");
+      }
+      expect(entry.expected.failsClosed, entry.name).toBe(true);
+      expect(entry.expected.nextInputDisposition, entry.name).toBe("FATAL-PRE");
+      // The row is decided by the input's §4.3 class, so it is derivable here
+      // rather than a number the generator was free to choose: plaintext under a
+      // newly effective `requireE2EE` is row N1 (`P1`); a hello whose tier the
+      // new policy refuses is refused at §8.6 step 2 (`P9`), never `P25`, which
+      // belongs to a handshake that already PASSED step 2.
+      const next = entry.inputs.nextInputAfterTheCommand as JsonRecord;
+      expect(entry.expected.nextInputRow, entry.name).toBe(
+        next.class === "LEGACY-JSON" ? "P1" : "P9",
+      );
+      rows.add(entry.expected.nextInputRow as string);
+      expect(hex(fixtureBytes((entry.expected.observable as JsonRecord).handshakeReject))).toBe(
+        hex(encodeE2eeHandshakeReject()),
+      );
+    }
+    expect(rows.size, "the two cases take different rows").toBe(2);
+  });
+
+  it("records the §12.5 non-interaction on every case in the family", () => {
+    // §12.6's closing prohibition. A withdrawal is an operator action, and
+    // folding it into either §12.5 counter would corrupt the §12.3 flip
+    // criterion with the operator's own command — so EVERY case asserts it, not
+    // only the one that names it.
+    for (const entry of F18.cases) {
+      expect(entry.expected.noFallbackOccurrenceRecorded, entry.name).toEqual({
+        "peer-legacy": 0,
+        "advertisement-unavailable": 0,
+      });
+    }
+    const named = caseByName(F18, "no-withdrawal-records-a-fallback-occurrence-of-either-class");
+    expect(named.expected.sweepIsAnOperatorActionNotALegacyAcceptance).toBe(true);
+  });
+
+  it("keeps the row-N3 race's two orders to one disjunction of two outcomes", () => {
+    // §12.6 step (b): one pass over one snapshot, each channel dispatched
+    // exactly once. Both outcomes are conforming — the phase the snapshot froze
+    // decides which — and an outcome outside the pair is not.
+    const races = casesMatching(F18, /^the-row-n3-race-/);
+    expect(races).toHaveLength(2);
+    for (const entry of races) {
+      expect(entry.expected.dispatchedExactlyOnce, entry.name).toBe(true);
+      expect(entry.expected.leftOpen, entry.name).toBe(false);
+      const outcomes = entry.expected.outcomeIsOneOf as readonly JsonRecord[];
+      expect(outcomes.map((outcome) => outcome.row)).toEqual(["Q12", "P25"]);
+      expect(outcomes.map((outcome) => outcome.countedIn)).toEqual(["nxE2ee", "abortedHandshakes"]);
+    }
+    expect(
+      new Set(races.map((entry) => JSON.stringify(entry.inputs.enumerationOrderAttempted))).size,
+      "the two orders are actually different",
+    ).toBe(2);
+  });
+
+  it("gives every pre-key observable in the family the one §11.5 observable", () => {
+    // §11.2's anti-oracle rule over F18: a refused hello, an aborted in-flight
+    // handshake and a fail-closed negotiating channel are three different causes
+    // and MUST be one observable. Parts of these blocks were driven by the node
+    // consumer — the record count and the close reason — and the rest were free
+    // numbers beside them, which is precisely where a cause-dependent length
+    // would hide.
+    // Pinned rather than filtered: `.filter(… !== undefined)` finds nothing at
+    // all when the generator stops emitting the block, and the length check
+    // below is the only thing that ever noticed.
+    const observables = carrying(F18.cases, "observable", 4).map(
+      (entry) => [entry.name, entry.expected.observable as JsonRecord] as const,
+    );
+    for (const [name, observable] of observables) {
+      expect(hex(fixtureBytes(observable.handshakeReject)), name).toBe(
+        hex(encodeE2eeHandshakeReject()),
+      );
+      expect(observable.handshakeRejectBytes, name).toBe(E2EE_HANDSHAKE_REJECT_BYTES);
+      expect(observable.handshakeRejectRecords, name).toBe(1);
+      expect(observable.applicationPayloadBytes, name).toBe(0);
+      expect(observable.closeReason, name).toBe("channel_rejected");
+    }
+    // …and they are one object, not five that happen to agree field by field.
+    expect(new Set(observables.map(([, observable]) => JSON.stringify(observable))).size).toBe(1);
+  });
+
+  it("derives each case's own summary claim instead of restating it", () => {
+    // Five fields that each summarise what the rest of their own case already
+    // says. Every one of them was a free boolean or a free list: the case could
+    // claim the generation advanced while carrying a pair that did not move, or
+    // claim the combined command matched the narrowing alone while carrying a
+    // different verdict list, and nothing failed. A summary is only worth
+    // carrying if it is checked against what it summarises.
+    const widening = caseByName(
+      F18,
+      "a-widening-closes-nothing-and-still-advances-the-policy-generation",
+    );
+    expect(widening.expected.generationStillAdvances).toBe(
+      (widening.expected.policyGenerationAfter as number) -
+        (widening.inputs.policyGenerationBefore as number) ===
+        1,
+    );
+    expect(widening.expected.generationStillAdvances, "§5.7: a widening spends one too").toBe(true);
+
+    // §12.6: a command that narrows AND widens is a withdrawal, with the same
+    // per-channel expectations as the narrowing alone. "The same" is checkable —
+    // against the narrowing-alone case's own verdict list, which is what makes
+    // the claim mean the widening half reached nothing.
+    const combined = caseByName(F18, "a-combined-narrow-and-widen-command-is-a-withdrawal");
+    const narrowingAlone = caseByName(
+      F18,
+      "require-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+    );
+    expect(combined.expected.perChannelMatchesTheNarrowingAlone).toBe(
+      JSON.stringify(combined.expected.perChannel) ===
+        JSON.stringify(narrowingAlone.expected.perChannel),
+    );
+    expect(combined.expected.perChannelMatchesTheNarrowingAlone).toBe(true);
+    expect(combined.expected.isWithdrawal, "it contains a reduction").toBe(true);
+
+    // §12.6 is explicit that the IK channel surviving `requireApprovedClientE2EE`
+    // is a CONSEQUENCE of §8.6 step 6 and not an exemption the sweep applies, so
+    // the per-channel test must not read the step-6 snapshot at all. The claim
+    // is therefore about a channel that HAS one and survives anyway.
+    const approved = caseByName(
+      F18,
+      "require-approved-client-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+    );
+    const withSnapshot = (approved.inputs.channels as readonly JsonRecord[]).filter(
+      (channel) => channel.admittedAuthoritySnapshot !== undefined,
+    );
+    expect(withSnapshot.map((channel) => channel.id)).toEqual(["ch-ik"]);
+    const verdicts = new Map(
+      (approved.expected.perChannel as readonly JsonRecord[]).map((channel) => [
+        channel.id,
+        channel,
+      ]),
+    );
+    expect(approved.expected.ikStaysOpenWithoutReadingItsStep6Snapshot).toBe(
+      withSnapshot.every((channel) => verdicts.get(channel.id)?.withdrawn === false),
+    );
+    expect(approved.expected.ikStaysOpenWithoutReadingItsStep6Snapshot).toBe(true);
+
+    // §12.6's ordering case: the policy the hello reads at §8.6 step 2 is the
+    // COMMITTED one, so its admitted set is §12.4's derivation over the narrowed
+    // value — and whether the hello is admitted is a membership test in it,
+    // which is exactly the test §8.6 step 2 runs.
+    const ordering = caseByName(
+      F18,
+      "a-hello-reaching-step-2-after-the-durable-commit-is-refused-there",
+    );
+    const atStepTwo = ordering.expected.policyReadAtStepTwo as JsonRecord;
+    expect(ordering.expected.admittedPatternsAtStepTwo).toEqual(
+      atStepTwo.effectiveAdmittedPatterns,
+    );
+    expect(ordering.expected.admittedPatternsAtStepTwo).toEqual([
+      ...e2eeEffectiveAdmittedPatterns(atStepTwo.requireApprovedClientE2EE as boolean),
+    ]);
+    expect(ordering.expected.helloAdmitted).toBe(
+      (ordering.expected.admittedPatternsAtStepTwo as readonly string[]).includes(
+        ordering.inputs.helloPattern as string,
+      ),
+    );
+    expect(ordering.expected.helloAdmitted, "the narrowed policy refuses it").toBe(false);
+  });
+
+  it("fixes every per-channel verdict's §11 observable from the class alone", () => {
+    // WHAT THIS IS FOR. `perChannel` carries nine fields per channel and the
+    // node-side consumer drives two of them — `withdrawn`, and `class` through
+    // which list the sweep terminated the channel on. The remaining seven were
+    // emitted, read by nothing, and free: an entry could name `Q12` on a
+    // `legacy` close, or one error record on an untouched channel, and every
+    // suite stayed green. A field that looks like an expectation and is not one
+    // is worse than an absent field, so they are derived here.
+    //
+    // They ARE derivable, and from one input: §12.6 fixes the class, and the
+    // class fixes the rest through §11. A `legacy` channel holds no keys, so it
+    // closes with NO record of any kind — the reject would be row K21 at the
+    // peer, which is the wrong implementation §16.3 F18 names explicitly. An
+    // `e2ee` channel of either withdrawal class holds keys, so it is FATAL-POST
+    // `Q12` with exactly one length-uniform `E2EEError` carrying `policy`. An
+    // in-flight handshake holds none yet, so it is FATAL-PRE `P25` with the
+    // generic fixed-size reject and no error record. A channel the sweep did not
+    // touch produces nothing at all. There is no per-channel freedom left in
+    // that table, which is exactly why every field of it can be checked.
+    interface ChannelVerdict {
+      readonly disposition: string;
+      readonly row: string | null;
+      readonly errorCode: number | null;
+      readonly errorRecordsOnTheWire: number;
+      readonly handshakeRejectEmitted: boolean;
+      readonly closeReason: string | null;
+    }
+    const VERDICTS: ReadonlyMap<string, ChannelVerdict> = new Map([
+      [
+        "legacy",
+        {
+          disposition: "closed with no record",
+          row: null,
+          errorCode: null,
+          errorRecordsOnTheWire: 0,
+          handshakeRejectEmitted: false,
+          closeReason: "channel_rejected",
+        },
+      ],
+      [
+        "nx_e2ee",
+        {
+          disposition: "FATAL-POST",
+          row: "Q12",
+          errorCode: E2EE_ERROR_CODE_POLICY,
+          errorRecordsOnTheWire: 1,
+          handshakeRejectEmitted: false,
+          closeReason: "channel_rejected",
+        },
+      ],
+      [
+        "suite_withdrawn",
+        {
+          disposition: "FATAL-POST",
+          row: "Q12",
+          errorCode: E2EE_ERROR_CODE_POLICY,
+          errorRecordsOnTheWire: 1,
+          handshakeRejectEmitted: false,
+          closeReason: "channel_rejected",
+        },
+      ],
+      [
+        "handshake",
+        {
+          disposition: "FATAL-PRE",
+          row: "P25",
+          errorCode: null,
+          errorRecordsOnTheWire: 0,
+          handshakeRejectEmitted: true,
+          closeReason: "channel_rejected",
+        },
+      ],
+      [
+        "untouched",
+        {
+          disposition: "untouched",
+          row: null,
+          errorCode: null,
+          errorRecordsOnTheWire: 0,
+          handshakeRejectEmitted: false,
+          closeReason: null,
+        },
+      ],
+    ]);
+
+    let checked = 0;
+    for (const entry of F18.cases) {
+      const perChannel = entry.expected.perChannel as readonly JsonRecord[] | undefined;
+      if (perChannel === undefined) continue;
+      // The verdict list is the CHANNEL list, in order and complete: a channel
+      // dropped from it would otherwise take no verdict and be missed by every
+      // check below, which is the shape of a channel neither enumeration saw.
+      const channels = entry.inputs.channels as readonly JsonRecord[];
+      expect(
+        perChannel.map((channel) => channel.id),
+        entry.name,
+      ).toEqual(channels.map((channel) => channel.id));
+      for (const channel of perChannel) {
+        const where = `${entry.name}: ${String(channel.id)}`;
+        // `withdrawn` and `class` are one fact stated twice, and the two must
+        // not be able to disagree: a class on a surviving channel would count a
+        // close that never happened.
+        expect(channel.withdrawn, where).toBe(channel.class !== null);
+        const verdict = VERDICTS.get((channel.class as string | null) ?? "untouched");
+        expect(verdict, `${where}: class ${String(channel.class)} is outside §12.6`).toBeDefined();
+        expect(channel.disposition, where).toBe(verdict!.disposition);
+        expect(channel.row, where).toBe(verdict!.row);
+        expect(channel.errorCode, where).toBe(verdict!.errorCode);
+        expect(channel.errorRecordsOnTheWire, where).toBe(verdict!.errorRecordsOnTheWire);
+        expect(channel.handshakeRejectEmitted, where).toBe(verdict!.handshakeRejectEmitted);
+        expect(channel.closeReason, where).toBe(verdict!.closeReason);
+        checked += 1;
+      }
+    }
+    expect(checked, "the family's channel verdicts").toBe(22);
+  });
+
+  it("reports the step (c) counts broken out by class against the channel set", () => {
+    const entry = caseByName(F18, "step-c-counts-broken-out-by-class");
+    const channels = entry.inputs.channels as readonly JsonRecord[];
+    const perChannel = entry.expected.perChannel as readonly JsonRecord[];
+    expect(perChannel.map((channel) => channel.id)).toEqual(channels.map((channel) => channel.id));
+    expect(entry.expected.channelsAccountedFor).toBe(channels.length);
+    // The counts are the per-channel verdicts, tallied — so a channel missed by
+    // an enumeration is visible as a count and not only as a survivor.
+    const tally = { legacy: 0, nxE2ee: 0, suiteWithdrawn: 0, abortedHandshakes: 0 };
+    for (const channel of perChannel) {
+      switch (channel.class) {
+        case "legacy":
+          tally.legacy += 1;
+          break;
+        case "nx_e2ee":
+          tally.nxE2ee += 1;
+          break;
+        case "suite_withdrawn":
+          tally.suiteWithdrawn += 1;
+          break;
+        case "handshake":
+          tally.abortedHandshakes += 1;
+          break;
+        default:
+          expect(channel.withdrawn, String(channel.id)).toBe(false);
+      }
+    }
+    expect(entry.expected.counts).toEqual(tally);
+    // The in-flight abort this case's channel set contains takes the SAME §11.5
+    // pre-key observable as the case that names the abort — which is §11.2's
+    // anti-oracle rule across two cases, and is why the block is carried here at
+    // all. It was carried and read by nobody: every number in it was free.
+    const abort = caseByName(F18, "in-flight-handshake-aborted-by-a-policy-withdrawal");
+    expect(entry.expected.inFlightAbortObservable).toEqual(abort.expected.observable);
+    const observable = entry.expected.inFlightAbortObservable as JsonRecord;
+    expect(hex(fixtureBytes(observable.handshakeReject))).toBe(hex(encodeE2eeHandshakeReject()));
+    expect(observable.handshakeRejectBytes).toBe(E2EE_HANDSHAKE_REJECT_BYTES);
+    expect(observable.handshakeRejectRecords).toBe(1);
+    expect(observable.applicationPayloadBytes).toBe(0);
+    // …and the case's own channel set has to contain the abort it describes.
+    expect(
+      perChannel.filter((channel) => channel.class === "handshake").map((channel) => channel.id),
+    ).toEqual(["ch-in-flight-nx"]);
   });
 });
 
@@ -1930,7 +3302,13 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 //   • no committed fixture case exists that no obligation here claims;
 //   • no family deferral exists that no obligation here claims, and none is
 //     claimed by two;
-//   • a group obligation cannot lose members below its `atLeast` floor.
+//   • every group obligation's declared `cases` count equals the number of
+//     committed cases its matcher claims — EXACTLY, in both directions, so a
+//     member cannot disappear and one cannot be added without the entry moving;
+//   • every obligation whose every matching case is read by NO suite carries
+//     `unasserted`, naming what is missing and who owns it. FOURTEEN do. That
+//     check runs against the measured union, not against a declaration, and it
+//     runs in both directions — the field must come off when a case goes live.
 //
 // WHAT THEY CANNOT PROVE
 //   • that the obligations written here are ALL of §16.3's obligations. An
@@ -1939,6 +3317,78 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 //     does not exist as far as the tests are concerned. THIS IS THE RESIDUAL.
 //   • that an entry's `spec` text still says what §16.3 says. Editing the
 //     document's wording, or narrowing an obligation there, fails nothing here.
+//   • that a case it claims ASSERTS ANYTHING BEYOND ONE LEAF. `generated` is a
+//     claim about existence; `unasserted` catches only the total-emptiness case.
+//     An obligation with one live leaf across its cases and everything else
+//     inert passes both. See the census immediately below.
+//
+// ───────────────────────────────────────────────────────────────────────────
+// THE MEASURED CENSUS: HOW MUCH OF THIS CORPUS IS ACTUALLY CHECKED
+// ───────────────────────────────────────────────────────────────────────────
+//
+// THE LEDGER CONSTRAINS NAMES AND COUNTS, NEVER CONTENT. A case reduced to
+// nothing but a `name` and an empty `expected` block discharges its obligation
+// exactly as well as one whose every field is re-derived through the
+// implementation. So the ledger proves a case EXISTS. It does not prove the
+// case SAYS anything, and the numbers below are what that costs today.
+//
+// Measured by read-liveness — every family is loaded through
+// `relayE2eeCorpusLiveness.ts`, which hands each leaf to the suite behind an
+// accessor that records the read — over one run of each consuming suite,
+// unioned. A LEAF is one scalar under `expected`, counting a `{"$bytes": …}`
+// wrapper as one. Full method, per-family residuals and owners are in the
+// corpus manifest under `livenessCensus`; the tests at the bottom of this file
+// hold the manifest to the corpus and to itself.
+//
+//   2,061 of 3,287 committed expectation leaves are read by some suite: 62.7%.
+//   1,226 are read by nothing. 33 of the 290 committed cases carry no live
+//   leaf at all — they are named one by one in `E2EE_CORPUS_CASE_LIVENESS`,
+//   each with the reason and the owner of the missing work.
+//
+//   Per family, live/total: F1 161/161 · F2 16/30 · F3 80/190 · F4 44/81 ·
+//   F5 52/66 · F6 26/62 · F7 31/73 · F8 117/148 · F9 182/589 · F10 361/361 ·
+//   F11 198/396 · F12 42/120 · F13 8/8 · F14 30/46 · F15 22/22 · F16 136/332 ·
+//   F17 150/197 · F18 405/405.
+//
+// "33 OF 290" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
+// one-leaf threshold it invites the reading that the other 257 assert something
+// substantial. The distribution is what shows the shape, and the manifest
+// publishes it as `casesByLiveLeafCount`:
+//
+//   live leaves per case:  0 → 33 · 1 → 16 · 2 → 64 · 3–5 → 72 · 6–10 → 51 ·
+//   11–25 → 38 · 26+ → 16.   113 of 290 cases have at most TWO live leaves;
+//   185 have at most five.
+//
+// READ-LIVENESS IS AN UPPER BOUND ON ASSERTION, AND NO CURRENT ASSERTION FIGURE
+// EXISTS. A suite that reads a value and never compares it marks it live here.
+// The tighter measure is a per-leaf MUTATION sweep, and the only one anyone has
+// run was against the 3,684-leaf corpus that PRECEDED this round: 1,821 live,
+// 1,863 inert, 49.4%, 37 contentless cases. That corpus is superseded — the
+// 397-leaf close-machine `steps` blocks were deleted and F8 and F17 assertions
+// were added since — so 49.4% is stale and no line-for-line comparison with the
+// per-family numbers above is valid. Everything published above is read-
+// liveness. Refreshing the tight figure means re-running the sweep: ~3,287
+// single-leaf mutations, each followed by the shared, node and Noise suites.
+// The manifest records this under `livenessCensus.assertionLiveness`.
+//
+// THE MECHANISM, as opposed to the number, IS A FLOOR: a committed case must
+// carry at least ONE leaf some consuming suite reads, or appear in
+// `E2EE_CORPUS_CASE_LIVENESS` naming the suite that reads it or declaring it
+// DECORATIVE with a reason and a named owner. What that guarantees is exactly
+// that — one leaf per committed case is read by somebody. It does NOT guarantee
+// that a case's expectations are meaningfully asserted: a case can keep its
+// name and one or two live leaves while every other field in its `expected`
+// block is inert, and it passes. Hollowing a case out ENTIRELY fails, and the
+// emptiness that remains is counted and named rather than silent, which is the
+// exact failure the ledger's own partition rule was added to close one level up.
+//
+// THE PER-FAMILY NUMBERS ARE PINNED FROM ABOVE AS WELL AS BELOW. Each family's
+// live count is a union across three suites in two packages; the leaves another
+// suite is the sole reader of are written down path by path in
+// `E2EE_CORPUS_DELEGATED_LEAF_READS`, checked to be real leaves this suite does
+// not read, and asserted to be genuinely read in the suite they name. So the
+// union is recomputed here EXACTLY, and a census that drifts above what the
+// suites read fails rather than reads.
 //
 // THE REVIEW OBLIGATION THAT STANDS IN FOR THE MISSING MECHANISM
 //   When EITHER side changes — an edit to §16.3, or an edit to this array — a
@@ -2018,14 +3468,39 @@ interface CoverageObligation {
   /** §16.3 asks for this and the corpus carries it: a case name must match. */
   readonly generated?: RegExp;
   /**
-   * How many cases the obligation stands for. A FLOOR, not an equality: the
-   * corpus may still grow, but no case inside a group may disappear. Without it
-   * a group matcher would keep passing while members of the group were deleted
-   * one at a time — presence of the group is not presence of its cases.
+   * How many cases the obligation stands for. EXACTLY, not a floor, and omitted
+   * means exactly one — `pins each generated obligation to its exact case count`
+   * holds the corpus to this number in BOTH directions.
+   *
+   * It was a floor once, and a floor is what let one obligation drift to
+   * `atLeast: 18` against nineteen committed cases: a case inside that group
+   * could be deleted and every ledger test stayed green, which is the whole
+   * failure the number exists to prevent. A floor also lets a case be ADDED
+   * without anyone touching the ledger, so the entry stops describing the corpus
+   * without ever failing. Growth is still expressible — it is one edit to this
+   * number, made in the same commit as the case, which is the point.
    */
-  readonly atLeast?: number;
+  readonly cases?: number;
   /** §16.3 asks for this and the corpus does not: a deferral must name it. */
   readonly declared?: RegExp;
+  /**
+   * SET WHEN THE CORPUS CARRIES THE CASE AND NOTHING ASSERTS IT.
+   *
+   * `generated` means "a committed case matches", which is a statement about
+   * EXISTENCE. Fourteen obligations resolved that way while every case backing
+   * them was decorative — read by no suite at all — so the ledger read as
+   * covering them and the census, one file over, recorded the opposite. The two
+   * statements disagreed and no test compared them.
+   *
+   * An obligation whose every matching case is decorative MUST carry this field,
+   * naming what is missing and who owns it. It is the ledger's third resolution:
+   * generated-but-unasserted, declared rather than implied.
+   *
+   * The check runs in BOTH directions. An obligation with this field and one
+   * non-decorative case fails — remove the field when the harness lands. An
+   * obligation whose cases are all decorative and lacks the field fails too.
+   */
+  readonly unasserted?: string;
 }
 
 const CROSS_RUNTIME = /^§16\.4 cross-runtime equality:/;
@@ -2038,7 +3513,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F1 (§4.5)",
     spec: "[Not named by §16.3. A repository addition: the §4.5 size budget — RELAY_MAX_RPC_MESSAGE_BYTES, E2EE_ENVELOPE_OVERHEAD_BYTES and the resulting `plaintextCeiling` — pinned as exact numbers, once under the limits the relay asserts by default and once for the channel every other case in this family runs under, so a constant change is visible here rather than only as moved bytes.]",
     generated: /^size-budget-/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f1-prelude-then-envelope",
@@ -2074,7 +3549,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F1 (§4.2, §4.3, §4.5)",
     spec: "envelope exactly at the prelude-headroom boundary and one byte over (prelude present, then absent)",
     generated: /^envelope-(exactly-at|one-byte-over)-the-prelude-headroom-boundary$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f1-interior-nul-runs",
@@ -2096,7 +3571,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F1 (§4.2, §4.3, §4.5)",
     spec: "inner body exactly at `plaintextCeiling` (sent) and one byte over (`e2ee_message_too_large`, nothing transmitted)",
     generated: /^inner-body-(exactly-at|one-byte-over)-the-plaintext-ceiling$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f1-empty-payload-zero-length-path",
@@ -2104,7 +3579,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F1 — Empty-payload cases (§3.4, §4.3 step 2)",
     spec: "The corpus MUST additionally carry the zero-length post-strip payload along both of its reachability paths, in `negotiating`, `e2ee`, and `legacy`: a `data.payload` of length zero [this entry], and a `data.payload` equal to exactly `RELAY_CHUNK_CAPABILITY_PRELUDE`.",
     generated: /^empty-post-strip-payload-zero-length-data-payload-in-/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f1-empty-payload-prelude-path",
@@ -2112,7 +3587,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F1 — Empty-payload cases (§3.4, §4.3 step 2)",
     spec: "…and a `data.payload` equal to exactly `RELAY_CHUNK_CAPABILITY_PRELUDE` [this entry]. …the prelude case MUST additionally assert that the peer's chunk-support latch still sets before the fatal outcome is taken.",
     generated: /^empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f1-empty-payload-row",
@@ -2136,7 +3611,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F2 (§5.6, §5.5)",
     spec: "one case per compatibility case C1–C6, each with exact carrier bytes (with and without prelude where applicable) and the required outcome [this entry covers C1, carrier reassembly, in both its with-prelude and without-prelude forms]",
     generated: /^c1-carrier-reassembly-/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f2-c6",
@@ -2177,7 +3652,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     id: "f2-u1-accounting",
     family: 2,
     section: "16.3 F2 (§5.6, §5.5)",
-    spec: "…(§5.5 U1 — advertisement suppressed, one `undersized-connection` occurrence recorded, no peer-legacy occurrence, and FATAL-PRE under effective `requireE2EE`) [this entry covers the §12.5 occurrence-accounting half of that clause]",
+    spec: "…(§5.5 U1 — advertisement suppressed, one `undersized-connection` occurrence recorded, no peer-legacy occurrence, and FATAL-PRE under effective `requireE2EE`) [this entry covers the §12.5 occurrence-accounting half of that clause. THIS FAMILY does not carry it: the case above carries only the comparison. The accounting is emitted in family F10 as rows N15–N17 and driven there — which is a different §16.3 obligation, claimed by a different entry, and does not discharge this one.]",
     declared: /^The §5\.5 U1 accounting half/,
   },
   {
@@ -2224,7 +3699,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "a statement whose signature was computed over the raw transcript bytes instead of the §7.2.1 envelope (invalid), and one whose envelope was built from a digest of different transcript bytes than those carried (invalid)",
     generated:
       /^(signature-computed-over-the-raw-transcript-instead-of-the-envelope|envelope-built-from-a-digest-of-different-transcript-bytes)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f3-re-encode-inequality",
@@ -2232,6 +3707,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 (§5.2, §5.7, §7.2.1, §7.6, §3.2.1)",
     spec: "and invalid variants — expired, future issued-at, over-long validity interval, wrong Hub origin, lower policy generation, fingerprint mismatch, cross-signature reconstruction failure, oversized statement …, re-encode inequality (non-canonical bytes) [this entry: re-encode inequality]",
     generated: /^non-canonical-transcript-encoding$/,
+    unasserted:
+      "The corpus carries `non-canonical-transcript-encoding` and nothing asserts it: `canonicalDecode`, `envelopeOverTheNonCanonicalBytesDiffers` and `verifiesUnderTheCanonicalSignature` are read by no suite. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-cross-signature-reconstruction",
@@ -2239,6 +3716,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 (§5.2, §5.7, §7.2.1, §7.6, §3.2.1)",
     spec: "and invalid variants — expired, future issued-at, over-long validity interval, wrong Hub origin, lower policy generation, fingerprint mismatch, cross-signature reconstruction failure, oversized statement …, re-encode inequality (non-canonical bytes) [this entry: cross-signature reconstruction failure]",
     generated: /^prekey-cross-signature-lifted-from-another-statement$/,
+    unasserted:
+      "The corpus carries `prekey-cross-signature-lifted-from-another-statement` and nothing asserts it: `crossSignatureReconstructionVerifies` is read by no suite. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-fingerprint-mismatch",
@@ -2246,6 +3725,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 (§5.2, §5.7, §7.2.1, §7.6, §3.2.1)",
     spec: "and invalid variants — expired, future issued-at, over-long validity interval, wrong Hub origin, lower policy generation, fingerprint mismatch, cross-signature reconstruction failure, oversized statement …, re-encode inequality (non-canonical bytes) [this entry: fingerprint mismatch]",
     generated: /^advertised-identity-fingerprint-disagrees-with-the-advertised-identity-key$/,
+    unasserted:
+      "The corpus carries `advertised-identity-fingerprint-disagrees-with-the-advertised-identity-key` and nothing asserts it: `crossSignatureReconstructionVerifies` is read by no suite. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-hub-origin-bound",
@@ -2253,7 +3734,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Size-invariant cases (§3.2.1 S1, S3, S4, S5, S6, S8)",
     spec: "a Hub origin exactly at and one byte over `E2EE_HUB_ORIGIN_MAX_BYTES` (accepted, then rejected — §7.1)",
     generated: /^hub-origin-(exactly-at|one-byte-over)-the-bound$/,
-    atLeast: 2,
+    cases: 2,
+    unasserted:
+      "The corpus carries both bound cases and nothing asserts either: `canonicalizationAccepted`, `encoderAccepted`, `expectedAccepted` and `selfCheckOnAConformingArtifact` are read by no suite, so the accept/reject split at `E2EE_HUB_ORIGIN_MAX_BYTES` is unverified. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-suite-registry-bound",
@@ -2261,7 +3744,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Size-invariant cases (§3.2.1 S1, S3, S4, S5, S6, S8)",
     spec: "a suite registry exactly at and one entry over `E2EE_SUITE_REGISTRY_MAX_ENTRIES`",
     generated: /^suite-registry-(exactly-at|one-entry-over)-max-entries$/,
-    atLeast: 2,
+    cases: 2,
+    unasserted:
+      "The corpus carries both bound cases and nothing asserts either: `encoderAccepted`, `expectedAccepted` and `transcriptBytes` are read by no suite, so the accept/reject split at `E2EE_SUITE_REGISTRY_MAX_ENTRIES` is unverified. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-transcript-bound",
@@ -2269,7 +3754,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Size-invariant cases (§3.2.1 S1, S3, S4, S5, S6, S8)",
     spec: "the same statement one byte over `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES` (rejected at §5.2 step 0, and refused at emit by §7.6.1) and exactly at the bound (accepted)",
     generated: /^transcript-(exactly-at|one-byte-over)-the-transcript-bound$/,
-    atLeast: 2,
+    cases: 2,
+    unasserted:
+      "The corpus carries both bound cases and nothing asserts either: `signingEnvelopeAccepted`, `expectedAccepted` and `selfCheck` are read by no suite, so the accept/reject split at `E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES` is unverified. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-oversized-statement",
@@ -2277,7 +3764,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 (§5.2, §5.7, §7.2.1, §7.6, §3.2.1)",
     spec: "oversized statement (re-anchored to the current `E2EE_CAPABILITY_STATEMENT_MAX_BYTES`) [carried as the statement bound and the carrier bound it implies]",
     generated: /^oversized-(statement|carrier)$/,
-    atLeast: 2,
+    cases: 2,
+    unasserted:
+      "The corpus carries `oversized-statement` and `oversized-carrier` and nothing asserts either: `selfCheck` is read by no suite. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-malformed-continuity-id",
@@ -2285,7 +3774,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 (§5.2, §5.7, §7.2.1, §7.6, §3.2.1)",
     spec: "a statement omitting element 18 and one carrying a malformed continuity id (both invalid) [this entry covers the malformed half, carried once per malformation class; the omission half is declared below]",
     generated: /^malformed-continuity-id-/,
-    atLeast: 4,
+    cases: 4,
+    unasserted:
+      "The corpus carries all four malformation classes and nothing asserts any of them: `encoderRejects` is read by no suite. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-continuity-id-unresolved",
@@ -2293,6 +3784,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 (§7.6.1) / F5 storage-and-anchor cases (§7.5, §5.5 U2)",
     spec: "[Not named in §16.3 F3. The emit-side face of the §7.5 startup cross-check: a node whose continuity id is unresolved at startup fails the §7.6.1 self-check and emits no advertisement, §5.5 U2 `statement-unavailable`. The node-state transitions that decide it are §16.3 F5's storage-and-anchor cases, declared there.]",
     generated: /^continuity-id-unresolved-at-startup$/,
+    unasserted:
+      "The corpus carries `continuity-id-unresolved-at-startup` and nothing asserts it: `selfCheck`, `advertisementUnavailable` and `fatalUnderEffectiveRequireE2EE` are read by no suite. Owned by the F3 statement harness. The §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
   },
   {
     id: "f3-protocol-range",
@@ -2300,7 +3793,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Protocol-range cases (§5.2 step 8, §7.6 elements 7–8)",
     spec: "a fully valid, correctly signed statement whose advertised range excludes `E2EE_PROTOCOL_VERSION` — both bounds strictly above it — and one whose range is inverted (`e2eeVersionMin > e2eeVersionMax`). Each MUST be run twice against the same bytes: with the channel's selection not latched, expecting row K3 …, and with the selection latched, expecting `P15`. … A boundary case MUST also carry a range whose minimum equals `E2EE_PROTOCOL_VERSION` and whose maximum is strictly greater, expecting the ordinary K1 path, so the check is a range test and not an equality test.",
     generated: /^protocol-range-/,
-    atLeast: 6,
+    cases: 6,
   },
   {
     id: "f3-admitted-patterns",
@@ -2308,7 +3801,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Admitted-pattern cases (§5.2 step 9, §7.6 element 14, §8.2)",
     spec: 'a fully valid, correctly signed statement whose element 14 is exactly ["IK"] … evaluated as a web client, whose tier runs "NX". … that run expects `P15` … The same bytes MUST also be run with the selection not latched, expecting row K3 … A companion case MUST evaluate the identical statement as a native client, whose tier runs "IK", expecting the ordinary K1 path … A further case MUST carry ["IK", "NX"] evaluated as web, also expecting K1.',
     generated: /^admitted-pattern-set-/,
-    atLeast: 5,
+    cases: 5,
   },
   {
     id: "f3-empty-suite-intersection",
@@ -2367,6 +3860,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F4 (§7.3, §7.4, §6.4)",
     spec: "valid node and client certificates (transcript bytes and signatures) [node half]",
     generated: /^valid-node-agreement-prekey-certificate$/,
+    unasserted:
+      "The corpus carries the valid node certificate and nothing asserts it: `transcript`, `transcriptBytes`, `transcriptSha256`, `identityFingerprint`, `agreementFingerprint`, `crossSignature`, `crossSignatureReconstructionVerifies` and `withinDirectSigningBound` are read by no suite. Owned by the F4 certificate harness. Reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side is per-family harness work not taken on in this round.",
   },
   {
     id: "f4-valid-client-certificate",
@@ -2381,7 +3876,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F4 (§7.3)",
     spec: "[Not enumerated individually by §16.3, which states its invalid variants over the client certificate. The same rules applied to the §7.3 NODE certificate: maximum Hub origin within S9, a cross-signature lifted from another Hub origin, carried identity and agreement fingerprints disagreeing with their keys, a prekey id substituted after signing, and usage fields that are not carrier-supplied.]",
     generated: /^node-certificate-/,
-    atLeast: 6,
+    cases: 6,
+    unasserted:
+      "The corpus carries all six node-certificate variants and nothing asserts any of them: their `crossSignatureReconstructionVerifies`, `transcript`, `satisfiesS9`, `reconstructedUsageDh` and `reconstructedUsageHash` leaves are read by no suite. Owned by the F4 certificate harness. Reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side is per-family harness work not taken on in this round.",
   },
   {
     id: "f4-clock-skew-boundary",
@@ -2390,7 +3887,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "expiry exactly at and one beyond the `E2EE_MAX_CLOCK_SKEW` boundary [carried at both edges of the window: not-yet-valid and expired]",
     generated:
       /^client-certificate-(not-yet-valid|expiry)-(accepted-exactly-at|one-millisecond-beyond)-the-clock-skew-boundary$/,
-    atLeast: 4,
+    cases: 4,
   },
   {
     id: "f4-prekey-lifetime",
@@ -2405,7 +3902,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F4 (§7.3, §7.4, §6.4)",
     spec: "wrong namespace (`hubOrigin`, `accountId`)",
     generated: /^client-certificate-(wrong-hub-origin-namespace|foreign-account-id-)/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f4-usage-field-mismatch",
@@ -2420,7 +3917,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F4 (§7.4)",
     spec: "[Not named by §16.3. The §7.4 signature check itself, which every namespace and usage case above sits on top of: an invalid signature, and a certificate signed by another device key.]",
     generated: /^client-certificate-(invalid-signature|signed-by-another-device-key)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f4-max-namespace-s9",
@@ -2428,6 +3925,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Size-invariant cases (§3.2.1 S9), carried in F4",
     spec: "the largest §7.3, §7.4, and §7.5 transcripts at `E2EE_HUB_ORIGIN_MAX_BYTES` and `E2EE_ACCOUNT_ID_MAX_BYTES`, asserting each is within `E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES` (§3.2.1 S9) [the §7.4 client-certificate half, emitted here beside the certificate it bounds]",
     generated: /^client-certificate-at-the-maximum-namespace-/,
+    unasserted:
+      "The corpus carries the maximum-namespace client certificate and nothing asserts it: `transcript`, `transcriptBytes`, `directSigningTranscriptMaxBytes`, `satisfiesS9`, `signingInputMaxBytes` and `satisfiesS2` are read by no suite, so the §3.2.1 S9 and S2 bounds this case exists to pin are unverified. Owned by the F4 certificate harness. Reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side is per-family harness work not taken on in this round.",
   },
   {
     id: "f4-strict-decode",
@@ -2436,7 +3935,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "valid node and client certificates (transcript bytes and signatures); expiry exactly at and one beyond the `E2EE_MAX_CLOCK_SKEW` boundary; wrong namespace (`hubOrigin`, `accountId`); usage-field mismatch against the suite; strict-decode failures [this entry: strict-decode failures, carried once per §3.6 violation class]",
     generated:
       /^client-certificate-(non-canonical|indefinite|trailing|truncated|float|wrong-element)/,
-    atLeast: 6,
+    cases: 6,
   },
   {
     id: "f4-rotation-overlap",
@@ -2460,7 +3959,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F5 (§7.5, §13.3, §5.5)",
     spec: "valid chains of length one … with the silent-pin-update expectation [the length-one half, carried once per pin state: no pin held, a pin that already equals the current key, and the pin the chain silently updates]",
     generated: /^valid-chain-(of-length-one-with-silent-pin-update|with-)/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f5-valid-max-length",
@@ -2468,7 +3967,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F5 (§7.5, §13.3, §5.5)",
     spec: "valid chains … of `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` with the silent-pin-update expectation. … The `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` case MUST be run twice: once with a short test Hub origin, and once with a Hub origin of exactly `E2EE_HUB_ORIGIN_MAX_BYTES`. … Both runs MUST assert the resulting carrier fits `E2EE_CAPABILITY_CARRIER_MAX_BYTES` and that `carrier + RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES ≤ E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`. The long-origin run MUST additionally assert the silent-pin-update expectation is unchanged by origin length.",
     generated: /^valid-max-length-chain-(short|max-length)-hub-origin$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f5-missing-link",
@@ -2497,7 +3996,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F5 (§7.5, §13.3, §5.5)",
     spec: "one case each for missing link, spliced key, reordered entries, truncated chain, generation gap and regression, invalid signature, over-length chain, mixed continuity ids within the chain, a chain entry whose continuity id disagrees with statement element 18, and a chain whose continuity id disagrees with the pinned value — each channel-fatal with the re-verification expectation [this entry: truncated chain, carried at both ends — head and tail]",
     generated: /^truncated-chain-(head|tail)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f5-generation-gap-and-regression",
@@ -2505,7 +4004,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F5 (§7.5, §13.3, §5.5)",
     spec: "one case each for missing link, spliced key, reordered entries, truncated chain, generation gap and regression, invalid signature, over-length chain, mixed continuity ids within the chain, a chain entry whose continuity id disagrees with statement element 18, and a chain whose continuity id disagrees with the pinned value — each channel-fatal with the re-verification expectation [this entry: generation gap and regression]",
     generated: /^generation-(gap|regression)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f5-invalid-signature",
@@ -2622,7 +4121,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F8 (§9.1–§9.3)",
     spec: "exact AAD bytes for both directions; envelopes at counters zero and one; a control record consuming the shared sequence; a tampered header byte, a wrong direction label, and a wrong `sessionBindingHash` — each failing authentication [this entry: exact AAD bytes for both directions]",
     generated: /^aad-(client-to-node|node-to-client)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f8-counters-zero-and-one",
@@ -2630,7 +4129,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F8 (§9.1–§9.3)",
     spec: "envelopes at counters zero and one [carried in both directions]",
     generated: /^envelopes-at-counters-zero-and-one-/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f8-control-record",
@@ -2645,7 +4144,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F8 (§9.1–§9.3)",
     spec: "a tampered header byte … each failing authentication [carried once per §3.3 header field, plus a ciphertext byte and an AEAD-tag byte]",
     generated: /^tampered-(header|ciphertext|aead)-/,
-    atLeast: 6,
+    cases: 6,
   },
   {
     id: "f8-wrong-direction-label",
@@ -2676,7 +4175,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F9 (§9.4–§9.6)",
     spec: "epoch secrets and AEAD keys for epochs zero through two in both directions",
     generated: /^epoch-key-schedule-(client-to-node|node-to-client)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f9-record-count-threshold",
@@ -2698,7 +4197,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F9 (§9.4–§9.6)",
     spec: "early, late, and skipped epoch transitions (each fatal)",
     generated: /^(early|late|skipped)-epoch-transition$/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f9-reserve-composition",
@@ -2713,7 +4212,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F9 (§9.4–§9.6)",
     spec: "synthetic counter- and epoch-exhaustion states with the authenticated-close expectation — each asserting that a complete close exchange is protected entirely out of the `E2EE_CLOSE_RECORDS_RESERVED` half of the §9.6 post-application reserve in the final epoch, once for the sequential initiator (`E2EEClose` plus final confirmation), once for a simultaneous close (`E2EEClose` plus `E2EECloseAck`), and once for the sequential responder, which leaves the remainder of its reserve unused [epoch-exhaustion half]",
     generated: /^terminal-epoch-(sequential|simultaneous)-close-out-of-the-close-reserve$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f9-counter-exhaustion-close",
@@ -2721,7 +4220,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F9 (§9.4–§9.6)",
     spec: "synthetic counter- and epoch-exhaustion states with the authenticated-close expectation … once for the sequential initiator …, once for a simultaneous close …, and once for the sequential responder [counter-exhaustion half]",
     generated: /^counter-exhaustion-(sequential|simultaneous)-close-out-of-the-close-reserve$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f9-error-reserve",
@@ -2729,7 +4228,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F9 — Terminal-error reserve cases (§9.6, §10.2, §11.3)",
     spec: "in the terminal epoch: a complete sequential-initiator exchange that has spent both close-machine records, followed by a stray protected envelope, asserting that the resulting `E2EEError` is protected out of `E2EE_ERROR_RECORDS_RESERVED` at the next `(epoch, counter)` with no wrap, no reuse, and no third close-machine record — this is the case that fails against an implementation sizing the reserve at `E2EE_CLOSE_RECORDS_RESERVED` alone; and the same trace from a synthetic state whose remaining capacity covers the close machine but not the error record, expecting the close without the error record and the §11.5 send path unusable observable rather than a wrap or a dropped obligation.",
     generated: /^terminal-epoch-error-record-(out-of-the-error-reserve|without-capacity)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f9-degenerate-state",
@@ -2737,6 +4236,13 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F9 (§9.4–§9.6)",
     spec: "a synthetic state holding less than the post-application reserve, expecting the §9.6 degenerate outcome (no wrap, no reuse, verdict unclean-abrupt)",
     generated: /^degenerate-state-below-the-post-application-reserve$/,
+  },
+  {
+    id: "f9-close-machine-step-trace",
+    family: 9,
+    section: "16.3 F9 (§9.6, §10.2)",
+    spec: "…each asserting that a complete close exchange is protected entirely out of the `E2EE_CLOSE_RECORDS_RESERVED` half of the §9.6 post-application reserve in the final epoch [this entry covers the per-STEP state trace of that exchange — the close machine's state, branch, anchor, pending record and armed waits after each of its records. §16.3 asks for the exchange, and the records it produces are generated and asserted by the entries above; the intermediate machine states were carried and read by nothing, so they were deleted rather than left counted]",
+    declared: /^The per-step state trace of the §10\.2 close machine/,
   },
 
   // ── F10 — mode machine ─────────────────────────────────────────────────────
@@ -2746,7 +4252,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F10 (§4.4)",
     spec: "The legacy-lock injection cases MUST name their §11 row per §16.2, and the rows are disjoint by §11.2's partition: an envelope after the lock is `P5`, a negotiation record after the lock is `P24` — carried at minimum as a correctly sized, correctly directed `E2EEClientHello` at the node and `E2EEServerAccept` at the client, which are neither over-bound nor misdirected and therefore not `P3` — and an unknown or absent first byte is `P6`. Each MUST also assert the disposition is FATAL-PRE, since no session keys exist in `legacy`.",
     generated: /^legacy-lock-injection-/,
-    atLeast: 5,
+    cases: 5,
   },
   {
     id: "f10-p3-contrast",
@@ -2754,14 +4260,22 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F10 (§4.4, §11.2)",
     spec: "…which are neither over-bound nor misdirected and therefore not `P3` [this entry carries the two contrast cases that ARE `P3`: a misdirected negotiation record and an over-bound one, so the P24 rows above are shown to be a partition and not a default]",
     generated: /-is-p3$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
-    id: "f10-transition-rows",
+    id: "f10-node-transition-rows",
     family: 10,
-    section: "16.3 F10 (§4.4)",
-    spec: "one case per transition row N1–N17 and K1–K24 — input payload bytes and state, expected action and next state — including plaintext injection after E2EE, envelope and negotiation injection after a legacy lock, and an unknown first byte in every state",
-    declared: /^Every transition row of §4\.4/,
+    section: "16.3 F10 (§4.4 rows N1–N14)",
+    spec: "one case per transition row N1–N17 [and K1–K24, which is the entry below] — input payload bytes and state, expected action and next state — including plaintext injection after E2EE, envelope and negotiation injection after a legacy lock, and an unknown first byte in every state [this entry carries the node rows N1–N14; N15–N17 have their own §16.3 paragraph and their own entry below]",
+    generated: /^row-n(?:[1-9]|1[0-4])-/,
+    cases: 19,
+  },
+  {
+    id: "f10-client-transition-rows",
+    family: 10,
+    section: "16.3 F10 (§4.4 rows K1–K24)",
+    spec: "one case per transition row [N1–N17 and] K1–K24 — input payload bytes and state, expected action and next state [this entry carries the client half; the node half is generated above]",
+    declared: /^Every CLIENT transition row of §4\.4/,
   },
   {
     id: "f10-selection-classification",
@@ -2775,14 +4289,23 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     family: 10,
     section: "16.3 F10 (§4.4 rows N15–N17)",
     spec: "Rows N15–N17 are driven by a connection-level input rather than a payload: each case MUST state the asserted `maxDataChunkBytes`, the §7.6.1 self-check result, and the effective `requireE2EE` value, and MUST assert which §12.5 class (if any) recorded an occurrence — including the N17 case, which MUST assert that no peer-legacy occurrence is added on top of N16's.",
-    declared: /^Rows N15–N17/,
+    generated: /^row-n1[567]-/,
+    cases: 5,
   },
   {
-    id: "f10-timer-and-keepalive",
+    id: "f10-node-deadline-under-each-policy",
     family: 10,
-    section: "16.3 F10 — Timer and keepalive cases (§3.2.2 L1 and L2, §8.9 deadline)",
-    spec: "Stalled accept (K15). A valid carrier, a valid hello, and then `E2EEServerAccept` withheld past `T_HANDSHAKE` … no plaintext left the client at any point in `negotiating`, including no keepalive `Ping`. — Buffered keepalive round trip … flushed as an envelope on entering `e2ee` (and as plaintext on entering `legacy` via K13). — Send-buffer overflow. Submissions past `E2EE_NEGOTIATION_BUFFER_MAX_BYTES` while `negotiating`, asserting `e2ee_send_unavailable` … plus a multi-channel accounting case … — Node deadline under each policy. `T_HANDSHAKE_NODE` expiry while `negotiating` MUST fire N8 under effective `requireE2EE` and MUST NOT fire it under the compatibility default; the same deadline expiring after row N3 with no authenticated implicit finish MUST be FATAL-POST `Q8` under both policies (§8.9).",
-    declared: /^The timer and keepalive cases/,
+    section: "16.3 F10 — Timer and keepalive cases (§8.9 deadline)",
+    spec: "Node deadline under each policy. `T_HANDSHAKE_NODE` expiry while `negotiating` MUST fire N8 under effective `requireE2EE` and MUST NOT fire it under the compatibility default; the same deadline expiring after row N3 with no authenticated implicit finish MUST be FATAL-POST `Q8` under both policies (§8.9). [The N8-fires half is the row-N8 case claimed by the node-transition-rows entry above; this entry carries the three assertions that are not a row of §4.4's table.]",
+    generated: /^node-deadline-/,
+    cases: 3,
+  },
+  {
+    id: "f10-client-timer-and-keepalive",
+    family: 10,
+    section: "16.3 F10 — Timer and keepalive cases (§3.2.2 L1 and L2)",
+    spec: "Stalled accept (K15). A valid carrier, a valid hello, and then `E2EEServerAccept` withheld past `T_HANDSHAKE` … no plaintext left the client at any point in `negotiating`, including no keepalive `Ping`. — Buffered keepalive round trip … flushed as an envelope on entering `e2ee` (and as plaintext on entering `legacy` via K13). — Send-buffer overflow. Submissions past `E2EE_NEGOTIATION_BUFFER_MAX_BYTES` while `negotiating`, asserting `e2ee_send_unavailable` … plus a multi-channel accounting case … [the node deadline half of this §16.3 paragraph is generated; this entry carries the three client cases]",
+    declared: /^The CLIENT timer and keepalive cases/,
   },
   {
     id: "f10-cross-runtime",
@@ -2806,7 +4329,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F11 — simultaneous-close table (§10.1.1)",
     spec: "The simultaneous cases MUST pin the §10.1.1 close anchor with explicit counters … Shared state: epoch 0 throughout, initiator I's next-send `(0, 7)`, responder R's next-send `(0, 4)`. [table rows: “Simultaneous close, passing” — both acks satisfy the strict rule against the validator's anchor, verdict Clean at both endpoints; and “Simultaneous close, ack declaring current next-send (negative)” — strict-rule failure at I: FATAL-POST `Q7`, `protocol_violation`, verdict Failed]",
     generated: /^simultaneous-close-(passing|ack-declaring-current-next-send)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f11-close-anchor-epoch-boundary",
@@ -2814,7 +4337,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F11 — simultaneous-close table (§10.1.1)",
     spec: "[table row] Close anchor across an epoch boundary — I's `E2EEClose` is the last record of epoch `e` under a §9.4 threshold; R's `E2EECloseAck` declares `expectedRecv` `(e + 1, 0)`. Accepted: the anchor is the §9.2/§9.4 advance … A companion negative case declaring `(e, counter + 1)` MUST fail as `Q7`.",
     generated: /^close-anchor-across-an-epoch-boundary/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f11-passed-through-rule",
@@ -2836,7 +4359,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F11 (§10)",
     spec: "a commitment mismatch [carried with the malformed close body it must be distinguished from]",
     generated: /^(commitment-mismatch|malformed-close-body)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f11-truncation",
@@ -2865,7 +4388,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F11 — Verdict-disambiguation cases (§10.2, §10.4, §11.3 Q6/Q7)",
     spec: "legacy JSON and a negotiation record delivered during the close phase, expecting FATAL-POST `Q6` and verdict Failed, so the close phase is shown to add no exemption to rows N11/K18",
     generated: /-during-the-close-phase$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f11-t-close-expiry",
@@ -2873,7 +4396,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F11 — Verdict-disambiguation cases (§10.2, §10.4, §11.3 Q6/Q7)",
     spec: "a `T_CLOSE` expiry at each waiting step, expecting Unclean — abrupt with no wire record — the contrast case that fixes which events this protocol declines to attribute",
     generated: /^t-close-expiry-/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f11-precedence",
@@ -2903,6 +4426,13 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "Ordering and linger behavior (§10.3) is not expressible as a deterministic wire vector and belongs to implementation tests, not this corpus.",
     declared: /^Ordering and linger behavior \(§10\.3\)/,
   },
+  {
+    id: "f11-close-machine-step-trace",
+    family: 11,
+    section: "16.3 F11 (§10.2)",
+    spec: "a sequential clean close (all three records … with their bodies, commitments, and both verdicts) … the simultaneous cases below [this entry covers the per-STEP state trace of those exchanges — the machine's state, branch, anchor, pending record and armed waits after each record. The records, bodies, commitments and both verdicts §16.3 names are generated and asserted by the entries above; the intermediate machine states were carried and read by nothing, so they were deleted rather than left counted]",
+    declared: /^The per-step state trace of the §10\.2 close machine/,
+  },
 
   // ── F12 — error records ────────────────────────────────────────────────────
   {
@@ -2918,7 +4448,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F12 (§11)",
     spec: "The reject case MUST be asserted byte-identical across causes — at minimum an absent Branch A record, a `pending` record, a `revoked` record, and a context-commitment mismatch — since those four are precisely the approval-membership classes §11.2 forbids distinguishing.",
     generated: /^handshake-reject-(is-byte-identical-for-|bytes-do-not-vary-by-cause)/,
-    atLeast: 5,
+    cases: 5,
   },
   {
     id: "f12-error-record-per-code",
@@ -2926,7 +4456,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F12 (§11)",
     spec: "one `E2EEError` envelope per defined code",
     generated: /^error-record-/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f12-length-uniformity",
@@ -2941,7 +4471,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Protocol-range and Admitted-pattern cases, carried in F12",
     spec: "A companion node-side case MUST deliver a hello whose `e2eeVersion` lies outside the range the node advertised on that channel, expecting `P9` with the §11.5 observable byte-identical to the F12 reject cases. … A node-side companion MUST deliver an NX hello to a node running `requireApprovedClientE2EE`, expecting `P9` with the §11.5 observable byte-identical to the F12 reject cases. [both emitted here, where that comparison is direct]",
     generated: /^node-side-companion-/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f12-reject-timing",
@@ -2958,7 +4488,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F13 (§7.1)",
     spec: "node, client, and agreement fingerprint vectors from the fixture keys, raw digests and `SHA256:` display forms",
     generated: /-key-fingerprint$/,
-    atLeast: 4,
+    cases: 4,
   },
   {
     id: "f14-safety-number",
@@ -2966,7 +4496,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F14 (§13.4, §13.5)",
     spec: "input arrays, intermediates (`safetyNumberSecret`, `prk`), HKDF outputs, and the exact rendered display strings for fixed inputs. Each rendering case MUST additionally assert its displayed entropy against §3.2.1 S10 and S11. [safety-number half, S10]",
     generated: /^safety-number-/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f14-web-sas",
@@ -2974,7 +4504,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F14 (§13.4, §13.5)",
     spec: "input arrays, intermediates (`safetyNumberSecret`, `prk`), HKDF outputs, and the exact rendered display strings for fixed inputs. Each rendering case MUST additionally assert its displayed entropy against §3.2.1 S10 and S11. [`WebSAS` half, S11]",
     generated: /^web-sas-/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f14-cross-runtime",
@@ -2991,7 +4521,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F15 (§14.1)",
     spec: "the official cacophony/snow vector sets for `Noise_IK_25519_ChaChaPoly_SHA256` and `Noise_NX_25519_ChaChaPoly_SHA256`, transcoded into the corpus format; the state machine MUST reproduce them exactly [cacophony half]",
     generated: /^cacophony\/Noise_(IK|NX)_25519_ChaChaPoly_SHA256$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f15-snow",
@@ -2999,7 +4529,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F15 (§14.1)",
     spec: "the official cacophony/snow vector sets for `Noise_IK_25519_ChaChaPoly_SHA256` and `Noise_NX_25519_ChaChaPoly_SHA256`, transcoded into the corpus format; the state machine MUST reproduce them exactly [snow half]",
     generated: /^snow\/Noise_(IK|NX)_25519_ChaChaPoly_SHA256$/,
-    atLeast: 2,
+    cases: 2,
   },
 
   // ── F16 — authorization context and Branch A ───────────────────────────────
@@ -3009,7 +4539,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 (§8.3, §7.5, §8.6 steps 6–7, §8.7, §8.9, §11.3 Q9, §13.6)",
     spec: "It reuses the F6 (IK) and F7 (NX) happy-path material and emits the context-block bytes and `contextCommitment` for both tiers, then one case per single-element mutation, each giving the mutated context bytes, the resulting commitment, and the expected outcome",
     generated: /^authorization-context-block-/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f16-element-9",
@@ -3031,7 +4561,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 (§8.3, §7.5)",
     spec: "element 17 continuity-id substitution — `P13`. This case MUST be run twice: once against a never-rotated node, whose §7.6 element 11 continuity chain is empty and whose context element 15 therefore carries no chain digest, and once against a node at `E2EE_CONTINUITY_CHAIN_MAX_LENGTH`. … The first run MUST additionally assert that the responder rebuilt element 17 from its own stored continuity id.",
     generated: /^element-17-continuity-id-substitution-(never-rotated-node|max-length-chain)$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f16-element-11",
@@ -3046,7 +4576,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 (§8.3)",
     spec: "element 12 role escalation above element 14 — `P13`; element 12 role reduction below element 14 — `P13`, since §8.3 makes a difference in either direction a context mismatch",
     generated: /^element-12-role-(escalation-above|reduction-below)-element-14$/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f16-commitment-preimage",
@@ -3068,6 +4598,8 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 (§8.7)",
     spec: "a suite-list strip: `offeredSuites` mutated after the hello wire bytes were hashed, expecting confirmation failure (§8.7 hashes exact hello wire bytes), surfaced as `P16` at the client",
     generated: /^suite-list-strip-after-the-hello-was-hashed$/,
+    unasserted:
+      "The corpus carries the suite-list strip and nothing asserts it: `nodeAccepted`, `serverAccept`, `clientVerdict`, `disposition`, `clientEmitsNoRecord` and `closeReason` are read by no suite. Owned by the client-phase handshake harness. The verdict is the CLIENT's §8.8 step-4 decision over a stripped suite list, and no client handshake exists in this repository to drive it.",
   },
   {
     id: "f16-advertised-snapshot",
@@ -3076,7 +4608,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "an identity rotation appending a continuity certificate in that window — the handshake completes, against the chain and identity fingerprint the statement advertised … ; the same window at `E2EE_CONTINUITY_CHAIN_MAX_LENGTH`, where the append also prunes the oldest entry — same expectation, and the case MUST assert the pruned entry's digest is still present in the channel's element 15; a prekey rotation in the same window, asserting the handshake completes against the prekey advertised on that channel (§6.4) and that element 15's entry 0 is the advertised agreement fingerprint",
     generated:
       /^(identity|prekey)-rotation-(between-advertisement-and-hello|at-max-chain-length-prunes-the-oldest-entry)$/,
-    atLeast: 3,
+    cases: 3,
   },
   {
     id: "f16-next-channel",
@@ -3091,7 +4623,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 — Branch A record-state cases (§8.6 step 6, §11.2)",
     spec: "Each case MUST state the node's Branch A record for `(hubOrigin, accountId, clientIdentityFingerprint)` as an explicit input … record absent, `pending`, `revoked`, an approved record whose `capabilitySet` excludes the requested capability, and an approved record whose `maxRole` is below the requested role. All five expect `P12`, and each MUST assert the §11.5 observable is byte-identical to the others and to the F12 reject cases.",
     generated: /^branch-a-record-/,
-    atLeast: 5,
+    cases: 5,
   },
   {
     id: "f16-withdrawal-cases",
@@ -3099,7 +4631,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 — Authorization-withdrawal cases (§13.6, §8.9, §11.3 Q9)",
     spec: "`status approved → revoked` — withdrawn; Q9, code `policy`; `maxRole owner → viewer` with `status` unchanged at `approved` — withdrawn; Q9 … run once against a channel admitted at element-12 `owner` and once against a channel admitted at element-12 `viewer`, both expecting Q9; `capabilitySet` losing a member the snapshot held … — withdrawn; Q9; a withdrawal applied to the same client fingerprint under a different `(hubOrigin, accountId)` scope — not withdrawn for this channel …; a withdrawal landing between §8.6 step 6 and row N3 — the in-flight abort, which MUST take the generic fixed-size `E2EEHandshakeReject` … never a `policy` code; a withdrawal landing after row N3 but before the authenticated implicit finish — Q9, per §8.9 [this last is carried as the `implicitFinish` expectation on each withdrawal case above, not as a separate case]",
     generated: /^withdrawal-/,
-    atLeast: 7,
+    cases: 7,
   },
   {
     id: "f16-widening-cases",
@@ -3107,7 +4639,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 — Authorization-withdrawal cases (§13.6, §8.9, §11.3 Q9)",
     spec: "a widening — first approval, re-approval, `maxRole` increase, `capabilitySet` addition — not withdrawn; the channel stays open and the widened authority reaches it only on a fresh ticket, channel, and handshake",
     generated: /^widening-/,
-    atLeast: 4,
+    cases: 4,
   },
   {
     id: "f16-combined-narrow-and-widen",
@@ -3131,13 +4663,6 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     declared: /^The §13\.6 pending-cap and pairing-window cases/,
   },
   {
-    id: "f16-policy-counterparts",
-    family: 16,
-    section: "16.3 F18 (§12.6), cross-referenced from F16",
-    spec: "[Not a §16.3 F16 obligation. A pointer entry: the §12.6 policy-withdrawal counterparts of F16's §13.6 authorization-withdrawal cases are §16.3 F18, which this corpus carries only in part — so a reader of F16 is told where the other half lives and that it is incomplete.]",
-    declared: /^The §12\.6 policy-withdrawal counterparts/,
-  },
-  {
     id: "f16-cross-runtime",
     family: 16,
     section: "16.4 (recorded against F16)",
@@ -3152,7 +4677,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F17 (§8.1)",
     spec: "an X25519 input producing an all-zero shared secret from a low-order point, expecting the single mandated behavior of §8.1 — abort, `P10` — in both the IK and NX handshake positions",
     generated: /^x25519-all-zero-shared-secret-/,
-    atLeast: 2,
+    cases: 2,
   },
   {
     id: "f17-p256-public-keys",
@@ -3160,7 +4685,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F17 (§7.1)",
     spec: "P-256 public keys that are off the curve, have a coordinate at or above the field prime, are the identity, or carry a first byte other than `0x04` (compressed and hybrid prefixes included) — each rejected by §7.1 before any signature check",
     generated: /^p256-public-key-/,
-    atLeast: 10,
+    cases: 10,
   },
   {
     id: "f17-p256-signatures",
@@ -3168,7 +4693,7 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F17 (§7.1)",
     spec: "P-256 ECDSA signatures presented as ASN.1/DER instead of fixed-width raw `r ‖ s`, and raw signatures with `r` or `s` equal to zero or at or above the group order — each rejected [seven cases: DER; `r` zero; `s` zero; `r` at the order; `s` at the order; `r` above the order; `s` above the order]",
     generated: /^p256-signature-/,
-    atLeast: 7,
+    cases: 7,
   },
   {
     id: "f17-ed25519-canonicality",
@@ -3176,7 +4701,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F17 (§14.3)",
     spec: "Ed25519 signatures that are non-canonical in point or scalar encoding — values a ZIP215-style verifier accepts and RFC 8032 MUST reject (§14.3)",
     generated: /^ed25519-(public-key|signature)-/,
-    atLeast: 6,
+    cases: 6,
+    unasserted:
+      "The corpus carries all six Ed25519 canonicality cases — the two public-key encodings, the control and non-canonical R, and both scalar cases — and nothing asserts any of them: `validation`, `verificationVerdict`, `pinnedPrimitiveUnderZip215Relaxation` and `differsFromTheControlOnlyInTheEncodingOfR` are read by no suite, so the ZIP215-vs-RFC-8032 split this obligation exists for is unverified. Owned by the F17 key-material harness. The validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
   },
   {
     id: "f17-cross-domain-substitution",
@@ -3223,25 +4750,77 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     generated: /^in-flight-handshake-aborted-by-a-policy-withdrawal$/,
   },
   {
-    id: "f18-per-channel-cases",
+    id: "f18-require-e2ee-narrowing",
     family: 18,
     section: "16.3 F18 (§12.6 per-channel bullets)",
-    spec: "`requireE2EE` false → true with one `legacy` channel, one NX `e2ee` channel, and one IK `e2ee` channel open …; `requireApprovedClientE2EE` false → true over the same three channels …; a suite leaving the advertised registry with an `e2ee` channel established on that suite — withdrawn, `Q12`; and a companion channel on a retained suite — not withdrawn … run twice against the same command, once IK and once NX, both expecting `Q12`; a widening … asserting that no channel is closed and that the policy generation still advances (§5.7); a combined narrow-and-widen command — a withdrawal …; a `negotiating` channel present while any of the above is applied — asserted not swept, and then asserted fail-closed on its next input.",
-    declared: /^Every per-channel case of §16\.3 F18/,
+    spec: "`requireE2EE` false → true with one `legacy` channel, one NX `e2ee` channel, and one IK `e2ee` channel open — the `legacy` channel withdrawn and closed with reason `channel_rejected` and no record of any kind, both `e2ee` channels untouched. The case MUST assert explicitly that no `E2EEHandshakeReject` was emitted on the `legacy` channel, since that is the plausible wrong implementation and would be row K21 at the peer",
+    generated: /^require-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel$/,
   },
   {
-    id: "f18-ordering-cases",
+    id: "f18-require-approved-narrowing",
     family: 18,
-    section: "16.3 F18 (§12.6 ordering and the row-N3 race)",
-    spec: "the ordering itself: a hello that reaches §8.6 step 2 after the durable commit reads the narrowed policy and is refused there …; the row-N3 race … a handshake that passed §8.6 step 2 under the old policy and whose row-N3 transition is scheduled to land concurrently with the sweep … The case MUST assert that the channel is accounted for exactly once and is not left open … and MUST be run with the two enumerations attempted in both orders.",
-    declared: /^The §12\.6 ordering cases/,
+    section: "16.3 F18 (§12.6 per-channel bullets)",
+    spec: "`requireApprovedClientE2EE` false → true over the same three channels — the `legacy` channel and the NX `e2ee` channel both withdrawn, the NX channel as FATAL-POST `Q12` with code `policy` and one length-uniform `E2EEError`, and the IK channel asserted to stay open, since §8.6 step 6 admitted it only against an `approved` record",
+    generated: /^require-approved-client-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel$/,
+  },
+  {
+    id: "f18-suite-clause-both-tiers",
+    family: 18,
+    section: "16.3 F18 (§12.6 suite bullet)",
+    spec: "a suite leaving the advertised registry with an `e2ee` channel established on that suite — withdrawn, `Q12`; and a companion channel on a retained suite — not withdrawn. This case MUST be run twice against the same command: once with the established channel's handshake IK and once with it NX, both expecting `Q12`, since §12.6's suite clause is tier-independent and a generator free to pick a tier would leave the rule pinned by prose alone. The IK run MUST additionally carry an unchanged `approved` Branch A record and assert the channel is closed anyway, since \"the record is still approved\" is the plausible wrong exemption",
+    generated: /^a-suite-leaving-the-registry-closes-the-(?:ik|nx)-channel-established-on-it$/,
+    cases: 2,
+  },
+  {
+    id: "f18-widening",
+    family: 18,
+    section: "16.3 F18 (§12.6 widening, §5.7)",
+    spec: "a widening — `requireE2EE` or `requireApprovedClientE2EE` true → false, a suite added — asserting that no channel is closed and that the policy generation still advances (§5.7)",
+    generated: /^a-widening-closes-nothing-and-still-advances-the-policy-generation$/,
+  },
+  {
+    id: "f18-combined-narrow-and-widen",
+    family: 18,
+    section: "16.3 F18 (§12.6 combined command)",
+    spec: "a combined narrow-and-widen command — a withdrawal, because it contains a reduction, with the same per-channel expectations as the narrowing alone",
+    generated: /^a-combined-narrow-and-widen-command-is-a-withdrawal$/,
+  },
+  {
+    id: "f18-negotiating-channel",
+    family: 18,
+    section: "16.3 F18 (§12.6, §8.6 step 2, §4.4 N1)",
+    spec: "a `negotiating` channel present while any of the above is applied — asserted not swept, and then asserted fail-closed on its next input: a hello whose tier the new policy refuses is `P9`, legacy JSON under a newly effective `requireE2EE` is row N1",
+    generated: /^a-negotiating-channel-is-not-swept-and-then-fails-closed-on-/,
+    cases: 2,
+  },
+  {
+    id: "f18-ordering-commit-first",
+    family: 18,
+    section: "16.3 F18 (§12.6 ordering)",
+    spec: "the ordering itself: a hello that reaches §8.6 step 2 after the durable commit reads the narrowed policy and is refused there, asserting that no channel can be established behind a sweep that has already passed",
+    generated: /^a-hello-reaching-step-2-after-the-durable-commit-is-refused-there$/,
+  },
+  {
+    id: "f18-row-n3-race",
+    family: 18,
+    section: "16.3 F18 (§12.6 the row-N3 race)",
+    spec: "the row-N3 race … a handshake that passed §8.6 step 2 under the old policy and whose row-N3 transition is scheduled to land concurrently with the sweep, between the live-channel enumeration and the in-flight enumeration. The case MUST assert that the channel is accounted for exactly once and is not left open — closed as `Q12` and counted in the step (c) `e2ee` class if it reached row N3, or aborted as `P25` and counted in the in-flight class if it did not — and MUST be run with the two enumerations attempted in both orders",
+    generated: /^the-row-n3-race-with-the-/,
+    cases: 2,
   },
   {
     id: "f18-step-c-counts",
     family: 18,
-    section: "16.3 F18 (§12.6 step (c), §12.5 non-interaction)",
-    spec: "the reported counts of §12.6 step (c), broken out by class — `legacy`, NX `e2ee`, suite-withdrawn `e2ee` of either tier, and in-flight handshakes aborted — asserted against the channel set …; the §12.5 non-interaction: every case above MUST assert that no fallback occurrence of either class was recorded by the withdrawal (§12.6).",
-    declared: /^The §12\.6 step \(c\) reported counts/,
+    section: "16.3 F18 (§12.6 step (c))",
+    spec: "the reported counts of §12.6 step (c), broken out by class — `legacy`, NX `e2ee`, suite-withdrawn `e2ee` of either tier, and in-flight handshakes aborted — asserted against the channel set, so a channel missed by one of the two enumerations is visible as a count and not only as a surviving channel",
+    generated: /^step-c-counts-broken-out-by-class$/,
+  },
+  {
+    id: "f18-fallback-non-interaction",
+    family: 18,
+    section: "16.3 F18 (§12.5 non-interaction, §12.6)",
+    spec: "the §12.5 non-interaction: every case above MUST assert that no fallback occurrence of either class was recorded by the withdrawal (§12.6), since the sweep is an operator action and not a legacy acceptance",
+    generated: /^no-withdrawal-records-a-fallback-occurrence-of-either-class$/,
   },
 ];
 
@@ -3290,7 +4869,7 @@ describe("§16.3 coverage ledger", () => {
     // reviewer counts against §16.3's bullets. Pinning the total means growing
     // or shrinking the ledger is a deliberate, visible edit rather than a line
     // that slips in with an unrelated change.
-    expect(SECTION_16_3_LEDGER.length).toBe(160);
+    expect(SECTION_16_3_LEDGER.length).toBe(170);
   });
 
   it("resolves every §16.3-named case as generated or as declared, never as neither", () => {
@@ -3300,12 +4879,9 @@ describe("§16.3 coverage ledger", () => {
     for (const entry of SECTION_16_3_LEDGER) {
       const family = familyByNumber(entry.family);
       if (entry.generated !== undefined) {
+        // How MANY cases it must be generated by is the next test's subject.
         const matches = family.cases.filter((fixture) => entry.generated!.test(fixture.name));
         expect(matches.length, `${entry.id} is generated by no case`).toBeGreaterThan(0);
-        expect(
-          matches.length,
-          `${entry.id} lost a case: ${String(matches.length)} present, ${String(entry.atLeast ?? 1)} required`,
-        ).toBeGreaterThanOrEqual(entry.atLeast ?? 1);
         continue;
       }
       const declarations = (family.deferred ?? []).filter((reason) => entry.declared!.test(reason));
@@ -3323,6 +4899,46 @@ describe("§16.3 coverage ledger", () => {
     }
   });
 
+  it("pins each generated obligation to its exact case count, so no group carries slack", () => {
+    // THE PROPERTY THE HEADER CLAIMS, ASSERTED RATHER THAN ASSERTED IN PROSE.
+    //
+    // `cases` was a FLOOR until this test existed, and a floor is one-sided: an
+    // obligation reading `atLeast: 18` against NINETEEN committed cases passed
+    // with a case to spare, so one of its nineteen could be deleted and every
+    // ledger test — including the one directly above, which is why this is a
+    // separate test and not a tightened line inside it — stayed green. That is
+    // exactly the silent loss the count exists to prevent, reintroduced by the
+    // number that was supposed to prevent it. It had drifted that way once
+    // already, in a ledger whose own header claimed the slack was zero.
+    //
+    // Exactness closes it in both directions at once. A case deleted from a
+    // group drops the count below the number and fails; a case ADDED to a group
+    // raises it above and fails too — which matters as much, because a group
+    // that silently grows is an entry that has stopped describing the corpus
+    // while still reading as if it does. Neither direction is a hardship: both
+    // are one edit to this number, in the commit that moved the case.
+    for (const entry of SECTION_16_3_LEDGER) {
+      if (entry.generated === undefined) {
+        // A deferral stands for work not carried, so it has no case count, and
+        // carrying one would be a claim about cases that do not exist.
+        expect(entry.cases, `${entry.id} is declared, so it may not state a case count`).toBe(
+          undefined,
+        );
+        continue;
+      }
+      const matches = familyByNumber(entry.family).cases.filter((fixture) =>
+        entry.generated!.test(fixture.name),
+      );
+      expect(
+        matches.length,
+        `${entry.id}: ${String(matches.length)} committed cases match, the ledger says ${String(entry.cases ?? 1)} — update the entry in the same commit as the case`,
+      ).toBe(entry.cases ?? 1);
+      // …and the omitted form means one, never "unspecified": an entry that
+      // wrote `cases: 1` and one that omitted it must not be different things.
+      expect(entry.cases, `${entry.id}: a count of one is written by omitting it`).not.toBe(1);
+    }
+  });
+
   it("claims every committed case, so a case cannot be added outside the ledger", () => {
     // The other direction. Without it the ledger could silently fall behind the
     // corpus, and an obligation that no longer matches anything would read as
@@ -3337,6 +4953,40 @@ describe("§16.3 coverage ledger", () => {
           matchers.some((entry) => entry.generated!.test(fixture.name)),
           `${file}: case ${fixture.name} is claimed by no ledger obligation`,
         ).toBe(true);
+      }
+    }
+  });
+
+  it("gives each committed case to exactly one obligation, so one case cannot discharge two", () => {
+    // THE HOLE THIS CLOSES IS HOW THE LEDGER GETS DEFEATED BY RELABELLING.
+    //
+    // "Claims every committed case" is a lower bound: it fails when a case has
+    // NO obligation. It cannot fail when a case has two. So an obligation whose
+    // work was never done could be moved from `declared` to `generated` and
+    // pointed at a case some OTHER obligation already discharges — no fixture
+    // written, no deferral left behind, and every ledger test still green. The
+    // ledger would then read as covering more than the corpus carries, which is
+    // strictly worse than reading as covering less: an honest gap becomes a
+    // false assurance, and the gap is invisible in exactly the place a reader
+    // goes to look for it.
+    //
+    // The rule is therefore a PARTITION, not a covering: the generated
+    // obligations of a family carve its cases into disjoint sets. A genuinely
+    // shared case is a sign that one obligation is really two halves of the same
+    // §16.3 clause, which is one entry; or that the second half is not carried,
+    // which is a deferral. Both are expressible. "Two obligations, one case" is
+    // not, and that is the point.
+    for (const [number, file] of FAMILY_FILES) {
+      const family = familyByNumber(number);
+      const matchers = SECTION_16_3_LEDGER.filter(
+        (entry) => entry.family === number && entry.generated !== undefined,
+      );
+      for (const fixture of family.cases) {
+        const claims = matchers.filter((entry) => entry.generated!.test(fixture.name));
+        expect(
+          claims.map((entry) => entry.id),
+          `${file}: case ${fixture.name} is claimed by more than one obligation`,
+        ).toHaveLength(1);
       }
     }
   });
@@ -3393,7 +5043,7 @@ describe("§16.3 coverage ledger", () => {
     const complete = [...FAMILY_FILES.keys()].filter(
       (number) => (familyByNumber(number).deferred ?? []).length === 0,
     );
-    expect(complete).toEqual([6, 9, 13, 15]);
+    expect(complete).toEqual([6, 13, 15, 18]);
   });
 
   it("records the ledger's own fidelity limitation in the manifest, not only in this file", () => {
@@ -3413,6 +5063,14 @@ describe("§16.3 coverage ledger", () => {
     // established rather than merely that something is imperfect.
     expect(fidelity.doesNotProve).toContain("§16.3");
     expect(fidelity.doesNotProve.length).toBeGreaterThan(200);
+    // …including the half the ledger cannot reach at all: a case it claims may
+    // assert nothing. That is measured, not asserted, and the census is where.
+    expect(fidelity.doesNotProve).toContain("livenessCensus");
+    // …and it must say that `unasserted` closes only the TOTAL-emptiness case,
+    // not that a claimed case asserts anything worth having.
+    expect(fidelity.doesNotProve).toContain("casesByLiveLeafCount");
+    expect(fidelity.doesNotProve).toContain("beyond a single leaf");
+    expect(fidelity.proves).toContain("unasserted");
     expect(fidelity.proves.length).toBeGreaterThan(200);
     // …and it must name the review that stands in for the missing mechanism,
     // together with the two per-entry fields that make that review mechanical.
@@ -3458,6 +5116,410 @@ describe("§16.3 coverage ledger", () => {
         (familyByNumber(number).deferred ?? []).some((reason) => CROSS_RUNTIME.test(reason)),
         `F${String(number)}`,
       ).toBe(false);
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Corpus liveness — what the committed cases ACTUALLY ASSERT
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The ledger above constrains NAMES and COUNTS. It cannot see content: a case
+// stripped to nothing but its `name` discharges its obligation exactly as well
+// as one whose every field is re-derived here, and thirty-three committed cases
+// are in that state today. This is the mechanism that makes that a declared
+// number instead of a silence.
+//
+// Every family is loaded through the read-liveness recorder, so this file knows
+// which leaves its own tests touched. The rule is: a committed case must carry
+// at least one leaf that a consuming suite reads, OR appear in
+// `E2EE_CORPUS_CASE_LIVENESS` naming the suite that reads it or declaring it
+// DECORATIVE with a reason and an owner. Both directions fail — a case listed
+// as unread that this suite does read is as much a defect as the reverse.
+//
+// WHAT THAT RULE IS: A FLOOR OF ONE LEAF PER CASE. It guarantees that every
+// committed case has at least one leaf some suite reads. It does not guarantee
+// that a case's expectations are meaningfully asserted, and it is not evidence
+// that they are. A case can keep its name and one or two live leaves with the
+// rest of its `expected` block inert and satisfy this in full; 113 of the 290
+// committed cases have at most two live leaves. The distribution the census
+// publishes is the honest picture; the floor is the thing a test can enforce.
+//
+// These tests are LAST in the file on purpose: everything above has run by the
+// time they read the recorder.
+describe("§16.3 corpus liveness", () => {
+  const claimKey = (file: string, name: string): string => `${file}::${name}`;
+  const CLAIMS = new Map(
+    E2EE_CORPUS_CASE_LIVENESS.map((claim) => [claimKey(claim.file, claim.case), claim]),
+  );
+
+  it("gives every committed case a live leaf, or an entry saying who reads it", () => {
+    expect(CLAIMS.size, "the liveness table repeats a case").toBe(E2EE_CORPUS_CASE_LIVENESS.length);
+    for (const [number, file] of FAMILY_FILES) {
+      for (const entry of familyByNumber(number).cases) {
+        const claim = CLAIMS.get(claimKey(file, entry.name));
+        const live = LIVENESS.liveLeafCount(file, entry.name);
+        if (claim === undefined) {
+          expect(
+            live,
+            `${file}: ${entry.name} carries no leaf this suite reads, and no liveness claim says who does — make it live, or declare it`,
+          ).toBeGreaterThan(0);
+          continue;
+        }
+        expect(
+          live,
+          `${file}: ${entry.name} is listed as unread here, but this suite reads ${String(live)} of its leaves — remove the entry`,
+        ).toBe(0);
+      }
+    }
+  });
+
+  it("keeps the liveness table honest: real cases, real reasons, named owners", () => {
+    const committed = new Set(
+      [...FAMILY_FILES].flatMap(([number, file]) =>
+        familyByNumber(number).cases.map((entry) => claimKey(file, entry.name)),
+      ),
+    );
+    for (const claim of E2EE_CORPUS_CASE_LIVENESS) {
+      expect(
+        committed.has(claimKey(claim.file, claim.case)),
+        `${claim.file}: ${claim.case} is claimed by the liveness table and is not a committed case`,
+      ).toBe(true);
+      if (claim.reader !== "decorative") {
+        // A delegation is verified in the suite it names, not here.
+        expect(claim.reason, `${claim.case}: a delegation carries no reason`).toBeUndefined();
+        continue;
+      }
+      // A DECORATIVE case is one the corpus commits, the ledger claims, and
+      // nothing asserts. Listing it is the whole point — but a list entry that
+      // said only "unread" would be the same silence one level further in, so
+      // each names what is unread and who owns making it live.
+      const reason = claim.reason ?? "";
+      expect(reason.length, `${claim.case}: no reason`).toBeGreaterThan(80);
+      expect(/owned by/i.test(reason), `${claim.case}: names no owner`).toBe(true);
+      expect(/states /i.test(reason), `${claim.case}: does not say what is unread`).toBe(true);
+    }
+    // The two totals a reader compares against the manifest, pinned so that
+    // growing either is a deliberate edit rather than a line that slips in.
+    expect(E2EE_CORPUS_CASE_LIVENESS.filter((claim) => claim.reader === "decorative").length).toBe(
+      33,
+    );
+    expect(E2EE_CORPUS_CASE_LIVENESS.filter((claim) => claim.reader === "noise").length).toBe(4);
+  });
+
+  it("keeps the manifest's measured census in step with the corpus and with itself", () => {
+    const census = MANIFEST.livenessCensus;
+    expect(census.section).toBe("16.3");
+    // The status names the MEASURE and the ENFORCEMENT separately. It read
+    // "measured" once, which a reader takes for "this corpus's coverage has been
+    // established"; what is measured is read-liveness, and what is enforced per
+    // case is a one-live-leaf floor.
+    expect(census.status).toBe("read-liveness measured; per-case rule is a one-live-leaf floor");
+    // The METHOD is the part a reader has to be able to check, so it must name
+    // the recorder and the runs rather than asserting a number on trust.
+    expect(census.method).toContain("relayE2eeCorpusLiveness.ts");
+    expect(census.method).toContain("bun run --cwd packages/shared test");
+    expect(census.method).toContain("bun run --cwd apps/server test src");
+    // …and the census must say what a LIVE leaf does and does not establish.
+    expect(census.whatLiveMeans).toContain("UPPER BOUND");
+    expect(census.whatLiveMeans.length).toBeGreaterThan(200);
+    expect(census.perCaseClaims).toContain("E2EE_CORPUS_CASE_LIVENESS");
+    // The per-case rule must be stated as the FLOOR it is. The sentence it
+    // replaced — "the three consuming suites each verify their half, so a case
+    // that becomes contentless fails a test" — was true and read as much more:
+    // what the suites verify is that at least one leaf of each case is read by
+    // someone, which a case can satisfy while the rest of it says nothing.
+    expect(census.perCaseFloor).toContain("floor");
+    expect(census.perCaseFloor).toContain("at least one");
+    expect(census.perCaseFloor).toContain("NOT");
+    expect(census.perCaseFloor).toContain("casesByLiveLeafCount");
+    expect(census.perCaseFloor.length).toBeGreaterThan(300);
+    // The independent mutation sweep is the tighter measurement and is recorded
+    // as such, against the corpus it was actually run on.
+    expect(census.independentMutationSweep.totalLeaves).toBe(
+      census.independentMutationSweep.liveLeaves + census.independentMutationSweep.inertLeaves,
+    );
+    expect(census.independentMutationSweep.measuredAgainst).toContain("3,684");
+    // …and it must not read as a current figure. It described the corpus this
+    // one replaced, and a note that says "cite this one where they disagree"
+    // without saying it is stale is how a superseded number keeps circulating.
+    expect(census.independentMutationSweep.note).toContain("STALE");
+
+    // Every family, and the denominators re-derived from the committed files so
+    // a census that has stopped describing the corpus fails rather than reads.
+    expect(census.families.map((family) => family.family)).toEqual([...FAMILY_FILES.keys()]);
+    let cases = 0;
+    let leaves = 0;
+    let live = 0;
+    let contentless = 0;
+    for (const family of census.families) {
+      const committed = familyByNumber(family.family);
+      expect(family.file, `F${String(family.family)}`).toBe(FAMILY_FILES.get(family.family));
+      expect(family.cases, family.file).toBe(committed.cases.length);
+      // Counted by the recorder from the PARSED file, before instrumentation —
+      // walking `expected` here would read every leaf through the accessors and
+      // make the census's own bookkeeping the thing that marks the corpus live.
+      expect(family.expectedLeaves, family.file).toBe(
+        committed.cases.reduce(
+          (total, entry) => total + LIVENESS.leafCount(family.file, entry.name),
+          0,
+        ),
+      );
+      expect(family.inertLeaves, family.file).toBe(family.expectedLeaves - family.liveLeaves);
+      expect(family.liveLeaves, family.file).toBeLessThanOrEqual(family.expectedLeaves);
+      expect(family.livePercent, family.file).toBe(
+        Math.round((1000 * family.liveLeaves) / family.expectedLeaves) / 10,
+      );
+      // Each family's contentless count is the exemption list, per family.
+      expect(family.casesWithNoLiveLeaf, family.file).toBe(
+        E2EE_CORPUS_CASE_LIVENESS.filter(
+          (claim) => claim.file === family.file && claim.reader === "decorative",
+        ).length,
+      );
+      // …and the residual is tracked with a real owner rather than implied.
+      expect(family.residual.length, family.file).toBeGreaterThan(60);
+      expect(family.residualOwner.length, family.file).toBeGreaterThan(3);
+      cases += family.cases;
+      leaves += family.expectedLeaves;
+      live += family.liveLeaves;
+      contentless += family.casesWithNoLiveLeaf;
+    }
+    expect(census.totals.cases).toBe(cases);
+    expect(census.totals.expectedLeaves).toBe(leaves);
+    expect(census.totals.liveLeaves).toBe(live);
+    expect(census.totals.inertLeaves).toBe(leaves - live);
+    expect(census.totals.casesWithNoLiveLeaf).toBe(contentless);
+    expect(census.totals.livePercent).toBe(Math.round((1000 * live) / leaves) / 10);
+  });
+
+  it("keeps the cross-suite read attribution honest, so it cannot be padded", () => {
+    // `E2EE_CORPUS_DELEGATED_LEAF_READS` is what makes the union computable in
+    // one process, and a table of hand-written path strings is exactly the kind
+    // of thing that can be padded to prop a number up. Three checks here, plus
+    // one in each of the suites it names, remove every way to do that:
+    //   • the case must exist, and each path must be a REAL leaf of it;
+    //   • no path may be one THIS suite reads (otherwise it double-counts);
+    //   • the case must be delegated to that same suite in the claims table.
+    // The fourth — "the named suite really does read it" — is unverifiable here
+    // and is asserted over there.
+    const seen = new Set<string>();
+    for (const entry of E2EE_CORPUS_DELEGATED_LEAF_READS) {
+      const key = claimKey(entry.file, entry.case);
+      expect(seen.has(key), `${entry.file}: ${entry.case} is attributed twice`).toBe(false);
+      seen.add(key);
+      expect(
+        [...FAMILY_FILES.values()].includes(entry.file),
+        `${entry.file} is not a committed family file`,
+      ).toBe(true);
+      const leaves = new Set(LIVENESS.leafPaths(entry.file, entry.case));
+      expect(leaves.size, `${entry.file}: ${entry.case} is not a committed case`).toBeGreaterThan(
+        0,
+      );
+      expect(entry.paths.length, `${entry.file}: ${entry.case} attributes no path`).toBeGreaterThan(
+        0,
+      );
+      const readHere = new Set(LIVENESS.liveLeafPaths(entry.file, entry.case));
+      for (const path of entry.paths) {
+        expect(
+          leaves.has(path),
+          `${entry.file}: ${entry.case} attributes ${path}, which is not a leaf of that case`,
+        ).toBe(true);
+        expect(
+          readHere.has(path),
+          `${entry.file}: ${entry.case} attributes ${path} to the ${entry.reader} suite, and THIS suite reads it — it would be counted twice`,
+        ).toBe(false);
+      }
+      const claim = CLAIMS.get(key);
+      // A case whose every leaf comes from another suite must also be declared
+      // in the claims table as belonging to that suite; a case this suite reads
+      // some of has no claim entry, and that is the one legitimate shape.
+      if (claim !== undefined) {
+        expect(
+          claim.reader,
+          `${entry.file}: ${entry.case} is attributed to the ${entry.reader} suite and the claims table says ${claim.reader}`,
+        ).toBe(entry.reader);
+      }
+    }
+  });
+
+  it("pins each family's live count to EXACTLY what the instrumented suites read", () => {
+    // THE UPPER BOUND. This assertion used to be `toBeGreaterThanOrEqual`
+    // against this one suite's own reads, which constrained the census from
+    // BELOW only: a published figure that drifted UPWARD — the direction in
+    // which a coverage number misleads — passed unchallenged. A census that
+    // cannot overstate is the whole value of publishing one.
+    //
+    // The union is now computable here exactly, because every leaf that another
+    // suite is the sole reader of is written down path by path in
+    // `E2EE_CORPUS_DELEGATED_LEAF_READS`, that table is disjoint from what this
+    // suite reads (checked above), and each named suite asserts it really reads
+    // its own paths (checked there).
+    let unionTotal = 0;
+    for (const family of MANIFEST.livenessCensus.families) {
+      const committed = familyByNumber(family.family);
+      const here = committed.cases.reduce(
+        (total, entry) => total + LIVENESS.liveLeafCount(family.file, entry.name),
+        0,
+      );
+      const delegated = E2EE_CORPUS_DELEGATED_LEAF_READS.filter(
+        (entry) => entry.file === family.file,
+      ).reduce((total, entry) => total + entry.paths.length, 0);
+      expect(
+        family.liveLeaves,
+        `${family.file}: the census records ${String(family.liveLeaves)} live leaves; this suite reads ${String(here)} and ${String(delegated)} more are attributed to another suite, so the measured union is ${String(here + delegated)}`,
+      ).toBe(here + delegated);
+      unionTotal += here + delegated;
+    }
+    expect(MANIFEST.livenessCensus.totals.liveLeaves).toBe(unionTotal);
+  });
+
+  it("publishes the SHAPE of per-case liveness, not one reassuring number", () => {
+    // `casesWithNoLiveLeaf: 33 of 290` invites the reading that the other 257
+    // assert something substantial. They do not: the rule is a one-leaf floor,
+    // and a large fraction of the corpus sits one or two leaves above it. The
+    // distribution is published so that shape is visible, and it is recomputed
+    // here from the same union the census is pinned to.
+    const counts: number[] = [];
+    for (const [number, file] of FAMILY_FILES) {
+      for (const entry of familyByNumber(number).cases) {
+        const delegated =
+          E2EE_CORPUS_DELEGATED_LEAF_READS.find(
+            (one) => one.file === file && one.case === entry.name,
+          )?.paths.length ?? 0;
+        counts.push(LIVENESS.liveLeafCount(file, entry.name) + delegated);
+      }
+    }
+    const bucketOf = (live: number): string =>
+      live === 0
+        ? "0"
+        : live === 1
+          ? "1"
+          : live === 2
+            ? "2"
+            : live <= 5
+              ? "3-5"
+              : live <= 10
+                ? "6-10"
+                : live <= 25
+                  ? "11-25"
+                  : "26+";
+    const distribution = MANIFEST.livenessCensus.casesByLiveLeafCount;
+    // The buckets must PARTITION the corpus: same labels, in order, summing to
+    // the case count. A bucket list that quietly drops a band would otherwise
+    // publish a flattering subset.
+    expect(distribution.buckets.map((bucket) => bucket.liveLeaves)).toEqual([
+      "0",
+      "1",
+      "2",
+      "3-5",
+      "6-10",
+      "11-25",
+      "26+",
+    ]);
+    for (const bucket of distribution.buckets) {
+      expect(bucket.cases, `bucket ${bucket.liveLeaves}`).toBe(
+        counts.filter((live) => bucketOf(live) === bucket.liveLeaves).length,
+      );
+    }
+    expect(distribution.buckets.reduce((total, bucket) => total + bucket.cases, 0)).toBe(
+      MANIFEST.livenessCensus.totals.cases,
+    );
+    expect(distribution.atMostTwoLiveLeaves).toBe(counts.filter((live) => live <= 2).length);
+    expect(distribution.atMostFiveLiveLeaves).toBe(counts.filter((live) => live <= 5).length);
+    // …and the bucket for nothing-at-all must agree with the exemption list, so
+    // the two ways the corpus reports emptiness cannot drift apart.
+    expect(distribution.buckets[0]?.cases).toBe(MANIFEST.livenessCensus.totals.casesWithNoLiveLeaf);
+  });
+
+  it("says in the census that the published figure is READ-liveness and the tight one is stale", () => {
+    // The only assertion-liveness numbers that exist were measured against the
+    // corpus as it stood BEFORE this round. Publishing them beside current
+    // per-family figures without saying so reads as though the corpus has a
+    // current tight measurement. It does not, and the census says which is
+    // which, what the published figure actually is, and what refreshing the
+    // tight one would take.
+    const assertion = MANIFEST.livenessCensus.assertionLiveness;
+    expect(assertion.currentCorpus).toContain("none");
+    expect(assertion.published).toContain("READ-liveness");
+    expect(assertion.published).toContain("upper bound");
+    expect(assertion.staleFigure).toContain("STALE");
+    expect(assertion.staleFigure).toContain("superseded");
+    expect(assertion.staleFigure).toContain("49.4%");
+    expect(assertion.refreshCost.length).toBeGreaterThan(120);
+    expect(assertion.ownedBy.length).toBeGreaterThan(3);
+    // The stale figure must name the corpus it was measured against, and that
+    // corpus must NOT be this one — a refreshed sweep would change these.
+    expect(MANIFEST.livenessCensus.independentMutationSweep.totalLeaves).not.toBe(
+      MANIFEST.livenessCensus.totals.expectedLeaves,
+    );
+  });
+
+  it("marks every ledger obligation whose every case is decorative as unasserted", () => {
+    // THE LEDGER AND THE CENSUS USED TO DISAGREE IN SILENCE. `generated` means
+    // "a committed case matches", which is a claim about EXISTENCE — and
+    // fourteen obligations resolved that way while every case backing them was
+    // read by no suite at all. The ledger read as covering them; the census, one
+    // file over, said the opposite; nothing compared the two.
+    //
+    // Ground truth here is the MEASURED union, not the claims table, so an
+    // obligation cannot be talked out of this by editing a declaration.
+    const liveUnion = (file: string, name: string): number =>
+      LIVENESS.liveLeafCount(file, name) +
+      (E2EE_CORPUS_DELEGATED_LEAF_READS.find((one) => one.file === file && one.case === name)?.paths
+        .length ?? 0);
+    let unasserted = 0;
+    for (const obligation of SECTION_16_3_LEDGER) {
+      if (obligation.generated === undefined) {
+        expect(
+          obligation.unasserted,
+          `${obligation.id}: a declared deferral cannot be "generated but unasserted"`,
+        ).toBeUndefined();
+        continue;
+      }
+      const file = FAMILY_FILES.get(obligation.family)!;
+      const matched = familyByNumber(obligation.family).cases.filter((entry) =>
+        obligation.generated!.test(entry.name),
+      );
+      const everyCaseInert = matched.every((entry) => liveUnion(file, entry.name) === 0);
+      if (everyCaseInert) {
+        unasserted += 1;
+        const reason = obligation.unasserted ?? "";
+        expect(
+          reason.length,
+          `${obligation.id}: every case it claims (${matched.map((entry) => entry.name).join(", ")}) is read by nothing, and the ledger does not say so — mark it \`unasserted\` with its owner, or make a case live`,
+        ).toBeGreaterThan(120);
+        expect(/owned by/i.test(reason), `${obligation.id}: names no owner`).toBe(true);
+        continue;
+      }
+      expect(
+        obligation.unasserted,
+        `${obligation.id}: marked unasserted, and ${String(matched.filter((entry) => liveUnion(file, entry.name) > 0).length)} of its cases are read — remove the field`,
+      ).toBeUndefined();
+    }
+    // Pinned, so the number moves only as a deliberate edit. It is FOURTEEN, and
+    // it was described as one before the ledger and the census were compared.
+    expect(unasserted, "the count of generated-but-unasserted obligations").toBe(14);
+    expect(SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined).length).toBe(14);
+    // …and the manifest carries the same list, so the number reaches a reader of
+    // the FIXTURES and not only a reader of this file. Ids, not just a count: a
+    // count alone cannot be checked against anything.
+    const declared = MANIFEST.ledgerFidelity.unassertedObligations;
+    expect(declared.count).toBe(14);
+    expect([...declared.ids].toSorted()).toEqual(
+      SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined)
+        .map((entry) => entry.id)
+        .toSorted(),
+    );
+    // Every owner named in the ledger's own reasons must appear in the manifest's
+    // owner list, so the two cannot describe different work.
+    expect(declared.ownedBy.length).toBeGreaterThan(0);
+    for (const owner of declared.ownedBy) {
+      const harness = owner.split(" — ")[0] ?? "";
+      expect(harness.length, "an owner entry with no harness named").toBeGreaterThan(5);
+      expect(
+        SECTION_16_3_LEDGER.some((entry) => entry.unasserted?.includes(harness) === true),
+        `${harness} owns unasserted work in the manifest and no ledger entry names it`,
+      ).toBe(true);
     }
   });
 });

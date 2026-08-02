@@ -271,6 +271,46 @@ export function formatE2eeKeyFingerprint(fingerprint: Uint8Array): string {
 }
 
 /**
+ * The inverse of `formatE2eeKeyFingerprint`, for the one input that arrives in
+ * the display form: §13.6 requires the owner to name a client key at the node
+ * CLI, and the value they read off the device is the §7.1 display string.
+ *
+ * STRICT, and deliberately so. It admits exactly what the formatter emits — the
+ * prefix, then the unpadded base64url of exactly `E2EE_KEY_FINGERPRINT_BYTES` —
+ * and rejects padding, whitespace, alternate alphabets, and any trailing bits
+ * the last character could smuggle in. A lenient parser here would let two
+ * different strings name one record and one string name none, and the §13.6
+ * pairing-window discriminator is matched by byte equality against a value the
+ * node has already authenticated.
+ */
+export function parseE2eeKeyFingerprint(display: string): Uint8Array {
+  if (typeof display !== "string") invalidRelayE2eeInput();
+  if (!display.startsWith(E2EE_KEY_FINGERPRINT_DISPLAY_PREFIX)) invalidRelayE2eeInput();
+  const encoded = display.slice(E2EE_KEY_FINGERPRINT_DISPLAY_PREFIX.length);
+  const bytes = new Uint8Array(E2EE_KEY_FINGERPRINT_BYTES);
+  let accumulator = 0;
+  let bits = 0;
+  let written = 0;
+  for (const character of encoded) {
+    const value = BASE64URL_ALPHABET.indexOf(character);
+    if (value < 0) invalidRelayE2eeInput();
+    accumulator = (accumulator << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      if (written >= E2EE_KEY_FINGERPRINT_BYTES) invalidRelayE2eeInput();
+      bytes[written] = (accumulator >> bits) & 0xff;
+      written += 1;
+    }
+  }
+  // The trailing partial group must be zero-padded, exactly as the encoder
+  // leaves it; a nonzero remainder is a distinct string for the same digest.
+  if (written !== E2EE_KEY_FINGERPRINT_BYTES) invalidRelayE2eeInput();
+  if (bits !== 0 && (accumulator & ((1 << bits) - 1)) !== 0) invalidRelayE2eeInput();
+  return bytes;
+}
+
+/**
  * Byte equality for the public material this protocol compares — fingerprints,
  * public keys, commitments, chain links. Every value compared through it is
  * public by construction (§6.2), so this is an ordinary comparison and MUST NOT

@@ -35,7 +35,10 @@ import {
 } from "../hubIdentity/LocalHubIdentityState.ts";
 import { makeNodeAgreementIdentity } from "../hubIdentity/NodeAgreementIdentity.ts";
 import { makeNodeContinuityAnchor } from "../hubIdentity/NodeContinuityAnchor.ts";
-import { makeNodeClientAuthorizationClient } from "../hubIdentity/NodeClientAuthorizationClient.ts";
+import {
+  makeNodeClientAuthorizationClient,
+  type NodeClientAuthorizationClient,
+} from "../hubIdentity/NodeClientAuthorizationClient.ts";
 import { makeNodeClientAuthorizationStore } from "../hubIdentity/NodeClientAuthorizationStore.ts";
 import type { NodeE2eeChannelAuthorization } from "./NodeE2eeChannelSession.ts";
 import {
@@ -50,6 +53,8 @@ import {
 import {
   makeNodeE2eePolicyClient,
   type NodeE2eeChannelRegistration,
+  type NodeE2eePolicyChangeResult,
+  type NodeE2eePolicyPreview,
 } from "../hubIdentity/NodeE2eePolicyClient.ts";
 import {
   type EffectiveNodeE2eePolicy,
@@ -157,6 +162,29 @@ export type NodeE2eeContinuityStatus =
       readonly remedy: string;
     };
 
+/**
+ * The §13.6 owner commands, kept apart from the relay path's narrow read seam.
+ *
+ * `NodeE2eeChannelAuthorization` is what a channel may reach; this is what an
+ * OWNER-AUTHENTICATED operator surface may reach. They are two names for
+ * disjoint halves of one client on purpose: a relay path that could reach these
+ * is one that could mutate authority from peer input.
+ */
+export type NodeE2eeAuthorizationAdmin = Pick<
+  NodeClientAuthorizationClient,
+  | "list"
+  | "get"
+  | "approve"
+  | "narrow"
+  | "revoke"
+  | "purge"
+  | "setDisplayLabel"
+  | "openPairingWindow"
+  | "closePairingWindow"
+  | "clearRefusedPairingAttempts"
+  | "sweepExpired"
+>;
+
 export interface HubIdentityRuntimeShape {
   readonly backend: ProtectedSecretStoreBackend;
   readonly readState: () => Promise<LocalHubIdentityState>;
@@ -212,22 +240,23 @@ export interface HubIdentityRuntimeShape {
     hubOrigin: string,
     keyId: string,
   ) => Promise<HubKeyRotationPromotion>;
-  // ─── OPERATOR SURFACE: OWNED BY THE CLI SLICE, NOT YET BUILT ──────────────
+  // ─── OPERATOR SURFACE ─────────────────────────────────────────────────────
   //
   // §6.4, §7.5, and §5.7 each require a node CLI command — forced prekey
   // rotation, continuity recovery with its two deliberate outcomes, the
   // deliberate chain break, and the policy-generation recovery — and every
   // "remedy" string this package exports is written in the words such a command
-  // must use. The runtime operations below are those commands' backing
-  // implementation and are complete and tested; the commands themselves, and
-  // the surfaces that print the remedies, are the CLI slice's work and do not
-  // exist yet. Until they do, an operator who reaches one of these conditions
-  // has no way to act on it. That is a known, deliberate gap in this slice and
-  // not an oversight in these methods.
+  // must use. The operations below are those commands' backing implementation;
+  // `ryco e2ee` is the surface, assembled in `NodeE2eeOperator` and served over
+  // the owner-authenticated routes of `hubConnector/http.ts`. A remedy string
+  // reaches an operator only through a surface that prints it, so a condition
+  // added here owes a display there in the same change.
   //
-  // `stageKeyRotation` and `confirmAuthenticatedKey` sit in the same position
-  // and already did before this slice: the §7.5 continuity argument threaded
-  // through `stageKeyRotation` is likewise unreachable until the command exists.
+  // `stageKeyRotation` and `confirmAuthenticatedKey` are the exception and were
+  // already: §7.5 requires the rotation command to make the compromise-versus-
+  // continuity distinction explicit at the point of use, and no command offers
+  // that choice yet, so the §7.5 continuity argument threaded through
+  // `stageKeyRotation` is still unreachable from any operator surface.
 
   /**
    * The §7.5 material a capability statement carries, after the startup
@@ -264,6 +293,14 @@ export interface HubIdentityRuntimeShape {
    * distinction the spec asks callers to act on.
    */
   readonly readE2eePrekeyCertificate: (hubOrigin: string) => Promise<NodeE2eePrekeyCertificate>;
+  /**
+   * The certificate this node HOLDS, for the operator display (§6.4).
+   *
+   * Distinct from `readE2eePrekeyCertificate`, which re-signs an unusable
+   * certificate before returning it: a display built on that could never show
+   * the `expired` state §6.4 names a diagnostic and a remedy for.
+   */
+  readonly readStoredE2eePrekey: (hubOrigin: string) => Promise<NodeE2eePrekeyCertificate | null>;
   /** §6.4's forced rotation, the operation the node CLI command drives. */
   readonly rotateE2eePrekey: (hubOrigin: string) => Promise<NodeE2eePrekeyCertificate>;
   /** Borrow the secret half of the prekey a channel advertised (§6.4, §8). */
@@ -310,6 +347,34 @@ export interface HubIdentityRuntimeShape {
    */
   readonly e2eeClientAuthorization: NodeE2eeChannelAuthorization;
   /**
+   * §13.6's owner commands, for the CLI and nothing else.
+   *
+   * Every mutation here runs the §13.6 ordered procedure inside the client —
+   * commit, then sweep — and rejects rather than returning when the sweep could
+   * not finish, which is what lets the CLI's acknowledgement mean what §13.6
+   * says it means.
+   */
+  readonly e2eeAuthorizationAdmin: NodeE2eeAuthorizationAdmin;
+  /** §5.7's generation the next advertisement carries, for the policy display. */
+  readonly e2eeGeneration: () => number;
+  /** §12.6 in full: (a) commit and bump, (b) sweep one snapshot, (c) the counts. */
+  readonly applyE2eePolicy: (
+    proposal: NodeE2eePolicyProposal,
+  ) => Promise<NodeE2eePolicyChangeResult>;
+  /** §12.6's display duty: what the change WOULD do, for the warning before it runs. */
+  readonly previewE2eePolicy: (proposal: NodeE2eePolicyProposal) => NodeE2eePolicyPreview;
+  /**
+   * §5.7's recovery command: durably advance the policy generation to a value
+   * strictly greater than any this node may previously have advertised.
+   *
+   * The high-water mark is updated first and the advertised record second, and
+   * the store refuses to re-adopt the values of a record the mark says was
+   * rolled back — it commits §12.4's fail-closed policy instead, so recovery can
+   * NARROW and owes §12.6 step (b) like any other narrowing. Widening back is
+   * the owner's own explicit policy command.
+   */
+  readonly recoverE2eeGeneration: () => Promise<NodeE2eePolicyChangeResult>;
+  /**
    * Record one §12.5 fallback occurrence. At most one per channel.
    *
    * Never rejects — instrumentation must not be able to fail a channel — so the
@@ -322,6 +387,13 @@ export interface HubIdentityRuntimeShape {
   }) => Promise<void>;
   /** The §12.5 counters, for the node CLI's display. */
   readonly readE2eeFallbackState: () => NodeE2eeFallbackState;
+  /**
+   * §12.5's reset authority, which is an explicit CLI command and nothing else.
+   *
+   * Zeroes both occurrence counters, both ring-overflow counters, and the ring,
+   * and records a new observation-window start. No automatic reset exists.
+   */
+  readonly resetE2eeFallbackState: () => Promise<NodeE2eeFallbackState>;
   /**
    * §12.5's clean-shutdown flush: commit anything still coalesced and cancel
    * the write interval. Idempotent, and never rejects.
@@ -1284,6 +1356,7 @@ export async function makeHubIdentityRuntime(options: {
     remintE2eeContinuityId: () =>
       continuityStore.breakAndRemint({ reason: "operator_break", at: now() }),
     readE2eePrekeyCertificate: (hubOrigin) => prekeys.advertised(hubOrigin),
+    readStoredE2eePrekey: (hubOrigin) => prekeys.stored(hubOrigin),
     rotateE2eePrekey: (hubOrigin) => prekeys.rotate(hubOrigin),
     withE2eePrekeySecret: (hubOrigin, prekeyId, use) =>
       prekeys.withPrekeySecret(hubOrigin, prekeyId, use),
@@ -1291,8 +1364,14 @@ export async function makeHubIdentityRuntime(options: {
     readE2eeAdvertisement: (hubOrigin) => statements.advertised(hubOrigin),
     registerE2eeChannel: () => policyClient.registerChannel(),
     e2eeClientAuthorization: authorizationClient,
+    e2eeAuthorizationAdmin: authorizationClient,
+    e2eeGeneration: () => policyClient.generation(),
+    applyE2eePolicy: (proposal) => policyClient.applyChange(proposal),
+    previewE2eePolicy: (proposal) => policyClient.preview(proposal),
+    recoverE2eeGeneration: () => policyClient.recoverGeneration(),
     recordE2eeFallback: (occurrence) => fallbackCounter.record(occurrence),
     readE2eeFallbackState: () => fallbackCounter.read(),
+    resetE2eeFallbackState: () => fallbackCounter.reset(),
     stopE2eeInstrumentation: () => fallbackCounter.stop().catch(() => undefined),
   };
 }

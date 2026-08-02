@@ -673,6 +673,23 @@ export class E2eeNoiseHandshake {
   }
 
   /**
+   * The peer's EPHEMERAL public key once the pattern has transmitted it — both
+   * roles learn it from the message the other party writes first — and
+   * `undefined` before that.
+   *
+   * PUBLIC MATERIAL, on exactly the footing `remoteStaticPublicKey` is on, and
+   * it survives `split()` for the same reason: the consumer is the caller's, not
+   * this module's. §13.5 derives the `WebSAS` over the WEB CLIENT'S Noise
+   * ephemeral, so the node — the NX responder, whose peer has no static at all —
+   * can reach that value through nothing else. It is not a session value and no
+   * key schedule reads it; §6.5's rule about what may be extracted is about the
+   * three derived secrets, and this is neither derived nor secret.
+   */
+  get remoteEphemeralPublicKey(): Uint8Array | undefined {
+    return this.#re === undefined ? undefined : Uint8Array.from(this.#re);
+  }
+
+  /**
    * TEST AND FIXTURE USE ONLY: Noise §5.2 `h`, the handshake hash of the LIVE
    * handshake, or `undefined` once `split()` or `destroy()` has erased it.
    *

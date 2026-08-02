@@ -28,6 +28,8 @@ import {
   type E2eeReceiveFatalReason,
   type E2eeSyntheticDirectionState,
 } from "@ryco/shared/relayE2eeSession";
+import type { E2eeTier } from "@ryco/shared/relayE2eeTranscripts";
+import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
 import {
   classifyPostStripPayload,
   decodeE2eeNegotiationRecord,
@@ -37,6 +39,7 @@ import {
   encodeE2eeHandshakeReject,
   type E2eeDirection,
   type E2eeInnerRecordType,
+  type E2eeSuiteId,
   type PostStripPayloadClass,
 } from "@ryco/shared/relayE2eeWire";
 
@@ -222,6 +225,24 @@ export interface NodeE2eeChannelSessionSources {
   readonly rateLimiter: NodeE2eeHandshakeRateLimiter;
   /** §12.5 row N2: one peer-legacy occurrence. Never rejects and is never awaited. */
   readonly recordPeerLegacyFallback: () => void;
+  /**
+   * §13.5: publish this session to the node-local operator directory at row N3.
+   *
+   * Optional because nothing on the wire depends on it and a caller that has no
+   * operator surface owes nothing here. The returned handle is retired on every
+   * terminal path, alongside the two sweep registrations. The `WebSAS` is
+   * derived HERE — the node identity key, the client's Noise ephemeral and the
+   * §8.8 session-binding hash are all channel state — and handed over as a
+   * display string, so nothing above this module ever holds the inputs.
+   */
+  readonly registerSession?:
+    | ((input: {
+        readonly tier: E2eeTier;
+        readonly suite: E2eeSuiteId;
+        readonly establishedAt: number;
+        readonly verificationCode: string | undefined;
+      }) => () => void)
+    | undefined;
   readonly onDiagnostic?: (diagnostic: NodeE2eeChannelDiagnostic) => void;
   readonly now?: () => number;
   readonly scheduler?: RelaySessionScheduler;
@@ -295,6 +316,8 @@ export function makeNodeE2eeChannelSession(
 
   const policyRegistration = sources.registerPolicyChannel();
   let authorizationRelease: (() => void) | undefined;
+  /** §13.5: the operator-directory entry for this session, retired with it. */
+  let sessionDirectoryRelease: (() => void) | undefined;
   /**
    * The second half of row N3: the §12.6 and §13.6 phase change from in-flight
    * handshake to established `e2ee` channel.
@@ -347,6 +370,10 @@ export function makeNodeE2eeChannelSession(
     policyRegistration.release();
     authorizationRelease?.();
     authorizationRelease = undefined;
+    // §13.5: the code is ephemeral display state and its window is exactly the
+    // session's, so the entry goes when the secrets do.
+    sessionDirectoryRelease?.();
+    sessionDirectoryRelease = undefined;
     clearTimers();
     closeSettled?.();
     closeSettled = undefined;
@@ -771,6 +798,34 @@ export function makeNodeE2eeChannelSession(
           mode = "e2ee";
           markEstablished?.();
           markEstablished = undefined;
+          // §13.5, after the row is complete and never before it: an entry the
+          // operator can read must describe a session that exists. The `WebSAS`
+          // is derived only for the web tier, because §13.5 defines it over the
+          // WEB client's Noise ephemeral; on IK the owner-facing value is
+          // §13.4's long-term safety number, which lives on the Branch A record.
+          // A derivation failure costs the directory entry and nothing else —
+          // this is a display duty, and §11.2 does not admit a channel outcome
+          // that varies with it.
+          if (sources.registerSession !== undefined) {
+            let verificationCode: string | undefined;
+            if (accept.tier === "web") {
+              try {
+                verificationCode = deriveE2eeWebSas({
+                  nodeIdentityPublicKey: advertised.nodeIdentityPublicKey,
+                  webEphemeralPublicKey: accept.peerEphemeralPublicKey,
+                  sessionBindingHash: accept.sessionBindingHash,
+                }).display;
+              } catch {
+                verificationCode = undefined;
+              }
+            }
+            sessionDirectoryRelease = sources.registerSession({
+              tier: accept.tier,
+              suite: accept.suite,
+              establishedAt: at,
+              verificationCode,
+            });
+          }
           return { kind: "entered" };
         },
       );

@@ -21,8 +21,9 @@ import { ServerAuthLive } from "../auth/Layers/ServerAuth.ts";
 import { ServerSecretStoreLive } from "../auth/Layers/ServerSecretStore.ts";
 import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "../config.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "../persistence/Layers/Sqlite.ts";
-import { HubConnectorService } from "./HubConnectorLive.ts";
+import { HubConnectorService, type HubConnectorE2eeOperator } from "./HubConnectorLive.ts";
 import { hubConnectorRoutesLayer } from "./http.ts";
+import { stubClientListing, stubE2eeOperator } from "./testUtils/e2eeOperatorStub.ts";
 
 const ONLINE_STATUS: HubConnectorStatus = {
   state: "online",
@@ -68,6 +69,7 @@ interface ConnectorStub {
   readonly resumeThrows?: boolean;
   readonly ceremony?: HubEnrollmentCeremonyDetail | null;
   readonly identity?: HubIdentitySummary;
+  readonly e2ee?: Partial<HubConnectorE2eeOperator>;
 }
 
 const makeConnectorStub = (stub: ConnectorStub) => {
@@ -90,6 +92,7 @@ const makeConnectorStub = (stub: ConnectorStub) => {
     readEnrollment: async () => stub.ceremony ?? null,
     cancelEnrollment: async () => stub.statuses[0]!,
     stop: async () => undefined,
+    e2ee: stubE2eeOperator(stub.e2ee ?? {}),
   };
   return {
     service,
@@ -195,6 +198,36 @@ const post = (origin: string, path: string, token?: string, requestOrigin?: stri
       },
     }),
   );
+
+/**
+ * Every E2EE operator route, enumerated so the auth envelope is asserted over
+ * the whole surface rather than over the members a test happened to name.
+ *
+ * `/clients/read` is a POST that mutates nothing — the record key it carries
+ * does not belong in a URL — so it is a mutation for the purposes of the
+ * cross-origin rule and is listed here.
+ */
+const E2EE_READ_PATHS = [
+  "/api/hub/e2ee/clients",
+  "/api/hub/e2ee/sessions",
+  "/api/hub/e2ee/policy",
+  "/api/hub/e2ee/prekey",
+  "/api/hub/e2ee/continuity",
+  "/api/hub/e2ee/fallback",
+] as const;
+
+const E2EE_MUTATION_PATHS = [
+  "/api/hub/e2ee/clients/read",
+  "/api/hub/e2ee/clients/authorization",
+  "/api/hub/e2ee/clients/pairing-window",
+  "/api/hub/e2ee/clients/refusals/clear",
+  "/api/hub/e2ee/policy",
+  "/api/hub/e2ee/policy/preview",
+  "/api/hub/e2ee/policy/recover",
+  "/api/hub/e2ee/prekey/rotate",
+  "/api/hub/e2ee/continuity",
+  "/api/hub/e2ee/fallback/reset",
+] as const;
 
 const get = (origin: string, path: string, token?: string) =>
   Effect.promise(() =>
@@ -409,6 +442,7 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
           "/api/hub/resume",
           "/api/hub/enrollment",
           "/api/hub/enrollment/cancel",
+          ...E2EE_MUTATION_PATHS,
         ]) {
           const response = yield* post(origin, path, ownerToken, attacker);
           assert.equal(response.status, 403, `${path} accepted a cross-origin mutation`);
@@ -477,6 +511,14 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
         assert.equal(resume.status, 403);
         assert.equal(enrollment.status, 403);
         assert.equal(cancel.status, 403);
+        for (const path of E2EE_READ_PATHS) {
+          const response = yield* get(origin, path, clientToken);
+          assert.equal(response.status, 403, `${path} served a non-owner session`);
+        }
+        for (const path of E2EE_MUTATION_PATHS) {
+          const response = yield* post(origin, path, clientToken);
+          assert.equal(response.status, 403, `${path} served a non-owner session`);
+        }
         assert.equal(resumeCalls(), 0, "resume ran despite a rejected session");
       }),
     ),
@@ -492,8 +534,22 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
         const resume = yield* post(origin, "/api/hub/resume");
         const enrollment = yield* post(origin, "/api/hub/enrollment");
         const cancel = yield* post(origin, "/api/hub/enrollment/cancel");
+        const e2eeReads = yield* Effect.forEach(E2EE_READ_PATHS, (path) => get(origin, path));
+        const e2eeMutations = yield* Effect.forEach(E2EE_MUTATION_PATHS, (path) =>
+          post(origin, path),
+        );
 
-        for (const response of [status, read, identity, leave, resume, enrollment, cancel]) {
+        for (const response of [
+          status,
+          read,
+          identity,
+          leave,
+          resume,
+          enrollment,
+          cancel,
+          ...e2eeReads,
+          ...e2eeMutations,
+        ]) {
           assert.isTrue(
             response.status === 401 || response.status === 403,
             `expected an auth rejection, got ${response.status}`,
@@ -501,6 +557,82 @@ it.layer(NodeServices.layer)("hub connector http routes", (it) => {
         }
         assert.equal(resumeCalls(), 0, "resume ran without authentication");
       }),
+    ),
+  );
+
+  it.effect("serves the E2EE operator surface to an owner and never a raw key", () =>
+    withHubRoutes(
+      {
+        statuses: [ONLINE_STATUS],
+        e2ee: {
+          listClients: async () =>
+            stubClientListing({ pendingGlobalSaturated: true, refusedPairingAttempts: 4 }),
+        },
+      },
+      ({ origin, ownerToken }) =>
+        Effect.gen(function* () {
+          const clients = yield* get(origin, "/api/hub/e2ee/clients", ownerToken);
+          assert.equal(clients.status, 200);
+          const body = yield* Effect.promise(() => clients.text());
+          assert.isTrue(body.includes("SHA256:"), "the listing dropped the fingerprint");
+          // §13.6: raw keys are never displayed and never stored, and the
+          // listing's instrumentation duties travel with it.
+          assert.isFalse(body.includes("publicKey"), "the listing leaked a key");
+          assert.isTrue(body.includes("pendingGlobalSaturated"));
+          assert.isTrue(body.includes("refusedPairingAttempts"));
+
+          const policy = yield* get(origin, "/api/hub/e2ee/policy", ownerToken);
+          const sessions = yield* get(origin, "/api/hub/e2ee/sessions", ownerToken);
+          const fallback = yield* get(origin, "/api/hub/e2ee/fallback", ownerToken);
+          assert.equal(policy.status, 200);
+          assert.equal(sessions.status, 200);
+          assert.equal(fallback.status, 200);
+
+          // §12.5: the report carries no account, channel, session, or key
+          // identifier, because none is stored.
+          const fallbackBody = yield* Effect.promise(() => fallback.text());
+          assert.isFalse(fallbackBody.includes("originHash"));
+          assert.isFalse(fallbackBody.includes("channel"));
+        }),
+    ),
+  );
+
+  it.effect("bounds every E2EE operator failure to one message that names no record", () =>
+    withHubRoutes(
+      {
+        statuses: [ONLINE_STATUS],
+        e2ee: {
+          revokeClient: async () => {
+            throw new Error(
+              "boom: no record for acct_secret SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA at /Users/owner/state",
+            );
+          },
+        },
+      },
+      ({ origin, ownerToken }) =>
+        Effect.gen(function* () {
+          const response = yield* Effect.promise(() =>
+            fetch(`${origin}/api/hub/e2ee/clients/authorization`, {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${ownerToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                action: "revoke",
+                hubOrigin: "https://hub.example.test",
+                accountId: "acct_secret",
+                fingerprint: `SHA256:${"A".repeat(43)}`,
+              }),
+            }),
+          );
+          const text = yield* Effect.promise(() => response.text());
+          assert.equal(response.status, 400);
+          assert.isFalse(text.includes("acct_secret"), "the failure echoed an account id");
+          assert.isFalse(text.includes("SHA256:"), "the failure echoed a fingerprint");
+          assert.isFalse(text.includes("/Users/"), "the failure echoed a path");
+          assert.isFalse(text.includes("boom"), "the failure echoed the underlying error");
+        }),
     ),
   );
 

@@ -1762,6 +1762,16 @@ export type E2eeNodeAcceptResult =
       /** The complete `E2EEServerAccept` record to send (row N3). */
       readonly record: Uint8Array;
       readonly sessionBindingHash: Uint8Array;
+      /**
+       * The client's Noise ephemeral public key for this handshake (§6.2).
+       *
+       * Present on BOTH tiers because the Noise pattern transmits it on both,
+       * and consumed by exactly one caller: §13.5's `WebSAS`, which is defined
+       * over the web client's ephemeral and is the only per-session value the
+       * node can display for a peer that has no long-term identity. Public
+       * material, never a session secret.
+       */
+      readonly peerEphemeralPublicKey: Uint8Array;
       /** §6.5 secrets; OWNERSHIP TRANSFERS to the caller, which erases them (§9.5). */
       readonly secrets: E2eeSessionSecrets;
       readonly suite: E2eeSuiteId;
@@ -2105,6 +2115,7 @@ export class E2eeNodeHandshake {
     );
     let secrets: E2eeSessionSecrets;
     let noiseMessage2: Uint8Array;
+    let peerEphemeralPublicKey: Uint8Array;
     try {
       noiseMessage2 = noise.writeMessage(
         encodeE2eeServerAcceptPayload({
@@ -2113,6 +2124,17 @@ export class E2eeNodeHandshake {
           nodeAgreementKeyFingerprint: agreementFingerprint,
         }),
       );
+      // Taken INSIDE the funnel and before `Split()`, not after the accept is
+      // built: every exit below `holdSecrets` is a `return` rather than a
+      // `throw`, so a failure raised there would leave the §6.5 secrets with no
+      // owner to erase them. Both patterns transmit the initiator's `e` in
+      // message 1, which `readMessage` has already processed, so the absence
+      // branch is a shape check against a pattern-table edit rather than a
+      // runtime condition — and it throws so the catch below destroys the Noise
+      // state on the way out, exactly as every other failure here does.
+      const ephemeral = noise.remoteEphemeralPublicKey;
+      if (ephemeral === undefined) throw new TypeError("Noise handshake has no peer ephemeral.");
+      peerEphemeralPublicKey = ephemeral;
       // §8.7: `Split()` completes AFTER message 2 is produced.
       secrets = deriveE2eeSessionSecrets(noise);
     } catch {
@@ -2153,6 +2175,7 @@ export class E2eeNodeHandshake {
       kind: "accepted",
       record,
       sessionBindingHash,
+      peerEphemeralPublicKey,
       secrets,
       suite,
       tier,

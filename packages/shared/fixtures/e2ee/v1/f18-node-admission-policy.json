@@ -5,19 +5,18 @@
     "sections": [
       "8.6",
       "11.2 P25",
+      "11.3 Q12",
+      "12.3",
       "12.4",
+      "12.5",
       "12.6",
+      "5.7",
       "16.3 F18"
     ],
-    "summary": "The two parts of §16.3 F18 the landed modules decide: the §7.6 element 14 effective admitted pattern set under each policy, and the §11.2 P25 in-flight abort a policy withdrawal produces at §8.6 step 8 — with its generic fixed-size reject, its distinctness from §13.6's P12 abort, and their shared §11.5 observable.",
+    "summary": "§16.3 F18 in full. The §7.6 element 14 effective admitted pattern set under each policy and the §11.2 P25 in-flight abort with its generic fixed-size reject, both derived from the landed shared modules; and the §12.6 node-state transitions — `requireE2EE` and `requireApprovedClientE2EE` false → true over a `legacy`, an NX and an IK channel, the tier-independent suite clause run twice against the same command, the widening that closes nothing while the generation still advances, the combined narrow-and-widen command, the `negotiating` channel that is not swept and then fails closed, the two ordering cases including the row-N3 race in both enumeration orders, the step (c) counts broken out by class, and the §12.5 non-interaction every case asserts. The transitions are replayed against the real policy client by apps/server/src/hubConnector/relayE2eeNodeCorpus.test.ts.",
     "generator": "scripts/generate-e2ee-fixtures.ts"
   },
   "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
-  "deferred": [
-    "Every per-channel case of §16.3 F18: `requireE2EE` false → true over a `legacy`, an NX `e2ee`, and an IK `e2ee` channel; `requireApprovedClientE2EE` false → true over the same three; a suite leaving the advertised registry run twice against the same command with the established channel IK and NX; the widening that closes nothing while the policy generation still advances; the combined narrow-and-widen command; and the `negotiating` channel that is not swept and then fails closed on its next input. Each states a pre-change policy, a policy generation, and a live-channel set with per-channel mode, tier, suite, and snapshot. No node policy store and no channel registry exists in packages/shared/src, so there is nothing to derive the §12.6 policy-withdrawal test's per-channel verdict from. Owned by the node phase.",
-    "The §12.6 ordering cases: a hello reaching §8.6 step 2 AFTER the durable commit, and the row-N3 race in which a channel's transition lands concurrently with the sweep, run with the two enumerations attempted in both orders. These are properties of a single-snapshot sweep over a live registry. Owned by the node phase.",
-    "The §12.6 step (c) reported counts broken out by class, and the §12.5 non-interaction assertion that no fallback occurrence of either class is recorded by a withdrawal. Both need the node's occurrence counters and its channel registry. Owned by the node phase."
-  ],
   "testKeyMaterial": {
     "note": "TEST ONLY. Fixed public seeds; the public halves below are derived from them by the pinned primitives (§14.2). Identical to the material `packages/shared/src/relayE2eeTranscripts.test.ts` and `relayE2eeHandshake.test.ts` pin.",
     "testOnlyNodeIdentitySeed": {
@@ -119,7 +118,11 @@
         "requireApprovedClientE2EE": [
           "IK"
         ],
-        "narrowingRemovesOnlyNx": true
+        "narrowingRemovesOnlyNx": true,
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
       }
     },
     {
@@ -153,7 +156,1178 @@
         },
         "authorizationWithdrawalRow": "P12",
         "rowsAreDistinct": true,
-        "bothTakeTheIdenticalObservable": true
+        "bothTakeTheIdenticalObservable": true,
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "require-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+      "sections": [
+        "12.6",
+        "11.3 Q12",
+        "12.5"
+      ],
+      "note": "The first §12.6 narrowing. It withdraws the `legacy` channel and NOTHING else: `requireE2EE` is about whether plaintext may be admitted at all, and both `e2ee` channels already satisfy it. The `legacy` channel holds no session keys, so it closes with `channel_rejected` and NO record — in particular no `E2EEHandshakeReject`, which is a negotiation record and would be row K21 at the peer, which is the plausible wrong implementation this case exists to catch.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-legacy",
+            "mode": "legacy",
+            "tier": null,
+            "pattern": null,
+            "suite": null
+          },
+          {
+            "id": "ch-nx",
+            "mode": "e2ee",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 1
+          },
+          {
+            "id": "ch-ik",
+            "mode": "e2ee",
+            "tier": "native",
+            "pattern": "IK",
+            "suite": 1,
+            "admittedAuthoritySnapshot": {
+              "status": "approved",
+              "maxRole": "owner"
+            }
+          }
+        ],
+        "command": {
+          "requireE2EE": true
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "policyAfter": {
+          "requireE2EE": true,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationAfter": 8,
+        "perChannel": [
+          {
+            "id": "ch-legacy",
+            "withdrawn": true,
+            "class": "legacy",
+            "disposition": "closed with no record",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-nx",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          },
+          {
+            "id": "ch-ik",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "handshakeRejectOnTheLegacyChannel": false,
+        "counts": {
+          "legacy": 1,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 0,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "require-approved-client-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+      "sections": [
+        "12.4",
+        "12.6",
+        "11.3 Q12"
+      ],
+      "note": "§12.4 makes this narrowing imply effective `requireE2EE`, so the `legacy` channel goes too. The NX channel is FATAL-POST `Q12` with code `policy` and one length-uniform `E2EEError`. The IK channel STAYS OPEN, and §12.6 is explicit that this is a consequence rather than an exemption: §8.6 step 6 admitted it only against an `approved` record, and element 14 under `requireApprovedClientE2EE` is exactly `[\"IK\"]`.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-legacy",
+            "mode": "legacy",
+            "tier": null,
+            "pattern": null,
+            "suite": null
+          },
+          {
+            "id": "ch-nx",
+            "mode": "e2ee",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 1
+          },
+          {
+            "id": "ch-ik",
+            "mode": "e2ee",
+            "tier": "native",
+            "pattern": "IK",
+            "suite": 1,
+            "admittedAuthoritySnapshot": {
+              "status": "approved",
+              "maxRole": "owner"
+            }
+          }
+        ],
+        "command": {
+          "requireApprovedClientE2EE": true
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "policyAfter": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": true,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK"
+          ]
+        },
+        "policyGenerationAfter": 8,
+        "effectiveRequireE2EEAfter": true,
+        "perChannel": [
+          {
+            "id": "ch-legacy",
+            "withdrawn": true,
+            "class": "legacy",
+            "disposition": "closed with no record",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-nx",
+            "withdrawn": true,
+            "class": "nx_e2ee",
+            "disposition": "FATAL-POST",
+            "row": "Q12",
+            "errorCode": 3,
+            "errorRecordsOnTheWire": 1,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-ik",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "ikStaysOpenWithoutReadingItsStep6Snapshot": true,
+        "counts": {
+          "legacy": 1,
+          "nxE2ee": 1,
+          "suiteWithdrawn": 0,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "a-suite-leaving-the-registry-closes-the-ik-channel-established-on-it",
+      "sections": [
+        "12.6",
+        "11.3 Q12",
+        "7.6 element 9"
+      ],
+      "note": "The suite clause is tier-independent, and this is the run that proves it for this tier. A companion channel on a retained suite is untouched by the same command, so the sweep is shown to be keyed on the channel's own established suite and not on the fact that a narrowing happened.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1,
+            2
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-on-the-withdrawn-suite",
+            "mode": "e2ee",
+            "tier": "native",
+            "pattern": "IK",
+            "suite": 1,
+            "admittedAuthoritySnapshot": {
+              "status": "approved",
+              "maxRole": "owner"
+            }
+          },
+          {
+            "id": "ch-on-the-retained-suite",
+            "mode": "e2ee",
+            "tier": "native",
+            "pattern": "IK",
+            "suite": 2
+          }
+        ],
+        "command": {
+          "suiteRegistry": [
+            2
+          ]
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "policyAfter": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            2
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationAfter": 8,
+        "perChannel": [
+          {
+            "id": "ch-on-the-withdrawn-suite",
+            "withdrawn": true,
+            "class": "suite_withdrawn",
+            "disposition": "FATAL-POST",
+            "row": "Q12",
+            "errorCode": 3,
+            "errorRecordsOnTheWire": 1,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-on-the-retained-suite",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "closedDespiteAnUnchangedApprovedRecord": true,
+        "counts": {
+          "legacy": 0,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 1,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "a-suite-leaving-the-registry-closes-the-nx-channel-established-on-it",
+      "sections": [
+        "12.6",
+        "11.3 Q12",
+        "7.6 element 9"
+      ],
+      "note": "The suite clause is tier-independent, and this is the run that proves it for this tier. A companion channel on a retained suite is untouched by the same command, so the sweep is shown to be keyed on the channel's own established suite and not on the fact that a narrowing happened.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1,
+            2
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-on-the-withdrawn-suite",
+            "mode": "e2ee",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 1
+          },
+          {
+            "id": "ch-on-the-retained-suite",
+            "mode": "e2ee",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 2
+          }
+        ],
+        "command": {
+          "suiteRegistry": [
+            2
+          ]
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "policyAfter": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            2
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationAfter": 8,
+        "perChannel": [
+          {
+            "id": "ch-on-the-withdrawn-suite",
+            "withdrawn": true,
+            "class": "suite_withdrawn",
+            "disposition": "FATAL-POST",
+            "row": "Q12",
+            "errorCode": 3,
+            "errorRecordsOnTheWire": 1,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-on-the-retained-suite",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "counts": {
+          "legacy": 0,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 1,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "a-widening-closes-nothing-and-still-advances-the-policy-generation",
+      "sections": [
+        "12.6",
+        "5.7"
+      ],
+      "note": "A pure widening is not a withdrawal and sweeps nothing — it takes effect on the next advertisement and on channels admitted after it, never retroactively. The §5.7 generation still advances, because the generation tracks the committed policy rather than the sweep, and a client holding a higher remembered generation must not be served the old statement. The live-channel set is the one the PRE-CHANGE policy can actually hold: `requireApprovedClientE2EE` admits no `legacy` channel and no NX channel, so a case that opened one here would be asserting over a state the node cannot reach.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": true,
+          "requireApprovedClientE2EE": true,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-ik",
+            "mode": "e2ee",
+            "tier": "native",
+            "pattern": "IK",
+            "suite": 1,
+            "admittedAuthoritySnapshot": {
+              "status": "approved",
+              "maxRole": "owner"
+            }
+          }
+        ],
+        "command": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1,
+            2
+          ]
+        }
+      },
+      "expected": {
+        "isWithdrawal": false,
+        "policyAfter": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1,
+            2
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationAfter": 8,
+        "generationStillAdvances": true,
+        "perChannel": [
+          {
+            "id": "ch-ik",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "counts": {
+          "legacy": 0,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 0,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "a-combined-narrow-and-widen-command-is-a-withdrawal",
+      "sections": [
+        "12.6",
+        "13.6"
+      ],
+      "note": "One command that enables `requireE2EE` while ADDING a suite. It contains a reduction and the reduction governs, exactly as in §13.6 — the per-channel expectations are the narrowing's, unchanged by the widening travelling with it.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-legacy",
+            "mode": "legacy",
+            "tier": null,
+            "pattern": null,
+            "suite": null
+          },
+          {
+            "id": "ch-nx",
+            "mode": "e2ee",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 1
+          },
+          {
+            "id": "ch-ik",
+            "mode": "e2ee",
+            "tier": "native",
+            "pattern": "IK",
+            "suite": 1,
+            "admittedAuthoritySnapshot": {
+              "status": "approved",
+              "maxRole": "owner"
+            }
+          }
+        ],
+        "command": {
+          "requireE2EE": true,
+          "suiteRegistry": [
+            1,
+            2
+          ]
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "policyAfter": {
+          "requireE2EE": true,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1,
+            2
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationAfter": 8,
+        "perChannelMatchesTheNarrowingAlone": true,
+        "perChannel": [
+          {
+            "id": "ch-legacy",
+            "withdrawn": true,
+            "class": "legacy",
+            "disposition": "closed with no record",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-nx",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          },
+          {
+            "id": "ch-ik",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "counts": {
+          "legacy": 1,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 0,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "a-negotiating-channel-is-not-swept-and-then-fails-closed-on-a-refused-hello",
+      "sections": [
+        "12.6",
+        "8.6 step 2",
+        "4.4 N1",
+        "11.2 P9"
+      ],
+      "note": "The channel has been admitted to nothing, so §12.6 does not sweep it. What makes that safe is step (a)'s ordering: the commit has already happened, so this hello reaches §8.6 step 2 under the NARROWED policy and is refused there as `P9` — not `P25`, which is the row for a handshake that already PASSED step 2.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-negotiating",
+            "mode": "negotiating",
+            "tier": null,
+            "pattern": null,
+            "suite": null
+          }
+        ],
+        "command": {
+          "requireE2EE": true,
+          "requireApprovedClientE2EE": true
+        },
+        "nextInputAfterTheCommand": {
+          "class": "NEGOTIATION",
+          "type": 1,
+          "tier": "web"
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "sweptByTheWithdrawal": false,
+        "perChannel": [
+          {
+            "id": "ch-negotiating",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "nextInputRow": "P9",
+        "nextInputDisposition": "FATAL-PRE",
+        "failsClosed": true,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        },
+        "counts": {
+          "legacy": 0,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 0,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "a-negotiating-channel-is-not-swept-and-then-fails-closed-on-legacy-json",
+      "sections": [
+        "12.6",
+        "8.6 step 2",
+        "4.4 N1",
+        "11.2 P1"
+      ],
+      "note": "The same channel taking plaintext instead. Under the newly effective `requireE2EE` that is row N1, §11.2 `P1` — fail-closed, and reached without the sweep having to touch the channel at all.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-negotiating",
+            "mode": "negotiating",
+            "tier": null,
+            "pattern": null,
+            "suite": null
+          }
+        ],
+        "command": {
+          "requireE2EE": true,
+          "requireApprovedClientE2EE": true
+        },
+        "nextInputAfterTheCommand": {
+          "class": "LEGACY-JSON"
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "sweptByTheWithdrawal": false,
+        "perChannel": [
+          {
+            "id": "ch-negotiating",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "nextInputRow": "P1",
+        "nextInputDisposition": "FATAL-PRE",
+        "failsClosed": true,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        },
+        "counts": {
+          "legacy": 0,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 0,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "a-hello-reaching-step-2-after-the-durable-commit-is-refused-there",
+      "sections": [
+        "12.6",
+        "8.6 step 2",
+        "11.2 P9"
+      ],
+      "note": "The ordering itself. Committing first means every handshake that reaches §8.6 step 2 afterwards reads the narrowed policy, so no channel can be established behind a sweep that has already passed. A node that swept first and committed second would leave a window whose length is the sweep's own duration.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "command": {
+          "requireApprovedClientE2EE": true
+        },
+        "helloArrivesAt": "after step (a)'s durable commit",
+        "helloTier": "web",
+        "helloPattern": "NX"
+      },
+      "expected": {
+        "policyReadAtStepTwo": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": true,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK"
+          ]
+        },
+        "admittedPatternsAtStepTwo": [
+          "IK"
+        ],
+        "helloAdmitted": false,
+        "row": "P9",
+        "disposition": "FATAL-PRE",
+        "channelEstablishedBehindTheSweep": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        },
+        "counts": {
+          "legacy": 0,
+          "nxE2ee": 0,
+          "suiteWithdrawn": 0,
+          "abortedHandshakes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "the-row-n3-race-with-the-live-channel-enumeration-attempted-first",
+      "sections": [
+        "12.6",
+        "8.6 step 2",
+        "11.2 P25",
+        "11.3 Q12"
+      ],
+      "note": "A handshake that passed §8.6 step 2 under the old policy, whose row-N3 transition is scheduled to land concurrently with the sweep, between the two enumerations. §12.6 requires both to be one pass over ONE consistent snapshot, so the channel is dispatched exactly once by the mode that snapshot froze.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "command": {
+          "requireApprovedClientE2EE": true
+        },
+        "racingChannel": {
+          "id": "ch-racing",
+          "passedStepTwoUnderTheOldPolicy": true,
+          "tier": "web",
+          "pattern": "NX",
+          "suite": 1,
+          "rowN3LandsConcurrentlyWithTheSweep": true
+        },
+        "enumerationOrderAttempted": [
+          "live-channels",
+          "in-flight-handshakes"
+        ]
+      },
+      "expected": {
+        "oneConsistentSnapshot": true,
+        "dispatchedExactlyOnce": true,
+        "leftOpen": false,
+        "outcomeIsOneOf": [
+          {
+            "reachedRowN3": true,
+            "row": "Q12",
+            "disposition": "FATAL-POST",
+            "countedIn": "nxE2ee"
+          },
+          {
+            "reachedRowN3": false,
+            "row": "P25",
+            "disposition": "FATAL-PRE",
+            "countedIn": "abortedHandshakes"
+          }
+        ],
+        "totalChannelsAccountedFor": 1,
+        "sameOutcomeInBothEnumerationOrders": true,
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "the-row-n3-race-with-the-in-flight-enumeration-attempted-first",
+      "sections": [
+        "12.6",
+        "8.6 step 2",
+        "11.2 P25",
+        "11.3 Q12"
+      ],
+      "note": "The same race with the enumerations attempted in the other order. A conforming implementation produces the identical outcome in both; an implementation that runs two independent passes loses the channel in one of them, which is the defect this pair pins.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "command": {
+          "requireApprovedClientE2EE": true
+        },
+        "racingChannel": {
+          "id": "ch-racing",
+          "passedStepTwoUnderTheOldPolicy": true,
+          "tier": "web",
+          "pattern": "NX",
+          "suite": 1,
+          "rowN3LandsConcurrentlyWithTheSweep": true
+        },
+        "enumerationOrderAttempted": [
+          "in-flight-handshakes",
+          "live-channels"
+        ]
+      },
+      "expected": {
+        "oneConsistentSnapshot": true,
+        "dispatchedExactlyOnce": true,
+        "leftOpen": false,
+        "outcomeIsOneOf": [
+          {
+            "reachedRowN3": true,
+            "row": "Q12",
+            "disposition": "FATAL-POST",
+            "countedIn": "nxE2ee"
+          },
+          {
+            "reachedRowN3": false,
+            "row": "P25",
+            "disposition": "FATAL-PRE",
+            "countedIn": "abortedHandshakes"
+          }
+        ],
+        "totalChannelsAccountedFor": 1,
+        "sameOutcomeInBothEnumerationOrders": true,
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "step-c-counts-broken-out-by-class",
+      "sections": [
+        "12.6 step (c)"
+      ],
+      "note": "The acknowledgement's own numbers, over a channel set that populates every class at once: a `legacy` channel, an NX `e2ee` channel, an `e2ee` channel of each tier on a suite that is leaving the registry, and an in-flight handshake the new policy refuses. A channel missed by one of the two enumerations shows up here as a count and not only as a surviving channel.",
+      "inputs": {
+        "policyBefore": {
+          "requireE2EE": false,
+          "requireApprovedClientE2EE": false,
+          "suiteRegistry": [
+            1,
+            2
+          ],
+          "effectiveAdmittedPatterns": [
+            "IK",
+            "NX"
+          ]
+        },
+        "policyGenerationBefore": 7,
+        "channels": [
+          {
+            "id": "ch-legacy",
+            "mode": "legacy",
+            "tier": null,
+            "pattern": null,
+            "suite": null
+          },
+          {
+            "id": "ch-nx-retained-suite",
+            "mode": "e2ee",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 2
+          },
+          {
+            "id": "ch-nx-withdrawn-suite",
+            "mode": "e2ee",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 1
+          },
+          {
+            "id": "ch-ik-withdrawn-suite",
+            "mode": "e2ee",
+            "tier": "native",
+            "pattern": "IK",
+            "suite": 1
+          },
+          {
+            "id": "ch-in-flight-nx",
+            "mode": "in_flight",
+            "tier": "web",
+            "pattern": "NX",
+            "suite": 2
+          },
+          {
+            "id": "ch-negotiating",
+            "mode": "negotiating",
+            "tier": null,
+            "pattern": null,
+            "suite": null
+          }
+        ],
+        "command": {
+          "requireApprovedClientE2EE": true,
+          "suiteRegistry": [
+            2
+          ]
+        }
+      },
+      "expected": {
+        "isWithdrawal": true,
+        "perChannel": [
+          {
+            "id": "ch-legacy",
+            "withdrawn": true,
+            "class": "legacy",
+            "disposition": "closed with no record",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-nx-retained-suite",
+            "withdrawn": true,
+            "class": "nx_e2ee",
+            "disposition": "FATAL-POST",
+            "row": "Q12",
+            "errorCode": 3,
+            "errorRecordsOnTheWire": 1,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-nx-withdrawn-suite",
+            "withdrawn": true,
+            "class": "nx_e2ee",
+            "disposition": "FATAL-POST",
+            "row": "Q12",
+            "errorCode": 3,
+            "errorRecordsOnTheWire": 1,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-ik-withdrawn-suite",
+            "withdrawn": true,
+            "class": "suite_withdrawn",
+            "disposition": "FATAL-POST",
+            "row": "Q12",
+            "errorCode": 3,
+            "errorRecordsOnTheWire": 1,
+            "handshakeRejectEmitted": false,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-in-flight-nx",
+            "withdrawn": true,
+            "class": "handshake",
+            "disposition": "FATAL-PRE",
+            "row": "P25",
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": true,
+            "closeReason": "channel_rejected"
+          },
+          {
+            "id": "ch-negotiating",
+            "withdrawn": false,
+            "class": null,
+            "disposition": "untouched",
+            "row": null,
+            "errorCode": null,
+            "errorRecordsOnTheWire": 0,
+            "handshakeRejectEmitted": false,
+            "closeReason": null
+          }
+        ],
+        "counts": {
+          "legacy": 1,
+          "nxE2ee": 2,
+          "suiteWithdrawn": 1,
+          "abortedHandshakes": 1
+        },
+        "channelsAccountedFor": 6,
+        "eachChannelDispatchedExactlyOnce": true,
+        "inFlightAbortObservable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        },
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
+      }
+    },
+    {
+      "name": "no-withdrawal-records-a-fallback-occurrence-of-either-class",
+      "sections": [
+        "12.6",
+        "12.5",
+        "12.3"
+      ],
+      "note": "§12.6's closing prohibition, stated once over the whole family: a policy withdrawal is neither a legacy acceptance nor an advertisement failure, and folding it into either §12.5 counter would corrupt the §12.3 flip criterion with the operator's own action. Every case in this family carries `noFallbackOccurrenceRecorded`; this case names the invariant so it is claimed rather than merely repeated.",
+      "inputs": {
+        "appliesTo": "every case in this family",
+        "fallbackClasses": [
+          "peer-legacy",
+          "advertisement-unavailable"
+        ]
+      },
+      "expected": {
+        "recordedByAnyWithdrawal": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        },
+        "sweepIsAnOperatorActionNotALegacyAcceptance": true,
+        "noFallbackOccurrenceRecorded": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 0
+        }
       }
     }
   ]

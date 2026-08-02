@@ -9,6 +9,7 @@ import {
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 
 import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
+import { stubIdentityE2eeAdmin } from "./testUtils/e2eeOperatorStub.ts";
 import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import type { HubRelaySocket, HubRelaySocketEventMap } from "./HubRelayTransport.ts";
 import {
@@ -94,6 +95,7 @@ function identity(): HubIdentityRuntimeShape {
     readE2eePrekeyCertificate: async () => {
       throw new Error("unused");
     },
+    readStoredE2eePrekey: async () => null,
     rotateE2eePrekey: async () => {
       throw new Error("unused");
     },
@@ -111,6 +113,23 @@ function identity(): HubIdentityRuntimeShape {
       throw new Error("unused");
     },
     e2eePolicy: () => NODE_E2EE_FAIL_CLOSED_POLICY,
+    e2eeAuthorizationAdmin: stubIdentityE2eeAdmin(),
+    e2eeGeneration: () => 0,
+    applyE2eePolicy: async () => {
+      throw new Error("unused");
+    },
+    previewE2eePolicy: () => ({
+      policy: NODE_E2EE_FAIL_CLOSED_POLICY,
+      withdrawal: false,
+      changed: false,
+      counts: { legacy: 0, nxE2ee: 0, suiteWithdrawn: 0, abortedHandshakes: 0 },
+    }),
+    recoverE2eeGeneration: async () => {
+      throw new Error("unused");
+    },
+    resetE2eeFallbackState: async () => {
+      throw new Error("unused");
+    },
     readE2eeAdvertisement: async () => ({
       kind: "unavailable" as const,
       reason: "identity_unavailable" as const,

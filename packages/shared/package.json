@@ -48,6 +48,10 @@
       "types": "./src/relayE2eeVerificationDisplay.ts",
       "import": "./src/relayE2eeVerificationDisplay.ts"
     },
+    "./relayE2eeCorpusLiveness": {
+      "types": "./src/relayE2eeCorpusLiveness.ts",
+      "import": "./src/relayE2eeCorpusLiveness.ts"
+    },
     "./model": {
       "types": "./src/model.ts",
       "import": "./src/model.ts"

@@ -120,6 +120,22 @@ export interface NodeE2eeChannelAdvertiser {
   readonly connectionReady: (input: { readonly maxDataChunkBytes: number }) => void;
   /** Decide one channel's disposition. Called before its `channel.accept`. */
   readonly openChannel: () => Promise<NodeE2eeChannelAnnouncement>;
+  /**
+   * The §5.5 U1 condition on the CURRENT connection, or `undefined` when there
+   * is none (§12.5 Display).
+   *
+   * §12.5 requires the CLI to show the asserted `maxDataChunkBytes` and
+   * `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES` for a LIVE `undersized-connection`
+   * condition, and says in as many words that the pair is read from the current
+   * connection rather than retained in the ring. This is that read, and it is a
+   * connection property so it lives here rather than on the counter.
+   */
+  readonly undersizedConnection: () =>
+    | {
+        readonly assertedMaxDataChunkBytes: number;
+        readonly advertisementMinChunkBytes: number;
+      }
+    | undefined;
 }
 
 export function makeNodeE2eeChannelAdvertiser(
@@ -202,6 +218,17 @@ export function makeNodeE2eeChannelAdvertiser(
 
   return {
     connectionReady,
+    // `undersized === undefined` is "no `ready` has been seen", which `planFor`
+    // treats as undersized because a node that does not know the asserted limit
+    // cannot know its carrier fits — but there is no asserted number to display,
+    // so no live condition is reported here either.
+    undersizedConnection: () =>
+      undersized === true && assertedMaxDataChunkBytes !== undefined
+        ? {
+            assertedMaxDataChunkBytes,
+            advertisementMinChunkBytes: E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
+          }
+        : undefined,
     openChannel: async () => {
       const plan = await planFor();
       return {
