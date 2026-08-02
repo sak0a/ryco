@@ -2,7 +2,7 @@
 // Purpose: Reveal streamed assistant text at a steady, adaptive cadence so tokens appear
 //          fluidly instead of in the network clumps that land in the store.
 // Layer: Web UI streaming primitive
-// Exports: useSmoothStreamedText
+// Exports: useSmoothStreamedText, revealBoundary
 // Why: Provider deltas reach the store in bursts, so rendering each clump verbatim reads
 //      as choppy. This hook drains the already-delivered buffer on requestAnimationFrame
 //      at a velocity that adapts to the backlog, low-pass-smooths that velocity so there
@@ -26,6 +26,27 @@ const VELOCITY_LERP = 0.15;
 // Clamp per-frame delta so returning from a backgrounded tab (rAF paused) does not dump
 // the whole backlog in a single frame.
 const MAX_FRAME_SECONDS = 0.05;
+
+/**
+ * Pulls a reveal position back off the seam of a surrogate pair.
+ *
+ * Astral characters (emoji, many CJK extensions) occupy two UTF-16 units, and
+ * slicing between them renders U+FFFD. The reveal can sit on one position for
+ * several frames when the backlog is small, so the broken glyph would be
+ * visible rather than instantaneous.
+ *
+ * This deliberately stops at code points rather than grapheme clusters:
+ * splitting a ZWJ sequence briefly shows a valid, complete emoji, whereas
+ * segmenting the whole string every frame would be O(n) on a hot path.
+ */
+export function revealBoundary(text: string, count: number): number {
+  if (count <= 0 || count >= text.length) {
+    return count;
+  }
+  const previous = text.charCodeAt(count - 1);
+  const isHighSurrogate = previous >= 0xd800 && previous <= 0xdbff;
+  return isHighSurrogate ? count - 1 : count;
+}
 
 /**
  * Smoothly reveal `text` while `isStreaming` is true.
@@ -98,7 +119,7 @@ export function useSmoothStreamedText(text: string, isStreaming: boolean): strin
       velocityRef.current += (targetVelocity - velocityRef.current) * VELOCITY_LERP;
       shownRef.current = Math.min(length, shownRef.current + velocityRef.current * dt);
 
-      const nextCount = Math.floor(shownRef.current);
+      const nextCount = revealBoundary(target, Math.floor(shownRef.current));
       if (nextCount !== emittedRef.current) {
         emittedRef.current = nextCount;
         setRevealed(nextCount >= length ? target : target.slice(0, nextCount));

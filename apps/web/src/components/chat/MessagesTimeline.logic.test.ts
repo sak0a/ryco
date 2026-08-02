@@ -669,6 +669,56 @@ describe("deriveMessagesTimelineRows", () => {
     expect(expanded.map((row) => row.id)).toEqual(["work-toggle:work-entry-1", "work-1", "work-2"]);
   });
 
+  it("keeps the plain count when a folded run hides a failure", () => {
+    const timelineEntries = [
+      {
+        id: "work-entry-1",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:01Z",
+        entry: makeWorkEntry({
+          id: "work-1",
+          createdAt: "2026-01-01T00:00:01Z",
+          command: "bun typecheck",
+        }),
+      },
+      {
+        id: "work-entry-2",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:02Z",
+        entry: makeWorkEntry({
+          id: "work-2",
+          createdAt: "2026-01-01T00:00:02Z",
+          command: "bun lint",
+        }),
+      },
+      {
+        id: "work-entry-3",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:03Z",
+        entry: makeWorkEntry({ id: "work-3", createdAt: "2026-01-01T00:00:03Z", tone: "error" }),
+      },
+      {
+        id: "work-entry-4",
+        kind: "work" as const,
+        createdAt: "2026-01-01T00:00:04Z",
+        entry: makeWorkEntry({ id: "work-4", createdAt: "2026-01-01T00:00:04Z" }),
+      },
+    ];
+
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    // "Ran 2 commands" would account for only the two tool rows and quietly
+    // conceal the failed one until the group was expanded.
+    const toggle = rows.find((row) => row.kind === "work-toggle");
+    expect(toggle?.kind === "work-toggle" ? toggle.summary : undefined).toBeNull();
+  });
+
   it("recaps a folded run of tool calls by category", () => {
     const timelineEntries = [
       {

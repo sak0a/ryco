@@ -158,6 +158,13 @@ export function summarizeToolCallGroup(
   if (summarizable.length < MIN_COLLAPSIBLE_TOOL_GROUP_SIZE) {
     return null;
   }
+  // The recap stands in for the entire folded run, so it may only be produced
+  // when it can account for every entry. A run of two commands plus a failure
+  // would otherwise collapse to "Ran 2 commands" and hide the failure until
+  // someone expanded the group — the caller falls back to a plain count instead.
+  if (summarizable.length !== entries.length) {
+    return null;
+  }
 
   const countByCategory = new Map<ToolCallSummaryCategory, number>();
   const distinctFilesByCategory = new Map<ToolCallSummaryCategory, Set<string>>();
