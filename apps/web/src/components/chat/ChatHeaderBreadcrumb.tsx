@@ -4,7 +4,7 @@ import { cn } from "~/lib/utils";
 import {
   shouldShowWorktreeBreadcrumbSegment,
   type WorktreeOriginLike,
-} from "./ChatSessionTabs.logic";
+} from "./ChatHeaderBreadcrumb.logic";
 
 export interface ChatHeaderBreadcrumbProps {
   projectName: string | null | undefined;

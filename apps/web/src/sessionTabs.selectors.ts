@@ -1,12 +1,17 @@
 import { scopeThreadRef, scopedThreadKey } from "@ryco/client-runtime/scoped";
 import type { DraftThreadState } from "./composerDraftStore";
-import type { ChatSessionTabsItem } from "./components/chat/ChatSessionTabs";
 import {
   deriveStatusBucket,
   resolveThreadStatusPill,
   type SidebarStatusBucket,
 } from "./components/Sidebar.logic";
 import { DEFAULT_AGENT_TOKEN_MODE, type SidebarThreadSummary } from "./types";
+
+export interface SessionTabItem {
+  key: string;
+  title: string;
+  bucket: SidebarStatusBucket;
+}
 
 export interface SessionTabsFilter {
   worktreeId: string | null | undefined;
@@ -41,7 +46,7 @@ export function draftThreadToSidebarSummary(draft: DraftThreadState): SidebarThr
 }
 
 interface CachedItem {
-  item: ChatSessionTabsItem;
+  item: SessionTabItem;
   inputs: {
     title: string;
     bucket: SidebarStatusBucket;
@@ -69,9 +74,9 @@ function threadBelongsToFilter(thread: SidebarThreadSummary, filter: SessionTabs
 export function createSessionTabsSelector(): (
   threads: ReadonlyArray<SidebarThreadSummary>,
   filter: SessionTabsFilter,
-) => ReadonlyArray<ChatSessionTabsItem> {
+) => ReadonlyArray<SessionTabItem> {
   const cache = new Map<string, CachedItem>();
-  let lastResult: ReadonlyArray<ChatSessionTabsItem> | null = null;
+  let lastResult: ReadonlyArray<SessionTabItem> | null = null;
 
   return (threads, filter) => {
     const matching: SidebarThreadSummary[] = [];
@@ -87,7 +92,7 @@ export function createSessionTabsSelector(): (
     );
 
     const seenKeys = new Set<string>();
-    const items: ChatSessionTabsItem[] = [];
+    const items: SessionTabItem[] = [];
     let identical = lastResult !== null && lastResult.length === matching.length;
     for (let i = 0; i < matching.length; i += 1) {
       const thread = matching[i]!;
@@ -98,7 +103,7 @@ export function createSessionTabsSelector(): (
         statusPill: resolveThreadStatusPill({ thread }),
       });
       const cached = cache.get(key);
-      let item: ChatSessionTabsItem;
+      let item: SessionTabItem;
       if (cached && cached.inputs.title === thread.title && cached.inputs.bucket === bucket) {
         item = cached.item;
       } else {

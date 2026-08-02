@@ -13,8 +13,3 @@ export function shouldShowWorktreeBreadcrumbSegment(input: {
   if (MAIN_BRANCH_NAMES.has(branch)) return false;
   return true;
 }
-
-export function tabKeyboardHint(index: number): string | null {
-  if (!Number.isInteger(index) || index < 0 || index > 8) return null;
-  return `⌘${index + 1}`;
-}

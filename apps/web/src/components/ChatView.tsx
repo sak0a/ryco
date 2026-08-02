@@ -145,9 +145,12 @@ import { ChatHeader } from "./chat/ChatHeader";
 import { PhoneThreadAppBar } from "./shell/phone/PhoneThreadAppBar";
 import type { PhoneThreadDockProps } from "./shell/phone/PhoneThreadDock";
 import { PhoneSurfaceScaffold, PhoneWorkSurfaceSheet } from "./shell/phone/PhoneWorkSurface";
-import { type ChatSessionTabsItem } from "./chat/ChatSessionTabs";
 import { useChatSessionTabsPrefetch } from "./chat/useChatSessionTabsPrefetch";
-import { createSessionTabsSelector, draftThreadToSidebarSummary } from "../sessionTabs.selectors";
+import {
+  createSessionTabsSelector,
+  draftThreadToSidebarSummary,
+  type SessionTabItem,
+} from "../sessionTabs.selectors";
 import type { SidebarThreadSummary } from "../types";
 import { markTabSwitchClick, usePerfMark } from "../perf/tabSwitchInstrumentation";
 import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
@@ -226,7 +229,7 @@ import {
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
-const EMPTY_SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = Object.freeze([]);
+const EMPTY_SESSION_TABS: ReadonlyArray<SessionTabItem> = Object.freeze([]);
 const PROVIDER_STATUS_KEY_SEPARATOR = "\0";
 
 // "Undo send" window: how long a freshly sent message can be pulled back before
@@ -825,9 +828,9 @@ export default function ChatView(props: ChatViewProps) {
       if (!target) return;
       markTabSwitchClick(key);
       // Defer navigate to the next macrotask so React can commit the
-      // optimistic pendingKey paint in ChatSessionTabs before the heavy
-      // route-driven re-render kicks in. Wrapping in startTransition
-      // composed badly with tanstack-router's internal Transitioner.
+      // dock's optimistic selection paint before the heavy route-driven
+      // re-render kicks in. Wrapping in startTransition composed badly
+      // with tanstack-router's internal Transitioner.
       setTimeout(() => {
         void navigate({
           to: "/$environmentId/$threadId",
@@ -841,7 +844,7 @@ export default function ChatView(props: ChatViewProps) {
     [navigate],
   );
 
-  const { handleTabPrefetchEnter, handleTabPrefetchLeave } = useChatSessionTabsPrefetch({
+  useChatSessionTabsPrefetch({
     activeWorktreeSessionTabs,
     activeSessionTabKey,
   });
@@ -3200,12 +3203,7 @@ export default function ChatView(props: ChatViewProps) {
             worktreeWorkItemKey={activeWorktreeSummary?.workItemKey ?? null}
             worktreeWorkItemState={activeWorktreeSummary?.workItemState ?? null}
             worktreeWorkItemStateName={activeWorktreeSummary?.workItemStateName ?? null}
-            sessionTabs={activeWorktreeSessionTabs}
-            activeSessionTabKey={activeSessionTabKey}
             onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
-            onSelectSessionTab={handleSelectSessionTab}
-            onPrefetchTabEnter={handleTabPrefetchEnter}
-            onPrefetchTabLeave={handleTabPrefetchLeave}
             workspacePanelOpen={workspacePanelOpen}
             onToggleWorkspacePanel={onToggleWorkspacePanel}
             overviewSidebarOpen={overviewControlOpen}

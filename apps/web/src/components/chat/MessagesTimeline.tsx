@@ -51,6 +51,7 @@ import {
   computeStableMessagesTimelineRows,
   deriveTimelineMinimapItems,
   isErroredWorkEntry,
+  isTimelineScrolledToEnd,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
@@ -265,11 +266,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     setMessageActionsRequest(request);
   }, []);
 
-  const handleScroll = useCallback(() => {
-    const state = listRef.current?.getState?.();
-    if (state) {
-      onIsAtEndChange(state.isAtEnd);
+  // Measure the live scroller instead of LegendList's cached `isAtEnd`: that
+  // flag is only refreshed inside the list's own layout/scroll passes, so a
+  // transcript short enough never to scroll keeps whatever value it was
+  // initialised with and the scroll-to-bottom pill sticks around forever.
+  const evaluateIsAtEnd = useCallback(() => {
+    const scrollNode = listRef.current?.getScrollableNode?.();
+    if (!(scrollNode instanceof HTMLElement)) {
+      return;
     }
+    onIsAtEndChange(isTimelineScrolledToEnd(scrollNode));
+  }, [listRef, onIsAtEndChange]);
+
+  const handleScroll = useCallback(() => {
+    evaluateIsAtEnd();
+    const state = listRef.current?.getState?.();
     if (!state || minimapItems.length === 0) {
       return;
     }
@@ -292,12 +303,35 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [evaluateIsAtEnd, listRef, minimapItems, minimapStripMap]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
     return () => cancelAnimationFrame(frame);
   }, [handleScroll, rows.length]);
+
+  // The scroller emits no event when rows grow, shrink, or finish measuring, so
+  // re-check the bottom whenever LegendList republishes a content size. Without
+  // this the pill survives a transcript that shrinks back under the viewport.
+  useEffect(() => {
+    if (!timelineViewportElement) {
+      return;
+    }
+    const state = listRef.current?.getState?.();
+    if (!state?.listen) {
+      return;
+    }
+    const unsubscribes = [
+      state.listen("totalSize", evaluateIsAtEnd),
+      state.listen("headerSize", evaluateIsAtEnd),
+      state.listen("footerSize", evaluateIsAtEnd),
+    ];
+    return () => {
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe();
+      }
+    };
+  }, [evaluateIsAtEnd, listRef, timelineViewportElement]);
 
   useEffect(() => {
     if (!timelineViewportElement) {
@@ -311,6 +345,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         current === nextHasPersistentGutter ? current : nextHasPersistentGutter,
       );
       setMinimapHitStripWidth(resolveTimelineMinimapHitStripWidth(viewportWidth));
+      // A shorter viewport can turn a non-scrolling transcript into a
+      // scrolling one (and back), so the pill has to be re-decided here too.
+      evaluateIsAtEnd();
     };
 
     const frame = requestAnimationFrame(measure);
@@ -321,7 +358,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [timelineViewportElement]);
+  }, [evaluateIsAtEnd, timelineViewportElement]);
 
   const previousRowCountRef = useRef(rows.length);
   useEffect(() => {

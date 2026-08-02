@@ -9,14 +9,46 @@ import { render } from "vitest-browser-react";
 
 const scrollToEndSpy = vi.fn();
 const scrollToIndexSpy = vi.fn();
+type MockListenerType = "totalSize" | "headerSize" | "footerSize";
 interface MockLegendListState {
   isAtEnd: boolean;
   scroll?: number;
   scrollLength?: number;
+  listen?: (type: MockListenerType, callback: () => void) => () => void;
   positionAtIndex?: (index: number) => number | undefined;
   sizeAtIndex?: (index: number) => number | undefined;
 }
-const getStateSpy = vi.fn<() => MockLegendListState>(() => ({ isAtEnd: true }));
+const getStateSpy = vi.fn<() => MockLegendListState>(() => ({
+  isAtEnd: true,
+  listen: mockListen,
+}));
+
+// The timeline reads bottom-ness off the live scroller, so the mock hands it a
+// detached element whose scroll metrics each test controls.
+let scrollableNode: HTMLElement | null = null;
+const sizeListeners = new Set<() => void>();
+
+function setScrollMetrics(metrics: {
+  scrollTop: number;
+  scrollHeight: number;
+  clientHeight: number;
+}): HTMLElement {
+  const node = document.createElement("div");
+  Object.defineProperty(node, "scrollTop", { value: metrics.scrollTop, configurable: true });
+  Object.defineProperty(node, "scrollHeight", { value: metrics.scrollHeight, configurable: true });
+  Object.defineProperty(node, "clientHeight", { value: metrics.clientHeight, configurable: true });
+  scrollableNode = node;
+  return node;
+}
+
+function mockListen(type: MockListenerType, callback: () => void): () => void {
+  if (type === "totalSize") {
+    sizeListeners.add(callback);
+  }
+  return () => {
+    sizeListeners.delete(callback);
+  };
+}
 
 vi.mock("@legendapp/list/react", async () => {
   const React = await import("react");
@@ -40,6 +72,7 @@ vi.mock("@legendapp/list/react", async () => {
           scrollToEnd: scrollToEndSpy,
           scrollToIndex: scrollToIndexSpy,
           getState: getStateSpy,
+          getScrollableNode: () => scrollableNode,
         }) as unknown as LegendListRef,
     );
 
@@ -63,6 +96,21 @@ vi.mock("@legendapp/list/react", async () => {
 
 import { MessagesTimeline } from "./MessagesTimeline";
 import { useUiStateStore } from "~/uiStateStore";
+
+const THINKING_ENTRIES = [
+  {
+    id: "work-1",
+    kind: "work" as const,
+    createdAt: "2026-04-13T12:00:00.000Z",
+    entry: {
+      id: "work-1",
+      createdAt: "2026-04-13T12:00:00.000Z",
+      label: "thinking",
+      detail: "Inspecting repository state",
+      tone: "thinking" as const,
+    },
+  },
+];
 
 function buildProps() {
   return {
@@ -93,7 +141,9 @@ describe("MessagesTimeline", () => {
     scrollToEndSpy.mockReset();
     scrollToIndexSpy.mockReset();
     getStateSpy.mockReset();
-    getStateSpy.mockReturnValue({ isAtEnd: true });
+    getStateSpy.mockReturnValue({ isAtEnd: true, listen: mockListen });
+    scrollableNode = null;
+    sizeListeners.clear();
     vi.restoreAllMocks();
     useUiStateStore.setState({
       threadTurnFoldExpandedById: {},
@@ -359,6 +409,60 @@ describe("MessagesTimeline", () => {
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
       expect(scrollToEndSpy).toHaveBeenCalledWith({ animated: false });
       expect(requestAnimationFrameSpy).toHaveBeenCalled();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("never reports away-from-end for a transcript too short to scroll", async () => {
+    setScrollMetrics({ scrollTop: 0, scrollHeight: 400, clientHeight: 800 });
+
+    const props = buildProps();
+    const screen = await render(<MessagesTimeline {...props} timelineEntries={THINKING_ENTRIES} />);
+
+    try {
+      await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
+      expect(props.onIsAtEndChange).toHaveBeenCalledWith(true);
+      expect(props.onIsAtEndChange).not.toHaveBeenCalledWith(false);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("reports away-from-end while the transcript is scrolled up", async () => {
+    setScrollMetrics({ scrollTop: 0, scrollHeight: 2000, clientHeight: 800 });
+
+    const props = buildProps();
+    const screen = await render(<MessagesTimeline {...props} timelineEntries={THINKING_ENTRIES} />);
+
+    try {
+      await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
+      expect(props.onIsAtEndChange).toHaveBeenCalledWith(false);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("re-checks the bottom when the measured content size settles", async () => {
+    // Estimated row sizes overflow the viewport on the first pass...
+    setScrollMetrics({ scrollTop: 0, scrollHeight: 2000, clientHeight: 800 });
+
+    const props = buildProps();
+    const screen = await render(<MessagesTimeline {...props} timelineEntries={THINKING_ENTRIES} />);
+
+    try {
+      await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
+      expect(props.onIsAtEndChange).toHaveBeenLastCalledWith(false);
+
+      // ...and the real measurement lands well under it. No scroll event
+      // follows, so the content-size listener is what has to re-decide.
+      setScrollMetrics({ scrollTop: 0, scrollHeight: 400, clientHeight: 800 });
+      expect(sizeListeners.size).toBeGreaterThan(0);
+      for (const listener of sizeListeners) {
+        listener();
+      }
+
+      expect(props.onIsAtEndChange).toHaveBeenLastCalledWith(true);
     } finally {
       await screen.unmount();
     }

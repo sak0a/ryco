@@ -1,24 +1,18 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { parseScopedThreadKey } from "@ryco/client-runtime/scoped";
 import { retainThreadDetailSubscription } from "../../environments/runtime/service";
 import { markTabSwitchFirstPaint } from "../../perf/tabSwitchInstrumentation";
-import { createTabPrefetchController } from "./ChatSessionTabsPrefetch";
-import type { ChatSessionTabsItem } from "./ChatSessionTabs";
+import type { SessionTabItem } from "../../sessionTabs.selectors";
 
 export interface UseChatSessionTabsPrefetchInput {
-  activeWorktreeSessionTabs: ReadonlyArray<ChatSessionTabsItem>;
+  activeWorktreeSessionTabs: ReadonlyArray<SessionTabItem>;
   activeSessionTabKey: string | null;
-}
-
-export interface UseChatSessionTabsPrefetchResult {
-  handleTabPrefetchEnter: (key: string) => void;
-  handleTabPrefetchLeave: (key: string) => void;
 }
 
 export const MAX_SPECULATIVE_SIBLING_TAB_PREFETCH = 6;
 
 export function selectSpeculativeSiblingTabPrefetchKeys(
-  activeWorktreeSessionTabs: ReadonlyArray<ChatSessionTabsItem>,
+  activeWorktreeSessionTabs: ReadonlyArray<SessionTabItem>,
   activeSessionTabKey: string | null,
   limit = MAX_SPECULATIVE_SIBLING_TAB_PREFETCH,
 ): ReadonlyArray<string> {
@@ -60,45 +54,18 @@ export function selectSpeculativeSiblingTabPrefetchKeys(
 }
 
 /**
- * Warms WS subscriptions for sibling session tabs (on hover and speculatively
- * for nearby tabs in the active worktree) and records the first-paint perf mark
- * when the active tab changes.
+ * Speculatively warms WS subscriptions for nearby sibling sessions in the
+ * active worktree and records the first-paint perf mark when the active
+ * session changes.
  */
-export function useChatSessionTabsPrefetch(
-  input: UseChatSessionTabsPrefetchInput,
-): UseChatSessionTabsPrefetchResult {
+export function useChatSessionTabsPrefetch(input: UseChatSessionTabsPrefetchInput): void {
   const { activeWorktreeSessionTabs, activeSessionTabKey } = input;
 
-  const prefetchControllerRef = useRef<ReturnType<typeof createTabPrefetchController> | null>(null);
-  useEffect(() => {
-    const controller = createTabPrefetchController({
-      retain: (key) => {
-        const ref = parseScopedThreadKey(key);
-        if (!ref) return () => {};
-        return retainThreadDetailSubscription(ref.environmentId, ref.threadId);
-      },
-      releaseDelayMs: 250,
-    });
-    prefetchControllerRef.current = controller;
-    return () => {
-      controller.dispose();
-      prefetchControllerRef.current = null;
-    };
-  }, []);
-  const handleTabPrefetchEnter = useCallback(
-    (key: string) => prefetchControllerRef.current?.enter(key),
-    [],
-  );
-  const handleTabPrefetchLeave = useCallback(
-    (key: string) => prefetchControllerRef.current?.leave(key),
-    [],
-  );
-
-  // Speculatively warm WS subscriptions for nearby sibling tabs in the
+  // Speculatively warm WS subscriptions for nearby sibling sessions in the
   // active worktree. Subscriptions are reference-counted by
   // retainThreadDetailSubscription, so the active route's own retain
   // is not duplicated and idle ones are evicted by the existing cap.
-  // This makes cold clicks (no hover) behave like warm clicks.
+  // This makes switching to a sibling session land on warm data.
   useEffect(() => {
     if (activeWorktreeSessionTabs.length === 0) return;
     const releases: Array<() => void> = [];
@@ -120,9 +87,4 @@ export function useChatSessionTabsPrefetch(
     const key = activeSessionTabKey;
     queueMicrotask(() => markTabSwitchFirstPaint(key));
   }, [activeSessionTabKey]);
-
-  return {
-    handleTabPrefetchEnter,
-    handleTabPrefetchLeave,
-  };
 }

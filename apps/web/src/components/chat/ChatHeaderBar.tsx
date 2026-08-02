@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { ChatHeaderBreadcrumb } from "./ChatHeaderBreadcrumb";
-import type { WorktreeOriginLike } from "./ChatSessionTabs.logic";
+import type { WorktreeOriginLike } from "./ChatHeaderBreadcrumb.logic";
 import type { LinkedWorktreeItem } from "../worktrees/LinkedWorktreeItemDialog";
 import { WorktreeSourceControlBadges } from "../worktrees/WorktreeSourceControlBadges";
 
