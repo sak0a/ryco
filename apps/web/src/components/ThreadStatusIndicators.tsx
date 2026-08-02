@@ -26,7 +26,6 @@ export interface PrStatusIndicator {
 export interface TerminalStatusIndicator {
   label: "Terminal process running";
   colorClass: string;
-  pulse: boolean;
 }
 
 export type ThreadPr = VcsStatusResult["pr"];
@@ -89,7 +88,6 @@ export function terminalStatusFromRunningIds(
   return {
     label: "Terminal process running",
     colorClass: "text-teal-600 dark:text-teal-300/90",
-    pulse: true,
   };
 }
 
@@ -114,7 +112,7 @@ export function ThreadStatusLabel({
       >
         <span
           className={`size-[9px] rounded-full ${status.dotClass} ${
-            status.pulse ? "animate-pulse" : ""
+            status.pulse ? "animate-status-pulse" : ""
           }`}
         />
         <span className="sr-only">{status.label}</span>
@@ -129,7 +127,7 @@ export function ThreadStatusLabel({
     >
       <span
         className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
-          status.pulse ? "animate-pulse" : ""
+          status.pulse ? "animate-status-pulse" : ""
         }`}
       />
       <span className={alwaysShowLabel ? undefined : "hidden md:inline"}>{status.label}</span>
@@ -279,7 +277,7 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
           title={terminalStatus.label}
           className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
         >
-          <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
+          <TerminalIcon className="size-3" />
         </span>
       ) : null}
       {isRemoteThread ? (

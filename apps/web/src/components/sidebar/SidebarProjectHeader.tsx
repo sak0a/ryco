@@ -79,7 +79,7 @@ export function SidebarProjectHeader(props: {
           >
             <span
               className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
-                projectStatus.pulse ? "animate-pulse" : ""
+                projectStatus.pulse ? "animate-status-pulse" : ""
               }`}
             />
           </span>

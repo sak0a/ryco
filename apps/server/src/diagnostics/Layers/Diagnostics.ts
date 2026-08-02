@@ -1,6 +1,5 @@
 import { open } from "node:fs/promises";
 import os from "node:os";
-import { monitorEventLoopDelay } from "node:perf_hooks";
 
 import {
   type DiagnosticsDurationBucket,
@@ -10,19 +9,26 @@ import {
   type DiagnosticsSpan,
   type DiagnosticsSpanEvent,
   type DiagnosticsSpanNameSummary,
+  type DiagnosticsTraceSinkHealth,
   type DiagnosticsWarning,
 } from "@ryco/contracts";
 import { Effect, Layer } from "effect";
 
 import type { ServerConfigShape } from "../../config.ts";
 import { ServerConfig } from "../../config.ts";
+import type { TraceSinkHealth } from "../../observability/TraceSink.ts";
 import type { TraceRecord } from "../../observability/TraceRecord.ts";
-import { Diagnostics, type DiagnosticsShape } from "../Services/Diagnostics.ts";
+import { summarizeOperationalMetrics } from "../OperationalMetrics.ts";
+import {
+  Diagnostics,
+  type DiagnosticsShape,
+  type DiagnosticsSnapshotInput,
+} from "../Services/Diagnostics.ts";
 
 const TRACE_RECORD_LIMIT = 2_000;
 const RESOURCE_SAMPLE_LIMIT = 240;
 const FILE_TAIL_BYTES = 512 * 1024;
-const RESOURCE_SAMPLE_INTERVAL_MS = 1_000;
+const FILE_TAIL_REFRESH_INTERVAL_MS = 30_000;
 const LIST_LIMIT = 50;
 const EVENT_LIMIT = 80;
 const RAW_MESSAGE_LIMIT = 1_200;
@@ -51,9 +57,8 @@ function makeRingBuffer<A>(limit: number): RingBuffer<A> {
 }
 
 interface ResourceSampler {
-  readonly current: () => DiagnosticsResourceSample;
+  readonly sample: () => Promise<DiagnosticsResourceSample>;
   readonly history: () => ReadonlyArray<DiagnosticsResourceSample>;
-  readonly close: () => void;
 }
 
 function makeResourceSampler(): ResourceSampler {
@@ -62,10 +67,15 @@ function makeResourceSampler(): ResourceSampler {
   const cpuCount = Math.max(1, os.cpus().length);
   let lastCpu = process.cpuUsage();
   let lastSampledAtMs = startedAtMs;
-  const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
-  eventLoopDelay.enable();
+  let inFlightSample: Promise<DiagnosticsResourceSample> | null = null;
 
-  const sample = () => {
+  const sampleOnce = async () => {
+    const eventLoopStartedAt = performance.now();
+    await new Promise<void>((resolve) => {
+      const timeoutId = setTimeout(resolve, 0);
+      timeoutId.unref?.();
+    });
+    const eventLoopDelayMs = Math.max(0, performance.now() - eventLoopStartedAt);
     const nowMs = Date.now();
     const memory = process.memoryUsage();
     const cpu = process.cpuUsage();
@@ -76,13 +86,8 @@ function makeResourceSampler(): ResourceSampler {
       0,
       Math.min(100, (busyMicros / (elapsedMicros * cpuCount)) * 100),
     );
-    const eventLoopDelayMs = Number.isFinite(eventLoopDelay.mean)
-      ? eventLoopDelay.mean / 1_000_000
-      : undefined;
-
     lastCpu = cpu;
     lastSampledAtMs = nowMs;
-    eventLoopDelay.reset();
 
     const next = {
       sampledAt: new Date(nowMs).toISOString(),
@@ -99,23 +104,26 @@ function makeResourceSampler(): ResourceSampler {
         systemMicros: cpu.system,
         utilizationPercent,
       },
-      ...(eventLoopDelayMs !== undefined ? { eventLoopDelayMs } : {}),
+      eventLoopDelayMs,
     } satisfies DiagnosticsResourceSample;
     samples.push(next);
     return next;
   };
 
-  sample();
-  const intervalId = setInterval(sample, RESOURCE_SAMPLE_INTERVAL_MS);
-  intervalId.unref?.();
-
   return {
-    current: sample,
-    history: samples.values,
-    close() {
-      clearInterval(intervalId);
-      eventLoopDelay.disable();
+    sample() {
+      if (inFlightSample !== null) {
+        return inFlightSample;
+      }
+      const pending = sampleOnce();
+      inFlightSample = pending;
+      const clearInFlight = () => {
+        if (inFlightSample === pending) inFlightSample = null;
+      };
+      void pending.then(clearInFlight, clearInFlight);
+      return pending;
     },
+    history: samples.values,
   };
 }
 
@@ -479,7 +487,7 @@ async function readTraceTail(input: {
   } catch (error) {
     input.warnings.push({
       code: "diagnostics.trace-tail-unavailable",
-      source: input.filePath,
+      source: "trace-file",
       message: error instanceof Error ? error.message : "Unable to read trace tail.",
     });
     return [];
@@ -500,7 +508,7 @@ async function readTraceTail(input: {
   if (malformed > 0) {
     input.warnings.push({
       code: "diagnostics.trace-tail-malformed-lines",
-      source: input.filePath,
+      source: "trace-file",
       message: "Some trace records in the retained tail could not be parsed.",
       count: malformed,
     });
@@ -520,7 +528,7 @@ async function readFailureLogTail(input: {
   } catch (error) {
     input.warnings.push({
       code: "diagnostics.log-tail-unavailable",
-      source: input.filePath,
+      source: input.source,
       message: error instanceof Error ? error.message : "Unable to read log tail.",
     });
     return [];
@@ -547,129 +555,139 @@ function dedupeTraceRecords(records: ReadonlyArray<TraceRecord>): ReadonlyArray<
   return [...byId.values()];
 }
 
-export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(function* (
-  config: ServerConfigShape,
-) {
-  const serverStartedAtMs = Date.now();
-  const serverStartedAt = new Date(serverStartedAtMs).toISOString();
-  const traceRecords = makeRingBuffer<TraceRecord>(TRACE_RECORD_LIMIT);
-  const resourceSampler = makeResourceSampler();
-  yield* Effect.addFinalizer(() => Effect.sync(() => resourceSampler.close()));
+function readTraceSinkHealth(
+  reader: (() => TraceSinkHealth) | undefined,
+): DiagnosticsTraceSinkHealth | null {
+  if (reader === undefined) return null;
+  try {
+    return reader();
+  } catch {
+    return null;
+  }
+}
 
+function buildOperationalPerformance(input: {
+  readonly snapshotInput: DiagnosticsSnapshotInput;
+  readonly generatedAt: string;
+  readonly snapshotStartedAt: number;
+  readonly traceSinkHealth: (() => TraceSinkHealth) | undefined;
+}) {
   return {
-    recordTraceRecords(records) {
-      for (const record of records) {
-        traceRecords.push(record);
-      }
+    local: input.snapshotInput.localMetrics ?? {
+      turnQuiescenceAvgMs: null,
+      checkpointDurationP95Ms: null,
+      latestThreadSnapshotDurationMs: null,
+      threadSnapshotDurationP95Ms: null,
+      wsReconnectCount: 0,
+      windowSampleCounts: {
+        turnQuiescence: 0,
+        checkpointDuration: 0,
+        threadSnapshotDuration: 0,
+      },
+      capturedAt: input.generatedAt,
     },
-    getSnapshot(input) {
-      return Effect.tryPromise(async () => {
-        const generatedAt = new Date().toISOString();
+    queues: summarizeOperationalMetrics(input.snapshotInput.metricSnapshots ?? []),
+    traceSink: readTraceSinkHealth(input.traceSinkHealth),
+    snapshotCollectionDurationMs: Math.max(0, performance.now() - input.snapshotStartedAt),
+  };
+}
+
+export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(
+  (
+    config: ServerConfigShape,
+    dependencies?: {
+      readonly traceSinkHealth?: () => TraceSinkHealth;
+    },
+  ) =>
+    Effect.sync(() => {
+      const serverStartedAtMs = Date.now();
+      const serverStartedAt = new Date(serverStartedAtMs).toISOString();
+      const traceRecords = makeRingBuffer<TraceRecord>(TRACE_RECORD_LIMIT);
+      const resourceSampler = makeResourceSampler();
+      let persistedDiagnosticsCache:
+        | {
+            readonly expiresAt: number;
+            readonly traceRecords: ReadonlyArray<TraceRecord>;
+            readonly failures: ReadonlyArray<DiagnosticsFailure>;
+            readonly warnings: ReadonlyArray<DiagnosticsWarning>;
+          }
+        | undefined;
+
+      const readPersistedDiagnostics = async (fallbackTime: string) => {
+        const now = Date.now();
+        if (persistedDiagnosticsCache !== undefined && persistedDiagnosticsCache.expiresAt > now) {
+          return persistedDiagnosticsCache;
+        }
+
         const warnings: DiagnosticsWarning[] = [];
         const traceTail = await readTraceTail({
           filePath: config.serverTracePath,
           warnings,
         });
-        const allTraceRecords = dedupeTraceRecords([...traceTail, ...traceRecords.values()]);
-        let skippedSpanRecords = 0;
-        const spans = allTraceRecords
-          .flatMap((record) => {
-            const span = safeToDiagnosticsSpan(record);
-            if (span === null) {
-              skippedSpanRecords += 1;
-              return [];
-            }
-            return [span];
-          })
-          .toSorted((left, right) => right.endTime.localeCompare(left.endTime));
-        if (skippedSpanRecords > 0) {
-          warnings.push({
-            code: "diagnostics.trace-records-skipped",
-            message: `Skipped ${skippedSpanRecords} malformed trace record(s).`,
-          });
-        }
-        const failuresFromSpans = spans.flatMap((span) => failureFromSpan(span) ?? []);
-        const failuresFromLogs = [
+        const failures = [
           ...(await readFailureLogTail({
             filePath: config.serverLogPath,
             source: "server.log",
-            fallbackTime: generatedAt,
+            fallbackTime,
             warnings,
           })),
           ...(await readFailureLogTail({
             filePath: config.providerEventLogPath,
             source: "provider-events.log",
-            fallbackTime: generatedAt,
+            fallbackTime,
             warnings,
           })),
         ];
-        const latestFailures = [...failuresFromSpans, ...failuresFromLogs]
-          .toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt))
-          .slice(0, LIST_LIMIT);
-        const currentResource = resourceSampler.current();
-        const resourceHistory = resourceSampler.history();
-
-        return {
-          generatedAt,
-          serverStartedAt,
-          uptimeMs: Math.max(0, Date.now() - serverStartedAtMs),
-          limits: {
-            traceRecordLimit: TRACE_RECORD_LIMIT,
-            resourceSampleLimit: RESOURCE_SAMPLE_LIMIT,
-            fileTailBytes: FILE_TAIL_BYTES,
-          },
-          observability: {
-            logsDirectoryPath: config.logsDir,
-            serverLogPath: config.serverLogPath,
-            serverTracePath: config.serverTracePath,
-            providerEventLogPath: config.providerEventLogPath,
-            localTracingEnabled: true,
-            ...(config.otlpTracesUrl !== undefined ? { otlpTracesUrl: config.otlpTracesUrl } : {}),
-            otlpTracesEnabled: config.otlpTracesUrl !== undefined,
-            ...(config.otlpMetricsUrl !== undefined
-              ? { otlpMetricsUrl: config.otlpMetricsUrl }
-              : {}),
-            otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
-          },
-          resources: {
-            current: currentResource,
-            history: resourceHistory,
-          },
-          liveProcesses: {
-            server: {
-              pid: process.pid,
-              platform: process.platform,
-              runtime: typeof Bun !== "undefined" ? "bun" : "node",
-              version: typeof Bun !== "undefined" ? Bun.version : process.versions.node,
-              cwd: config.cwd,
-            },
-            terminals: [...input.terminals],
-            providers: [...input.providers],
-          },
-          tracing: {
-            retainedSpanCount: allTraceRecords.length,
-            recentSpans: spans.slice(0, LIST_LIMIT),
-            slowestSpans: [...spans]
-              .toSorted((left, right) => right.durationMs - left.durationMs)
-              .slice(0, LIST_LIMIT),
-            topSpanNames: buildTopSpanNames(spans),
-            durationBuckets: buildDurationBuckets(spans),
-            recentEvents: toDiagnosticsSpanEvents(allTraceRecords),
-          },
-          failures: {
-            latest: latestFailures,
-            common: buildFailureSummary([...failuresFromSpans, ...failuresFromLogs]),
-          },
-          client: {
-            slowRpcAcks: [],
-          },
+        persistedDiagnosticsCache = {
+          expiresAt: now + FILE_TAIL_REFRESH_INTERVAL_MS,
+          traceRecords: traceTail,
+          failures,
           warnings,
         };
-      }).pipe(
-        Effect.catch((error) =>
-          Effect.sync(() => {
+        return persistedDiagnosticsCache;
+      };
+
+      return {
+        recordTraceRecords(records) {
+          for (const record of records) {
+            traceRecords.push(record);
+          }
+        },
+        getSnapshot(input) {
+          const snapshotStartedAt = performance.now();
+          return Effect.tryPromise(async () => {
             const generatedAt = new Date().toISOString();
-            const currentResource = resourceSampler.current();
+            const currentResource = await resourceSampler.sample();
+            const persistedDiagnostics = await readPersistedDiagnostics(generatedAt);
+            const warnings = [...persistedDiagnostics.warnings];
+            const allTraceRecords = dedupeTraceRecords([
+              ...persistedDiagnostics.traceRecords,
+              ...traceRecords.values(),
+            ]);
+            let skippedSpanRecords = 0;
+            const spans = allTraceRecords
+              .flatMap((record) => {
+                const span = safeToDiagnosticsSpan(record);
+                if (span === null) {
+                  skippedSpanRecords += 1;
+                  return [];
+                }
+                return [span];
+              })
+              .toSorted((left, right) => right.endTime.localeCompare(left.endTime));
+            if (skippedSpanRecords > 0) {
+              warnings.push({
+                code: "diagnostics.trace-records-skipped",
+                message: `Skipped ${skippedSpanRecords} malformed trace record(s).`,
+              });
+            }
+            const failuresFromSpans = spans.flatMap((span) => failureFromSpan(span) ?? []);
+            const failuresFromLogs = persistedDiagnostics.failures;
+            const latestFailures = [...failuresFromSpans, ...failuresFromLogs]
+              .toSorted((left, right) => right.occurredAt.localeCompare(left.occurredAt))
+              .slice(0, LIST_LIMIT);
+            const resourceHistory = resourceSampler.history();
+
             return {
               generatedAt,
               serverStartedAt,
@@ -696,7 +714,7 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(functi
               },
               resources: {
                 current: currentResource,
-                history: resourceSampler.history(),
+                history: resourceHistory,
               },
               liveProcesses: {
                 server: {
@@ -710,36 +728,112 @@ export const makeDiagnosticsService = Effect.fn("makeDiagnosticsService")(functi
                 providers: [...input.providers],
               },
               tracing: {
-                retainedSpanCount: traceRecords.size(),
-                recentSpans: [],
-                slowestSpans: [],
-                topSpanNames: [],
-                durationBuckets: buildDurationBuckets([]),
-                recentEvents: [],
+                retainedSpanCount: allTraceRecords.length,
+                recentSpans: spans.slice(0, LIST_LIMIT),
+                slowestSpans: [...spans]
+                  .toSorted((left, right) => right.durationMs - left.durationMs)
+                  .slice(0, LIST_LIMIT),
+                topSpanNames: buildTopSpanNames(spans),
+                durationBuckets: buildDurationBuckets(spans),
+                recentEvents: toDiagnosticsSpanEvents(allTraceRecords),
               },
               failures: {
-                latest: [],
-                common: [],
+                latest: latestFailures,
+                common: buildFailureSummary([...failuresFromSpans, ...failuresFromLogs]),
               },
               client: {
                 slowRpcAcks: [],
               },
-              warnings: [
-                {
-                  code: "diagnostics.snapshot-partial",
-                  message:
-                    error instanceof Error
-                      ? error.message
-                      : "Diagnostics snapshot was partially collected.",
-                },
-              ],
+              performance: buildOperationalPerformance({
+                snapshotInput: input,
+                generatedAt,
+                snapshotStartedAt,
+                traceSinkHealth: dependencies?.traceSinkHealth,
+              }),
+              warnings,
             };
-          }),
-        ),
-      );
-    },
-  } satisfies DiagnosticsShape;
-});
+          }).pipe(
+            Effect.catch((error) =>
+              Effect.promise(async () => {
+                const generatedAt = new Date().toISOString();
+                const currentResource = await resourceSampler.sample();
+                return {
+                  generatedAt,
+                  serverStartedAt,
+                  uptimeMs: Math.max(0, Date.now() - serverStartedAtMs),
+                  limits: {
+                    traceRecordLimit: TRACE_RECORD_LIMIT,
+                    resourceSampleLimit: RESOURCE_SAMPLE_LIMIT,
+                    fileTailBytes: FILE_TAIL_BYTES,
+                  },
+                  observability: {
+                    logsDirectoryPath: config.logsDir,
+                    serverLogPath: config.serverLogPath,
+                    serverTracePath: config.serverTracePath,
+                    providerEventLogPath: config.providerEventLogPath,
+                    localTracingEnabled: true,
+                    ...(config.otlpTracesUrl !== undefined
+                      ? { otlpTracesUrl: config.otlpTracesUrl }
+                      : {}),
+                    otlpTracesEnabled: config.otlpTracesUrl !== undefined,
+                    ...(config.otlpMetricsUrl !== undefined
+                      ? { otlpMetricsUrl: config.otlpMetricsUrl }
+                      : {}),
+                    otlpMetricsEnabled: config.otlpMetricsUrl !== undefined,
+                  },
+                  resources: {
+                    current: currentResource,
+                    history: resourceSampler.history(),
+                  },
+                  liveProcesses: {
+                    server: {
+                      pid: process.pid,
+                      platform: process.platform,
+                      runtime: typeof Bun !== "undefined" ? "bun" : "node",
+                      version: typeof Bun !== "undefined" ? Bun.version : process.versions.node,
+                      cwd: config.cwd,
+                    },
+                    terminals: [...input.terminals],
+                    providers: [...input.providers],
+                  },
+                  tracing: {
+                    retainedSpanCount: traceRecords.size(),
+                    recentSpans: [],
+                    slowestSpans: [],
+                    topSpanNames: [],
+                    durationBuckets: buildDurationBuckets([]),
+                    recentEvents: [],
+                  },
+                  failures: {
+                    latest: [],
+                    common: [],
+                  },
+                  client: {
+                    slowRpcAcks: [],
+                  },
+                  performance: buildOperationalPerformance({
+                    snapshotInput: input,
+                    generatedAt,
+                    snapshotStartedAt,
+                    traceSinkHealth: dependencies?.traceSinkHealth,
+                  }),
+                  warnings: [
+                    {
+                      code: "diagnostics.snapshot-partial",
+                      message:
+                        error instanceof Error
+                          ? error.message
+                          : "Diagnostics snapshot was partially collected.",
+                    },
+                  ],
+                };
+              }),
+            ),
+          );
+        },
+      } satisfies DiagnosticsShape;
+    }),
+);
 
 export const DiagnosticsLive = Layer.effect(
   Diagnostics,

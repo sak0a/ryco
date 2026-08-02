@@ -23,12 +23,14 @@ export const ObservabilityLive = Layer.unwrap(
 
     const tracerLayer = Layer.unwrap(
       Effect.gen(function* () {
-        const diagnostics = yield* makeDiagnosticsService(config);
         const sink = yield* makeTraceSink({
           filePath: config.serverTracePath,
           maxBytes: config.traceMaxBytes,
           maxFiles: config.traceMaxFiles,
           batchWindowMs: config.traceBatchWindowMs,
+        });
+        const diagnostics = yield* makeDiagnosticsService(config, {
+          traceSinkHealth: sink.health,
         });
         const diagnosticsSink = {
           filePath: sink.filePath,
@@ -38,6 +40,7 @@ export const ObservabilityLive = Layer.unwrap(
           },
           flush: sink.flush,
           close: sink.close,
+          health: sink.health,
         } satisfies TraceSink;
         const delegate =
           config.otlpTracesUrl === undefined

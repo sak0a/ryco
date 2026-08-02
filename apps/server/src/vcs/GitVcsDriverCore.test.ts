@@ -175,7 +175,33 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.isDefined(fetchCall);
         assert.equal(fetchCall?.env?.GIT_TERMINAL_PROMPT, "0");
         assert.equal(fetchCall?.env?.SSH_ASKPASS_REQUIRE, "never");
+        assert.deepStrictEqual(
+          calls
+            .filter((call) => call.args[0] === "diff" && call.args.includes("--numstat"))
+            .map((call) => call.args),
+          [["diff", "HEAD", "--numstat"]],
+        );
       }).pipe(Effect.provide(OverrideTestLayer)),
+    );
+
+    it.effect("falls back to staged and unstaged numstat for an unborn repository", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+        yield* driver.initRepo({ cwd });
+        yield* writeTextFile(cwd, "first.txt", "first line\n");
+        yield* git(cwd, ["add", "first.txt"]);
+
+        const status = yield* driver.statusDetails(cwd);
+
+        assert.equal(status.isRepo, true);
+        assert.equal(status.hasWorkingTreeChanges, true);
+        assert.deepInclude(status.workingTree.files, {
+          path: "first.txt",
+          insertions: 1,
+          deletions: 0,
+        });
+      }),
     );
 
     it.effect("reports default-branch delta separately from upstream delta", () =>

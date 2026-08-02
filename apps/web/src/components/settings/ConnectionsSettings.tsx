@@ -131,7 +131,7 @@ function ConnectionStatusDot({
       {pingClassName ? (
         <span
           className={cn(
-            "absolute inline-flex h-full w-full animate-ping rounded-full",
+            "absolute inline-flex h-full w-full animate-status-ping rounded-full",
             pingClassName,
           )}
         />
@@ -943,7 +943,7 @@ const ConnectedClientListRow = memo(function ConnectedClientListRow({
             <ConnectionStatusDot
               tooltipText={statusTooltip}
               dotClassName={isLive ? "bg-success" : "bg-muted-foreground/30"}
-              pingClassName={isLive ? "bg-success/60 duration-2000" : null}
+              pingClassName={null}
             />
             <h3 className="text-sm font-medium text-foreground">{primaryLabel}</h3>
             {clientSession.current ? (

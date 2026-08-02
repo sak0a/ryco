@@ -33,11 +33,10 @@ describe("wsReplayMetrics", () => {
     Effect.gen(function* () {
       const attributes = {
         stream: "shell",
-        subscriptionId: "ws-replay-metrics-unit",
       };
       const metrics = yield* makeWsReplayMetrics({
         stream: "shell",
-        subscriptionId: attributes.subscriptionId,
+        subscriptionId: "ws-replay-metrics-unit",
         snapshotSequence: 10,
       });
 
@@ -70,6 +69,57 @@ describe("wsReplayMetrics", () => {
       );
       assert.equal(
         findGaugeValue(resetSnapshots, "t3_ws_orchestration_live_buffer_high_water", attributes),
+        0,
+      );
+    }),
+  );
+
+  it.effect("publishes bounded per-stream aggregates across active subscriptions", () =>
+    Effect.gen(function* () {
+      const first = yield* makeWsReplayMetrics({
+        stream: "thread",
+        subscriptionId: "ws-replay-aggregate-first",
+        snapshotSequence: 10,
+      });
+      const second = yield* makeWsReplayMetrics({
+        stream: "thread",
+        subscriptionId: "ws-replay-aggregate-second",
+        snapshotSequence: 20,
+      });
+
+      yield* first.recordLiveEnqueued(11);
+      yield* first.recordLiveEnqueued(12);
+      yield* second.recordLiveEnqueued(21);
+
+      const activeSnapshots = yield* Metric.snapshot;
+      assert.equal(
+        findGaugeValue(activeSnapshots, "t3_ws_orchestration_live_buffer_depth", {
+          stream: "thread",
+        }),
+        3,
+      );
+      assert.equal(
+        activeSnapshots.filter(
+          (snapshot) =>
+            snapshot.id === "t3_ws_orchestration_live_buffer_depth" &&
+            snapshot.attributes?.stream === "thread",
+        ).length,
+        1,
+      );
+
+      yield* first.reset;
+      assert.equal(
+        findGaugeValue(yield* Metric.snapshot, "t3_ws_orchestration_live_buffer_depth", {
+          stream: "thread",
+        }),
+        1,
+      );
+
+      yield* second.reset;
+      assert.equal(
+        findGaugeValue(yield* Metric.snapshot, "t3_ws_orchestration_live_buffer_depth", {
+          stream: "thread",
+        }),
         0,
       );
     }),

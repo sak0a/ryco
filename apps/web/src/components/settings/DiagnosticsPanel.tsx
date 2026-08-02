@@ -1,12 +1,10 @@
-import type { EnvironmentId, ServerLocalDiagnosticsMetrics } from "@ryco/contracts";
+import type { DiagnosticsSnapshot, EnvironmentId } from "@ryco/contracts";
 import { ClipboardCheckIcon, ClipboardCopyIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import {
   buildDiagnosticsBundle,
-  formatDiagnosticsCount,
-  formatDiagnosticsDurationMs,
   hasPushSequenceGap,
   serializeDiagnosticsBundle,
 } from "./DiagnosticsPanel.logic";
@@ -32,9 +30,7 @@ import {
 } from "../../rpc/serverState";
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
-
-const DIAGNOSTICS_METRICS_POLL_MS = 5_000;
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const CONNECTION_STATE_DOT: Record<string, string> = {
   connected: "bg-success",
@@ -112,48 +108,20 @@ function EnvironmentRow({ environmentId, record, runtime, pushSequence }: Enviro
   );
 }
 
-export function DiagnosticsPanel() {
+export function DiagnosticsSupportSections({
+  snapshot,
+}: {
+  readonly snapshot: DiagnosticsSnapshot | null;
+}) {
   const registryById = useSavedEnvironmentRegistryStore((state) => state.byId);
   const runtimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
   const pushById = usePushSequenceMonitor((state) => state.byEnvironment);
   const providers = useServerProviders();
   const observability = useServerObservability();
   const availableEditors = useServerAvailableEditors();
+  const localMetrics = snapshot?.performance?.local ?? null;
 
-  const [localMetrics, setLocalMetrics] = useState<ServerLocalDiagnosticsMetrics | null>(
-    observability?.localMetrics ?? null,
-  );
   const [isOpeningLogs, setIsOpeningLogs] = useState(false);
-
-  useEffect(() => {
-    setLocalMetrics(observability?.localMetrics ?? null);
-  }, [observability?.localMetrics]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const refreshMetrics = () => {
-      void ensureLocalApi()
-        .server.getDiagnosticsMetrics()
-        .then((metrics) => {
-          if (!cancelled) {
-            setLocalMetrics(metrics);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setLocalMetrics(null);
-          }
-        });
-    };
-
-    refreshMetrics();
-    const intervalId = window.setInterval(refreshMetrics, DIAGNOSTICS_METRICS_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, []);
 
   const observabilityForBundle = useMemo(
     () =>
@@ -211,6 +179,7 @@ export function DiagnosticsPanel() {
       })),
       providers,
       observability: observabilityForBundle,
+      performance: snapshot?.performance ?? null,
     });
     copyToClipboard(serializeDiagnosticsBundle(bundle), undefined);
   }, [
@@ -221,6 +190,7 @@ export function DiagnosticsPanel() {
     pushById,
     registryById,
     runtimeById,
+    snapshot?.performance,
   ]);
 
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
@@ -257,7 +227,7 @@ export function DiagnosticsPanel() {
   }, [availableEditors, logsDirectoryPath]);
 
   return (
-    <SettingsPageContainer>
+    <>
       <SettingsSection
         title="Diagnostics"
         headerAction={
@@ -287,45 +257,6 @@ export function DiagnosticsPanel() {
             >
               {isOpeningLogs ? "Opening…" : "Open logs folder"}
             </Button>
-          }
-        />
-      </SettingsSection>
-
-      <SettingsSection title="Local metrics">
-        <SettingsRow
-          title="Turn quiescence (avg)"
-          description={
-            <span className="space-y-0.5">
-              <span className="block">
-                Rolling 5-minute average from turn completion to processing quiescence.
-              </span>
-              <span className="block text-muted-foreground/70">
-                Resets when the server process restarts.
-              </span>
-            </span>
-          }
-          control={
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {formatDiagnosticsDurationMs(localMetrics?.turnQuiescenceAvgMs)}
-            </span>
-          }
-        />
-        <SettingsRow
-          title="Checkpoint duration (p95)"
-          description="Rolling 5-minute p95 for checkpoint capture and diff finalization."
-          control={
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {formatDiagnosticsDurationMs(localMetrics?.checkpointDurationP95Ms)}
-            </span>
-          }
-        />
-        <SettingsRow
-          title="WebSocket reconnects"
-          description="Server-side count of websocket sessions that reconnected after a disconnect in this process."
-          control={
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {formatDiagnosticsCount(localMetrics?.wsReconnectCount)}
-            </span>
           }
         />
       </SettingsSection>
@@ -382,6 +313,6 @@ export function DiagnosticsPanel() {
           })
         )}
       </SettingsSection>
-    </SettingsPageContainer>
+    </>
   );
 }

@@ -1,4 +1,5 @@
 import type {
+  DiagnosticsOperationalPerformance,
   EnvironmentId,
   ServerLocalDiagnosticsMetrics,
   ServerObservability,
@@ -95,6 +96,7 @@ export interface DiagnosticsBundleInput {
   }>;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly observability: ServerObservability | null;
+  readonly performance: DiagnosticsOperationalPerformance | null;
 }
 
 export interface DiagnosticsBundle {
@@ -103,8 +105,6 @@ export interface DiagnosticsBundle {
   readonly environments: ReadonlyArray<{
     readonly environmentId: EnvironmentId;
     readonly label: string | null;
-    readonly httpBaseUrl: string | null;
-    readonly wsBaseUrl: string | null;
     readonly connectionState: string | null;
     readonly authState: string | null;
     readonly role: string | null;
@@ -129,7 +129,7 @@ export interface DiagnosticsBundle {
     readonly checkedAt: string;
   }>;
   readonly observability: {
-    readonly logsDirectoryPath: string;
+    readonly logsDirectoryConfigured: boolean;
     readonly localTracingEnabled: boolean;
     readonly otlpTracesEnabled: boolean;
     readonly otlpMetricsEnabled: boolean;
@@ -140,6 +140,7 @@ export interface DiagnosticsBundle {
       readonly capturedAt: string;
     } | null;
   } | null;
+  readonly performance: DiagnosticsOperationalPerformance | null;
 }
 
 export function formatDiagnosticsDurationMs(value: number | null | undefined): string {
@@ -183,8 +184,6 @@ export function buildDiagnosticsBundle(input: DiagnosticsBundleInput): Diagnosti
     environments: input.environments.map((entry) => ({
       environmentId: entry.environmentId,
       label: entry.record?.label ?? null,
-      httpBaseUrl: entry.record?.httpBaseUrl ?? null,
-      wsBaseUrl: entry.record?.wsBaseUrl ?? null,
       connectionState: entry.runtime?.connectionState ?? null,
       authState: entry.runtime?.authState ?? null,
       role: entry.runtime?.role ?? null,
@@ -210,7 +209,7 @@ export function buildDiagnosticsBundle(input: DiagnosticsBundleInput): Diagnosti
     })),
     observability: input.observability
       ? {
-          logsDirectoryPath: input.observability.logsDirectoryPath,
+          logsDirectoryConfigured: input.observability.logsDirectoryPath.length > 0,
           localTracingEnabled: input.observability.localTracingEnabled,
           otlpTracesEnabled: input.observability.otlpTracesEnabled,
           otlpMetricsEnabled: input.observability.otlpMetricsEnabled,
@@ -222,6 +221,22 @@ export function buildDiagnosticsBundle(input: DiagnosticsBundleInput): Diagnosti
                 capturedAt: input.observability.localMetrics.capturedAt,
               }
             : null,
+        }
+      : null,
+    performance: input.performance
+      ? {
+          local: {
+            turnQuiescenceAvgMs: input.performance.local.turnQuiescenceAvgMs,
+            checkpointDurationP95Ms: input.performance.local.checkpointDurationP95Ms,
+            latestThreadSnapshotDurationMs: input.performance.local.latestThreadSnapshotDurationMs,
+            threadSnapshotDurationP95Ms: input.performance.local.threadSnapshotDurationP95Ms,
+            wsReconnectCount: input.performance.local.wsReconnectCount,
+            windowSampleCounts: { ...input.performance.local.windowSampleCounts },
+            capturedAt: input.performance.local.capturedAt,
+          },
+          queues: { ...input.performance.queues },
+          traceSink: input.performance.traceSink ? { ...input.performance.traceSink } : null,
+          snapshotCollectionDurationMs: input.performance.snapshotCollectionDurationMs,
         }
       : null,
   };

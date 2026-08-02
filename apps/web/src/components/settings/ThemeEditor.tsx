@@ -100,10 +100,6 @@ const TOKEN_CATEGORIES: ReadonlyArray<TokenCategory> = [
       "scrollbar-thumb-thin-hover",
     ],
   },
-  {
-    title: "Misc",
-    tokens: ["noise-opacity"],
-  },
 ];
 
 const KNOWN_TOKEN_SET = new Set<string>(THEME_TOKEN_NAMES);

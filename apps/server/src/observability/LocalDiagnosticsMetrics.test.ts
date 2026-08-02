@@ -16,15 +16,20 @@ describe("LocalDiagnosticsMetrics", () => {
       yield* metrics.recordCheckpointDurationMs(50);
       yield* metrics.recordCheckpointDurationMs(150);
       yield* metrics.recordCheckpointDurationMs(250);
+      yield* metrics.recordThreadSnapshotDurationMs(20);
+      yield* metrics.recordThreadSnapshotDurationMs(80);
       yield* metrics.recordWsReconnect();
       yield* metrics.recordWsReconnect();
 
       const snapshot = yield* metrics.snapshot;
       assert.equal(snapshot.turnQuiescenceAvgMs, 200);
       assert.equal(snapshot.checkpointDurationP95Ms, 250);
+      assert.equal(snapshot.latestThreadSnapshotDurationMs, 80);
+      assert.equal(snapshot.threadSnapshotDurationP95Ms, 80);
       assert.equal(snapshot.wsReconnectCount, 2);
       assert.equal(snapshot.windowSampleCounts.turnQuiescence, 2);
       assert.equal(snapshot.windowSampleCounts.checkpointDuration, 3);
+      assert.equal(snapshot.windowSampleCounts.threadSnapshotDuration, 2);
       assert.match(snapshot.capturedAt, /^\d{4}-\d{2}-\d{2}T/);
     }).pipe(Effect.provide(LocalDiagnosticsMetricsLive)),
   );

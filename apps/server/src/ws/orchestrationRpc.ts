@@ -37,6 +37,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     enrichOrchestrationEvents,
     makeReplayableShellStream,
     makeReplayableThreadStream,
+    recordThreadSnapshotDurationMs,
   } = ctx;
 
   return defineWsHandlers({
@@ -251,7 +252,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
           makeReplayableThreadStream(
             Effect.gen(function* () {
               const perfEnabled = isServerPerfProfileEnabled();
-              const startedAtMs = perfEnabled ? Date.now() : 0;
+              const startedAtMs = performance.now();
               const [threadDetail, snapshotSequence] = yield* Effect.all([
                 projectionSnapshotQuery.getThreadDetailById(input.threadId).pipe(
                   Effect.mapError(
@@ -285,12 +286,14 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
                 snapshotSequence,
                 thread: threadDetail.value,
               };
+              const snapshotDurationMs = Math.max(0, performance.now() - startedAtMs);
+              yield* recordThreadSnapshotDurationMs(snapshotDurationMs);
               if (perfEnabled) {
                 yield* Effect.sync(() =>
                   recordServerPerfPayload(
                     "server.ws.orchestration.subscribeThread.snapshot",
                     snapshot,
-                    { durationMs: Math.max(0, Date.now() - startedAtMs) },
+                    { durationMs: snapshotDurationMs },
                   ),
                 );
               }

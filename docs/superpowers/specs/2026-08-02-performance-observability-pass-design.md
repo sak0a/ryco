@@ -175,17 +175,17 @@ The complete repository backstop and web browser validation required by `AGENTS.
 
 ## Upstream Audit Mapping
 
-| T3Code reference | Ryco conclusion |
-| --- | --- |
-| #3978 GPU idle and animation reduction | Missing in part; implement overlay removal, status duty cycling, and reduced-motion coverage. |
+| T3Code reference                                       | Ryco conclusion                                                                                                                                                            |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #3978 GPU idle and animation reduction                 | Missing in part; implement overlay removal, status duty cycling, and reduced-motion coverage.                                                                              |
 | #2679 native diagnostics and bounded background policy | Partially present through Node diagnostics, bounded provider logs, and demand-aware VCS. Implement demand-gated sampling and trace failure bounds; defer a native sidecar. |
-| #4177 snapshot/live replay handoff | Already functionally present in Ryco's bounded live-first handoff; retain and expose its metrics. |
-| #4622 redundant activity payload pruning | Intentionally deferred pending a complete web/mobile field-consumption audit. Context-window pruning is implemented separately. |
-| #4705, #4788, #4798 transport compression | Intentionally deferred pending Ryco payload measurements and compatibility validation across browser, desktop, hosted, server, and mobile clients. |
-| #4791 stale context trimming | Missing; implement latest-valid context-window snapshot pruning. |
-| #4843 Git refresh improvement | Missing; implement the combined tracked-file numstat call with unborn fallback. |
-| #5008 Git caching | Partially present through upstream-status TTL/cooldown and subscriber-driven refresh; defer additional branch/remote caches until safe mutation invalidation exists. |
-| #5147 bounded resource handling | Replay/startup/log bounds are already present; implement lightweight legacy HTTP and offline snapshot consumers plus trace failure bounds. |
+| #4177 snapshot/live replay handoff                     | Already functionally present in Ryco's bounded live-first handoff; retain and expose its metrics.                                                                          |
+| #4622 redundant activity payload pruning               | Intentionally deferred pending a complete web/mobile field-consumption audit. Context-window pruning is implemented separately.                                            |
+| #4705, #4788, #4798 transport compression              | Intentionally deferred pending Ryco payload measurements and compatibility validation across browser, desktop, hosted, server, and mobile clients.                         |
+| #4791 stale context trimming                           | Missing; implement latest-valid context-window snapshot pruning.                                                                                                           |
+| #4843 Git refresh improvement                          | Missing; implement the combined tracked-file numstat call with unborn fallback.                                                                                            |
+| #5008 Git caching                                      | Partially present through upstream-status TTL/cooldown and subscriber-driven refresh; defer additional branch/remote caches until safe mutation invalidation exists.       |
+| #5147 bounded resource handling                        | Replay/startup/log bounds are already present; implement lightweight legacy HTTP and offline snapshot consumers plus trace failure bounds.                                 |
 
 ## Later Native Monitor Phase
 

@@ -124,6 +124,42 @@ describe("buildDiagnosticsBundle", () => {
         capturedAt: "2026-06-14T00:00:00.000Z",
       },
     },
+    performance: {
+      local: {
+        turnQuiescenceAvgMs: 120,
+        checkpointDurationP95Ms: 250,
+        latestThreadSnapshotDurationMs: 42,
+        threadSnapshotDurationP95Ms: 80,
+        wsReconnectCount: 2,
+        windowSampleCounts: {
+          turnQuiescence: 3,
+          checkpointDuration: 3,
+          threadSnapshotDuration: 2,
+        },
+        capturedAt: "2026-06-14T00:00:00.000Z",
+      },
+      queues: {
+        runtimeDepthTotal: 1,
+        runtimeHighWaterMax: 3,
+        replayDepthMax: 2,
+        liveBufferDepthTotal: 1,
+        liveBufferHighWaterMax: 4,
+        liveBufferOverflowCount: 0,
+        replayLagMax: 1,
+        providerLogDroppedRecords: 0,
+      },
+      traceSink: {
+        bufferedBytes: 128,
+        bufferedRecords: 1,
+        maxBufferedBytes: 1024,
+        maxBufferedRecords: 50,
+        droppedRecords: 0,
+        writeFailures: 0,
+        retryDelayMs: 0,
+        lastWriteFailureAt: null,
+      },
+      snapshotCollectionDurationMs: 12,
+    },
   };
 
   it("formats local diagnostics metrics for display", () => {
@@ -141,11 +177,15 @@ describe("buildDiagnosticsBundle", () => {
     expect(serialized).not.toContain("topsecretpw");
     expect(serialized).not.toContain("leaked-token-value");
     expect(serialized).not.toContain("user@example.com");
+    expect(serialized).not.toContain("backend.example.com");
+    expect(serialized).not.toContain("/home/user/.ryco/logs");
     // Safe diagnostic data is still present.
     expect(serialized).toContain("handshake failed");
-    expect(serialized).toContain("/home/user/.ryco/logs");
+    expect(serialized).toContain('"logsDirectoryConfigured": true');
     expect(serialized).toContain("codex-1");
     expect(serialized).toContain('"turnQuiescenceAvgMs": 120');
+    expect(serialized).toContain('"latestThreadSnapshotDurationMs": 42');
+    expect(serialized).toContain('"runtimeHighWaterMax": 3');
   });
 
   it("keeps the provider auth status but drops PII", () => {

@@ -40,21 +40,25 @@ const authenticateOwnerSession = Effect.gen(function* () {
   return session;
 });
 
+export const loadOrchestrationHttpSnapshot = Effect.gen(function* () {
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+  return yield* projectionSnapshotQuery.getCommandReadModel().pipe(
+    Effect.mapError(
+      (cause) =>
+        new OrchestrationGetSnapshotError({
+          message: "Failed to load orchestration snapshot.",
+          cause,
+        }),
+    ),
+  );
+});
+
 export const orchestrationSnapshotRouteLayer = HttpRouter.add(
   "GET",
   "/api/orchestration/snapshot",
   Effect.gen(function* () {
     yield* authenticateOwnerSession;
-    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
-    const snapshot = yield* projectionSnapshotQuery.getSnapshot().pipe(
-      Effect.mapError(
-        (cause) =>
-          new OrchestrationGetSnapshotError({
-            message: "Failed to load orchestration snapshot.",
-            cause,
-          }),
-      ),
-    );
+    const snapshot = yield* loadOrchestrationHttpSnapshot;
     return HttpServerResponse.jsonUnsafe(snapshot satisfies OrchestrationReadModel, {
       status: 200,
     });

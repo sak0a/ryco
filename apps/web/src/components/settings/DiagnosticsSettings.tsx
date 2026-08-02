@@ -1,7 +1,14 @@
 import type { DiagnosticsSnapshot, DiagnosticsSpan } from "@ryco/contracts";
-import { PauseIcon, PlayIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  PauseIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useSavedEnvironmentRuntimeStore } from "../../environments/runtime";
 import { ensureLocalApi } from "../../localApi";
 import { cn } from "../../lib/utils";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
@@ -10,7 +17,8 @@ import { useTierOverrideStore, type PresentationTierOverride } from "../../tierO
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
+import { DiagnosticsSupportSections } from "./DiagnosticsPanel";
+import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import {
   durationBucketSeries,
   formatBytes,
@@ -134,6 +142,26 @@ function OverviewMetric({
       {detail ? (
         <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{detail}</div>
       ) : null}
+    </div>
+  );
+}
+
+function EvidenceRow({
+  label,
+  value,
+  detail,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly detail: string;
+}) {
+  return (
+    <div className="grid gap-1 border-border/60 border-t px-4 py-3 first:border-t-0 sm:grid-cols-[11rem_minmax(0,1fr)] sm:px-5">
+      <div className="text-[12px] font-medium text-foreground">{label}</div>
+      <div className="min-w-0">
+        <div className="font-mono text-[12px] text-foreground">{value}</div>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">{detail}</div>
+      </div>
     </div>
   );
 }
@@ -280,9 +308,11 @@ export function DiagnosticsSettings() {
   const hasSnapshotRef = useRef(false);
   const cancelledRef = useRef(false);
   const slowRpcAcks = useSlowRpcAckRequests();
-  const nowMs = useRelativeTimeTick(1_000);
+  const environmentRuntimeById = useSavedEnvironmentRuntimeStore((state) => state.byId);
+  const nowMs = Date.now();
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (allowHidden = false) => {
+    if (!allowHidden && document.visibilityState !== "visible") return;
     if (refreshInFlightRef.current) return;
     refreshInFlightRef.current = true;
     setLoading((current) => current && !hasSnapshotRef.current);
@@ -313,10 +343,30 @@ export function DiagnosticsSettings() {
         cancelledRef.current = true;
       };
     }
-    const id = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    let intervalId: number | null = null;
+    const stopPolling = () => {
+      if (intervalId === null) return;
+      window.clearInterval(intervalId);
+      intervalId = null;
+    };
+    const startPolling = () => {
+      if (document.visibilityState !== "visible" || intervalId !== null) return;
+      intervalId = window.setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    };
+    startPolling();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+        startPolling();
+        return;
+      }
+      stopPolling();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       cancelledRef.current = true;
-      window.clearInterval(id);
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [paused, refresh]);
 
@@ -326,6 +376,31 @@ export function DiagnosticsSettings() {
   );
   const cpuSeries = useMemo(() => resourceCpuSeries(snapshot?.resources.history ?? []), [snapshot]);
   const latestFailure = snapshot ? latestFailureLabel(snapshot) : "No snapshot";
+  const activeProviderCount =
+    snapshot?.liveProcesses.providers.filter((provider) => provider.enabled).length ?? 0;
+  const activeTerminalCount =
+    snapshot?.liveProcesses.terminals.filter(
+      (terminal) => terminal.status === "starting" || terminal.status === "running",
+    ).length ?? 0;
+  const environmentConnectionStates = Object.values(environmentRuntimeById);
+  const connectedEnvironmentCount = environmentConnectionStates.filter(
+    (runtime) => runtime.connectionState === "connected",
+  ).length;
+  const connectingEnvironmentCount = environmentConnectionStates.filter(
+    (runtime) => runtime.connectionState === "connecting",
+  ).length;
+  const websocketState =
+    environmentConnectionStates.length === 0
+      ? "No tracked clients"
+      : `${connectedEnvironmentCount} connected${connectingEnvironmentCount > 0 ? ` · ${connectingEnvironmentCount} connecting` : ""}`;
+  const slowestServerSpan =
+    snapshot?.tracing.slowestSpans.find((span) => span.source === "server") ?? null;
+  const latestSlowRpc = slowRpcAcks[0] ?? null;
+  const performance = snapshot?.performance ?? null;
+  const turnQuiescenceAvgMs = performance?.local.turnQuiescenceAvgMs ?? null;
+  const checkpointDurationP95Ms = performance?.local.checkpointDurationP95Ms ?? null;
+  const latestThreadSnapshotDurationMs = performance?.local.latestThreadSnapshotDurationMs ?? null;
+  const threadSnapshotDurationP95Ms = performance?.local.threadSnapshotDurationP95Ms ?? null;
 
   return (
     <SettingsPageContainer>
@@ -343,7 +418,7 @@ export function DiagnosticsSettings() {
             {paused ? <PlayIcon className="size-3.5" /> : <PauseIcon className="size-3.5" />}
             {paused ? "Resume" : "Pause"}
           </Button>
-          <Button size="xs" variant="outline" onClick={() => void refresh()} disabled={loading}>
+          <Button size="xs" variant="outline" onClick={() => void refresh(true)} disabled={loading}>
             <RefreshCwIcon className={cn("size-3.5", loading && "animate-spin")} />
             Refresh
           </Button>
@@ -354,17 +429,17 @@ export function DiagnosticsSettings() {
 
       {import.meta.env.DEV ? <TierPreviewSection /> : null}
 
-      <SettingsSection title="Overview">
+      <SettingsSection title="Performance now">
         <div className="grid sm:grid-cols-2 lg:grid-cols-3">
           <OverviewMetric
-            label="Uptime"
-            value={snapshot ? formatDuration(snapshot.uptimeMs) : "n/a"}
-            detail={
-              snapshot ? `Started ${relativeTimeLabel(snapshot.serverStartedAt, nowMs)}` : undefined
+            label="Backend CPU"
+            value={
+              snapshot ? formatPercent(snapshot.resources.current.cpu.utilizationPercent) : "n/a"
             }
+            detail={snapshot ? `Process uptime ${formatDuration(snapshot.uptimeMs)}` : undefined}
           />
           <OverviewMetric
-            label="Memory"
+            label="RSS / heap"
             value={snapshot ? formatBytes(snapshot.resources.current.memory.rssBytes) : "n/a"}
             detail={
               snapshot
@@ -373,170 +448,294 @@ export function DiagnosticsSettings() {
             }
           />
           <OverviewMetric
-            label="CPU"
+            label="Event-loop delay"
             value={
-              snapshot ? formatPercent(snapshot.resources.current.cpu.utilizationPercent) : "n/a"
+              snapshot?.resources.current.eventLoopDelayMs !== undefined
+                ? formatDuration(snapshot.resources.current.eventLoopDelayMs)
+                : "n/a"
+            }
+            detail="Measured once for this requested snapshot"
+          />
+          <OverviewMetric
+            label="Providers / terminals"
+            value={`${activeProviderCount} enabled providers`}
+            detail={`${activeTerminalCount} active terminals`}
+          />
+          <OverviewMetric
+            label="Turn quiescence"
+            value={
+              turnQuiescenceAvgMs === null ? "No samples" : formatDuration(turnQuiescenceAvgMs)
+            }
+            detail="Rolling average"
+          />
+          <OverviewMetric
+            label="Checkpoint duration"
+            value={
+              checkpointDurationP95Ms === null
+                ? "No samples"
+                : formatDuration(checkpointDurationP95Ms)
+            }
+            detail="Rolling p95"
+          />
+          <OverviewMetric
+            label="WebSocket state"
+            value={websocketState}
+            detail={`${performance?.local.wsReconnectCount ?? 0} reconnects in this server process`}
+          />
+          <OverviewMetric
+            label="Thread snapshot"
+            value={
+              latestThreadSnapshotDurationMs === null
+                ? "No samples"
+                : formatDuration(latestThreadSnapshotDurationMs)
             }
             detail={
-              snapshot?.resources.current.eventLoopDelayMs !== undefined
-                ? `${formatDuration(snapshot.resources.current.eventLoopDelayMs)} event loop delay`
-                : undefined
+              threadSnapshotDurationP95Ms === null
+                ? "Latest successful subscription snapshot"
+                : `${formatDuration(threadSnapshotDurationP95Ms)} rolling p95`
             }
-          />
-          <OverviewMetric
-            label="Activity"
-            value={`${snapshot?.liveProcesses.providers.filter((provider) => provider.enabled).length ?? 0} providers`}
-            detail={`${snapshot?.liveProcesses.terminals.length ?? 0} terminal sessions`}
-          />
-          <OverviewMetric
-            label="Tracing"
-            value={`${snapshot?.tracing.retainedSpanCount ?? 0} spans`}
-            detail={snapshot ? `${snapshot.limits.fileTailBytes / 1024} KB file tail` : undefined}
           />
           <OverviewMetric label="Latest failure" value={latestFailure} />
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Resource history">
-        <div className="grid gap-0 divide-y divide-border/60 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-          <div className="min-w-0 p-4">
-            <div className="mb-1 text-[12px] font-semibold">RSS memory</div>
-            <MiniLineChart points={memorySeries} formatValue={formatBytes} />
-          </div>
-          <div className="min-w-0 p-4">
-            <div className="mb-1 text-[12px] font-semibold">CPU utilization</div>
-            <MiniLineChart points={cpuSeries} formatValue={(value) => `${value.toFixed(1)}%`} />
-          </div>
-        </div>
+      <SettingsSection title="Why was this slow?">
+        <EvidenceRow
+          label="Thread snapshot"
+          value={
+            latestThreadSnapshotDurationMs === null
+              ? "No thread snapshot timing yet"
+              : `${formatDuration(latestThreadSnapshotDurationMs)} latest`
+          }
+          detail={
+            threadSnapshotDurationP95Ms === null
+              ? "Replay duration and payload bytes are not collected because the current transport has no zero-copy attribution hook."
+              : `${formatDuration(threadSnapshotDurationP95Ms)} rolling p95. Replay duration and payload bytes are not collected because the current transport has no zero-copy attribution hook.`
+          }
+        />
+        <EvidenceRow
+          label="Queue pressure"
+          value={
+            performance
+              ? `${performance.queues.runtimeDepthTotal + performance.queues.liveBufferDepthTotal} queued now`
+              : "No snapshot"
+          }
+          detail={
+            performance
+              ? `Largest runtime high-water ${performance.queues.runtimeHighWaterMax}; live-buffer high-water ${performance.queues.liveBufferHighWaterMax}; ${performance.queues.liveBufferOverflowCount} overflows; replay depth ${performance.queues.replayDepthMax}; replay lag ${performance.queues.replayLagMax}; ${performance.queues.providerLogDroppedRecords} provider log records dropped.`
+              : "Runtime and replay queue evidence will appear after the first snapshot."
+          }
+        />
+        <EvidenceRow
+          label="Slowest server stage"
+          value={
+            slowestServerSpan
+              ? `${slowestServerSpan.name} · ${formatDuration(slowestServerSpan.durationMs)}`
+              : "No retained spans"
+          }
+          detail={
+            slowestServerSpan
+              ? `Server span completed ${relativeTimeLabel(slowestServerSpan.endTime, nowMs)}.`
+              : "Tracing has not retained a server stage yet."
+          }
+        />
+        <EvidenceRow
+          label="Current slow client RPC"
+          value={latestSlowRpc?.tag ?? "No slow RPC acknowledgement in progress"}
+          detail={
+            latestSlowRpc
+              ? `Exceeded its ${formatDuration(latestSlowRpc.thresholdMs)} acknowledgement threshold; started ${relativeTimeLabel(latestSlowRpc.startedAt, nowMs)}.`
+              : "Only RPCs that cross the existing client acknowledgement threshold appear here."
+          }
+        />
+        <EvidenceRow
+          label="Reconnect / resume"
+          value={websocketState}
+          detail={`${performance?.local.wsReconnectCount ?? 0} server-side reconnects. Per-environment push gaps and recovery state are in Advanced diagnostics.`}
+        />
+        <EvidenceRow
+          label="Recent failure"
+          value={snapshot?.failures.latest[0]?.message ?? "No retained failures"}
+          detail={
+            snapshot?.failures.latest[0]
+              ? `${snapshot.failures.latest[0].source} · ${relativeTimeLabel(snapshot.failures.latest[0].occurredAt, nowMs)}`
+              : "No failure evidence is available for the current server process."
+          }
+        />
+        <EvidenceRow
+          label="Trace persistence"
+          value={
+            performance?.traceSink
+              ? `${formatBytes(performance.traceSink.bufferedBytes)} buffered`
+              : "Health unavailable"
+          }
+          detail={
+            performance?.traceSink
+              ? `${formatBytes(performance.traceSink.maxBufferedBytes)} cap; ${performance.traceSink.droppedRecords} dropped records; ${performance.traceSink.writeFailures} write failures; retry delay ${formatDuration(performance.traceSink.retryDelayMs)}.`
+              : "This diagnostics service is not attached to the local trace-file sink."
+          }
+        />
       </SettingsSection>
 
-      <SettingsSection title="Tracing diagnostics">
-        <div className="grid gap-0 divide-y divide-border/60 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-          <div className="min-w-0">
-            <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
-              Top span names
+      <details className="group/diagnostics">
+        <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl border bg-card px-4 py-3 text-sm font-medium text-foreground shadow-sm/4 marker:hidden hover:bg-accent/30">
+          Advanced diagnostics
+          <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-open/diagnostics:rotate-180 motion-reduce:transition-none" />
+        </summary>
+        <div className="mt-5 space-y-5">
+          <SettingsSection title="Resource history">
+            <div className="grid gap-0 divide-y divide-border/60 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+              <div className="min-w-0 p-4">
+                <div className="mb-1 text-[12px] font-semibold">RSS memory</div>
+                <MiniLineChart points={memorySeries} formatValue={formatBytes} />
+              </div>
+              <div className="min-w-0 p-4">
+                <div className="mb-1 text-[12px] font-semibold">CPU utilization</div>
+                <MiniLineChart points={cpuSeries} formatValue={(value) => `${value.toFixed(1)}%`} />
+              </div>
             </div>
-            <BarList points={topSpanSeries(snapshot?.tracing.topSpanNames ?? [])} />
-          </div>
-          <div className="min-w-0">
-            <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
-              Duration buckets
-            </div>
-            <BarList points={durationBucketSeries(snapshot?.tracing.durationBuckets ?? [])} />
-          </div>
-        </div>
-        <div className="border-border/60 border-t">
-          <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
-            Slowest spans
-          </div>
-          <SpanRows spans={snapshot?.tracing.slowestSpans ?? []} />
-        </div>
-      </SettingsSection>
+          </SettingsSection>
 
-      <SettingsSection title="Failures">
-        <div className="divide-y divide-border/60">
-          {(snapshot?.failures.latest ?? []).slice(0, 8).map((failure) => (
-            <div
-              key={failure.id}
-              className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_6rem]"
-            >
+          <SettingsSection title="Tracing diagnostics">
+            <div className="grid gap-0 divide-y divide-border/60 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
               <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2">
-                  <Badge size="sm" variant="error">
-                    {failure.category}
-                  </Badge>
-                  <span className="truncate text-[13px] font-medium">{failure.message}</span>
+                <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
+                  Top span names
                 </div>
-                <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-                  {failure.source} / {failure.signature}
-                </div>
-                <div className="mt-2">
-                  <RawDetails value={failure.raw ?? failure} />
-                </div>
+                <BarList points={topSpanSeries(snapshot?.tracing.topSpanNames ?? [])} />
               </div>
-              <div className="font-mono text-[11px] text-muted-foreground sm:text-right">
-                {relativeTimeLabel(failure.occurredAt, nowMs)}
+              <div className="min-w-0">
+                <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
+                  Duration buckets
+                </div>
+                <BarList points={durationBucketSeries(snapshot?.tracing.durationBuckets ?? [])} />
               </div>
             </div>
-          ))}
-          {snapshot && snapshot.failures.latest.length === 0 ? (
-            <p className="px-4 py-4 text-muted-foreground text-sm">No failures retained.</p>
-          ) : null}
-        </div>
-      </SettingsSection>
+            <div className="border-border/60 border-t">
+              <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
+                Slowest spans
+              </div>
+              <SpanRows spans={snapshot?.tracing.slowestSpans ?? []} />
+            </div>
+          </SettingsSection>
 
-      <SettingsSection title="Live activity">
-        <div className="grid gap-0 divide-y divide-border/60 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-          <div className="min-w-0">
-            <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
-              Providers
-            </div>
+          <SettingsSection title="Failures">
             <div className="divide-y divide-border/60">
-              {(snapshot?.liveProcesses.providers ?? []).map((provider) => (
+              {(snapshot?.failures.latest ?? []).slice(0, 8).map((failure) => (
                 <div
-                  key={provider.instanceId}
-                  className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5"
+                  key={failure.id}
+                  className="grid gap-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_6rem]"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-[13px] font-medium">
-                      {provider.displayName ?? provider.instanceId}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge size="sm" variant="error">
+                        {failure.category}
+                      </Badge>
+                      <span className="truncate text-[13px] font-medium">{failure.message}</span>
                     </div>
-                    <div className="truncate font-mono text-[11px] text-muted-foreground">
-                      {provider.driver}
+                    <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                      {failure.source} / {failure.signature}
+                    </div>
+                    <div className="mt-2">
+                      <RawDetails value={failure.raw ?? failure} />
                     </div>
                   </div>
-                  <Badge
-                    size="sm"
-                    variant={
-                      provider.status === "error"
-                        ? "error"
-                        : provider.status === "warning"
-                          ? "warning"
-                          : "outline"
-                    }
-                  >
-                    {provider.status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="min-w-0">
-            <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
-              Terminals and slow RPCs
-            </div>
-            <div className="divide-y divide-border/60">
-              {(snapshot?.liveProcesses.terminals ?? []).map((terminal) => (
-                <div key={`${terminal.threadId}:${terminal.terminalId}`} className="px-4 py-2.5">
-                  <div className="flex min-w-0 items-center justify-between gap-3">
-                    <span className="truncate text-[13px] font-medium">{terminal.terminalId}</span>
-                    <Badge size="sm" variant={terminal.status === "error" ? "error" : "outline"}>
-                      {terminal.status}
-                    </Badge>
-                  </div>
-                  <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
-                    pid {terminal.pid ?? "n/a"} / subprocess{" "}
-                    {terminal.hasRunningSubprocess ? "yes" : "no"}
+                  <div className="font-mono text-[11px] text-muted-foreground sm:text-right">
+                    {relativeTimeLabel(failure.occurredAt, nowMs)}
                   </div>
                 </div>
               ))}
-              {slowRpcAcks.map((request) => (
-                <div key={request.requestId} className="px-4 py-2.5">
-                  <div className="truncate text-[13px] font-medium">{request.tag}</div>
-                  <div className="mt-1 font-mono text-[11px] text-muted-foreground">
-                    slow ack / {relativeTimeLabel(request.startedAt, nowMs)}
-                  </div>
-                </div>
-              ))}
-              {(snapshot?.liveProcesses.terminals.length ?? 0) === 0 && slowRpcAcks.length === 0 ? (
-                <p className="px-4 py-4 text-muted-foreground text-sm">
-                  No live terminal or slow RPC activity.
-                </p>
+              {snapshot && snapshot.failures.latest.length === 0 ? (
+                <p className="px-4 py-4 text-muted-foreground text-sm">No failures retained.</p>
               ) : null}
             </div>
-          </div>
+          </SettingsSection>
+
+          <SettingsSection title="Live activity">
+            <div className="grid gap-0 divide-y divide-border/60 lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+              <div className="min-w-0">
+                <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
+                  Providers
+                </div>
+                <div className="divide-y divide-border/60">
+                  {(snapshot?.liveProcesses.providers ?? []).map((provider) => (
+                    <div
+                      key={provider.instanceId}
+                      className="flex min-w-0 items-center justify-between gap-3 px-4 py-2.5"
+                    >
+                      <div className="min-w-0">
+                        <div className="truncate text-[13px] font-medium">
+                          {provider.displayName ?? provider.instanceId}
+                        </div>
+                        <div className="truncate font-mono text-[11px] text-muted-foreground">
+                          {provider.driver}
+                        </div>
+                      </div>
+                      <Badge
+                        size="sm"
+                        variant={
+                          provider.status === "error"
+                            ? "error"
+                            : provider.status === "warning"
+                              ? "warning"
+                              : "outline"
+                        }
+                      >
+                        {provider.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="min-w-0">
+                <div className="border-border/60 border-b px-4 py-2 text-[12px] font-semibold">
+                  Terminals and slow RPCs
+                </div>
+                <div className="divide-y divide-border/60">
+                  {(snapshot?.liveProcesses.terminals ?? []).map((terminal) => (
+                    <div
+                      key={`${terminal.threadId}:${terminal.terminalId}`}
+                      className="px-4 py-2.5"
+                    >
+                      <div className="flex min-w-0 items-center justify-between gap-3">
+                        <span className="truncate text-[13px] font-medium">
+                          {terminal.terminalId}
+                        </span>
+                        <Badge
+                          size="sm"
+                          variant={terminal.status === "error" ? "error" : "outline"}
+                        >
+                          {terminal.status}
+                        </Badge>
+                      </div>
+                      <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                        pid {terminal.pid ?? "n/a"} / subprocess{" "}
+                        {terminal.hasRunningSubprocess ? "yes" : "no"}
+                      </div>
+                    </div>
+                  ))}
+                  {slowRpcAcks.map((request) => (
+                    <div key={request.requestId} className="px-4 py-2.5">
+                      <div className="truncate text-[13px] font-medium">{request.tag}</div>
+                      <div className="mt-1 font-mono text-[11px] text-muted-foreground">
+                        slow ack / {relativeTimeLabel(request.startedAt, nowMs)}
+                      </div>
+                    </div>
+                  ))}
+                  {(snapshot?.liveProcesses.terminals.length ?? 0) === 0 &&
+                  slowRpcAcks.length === 0 ? (
+                    <p className="px-4 py-4 text-muted-foreground text-sm">
+                      No live terminal or slow RPC activity.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </SettingsSection>
+
+          <DiagnosticsSupportSections snapshot={snapshot} />
         </div>
-      </SettingsSection>
+      </details>
     </SettingsPageContainer>
   );
 }

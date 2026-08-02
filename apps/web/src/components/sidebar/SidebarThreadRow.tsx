@@ -497,7 +497,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
               title={terminalStatus.label}
               className={`inline-flex items-center justify-center ${terminalStatus.colorClass}`}
             >
-              <TerminalIcon className={`size-3 ${terminalStatus.pulse ? "animate-pulse" : ""}`} />
+              <TerminalIcon className="size-3" />
             </span>
           )}
           <div

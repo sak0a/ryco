@@ -128,7 +128,7 @@ export const ChatSessionTabs = memo(function ChatSessionTabs(props: ChatSessionT
               aria-hidden
               className={cn(
                 "inline-flex size-2 shrink-0 items-center justify-center",
-                item.bucket === "in_progress" ? "animate-pulse" : "",
+                item.bucket === "in_progress" ? "animate-status-pulse" : "",
               )}
             >
               <span className={cn("size-1.5 rounded-full", BUCKET_DOT[item.bucket])} />
