@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { shouldShowWorktreeBreadcrumbSegment, tabKeyboardHint } from "./ChatSessionTabs.logic";
+import { shouldShowWorktreeBreadcrumbSegment } from "./ChatHeaderBreadcrumb.logic";
 
 describe("shouldShowWorktreeBreadcrumbSegment", () => {
   it("hides for the main worktree origin", () => {
@@ -28,21 +28,5 @@ describe("shouldShowWorktreeBreadcrumbSegment", () => {
 
   it("hides when nothing identifies the worktree", () => {
     expect(shouldShowWorktreeBreadcrumbSegment({ origin: null, branch: null })).toBe(false);
-  });
-});
-
-describe("tabKeyboardHint", () => {
-  it("returns ⌘1..⌘9 for the first nine indexes", () => {
-    expect(tabKeyboardHint(0)).toBe("⌘1");
-    expect(tabKeyboardHint(8)).toBe("⌘9");
-  });
-
-  it("returns null for index 9 and beyond", () => {
-    expect(tabKeyboardHint(9)).toBeNull();
-    expect(tabKeyboardHint(20)).toBeNull();
-  });
-
-  it("returns null for negative indexes", () => {
-    expect(tabKeyboardHint(-1)).toBeNull();
   });
 });

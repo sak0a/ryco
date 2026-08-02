@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { ChatSessionTabsItem } from "./ChatSessionTabs";
+import type { SessionTabItem } from "../../sessionTabs.selectors";
 import {
   MAX_SPECULATIVE_SIBLING_TAB_PREFETCH,
   selectSpeculativeSiblingTabPrefetchKeys,
 } from "./useChatSessionTabsPrefetch";
 
-function tab(key: string): ChatSessionTabsItem {
+function tab(key: string): SessionTabItem {
   return {
     key,
     title: key,

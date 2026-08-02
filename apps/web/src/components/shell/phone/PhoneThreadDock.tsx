@@ -14,7 +14,7 @@ import {
 import type { DraftId } from "../../../composerDraftStore";
 import { selectSidebarThreadsAcrossEnvironments, useStore } from "../../../store";
 import { DEFAULT_INTERACTION_MODE, type SidebarThreadSummary } from "../../../types";
-import type { ChatSessionTabsItem } from "../../chat/ChatSessionTabs";
+import type { SessionTabItem } from "../../../sessionTabs.selectors";
 import { MobileContextStrip, type MobileContextStripItem } from "../../mobile/MobileContextStrip";
 import { MobileListRow } from "../../mobile/MobileListRow";
 import {
@@ -55,7 +55,7 @@ export interface PhoneThreadDockProps {
    * surface would only render empty states.
    */
   readonly onOpenSourceControl: (() => void) | null;
-  readonly sessionTabs: ReadonlyArray<ChatSessionTabsItem>;
+  readonly sessionTabs: ReadonlyArray<SessionTabItem>;
   readonly activeSessionTabKey: string | null;
   readonly onSelectSessionTab: ((key: string) => void) | null;
 }

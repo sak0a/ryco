@@ -12,6 +12,7 @@ import {
   deriveTimelineMinimapItems,
   deriveUndoTurnCountByTurnId,
   isErroredWorkEntry,
+  isTimelineScrolledToEnd,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   resolveTimelineMinimapHasPersistentGutter,
@@ -155,6 +156,48 @@ describe("timeline minimap", () => {
         assistantText: null,
       },
     ]);
+  });
+});
+
+describe("isTimelineScrolledToEnd", () => {
+  it("counts a transcript that cannot scroll as being at the end", () => {
+    expect(
+      isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 400, clientHeight: 800 }),
+    ).toBe(true);
+    expect(
+      isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 800, clientHeight: 800 }),
+    ).toBe(true);
+  });
+
+  it("tolerates sub-pixel content overflow", () => {
+    expect(
+      isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 800.6, clientHeight: 800 }),
+    ).toBe(true);
+  });
+
+  it("reports away-from-end once the user scrolls past the pin threshold", () => {
+    // 800px viewport pins within 80px of the bottom.
+    expect(
+      isTimelineScrolledToEnd({ scrollTop: 1100, scrollHeight: 2000, clientHeight: 800 }),
+    ).toBe(false);
+    expect(
+      isTimelineScrolledToEnd({ scrollTop: 1121, scrollHeight: 2000, clientHeight: 800 }),
+    ).toBe(true);
+  });
+
+  it("treats a scrolled-to-bottom transcript as being at the end", () => {
+    expect(
+      isTimelineScrolledToEnd({ scrollTop: 1200, scrollHeight: 2000, clientHeight: 800 }),
+    ).toBe(true);
+  });
+
+  it("stays at the end for an unmeasured or non-finite viewport", () => {
+    expect(isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 2000, clientHeight: 0 })).toBe(
+      true,
+    );
+    expect(
+      isTimelineScrolledToEnd({ scrollTop: Number.NaN, scrollHeight: 2000, clientHeight: 800 }),
+    ).toBe(true);
   });
 });
 

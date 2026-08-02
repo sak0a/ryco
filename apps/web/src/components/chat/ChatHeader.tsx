@@ -13,8 +13,7 @@ import { OpenInPicker } from "./OpenInPicker";
 import { usePrimaryEnvironmentId } from "../../environments/primary";
 import { HostedNodeMenu } from "../hostedHub/HostedConnectionControls";
 import { ChatHeaderBar } from "./ChatHeaderBar";
-import { ChatSessionTabs, type ChatSessionTabsItem } from "./ChatSessionTabs";
-import type { WorktreeOriginLike } from "./ChatSessionTabs.logic";
+import type { WorktreeOriginLike } from "./ChatHeaderBreadcrumb.logic";
 import { HEADER_CHROME_ICON_BUTTON_CLASS_NAME } from "./headerChrome";
 import type { LinkedWorktreeItem } from "../worktrees/LinkedWorktreeItemDialog";
 import { usePerfMark, useDevPropDiff } from "../../perf/tabSwitchInstrumentation";
@@ -29,9 +28,9 @@ interface ChatHeaderProps {
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
-  // New, optional props for the breadcrumb / tab strip. When omitted the
-  // header still renders correctly with degraded info (no worktree segment,
-  // no tab strip, no source-control counts).
+  // New, optional props for the breadcrumb. When omitted the header still
+  // renders correctly with degraded info (no worktree segment, no
+  // source-control counts).
   worktreeBranch?: string | null;
   worktreeTitle?: string | null;
   worktreeOrigin?: WorktreeOriginLike;
@@ -44,12 +43,6 @@ interface ChatHeaderProps {
   worktreeWorkItemKey?: string | null;
   worktreeWorkItemState?: "open" | "in_progress" | "done" | "closed" | "unknown" | null;
   worktreeWorkItemStateName?: string | null;
-  sessionTabs?: ReadonlyArray<ChatSessionTabsItem>;
-  activeSessionTabKey?: string | null;
-  onSelectSessionTab?: (key: string) => void;
-  onPrefetchTabEnter?: (key: string) => void;
-  onPrefetchTabLeave?: (key: string) => void;
-  onNewSessionInWorktree?: () => void;
   onSelectProject?: () => void;
   onSelectWorktree?: () => void;
   onOpenLinkedWorktreeItem?: (item: LinkedWorktreeItem) => void;
@@ -144,46 +137,31 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
     </>
   );
 
-  const tabs = props.sessionTabs ?? [];
-  const showTabs = tabs.length > 0;
-
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
-      <div className="flex min-w-0 items-center gap-2 pt-4 pb-2.5">
-        <ChatHeaderBar
-          projectName={props.activeProjectName}
-          isGitRepo={props.isGitRepo}
-          worktreeBranch={props.worktreeBranch}
-          worktreeTitle={props.worktreeTitle}
-          worktreeOrigin={props.worktreeOrigin}
-          worktreeIssueNumber={props.worktreeIssueNumber}
-          worktreeIssueState={props.worktreeIssueState}
-          worktreePrNumber={props.worktreePrNumber}
-          worktreePrState={props.worktreePrState}
-          worktreePrIsDraft={props.worktreePrIsDraft}
-          worktreeWorkItemProvider={props.worktreeWorkItemProvider}
-          worktreeWorkItemKey={props.worktreeWorkItemKey}
-          worktreeWorkItemState={props.worktreeWorkItemState}
-          worktreeWorkItemStateName={props.worktreeWorkItemStateName}
-          sessionTitle={props.activeThreadTitle}
-          {...(props.onSelectProject ? { onSelectProject: props.onSelectProject } : {})}
-          {...(props.onSelectWorktree ? { onSelectWorktree: props.onSelectWorktree } : {})}
-          {...(props.onOpenLinkedWorktreeItem
-            ? { onOpenLinkedWorktreeItem: props.onOpenLinkedWorktreeItem }
-            : {})}
-          inlineActions={inlineActions}
-        />
-      </div>
-      {showTabs && props.onSelectSessionTab ? (
-        <ChatSessionTabs
-          items={tabs}
-          activeKey={props.activeSessionTabKey ?? null}
-          onSelect={props.onSelectSessionTab}
-          {...(props.onPrefetchTabEnter ? { onPrefetchEnter: props.onPrefetchTabEnter } : {})}
-          {...(props.onPrefetchTabLeave ? { onPrefetchLeave: props.onPrefetchTabLeave } : {})}
-          {...(props.onNewSessionInWorktree ? { onNew: props.onNewSessionInWorktree } : {})}
-        />
-      ) : null}
+    <div className="flex min-w-0 flex-1 items-center gap-2 py-3">
+      <ChatHeaderBar
+        projectName={props.activeProjectName}
+        isGitRepo={props.isGitRepo}
+        worktreeBranch={props.worktreeBranch}
+        worktreeTitle={props.worktreeTitle}
+        worktreeOrigin={props.worktreeOrigin}
+        worktreeIssueNumber={props.worktreeIssueNumber}
+        worktreeIssueState={props.worktreeIssueState}
+        worktreePrNumber={props.worktreePrNumber}
+        worktreePrState={props.worktreePrState}
+        worktreePrIsDraft={props.worktreePrIsDraft}
+        worktreeWorkItemProvider={props.worktreeWorkItemProvider}
+        worktreeWorkItemKey={props.worktreeWorkItemKey}
+        worktreeWorkItemState={props.worktreeWorkItemState}
+        worktreeWorkItemStateName={props.worktreeWorkItemStateName}
+        sessionTitle={props.activeThreadTitle}
+        {...(props.onSelectProject ? { onSelectProject: props.onSelectProject } : {})}
+        {...(props.onSelectWorktree ? { onSelectWorktree: props.onSelectWorktree } : {})}
+        {...(props.onOpenLinkedWorktreeItem
+          ? { onOpenLinkedWorktreeItem: props.onOpenLinkedWorktreeItem }
+          : {})}
+        inlineActions={inlineActions}
+      />
     </div>
   );
 });

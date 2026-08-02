@@ -1159,6 +1159,23 @@ function createSnapshotWithPendingApproval(): OrchestrationReadModel {
 // columns that the table cannot fit a 320-430px phone viewport.
 const WIDE_TABLE_COLUMN_COUNT = 24;
 
+// A transcript short enough that the timeline never overflows its viewport.
+function createShortTranscriptSnapshot(): OrchestrationReadModel {
+  const snapshot = createSnapshotForTargetUser({
+    targetMessageId: "msg-user-short-transcript" as MessageId,
+    targetText: "short transcript target",
+  });
+
+  return {
+    ...snapshot,
+    threads: snapshot.threads.map((thread) =>
+      thread.id === THREAD_ID
+        ? Object.assign({}, thread, { messages: thread.messages.slice(0, 2) })
+        : thread,
+    ),
+  };
+}
+
 function createSnapshotWithWideMarkdownTable(): OrchestrationReadModel {
   const snapshot = createSnapshotForTargetUser({
     targetMessageId: "msg-user-wide-table-target" as MessageId,
@@ -1435,6 +1452,14 @@ async function waitForLayout(): Promise<void> {
   await nextFrame();
   await nextFrame();
   await nextFrame();
+}
+
+function findScrollToBottomButton(): HTMLButtonElement | null {
+  return (
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) =>
+      button.textContent?.includes("Scroll to bottom"),
+    ) ?? null
+  );
 }
 
 function findScrollableAncestor(element: HTMLElement): HTMLElement | null {
@@ -5051,28 +5076,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("renders the active thread title inside the sessions worktree list", async () => {
-    const mounted = await mountChatView({
-      viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotForTargetUser({
-        targetMessageId: "msg-user-archive-hover-test" as MessageId,
-        targetText: "archive hover target",
-      }),
-    });
-
-    try {
-      await waitForElement(
-        () =>
-          Array.from(
-            document.querySelectorAll<HTMLElement>('[aria-label="Sessions in this worktree"]'),
-          ).find((element) => element.textContent?.includes(THREAD_TITLE)) ?? null,
-        "Unable to find the active thread title in the sessions worktree list.",
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
   it("renders the active thread title in the breadcrumb", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -5095,7 +5098,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("does not render a thread archive action for the active worktree session row", async () => {
+  it("does not render a thread archive action in the chat header", async () => {
     localStorage.setItem(
       "ryco:client-settings:v1",
       JSON.stringify({
@@ -5115,10 +5118,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       await waitForElement(
         () =>
-          Array.from(
-            document.querySelectorAll<HTMLElement>('[aria-label="Sessions in this worktree"]'),
-          ).find((element) => element.textContent?.includes(THREAD_TITLE)) ?? null,
-        "Unable to find the active thread title in the sessions worktree list.",
+          Array.from(document.querySelectorAll<HTMLElement>('[aria-label="Breadcrumb"]')).find(
+            (element) => element.textContent?.includes(THREAD_TITLE),
+          ) ?? null,
+        "Unable to find the active thread title in the breadcrumb.",
       );
       expect(document.querySelector(`[data-testid="thread-archive-${THREAD_ID}"]`)).toBeNull();
       expect(
@@ -5126,6 +5129,68 @@ describe("ChatView timeline estimator parity (full app)", () => {
       ).toBeNull();
     } finally {
       localStorage.removeItem("ryco:client-settings:v1");
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the scroll-to-bottom pill hidden when the transcript is too short to scroll", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createShortTranscriptSnapshot(),
+    });
+
+    try {
+      const timelineRow = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-message-id]"),
+        "Unable to find a timeline message row.",
+      );
+      expect(findScrollableAncestor(timelineRow)).toBeNull();
+
+      // The pill is shown behind a 150ms debounce, so a stale "not at end"
+      // signal would surface shortly after the timeline paints.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(findScrollToBottomButton()).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows the scroll-to-bottom pill only while the transcript is scrolled away from the bottom", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-scroll-pill" as MessageId,
+        targetText: "scroll pill target",
+      }),
+    });
+
+    try {
+      const timelineRow = await waitForElement(
+        () => document.querySelector<HTMLElement>("[data-message-id]"),
+        "Unable to find a timeline message row.",
+      );
+      const scrollContainer = findScrollableAncestor(timelineRow);
+      expect(scrollContainer).not.toBeNull();
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(findScrollToBottomButton()).toBeNull();
+
+      // The list keeps re-pinning to the end until its scroll handler observes
+      // the user-initiated offset, so re-assert until the position sticks.
+      await vi.waitFor(async () => {
+        scrollContainer!.scrollTop = 0;
+        await waitForLayout();
+        expect(scrollContainer!.scrollTop).toBeLessThan(100);
+      });
+      await vi.waitFor(() => {
+        expect(findScrollToBottomButton()).not.toBeNull();
+      });
+
+      findScrollToBottomButton()!.click();
+      await vi.waitFor(() => {
+        expect(findScrollToBottomButton()).toBeNull();
+      });
+    } finally {
       await mounted.cleanup();
     }
   });

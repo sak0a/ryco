@@ -37,7 +37,7 @@ import { useStore, type EnvironmentState } from "../../../store";
 import type { SidebarThreadSummary } from "../../../types";
 import { useUiStateStore } from "../../../uiStateStore";
 import { SidebarInset, SidebarProvider } from "../../ui/sidebar";
-import type { ChatSessionTabsItem } from "../../chat/ChatSessionTabs";
+import type { SessionTabItem } from "../../../sessionTabs.selectors";
 import { PhoneHome } from "./PhoneHome";
 import { PhoneThreadAppBar } from "./PhoneThreadAppBar";
 import { PhoneThreadDock } from "./PhoneThreadDock";
@@ -61,10 +61,10 @@ const THREAD_IDS: ReadonlyArray<ThreadId> = Array.from(
 );
 
 /** Two sessions, so the strip renders its full pill inventory under test. */
-const SESSION_TABS: ReadonlyArray<ChatSessionTabsItem> = [
+const SESSION_TABS: ReadonlyArray<SessionTabItem> = [
   { key: "session-a", title: "Session A" },
   { key: "session-b", title: "Session B" },
-] as unknown as ReadonlyArray<ChatSessionTabsItem>;
+] as unknown as ReadonlyArray<SessionTabItem>;
 
 /**
  * **The enumerated "primary and frequent" inventory**, stated by accessible

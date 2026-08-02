@@ -101,6 +101,49 @@ export function resolveTimelineMinimapHitStripWidth(viewportWidth: number): numb
   );
 }
 
+/**
+ * Fraction of the viewport within which the transcript counts as "at the end".
+ * Mirrors LegendList's `maintainScrollAtEndThreshold`, so the scroll-to-bottom
+ * pill is hidden exactly while the list still auto-pins to the bottom.
+ */
+export const TIMELINE_AT_END_THRESHOLD_RATIO = 0.1;
+
+/** Sub-pixel slack when deciding whether the transcript can scroll at all. */
+const TIMELINE_SCROLLABLE_EPSILON_PX = 1;
+
+export interface TimelineScrollMetrics {
+  readonly scrollTop: number;
+  readonly scrollHeight: number;
+  readonly clientHeight: number;
+}
+
+/**
+ * Whether the transcript is parked at the bottom — measured from the live
+ * scroller rather than LegendList's cached `isAtEnd`, which only refreshes
+ * inside its own layout/scroll passes and stays stale for a transcript that
+ * never scrolls. A viewport that is unmeasured, or content that fits without
+ * overflowing, both count as "at the end": there is no bottom to travel to,
+ * so the scroll-to-bottom affordance has nothing to offer.
+ */
+export function isTimelineScrolledToEnd(metrics: TimelineScrollMetrics): boolean {
+  const { scrollTop, scrollHeight, clientHeight } = metrics;
+  if (
+    !Number.isFinite(scrollTop) ||
+    !Number.isFinite(scrollHeight) ||
+    !Number.isFinite(clientHeight)
+  ) {
+    return true;
+  }
+  if (clientHeight <= 0) {
+    return true;
+  }
+  if (scrollHeight - clientHeight <= TIMELINE_SCROLLABLE_EPSILON_PX) {
+    return true;
+  }
+  const distanceFromEnd = scrollHeight - scrollTop - clientHeight;
+  return distanceFromEnd < clientHeight * TIMELINE_AT_END_THRESHOLD_RATIO;
+}
+
 export function resolveTimelineMinimapInteractiveWidth(
   collapsedWidth: number,
   expanded: boolean,
