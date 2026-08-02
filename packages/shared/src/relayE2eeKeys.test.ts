@@ -15,6 +15,7 @@ import {
   e2eeBytesEqual,
   e2eeKeyFingerprint,
   formatE2eeKeyFingerprint,
+  parseE2eeKeyFingerprint,
   generateE2eeAgreementKeyPair,
   validateE2eeAgreementPublicKey,
   validateE2eeClientIdentityPublicKey,
@@ -123,6 +124,49 @@ describe("relay E2EE key material (§7.1)", () => {
     expect(formatE2eeKeyFingerprint(agreement)).toBe(AGREEMENT_FINGERPRINT_DISPLAY);
     // Derived, not chosen: ⌈4 · 32 / 3⌉ characters after the prefix (§7.1).
     expect(NODE_FINGERPRINT_DISPLAY.length - E2EE_KEY_FINGERPRINT_DISPLAY_PREFIX.length).toBe(43);
+  });
+
+  it("round-trips the display form and refuses every other spelling of it", () => {
+    // §13.6 has the owner TYPE this value at the node CLI, so the parse is the
+    // one place a display string becomes a record key. It must accept exactly
+    // what the formatter emits and nothing else: two spellings of one digest
+    // would let one record be named twice and the pairing-window discriminator
+    // be matched against a value the owner did not read off their device.
+    const fingerprint = e2eeKeyFingerprint("client-identity", CLIENT_PUBLIC_KEY);
+    const display = formatE2eeKeyFingerprint(fingerprint);
+    expect(hex(parseE2eeKeyFingerprint(display))).toBe(hex(fingerprint));
+
+    const body = display.slice(E2EE_KEY_FINGERPRINT_DISPLAY_PREFIX.length);
+    for (const rejected of [
+      body,
+      `sha256:${body}`,
+      `SHA256:${body}=`,
+      `SHA256:${body} `,
+      `SHA256:${body.slice(0, -1)}`,
+      `SHA256:${body}A`,
+      // Standard base64's alphabet, which encodes the same digest differently.
+      `SHA256:${body.replaceAll("-", "+").replaceAll("_", "/")}`,
+    ]) {
+      if (rejected === display) continue;
+      expect(() => parseE2eeKeyFingerprint(rejected)).toThrow();
+    }
+  });
+
+  it("refuses a display form whose trailing bits are not the encoder's padding", () => {
+    // The last character carries only four significant bits of a 32-byte digest;
+    // the other two are padding the encoder always writes as zero. A parser that
+    // ignored them would accept four spellings of every fingerprint.
+    const display = formatE2eeKeyFingerprint(e2eeKeyFingerprint("node-identity", NODE_PUBLIC_KEY));
+    const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const last = display[display.length - 1]!;
+    const index = alphabet.indexOf(last);
+    let refused = 0;
+    for (const offset of [1, 2, 3]) {
+      const candidate = `${display.slice(0, -1)}${alphabet[(index + offset) % 64]!}`;
+      expect(() => parseE2eeKeyFingerprint(candidate)).toThrow();
+      refused += 1;
+    }
+    expect(refused).toBe(3);
   });
 
   it("reuses the node-identity fingerprint definition unchanged", () => {

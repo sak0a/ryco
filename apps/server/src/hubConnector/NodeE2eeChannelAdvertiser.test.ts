@@ -224,6 +224,7 @@ function relayHarness(options: RelayHarnessOptions) {
     diagnostics,
     statements,
     sendHandles,
+    advertiser,
     announcementWasAsynchronous: () => announcementWasAsynchronous,
   };
 }
@@ -364,6 +365,26 @@ describe("NodeE2eeChannelAdvertiser on the relay path", () => {
         minimumChunkBytes: E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
       },
     ]);
+  });
+
+  it("reports the live §5.5 U1 pair for §12.5's display, and nothing when it is not live", async () => {
+    // §12.5 Display: "For a live `undersized-connection` condition it MUST also
+    // display the asserted `maxDataChunkBytes` and
+    // `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`", and it says the pair is read from
+    // the current connection rather than retained in the ring. So it is read
+    // here, and it answers `undefined` for a connection that carries a carrier
+    // fine — a display that reported the pair anyway would name a condition that
+    // does not hold.
+    const undersized = relayHarness({ maxDataChunkBytes: E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES - 1 });
+    await undersized.registry.handle(openFrame);
+    expect(undersized.advertiser.undersizedConnection()).toEqual({
+      assertedMaxDataChunkBytes: E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES - 1,
+      advertisementMinChunkBytes: E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
+    });
+
+    const serviceable = relayHarness({ maxDataChunkBytes: E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES });
+    await serviceable.registry.handle(openFrame);
+    expect(serviceable.advertiser.undersizedConnection()).toBeUndefined();
   });
 
   it("fails an undersized connection closed under effective requireE2EE (§5.5, §11.2 P2)", async () => {

@@ -190,6 +190,68 @@ identity summary — `none`, `pending`, `active`, or `unknown` — rather than i
 `unknown` means key custody could not be read at all, and must be treated like `active`: refusing a
 destructive action is the safe answer when an identity may exist.
 
+### Operator commands
+
+The encrypted relay layer's owner-facing state is reached through `ryco e2ee`, a sibling of
+`ryco hub` rather than a subtree of it: `hub`'s subcommands are connector-lifecycle verbs, while
+these are about node-owned security state that outlives any one connector. Every one of them
+requires the running server, for the same reason the acknowledgements mean anything at all.
+
+```bash
+ryco e2ee client list                      # records, saturation, refusal count, pairing window
+ryco e2ee client show <fingerprint>        # one record and its long-term safety number
+ryco e2ee client approve <fingerprint> --max-role <role> --capability <capability>
+ryco e2ee client narrow <fingerprint> [--max-role <role>] [--capability <capability>]
+ryco e2ee client revoke <fingerprint>
+ryco e2ee client purge <fingerprint>
+ryco e2ee client clear-refusals            # zero the pending-cap refusal count
+ryco e2ee client window open <fingerprint> # the discriminator is required
+ryco e2ee client window close
+ryco e2ee sessions                         # the advisory per-session code, for the web tier
+ryco e2ee policy show
+ryco e2ee policy set [--require-e2ee] [--require-approved-client-e2ee] [--suite <id>]
+ryco e2ee policy recover                   # advance a rolled-back policy generation
+ryco e2ee prekey show
+ryco e2ee prekey rotate
+ryco e2ee continuity show
+ryco e2ee continuity recover --adopt <continuity-id> | --break
+ryco e2ee continuity break
+ryco e2ee fallback show
+ryco e2ee fallback reset
+```
+
+`client list`, `show`, `approve`, `narrow`, `revoke`, and `purge` take the record key in full —
+`--hub-origin`, `--account-id`, and the `SHA256:` fingerprint — because a key is all three fields
+and a fingerprint alone names records in scopes the owner did not touch.
+
+Three of these carry guarantees rather than conveniences, and it is worth stating what they are.
+**`client narrow` and `client revoke` do not return until every channel admitted under the withdrawn
+authority is closed**, and they report how many they closed and how many in-flight handshakes they
+aborted; an acknowledgement therefore means what an owner reads it to mean. **`policy set` warns
+before it acts** — including the operator-lockout warning for `--require-approved-client-e2ee`,
+which disables web and legacy access entirely and can strand remote access if every approved native
+client key is lost — then runs the same ordered procedure and reports the closures broken out by
+class. **`continuity recover` offers exactly two outcomes and defaults to neither**: re-adopting a
+confirmed lineage id keeps every existing client verification, while breaking continuity mints a
+fresh one and requires every paired client to verify this node again.
+
+Two more are recovery paths rather than routine operations. **`policy recover`** is §5.7's command
+for a node whose advertised policy generation is below its durable high-water mark — a restore
+rolled the record back: it advances the generation past every value the node may have advertised,
+warns that the jump is deliberate and that clients accept only a strictly higher value, and commits
+the fail-closed policy rather than re-adopting restored values, so widening back is a separate
+explicit `policy set`. **`prekey show`** reads the certificate the node holds without re-signing it,
+which is the only surface on which an expired prekey — and §6.4's remedy for it — is visible at all.
+
+`--json` emits one compact document on a single line, and that document is the whole of stdout:
+logging is suppressed for the entire command, and answers that read as prose to a human ("no
+enrollment is pending") are documents to a machine. Mandated warnings are not dropped under the
+flag — they go to stderr and travel inside the document — because a flag that silenced a warning
+would be the quiet way to skip one. Nothing on any of these surfaces carries a raw key, and the
+fallback report carries no account, channel, session, or key identifier at all, because none is
+stored. Normative definitions: `docs/relay-e2ee-protocol.md` §5.7, §6.4, §7.5, §12.3–§12.6,
+§13.4–§13.6.
+
 ## Enrollment and key custody
 
 Start Ryco with the connector enabled, then run these commands against the same Ryco state

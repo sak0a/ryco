@@ -15,7 +15,7 @@
   },
   "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
   "deferred": [
-    "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any landed module: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock, and the node-side prekey rotation state that holds two is owned by the node phase.",
+    "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any module this generator can reach: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock. The node-side rotation state that holds two now EXISTS — `NodeE2eePrekeyClient` and `NodeE2eePrekeyStore` in apps/server — and is covered by its own module tests, but the overlap window has not been transcribed into this corpus and no consuming test holds the runtime to a committed table of it. Owned by the node phase.",
     "The §5.2 step 5 checks a VERIFIER applies to the node prekey carried in a capability statement — lifetime and rotation-overlap against the verifier's clock — have no landed implementation; the reconstruction above is the part §7.6 fixes. Owned by the §5.2 statement verifier."
   ],
   "testKeyMaterial": {

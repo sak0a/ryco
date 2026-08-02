@@ -6,18 +6,20 @@
       "3.4",
       "4.3",
       "4.4",
+      "8.9",
       "11.2",
+      "11.3",
+      "12.5",
       "16.3 F10"
     ],
-    "summary": "The part of §16.3 F10 the landed wire module decides: the §11.2 partition of the legacy-lock injection rows. An envelope after the lock is P5, a correctly sized and correctly directed negotiation record after it is P24 — proved to be neither over-bound nor misdirected, and therefore not P3 — and an unknown or absent first byte is P6, each FATAL-PRE because no session keys exist in `legacy`. The two P3 contrast cases fix the boundary of that partition.",
+    "summary": "The NODE half of §16.3 F10. Every §4.4 node transition row N1–N17, with its state, its input class and payload bytes, the guards that select it, and its expected ACTION and NEXT STATE — including rows N15–N17, whose input is `channel.accept` and whose §12.5 occurrence accounting §16.3 states field by field, and the §8.9 deadline under each policy. Plus the §11.2 partition of the legacy-lock injection rows: an envelope after the lock is P5, a correctly sized and correctly directed negotiation record after it is P24 — proved to be neither over-bound nor misdirected, and therefore not P3 — and an unknown or absent first byte is P6, each FATAL-PRE because no session keys exist in `legacy`, with two P3 contrast cases fixing the boundary of that partition. The node rows are replayed against the real runtime by apps/server/src/hubConnector/relayE2eeNodeCorpus.test.ts.",
     "generator": "scripts/generate-e2ee-fixtures.ts"
   },
   "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
   "deferred": [
-    "Every transition row of §4.4 — N1–N17 and K1–K24, with its input payload, its state, its expected ACTION and its next state. No §4.4 mode machine exists in packages/shared/src, so no row has an implementation to derive an expectation from; the cases above pin the classification and the record-framing verdicts a machine consumes, not the machine. Owned by the node and client phases.",
+    "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state. No client mode machine exists in this repository, so no client row has an implementation to derive an expectation from. The node rows N1–N17 ARE emitted above and are held to the real `NodeE2eeChannelSession` by the node-side consuming test. Owned by the client phase.",
     "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
-    "Rows N15–N17, which are driven by a connection-level input rather than a payload, and their §12.5 occurrence accounting. Owned by the node phase.",
-    "The timer and keepalive cases that discharge §3.2.2 L1 and L2 and the §8.9 deadline — the stalled accept (K15), the buffered keepalive round trip, the send-buffer overflow including the connection-wide multi-channel accounting, and the node deadline under each policy. `E2eeClientHandshake` and `E2eeNodeHandshake` do expose the two deadlines, but the buffering, flushing, and occurrence behavior these cases assert belongs to the mode machine and to the relay engine. Owned by the node and client phases.",
+    "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — the stalled accept (K15), the buffered keepalive round trip, and the send-buffer overflow including the connection-wide multi-channel accounting. The buffering and flushing behavior they assert belongs to a client mode machine and to the client's relay engine, neither of which exists here; the §8.9 node deadline under each policy IS emitted above. Owned by the client phase.",
     "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
   ],
   "testKeyMaterial": {
@@ -295,6 +297,1121 @@
         "bodyParsed": false,
         "fatal": "P3",
         "disposition": "FATAL-PRE"
+      }
+    },
+    {
+      "name": "row-n1-legacy-json-under-effective-require-e2ee",
+      "sections": [
+        "4.4 N1",
+        "11.2 P1",
+        "12.3"
+      ],
+      "note": "Effective `requireE2EE` forbids entering `legacy` at all, so the first legacy RPC message is FATAL-PRE rather than a fallback. The row is P1, and it is the reason `requireE2EE` is a policy about channels and not only about advertisements.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N1",
+        "state": "negotiating",
+        "input": {
+          "class": "LEGACY-JSON"
+        },
+        "postStripPayload": {
+          "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+        },
+        "guards": {
+          "effectiveRequireE2EE": true,
+          "advertisementEmitted": true
+        }
+      },
+      "expected": {
+        "row": "N1",
+        "step2Discrimination": {
+          "class": "legacy-json"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P1",
+        "disposition": "FATAL-PRE",
+        "deliveredToTheRpcParser": false,
+        "fallbackOccurrence": null,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n2-legacy-json-locks-legacy-and-counts-one-peer-legacy-occurrence",
+      "sections": [
+        "4.4 N2",
+        "12.5"
+      ],
+      "note": "The compatibility default with an advertisement actually emitted: the channel locks `legacy`, the message reaches the RPC parser, and exactly ONE peer-legacy occurrence is recorded — the §12.5 evidence that a legacy peer population exists. N17 is the same admission WITHOUT an advertisement and MUST NOT add a second occurrence.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N2",
+        "state": "negotiating",
+        "input": {
+          "class": "LEGACY-JSON"
+        },
+        "postStripPayload": {
+          "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+        },
+        "guards": {
+          "effectiveRequireE2EE": false,
+          "nodeE2eeCapable": true,
+          "advertisementEmitted": true
+        }
+      },
+      "expected": {
+        "row": "N2",
+        "step2Discrimination": {
+          "class": "legacy-json"
+        },
+        "action": "lock legacy; count one peer-legacy fallback occurrence; deliver to the RPC parser",
+        "nextState": "legacy",
+        "fatal": null,
+        "deliveredToTheRpcParser": true,
+        "fallbackOccurrence": {
+          "class": "peer-legacy",
+          "count": 1
+        }
+      }
+    },
+    {
+      "name": "row-n3-client-hello-runs-the-responder-and-enters-e2ee",
+      "sections": [
+        "4.4 N3",
+        "8.6",
+        "8.7"
+      ],
+      "note": "The only row that enters `e2ee`. Its action has two halves — run the §8.6 responder, then emit `E2EEServerAccept` — and §12.6 requires both to land in one synchronous turn, because the channel is an in-flight handshake to both withdrawal sweeps until the accept is on the send path.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N3",
+        "state": "negotiating",
+        "input": {
+          "class": "NEGOTIATION",
+          "type": 1
+        },
+        "postStripPayload": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b707a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        },
+        "guards": {
+          "advertisementEmitted": true,
+          "firstHelloOnThisChannel": true,
+          "withinItsBound": true
+        }
+      },
+      "expected": {
+        "row": "N3",
+        "step2Discrimination": {
+          "class": "negotiation"
+        },
+        "action": "run the §8.6 responder handshake; on success emit `E2EEServerAccept`",
+        "nextState": "e2ee",
+        "fatal": null,
+        "serverAccept": {
+          "$bytes": "02028501781a65706b5f45454545454545454545454545454545454545454545582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d7858655869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67bb13e712e2d79ffe5479f893d5255f767e736270d77c4d46aebba6d01338e774bcff68792b06e98786db90b08d6a159910da44b2dba57b8a02f627acd8dca23db4cb8a1371458201d7653f44a48d31ef9d689ecd25a1a566f98c2939a4513e9784bfdd1206e3d34"
+        },
+        "serverAcceptBytes": 203,
+        "registryDirection": "n2c",
+        "deliveredToTheRpcParser": false,
+        "rpcOutputBeforeTheImplicitFinish": false
+      }
+    },
+    {
+      "name": "row-n4-a-second-hello-on-the-channel",
+      "sections": [
+        "4.4 N4",
+        "11.2 P4",
+        "5.5"
+      ],
+      "note": "Exactly one handshake attempt per channel (§4.4): a second hello is fatal whatever it contains, and a retry needs a fresh ticket, channel, and handshake.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N4",
+        "state": "negotiating",
+        "input": {
+          "class": "NEGOTIATION",
+          "type": 1
+        },
+        "postStripPayload": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b707a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        },
+        "guards": {
+          "advertisementEmitted": true,
+          "firstHelloOnThisChannel": false
+        }
+      },
+      "expected": {
+        "row": "N4",
+        "step2Discrimination": {
+          "class": "negotiation"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P4",
+        "disposition": "FATAL-PRE",
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n4-a-hello-with-no-advertisement-emitted",
+      "sections": [
+        "4.4 N4",
+        "11.2 P4",
+        "5.5"
+      ],
+      "note": "§5.1's advertise-never-probe rule from the node's side: a hello on a channel this node never advertised on is fatal rather than served, because the client cannot have validated a statement it was never sent.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N4",
+        "state": "negotiating",
+        "input": {
+          "class": "NEGOTIATION",
+          "type": 1
+        },
+        "postStripPayload": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b707a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        },
+        "guards": {
+          "advertisementEmitted": false,
+          "firstHelloOnThisChannel": true
+        }
+      },
+      "expected": {
+        "row": "N4",
+        "step2Discrimination": {
+          "class": "negotiation"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P4",
+        "disposition": "FATAL-PRE",
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n5-a-misdirected-negotiation-record-in-negotiating",
+      "sections": [
+        "4.4 N5",
+        "3.4",
+        "11.2 P3"
+      ],
+      "note": "An `E2EEServerAccept` arriving AT THE NODE. The §3.4 registry fixes its direction as node to client, so at the node it is misdirected and P3 — the row that is P24 only once the channel has locked `legacy`.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N5",
+        "state": "negotiating",
+        "input": {
+          "class": "NEGOTIATION",
+          "type": 2
+        },
+        "postStripPayload": {
+          "$bytes": "02028501781a65706b5f45454545454545454545454545454545454545454545582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d7858655869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67bb13e712e2d79ffe5479f893d5255f767e736270d77c4d46aebba6d01338e774bcff68792b06e98786db90b08d6a159910da44b2dba57b8a02f627acd8dca23db4cb8a1371458201d7653f44a48d31ef9d689ecd25a1a566f98c2939a4513e9784bfdd1206e3d34"
+        },
+        "guards": {
+          "registryDirection": "n2c",
+          "directedCorrectlyForThisEndpoint": false
+        }
+      },
+      "expected": {
+        "row": "N5",
+        "step2Discrimination": {
+          "class": "negotiation"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P3",
+        "disposition": "FATAL-PRE",
+        "misdirected": true,
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n6-an-envelope-before-establishment",
+      "sections": [
+        "4.4 N6",
+        "11.2 P5"
+      ],
+      "note": "An envelope in `negotiating` cannot be authenticated — no session keys exist — so it is P5 and FATAL-PRE, never FATAL-POST.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N6",
+        "state": "negotiating",
+        "input": {
+          "class": "ENVELOPE"
+        },
+        "postStripPayload": {
+          "$bytes": "010101000000000000000000000000a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0"
+        },
+        "guards": {
+          "sessionKeysExist": false
+        }
+      },
+      "expected": {
+        "row": "N6",
+        "step2Discrimination": {
+          "class": "envelope"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P5",
+        "disposition": "FATAL-PRE",
+        "sessionKeysExist": false,
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n7-an-unknown-first-byte-in-negotiating",
+      "sections": [
+        "4.4 N7",
+        "3.4",
+        "11.2 P6"
+      ],
+      "note": "An unknown discriminator in `negotiating`: fatal, never an implicit legacy path.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N7",
+        "state": "negotiating",
+        "input": {
+          "class": "OTHER"
+        },
+        "postStripPayload": {
+          "$bytes": "7f0102"
+        },
+        "guards": {}
+      },
+      "expected": {
+        "row": "N7",
+        "step2Discrimination": {
+          "class": "other"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P6",
+        "disposition": "FATAL-PRE",
+        "neverSilentlyDropped": true,
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n7-an-absent-first-byte-in-negotiating",
+      "sections": [
+        "4.4 N7",
+        "3.4",
+        "11.2 P6"
+      ],
+      "note": "§3.4's absent case — a zero-length post-strip payload — takes the same row, so no implementation treats it as a benign no-op.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N7",
+        "state": "negotiating",
+        "input": {
+          "class": "OTHER"
+        },
+        "postStripPayload": {
+          "$bytes": ""
+        },
+        "guards": {}
+      },
+      "expected": {
+        "row": "N7",
+        "step2Discrimination": {
+          "class": "other"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P6",
+        "disposition": "FATAL-PRE",
+        "neverSilentlyDropped": true,
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n8-the-handshake-deadline-under-effective-require-e2ee",
+      "sections": [
+        "4.4 N8",
+        "11.2 P7",
+        "12.3"
+      ],
+      "note": "`T_HANDSHAKE_NODE` measured from advertisement emit, with the handshake incomplete. §4.4 guards this row deliberately: it covers a silent peer, an oversized or excessive negotiation exchange, and a plain timeout alike, and it is armed ONLY under effective `requireE2EE`.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N8",
+        "state": "negotiating",
+        "input": {
+          "class": "TIMER",
+          "timer": "T_HANDSHAKE_NODE",
+          "startedAt": "advertisement emit"
+        },
+        "guards": {
+          "effectiveRequireE2EE": true,
+          "handshakeComplete": false
+        }
+      },
+      "expected": {
+        "row": "N8",
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P7",
+        "disposition": "FATAL-PRE",
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n9-an-authenticated-envelope-is-delivered-to-the-rpc-parser",
+      "sections": [
+        "4.4 N9",
+        "4.3 step 3",
+        "8.9",
+        "9.1"
+      ],
+      "note": "The only node row that reaches the RPC parser in `e2ee`. The FIRST authenticated client-to-node envelope also completes the §8.9 implicit client finish, and until it does the node MUST emit no RPC output and invoke no handler — which is why the delivery and the finish are asserted together.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N9",
+        "state": "e2ee",
+        "input": {
+          "class": "ENVELOPE",
+          "innerType": 1
+        },
+        "postStripPayload": {
+          "$bytes": "01010100000000000000000000000078fe898e903e04ca8b3290545503de837a216f93d1b25d2dd24af460ebe5e688d092308849f1bc6e57db87a023bdcabade4e9b"
+        },
+        "guards": {
+          "step3ChecksPass": true,
+          "knownInnerType": true,
+          "firstAuthenticatedC2nEnvelope": true
+        }
+      },
+      "expected": {
+        "row": "N9",
+        "step2Discrimination": {
+          "class": "envelope"
+        },
+        "action": "deliver the authenticated inner record; complete the §8.9 implicit client finish",
+        "nextState": "e2ee",
+        "fatal": null,
+        "unprotect": {
+          "kind": "authenticated",
+          "innerType": 1,
+          "bodyBytes": 34,
+          "epoch": 0,
+          "counter": 0,
+          "plaintextBytes": 35,
+          "epochCompleted": false
+        },
+        "deliveredToTheRpcParser": true,
+        "rpcOutputBeforeTheImplicitFinish": false
+      }
+    },
+    {
+      "name": "row-n10-an-envelope-failing-a-step-3-check",
+      "sections": [
+        "4.4 N10",
+        "4.3 step 3",
+        "11.3 Q3"
+      ],
+      "note": "The same envelope with one ciphertext bit flipped. Session keys exist, so the disposition is FATAL-POST and the node emits one encrypted `E2EEError` before closing — the row is Q3, and §11.3's code for every one of this table's rows is `protocol_violation`.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N10",
+        "state": "e2ee",
+        "input": {
+          "class": "ENVELOPE",
+          "innerType": 1,
+          "ciphertextBitFlipped": true
+        },
+        "postStripPayload": {
+          "$bytes": "01010100000000000000000000000078fe898e903e04ca8b3290545503de837a216f93d1b25d2dd24af460ebe5e688d092308849f1bc6e57db87a023bdcabade4e9a"
+        },
+        "guards": {
+          "step3ChecksPass": false
+        }
+      },
+      "expected": {
+        "row": "N10",
+        "step2Discrimination": {
+          "class": "envelope"
+        },
+        "action": "FATAL-POST",
+        "nextState": "closed",
+        "fatal": "Q3",
+        "disposition": "FATAL-POST",
+        "unprotect": {
+          "kind": "fatal",
+          "reason": "authentication_failed"
+        },
+        "errorCode": 1,
+        "errorRecordsOnTheWire": 1,
+        "closeReason": "channel_rejected",
+        "deliveredToTheRpcParser": false
+      }
+    },
+    {
+      "name": "row-n11-legacy-json-after-e2ee",
+      "sections": [
+        "4.4 N11",
+        "3.4",
+        "11.3 Q6"
+      ],
+      "note": "Plaintext after E2EE never reaches the RPC parser. This is the row a keepalive `Ping` would hit if a client let one escape after the mode locked, which is why §4.4's buffering rule covers all plaintext and not only application RPC.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N11",
+        "state": "e2ee",
+        "input": {
+          "class": "LEGACY-JSON"
+        },
+        "postStripPayload": {
+          "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+        },
+        "guards": {
+          "sessionKeysExist": true
+        }
+      },
+      "expected": {
+        "row": "N11",
+        "step2Discrimination": {
+          "class": "legacy-json"
+        },
+        "action": "FATAL-POST",
+        "nextState": "closed",
+        "fatal": "Q6",
+        "disposition": "FATAL-POST",
+        "errorCode": 1,
+        "errorRecordsOnTheWire": 1,
+        "closeReason": "channel_rejected",
+        "deliveredToTheRpcParser": false
+      }
+    },
+    {
+      "name": "row-n11-a-negotiation-record-after-e2ee",
+      "sections": [
+        "4.4 N11",
+        "3.4",
+        "11.3 Q6"
+      ],
+      "note": "A negotiation record in `e2ee` is Q6 and not P24: P24 is the `legacy` row, and here session keys exist, so the disposition is FATAL-POST.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N11",
+        "state": "e2ee",
+        "input": {
+          "class": "NEGOTIATION"
+        },
+        "postStripPayload": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b707a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        },
+        "guards": {
+          "sessionKeysExist": true
+        }
+      },
+      "expected": {
+        "row": "N11",
+        "step2Discrimination": {
+          "class": "negotiation"
+        },
+        "action": "FATAL-POST",
+        "nextState": "closed",
+        "fatal": "Q6",
+        "disposition": "FATAL-POST",
+        "errorCode": 1,
+        "errorRecordsOnTheWire": 1,
+        "closeReason": "channel_rejected",
+        "deliveredToTheRpcParser": false
+      }
+    },
+    {
+      "name": "row-n11-an-absent-first-byte-after-e2ee",
+      "sections": [
+        "4.4 N11",
+        "3.4",
+        "11.3 Q6"
+      ],
+      "note": "§3.4's absent case in `e2ee`. §11.3 Q6 names it explicitly so a zero-length payload cannot be read as a benign no-op after establishment either.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N11",
+        "state": "e2ee",
+        "input": {
+          "class": "OTHER"
+        },
+        "postStripPayload": {
+          "$bytes": ""
+        },
+        "guards": {
+          "sessionKeysExist": true
+        }
+      },
+      "expected": {
+        "row": "N11",
+        "step2Discrimination": {
+          "class": "other"
+        },
+        "action": "FATAL-POST",
+        "nextState": "closed",
+        "fatal": "Q6",
+        "disposition": "FATAL-POST",
+        "errorCode": 1,
+        "errorRecordsOnTheWire": 1,
+        "closeReason": "channel_rejected",
+        "deliveredToTheRpcParser": false
+      }
+    },
+    {
+      "name": "row-n12-legacy-json-in-legacy",
+      "sections": [
+        "4.4 N12"
+      ],
+      "note": "The steady state of a locked-legacy channel: deliver, stay `legacy`, and count nothing — the channel's single §12.5 occurrence was recorded at the lock (N2) or at the suppressed advertisement (N16).",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N12",
+        "state": "legacy",
+        "input": {
+          "class": "LEGACY-JSON"
+        },
+        "postStripPayload": {
+          "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+        },
+        "guards": {}
+      },
+      "expected": {
+        "row": "N12",
+        "step2Discrimination": {
+          "class": "legacy-json"
+        },
+        "action": "deliver to the RPC parser",
+        "nextState": "legacy",
+        "fatal": null,
+        "deliveredToTheRpcParser": true,
+        "fallbackOccurrence": null
+      }
+    },
+    {
+      "name": "row-n13-an-envelope-in-legacy",
+      "sections": [
+        "4.4 N13",
+        "11.2 P5"
+      ],
+      "note": "The envelope half of row N13. No session keys exist in `legacy`, so it is FATAL-PRE.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N13",
+        "state": "legacy",
+        "input": {
+          "class": "ENVELOPE"
+        },
+        "postStripPayload": {
+          "$bytes": "010101000000000000000000000000a0a1a2a3a4a5a6a7a8a9aaabacadaeafb0"
+        },
+        "guards": {
+          "sessionKeysExist": false
+        }
+      },
+      "expected": {
+        "row": "N13",
+        "step2Discrimination": {
+          "class": "envelope"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P5",
+        "disposition": "FATAL-PRE",
+        "sessionKeysExist": false,
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n13-a-negotiation-record-in-legacy",
+      "sections": [
+        "4.4 N13",
+        "11.2 P24"
+      ],
+      "note": "The negotiation half of row N13, and the reason P24 exists as its own §11.2 row: this hello is correctly sized and correctly directed, so it is neither P3 nor P5.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N13",
+        "state": "legacy",
+        "input": {
+          "class": "NEGOTIATION"
+        },
+        "postStripPayload": {
+          "$bytes": "02018701666e617469766501810158209f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180582086d6a90573622a70e2c1261bd90cfd8f8bc917091e7bc87990876dc1303f5d785901b707a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c3b00409253b742804a2af498e84c0dfa2caccf2c6c2dafb5eb9e4700bafd0fd42dc71012a4498d7a640bf79254b38f5c130ccc6e04b9df06676beb081521a78e1b34b8a1bb923d4a4e1a6d0ddc9e5ff57d928ffe67b426450b8a904ec2aec164188652fbd9919d6f7815edf5ab2856471fede30407b731573902916b37e9cfd42d234701bb21c63ad08128c0e7d1a838c56c0dc6e47644283e068bc46b4f3c32c6f335bbffe18c82865f41f3a39d7b024d50f162f848e3f10456ca1b33e10aac7eda32192de57304fcb2db6434584f38dfd0e00486f0818a6dc2b4c9d3c2bd56aa28e32b7811bbb562995d1e5cdb5abe780f63deebf1edd7845340c32d00d6c375976689807f878076ba56162e58f4ce73ecfa7e9f0973b2a8173907c35c3ce9f41c96921d7f73f27c473832aa0160cf66d88bafa40d5a7a65df78fca36dd44d2258c8356772b484ef1832ae7a06f9e49af50713fa4bb7ef64fdc636ab63a236b6639796e39cd20357477a170fdc7d9434b429a6f0d5897b69197017a7712c97b34b211c9d19a0efadf514e1663eb9f6cad85400254a7e"
+        },
+        "guards": {
+          "sessionKeysExist": false
+        }
+      },
+      "expected": {
+        "row": "N13",
+        "step2Discrimination": {
+          "class": "negotiation"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P24",
+        "disposition": "FATAL-PRE",
+        "sessionKeysExist": false,
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n14-an-unknown-first-byte-in-legacy",
+      "sections": [
+        "4.4 N14",
+        "3.4",
+        "11.2 P6"
+      ],
+      "note": "The `OTHER` row of the `legacy` state, completing §4.4's rule that a malformed, unknown, or absent first byte is fatal in EVERY state.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N14",
+        "state": "legacy",
+        "input": {
+          "class": "OTHER"
+        },
+        "postStripPayload": {
+          "$bytes": "7f0102"
+        },
+        "guards": {}
+      },
+      "expected": {
+        "row": "N14",
+        "step2Discrimination": {
+          "class": "other"
+        },
+        "action": "FATAL-PRE",
+        "nextState": "closed",
+        "fatal": "P6",
+        "disposition": "FATAL-PRE",
+        "deliveredToTheRpcParser": false,
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n15-an-undersized-connection-under-effective-require-e2ee",
+      "sections": [
+        "4.4 N15",
+        "5.5",
+        "11.2 P2",
+        "7.6.1"
+      ],
+      "note": "§5.5 U1: the connection's asserted `maxDataChunkBytes` is below the advertisement floor, so no carrier can be emitted at all. Under effective `requireE2EE` that is FATAL-PRE at `channel.accept` — before any carrier is built and before any peer input — and the row is P2. It is a property of the CONNECTION, so every channel on it takes the same row.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N15",
+        "state": "negotiating",
+        "input": {
+          "class": "channel.accept"
+        },
+        "guards": {
+          "assertedMaxDataChunkBytes": 8191,
+          "advertisementMinChunkBytes": 8192,
+          "selfCheck": {
+            "kind": "ok"
+          },
+          "effectiveRequireE2EE": true,
+          "advertisementUnavailableReason": "undersized-connection"
+        }
+      },
+      "expected": {
+        "row": "N15",
+        "action": "FATAL-PRE, before any carrier is built and before any peer input",
+        "nextState": "closed",
+        "fatal": "P2",
+        "disposition": "FATAL-PRE",
+        "carrierEmitted": false,
+        "fallbackOccurrence": null,
+        "operatorDiagnostic": {
+          "code": "e2ee_advertisement_unavailable",
+          "reason": "undersized-connection"
+        },
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n15-no-conforming-statement-under-effective-require-e2ee",
+      "sections": [
+        "4.4 N15",
+        "5.5",
+        "11.2 P23",
+        "7.6.1"
+      ],
+      "note": "§5.5 U2: the §7.6.1 self-check fails, here on an unresolvable continuity id under the §7.5 startup cross-check. Under effective `requireE2EE` the row is P23. The wire surface is identical to P2's and to every other pre-key failure; only the node-local operator diagnostic differs.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N15",
+        "state": "negotiating",
+        "input": {
+          "class": "channel.accept"
+        },
+        "guards": {
+          "assertedMaxDataChunkBytes": 4194304,
+          "advertisementMinChunkBytes": 8192,
+          "selfCheck": {
+            "kind": "error",
+            "failure": "continuity_id_unresolved"
+          },
+          "effectiveRequireE2EE": true,
+          "advertisementUnavailableReason": "statement-unavailable"
+        }
+      },
+      "expected": {
+        "row": "N15",
+        "action": "FATAL-PRE, before any carrier is built and before any peer input",
+        "nextState": "closed",
+        "fatal": "P23",
+        "disposition": "FATAL-PRE",
+        "carrierEmitted": false,
+        "fallbackOccurrence": null,
+        "operatorDiagnostic": {
+          "code": "e2ee_advertisement_unavailable",
+          "reason": "statement-unavailable"
+        },
+        "observable": {
+          "handshakeRejectRecords": 1,
+          "handshakeReject": {
+            "$bytes": "0203583c000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "handshakeRejectBytes": 64,
+          "closeReason": "channel_rejected",
+          "applicationPayloadBytes": 0
+        }
+      }
+    },
+    {
+      "name": "row-n16-an-undersized-connection-under-the-compatibility-default",
+      "sections": [
+        "4.4 N16",
+        "5.5",
+        "12.5"
+      ],
+      "note": "§5.5 U1 without `requireE2EE`: the advertisement is suppressed, exactly ONE advertisement-unavailable occurrence is recorded for this channel, and no carrier is emitted. The occurrence is deliberately NOT peer-legacy: nothing yet says a legacy peer exists.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N16",
+        "state": "negotiating",
+        "input": {
+          "class": "channel.accept"
+        },
+        "guards": {
+          "assertedMaxDataChunkBytes": 8191,
+          "advertisementMinChunkBytes": 8192,
+          "selfCheck": {
+            "kind": "ok"
+          },
+          "effectiveRequireE2EE": false,
+          "advertisementUnavailableReason": "undersized-connection"
+        }
+      },
+      "expected": {
+        "row": "N16",
+        "action": "suppress the advertisement; record exactly one advertisement-unavailable occurrence; emit no carrier",
+        "nextState": "negotiating (no advertisement)",
+        "fatal": null,
+        "carrierEmitted": false,
+        "fallbackOccurrence": {
+          "class": "advertisement-unavailable",
+          "reason": "undersized-connection",
+          "count": 1
+        },
+        "peerLegacyOccurrence": 0,
+        "operatorDiagnostic": {
+          "code": "e2ee_advertisement_unavailable",
+          "reason": "undersized-connection"
+        }
+      }
+    },
+    {
+      "name": "row-n16-no-conforming-statement-under-the-compatibility-default",
+      "sections": [
+        "4.4 N16",
+        "5.5",
+        "12.5"
+      ],
+      "note": "§5.5 U2 without `requireE2EE`. The same suppression and the same single occurrence: §12.5's advertisement-unavailable class does not partition by which of U1 or U2 caused it, and the §12.3 flip criterion reads the class.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N16",
+        "state": "negotiating",
+        "input": {
+          "class": "channel.accept"
+        },
+        "guards": {
+          "assertedMaxDataChunkBytes": 4194304,
+          "advertisementMinChunkBytes": 8192,
+          "selfCheck": {
+            "kind": "error",
+            "failure": "continuity_id_unresolved"
+          },
+          "effectiveRequireE2EE": false,
+          "advertisementUnavailableReason": "statement-unavailable"
+        }
+      },
+      "expected": {
+        "row": "N16",
+        "action": "suppress the advertisement; record exactly one advertisement-unavailable occurrence; emit no carrier",
+        "nextState": "negotiating (no advertisement)",
+        "fatal": null,
+        "carrierEmitted": false,
+        "fallbackOccurrence": {
+          "class": "advertisement-unavailable",
+          "reason": "statement-unavailable",
+          "count": 1
+        },
+        "peerLegacyOccurrence": 0,
+        "operatorDiagnostic": {
+          "code": "e2ee_advertisement_unavailable",
+          "reason": "statement-unavailable"
+        }
+      }
+    },
+    {
+      "name": "row-n17-legacy-json-on-a-channel-that-never-advertised",
+      "sections": [
+        "4.4 N17",
+        "12.3",
+        "12.5"
+      ],
+      "note": "Rows N2 and N17 partition legacy admission by whether the node actually advertised. This channel's single §12.5 occurrence was already recorded by N16, so N2's peer-legacy count MUST NOT also fire — an advertisement the node could not emit is never recorded as evidence that a legacy peer exists.",
+      "inputs": {
+        "endpoint": "node",
+        "row": "N17",
+        "state": "negotiating (no advertisement)",
+        "input": {
+          "class": "LEGACY-JSON"
+        },
+        "postStripPayload": {
+          "$bytes": "7b225f746167223a227279636f2e7270632e72657175657374222c226964223a317d"
+        },
+        "guards": {
+          "effectiveRequireE2EE": false,
+          "nodeE2eeCapable": true,
+          "advertisementEmitted": false,
+          "occurrenceAlreadyRecordedByRowN16": {
+            "class": "advertisement-unavailable",
+            "count": 1
+          }
+        }
+      },
+      "expected": {
+        "row": "N17",
+        "step2Discrimination": {
+          "class": "legacy-json"
+        },
+        "action": "lock legacy; deliver to the RPC parser",
+        "nextState": "legacy",
+        "fatal": null,
+        "deliveredToTheRpcParser": true,
+        "peerLegacyOccurrenceAddedOnTopOfN16": 0,
+        "fallbackOccurrencesForThisChannel": {
+          "peer-legacy": 0,
+          "advertisement-unavailable": 1
+        }
+      }
+    },
+    {
+      "name": "node-deadline-n8-does-not-fire-under-the-compatibility-default",
+      "sections": [
+        "4.4 N8",
+        "8.9",
+        "12.3"
+      ],
+      "note": "Arming N8 unconditionally would make the default-policy node strictly less permissive than today's node — any peer whose first channel-borne JSON is later than `T_HANDSHAKE_NODE` would be closed where it is currently served — while buying no availability. The channel stays `negotiating` and its next input still decides it.",
+      "inputs": {
+        "endpoint": "node",
+        "state": "negotiating",
+        "input": {
+          "class": "TIMER",
+          "timer": "T_HANDSHAKE_NODE",
+          "startedAt": "advertisement emit"
+        },
+        "guards": {
+          "effectiveRequireE2EE": false,
+          "handshakeComplete": false
+        }
+      },
+      "expected": {
+        "row": null,
+        "rowN8Fires": false,
+        "action": "no transition",
+        "nextState": "negotiating",
+        "fatal": null,
+        "recordsOnTheWire": 0,
+        "channelStaysOpen": true
+      }
+    },
+    {
+      "name": "node-deadline-after-row-n3-is-q8-under-effective-require-e2ee",
+      "sections": [
+        "8.9",
+        "11.3 Q8",
+        "4.4"
+      ],
+      "note": "The §8.9 implicit-finish deadline on a channel that reached row N3 and never authenticated. It is FATAL-POST, not FATAL-PRE, because session keys exist.",
+      "inputs": {
+        "endpoint": "node",
+        "state": "e2ee",
+        "input": {
+          "class": "TIMER",
+          "timer": "T_HANDSHAKE_NODE",
+          "startedAt": "advertisement emit"
+        },
+        "guards": {
+          "effectiveRequireE2EE": true,
+          "reachedRowN3": true,
+          "implicitFinishAuthenticated": false
+        }
+      },
+      "expected": {
+        "row": "Q8",
+        "action": "FATAL-POST",
+        "nextState": "closed",
+        "disposition": "FATAL-POST",
+        "armedUnderThisPolicy": true,
+        "errorCode": 1,
+        "errorRecordsOnTheWire": 1,
+        "closeReason": "channel_rejected",
+        "deliveredToTheRpcParser": false
+      }
+    },
+    {
+      "name": "node-deadline-after-row-n3-is-q8-under-the-compatibility-default",
+      "sections": [
+        "8.9",
+        "11.3 Q8",
+        "4.4"
+      ],
+      "note": "The same expiry under the compatibility default, and this is the half §16.3 F10 singles out: §8.9's deadline is armed under EVERY policy, unlike row N8, because between row N3 and the finish the node is holding live key material rather than an idle channel slot.",
+      "inputs": {
+        "endpoint": "node",
+        "state": "e2ee",
+        "input": {
+          "class": "TIMER",
+          "timer": "T_HANDSHAKE_NODE",
+          "startedAt": "advertisement emit"
+        },
+        "guards": {
+          "effectiveRequireE2EE": false,
+          "reachedRowN3": true,
+          "implicitFinishAuthenticated": false
+        }
+      },
+      "expected": {
+        "row": "Q8",
+        "action": "FATAL-POST",
+        "nextState": "closed",
+        "disposition": "FATAL-POST",
+        "armedUnderThisPolicy": true,
+        "errorCode": 1,
+        "errorRecordsOnTheWire": 1,
+        "closeReason": "channel_rejected",
+        "deliveredToTheRpcParser": false
       }
     }
   ]

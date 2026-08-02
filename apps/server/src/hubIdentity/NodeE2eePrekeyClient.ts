@@ -119,6 +119,16 @@ export interface NodeE2eePrekeyClient {
   /** §6.4's forced rotation: always a new keypair and a new certificate. */
   readonly rotate: (hubOrigin: string) => Promise<NodeE2eePrekeyCertificate>;
   /**
+   * The certificate this node currently HOLDS, read without issuing one.
+   *
+   * Deliberately not `advertised`. That path re-signs whatever it finds unusable,
+   * which is right for a channel and wrong for a display: an operator surface
+   * built on it could never show the `expired` state, so §6.4's expiry
+   * diagnostic and the remedy written for it would be unreachable from the CLI.
+   * `null` means this node holds no prekey for the origin at all.
+   */
+  readonly stored: (hubOrigin: string) => Promise<NodeE2eePrekeyCertificate | null>;
+  /**
    * The certificate to advertise on a new channel (§5.2).
    *
    * A pure read whenever the stored certificate is bound to the current
@@ -592,5 +602,14 @@ export function makeNodeE2eePrekeyClient(
     }
   };
 
-  return { ensure, rotate, advertised, withPrekeySecret, sweep };
+  const stored: NodeE2eePrekeyClient["stored"] = async (rawHubOrigin) => {
+    const hubOrigin = canonical(rawHubOrigin);
+    const record = (await readPrekeys()).e2eePrekey;
+    // A pure read: no sweep, no issue, no serialization. It reports what is
+    // there, including a certificate that is past its window, which is exactly
+    // the state a display exists to make visible.
+    return record === null || record.hubOrigin !== hubOrigin ? null : certificateOf(record);
+  };
+
+  return { ensure, rotate, stored, advertised, withPrekeySecret, sweep };
 }

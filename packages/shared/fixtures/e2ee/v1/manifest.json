@@ -18,12 +18,12 @@
         "11.4",
         "16.3 F1"
       ],
-      "sha256": "0d57138a78aaf9ffcd0eb98043c71559e3e49bb5dd89d40e4539511411864028",
+      "sha256": "91d095e246249606d412a879202cbfd52a4564dd0756ea55c5a0024dc4ec376e",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 18,
       "deferred": [
-        "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict. The mode machine is not implemented in packages/shared/src yet, so the row is carried as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The node and client transition rows themselves are family F10. Owned by the node and client phases.",
+        "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict, and no mode machine is reachable from packages/shared/src: the node's lives in apps/server and the client's does not exist. The row is therefore carried here as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The transition rows themselves are family F10, whose NODE rows are now generated and driven against the real runtime; its client rows remain deferred. Owned by the client phase.",
         "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -35,14 +35,14 @@
         "5.6",
         "16.3 F2"
       ],
-      "sha256": "68a197ed8829505651179043eb6580f5e636e88622b9fcfac14d36659004ccdd",
+      "sha256": "cde7fb3f21315dc0fb24fdd249de3c38937eb4c2a469545e0aee78d89484cbdf",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 5,
       "deferred": [
         "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.59` as patched by `patches/effect@4.0.0-beta.59.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. Owned by the §5.6 compatibility harness.",
         "Case C5, the node-direction hazard, is the defect reply the node's RPC server emits for an unknown request tag. It is a property of the pinned RPC server rather than of any protocol structure, and it is what makes the carrier direction node-to-client only. Owned by the §5.6 compatibility harness, together with the node phase.",
-        "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src. The comparison the decision reads IS emitted above. Owned by the node phase.",
+        "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src, so THIS family carries only the comparison the decision reads, which IS emitted above. The accounting itself is family F10's rows N15–N17, emitted there and driven against the real advertiser by the node-side consuming test. Owned by the node phase.",
         "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -83,12 +83,12 @@
         "3.2.1 S9",
         "16.3 F4"
       ],
-      "sha256": "2be336c71f6742b3ed77eac011de6d108289d2322b77d317e70c7c1d46ef21e3",
+      "sha256": "4b484a9b0e1859547fd21a1d9f15686c6234cc3401b0975ae007c4efcb40c835",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 25,
       "deferred": [
-        "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any landed module: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock, and the node-side prekey rotation state that holds two is owned by the node phase.",
+        "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any module this generator can reach: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock. The node-side rotation state that holds two now EXISTS — `NodeE2eePrekeyClient` and `NodeE2eePrekeyStore` in apps/server — and is covered by its own module tests, but the overlap window has not been transcribed into this corpus and no consuming test holds the runtime to a committed table of it. Owned by the node phase.",
         "The §5.2 step 5 checks a VERIFIER applies to the node prekey carried in a capability statement — lifetime and rotation-overlap against the verifier's clock — have no landed implementation; the reconstruction above is the part §7.6 fixes. Owned by the §5.2 statement verifier."
       ]
     },
@@ -102,13 +102,13 @@
         "3.2.1 S6",
         "16.3 F5"
       ],
-      "sha256": "d5fe5216848c22f949bd724893a8bca5bba6a29583f3adcf8857a20f46fdbbe8",
+      "sha256": "20c4ca33daecb2909032d42973890e00c94127d8b4f58b8291a92ca57a98456e",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 20,
       "deferred": [
         "A chain whose continuity id disagrees with the PINNED value. `validateNodeE2eeContinuityChain` takes a pinned identity fingerprint and no pinned continuity id; the §13.1 durable pin record that holds one is not in packages/shared/src yet, so the comparison has no implementation to derive an expectation from. Owned by the client trust-state work (§13.1, §13.3).",
-        "The §7.5 continuity-id storage and anchor cases (the five startup outcomes, the never-rotated anchor restore, and the pre-protocol migration mint). These are node-state transitions against a durable anchor; no node startup state machine exists in packages/shared/src. Owned by the node phase."
+        "The §7.5 continuity-id storage and anchor cases (the five startup outcomes, the never-rotated anchor restore, and the pre-protocol migration mint). These are node-state transitions against a durable anchor. The state machine that decides them now EXISTS — `NodeContinuityAnchor` and the identity runtime in apps/server, which this generator sits under in the dependency graph and cannot import — and it is covered by its own module tests, but the outcomes have not been transcribed into this corpus and no consuming test holds the runtime to a committed table of them, as family F10's rows and family F18's transitions now are. Owned by the node phase."
       ]
     },
     "f06-ik-handshake.json": {
@@ -164,10 +164,13 @@
         "9.6",
         "16.3 F9"
       ],
-      "sha256": "f7a67cc68da3f6be36b76bbc262ff013f500ea601c1c3391b2901773a8344009",
+      "sha256": "6379330f90e6e57a6dc4b554222061feb91cc692abfb35505a544e26dfcd1933",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
-      "cases": 15
+      "cases": 15,
+      "deferred": [
+        "The per-step state trace of the §10.2 close machine — each endpoint's state, branch, close anchor, pending record, armed waits, and verdict after every record of the exchange — is NOT carried. It was carried, as an `expected.steps` block, until a read-liveness sweep showed that no consuming suite read any of its leaves: the block could have stated any transition at all and failed nothing, so it was deleted rather than left reading as coverage. Asserting it needs a consumer-side derivation harness driving `E2eeCloseMachine` and `E2eeRecordSession` through both §10.2 branches and the §9.6 exhaustion states; every record-level value the cases state — bodies, commitment preimages, commitments, declared positions, anchors, and both verdicts — is still generated and still asserted. Owned by the close-machine derivation harness, tracked as residual work for this family in the manifest's `livenessCensus`."
+      ]
     },
     "f10-mode-machine.json": {
       "family": 10,
@@ -176,18 +179,20 @@
         "3.4",
         "4.3",
         "4.4",
+        "8.9",
         "11.2",
+        "11.3",
+        "12.5",
         "16.3 F10"
       ],
-      "sha256": "4bd26be16473314d6e146c1b893af88796a8bb05b85e3e6c56e7bf790469b098",
+      "sha256": "2c019d7bc852ba182aeca1a97b0bc89c079e23e2bfd14e3b023b2eb701c34f95",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
-      "cases": 7,
+      "cases": 34,
       "deferred": [
-        "Every transition row of §4.4 — N1–N17 and K1–K24, with its input payload, its state, its expected ACTION and its next state. No §4.4 mode machine exists in packages/shared/src, so no row has an implementation to derive an expectation from; the cases above pin the classification and the record-framing verdicts a machine consumes, not the machine. Owned by the node and client phases.",
+        "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state. No client mode machine exists in this repository, so no client row has an implementation to derive an expectation from. The node rows N1–N17 ARE emitted above and are held to the real `NodeE2eeChannelSession` by the node-side consuming test. Owned by the client phase.",
         "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
-        "Rows N15–N17, which are driven by a connection-level input rather than a payload, and their §12.5 occurrence accounting. Owned by the node phase.",
-        "The timer and keepalive cases that discharge §3.2.2 L1 and L2 and the §8.9 deadline — the stalled accept (K15), the buffered keepalive round trip, the send-buffer overflow including the connection-wide multi-channel accounting, and the node deadline under each policy. `E2eeClientHandshake` and `E2eeNodeHandshake` do expose the two deadlines, but the buffering, flushing, and occurrence behavior these cases assert belongs to the mode machine and to the relay engine. Owned by the node and client phases.",
+        "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — the stalled accept (K15), the buffered keepalive round trip, and the send-buffer overflow including the connection-wide multi-channel accounting. The buffering and flushing behavior they assert belongs to a client mode machine and to the client's relay engine, neither of which exists here; the §8.9 node deadline under each policy IS emitted above. Owned by the client phase.",
         "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -201,12 +206,13 @@
         "10.4",
         "16.3 F11"
       ],
-      "sha256": "e27c9eeaf49f0f8780a88b85f69c6ccf29f6b0fc6f0e0d1ab42022b920844fbc",
+      "sha256": "5c7a0e512fd35d1f2ed58acd8ef8d9db78afbb242bc1561950cd6006d89b7dbc",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 20,
       "deferred": [
-        "Ordering and linger behavior (§10.3) beyond the timed phase-duration case is not expressible as a deterministic wire vector and belongs to implementation tests rather than to this corpus, exactly as §16.3 F11 states."
+        "Ordering and linger behavior (§10.3) beyond the timed phase-duration case is not expressible as a deterministic wire vector and belongs to implementation tests rather than to this corpus, exactly as §16.3 F11 states.",
+        "The per-step state trace of the §10.2 close machine — each endpoint's state, branch, close anchor, pending record, armed waits, and verdict after every record of the exchange — is NOT carried. It was carried, as an `expected.steps` block, until a read-liveness sweep showed that no consuming suite read any of its leaves: the block could have stated any transition at all and failed nothing, so it was deleted rather than left reading as coverage. Asserting it needs a consumer-side derivation harness driving `E2eeCloseMachine` and `E2eeRecordSession` through both §10.2 branches and the §9.6 exhaustion states; every record-level value the cases state — bodies, commitment preimages, commitments, declared positions, anchors, and both verdicts — is still generated and still asserted. Owned by the close-machine derivation harness, tracked as residual work for this family in the manifest's `livenessCensus`."
       ]
     },
     "f12-error-records.json": {
@@ -291,13 +297,12 @@
         "13.6",
         "16.3 F16"
       ],
-      "sha256": "20cdf8846a8c399847cf8dd796aae6f9477240f52bcb5ea6fcbeb47be0f22e34",
+      "sha256": "dc2a32ec554ea95fa098a2f7b314267a5428671c8f4288008f0b89db48f2699a",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 34,
       "deferred": [
-        "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations; no pending-client store exists in packages/shared/src. Owned by the node phase.",
-        "The §12.6 policy-withdrawal counterparts of the §13.6 cases above are family F18, which this corpus carries only in part for the same reason: no node policy store and no channel registry exists in packages/shared/src. Owned by the node phase, and enumerated case by case in family F18's own deferrals.",
+        "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations. The store that decides them now EXISTS — `NodeClientAuthorizationStore` and `NodeClientAuthorizationClient` in apps/server, which this generator sits under in the dependency graph and cannot import — and it is covered by its own module tests, but the transitions have not been transcribed into this corpus and no consuming test holds the runtime to a committed table of them, as family F10's rows and family F18's transitions now are. Owned by the node phase.",
         "§16.4 cross-runtime equality: the NX cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -328,19 +333,18 @@
       "sections": [
         "8.6",
         "11.2 P25",
+        "11.3 Q12",
+        "12.3",
         "12.4",
+        "12.5",
         "12.6",
+        "5.7",
         "16.3 F18"
       ],
-      "sha256": "e0a4405eb8dedc1d35df90bb245e4a74dc4f938308f0aaff093790612db46aa5",
+      "sha256": "5ae31fc3d879e2c47ba38523ac2bd3f9b0fff951bfd76b7e3455833f5420a2fa",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
-      "cases": 2,
-      "deferred": [
-        "Every per-channel case of §16.3 F18: `requireE2EE` false → true over a `legacy`, an NX `e2ee`, and an IK `e2ee` channel; `requireApprovedClientE2EE` false → true over the same three; a suite leaving the advertised registry run twice against the same command with the established channel IK and NX; the widening that closes nothing while the policy generation still advances; the combined narrow-and-widen command; and the `negotiating` channel that is not swept and then fails closed on its next input. Each states a pre-change policy, a policy generation, and a live-channel set with per-channel mode, tier, suite, and snapshot. No node policy store and no channel registry exists in packages/shared/src, so there is nothing to derive the §12.6 policy-withdrawal test's per-channel verdict from. Owned by the node phase.",
-        "The §12.6 ordering cases: a hello reaching §8.6 step 2 AFTER the durable commit, and the row-N3 race in which a channel's transition lands concurrently with the sweep, run with the two enumerations attempted in both orders. These are properties of a single-snapshot sweep over a live registry. Owned by the node phase.",
-        "The §12.6 step (c) reported counts broken out by class, and the §12.5 non-interaction assertion that no fallback occurrence of either class is recorded by a withdrawal. Both need the node's occurrence counters and its channel registry. Owned by the node phase."
-      ]
+      "cases": 15
     }
   },
   "deferredFamilies": [],
@@ -350,7 +354,7 @@
       "title": "Payload discrimination and chunk pipeline",
       "file": "f01-payload-discrimination.json",
       "deferred": [
-        "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict. The mode machine is not implemented in packages/shared/src yet, so the row is carried as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The node and client transition rows themselves are family F10. Owned by the node and client phases.",
+        "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict, and no mode machine is reachable from packages/shared/src: the node's lives in apps/server and the client's does not exist. The row is therefore carried here as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The transition rows themselves are family F10, whose NODE rows are now generated and driven against the real runtime; its client rows remain deferred. Owned by the client phase.",
         "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -361,7 +365,7 @@
       "deferred": [
         "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.59` as patched by `patches/effect@4.0.0-beta.59.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. Owned by the §5.6 compatibility harness.",
         "Case C5, the node-direction hazard, is the defect reply the node's RPC server emits for an unknown request tag. It is a property of the pinned RPC server rather than of any protocol structure, and it is what makes the carrier direction node-to-client only. Owned by the §5.6 compatibility harness, together with the node phase.",
-        "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src. The comparison the decision reads IS emitted above. Owned by the node phase.",
+        "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src, so THIS family carries only the comparison the decision reads, which IS emitted above. The accounting itself is family F10's rows N15–N17, emitted there and driven against the real advertiser by the node-side consuming test. Owned by the node phase.",
         "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -382,7 +386,7 @@
       "title": "Prekey certificates",
       "file": "f04-prekey-certificates.json",
       "deferred": [
-        "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any landed module: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock, and the node-side prekey rotation state that holds two is owned by the node phase.",
+        "The §6.4 staged-rotation overlap window (`E2EE_PREKEY_ROTATION_OVERLAP`, under which an outgoing and an incoming prekey both verify) is not decided by any module this generator can reach: `verifyE2eeClientPrekeyCertificate` evaluates one certificate against one clock. The node-side rotation state that holds two now EXISTS — `NodeE2eePrekeyClient` and `NodeE2eePrekeyStore` in apps/server — and is covered by its own module tests, but the overlap window has not been transcribed into this corpus and no consuming test holds the runtime to a committed table of it. Owned by the node phase.",
         "The §5.2 step 5 checks a VERIFIER applies to the node prekey carried in a capability statement — lifetime and rotation-overlap against the verifier's clock — have no landed implementation; the reconstruction above is the part §7.6 fixes. Owned by the §5.2 statement verifier."
       ]
     },
@@ -392,7 +396,7 @@
       "file": "f05-continuity-chains.json",
       "deferred": [
         "A chain whose continuity id disagrees with the PINNED value. `validateNodeE2eeContinuityChain` takes a pinned identity fingerprint and no pinned continuity id; the §13.1 durable pin record that holds one is not in packages/shared/src yet, so the comparison has no implementation to derive an expectation from. Owned by the client trust-state work (§13.1, §13.3).",
-        "The §7.5 continuity-id storage and anchor cases (the five startup outcomes, the never-rotated anchor restore, and the pre-protocol migration mint). These are node-state transitions against a durable anchor; no node startup state machine exists in packages/shared/src. Owned by the node phase."
+        "The §7.5 continuity-id storage and anchor cases (the five startup outcomes, the never-rotated anchor restore, and the pre-protocol migration mint). These are node-state transitions against a durable anchor. The state machine that decides them now EXISTS — `NodeContinuityAnchor` and the identity runtime in apps/server, which this generator sits under in the dependency graph and cannot import — and it is covered by its own module tests, but the outcomes have not been transcribed into this corpus and no consuming test holds the runtime to a committed table of them, as family F10's rows and family F18's transitions now are. Owned by the node phase."
       ]
     },
     {
@@ -412,14 +416,21 @@
       ]
     },
     {
+      "family": 9,
+      "title": "Rekey boundaries",
+      "file": "f09-rekey-boundaries.json",
+      "deferred": [
+        "The per-step state trace of the §10.2 close machine — each endpoint's state, branch, close anchor, pending record, armed waits, and verdict after every record of the exchange — is NOT carried. It was carried, as an `expected.steps` block, until a read-liveness sweep showed that no consuming suite read any of its leaves: the block could have stated any transition at all and failed nothing, so it was deleted rather than left reading as coverage. Asserting it needs a consumer-side derivation harness driving `E2eeCloseMachine` and `E2eeRecordSession` through both §10.2 branches and the §9.6 exhaustion states; every record-level value the cases state — bodies, commitment preimages, commitments, declared positions, anchors, and both verdicts — is still generated and still asserted. Owned by the close-machine derivation harness, tracked as residual work for this family in the manifest's `livenessCensus`."
+      ]
+    },
+    {
       "family": 10,
       "title": "Mode machine",
       "file": "f10-mode-machine.json",
       "deferred": [
-        "Every transition row of §4.4 — N1–N17 and K1–K24, with its input payload, its state, its expected ACTION and its next state. No §4.4 mode machine exists in packages/shared/src, so no row has an implementation to derive an expectation from; the cases above pin the classification and the record-framing verdicts a machine consumes, not the machine. Owned by the node and client phases.",
+        "Every CLIENT transition row of §4.4 — K1–K24, with its input payload, its state, its expected ACTION and its next state. No client mode machine exists in this repository, so no client row has an implementation to derive an expectation from. The node rows N1–N17 ARE emitted above and are held to the real `NodeE2eeChannelSession` by the node-side consuming test. Owned by the client phase.",
         "The client rows' §12.1.1 selection classification, the `(hubOrigin, accountId)` scope, and the device-level `anyNodeVerified(hubOrigin)` marker, together with the account-scope-change cases that discharge the §12.1.1 provenance rule (K24/K23 versus K13). These need the §13.1 durable pin store and the §12.1.1 classifier, neither of which is landed. Owned by the client phase.",
-        "Rows N15–N17, which are driven by a connection-level input rather than a payload, and their §12.5 occurrence accounting. Owned by the node phase.",
-        "The timer and keepalive cases that discharge §3.2.2 L1 and L2 and the §8.9 deadline — the stalled accept (K15), the buffered keepalive round trip, the send-buffer overflow including the connection-wide multi-channel accounting, and the node deadline under each policy. `E2eeClientHandshake` and `E2eeNodeHandshake` do expose the two deadlines, but the buffering, flushing, and occurrence behavior these cases assert belongs to the mode machine and to the relay engine. Owned by the node and client phases.",
+        "The CLIENT timer and keepalive cases that discharge §3.2.2 L1 and L2 — the stalled accept (K15), the buffered keepalive round trip, and the send-buffer overflow including the connection-wide multi-channel accounting. The buffering and flushing behavior they assert belongs to a client mode machine and to the client's relay engine, neither of which exists here; the §8.9 node deadline under each policy IS emitted above. Owned by the client phase.",
         "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -428,7 +439,8 @@
       "title": "Authenticated close",
       "file": "f11-authenticated-close.json",
       "deferred": [
-        "Ordering and linger behavior (§10.3) beyond the timed phase-duration case is not expressible as a deterministic wire vector and belongs to implementation tests rather than to this corpus, exactly as §16.3 F11 states."
+        "Ordering and linger behavior (§10.3) beyond the timed phase-duration case is not expressible as a deterministic wire vector and belongs to implementation tests rather than to this corpus, exactly as §16.3 F11 states.",
+        "The per-step state trace of the §10.2 close machine — each endpoint's state, branch, close anchor, pending record, armed waits, and verdict after every record of the exchange — is NOT carried. It was carried, as an `expected.steps` block, until a read-liveness sweep showed that no consuming suite read any of its leaves: the block could have stated any transition at all and failed nothing, so it was deleted rather than left reading as coverage. Asserting it needs a consumer-side derivation harness driving `E2eeCloseMachine` and `E2eeRecordSession` through both §10.2 branches and the §9.6 exhaustion states; every record-level value the cases state — bodies, commitment preimages, commitments, declared positions, anchors, and both verdicts — is still generated and still asserted. Owned by the close-machine derivation harness, tracked as residual work for this family in the manifest's `livenessCensus`."
       ]
     },
     {
@@ -452,8 +464,7 @@
       "title": "Authorization context and Branch A enforcement",
       "file": "f16-authorization-context.json",
       "deferred": [
-        "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations; no pending-client store exists in packages/shared/src. Owned by the node phase.",
-        "The §12.6 policy-withdrawal counterparts of the §13.6 cases above are family F18, which this corpus carries only in part for the same reason: no node policy store and no channel registry exists in packages/shared/src. Owned by the node phase, and enumerated case by case in family F18's own deferrals.",
+        "The §13.6 pending-cap and pairing-window cases — the cap-exceeding attempt with no window, the flood at `E2EE_PENDING_CLIENTS_MAX_GLOBAL`, the per-account and global eviction cases, the spent reservation, and the `E2EE_PAIRING_RESERVATION_LIFETIME` ageing case. They are node-state transitions over a durable pending set with reservations. The store that decides them now EXISTS — `NodeClientAuthorizationStore` and `NodeClientAuthorizationClient` in apps/server, which this generator sits under in the dependency graph and cannot import — and it is covered by its own module tests, but the transitions have not been transcribed into this corpus and no consuming test holds the runtime to a committed table of them, as family F10's rows and family F18's transitions now are. Owned by the node phase.",
         "§16.4 cross-runtime equality: the NX cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
       ]
     },
@@ -465,16 +476,6 @@
         "Each case names the §11 row for the position the material occupies (P11 inside the IK client certificate, P10 for a Noise-level failure, K2/K3 and P15 inside a node-signed statement). The row for material inside a node-signed statement depends on the §5.2 verifier and the §12.1.1 selection classification, neither of which is in packages/shared/src; those rows are carried as §16.2 labels and the DERIVED value in every case is the validator's or the verification path's own verdict. Owned by the §5.2 statement verifier and the client phase.",
         "A small-order Ed25519 public key is NOT emitted as a rejected encoding: the pinned primitive's strict public-key validation accepts it, and the rejection happens at verification. Asserting a validator rejection here would have been wrong, so the case is left to the verification-path rows above.",
         "§16.4 cross-runtime equality: the P-256 cases of this family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
-      ]
-    },
-    {
-      "family": 18,
-      "title": "Node admission policy transitions",
-      "file": "f18-node-admission-policy.json",
-      "deferred": [
-        "Every per-channel case of §16.3 F18: `requireE2EE` false → true over a `legacy`, an NX `e2ee`, and an IK `e2ee` channel; `requireApprovedClientE2EE` false → true over the same three; a suite leaving the advertised registry run twice against the same command with the established channel IK and NX; the widening that closes nothing while the policy generation still advances; the combined narrow-and-widen command; and the `negotiating` channel that is not swept and then fails closed on its next input. Each states a pre-change policy, a policy generation, and a live-channel set with per-channel mode, tier, suite, and snapshot. No node policy store and no channel registry exists in packages/shared/src, so there is nothing to derive the §12.6 policy-withdrawal test's per-channel verdict from. Owned by the node phase.",
-        "The §12.6 ordering cases: a hello reaching §8.6 step 2 AFTER the durable commit, and the row-N3 race in which a channel's transition lands concurrently with the sweep, run with the two enumerations attempted in both orders. These are properties of a single-snapshot sweep over a live registry. Owned by the node phase.",
-        "The §12.6 step (c) reported counts broken out by class, and the §12.5 non-interaction assertion that no fallback occurrence of either class is recorded by a withdrawal. Both need the node's occurrence counters and its channel registry. Owned by the node phase."
       ]
     }
   ],
@@ -516,13 +517,326 @@
       "ownedBy": "the native rollout's acceptance gate"
     }
   },
+  "livenessCensus": {
+    "section": "16.3",
+    "status": "read-liveness measured; per-case rule is a one-live-leaf floor",
+    "measuredOn": "2026-08-02",
+    "unit": "One LEAF is one scalar under a case's `expected` block; a §16.2 `{\"$bytes\": …}` wrapper counts as one leaf, not two.",
+    "method": "READ-LIVENESS, measured in one run of each consuming suite and unioned. Every family is loaded through `packages/shared/src/relayE2eeCorpusLiveness.ts`, which hands each leaf to the suite behind an accessor that records the read; a leaf is LIVE when some suite read it. The three runs are `bun run --cwd packages/shared test` (the shared corpus suite and the F15 Noise suite) and `bun run --cwd apps/server test src` (the node suite). Re-measuring means re-running those with the recorder in place. The union is not taken on trust: every leaf a suite other than the shared one is the sole reader of is listed path by path in `E2EE_CORPUS_DELEGATED_LEAF_READS`, the shared suite rejects any such path that is not a real leaf or that it reads itself, the named suite asserts it really reads its own paths, and the per-family `liveLeaves` below is then asserted to EQUAL that union. A published figure that drifts above what the suites read fails a test.",
+    "whatLiveMeans": "Read-liveness is an UPPER BOUND on assertion. A suite that reads a value and does not compare it, or reads it only to feed it back as an input, marks it live here. It is exact in the direction that matters: a leaf no suite reads cannot be asserted by one, so every INERT leaf below is proof of absent coverage, while a LIVE leaf is only evidence of present coverage.",
+    "perCaseClaims": "packages/shared/src/relayE2eeCorpusLiveness.ts — E2EE_CORPUS_CASE_LIVENESS. Every committed case must carry at least one live leaf or appear in that table, which names the suite that reads it or declares it DECORATIVE with a reason and an owner. Each of the three consuming suites checks the claims naming it, in both directions.",
+    "perCaseFloor": "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 113 of the 290 committed cases have at most two live leaves and 185 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
+    "assertionLiveness": {
+      "currentCorpus": "none. No assertion-liveness figure has been measured against the corpus as it stands. Every per-family and total number in this census is read-liveness.",
+      "published": "READ-liveness, which is an upper bound on assertion: a leaf a suite reads and never compares to anything counts as live here. Treat every `liveLeaves` figure below as a ceiling on how much is actually asserted, not as a measure of it.",
+      "staleFigure": "The 49.4% in `independentMutationSweep` is the only assertion-liveness number that exists, and it is STALE: it was measured against a superseded corpus — 3,684 leaves, before the 397-leaf close-machine `steps` blocks were deleted and before the F8 tampering, F8 round-trip and F17 substitution-matrix assertions were added. It is not comparable line for line with anything below.",
+      "refreshCost": "A per-leaf mutation sweep over the current corpus: mutate each of the 3,287 committed expectation leaves in turn and re-run the three consuming suites for each, then re-derive the per-family and per-case figures from which mutations failed a test. It is a sweep harness plus roughly 3,287 full suite runs, which is why this round publishes read-liveness and says so rather than quoting a stale tight number as if it were current.",
+      "ownedBy": "the hardening phase, alongside the per-family assertion harnesses"
+    },
+    "independentMutationSweep": {
+      "method": "An independent per-leaf MUTATION sweep, run outside this repository against the corpus as it stood before this round: every scalar under `expected` was mutated in turn and the consuming suites re-run.",
+      "measuredAgainst": "The 3,684-leaf corpus that preceded this round — before the 397-leaf close-machine `steps` blocks were deleted and before the F8 tampering, F8 round-trip and F17 substitution-matrix assertions were added. Its figures are NOT comparable line for line with the per-family numbers below.",
+      "liveLeaves": 1821,
+      "inertLeaves": 1863,
+      "totalLeaves": 3684,
+      "casesWithNoLiveLeaf": 37,
+      "note": "Mutation-liveness is the tighter measure — it counts a leaf live only when changing it fails a test — and its global figure is 49.4%. It is also STALE: it describes the superseded corpus named in `measuredAgainst`, not the one committed here, so it is not the number to cite about anything below either. There is no current assertion-liveness figure; see `assertionLiveness`."
+    },
+    "totals": {
+      "cases": 290,
+      "expectedLeaves": 3287,
+      "liveLeaves": 2061,
+      "inertLeaves": 1226,
+      "livePercent": 62.7,
+      "casesWithNoLiveLeaf": 33
+    },
+    "casesByLiveLeafCount": {
+      "note": "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 33 of 290` reads, against a one-leaf threshold, as though the other 257 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
+      "buckets": [
+        {
+          "liveLeaves": "0",
+          "cases": 33
+        },
+        {
+          "liveLeaves": "1",
+          "cases": 16
+        },
+        {
+          "liveLeaves": "2",
+          "cases": 64
+        },
+        {
+          "liveLeaves": "3-5",
+          "cases": 72
+        },
+        {
+          "liveLeaves": "6-10",
+          "cases": 51
+        },
+        {
+          "liveLeaves": "11-25",
+          "cases": 38
+        },
+        {
+          "liveLeaves": "26+",
+          "cases": 16
+        }
+      ],
+      "atMostTwoLiveLeaves": 113,
+      "atMostFiveLiveLeaves": 185
+    },
+    "families": [
+      {
+        "family": 1,
+        "file": "f01-payload-discrimination.json",
+        "cases": 18,
+        "expectedLeaves": 161,
+        "liveLeaves": 161,
+        "inertLeaves": 0,
+        "livePercent": 100,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "None measured: every leaf of every case is read by the shared consuming suite, which re-runs the §4.3 pipeline, the chunk assembler and the §4.2 send path over each case's own bytes. What remains for this family is the §16.4 cross-runtime run.",
+        "residualOwner": "the web phase and the native rollout, for the §16.4 run only"
+      },
+      {
+        "family": 2,
+        "file": "f02-carrier-compatibility.json",
+        "cases": 5,
+        "expectedLeaves": 30,
+        "liveLeaves": 16,
+        "inertLeaves": 14,
+        "livePercent": 53.3,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "Fourteen leaves inert, all of them C1's and C6's restatements of an assembler or classifier result the same case already states elsewhere (`assembler`, `reassemblyError`, `peerSupportsChunkingLatch`, `isChunkedPayload`, `step2Discrimination`), plus the C5 defect-reply block.",
+        "residualOwner": "the F2 carrier harness"
+      },
+      {
+        "family": 3,
+        "file": "f03-capability-statement.json",
+        "cases": 35,
+        "expectedLeaves": 190,
+        "liveLeaves": 80,
+        "inertLeaves": 110,
+        "livePercent": 42.1,
+        "casesWithNoLiveLeaf": 17,
+        "residual": "110 leaves inert and seventeen cases with no live leaf at all — the largest hole in the corpus. The `selfCheck` verdicts (14 leaves) are the node advertisement self-check, which lives in apps/server and no consuming suite drives; `bounds`, `encoderAccepted`, `encoderRejects`, `expectedAccepted` and `transcriptBytes` are derivable from the §7.2 transcript encoder already reachable from packages/shared and simply have no consumer yet.",
+        "residualOwner": "the F3 statement harness; the `selfCheck` half additionally waits on a node-side consumer"
+      },
+      {
+        "family": 4,
+        "file": "f04-prekey-certificates.json",
+        "cases": 25,
+        "expectedLeaves": 81,
+        "liveLeaves": 44,
+        "inertLeaves": 37,
+        "livePercent": 54.3,
+        "casesWithNoLiveLeaf": 8,
+        "residual": "37 leaves inert and eight cases with no live leaf. The client certificate path is driven end to end; the NODE certificate path is not — `crossSignatureReconstructionVerifies` (6), the §7.3 transcripts and their byte counts, and the §11 `fatal` row of each rejected shape are all unread. Reconstructing the node transcript and re-verifying its cross-signature is reachable from packages/shared.",
+        "residualOwner": "the F4 certificate harness"
+      },
+      {
+        "family": 5,
+        "file": "f05-continuity-chains.json",
+        "cases": 20,
+        "expectedLeaves": 66,
+        "liveLeaves": 52,
+        "inertLeaves": 14,
+        "livePercent": 78.8,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "Fourteen leaves inert: the §5.5 size figures beside the two max-depth chains (`statementBytes`, `carrierMaxBytes`, `capabilityTranscriptBytes`, `continuityTranscriptBytes`, `advertisementMinChunkBytes`) and the pin-update pair on the same two cases.",
+        "residualOwner": "the F5 size-argument harness"
+      },
+      {
+        "family": 6,
+        "file": "f06-ik-handshake.json",
+        "cases": 1,
+        "expectedLeaves": 62,
+        "liveLeaves": 26,
+        "inertLeaves": 36,
+        "livePercent": 41.9,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "36 of the single trace's 62 leaves inert, 22 of them the `firstProtectedEnvelopes` block: its AADs and §8.9 implicit-finish gate are read, its envelope bytes, positions and per-side received blocks are not. The §8.6 step-6 `admittedAuthority` snapshot (6) is also unread here — F16 carries the same snapshot and drives it.",
+        "residualOwner": "the F6/F7 handshake harness"
+      },
+      {
+        "family": 7,
+        "file": "f07-nx-handshake.json",
+        "cases": 3,
+        "expectedLeaves": 73,
+        "liveLeaves": 31,
+        "inertLeaves": 42,
+        "livePercent": 42.5,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "42 leaves inert: the same `firstProtectedEnvelopes` block as F6, plus the §11.5 `observable` of the two negative NX cases.",
+        "residualOwner": "the F6/F7 handshake harness"
+      },
+      {
+        "family": 8,
+        "file": "f08-record-protection.json",
+        "cases": 13,
+        "expectedLeaves": 148,
+        "liveLeaves": 117,
+        "inertLeaves": 31,
+        "livePercent": 79.1,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "31 leaves inert after this round drove the six tampering cases and both counter-zero-and-one round trips through the real §9.1 path. What remains is the control-record case's `firstReceived`/`secondReceived` blocks and the constant restatements beside the two AAD cases.",
+        "residualOwner": "the F8 record harness"
+      },
+      {
+        "family": 9,
+        "file": "f09-rekey-boundaries.json",
+        "cases": 15,
+        "expectedLeaves": 589,
+        "liveLeaves": 182,
+        "inertLeaves": 407,
+        "livePercent": 30.9,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "407 leaves inert — the largest inert block left in the corpus. The epoch schedule and the two §9.6 exhaustion verdicts are derived; the per-record `records` arrays (140 leaves) and the `closeRecords` arrays (96) that carry each close-machine record's body, commitment and envelope are not. The 200-leaf `steps` state trace that used to sit beside them was DELETED this round and declared in this family's `deferred` list rather than left counted.",
+        "residualOwner": "the close-machine derivation harness"
+      },
+      {
+        "family": 10,
+        "file": "f10-mode-machine.json",
+        "cases": 34,
+        "expectedLeaves": 361,
+        "liveLeaves": 361,
+        "inertLeaves": 0,
+        "livePercent": 100,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "None measured: every leaf is read once the node consuming suite's run is unioned with the shared one. The node rows are driven against the real runtime; the client rows remain declared in this family's `deferred` list.",
+        "residualOwner": "the client phase, for the client rows the family still defers"
+      },
+      {
+        "family": 11,
+        "file": "f11-authenticated-close.json",
+        "cases": 20,
+        "expectedLeaves": 396,
+        "liveLeaves": 198,
+        "inertLeaves": 198,
+        "livePercent": 50,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "198 leaves inert. Every close-machine body, commitment preimage and commitment is rebuilt from the case's own declared fields, but the `records` arrays' envelope bytes and positions (96 leaves) and most `received` blocks are unread. The 197-leaf `steps` state trace was DELETED this round and declared rather than left counted.",
+        "residualOwner": "the close-machine derivation harness"
+      },
+      {
+        "family": 12,
+        "file": "f12-error-records.json",
+        "cases": 12,
+        "expectedLeaves": 120,
+        "liveLeaves": 42,
+        "inertLeaves": 78,
+        "livePercent": 35,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "78 leaves inert. The `E2EEHandshakeReject` record is pinned byte for byte; the protected `E2EEError` cases' `received` blocks (21 leaves) and their §11.5 `observable` blocks (12) are not read — both need a session to open the record with.",
+        "residualOwner": "the F12 error-record harness"
+      },
+      {
+        "family": 13,
+        "file": "f13-fingerprints.json",
+        "cases": 4,
+        "expectedLeaves": 8,
+        "liveLeaves": 8,
+        "inertLeaves": 0,
+        "livePercent": 100,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "None measured: every fingerprint vector is recomputed by the shared consuming suite.",
+        "residualOwner": "no residual"
+      },
+      {
+        "family": 14,
+        "file": "f14-verification-display.json",
+        "cases": 6,
+        "expectedLeaves": 46,
+        "liveLeaves": 30,
+        "inertLeaves": 16,
+        "livePercent": 65.2,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "Sixteen leaves inert, all of them the §13.4/§13.5 `displayFormat` blocks — the grouping, separator and casing rules of the rendered form, as opposed to the digits themselves, which are derived.",
+        "residualOwner": "the F14 display harness"
+      },
+      {
+        "family": 15,
+        "file": "f15-noise-core-vectors.json",
+        "cases": 4,
+        "expectedLeaves": 22,
+        "liveLeaves": 22,
+        "inertLeaves": 0,
+        "livePercent": 100,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "None measured: all four transcoded vectors are driven by packages/shared/src/relayE2eeNoise.test.ts. They read as inert in the shared corpus suite, which is why the per-case liveness table delegates them to that suite explicitly.",
+        "residualOwner": "no residual"
+      },
+      {
+        "family": 16,
+        "file": "f16-authorization-context.json",
+        "cases": 34,
+        "expectedLeaves": 332,
+        "liveLeaves": 136,
+        "inertLeaves": 196,
+        "livePercent": 41,
+        "casesWithNoLiveLeaf": 1,
+        "residual": "196 leaves inert and one case with no live leaf. The context commitment, the §8.7 confirmation transcript and the withdrawal verdicts are derived; the per-case `elements` blocks (65 leaves) that restate each §8.3 context element and the §11.5 `observable` blocks (65) are not read.",
+        "residualOwner": "the F16 context harness, and the client phase for the client-side verdicts"
+      },
+      {
+        "family": 17,
+        "file": "f17-key-material-validation.json",
+        "cases": 26,
+        "expectedLeaves": 197,
+        "liveLeaves": 150,
+        "inertLeaves": 47,
+        "livePercent": 76.1,
+        "casesWithNoLiveLeaf": 7,
+        "residual": "47 leaves inert and seven cases with no live leaf, after this round made the 114-leaf cross-domain substitution matrix the assertion target instead of a restatement beside one. What remains is the Ed25519 canonicality group's `verificationVerdict` (13), the `rejectedBeforeAnySignatureCheck` and `positionNote` labels, and the §11 `fatal` row of each rejected encoding.",
+        "residualOwner": "the F17 key-material harness"
+      },
+      {
+        "family": 18,
+        "file": "f18-node-admission-policy.json",
+        "cases": 15,
+        "expectedLeaves": 405,
+        "liveLeaves": 405,
+        "inertLeaves": 0,
+        "livePercent": 100,
+        "casesWithNoLiveLeaf": 0,
+        "residual": "None measured: every leaf is read once the node consuming suite's run is unioned with the shared one; the §12.6 procedure is driven against the real policy store.",
+        "residualOwner": "no residual"
+      }
+    ]
+  },
   "ledgerFidelity": {
     "section": "16.3",
     "ledger": "packages/shared/src/relayE2eeCorpus.test.ts — SECTION_16_3_LEDGER",
     "status": "hand-maintained-transcription",
-    "proves": "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and a group obligation cannot lose members below its floor. So a case that is dropped, or a deferral that is quietly deleted, fails a test.",
-    "doesNotProve": "That the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+    "proves": "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. FOURTEEN obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live.",
+    "doesNotProve": "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 33 of the 290 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
     "reviewObligation": "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
-    "whyNotAutomated": "Parsing §16.3's prose to derive the obligation set automatically was considered and deliberately rejected. The section is discursive English — nested bullets, prose qualifiers, single obligations spread across several sentences, some of them negative — and an extractor over it would be wrong in ways no test could surface. A green check from an unreliable extractor is strictly worse than a known limitation whose reviewer is told, in as many words, to close it."
+    "whyNotAutomated": "Parsing §16.3's prose to derive the obligation set automatically was considered and deliberately rejected. The section is discursive English — nested bullets, prose qualifiers, single obligations spread across several sentences, some of them negative — and an extractor over it would be wrong in ways no test could surface. A green check from an unreliable extractor is strictly worse than a known limitation whose reviewer is told, in as many words, to close it.",
+    "unassertedObligations": {
+      "count": 14,
+      "note": "Fourteen §16.3 obligations resolve as generated — the corpus carries a case for each — and every case backing them is read by no consuming suite. Each carries an `unasserted` field in SECTION_16_3_LEDGER stating what is unread and who owns it, checked against the measured read-liveness union in both directions: the field must be present while the cases are inert and must come off when one goes live.",
+      "ids": [
+        "f16-suite-list-strip",
+        "f17-ed25519-canonicality",
+        "f3-continuity-id-unresolved",
+        "f3-cross-signature-reconstruction",
+        "f3-fingerprint-mismatch",
+        "f3-hub-origin-bound",
+        "f3-malformed-continuity-id",
+        "f3-oversized-statement",
+        "f3-re-encode-inequality",
+        "f3-suite-registry-bound",
+        "f3-transcript-bound",
+        "f4-max-namespace-s9",
+        "f4-node-certificate-variants",
+        "f4-valid-node-certificate"
+      ],
+      "ownedBy": [
+        "the F3 statement harness — 9 obligations (16 cases): the §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work",
+        "the F4 certificate harness — 3 obligations (8 cases): reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side",
+        "the client-phase handshake harness — 1 obligation (1 case): the §8.8 step-4 client verdict, which no client handshake in this repository can drive",
+        "the F17 key-material harness — 1 obligation (6 cases): driving each Ed25519 encoding through the validators and `verifyE2eeSignature`"
+      ]
+    }
   }
 }

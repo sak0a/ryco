@@ -1,48 +1,21 @@
-import { createPrivateKey, createPublicKey, generateKeyPairSync, sign } from "node:crypto";
-
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  RELAY_INITIAL_LIMITS,
-  type RelayChannelId,
-  type RelayCloseReason,
-  type RelayDataFrame,
-  type RelayFrame,
-  type RelayLimits,
-} from "@ryco/contracts/relay";
-import { decodeRelayFrame } from "@ryco/shared/relayCodec";
 import {
   E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
   E2EE_EPOCH_MAX,
   E2EE_HANDSHAKE_REJECT_BYTES,
-  E2EE_PREKEY_LIFETIME,
   E2EE_REKEY_MAX_RECORDS,
 } from "@ryco/shared/relayE2eeConstants";
 import {
   E2EE_ERROR_CODE_POLICY,
   E2EE_ERROR_CODE_PROTOCOL_VIOLATION,
-  E2eeCloseMachine,
   decodeE2eeCloseRecordBody,
   decodeE2eeErrorRecordBody,
-  type E2eeCloseRecordToSend,
-  type E2eeSequencePosition,
 } from "@ryco/shared/relayE2eeClose";
-import {
-  E2eeClientHandshake,
-  type E2eeClientAuthorization,
-  type E2eeClientHandshakeCredentials,
-  type E2eeHandshakeChannel,
-} from "@ryco/shared/relayE2eeHandshake";
+import { E2eeClientHandshake } from "@ryco/shared/relayE2eeHandshake";
 import { deriveE2eeAgreementPublicKey } from "@ryco/shared/relayE2eeKeys";
-import {
-  E2eeRecordSession,
-  type E2eeDirectionState,
-  type E2eeSyntheticDirectionState,
-} from "@ryco/shared/relayE2eeSession";
-import {
-  encodeClientE2eePrekeyTranscript,
-  encodeNodeE2eePrekeyTranscript,
-} from "@ryco/shared/relayE2eeTranscripts";
+import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
+import { E2eeRecordSession } from "@ryco/shared/relayE2eeSession";
 import {
   E2EE_INNER_TYPE_CLOSE,
   E2EE_INNER_TYPE_CLOSE_ACK,
@@ -55,44 +28,15 @@ import {
   decodeE2eeNegotiationRecord,
   encodeE2eeHandshakeReject,
   encodeE2eeNegotiationRecord,
-  type E2eeInnerRecordType,
 } from "@ryco/shared/relayE2eeWire";
-import { prepareRelayMessage, RelayMessageAssembler } from "@ryco/shared/relayMessageChunks";
+import { prepareRelayMessage } from "@ryco/shared/relayMessageChunks";
 
-import {
-  makeNodeE2eeCapabilityStatementClient,
-  type NodeE2eeAdvertisement,
-  type NodeE2eeAdvertisementResult,
-} from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
+import type { NodeE2eeAdvertisementResult } from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
 import {
   makeNodeE2eePolicyClient,
-  type NodeE2eeChannelRegistration,
   type NodeE2eePolicyWithdrawalCounts,
 } from "../hubIdentity/NodeE2eePolicyClient.ts";
-import {
-  e2eePolicyNarrows,
-  effectiveNodeE2eePolicy,
-  initialNodeE2eePolicyRecord,
-  nodeE2eeAdmissionPolicyOf,
-  type EffectiveNodeE2eePolicy,
-  type NodeE2eePolicyRecordFile,
-  type NodeE2eePolicyStore,
-} from "../hubIdentity/NodeE2eePolicyStore.ts";
-import type { NodeE2eePrekeyCertificate } from "../hubIdentity/NodeE2eePrekeyClient.ts";
-import { makeNodeE2eeChannelAdvertiser } from "./NodeE2eeChannelAdvertiser.ts";
-import {
-  makeNodeE2eeChannelSession,
-  makeNodeE2eeHandshakeRateLimiter,
-  NODE_E2EE_RECEIVE_FATAL_ROWS,
-  type NodeE2eeChannelAuthorization,
-  type NodeE2eeChannelSession,
-} from "./NodeE2eeChannelSession.ts";
-import {
-  makeNodeE2eeRelayChannelSession,
-  nodeE2eeChannelPlaintextCeiling,
-} from "./NodeE2eeRelayChannel.ts";
-import { RelayChannelRegistry, type RelayRpcChannelSession } from "./RelayChannelRegistry.ts";
-import { RelaySendQueue } from "./RelaySendQueue.ts";
+import { NODE_E2EE_RECEIVE_FATAL_ROWS } from "./NodeE2eeChannelSession.ts";
 
 // The node's E2EE layer on the real relay path: the §4.4 mode machine, the §8.6
 // responder, the §9 record session with its §9.3 admission, the §10 close, and
@@ -109,568 +53,28 @@ import { RelaySendQueue } from "./RelaySendQueue.ts";
 // own suite pins, so a wrong curve or encoding shows up immediately. NONE OF IT
 // MAY EVER REACH A REAL ENDPOINT.
 
-const HUB_ORIGIN = "https://relay.example";
-const NODE_ID = `node_${"N".repeat(22)}`;
-const IDENTITY_KEY_ID = `nkey_${"K".repeat(22)}`;
-const PREKEY_ID = `epk_${"P".repeat(22)}`;
-const CONTINUITY_ID = `nct_${"C".repeat(22)}`;
-const ACCOUNT_ID = "acct_0123456789";
-const CHANNEL_ID = `ch_${"A".repeat(22)}` as RelayChannelId;
-const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
-const version = { protocolMajor: 1, protocolMinor: 2 } as const;
-const limits: RelayLimits = RELAY_INITIAL_LIMITS;
-const CAPABILITY = "ryco.rpc" as const;
-const ROLE = "owner" as const;
-const NOW = 1_784_160_030_000;
-
-/** Let every pending microtask run: `protect` is serialized and asynchronous. */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
-
-const hex = (value: string): Uint8Array => Uint8Array.from(Buffer.from(value, "hex"));
-const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value);
-
-const NODE_AGREEMENT_SECRET = hex(
-  "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb",
-);
-const NODE_AGREEMENT_PUBLIC = deriveE2eeAgreementPublicKey(NODE_AGREEMENT_SECRET);
-const CLIENT_AGREEMENT_SECRET = hex(
-  "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
-);
-const CLIENT_AGREEMENT_PUBLIC = deriveE2eeAgreementPublicKey(CLIENT_AGREEMENT_SECRET);
-/**
- * The client device key (§7.1), generated per run through the platform's own
- * P-256 implementation.
- *
- * `ieee-p1363` is the raw `r ‖ s` encoding §7.1 fixes; DER would be rejected by
- * the certificate verifier, which is the point of naming it here rather than
- * relying on a default.
- */
-const clientIdentity = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
-const CLIENT_IDENTITY_PUBLIC = Uint8Array.from(
-  clientIdentity.publicKey.export({ format: "der", type: "spki" }).subarray(-65),
-);
-const signClientPrekey = (transcript: Uint8Array): Uint8Array =>
-  Uint8Array.from(
-    sign("sha256", transcript, {
-      key: clientIdentity.privateKey,
-      dsaEncoding: "ieee-p1363",
-    }),
-  );
-
-const APPROVED: E2eeClientAuthorization = {
-  status: "approved",
-  maxRole: ROLE,
-  capabilitySet: [CAPABILITY],
-};
-
-const PERMISSIVE_POLICY = effectiveNodeE2eePolicy({
-  requireE2EE: false,
-  requireApprovedClientE2EE: false,
-  suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
-});
-
-const REQUIRE_E2EE_POLICY = effectiveNodeE2eePolicy({
-  requireE2EE: true,
-  requireApprovedClientE2EE: false,
-  suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
-});
-
-function decodeFrame(bytes: Uint8Array): RelayFrame {
-  const result = decodeRelayFrame(bytes);
-  if (!result.ok) throw new Error(result.error.code);
-  return result.value;
-}
-
-/** The relay chunk layer's own prelude, stripped exactly as a receiver does. */
-function stripPrelude(payload: Uint8Array): Uint8Array {
-  const assembler = new RelayMessageAssembler();
-  const result = assembler.push(payload);
-  if (result.kind !== "done") throw new Error("expected one complete message");
-  return result.message;
-}
-
-/**
- * A real §5.2 statement client over real Ed25519 custody.
- *
- * One per harness, and the same instance answers the node's advertiser and the
- * test's client: §8.3 gives the client's element 15 exactly one source — the
- * statement it validated on this channel — so the material a client uses must be
- * the material the node advertised, not a second statement that merely looks
- * like it.
- */
-function statementClient(policy: () => EffectiveNodeE2eePolicy) {
-  const { privateKey } = generateKeyPairSync("ed25519");
-  const der = Buffer.from(privateKey.export({ format: "der", type: "pkcs8" }));
-  const identityPublicKey = Uint8Array.from(
-    createPublicKey(privateKey)
-      .export({ format: "der", type: "spki" })
-      .subarray(SPKI_PREFIX.byteLength),
-  );
-  const signBytes = (message: Uint8Array): Uint8Array =>
-    Uint8Array.from(
-      sign(null, message, createPrivateKey({ key: der, format: "der", type: "pkcs8" })),
-    );
-  const prekey: NodeE2eePrekeyCertificate = {
-    hubOrigin: HUB_ORIGIN,
-    nodeId: NODE_ID,
-    identityKeyId: IDENTITY_KEY_ID,
-    prekeyId: PREKEY_ID,
-    agreementPublicKey: NODE_AGREEMENT_PUBLIC,
-    createdAt: 1_000,
-    expiresAt: 9_000_000_000_000,
-    crossSignature: signBytes(
-      encodeNodeE2eePrekeyTranscript({
-        hubOrigin: HUB_ORIGIN,
-        nodeId: NODE_ID,
-        identityKeyId: IDENTITY_KEY_ID,
-        prekeyId: PREKEY_ID,
-        identityPublicKey,
-        agreementPublicKey: NODE_AGREEMENT_PUBLIC,
-        createdAt: 1_000,
-        expiresAt: 9_000_000_000_000,
-      }),
-    ),
-  };
-  return makeNodeE2eeCapabilityStatementClient({
-    identity: async () => ({
-      nodeId: NODE_ID,
-      identityKeyId: IDENTITY_KEY_ID,
-      identityPublicKey,
-      sign: async (envelope) => signBytes(envelope),
-    }),
-    prekey: async () => prekey,
-    continuity: async () => ({ continuityId: CONTINUITY_ID, chain: [] }),
-    policy,
-    generation: () => 3,
-    now: () => NOW,
-  });
-}
-
-/**
- * An in-memory §12.6 policy store with the real commit semantics and no
- * durability, so a test can run the REAL `NodeE2eePolicyClient` — its ordered
- * procedure, its single snapshot, and its dispatch by phase — against a real
- * channel session.
- */
-function stubPolicyStore(): NodeE2eePolicyStore {
-  let record: NodeE2eePolicyRecordFile = initialNodeE2eePolicyRecord();
-  const apply = (next: NodeE2eePolicyRecordFile) => {
-    const previous = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(record));
-    const policy = effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(next));
-    record = next;
-    return {
-      record: next,
-      policy,
-      previous,
-      withdrawal: e2eePolicyNarrows(previous, policy),
-      changed: true,
-    };
-  };
-  return {
-    read: async () => ({
-      record,
-      policy: effectiveNodeE2eePolicy(nodeE2eeAdmissionPolicyOf(record)),
-    }),
-    commit: async (proposal) =>
-      apply({
-        ...record,
-        revision: record.revision + 1,
-        generation: record.generation + 1,
-        requireE2EE: proposal.requireE2EE ?? record.requireE2EE,
-        requireApprovedClientE2EE:
-          proposal.requireApprovedClientE2EE ?? record.requireApprovedClientE2EE,
-        suiteRegistry: proposal.suiteRegistry ?? record.suiteRegistry,
-      }),
-    recoverGeneration: async () =>
-      apply({ ...record, revision: record.revision + 1, generation: record.generation + 1 }),
-  };
-}
-
-/** A policy registration that admits everything, so a test isolates one rule. */
-function permissiveRegistration(): NodeE2eeChannelRegistration {
-  return {
-    selectHandshake: () => ({
-      establish: () => ({ kind: "entered", established: () => undefined }),
-    }),
-    lockLegacy: () => ({ kind: "entered" }),
-    release: () => undefined,
-  };
-}
-
-function authorizationFor(
-  record: E2eeClientAuthorization | undefined,
-): NodeE2eeChannelAuthorization {
-  return {
-    lookupClientAuthorization: () => record,
-    reReadAuthorization: () => record,
-    registerInFlightHandshake: () => ({
-      establish: () => ({
-        kind: "entered",
-        release: () => undefined,
-        established: () => undefined,
-      }),
-      release: () => undefined,
-    }),
-  };
-}
-
-interface Harness {
-  readonly dataPayloads: () => readonly Uint8Array[];
-  readonly closeReasons: () => readonly (RelayCloseReason | undefined)[];
-  readonly deliveredToParser: readonly Uint8Array[];
-  readonly session: () => NodeE2eeChannelSession;
-  /** The registry-facing channel, exactly as `HubConnectorLive` binds it. */
-  readonly channel: () => RelayRpcChannelSession;
-  /** How many times the RPC runtime behind the channel was released. */
-  readonly releases: () => number;
-  readonly open: () => Promise<NodeE2eeAdvertisement>;
-  /** Open a channel whose advertisement this node cannot produce (§5.5). */
-  readonly openRaw: () => Promise<void>;
-  readonly deliver: (payload: Uint8Array) => Promise<void>;
-  /** The peer tore the channel down: the registry's own teardown path. */
-  readonly closeFromPeer: () => Promise<void>;
-  readonly flush: () => void;
-  readonly sendQueue: RelaySendQueue;
-  readonly fallbacks: () => number;
-  /** The node-local §11.4 diagnostic rows, for asserting WHICH rule fired. */
-  readonly rows: () => readonly string[];
-}
-
-/**
- * The node, assembled from the real relay pieces.
- *
- * `RelayChannelRegistry` supplies the send handle, the §9.3 admission handle,
- * the close handle, and the acceptance announcement. The channel session's
- * `intercept` sits exactly where `RpcByteSession` puts it — after the relay
- * message assembler and before the RPC parser — so `deliveredToParser` is
- * literally the set of bytes that would reach the parser and nothing else.
- */
-async function harness(
-  options: {
-    readonly policy?: () => EffectiveNodeE2eePolicy;
-    readonly authorization?: NodeE2eeChannelAuthorization;
-    readonly registration?: () => NodeE2eeChannelRegistration;
-    /** §5.5: what this node's statement builder answers, when a test needs U2. */
-    readonly readAdvertisement?: () => Promise<NodeE2eeAdvertisementResult>;
-    /** §5.5 U1: an asserted chunk limit below `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`. */
-    readonly maxDataChunkBytes?: number;
-    /**
-     * Runs inside `withPrekeySecret`, after the borrow's body has returned and
-     * before the borrow resolves — the exact window a §12.6 sweep can land in
-     * while a hello is being processed.
-     */
-    readonly afterPrekeyBorrow?: () => Promise<void>;
-    /** §16.3 F9: place the node's send direction at §9.6's exhaustion boundary. */
-    readonly syntheticSendState?: E2eeSyntheticDirectionState;
-  } = {},
-): Promise<Harness> {
-  const readyLimits: RelayLimits =
-    options.maxDataChunkBytes === undefined
-      ? RELAY_INITIAL_LIMITS
-      : { ...RELAY_INITIAL_LIMITS, maxDataChunkBytes: options.maxDataChunkBytes };
-  const sent: Uint8Array[] = [];
-  const socket = {
-    bufferedAmount: 0,
-    send: (bytes: Uint8Array) => {
-      sent.push(Uint8Array.from(bytes));
-    },
-  };
-  const sendQueue = new RelaySendQueue(socket, readyLimits);
-  const policy = options.policy ?? (() => PERMISSIVE_POLICY);
-  const statements = statementClient(policy);
-  const advertiser = makeNodeE2eeChannelAdvertiser({
-    hubOrigin: HUB_ORIGIN,
-    readAdvertisement:
-      options.readAdvertisement ?? ((hubOrigin) => statements.advertised(hubOrigin)),
-    policy,
-    recordFallback: async () => undefined,
-  });
-  const deliveredToParser: Uint8Array[] = [];
-  const assembler = new RelayMessageAssembler();
-  let channelSession: NodeE2eeChannelSession | undefined;
-  let relayChannel: RelayRpcChannelSession | undefined;
-  let releases = 0;
-  let fallbacks = 0;
-  let inboundSequence = 0;
-  const rows: string[] = [];
-
-  const registry = new RelayChannelRegistry({
-    limits: readyLimits,
-    sendQueue,
-    onOutboundReady: () => sendQueue.flush(),
-    factory: {
-      connectionReady: ({ limits: ready }) =>
-        advertiser.connectionReady({ maxDataChunkBytes: ready.maxDataChunkBytes }),
-      open: async ({ channelId, capability, effectiveRole, send, admit, close }) => {
-        const announcement = await advertiser.openChannel();
-        const e2ee = makeNodeE2eeChannelSession({
-          channel: {
-            hubOrigin: HUB_ORIGIN,
-            channelId,
-            relayProtocolMajor: version.protocolMajor,
-            relayProtocolMinor: version.protocolMinor,
-            channelOpenCapability: capability,
-            channelOpenEffectiveRole: effectiveRole,
-          },
-          announcement,
-          plaintextCeiling: nodeE2eeChannelPlaintextCeiling(readyLimits),
-          send,
-          admit,
-          close,
-          policy,
-          registerPolicyChannel: options.registration ?? permissiveRegistration,
-          authorization: options.authorization ?? authorizationFor(APPROVED),
-          withPrekeySecret: async (prekeyId, use) => {
-            expect(prekeyId).toBe(PREKEY_ID);
-            const result = await use(NODE_AGREEMENT_SECRET);
-            await options.afterPrekeyBorrow?.();
-            return result;
-          },
-          rateLimiter: makeNodeE2eeHandshakeRateLimiter(),
-          recordPeerLegacyFallback: () => {
-            fallbacks += 1;
-          },
-          onDiagnostic: (value) => rows.push(value.row),
-          ...(options.syntheticSendState === undefined
-            ? {}
-            : { testOnlySyntheticSendState: options.syntheticSendState }),
-        });
-        channelSession = e2ee;
-        // The binding `HubConnectorLive` uses, over the same pipeline
-        // `RpcByteSession` provides: reassemble and strip the prelude, then
-        // discriminate. Nothing reaches `deliveredToParser` except an `rpc`
-        // disposition, which is what the parser boundary is.
-        relayChannel = makeNodeE2eeRelayChannelSession({
-          e2ee,
-          rpc: {
-            receive: async (bytes) => {
-              const assembled = assembler.push(bytes);
-              if (assembled.kind === "error") throw new Error(assembled.reason);
-              if (assembled.kind === "pending") return true;
-              const disposition = await e2ee.intercept(assembled.message);
-              if (disposition.kind === "rpc") deliveredToParser.push(disposition.message);
-              return disposition.kind !== "rejected";
-            },
-            queuedBytes: async () => 0,
-            supportsChunkedMessages: () => assembler.peerSupportsChunking,
-            incompleteReassembly: () => assembler.incompleteMessage,
-          },
-          release: async () => {
-            releases += 1;
-          },
-        });
-        return relayChannel;
-      },
-    },
-  });
-
-  const frames = (): readonly RelayFrame[] => sent.map(decodeFrame);
-  return {
-    dataPayloads: () =>
-      frames()
-        .filter((frame): frame is RelayDataFrame => frame.type === "data")
-        .map((frame) => Uint8Array.from(frame.payload)),
-    closeReasons: () =>
-      frames()
-        .filter(
-          (frame): frame is Extract<RelayFrame, { type: "channel.close" }> =>
-            frame.type === "channel.close",
-        )
-        .map((frame) => frame.reason),
-    deliveredToParser,
-    session: () => {
-      if (channelSession === undefined) throw new Error("channel is not open");
-      return channelSession;
-    },
-    channel: () => {
-      if (relayChannel === undefined) throw new Error("channel is not open");
-      return relayChannel;
-    },
-    releases: () => releases,
-    openRaw: async () => {
-      await registry.handle({
-        type: "channel.open",
-        ...version,
-        channelId: CHANNEL_ID,
-        capability: CAPABILITY,
-        effectiveRole: ROLE,
-      });
-      sendQueue.flush();
-    },
-    open: async () => {
-      await registry.handle({
-        type: "channel.open",
-        ...version,
-        channelId: CHANNEL_ID,
-        capability: CAPABILITY,
-        effectiveRole: ROLE,
-      });
-      sendQueue.flush();
-      const result = await statements.advertised(HUB_ORIGIN);
-      if (result.kind !== "available") throw new Error(result.reason);
-      return result.advertisement;
-    },
-    deliver: async (payload) => {
-      await registry.handle({
-        type: "data",
-        ...version,
-        channelId: CHANNEL_ID,
-        sequence: inboundSequence as RelayDataFrame["sequence"],
-        payload,
-      });
-      inboundSequence += 1;
-      // The registry defers every close it schedules to a microtask, so a
-      // caller that asserts on the wire has to let those run first.
-      await Promise.resolve();
-      await Promise.resolve();
-      sendQueue.flush();
-    },
-    closeFromPeer: async () => {
-      await registry.handle({ type: "channel.close", ...version, channelId: CHANNEL_ID });
-      await Promise.resolve();
-      sendQueue.flush();
-    },
-    flush: () => sendQueue.flush(),
-    sendQueue,
-    fallbacks: () => fallbacks,
-    rows: () => rows,
-  };
-}
-
-function nativeCredentials(): E2eeClientHandshakeCredentials {
-  const transcript = encodeClientE2eePrekeyTranscript({
-    hubOrigin: HUB_ORIGIN,
-    accountId: ACCOUNT_ID,
-    identityPublicKey: CLIENT_IDENTITY_PUBLIC,
-    agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
-    createdAt: NOW - 1_000,
-    // §6.4 bounds the certificate's whole lifetime, not just its expiry.
-    expiresAt: NOW - 1_000 + E2EE_PREKEY_LIFETIME,
-  });
-  return {
-    tier: "native",
-    accountId: ACCOUNT_ID,
-    identityPublicKey: CLIENT_IDENTITY_PUBLIC,
-    agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
-    agreementSecretKey: CLIENT_AGREEMENT_SECRET,
-    prekeyTranscript: transcript,
-    prekeySignature: signClientPrekey(transcript),
-  };
-}
-
-const clientChannel: E2eeHandshakeChannel = {
-  hubOrigin: HUB_ORIGIN,
-  channelId: CHANNEL_ID,
-  relayProtocolMajor: version.protocolMajor,
-  relayProtocolMinor: version.protocolMinor,
-  channelOpenCapability: CAPABILITY,
-  channelOpenEffectiveRole: ROLE,
-};
-
-interface EstablishedClient {
-  readonly record: E2eeRecordSession;
-  readonly close: E2eeCloseMachine;
-}
-
-const positionOf = (state: E2eeDirectionState): E2eeSequencePosition => {
-  if (state.epoch === undefined || state.counter === undefined) {
-    throw new Error("direction is exhausted");
-  }
-  return { epoch: state.epoch, counter: state.counter };
-};
-
-/**
- * Drive a whole handshake against the harness and return the client's session.
- *
- * The node is a real relay channel throughout: the hello goes in as a `data`
- * frame the assembler strips, and the accept comes back out of the send queue.
- */
-async function establish(
-  node: Harness,
-  tier: "native" | "web",
-  advertisement: NodeE2eeAdvertisement,
-): Promise<EstablishedClient> {
-  const client = new E2eeClientHandshake({
-    channel: clientChannel,
-    // §8.3: the client's node material has one source — the statement it
-    // validated on this channel.
-    advertised: advertisement.material,
-    selectedSuite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
-    offeredSuites: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
-    credentials: tier === "native" ? nativeCredentials() : { tier: "web" },
-    intendedCapability: CAPABILITY,
-    intendedRole: ROLE,
-  });
-  const hello = client.createHello(NOW);
-  if (hello.kind !== "hello") throw new Error(`hello: ${JSON.stringify(hello)}`);
-  const before = node.dataPayloads().length;
-  await node.deliver(hello.record);
-  const accept = node.dataPayloads().slice(before);
-  expect(accept).toHaveLength(1);
-  const established = client.receiveServerAccept(stripPrelude(accept[0]!), NOW);
-  if (established.kind !== "established") {
-    throw new Error(`accept: ${JSON.stringify(established)} rows=${node.rows().join(",")}`);
-  }
-  return {
-    record: new E2eeRecordSession({
-      secrets: established.secrets,
-      suite: established.suite,
-      sessionBindingHash: established.sessionBindingHash,
-      sendDirection: "c2n",
-      plaintextCeiling: 512 * 1_024,
-    }),
-    close: new E2eeCloseMachine({
-      sessionBindingHash: established.sessionBindingHash,
-      sendDirection: "c2n",
-    }),
-  };
-}
-
-/** Protect one client record and hand the envelope to the node as a data frame. */
-async function clientSend(
-  node: Harness,
-  client: EstablishedClient,
-  innerType: E2eeInnerRecordType,
-  body: Uint8Array,
-): Promise<{ readonly epoch: bigint; readonly counter: bigint; readonly epochCompleted: boolean }> {
-  let envelope: Uint8Array | undefined;
-  const result = await client.record.protect({
-    innerType,
-    body,
-    admit: () => true,
-    transmit: (bytes) => {
-      envelope = Uint8Array.from(bytes);
-      return { kind: "sent" };
-    },
-  });
-  if (result.kind !== "protected" || envelope === undefined) {
-    throw new Error(`client protect: ${JSON.stringify(result)}`);
-  }
-  await node.deliver(envelope);
-  return {
-    epoch: result.epoch,
-    counter: result.counter,
-    epochCompleted: result.epochCompleted,
-  };
-}
-
-async function clientSendCloseRecord(
-  node: Harness,
-  client: EstablishedClient,
-  toSend: E2eeCloseRecordToSend,
-): Promise<void> {
-  const sent = await clientSend(node, client, toSend.innerType, toSend.body);
-  client.close.noteTransmitted({ record: toSend, ...sent, at: NOW });
-}
-
-/** Authenticate one node-to-client payload and hand it to the client's close machine. */
-function clientReceive(client: EstablishedClient, payload: Uint8Array) {
-  const authenticated = client.record.unprotect(stripPrelude(payload));
-  if (authenticated.kind !== "authenticated") {
-    throw new Error(`client unprotect: ${JSON.stringify(authenticated)}`);
-  }
-  return authenticated;
-}
+import {
+  CAPABILITY,
+  CHANNEL_ID,
+  NOW,
+  REQUIRE_E2EE_POLICY,
+  ROLE,
+  authorizationFor,
+  clientChannel,
+  clientReceive,
+  clientSend,
+  clientSendCloseRecord,
+  establish,
+  harness,
+  limits,
+  nativeCredentials,
+  positionOf,
+  settle,
+  stripPrelude,
+  stubPolicyStore,
+  utf8,
+  type Harness,
+} from "./testUtils/nodeE2eeChannelHarness.ts";
 
 describe("NodeE2eeChannelSession", () => {
   it("completes a full IK handshake and carries RPC as envelopes", async () => {
@@ -711,6 +115,64 @@ describe("NodeE2eeChannelSession", () => {
     expect(node.session().mode()).toBe("e2ee");
     await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
     expect(node.deliveredToParser).toHaveLength(1);
+  });
+
+  it("publishes the §13.5 advisory code for a web session and retires it on close", async () => {
+    const registrations: {
+      readonly tier: string;
+      readonly verificationCode: string | undefined;
+    }[] = [];
+    let released = 0;
+    const node = await harness({
+      authorization: authorizationFor(undefined),
+      registerSession: (session) => {
+        registrations.push({ tier: session.tier, verificationCode: session.verificationCode });
+        return () => {
+          released += 1;
+        };
+      },
+    });
+    const advertisement = await node.open();
+    const clientEphemeralSecret = new Uint8Array(32).fill(0x2c);
+    // Derived BEFORE the handshake: §9.5's erasure reaches the injected buffer,
+    // which is the caller's own array, so reading it afterwards reads zeroes.
+    const clientEphemeralPublic = deriveE2eeAgreementPublicKey(clientEphemeralSecret);
+    const client = await establish(node, "web", advertisement, clientEphemeralSecret);
+
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0]?.tier).toBe("web");
+    // The node's value must be the §13.5 derivation over the node identity key,
+    // the WEB client's Noise ephemeral, and the §8.8 binding hash — derived here
+    // from the two halves the client and the advertisement each hold, so a node
+    // that fed the wrong input would produce a different string.
+    const expected = deriveE2eeWebSas({
+      nodeIdentityPublicKey: advertisement.nodeIdentityPublicKey,
+      webEphemeralPublicKey: clientEphemeralPublic,
+      sessionBindingHash: client.sessionBindingHash,
+    }).display;
+    expect(registrations[0]?.verificationCode).toBe(expected);
+
+    // §13.5: the code is ephemeral display state, so the entry goes when the
+    // session does.
+    expect(released).toBe(0);
+    await node.closeFromPeer();
+    expect(released).toBe(1);
+  });
+
+  it("publishes a native session with no §13.5 code, because it has no meaning there", async () => {
+    const registrations: { readonly verificationCode: string | undefined }[] = [];
+    const node = await harness({
+      registerSession: (session) => {
+        registrations.push({ verificationCode: session.verificationCode });
+        return () => undefined;
+      },
+    });
+    const advertisement = await node.open();
+    await establish(node, "native", advertisement);
+    expect(registrations).toHaveLength(1);
+    // §13.4's long-term safety number is the owner-facing value for a signed
+    // client, and it lives on the Branch A record rather than on the session.
+    expect(registrations[0]?.verificationCode).toBeUndefined();
   });
 
   it("delivers nothing to the RPC parser before the implicit client finish", async () => {

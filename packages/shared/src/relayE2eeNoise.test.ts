@@ -4,9 +4,15 @@ import { expand } from "@noble/hashes/hkdf";
 import { sha256 } from "@noble/hashes/sha2";
 import { utf8ToBytes } from "@noble/hashes/utils";
 import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import { E2EE_SECRET_BYTES, NOISE_SPEC_REVISION } from "./relayE2eeConstants.ts";
+import {
+  E2EE_CORPUS_CASE_LIVENESS,
+  E2EE_CORPUS_DELEGATED_LEAF_READS,
+  E2eeCorpusLivenessRecorder,
+} from "./relayE2eeCorpusLiveness.ts";
 import {
   E2EE_NOISE_EXPORTER_LABEL,
   E2EE_NOISE_PROTOCOL_NAME_IK,
@@ -738,17 +744,26 @@ const readFixture = (name: string): Uint8Array =>
   Uint8Array.from(readFileSync(new URL(name, F15_FIXTURE_ROOT)));
 
 const F15_FIXTURE_BYTES = readFixture("f15-noise-core-vectors.json");
-const F15_FAMILY = JSON.parse(new TextDecoder().decode(F15_FIXTURE_BYTES)) as {
-  readonly family: { readonly number: number; readonly title: string };
-  readonly warning: string;
-  readonly provenance: readonly {
-    readonly source: string;
-    readonly url: string;
-    readonly sourceFileSha256: string;
-    readonly transcodedVectors: readonly string[];
-  }[];
-  readonly cases: readonly F15Case[];
-};
+/**
+ * F15 is loaded THROUGH the read-liveness recorder: the shared corpus suite
+ * cannot see whether these four transcoded vectors are asserted anywhere, so its
+ * ledger delegates them here and the last test in this file discharges that.
+ */
+const F15_LIVENESS = new E2eeCorpusLivenessRecorder();
+const F15_FAMILY = F15_LIVENESS.watch(
+  "f15-noise-core-vectors.json",
+  JSON.parse(new TextDecoder().decode(F15_FIXTURE_BYTES)) as {
+    readonly family: { readonly number: number; readonly title: string };
+    readonly warning: string;
+    readonly provenance: readonly {
+      readonly source: string;
+      readonly url: string;
+      readonly sourceFileSha256: string;
+      readonly transcodedVectors: readonly string[];
+    }[];
+    readonly cases: readonly F15Case[];
+  },
+);
 
 /** §16.2 byte strings are `{"$bytes": "<lowercase hex>"}` and nothing else. */
 const f15Bytes = (value: F15Bytes): Uint8Array => {
@@ -982,5 +997,43 @@ describe("determinism and separation", () => {
     expect(hex(keys.exporterSecret)).not.toBe(IK_EXPORTER_SECRET);
     expect(hex(keys.epochSecretC2N)).not.toBe(IK_EPOCH_SECRET_C2N);
     expect(hex(keys.epochSecretN2C)).not.toBe(IK_EPOCH_SECRET_N2C);
+  });
+});
+
+describe("§16.3 corpus liveness, F15 half", () => {
+  it("reads a leaf of every F15 case the shared ledger delegates to this suite", () => {
+    // F15 is transcoded rather than generated and is consumed HERE, not by the
+    // shared corpus suite — which is exactly why its four cases read as carrying
+    // no live leaf over there. The delegation is written down in the shared
+    // ledger's liveness table; this is where it is discharged.
+    const delegated = E2EE_CORPUS_CASE_LIVENESS.filter((claim) => claim.reader === "noise");
+    expect(delegated.length, "the table delegates nothing to this suite").toBe(4);
+    for (const claim of delegated) {
+      expect(
+        F15_LIVENESS.liveLeafCount(claim.file, claim.case),
+        `${claim.file}: ${claim.case} is delegated to this suite and read by nothing in it`,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("reads every leaf the census attributes to this suite", () => {
+    // The corpus manifest's per-family live count is a union across three
+    // suites, and the shared corpus suite recomputes it EXACTLY using
+    // `E2EE_CORPUS_DELEGATED_LEAF_READS` — a table of leaf paths that other
+    // suites, this one among them, are the sole readers of. Over there the table
+    // can only be checked for naming real leaves the shared suite does not read.
+    // Whether F15's leaves are read at all is knowable only here, so an entry
+    // that nothing reads must fail HERE or the union can be inflated at will.
+    const mine = E2EE_CORPUS_DELEGATED_LEAF_READS.filter((entry) => entry.reader === "noise");
+    expect(mine.length, "the attribution delegates nothing to this suite").toBeGreaterThan(0);
+    for (const entry of mine) {
+      const read = new Set(F15_LIVENESS.liveLeafPaths(entry.file, entry.case));
+      for (const path of entry.paths) {
+        expect(
+          read.has(path),
+          `${entry.file}: ${entry.case}.${path} is counted live because this suite is said to read it, and this suite does not`,
+        ).toBe(true);
+      }
+    }
   });
 });

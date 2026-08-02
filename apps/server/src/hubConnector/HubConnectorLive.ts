@@ -26,11 +26,112 @@ import {
   makeNodeE2eeChannelSession,
   makeNodeE2eeHandshakeRateLimiter,
 } from "./NodeE2eeChannelSession.ts";
+import { makeNodeE2eeOperator } from "./NodeE2eeOperator.ts";
 import {
   makeNodeE2eeRelayChannelSession,
   nodeE2eeChannelPlaintextCeiling,
 } from "./NodeE2eeRelayChannel.ts";
+import { makeNodeE2eeSessionDirectory } from "./NodeE2eeSessionDirectory.ts";
+import type {
+  E2eeAuthorizationChangeView,
+  E2eeClientListingView,
+  E2eeClientRecordView,
+  E2eeContinuityChangeView,
+  E2eeContinuityView,
+  E2eeFallbackView,
+  E2eePolicyChangeView,
+  E2eePolicyPreviewView,
+  E2eePolicyView,
+  E2eePrekeyView,
+  E2eeSessionListView,
+} from "./e2eeOperatorContract.ts";
 import type { RelayChannelSessionFactory } from "./RelayChannelRegistry.ts";
+
+/**
+ * One §12.6 policy proposal, as an owner states it.
+ *
+ * `suiteRegistry` is here because §12.6 makes a suite leaving the advertised
+ * registry one of its three withdrawal classes — the one with its own sweep
+ * class in step (c) — so an operator surface without it can display a
+ * `suiteWithdrawn` count that no command it offers can ever produce.
+ */
+export interface E2eePolicyProposalInput {
+  readonly requireE2EE?: boolean | undefined;
+  readonly requireApprovedClientE2EE?: boolean | undefined;
+  readonly suiteRegistry?: readonly number[] | undefined;
+}
+
+/**
+ * The node's E2EE operator surface, as the owner-authenticated routes see it.
+ *
+ * One namespaced member rather than a dozen siblings on the connector service:
+ * these are the §6.4, §7.5, §12.5, §12.6 and §13.6 owner commands, they share a
+ * single precondition — an owner session on this node's own origin — and they
+ * have nothing to do with the connector's enrollment lifecycle, which is what
+ * the rest of this service is.
+ *
+ * Every mutation below returns only after the transition it names has COMPLETED,
+ * including any sweep it owes. That is not a convenience: §12.6(c) and §13.6
+ * both forbid acknowledging before the ordered procedure has finished, and this
+ * boundary is the last place that ordering can be honoured before the answer
+ * becomes an HTTP response the CLI prints as success.
+ */
+export interface HubConnectorE2eeOperator {
+  readonly listClients: () => Promise<E2eeClientListingView>;
+  readonly getClient: (key: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly fingerprint: string;
+  }) => Promise<E2eeClientRecordView | undefined>;
+  readonly approveClient: (input: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly fingerprint: string;
+    readonly maxRole: string;
+    readonly capabilitySet: readonly string[];
+    readonly displayLabel?: string | undefined;
+  }) => Promise<E2eeAuthorizationChangeView>;
+  readonly narrowClient: (input: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly fingerprint: string;
+    readonly maxRole?: string | undefined;
+    readonly capabilitySet?: readonly string[] | undefined;
+  }) => Promise<E2eeAuthorizationChangeView>;
+  readonly revokeClient: (key: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly fingerprint: string;
+  }) => Promise<E2eeAuthorizationChangeView>;
+  readonly purgeClient: (key: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly fingerprint: string;
+  }) => Promise<E2eeAuthorizationChangeView>;
+  readonly openPairingWindow: (fingerprint: string) => Promise<E2eeClientListingView>;
+  readonly closePairingWindow: () => Promise<E2eeClientListingView>;
+  /**
+   * §13.6: the refusal count the listing shows is "bounded, owner-clearable",
+   * and this is the clearing. It answers with the listing, because what an owner
+   * does next is read the count they just zeroed.
+   */
+  readonly clearRefusedPairingAttempts: () => Promise<E2eeClientListingView>;
+  readonly listSessions: () => E2eeSessionListView;
+  readonly readPolicy: () => E2eePolicyView;
+  readonly previewPolicy: (proposal: E2eePolicyProposalInput) => E2eePolicyPreviewView;
+  readonly applyPolicy: (proposal: E2eePolicyProposalInput) => Promise<E2eePolicyChangeView>;
+  /** §5.7's recovery command. Reports the same shape a policy change does. */
+  readonly recoverPolicyGeneration: () => Promise<E2eePolicyChangeView>;
+  /** §6.4: the prekey this node holds now, without issuing one. */
+  readonly readPrekey: () => Promise<E2eePrekeyView>;
+  readonly rotatePrekey: () => Promise<E2eePrekeyView>;
+  readonly readContinuity: () => Promise<E2eeContinuityView>;
+  readonly adoptContinuityId: (continuityId: string) => Promise<E2eeContinuityChangeView>;
+  readonly remintContinuityId: () => Promise<E2eeContinuityChangeView>;
+  readonly breakContinuityChain: () => Promise<E2eeContinuityChangeView>;
+  readonly readFallback: () => E2eeFallbackView;
+  readonly resetFallback: () => Promise<E2eeFallbackView>;
+}
 
 export interface HubConnectorServiceShape {
   readonly status: HubConnector["status"];
@@ -41,6 +142,7 @@ export interface HubConnectorServiceShape {
   readonly leave: HubConnector["leave"];
   readonly cancelEnrollment: HubConnector["cancelEnrollment"];
   readonly stop: HubConnector["stop"];
+  readonly e2ee: HubConnectorE2eeOperator;
 }
 
 export class HubConnectorService extends Context.Service<
@@ -58,6 +160,10 @@ export class HubConnectorService extends Context.Service<
  * read its durable policy does not know what it promised, so it promises the
  * most and advertises nothing (§5.5 U2, §5.7).
  */
+const e2eeOperatorUnavailable = async (): Promise<never> => {
+  throw new HubIdentityRuntimeError("identity_unavailable");
+};
+
 const offlineE2eeSurface = {
   e2eePolicy: () => NODE_E2EE_FAIL_CLOSED_POLICY,
   readE2eeAdvertisement: async (): Promise<NodeE2eeAdvertisementResult> => ({
@@ -96,15 +202,55 @@ const offlineE2eeSurface = {
       release: () => undefined,
     }),
   },
+  // The owner commands are the one part of the E2EE surface that is NOT
+  // answerable offline. A withdrawal's acknowledgement means "no channel
+  // admitted under the withdrawn authority is still open" (§13.6), and a stub
+  // that returned success would say exactly that about a record it never
+  // committed. Refusing is the only honest answer, and it is the same answer the
+  // rest of this runtime gives for an identity it cannot open.
+  e2eeAuthorizationAdmin: {
+    list: e2eeOperatorUnavailable,
+    get: e2eeOperatorUnavailable,
+    approve: e2eeOperatorUnavailable,
+    narrow: e2eeOperatorUnavailable,
+    revoke: e2eeOperatorUnavailable,
+    purge: e2eeOperatorUnavailable,
+    setDisplayLabel: e2eeOperatorUnavailable,
+    openPairingWindow: e2eeOperatorUnavailable,
+    closePairingWindow: e2eeOperatorUnavailable,
+    clearRefusedPairingAttempts: () => undefined,
+    sweepExpired: e2eeOperatorUnavailable,
+  },
+  // 0 is the generation that has never been issued, which is the truthful
+  // reading for a runtime that must not advertise at all (§5.7).
+  e2eeGeneration: () => 0,
+  applyE2eePolicy: e2eeOperatorUnavailable,
+  previewE2eePolicy: () => ({
+    policy: NODE_E2EE_FAIL_CLOSED_POLICY,
+    withdrawal: false,
+    changed: false,
+    counts: { legacy: 0, nxE2ee: 0, suiteWithdrawn: 0, abortedHandshakes: 0 },
+  }),
+  // §5.7's recovery advances a DURABLE generation and a durable high-water mark.
+  // A runtime with no identity has neither, and answering would report a jump
+  // that nothing committed.
+  recoverE2eeGeneration: e2eeOperatorUnavailable,
+  resetE2eeFallbackState: e2eeOperatorUnavailable,
 } as const satisfies Pick<
   HubIdentityRuntimeShape,
   | "e2eePolicy"
   | "readE2eeAdvertisement"
   | "recordE2eeFallback"
   | "readE2eeFallbackState"
+  | "resetE2eeFallbackState"
   | "stopE2eeInstrumentation"
   | "registerE2eeChannel"
   | "e2eeClientAuthorization"
+  | "e2eeAuthorizationAdmin"
+  | "e2eeGeneration"
+  | "applyE2eePolicy"
+  | "previewE2eePolicy"
+  | "recoverE2eeGeneration"
 >;
 
 /**
@@ -133,6 +279,7 @@ const unavailableIdentity = (): HubIdentityRuntimeShape => {
     resumeKeyRotation: unavailable,
     confirmAuthenticatedKey: unavailable,
     readE2eePrekeyCertificate: unavailable,
+    readStoredE2eePrekey: unavailable,
     rotateE2eePrekey: unavailable,
     withE2eePrekeySecret: unavailable,
     readE2eeContinuity: unavailable,
@@ -195,6 +342,7 @@ const readOnlyIdentity = (options: {
     resumeKeyRotation: unavailable,
     confirmAuthenticatedKey: unavailable,
     readE2eePrekeyCertificate: unavailable,
+    readStoredE2eePrekey: unavailable,
     rotateE2eePrekey: unavailable,
     withE2eePrekeySecret: unavailable,
     readE2eeContinuity: unavailable,
@@ -266,6 +414,15 @@ export const HubConnectorLive = Layer.effect(
     const handshakeRateLimiter = makeNodeE2eeHandshakeRateLimiter();
 
     /**
+     * §13.5's node-side reader: the sessions established right now.
+     *
+     * In memory and per process, because the value it carries is ephemeral
+     * display state that §13.5 forbids logging or persisting, and because a
+     * session that did not survive a restart has no code left to compare.
+     */
+    const sessionDirectory = makeNodeE2eeSessionDirectory();
+
+    /**
      * §4.5's `plaintextCeiling`, taken once from the connection's asserted
      * limits through the single derivation `e2eeChannelSizeBudget` owns.
      *
@@ -329,6 +486,7 @@ export const HubConnectorLive = Layer.effect(
               use,
             ),
           rateLimiter: handshakeRateLimiter,
+          registerSession: (session) => sessionDirectory.register(session),
           recordPeerLegacyFallback: () => {
             void identity
               .recordE2eeFallback({
@@ -445,6 +603,19 @@ export const HubConnectorLive = Layer.effect(
       leave: () => connector.leave(),
       cancelEnrollment: () => connector.cancelEnrollment(),
       stop: () => connector.stop(),
+      e2ee: makeNodeE2eeOperator({
+        identity,
+        sessions: sessionDirectory,
+        // §12.5 Display: the live §5.5 U1 pair, read from the connection the
+        // advertiser is on right now. It is not in the durable counter and must
+        // not be — §12.5 says the pair is not retained in the ring.
+        undersizedConnection: () => advertiser.undersizedConnection(),
+        // Read per call rather than captured: the configured origin is what the
+        // prekey and lineage records are keyed by, and a connector that is
+        // reconfigured between two operator commands must not answer the second
+        // one about the first one's origin.
+        hubOrigin: () => config.hubConnector?.origin ?? "",
+      }),
     } satisfies HubConnectorServiceShape;
   }),
 );

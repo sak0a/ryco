@@ -17,7 +17,7 @@
   },
   "warning": "TEST-ONLY MATERIAL. Every private key, seed, ephemeral, and secret in this corpus is deterministic test material. It MUST NEVER be used for a real endpoint, and no production code path may accept it (docs/relay-e2ee-protocol.md §16.1).",
   "deferred": [
-    "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict. The mode machine is not implemented in packages/shared/src yet, so the row is carried as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The node and client transition rows themselves are family F10. Owned by the node and client phases.",
+    "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict, and no mode machine is reachable from packages/shared/src: the node's lives in apps/server and the client's does not exist. The row is therefore carried here as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The transition rows themselves are family F10, whose NODE rows are now generated and driven against the real runtime; its client rows remain deferred. Owned by the client phase.",
     "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
   ],
   "testKeyMaterial": {
@@ -390,7 +390,8 @@
         "maxQueuedBytes": 384,
         "maxControlFrameBytes": 256,
         "plaintextCeiling": 96,
-        "innerBodyBytes": 96
+        "innerBodyBytes": 96,
+        "innerBodyFill": 119
       },
       "expected": {
         "send": "protected",
@@ -411,7 +412,8 @@
       "note": "§4.2 step 2 is enforced BEFORE encryption: nothing is encrypted and nothing is transmitted, and `e2ee_message_too_large` is sender-local — the channel stays usable.",
       "inputs": {
         "plaintextCeiling": 96,
-        "innerBodyBytes": 97
+        "innerBodyBytes": 97,
+        "innerBodyFill": 119
       },
       "expected": {
         "send": {
@@ -458,8 +460,7 @@
         },
         "fatal": "P6",
         "disposition": "FATAL-PRE",
-        "neverSilentlyDropped": true,
-        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+        "neverSilentlyDropped": true
       }
     },
     {
@@ -498,8 +499,7 @@
         },
         "fatal": "Q6",
         "disposition": "FATAL-POST",
-        "neverSilentlyDropped": true,
-        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+        "neverSilentlyDropped": true
       }
     },
     {
@@ -538,8 +538,7 @@
         },
         "fatal": "P6",
         "disposition": "FATAL-PRE",
-        "neverSilentlyDropped": true,
-        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+        "neverSilentlyDropped": true
       }
     },
     {
@@ -578,8 +577,7 @@
         },
         "fatal": "P6",
         "disposition": "FATAL-PRE",
-        "neverSilentlyDropped": true,
-        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+        "neverSilentlyDropped": true
       }
     },
     {
@@ -618,8 +616,7 @@
         },
         "fatal": "Q6",
         "disposition": "FATAL-POST",
-        "neverSilentlyDropped": true,
-        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+        "neverSilentlyDropped": true
       }
     },
     {
@@ -658,8 +655,7 @@
         },
         "fatal": "P6",
         "disposition": "FATAL-PRE",
-        "neverSilentlyDropped": true,
-        "rowOwnedBy": "§4.4 mode machine (not in packages/shared/src yet); the pipeline result above is what this corpus derives."
+        "neverSilentlyDropped": true
       }
     }
   ]
