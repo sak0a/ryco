@@ -1054,10 +1054,10 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
 
 // The settled turn's disclosure and its live twin share one label tone, size,
 // and full-width divider, so a turn folding shut is a status change rather than
-// a change of shape. `-ml-0.5` optically aligns the leading "W" with the reply
-// text below: the box is flush already, but the glyph carries a left side
-// bearing that reads as an inset.
-const TURN_FOLD_LABEL_CLASS_NAME = "-ml-0.5 text-[13px] text-muted-foreground/70 tabular-nums";
+// a change of shape. The label box stays flush with the timeline's content edge:
+// nudging it left to compensate for the leading "W" side bearing pushed the
+// glyph past the scroll container's clip and shaved its left stem.
+const TURN_FOLD_LABEL_CLASS_NAME = "text-[13px] text-muted-foreground/70 tabular-nums";
 
 function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
   const { routeThreadKey } = use(TimelineStableCtx);
