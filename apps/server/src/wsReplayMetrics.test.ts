@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Effect, Metric } from "effect";
+import { Deferred, Effect, Fiber, Metric } from "effect";
 
 import { makeWsReplayMetrics } from "./wsReplayMetrics.ts";
 
@@ -120,6 +120,37 @@ describe("wsReplayMetrics", () => {
         findGaugeValue(yield* Metric.snapshot, "t3_ws_orchestration_live_buffer_depth", {
           stream: "thread",
         }),
+        0,
+      );
+    }),
+  );
+
+  it.effect("removes active state when the registration scope is interrupted", () =>
+    Effect.gen(function* () {
+      const ready = yield* Deferred.make<void>();
+      const attributes = { stream: "shell" };
+      const fiber = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const metrics = yield* makeWsReplayMetrics({
+            stream: "shell",
+            subscriptionId: "ws-replay-interrupted-registration",
+            snapshotSequence: 0,
+          });
+          yield* metrics.recordLiveEnqueued(1);
+          yield* Deferred.succeed(ready, undefined);
+          return yield* Effect.never;
+        }),
+      ).pipe(Effect.forkChild);
+
+      yield* Deferred.await(ready);
+      assert.equal(
+        findGaugeValue(yield* Metric.snapshot, "t3_ws_orchestration_live_buffer_depth", attributes),
+        1,
+      );
+
+      yield* Fiber.interrupt(fiber);
+      assert.equal(
+        findGaugeValue(yield* Metric.snapshot, "t3_ws_orchestration_live_buffer_depth", attributes),
         0,
       );
     }),

@@ -1,4 +1,4 @@
-import { Effect, Metric, Ref } from "effect";
+import { Effect, Metric, Ref, Scope } from "effect";
 
 import { metricAttributes } from "./observability/Metrics.ts";
 
@@ -78,7 +78,7 @@ export const makeWsReplayMetrics = (input: {
   readonly stream: WsReplayStreamKind;
   readonly subscriptionId: string;
   readonly snapshotSequence: number;
-}): Effect.Effect<WsReplayMetrics> =>
+}): Effect.Effect<WsReplayMetrics, never, Scope.Scope> =>
   Effect.gen(function* () {
     const snapshotSequence = normalizeSequence(input.snapshotSequence);
     const attributes = metricAttributes({ stream: input.stream });
@@ -96,8 +96,6 @@ export const makeWsReplayMetrics = (input: {
       liveBufferDepth,
       liveBufferHighWater,
     } satisfies ActiveReplayMetricState;
-    activeReplayMetricStates.set(input.subscriptionId, state);
-
     const publishAggregate = Effect.gen(function* () {
       const activeStates = [...activeReplayMetricStates.values()].filter(
         (candidate) => candidate.stream === input.stream,
@@ -137,6 +135,18 @@ export const makeWsReplayMetrics = (input: {
       );
     });
 
+    const reset = Effect.sync(() => {
+      if (activeReplayMetricStates.get(input.subscriptionId) === state) {
+        activeReplayMetricStates.delete(input.subscriptionId);
+      }
+    }).pipe(Effect.andThen(publishAggregate));
+
+    yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        activeReplayMetricStates.set(input.subscriptionId, state);
+      }),
+      () => reset,
+    );
     yield* publishAggregate;
 
     const markDrained = (sequence: number) =>
@@ -177,10 +187,6 @@ export const makeWsReplayMetrics = (input: {
             { discard: true },
           );
         }),
-      reset: Effect.sync(() => {
-        if (activeReplayMetricStates.get(input.subscriptionId) === state) {
-          activeReplayMetricStates.delete(input.subscriptionId);
-        }
-      }).pipe(Effect.andThen(publishAggregate)),
+      reset,
     };
   });
