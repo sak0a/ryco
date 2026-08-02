@@ -93,9 +93,17 @@ introduced.
 
 ### Web display metadata
 
-Add local, component-native SVG icons for Android Studio, Xcode, Windsurf, Sublime Text, Nova, and
-Positron. Terminal uses Lucide’s terminal glyph so it remains legible at the picker’s small icon
-size and does not falsely imply one third-party terminal emulator.
+Add checked-in, optimized copies of the original launcher-style app icons for Android Studio,
+Xcode, Windsurf, Sublime Text, Nova, and Positron. Source each image from an official application
+bundle or first-party vendor download, preserve its original rounded-square artwork and transparent
+background, and render it through a small React icon wrapper. Assets must work offline and must not
+depend on vendor CDNs at runtime. Terminal continues to use Lucide’s terminal glyph so it remains
+legible at the picker’s small icon size and does not falsely imply one third-party terminal
+emulator.
+
+Use a consistent optimized raster size between 128 and 256 pixels. Do not redraw, simplify, recolor,
+or approximate an application icon. Include an accessible title for each image and keep the
+exhaustive `EditorId` mapping unchanged.
 
 Consolidate the duplicated editor label/icon tables currently split between
 `OpenInPicker.tsx` and `SettingsPanels.editor.ts` into one web display-metadata module. That module
