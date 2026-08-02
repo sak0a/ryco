@@ -6,14 +6,35 @@ import { useSettings } from "./hooks/useSettings";
 
 const LAST_EDITOR_KEY = "ryco:last-editor";
 
+export function isEditorPreferenceEligible(editorId: EditorId): boolean {
+  const editor = EDITORS.find((candidate) => candidate.id === editorId);
+  return Boolean(editor && (!("workspaceOnly" in editor) || !editor.workspaceOnly));
+}
+
 export function usePreferredEditor(availableEditors: ReadonlyArray<EditorId>) {
   const [lastEditor, setLastEditor] = useLocalStorage(LAST_EDITOR_KEY, null, EditorId);
   const pinnedEditor = useSettings((s) => s.preferredEditor);
 
   const effectiveEditor = useMemo(() => {
-    if (pinnedEditor && availableEditors.includes(pinnedEditor)) return pinnedEditor;
-    if (lastEditor && availableEditors.includes(lastEditor)) return lastEditor;
-    return EDITORS.find((editor) => availableEditors.includes(editor.id))?.id ?? null;
+    if (
+      pinnedEditor &&
+      availableEditors.includes(pinnedEditor) &&
+      isEditorPreferenceEligible(pinnedEditor)
+    ) {
+      return pinnedEditor;
+    }
+    if (
+      lastEditor &&
+      availableEditors.includes(lastEditor) &&
+      isEditorPreferenceEligible(lastEditor)
+    ) {
+      return lastEditor;
+    }
+    return (
+      EDITORS.find(
+        (editor) => availableEditors.includes(editor.id) && isEditorPreferenceEligible(editor.id),
+      )?.id ?? null
+    );
   }, [pinnedEditor, lastEditor, availableEditors]);
 
   return [effectiveEditor, setLastEditor] as const;
@@ -24,10 +45,14 @@ export function resolveAndPersistPreferredEditor(
 ): EditorId | null {
   const availableEditorIds = new Set(availableEditors);
   const pinned = getClientSettings().preferredEditor;
-  if (pinned && availableEditorIds.has(pinned)) return pinned;
+  if (pinned && availableEditorIds.has(pinned) && isEditorPreferenceEligible(pinned)) return pinned;
   const stored = getLocalStorageItem(LAST_EDITOR_KEY, EditorId);
-  if (stored && availableEditorIds.has(stored)) return stored;
-  const editor = EDITORS.find((editor) => availableEditorIds.has(editor.id))?.id ?? null;
+  if (stored && availableEditorIds.has(stored) && isEditorPreferenceEligible(stored)) return stored;
+  const editor =
+    EDITORS.find(
+      (candidate) =>
+        availableEditorIds.has(candidate.id) && isEditorPreferenceEligible(candidate.id),
+    )?.id ?? null;
   if (editor) setLocalStorageItem(LAST_EDITOR_KEY, editor, EditorId);
   return editor ?? null;
 }

@@ -33,7 +33,7 @@ const TARGET_WITH_POSITION_PATTERN = /^(.*?):(\d+)(?::(\d+))?$/;
 
 function parseTargetPathAndPosition(target: string): {
   path: string;
-  line: string | undefined;
+  line: string;
   column: string | undefined;
 } | null {
   const match = TARGET_WITH_POSITION_PATTERN.exec(target);
@@ -59,6 +59,13 @@ function resolveCommandEditorArgs(
       return [target];
     case "goto":
       return parsedTarget ? ["--goto", target] : [target];
+    case "line": {
+      if (!parsedTarget) {
+        return [target];
+      }
+
+      return ["--line", parsedTarget.line, parsedTarget.path];
+    }
     case "line-column": {
       if (!parsedTarget) {
         return [target];
@@ -66,6 +73,16 @@ function resolveCommandEditorArgs(
 
       const { path, line, column } = parsedTarget;
       return [...(line ? ["--line", line] : []), ...(column ? ["--column", column] : []), path];
+    }
+    case "nova-line-column": {
+      if (!parsedTarget) {
+        return [target];
+      }
+
+      const position = parsedTarget.column
+        ? `${parsedTarget.line}:${parsedTarget.column}`
+        : parsedTarget.line;
+      return [parsedTarget.path, "--line", position];
     }
   }
 }
@@ -92,6 +109,11 @@ function resolveAvailableCommand(
 
 const DARWIN_APP_BUNDLE_RELATIVE_CLI_PATHS: Partial<Record<EditorId, readonly string[]>> = {
   cursor: ["Cursor.app/Contents/Resources/app/bin/cursor"],
+  windsurf: ["Windsurf.app/Contents/Resources/app/bin/windsurf"],
+  positron: ["Positron.app/Contents/Resources/app/bin/positron"],
+  "sublime-text": ["Sublime Text.app/Contents/SharedSupport/bin/subl"],
+  xcode: ["Xcode.app/Contents/Developer/usr/bin/xed"],
+  "android-studio": ["Android Studio.app/Contents/MacOS/studio"],
   idea: [
     "IntelliJ IDEA.app/Contents/MacOS/idea",
     "IntelliJ IDEA Ultimate.app/Contents/MacOS/idea",
@@ -128,6 +150,8 @@ export interface ResolveOptions {
    * pass an isolated array to keep results deterministic.
    */
   readonly darwinAppRoots?: readonly string[];
+  /** macOS-only: injectable Terminal.app executables used by deterministic tests. */
+  readonly darwinTerminalAppPaths?: readonly string[];
 }
 
 function resolveDarwinBundleCli(
@@ -160,6 +184,86 @@ function fileManagerCommandForPlatform(platform: NodeJS.Platform): string {
   }
 }
 
+const LINUX_TERMINAL_COMMANDS = [
+  {
+    command: "gnome-terminal",
+    args: (cwd: string): ReadonlyArray<string> => [`--working-directory=${cwd}`],
+  },
+  { command: "konsole", args: (cwd: string): ReadonlyArray<string> => ["--workdir", cwd] },
+  {
+    command: "xfce4-terminal",
+    args: (cwd: string): ReadonlyArray<string> => [`--working-directory=${cwd}`],
+  },
+  { command: "kitty", args: (cwd: string): ReadonlyArray<string> => ["--directory", cwd] },
+  {
+    command: "wezterm",
+    args: (cwd: string): ReadonlyArray<string> => ["start", "--cwd", cwd],
+  },
+  {
+    command: "alacritty",
+    args: (cwd: string): ReadonlyArray<string> => ["--working-directory", cwd],
+  },
+  {
+    command: "ghostty",
+    args: (cwd: string): ReadonlyArray<string> => [`--working-directory=${cwd}`],
+  },
+] as const;
+
+function resolveTerminalLaunch(
+  cwd: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  options: ResolveOptions,
+): EditorLaunch | null {
+  if (platform === "darwin") {
+    if (!isCommandAvailable("open", { platform, env })) return null;
+    const terminalAppPaths = options.darwinTerminalAppPaths ?? [
+      "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+      "/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+    ];
+    if (!terminalAppPaths.some((path) => isCommandAvailable(path, { platform, env }))) return null;
+    return { command: "open", args: ["-a", "Terminal", cwd] };
+  }
+
+  if (platform === "win32") {
+    const command = resolveAvailableCommand(["wt", "wt.exe"], { platform, env });
+    return command ? { command, args: ["-d", cwd] } : null;
+  }
+
+  if (platform === "linux") {
+    for (const terminal of LINUX_TERMINAL_COMMANDS) {
+      if (isCommandAvailable(terminal.command, { platform, env })) {
+        return { command: terminal.command, args: terminal.args(cwd) };
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolvePlatformEditorLaunch(
+  editor: (typeof EDITORS)[number],
+  cwd: string,
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  options: ResolveOptions,
+  requireAvailable = true,
+): EditorLaunch | null {
+  if (!("platformLauncher" in editor)) return null;
+  if (editor.platformLauncher === "terminal") {
+    return resolveTerminalLaunch(cwd, platform, env, options);
+  }
+
+  const command = fileManagerCommandForPlatform(platform);
+  return !requireAvailable || isCommandAvailable(command, { platform, env })
+    ? { command, args: [cwd] }
+    : null;
+}
+
+function supportsPlatform(editor: (typeof EDITORS)[number], platform: NodeJS.Platform): boolean {
+  return !("platforms" in editor) || (editor.platforms as readonly string[]).includes(platform);
+}
+
 export function resolveAvailableEditors(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
@@ -168,9 +272,10 @@ export function resolveAvailableEditors(
   const available: EditorId[] = [];
 
   for (const editor of EDITORS) {
+    if (!supportsPlatform(editor, platform)) continue;
+
     if (editor.commands === null) {
-      const command = fileManagerCommandForPlatform(platform);
-      if (isCommandAvailable(command, { platform, env })) {
+      if (resolvePlatformEditorLaunch(editor, ".", platform, env, options)) {
         available.push(editor.id);
       }
       continue;
@@ -230,6 +335,11 @@ export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   if (!editorDef) {
     return yield* new OpenError({ message: `Unknown editor: ${input.editor}` });
   }
+  if (!supportsPlatform(editorDef, platform)) {
+    return yield* new OpenError({
+      message: `${editorDef.label} is not supported on ${platform}`,
+    });
+  }
 
   if (editorDef.commands) {
     const command =
@@ -242,11 +352,18 @@ export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     };
   }
 
-  if (editorDef.id !== "file-manager") {
-    return yield* new OpenError({ message: `Unsupported editor: ${input.editor}` });
+  const platformLaunch = resolvePlatformEditorLaunch(
+    editorDef,
+    input.cwd,
+    platform,
+    env,
+    options,
+    false,
+  );
+  if (!platformLaunch) {
+    return yield* new OpenError({ message: `${editorDef.label} is not available` });
   }
-
-  return { command: fileManagerCommandForPlatform(platform), args: [input.cwd] };
+  return platformLaunch;
 });
 
 export const launchDetached = (launch: EditorLaunch) =>

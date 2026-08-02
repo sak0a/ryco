@@ -81,6 +81,23 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
         args: ["/tmp/workspace"],
       });
 
+      for (const [editor, command] of [
+        ["windsurf", "windsurf"],
+        ["positron", "positron"],
+        ["sublime-text", "subl"],
+        ["nova", "nova"],
+        ["xcode", "xed"],
+        ["android-studio", "studio"],
+      ] as const) {
+        const launch = yield* resolveEditorLaunch(
+          { cwd: "/tmp/workspace", editor },
+          "darwin",
+          { PATH: "" },
+          { darwinAppRoots: [] },
+        );
+        assert.deepEqual(launch, { command, args: ["/tmp/workspace"] });
+      }
+
       const zedLaunch = yield* resolveEditorLaunch(
         { cwd: "/tmp/workspace", editor: "zed" },
         "darwin",
@@ -338,6 +355,39 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
         args: ["--line", "71", "--column", "5", "/tmp/workspace/src/open.ts"],
       });
 
+      const androidStudioLineAndColumn = yield* resolveEditorLaunch(
+        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "android-studio" },
+        "darwin",
+        { PATH: "" },
+        { darwinAppRoots: [] },
+      );
+      assert.deepEqual(androidStudioLineAndColumn, {
+        command: "studio",
+        args: ["--line", "71", "--column", "5", "/tmp/workspace/src/open.ts"],
+      });
+
+      const xcodeLineAndColumn = yield* resolveEditorLaunch(
+        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "xcode" },
+        "darwin",
+        { PATH: "" },
+        { darwinAppRoots: [] },
+      );
+      assert.deepEqual(xcodeLineAndColumn, {
+        command: "xed",
+        args: ["--line", "71", "/tmp/workspace/src/open.ts"],
+      });
+
+      const novaLineAndColumn = yield* resolveEditorLaunch(
+        { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "nova" },
+        "darwin",
+        { PATH: "" },
+        { darwinAppRoots: [] },
+      );
+      assert.deepEqual(novaLineAndColumn, {
+        command: "nova",
+        args: ["/tmp/workspace/src/open.ts", "--line", "71:5"],
+      });
+
       const aquaLineAndColumn = yield* resolveEditorLaunch(
         { cwd: "/tmp/workspace/src/open.ts:71:5", editor: "aqua" },
         "darwin",
@@ -477,6 +527,64 @@ it.layer(NodeServices.layer)("resolveEditorLaunch", (it) => {
         command: "zeditor",
         args: ["/tmp/workspace"],
       });
+    }),
+  );
+
+  it.effect("resolves platform-native terminal working directories", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+
+      const macBin = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-terminal-mac-" });
+      const macTerminal = path.join(macBin, "Terminal");
+      yield* fs.writeFileString(path.join(macBin, "open"), "#!/bin/sh\nexit 0\n");
+      yield* fs.writeFileString(macTerminal, "#!/bin/sh\nexit 0\n");
+      yield* fs.chmod(path.join(macBin, "open"), 0o755);
+      yield* fs.chmod(macTerminal, 0o755);
+      const macLaunch = yield* resolveEditorLaunch(
+        { cwd: "/tmp/workspace", editor: "terminal" },
+        "darwin",
+        { PATH: macBin },
+        { darwinTerminalAppPaths: [macTerminal] },
+      );
+      assert.deepEqual(macLaunch, {
+        command: "open",
+        args: ["-a", "Terminal", "/tmp/workspace"],
+      });
+
+      const windowsBin = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-terminal-win-" });
+      yield* fs.writeFileString(path.join(windowsBin, "wt.CMD"), "@echo off\r\n");
+      const windowsLaunch = yield* resolveEditorLaunch(
+        { cwd: "C:\\workspace", editor: "terminal" },
+        "win32",
+        { PATH: windowsBin, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      );
+      assert.deepEqual(windowsLaunch, {
+        command: "wt",
+        args: ["-d", "C:\\workspace"],
+      });
+
+      for (const [command, args] of [
+        ["gnome-terminal", ["--working-directory=/tmp/workspace"]],
+        ["konsole", ["--workdir", "/tmp/workspace"]],
+        ["xfce4-terminal", ["--working-directory=/tmp/workspace"]],
+        ["kitty", ["--directory", "/tmp/workspace"]],
+        ["wezterm", ["start", "--cwd", "/tmp/workspace"]],
+        ["alacritty", ["--working-directory", "/tmp/workspace"]],
+        ["ghostty", ["--working-directory=/tmp/workspace"]],
+      ] as const) {
+        const linuxBin = yield* fs.makeTempDirectoryScoped({
+          prefix: `ryco-terminal-${command}-`,
+        });
+        yield* fs.writeFileString(path.join(linuxBin, command), "#!/bin/sh\nexit 0\n");
+        yield* fs.chmod(path.join(linuxBin, command), 0o755);
+        const linuxLaunch = yield* resolveEditorLaunch(
+          { cwd: "/tmp/workspace", editor: "terminal" },
+          "linux",
+          { PATH: linuxBin },
+        );
+        assert.deepEqual(linuxLaunch, { command, args });
+      }
     }),
   );
 
@@ -625,9 +733,13 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
       const dir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-editors-" });
 
       yield* fs.writeFileString(path.join(dir, "trae.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "windsurf.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "kiro.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "code-insiders.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "codium.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "positron.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "subl.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "studio.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "aqua.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "clion.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "datagrip.CMD"), "@echo off\r\n");
@@ -639,16 +751,21 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
       yield* fs.writeFileString(path.join(dir, "rubymine.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "rustrover.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "webstorm.CMD"), "@echo off\r\n");
+      yield* fs.writeFileString(path.join(dir, "wt.CMD"), "@echo off\r\n");
       yield* fs.writeFileString(path.join(dir, "explorer.CMD"), "MZ");
       const editors = resolveAvailableEditors("win32", {
         PATH: dir,
         PATHEXT: ".COM;.EXE;.BAT;.CMD",
       });
       assert.deepEqual(editors, [
+        "windsurf",
         "trae",
         "kiro",
         "vscode-insiders",
         "vscodium",
+        "positron",
+        "sublime-text",
+        "android-studio",
         "aqua",
         "clion",
         "datagrip",
@@ -660,6 +777,7 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
         "rubymine",
         "rustrover",
         "webstorm",
+        "terminal",
         "file-manager",
       ]);
     }),
@@ -725,6 +843,11 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
       const appRoot = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-darwin-apps-" });
 
       const bundles: ReadonlyArray<readonly [string, string]> = [
+        ["Windsurf.app/Contents/Resources/app/bin", "windsurf"],
+        ["Positron.app/Contents/Resources/app/bin", "positron"],
+        ["Sublime Text.app/Contents/SharedSupport/bin", "subl"],
+        ["Xcode.app/Contents/Developer/usr/bin", "xed"],
+        ["Android Studio.app/Contents/MacOS", "studio"],
         ["IntelliJ IDEA.app/Contents/MacOS", "idea"],
         ["Aqua.app/Contents/MacOS", "aqua"],
         ["CLion.app/Contents/MacOS", "clion"],
@@ -755,8 +878,13 @@ it.layer(NodeServices.layer)("resolveAvailableEditors", (it) => {
         { PATH: opener },
         { darwinAppRoots: [appRoot] },
       );
-      for (const [, id] of bundles) {
-        assert.include(editors, id);
+      const editorIdByBinary: Record<string, string> = {
+        subl: "sublime-text",
+        xed: "xcode",
+        studio: "android-studio",
+      };
+      for (const [, binary] of bundles) {
+        assert.include(editors, editorIdByBinary[binary] ?? binary);
       }
     }),
   );

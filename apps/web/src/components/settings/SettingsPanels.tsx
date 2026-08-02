@@ -21,7 +21,10 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
-import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
+import {
+  isEditorPreferenceEligible,
+  resolveAndPersistPreferredEditor,
+} from "../../editorPreferences";
 import { isElectron } from "../../env";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { useLongPress } from "../../hooks/useLongPress";
@@ -582,7 +585,11 @@ export function GeneralSettingsPanel() {
                     Auto (last used)
                   </span>
                 </SelectItem>
-                {EDITORS.filter((e) => (availableEditors ?? []).includes(e.id)).map((editor) => (
+                {EDITORS.filter(
+                  (editor) =>
+                    (availableEditors ?? []).includes(editor.id) &&
+                    isEditorPreferenceEligible(editor.id),
+                ).map((editor) => (
                   <SelectItem key={editor.id} hideIndicator value={editor.id}>
                     <span className="inline-flex items-center gap-2">
                       <EditorOptionIcon editor={editor.id} />
