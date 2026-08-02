@@ -58,6 +58,7 @@ export function ThreadActionsSheet(props: {
   readonly onClose: () => void;
   readonly onRename: (title: string) => void;
   readonly onStop: () => void;
+  readonly onToggleSettlement: () => void;
   readonly onToggleArchive: () => void;
   readonly onReview: () => void;
 }) {
@@ -175,6 +176,19 @@ export function ThreadActionsSheet(props: {
               onPress={props.onStop}
             />
           ) : null}
+          {props.model.settlementAction ? (
+            <ActionRow
+              icon={
+                props.model.settlementAction.kind === "settle"
+                  ? "checkmark.circle"
+                  : "arrow.uturn.backward"
+              }
+              label={props.model.settlementAction.label}
+              detail={props.model.settlementAction.detail}
+              disabled={props.busy || props.model.settlementAction.disabled}
+              onPress={props.onToggleSettlement}
+            />
+          ) : null}
           <ActionRow
             icon={archiveAction === "archive" ? "archivebox" : "arrow.uturn.backward"}
             label={archiveAction === "archive" ? "Archive task" : "Restore task"}
@@ -182,8 +196,8 @@ export function ThreadActionsSheet(props: {
               turnRunning
                 ? "Stop the current turn before archiving."
                 : archiveAction === "archive"
-                  ? "Hide this task from the Inbox."
-                  : "Return this task to the Inbox."
+                  ? "Move this task out of active workspace lists."
+                  : "Restore this archived task to workspace lists."
             }
             destructive={archiveAction === "archive"}
             disabled={props.busy || turnRunning}

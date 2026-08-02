@@ -93,6 +93,8 @@ describe("orchestration projector", () => {
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
         deletedAt: null,
         messages: [],
         proposedPlans: [],
@@ -101,6 +103,79 @@ describe("orchestration projector", () => {
         session: null,
       },
     ]);
+  });
+
+  it("projects settled and activity-unsettled events", async () => {
+    const createdAt = "2026-07-31T00:00:00.000Z";
+    const settledAt = "2026-07-31T01:00:00.000Z";
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-settlement",
+          occurredAt: createdAt,
+          commandId: "command-create",
+          payload: {
+            threadId: "thread-settlement",
+            projectId: "project-1",
+            title: "Settlement",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5.4",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+    const afterSettle = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.settled",
+          aggregateKind: "thread",
+          aggregateId: "thread-settlement",
+          occurredAt: settledAt,
+          commandId: "command-settle",
+          payload: {
+            threadId: "thread-settlement",
+            settledAt,
+            updatedAt: settledAt,
+          },
+        }),
+      ),
+    );
+    expect(afterSettle.threads[0]?.settledOverride).toBe("settled");
+    expect(afterSettle.threads[0]?.settledAt).toBe(settledAt);
+
+    const afterActivity = await Effect.runPromise(
+      projectEvent(
+        afterSettle,
+        makeEvent({
+          sequence: 3,
+          type: "thread.unsettled",
+          aggregateKind: "thread",
+          aggregateId: "thread-settlement",
+          occurredAt: "2026-07-31T02:00:00.000Z",
+          commandId: "command-activity",
+          payload: {
+            threadId: "thread-settlement",
+            reason: "activity",
+            updatedAt: "2026-07-31T02:00:00.000Z",
+          },
+        }),
+      ),
+    );
+    expect(afterActivity.threads[0]?.settledOverride).toBeNull();
+    expect(afterActivity.threads[0]?.settledAt).toBeNull();
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {

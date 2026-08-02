@@ -125,6 +125,8 @@ function makeThreadShellSnapshot(params: {
         createdAt: "2026-04-13T00:00:00.000Z",
         updatedAt: "2026-04-13T00:00:00.000Z",
         archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
         session: params.sessionStatus
           ? {
               threadId: params.threadId,
@@ -172,7 +174,7 @@ describe("retainThreadDetailSubscription", () => {
             label: "Remote env",
             platform: { os: "darwin", arch: "arm64" },
             serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
+            capabilities: { repositoryIdentity: true, threadSettlement: false },
           },
         })),
       },
@@ -562,7 +564,7 @@ describe("retainThreadDetailSubscription", () => {
             label: "Remote env",
             platform: { os: "darwin", arch: "arm64" },
             serverVersion: "0.0.0-test",
-            capabilities: { repositoryIdentity: true },
+            capabilities: { repositoryIdentity: true, threadSettlement: false },
           },
         })),
       },

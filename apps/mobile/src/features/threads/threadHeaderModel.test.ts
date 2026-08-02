@@ -109,6 +109,70 @@ describe("buildThreadHeaderModel", () => {
       moreActions: ["rename", "unarchive", "details"],
     });
   });
+
+  it("presents settle and unsettle independently from archive", () => {
+    const active = buildThreadHeaderModel({
+      thread: thread(),
+      project: { name: "Ryco" },
+      worktree: null,
+      nodeLabel: "Studio",
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+      settlement: {
+        attentionState: "active",
+        canSettle: true,
+        settlementBlocker: null,
+        mutationEnabled: true,
+        mutationBlocker: null,
+      },
+    });
+    expect(active.settlementAction).toEqual({
+      kind: "settle",
+      label: "Settle task",
+      detail: "Mark this task handled without archiving it.",
+      disabled: false,
+    });
+
+    const settled = buildThreadHeaderModel({
+      thread: thread(),
+      project: { name: "Ryco" },
+      worktree: null,
+      nodeLabel: "Studio",
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+      settlement: {
+        attentionState: "settled",
+        canSettle: true,
+        settlementBlocker: null,
+        mutationEnabled: true,
+        mutationBlocker: null,
+      },
+    });
+    expect(settled.settlementAction?.kind).toBe("unsettle");
+  });
+
+  it("explains why a supported active task cannot settle", () => {
+    const model = buildThreadHeaderModel({
+      thread: thread(),
+      project: { name: "Ryco" },
+      worktree: null,
+      nodeLabel: "Studio",
+      hasPendingApproval: true,
+      hasPendingUserInput: false,
+      settlement: {
+        attentionState: "active",
+        canSettle: false,
+        settlementBlocker: "pending-approval",
+        mutationEnabled: true,
+        mutationBlocker: null,
+      },
+    });
+    expect(model.settlementAction).toMatchObject({
+      kind: "settle",
+      disabled: true,
+      detail: "Resolve the pending approval first.",
+    });
+  });
 });
 
 describe("findThreadWorktree", () => {

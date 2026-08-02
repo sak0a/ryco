@@ -55,6 +55,7 @@ import Migration0038 from "./Migrations/038_WorktreeWorkItems.ts";
 import Migration0039 from "./Migrations/039_WorktreeWorkItemStateNames.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadsProjectUpdatedAtIndex.ts";
 import Migration0041 from "./Migrations/041_ProjectionThreadsSubagentNesting.ts";
+import Migration0042 from "./Migrations/042_ProjectionThreadsSettled.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -108,6 +109,7 @@ export const migrationEntries = [
   [39, "WorktreeWorkItemStateNames", Migration0039],
   [40, "ProjectionThreadsProjectUpdatedAtIndex", Migration0040],
   [41, "ProjectionThreadsSubagentNesting", Migration0041],
+  [42, "ProjectionThreadsSettled", Migration0042],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -271,6 +273,34 @@ export const repairProjectionThreadSubagentNestingColumns = Effect.fn(
   }
 });
 
+export const repairProjectionThreadSettlementColumns = Effect.fn(
+  "repairProjectionThreadSettlementColumns",
+)(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const projectionThreadTables = yield* sql<{ readonly name: string }>`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name = 'projection_threads'
+  `;
+  if (projectionThreadTables.length === 0) {
+    return;
+  }
+
+  const columns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_threads)
+  `;
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  if (!columnNames.has("settled_override")) {
+    yield* sql`ALTER TABLE projection_threads ADD COLUMN settled_override TEXT`;
+    yield* Effect.log("Repaired projection_threads.settled_override column");
+  }
+
+  if (!columnNames.has("settled_at")) {
+    yield* sql`ALTER TABLE projection_threads ADD COLUMN settled_at TEXT`;
+    yield* Effect.log("Repaired projection_threads.settled_at column");
+  }
+});
+
 /**
  * Run all pending migrations.
  *
@@ -301,6 +331,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   }
   if (toMigrationInclusive === undefined || toMigrationInclusive >= 41) {
     yield* repairProjectionThreadSubagentNestingColumns();
+  }
+  if (toMigrationInclusive === undefined || toMigrationInclusive >= 42) {
+    yield* repairProjectionThreadSettlementColumns();
   }
   yield* Effect.log("Migrations ran successfully").pipe(
     Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),

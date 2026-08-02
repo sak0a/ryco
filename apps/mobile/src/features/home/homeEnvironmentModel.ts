@@ -7,6 +7,9 @@ export interface DirectHomeEnvironmentInput {
   readonly label: string;
   readonly connectionState: "connecting" | "connected" | "disconnected" | "error";
   readonly role: "client" | "owner" | null;
+  readonly threadSettlementSupported: boolean;
+  readonly shellCurrent: boolean;
+  readonly apiAvailable: boolean;
 }
 
 export interface HostedHomeEnvironmentInput {
@@ -30,6 +33,9 @@ export interface HostedHomeEnvironmentInput {
     | "delivery-unknown"
     | "closed";
   readonly role: "viewer" | "operator" | "owner" | null;
+  readonly threadSettlementSupported: boolean;
+  readonly shellCurrent: boolean;
+  readonly apiAvailable: boolean;
 }
 
 function directState(input: DirectHomeEnvironmentInput): InboxEnvironment["connectionState"] {
@@ -39,7 +45,7 @@ function directState(input: DirectHomeEnvironmentInput): InboxEnvironment["conne
 }
 
 export function hostedState(
-  input: HostedHomeEnvironmentInput,
+  input: Pick<HostedHomeEnvironmentInput, "transportStatus" | "sessionStatus" | "role">,
 ): InboxEnvironment["connectionState"] {
   if (input.transportStatus === "online" && input.sessionStatus === "ready") {
     return input.role === "viewer" ? "read-only" : "connected";
@@ -68,6 +74,9 @@ export function buildHomeEnvironments(input: {
       environmentId: direct.environmentId,
       label: direct.label,
       connectionState: directState(direct),
+      threadSettlementSupported: direct.threadSettlementSupported,
+      mutationReady: direct.connectionState === "connected" && direct.apiAvailable,
+      shellCurrent: direct.shellCurrent,
     });
   }
   if (input.hosted) {
@@ -75,6 +84,12 @@ export function buildHomeEnvironments(input: {
       environmentId: input.hosted.environmentId,
       label: input.hosted.label,
       connectionState: hostedState(input.hosted),
+      threadSettlementSupported: input.hosted.threadSettlementSupported,
+      mutationReady:
+        hostedState(input.hosted) === "connected" &&
+        input.hosted.role !== "viewer" &&
+        input.hosted.apiAvailable,
+      shellCurrent: input.hosted.shellCurrent,
     });
   }
   return [...environments.values()];

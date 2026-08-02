@@ -1,6 +1,7 @@
 import { useNavigation } from "@react-navigation/native";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useLayoutEffect, useMemo, useReducer, useState } from "react";
+import { getQueuedThreadKeys } from "@ryco/client-runtime/state/message-queue";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
 
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
@@ -13,6 +14,7 @@ import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import { useStore } from "../../state/threadsRuntime";
+import { useMessageQueueStore } from "../../state/messageQueueStore";
 import { buildInboxSections, resolveInboxEmptyState } from "../inbox/inboxModel";
 import { InboxScreen } from "../inbox/InboxScreen";
 import { NodesScreen } from "../nodes/NodesScreen";
@@ -32,6 +34,17 @@ export function HomeScreen() {
   const textColor = useThemeColor("--color-foreground");
   const { projects, worktrees, threads } = useHomeWorkspaceData();
   const environments = useHomeEnvironments();
+  const queuesByThreadKey = useMessageQueueStore((state) => state.queuesByThreadKey);
+  const localQueuedThreadIds = useMemo(
+    () => getQueuedThreadKeys(queuesByThreadKey),
+    [queuesByThreadKey],
+  );
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const currentQuery = home.queryByMode[home.mode];
   const currentNodeScope = home.nodeScopeByMode[home.mode];
@@ -44,11 +57,15 @@ export function HomeScreen() {
         environments,
         query: home.queryByMode.inbox,
         nodeScope: home.nodeScopeByMode.inbox,
+        localQueuedThreadIds,
+        nowMs,
       }),
     [
       environments,
       home.nodeScopeByMode.inbox,
       home.queryByMode.inbox,
+      localQueuedThreadIds,
+      nowMs,
       projects,
       threads,
       worktrees,

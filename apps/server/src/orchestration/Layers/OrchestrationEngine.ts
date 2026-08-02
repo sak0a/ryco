@@ -81,6 +81,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "thread.delete":
     case "thread.archive":
     case "thread.unarchive":
+    case "thread.settle":
+    case "thread.unsettle":
     case "thread.meta.update":
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":

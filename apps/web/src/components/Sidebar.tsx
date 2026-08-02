@@ -88,6 +88,9 @@ import { composeSidebarTree } from "./sidebar/hooks/useSidebarTree";
 import { SidebarProjectsContent, PROJECT_ROOT_DROP_ID } from "./sidebar/SidebarProjectList";
 import { SidebarProjectItem } from "./sidebar/SidebarProjectItem";
 import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrome";
+import { SidebarViewToggle } from "./sidebar/SidebarViewToggle";
+import { SidebarGlobalSearch } from "./sidebar/SidebarGlobalSearch";
+import { SidebarInbox } from "./sidebar/inbox/SidebarInbox";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { derivePhysicalProjectKey, getProjectOrderKey } from "../logicalProject";
@@ -108,6 +111,7 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 } as const;
 type SidebarAutoAnimateControllers = Map<HTMLElement, AnimationController>;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
+const EMPTY_THREAD_KEYS: readonly string[] = [];
 
 function pruneDisconnectedSidebarAutoAnimateControllers(
   controllers: SidebarAutoAnimateControllers,
@@ -206,6 +210,7 @@ export default function Sidebar() {
   const sidebarThreadSortOrder = useSettings((s) => s.sidebarThreadSortOrder);
   const sidebarProjectSortOrder = useSettings((s) => s.sidebarProjectSortOrder);
   const sidebarProjectGroupingMode = useSettings((s) => s.sidebarProjectGroupingMode);
+  const sidebarViewMode = useSettings((s) => s.sidebarViewMode);
   const projectGroupingSettings = useSettings((settings) => ({
     sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
     sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
@@ -429,6 +434,30 @@ export default function Sidebar() {
       });
     },
     [clearSelection, isMobile, navigate, setOpenMobile, setSelectionAnchor],
+  );
+
+  const navigateToDraft = useCallback(
+    (draftId: DraftId) => {
+      if (useThreadSelectionStore.getState().selectedThreadKeys.size > 0) {
+        clearSelection();
+      }
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+      });
+    },
+    [clearSelection, isMobile, navigate, setOpenMobile],
+  );
+
+  const handleSidebarViewModeChange = useCallback(
+    (mode: "workspace" | "inbox") => {
+      clearSelection();
+      updateSettings({ sidebarViewMode: mode });
+    },
+    [clearSelection, updateSettings],
   );
 
   const projectDnDSensors = useSensors(
@@ -728,9 +757,11 @@ export default function Sidebar() {
       shouldAnimateThreadLists,
     );
   }, [shouldAnimateThreadLists]);
+  const interactiveWorkspaceThreadKeys =
+    !isMobile && sidebarViewMode === "inbox" ? EMPTY_THREAD_KEYS : visibleSidebarThreadKeys;
   const threadJumpCommandByKey = useMemo(() => {
     const mapping = new Map<string, NonNullable<ReturnType<typeof threadJumpCommandForIndex>>>();
-    for (const [visibleThreadIndex, threadKey] of visibleSidebarThreadKeys.entries()) {
+    for (const [visibleThreadIndex, threadKey] of interactiveWorkspaceThreadKeys.entries()) {
       const jumpCommand = threadJumpCommandForIndex(visibleThreadIndex);
       if (!jumpCommand) {
         return mapping;
@@ -739,7 +770,7 @@ export default function Sidebar() {
     }
 
     return mapping;
-  }, [visibleSidebarThreadKeys]);
+  }, [interactiveWorkspaceThreadKeys]);
   const threadJumpThreadKeys = useMemo(
     () => [...threadJumpCommandByKey.keys()],
     [threadJumpCommandByKey],
@@ -776,10 +807,10 @@ export default function Sidebar() {
   const visibleThreadJumpLabelByKey = showThreadJumpHints
     ? threadJumpLabelByKey
     : EMPTY_THREAD_JUMP_LABELS;
-  const orderedSidebarThreadKeys = visibleSidebarThreadKeys;
+  const orderedSidebarThreadKeys = interactiveWorkspaceThreadKeys;
   const prewarmedSidebarThreadKeys = useMemo(
-    () => getSidebarThreadIdsToPrewarm(visibleSidebarThreadKeys),
-    [visibleSidebarThreadKeys],
+    () => getSidebarThreadIdsToPrewarm(interactiveWorkspaceThreadKeys),
+    [interactiveWorkspaceThreadKeys],
   );
   const prewarmedSidebarThreadRefs = useMemo(
     () =>
@@ -1046,51 +1077,64 @@ export default function Sidebar() {
     <>
       <SidebarChromeHeader isElectron={isElectron} />
 
-      <SidebarProjectsContent
-        showArm64IntelBuildWarning={showArm64IntelBuildWarning}
-        arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
-        desktopUpdateButtonAction={desktopUpdateButtonAction}
-        desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
-        handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
-        projectSortOrder={sidebarProjectSortOrder}
-        threadSortOrder={sidebarThreadSortOrder}
-        projectGroupingMode={sidebarProjectGroupingMode}
-        updateSettings={updateSettings}
-        openAddProject={openAddProjectCommandPalette}
-        isManualProjectSorting={isManualProjectSorting}
-        projectDnDSensors={projectDnDSensors}
-        projectCollisionDetection={projectCollisionDetection}
-        handleProjectDragStart={handleProjectDragStart}
-        handleProjectDragEnd={handleProjectDragEnd}
-        handleProjectDragCancel={handleProjectDragCancel}
-        projectTreeRows={projectTreeRows}
-        commandPaletteShortcutLabel={commandPaletteShortcutLabel}
-        attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-        projectsLength={projects.length}
-        renderProjectRow={(project, dragHandleProps, onNewFolderWithProject) => (
-          <SidebarProjectItem
-            project={project}
-            isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-            activeRouteThreadKey={
-              activeRouteProjectKey === project.projectKey ? activeRouteThreadKey : null
-            }
-            newThreadShortcutLabel={newThreadShortcutLabel}
-            handleNewThread={handleNewThread}
-            archiveThread={archiveThread}
-            deleteThread={deleteThread}
-            threadJumpLabelByKey={visibleThreadJumpLabelByKey}
-            attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-            expandThreadListForProject={expandThreadListForProject}
-            collapseThreadListForProject={collapseThreadListForProject}
-            onNewFolderWithProject={onNewFolderWithProject}
-            dragInProgressRef={dragInProgressRef}
-            suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-            suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-            isManualProjectSorting={isManualProjectSorting}
-            dragHandleProps={dragHandleProps}
-          />
-        )}
-      />
+      <SidebarGlobalSearch shortcutLabel={commandPaletteShortcutLabel} />
+
+      {!isMobile ? (
+        <SidebarViewToggle value={sidebarViewMode} onChange={handleSidebarViewModeChange} />
+      ) : null}
+
+      {isMobile || sidebarViewMode === "workspace" ? (
+        <SidebarProjectsContent
+          showArm64IntelBuildWarning={showArm64IntelBuildWarning}
+          arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
+          desktopUpdateButtonAction={desktopUpdateButtonAction}
+          desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
+          handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
+          projectSortOrder={sidebarProjectSortOrder}
+          threadSortOrder={sidebarThreadSortOrder}
+          projectGroupingMode={sidebarProjectGroupingMode}
+          updateSettings={updateSettings}
+          openAddProject={openAddProjectCommandPalette}
+          isManualProjectSorting={isManualProjectSorting}
+          projectDnDSensors={projectDnDSensors}
+          projectCollisionDetection={projectCollisionDetection}
+          handleProjectDragStart={handleProjectDragStart}
+          handleProjectDragEnd={handleProjectDragEnd}
+          handleProjectDragCancel={handleProjectDragCancel}
+          projectTreeRows={projectTreeRows}
+          attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
+          projectsLength={projects.length}
+          renderProjectRow={(project, dragHandleProps, onNewFolderWithProject) => (
+            <SidebarProjectItem
+              project={project}
+              isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
+              activeRouteThreadKey={
+                activeRouteProjectKey === project.projectKey ? activeRouteThreadKey : null
+              }
+              newThreadShortcutLabel={newThreadShortcutLabel}
+              handleNewThread={handleNewThread}
+              archiveThread={archiveThread}
+              deleteThread={deleteThread}
+              threadJumpLabelByKey={visibleThreadJumpLabelByKey}
+              attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+              expandThreadListForProject={expandThreadListForProject}
+              collapseThreadListForProject={collapseThreadListForProject}
+              onNewFolderWithProject={onNewFolderWithProject}
+              dragInProgressRef={dragInProgressRef}
+              suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+              suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+              isManualProjectSorting={isManualProjectSorting}
+              dragHandleProps={dragHandleProps}
+            />
+          )}
+        />
+      ) : (
+        <SidebarInbox
+          currentThreadKey={activeRouteThreadKey}
+          onNavigateDraft={navigateToDraft}
+          onNavigateThread={(entry) => navigateToThread(entry.ref)}
+        />
+      )}
 
       <SidebarSeparator />
       <SidebarChromeFooter />

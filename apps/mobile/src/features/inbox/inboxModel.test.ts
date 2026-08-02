@@ -11,6 +11,18 @@ import { buildInboxSections, resolveInboxEmptyState } from "./inboxModel";
 
 const NODE_A = "node-a" as EnvironmentId;
 const NODE_B = "node-b" as EnvironmentId;
+const NOW_MS = Date.parse("2026-07-26T12:00:00.000Z");
+
+function environment(environmentId: EnvironmentId, label: string) {
+  return {
+    environmentId,
+    label,
+    connectionState: "connected" as const,
+    threadSettlementSupported: true,
+    mutationReady: true,
+    shellCurrent: true,
+  };
+}
 
 function project(environmentId: EnvironmentId, id: string, name: string): Project {
   return {
@@ -72,6 +84,8 @@ function thread(
     session: null,
     createdAt: "2026-07-26T08:00:00.000Z",
     archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
     updatedAt: "2026-07-26T08:00:00.000Z",
     latestTurn: null,
     branch: null,
@@ -86,15 +100,12 @@ function thread(
 }
 
 describe("Inbox model", () => {
-  it("prioritizes input, delivery uncertainty, and running work above recent tasks", () => {
+  it("keeps idle work and attention blockers together in the Active queue", () => {
     const projects = [project(NODE_A, "project-a", "Ryco"), project(NODE_B, "project-b", "Hub")];
     const sections = buildInboxSections({
       projects,
       worktrees: [],
-      environments: [
-        { environmentId: NODE_A, label: "Mac Studio", connectionState: "connected" },
-        { environmentId: NODE_B, label: "Build node", connectionState: "connected" },
-      ],
+      environments: [environment(NODE_A, "Mac Studio"), environment(NODE_B, "Build node")],
       threads: [
         thread(NODE_A, "idle", "project-a", {
           updatedAt: "2026-07-26T09:00:00.000Z",
@@ -108,22 +119,23 @@ describe("Inbox model", () => {
         thread(NODE_B, "uncertain", "project-b"),
       ],
       deliveryUnknownThreadIds: new Set(["node-b:uncertain"]),
+      nowMs: NOW_MS,
     });
 
-    expect(sections.map((section) => section.title)).toEqual(["Active now", "Recent"]);
+    expect(sections.map((section) => section.title)).toEqual(["Active"]);
     expect(sections[0]?.rows.map((row) => row.threadId)).toEqual([
+      "idle",
+      "working",
       "approval",
       "uncertain",
-      "working",
     ]);
-    expect(sections[1]?.rows.map((row) => row.threadId)).toEqual(["idle"]);
   });
 
   it("builds the complete node, project, and worktree context and filters it", () => {
     const sections = buildInboxSections({
       projects: [project(NODE_A, "project-a", "Ryco")],
       worktrees: [worktree(NODE_A, "tree-a", "project-a", "feat/mobile")],
-      environments: [{ environmentId: NODE_A, label: "Mac Studio", connectionState: "connected" }],
+      environments: [environment(NODE_A, "Mac Studio")],
       threads: [
         thread(NODE_A, "thread-a", "project-a", {
           title: "Polish inbox",
@@ -131,6 +143,7 @@ describe("Inbox model", () => {
         } as never),
       ],
       query: "feat/mobile",
+      nowMs: NOW_MS,
     });
 
     expect(sections[0]?.rows[0]?.contextLabel).toBe("Mac Studio · Ryco · feat/mobile");
@@ -140,16 +153,14 @@ describe("Inbox model", () => {
     const sections = buildInboxSections({
       projects: [project(NODE_A, "a", "A"), project(NODE_B, "b", "B")],
       worktrees: [],
-      environments: [
-        { environmentId: NODE_A, label: "A", connectionState: "connected" },
-        { environmentId: NODE_B, label: "B", connectionState: "connected" },
-      ],
+      environments: [environment(NODE_A, "A"), environment(NODE_B, "B")],
       threads: [
         thread(NODE_A, "visible", "a"),
         thread(NODE_B, "other", "b"),
         thread(NODE_A, "archived", "a", { archivedAt: "2026-07-26T09:00:00.000Z" }),
       ],
       nodeScope: NODE_A,
+      nowMs: NOW_MS,
     });
 
     expect(sections.flatMap((section) => section.rows).map((row) => row.threadId)).toEqual([
@@ -206,7 +217,8 @@ describe("inbox change-request badge", () => {
       projects: [project(NODE_A, "project-a", "Ryco")],
       worktrees: [tree],
       threads: [thread(NODE_A, "thread-a", "project-a", { worktreeId: "tree-a" })],
-      environments: [{ environmentId: NODE_A, label: "Studio", connectionState: "connected" }],
+      environments: [environment(NODE_A, "Studio")],
+      nowMs: NOW_MS,
     });
     const row = sections.flatMap((section) => section.rows)[0];
     expect(row?.changeRequest?.label).toBe("#42");
@@ -218,8 +230,62 @@ describe("inbox change-request badge", () => {
       projects: [project(NODE_A, "project-a", "Ryco")],
       worktrees: [worktree(NODE_A, "tree-a", "project-a", "feat/mobile")],
       threads: [thread(NODE_A, "thread-a", "project-a", { worktreeId: "tree-a" })],
-      environments: [{ environmentId: NODE_A, label: "Studio", connectionState: "connected" }],
+      environments: [environment(NODE_A, "Studio")],
+      nowMs: NOW_MS,
     });
     expect(sections.flatMap((section) => section.rows)[0]?.changeRequest).toBeNull();
+  });
+
+  it("partitions manual and merged-PR work into Settled", () => {
+    const merged = {
+      ...worktree(NODE_A, "tree-a", "project-a", "feat/mobile"),
+      prNumber: 42,
+      prState: "merged" as const,
+      updatedAt: "2026-07-26T10:00:00.000Z",
+    };
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [merged],
+      threads: [
+        thread(NODE_A, "manual", "project-a", {
+          settledOverride: "settled",
+          settledAt: "2026-07-26T11:00:00.000Z",
+        }),
+        thread(NODE_A, "merged", "project-a", { worktreeId: "tree-a" } as never),
+        thread(NODE_A, "kept-active", "project-a", {
+          worktreeId: "tree-a",
+          settledOverride: "active",
+        } as never),
+      ],
+      environments: [environment(NODE_A, "Studio")],
+      nowMs: NOW_MS,
+    });
+
+    expect(sections.map((section) => section.title)).toEqual(["Active", "Settled"]);
+    expect(sections[0]?.rows.map((row) => row.threadId)).toEqual(["kept-active"]);
+    expect(sections[1]?.rows.map((row) => row.threadId)).toEqual(["manual", "merged"]);
+  });
+
+  it("keeps persisted outbox work active and non-settleable", () => {
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco")],
+      worktrees: [],
+      threads: [
+        thread(NODE_A, "queued", "project-a", {
+          settledOverride: "settled",
+          settledAt: "2026-07-26T11:00:00.000Z",
+        }),
+      ],
+      environments: [environment(NODE_A, "Studio")],
+      localQueuedThreadIds: new Set(["node-a:queued"]),
+      nowMs: NOW_MS,
+    });
+
+    expect(sections[0]?.key).toBe("active");
+    expect(sections[0]?.rows[0]).toMatchObject({
+      threadId: "queued",
+      canSettle: false,
+      settlementBlocker: "local-queue",
+    });
   });
 });

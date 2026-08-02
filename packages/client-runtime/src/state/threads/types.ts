@@ -18,6 +18,7 @@ import type {
   RuntimeMode,
   AgentTokenMode,
   StatusBucket,
+  ThreadSettlementOverride,
   WorktreeId,
   WorktreeOrigin,
 } from "@ryco/contracts";
@@ -118,6 +119,10 @@ export interface Thread {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  /** Absent only for an object retained from a pre-settlement client snapshot. */
+  settledOverride?: ThreadSettlementOverride | null | undefined;
+  /** Absent only for an object retained from a pre-settlement client snapshot. */
+  settledAt?: string | null | undefined;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
@@ -143,6 +148,10 @@ export interface ThreadShell {
   error: string | null;
   createdAt: string;
   archivedAt: string | null;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledOverride?: ThreadSettlementOverride | null | undefined;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledAt?: string | null | undefined;
   updatedAt?: string | undefined;
   branch: string | null;
   worktreePath: string | null;
@@ -161,11 +170,19 @@ export interface SidebarThreadSummary {
   environmentId: EnvironmentId;
   projectId: ProjectId;
   title: string;
+  /** Optional at the runtime boundary for retained pre-rich-row summaries. */
+  modelSelection?: ModelSelection | undefined;
   interactionMode: ProviderInteractionMode;
   tokenMode?: AgentTokenMode;
   session: ThreadSession | null;
+  /** Sanitized provider/session failure shown by summary-only surfaces. */
+  error?: string | null | undefined;
   createdAt: string;
   archivedAt: string | null;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledOverride?: ThreadSettlementOverride | null | undefined;
+  /** Optional at the runtime boundary for mixed-version shell snapshots. */
+  settledAt?: string | null | undefined;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   branch: string | null;

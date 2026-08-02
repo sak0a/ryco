@@ -70,7 +70,7 @@ function createBaseServerConfig(): ServerConfig {
       label: "Local environment",
       platform: { os: "darwin" as const, arch: "arm64" as const },
       serverVersion: "0.0.0-test",
-      capabilities: { repositoryIdentity: true },
+      capabilities: { repositoryIdentity: true, threadSettlement: false },
     },
     auth: {
       policy: "loopback-browser",
@@ -181,6 +181,8 @@ function createMinimalSnapshot(): OrchestrationReadModel {
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
         archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
         deletedAt: null,
         messages: [
           {
@@ -237,6 +239,8 @@ function toShellSnapshot(snapshot: OrchestrationReadModel) {
       createdAt: thread.createdAt,
       updatedAt: thread.updatedAt,
       archivedAt: thread.archivedAt,
+      settledOverride: thread.settledOverride,
+      settledAt: thread.settledAt,
       session: thread.session,
       latestUserMessageAt:
         thread.messages.findLast((message) => message.role === "user")?.createdAt ?? null,
@@ -258,7 +262,7 @@ function buildFixture(): TestFixture {
         label: "Local environment",
         platform: { os: "darwin" as const, arch: "arm64" as const },
         serverVersion: "0.0.0-test",
-        capabilities: { repositoryIdentity: true },
+        capabilities: { repositoryIdentity: true, threadSettlement: false },
       },
       cwd: "/repo/project",
       projectName: "Project",

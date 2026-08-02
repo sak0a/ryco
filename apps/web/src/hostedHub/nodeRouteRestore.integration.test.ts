@@ -110,7 +110,7 @@ function makeClient(): CapturedClient & Record<string, unknown> {
           label: "Unrelated saved environment",
           platform: { os: "linux", arch: "x64" },
           serverVersion: "0.9.0",
-          capabilities: { repositoryIdentity: false },
+          capabilities: { repositoryIdentity: false, threadSettlement: false },
         },
       })),
     },

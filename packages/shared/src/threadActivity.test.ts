@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { EventId } from "@ryco/contracts";
 import {
   capThreadActivitiesPreservingMilestones,
+  derivePendingThreadRequestState,
   isContextCompactionActivity,
 } from "./threadActivity.ts";
 
@@ -35,5 +36,54 @@ describe("threadActivity", () => {
       "recent-tool-1",
       "recent-tool-2",
     ]);
+  });
+
+  it("derives pending approval and user-input request state in activity order", () => {
+    const requestActivity = (
+      id: string,
+      kind: string,
+      requestId: string,
+      createdAt: string,
+      detail?: string,
+    ) => ({
+      id: EventId.make(id),
+      kind,
+      createdAt,
+      payload: {
+        requestId,
+        ...(detail ? { detail } : {}),
+      },
+    });
+
+    expect(
+      derivePendingThreadRequestState([
+        requestActivity(
+          "approval-open",
+          "approval.requested",
+          "approval-1",
+          "2026-01-01T00:00:00Z",
+        ),
+        requestActivity("input-open", "user-input.requested", "input-1", "2026-01-01T00:00:01Z"),
+        requestActivity(
+          "approval-stale",
+          "provider.approval.respond.failed",
+          "approval-1",
+          "2026-01-01T00:00:02Z",
+          "Unknown pending approval request",
+        ),
+        requestActivity("input-resolved", "user-input.resolved", "input-1", "2026-01-01T00:00:03Z"),
+        requestActivity(
+          "approval-open-2",
+          "approval.requested",
+          "approval-2",
+          "2026-01-01T00:00:04Z",
+        ),
+      ]),
+    ).toEqual({
+      pendingApprovalCount: 1,
+      pendingUserInputCount: 0,
+      hasPendingApprovals: true,
+      hasPendingUserInput: false,
+    });
   });
 });

@@ -972,6 +972,39 @@ found by the full backstop. Do not accumulate unfinished production code here.
 - mixed-version update-server behavior;
 - Snooze/inactivity as not yet included.
 
+## Rich row refinement
+
+This follow-up implements the approved supplement in
+`docs/superpowers/specs/2026-07-31-sidebar-inbox-rich-rows-design.md`.
+
+### Task 8.1: Project model and error context into Inbox summaries
+
+- Add optional mixed-version-safe `modelSelection` and `error` fields to `SidebarThreadSummary`.
+- Populate them from the existing thread shell payload and include them in equality checks.
+- Add client-runtime projection coverage.
+
+### Task 8.2: Resolve environment-scoped provider presentation
+
+- Build provider-instance lookup maps from the primary server configuration and each saved
+  environment runtime configuration.
+- Prefer friendly model labels from provider snapshots; fall back to the stored model slug and
+  session driver.
+- Keep the row component independent from connection stores by passing resolved metadata as props.
+
+### Task 8.3: Implement active cards, settled rows, and hover detail cards
+
+- Replace the uniform row with a compact three-line active card and a one-line settled row.
+- Render project favicons, worktree/branch context, PR state, remote-environment marker, provider
+  icon, status, and relative time in stable slots.
+- Add a short-delay right-side tooltip containing the full context and failure/blocker state.
+- Preserve separate keyboard-reachable lifecycle actions and the context menu.
+
+### Task 8.4: Verify the refinement
+
+- Extend runtime and browser component tests.
+- Repeat live browser QA for hover placement, keyboard focus, filtering, and settle/unsettle.
+- Rerun the complete repository and browser backstops.
+
 ## Full repository backstop
 
 Run from the repository root:
