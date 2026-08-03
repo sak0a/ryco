@@ -156,4 +156,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 
 ## License
 
-[MIT](./LICENSE) © Ryco Inc.
+Ryco's original code and modifications are licensed under the [MIT License](./LICENSE)
+© Ryco Inc. Portions derived from third-party projects remain covered by their
+respective notices, including [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md)
+and package-level license files.
