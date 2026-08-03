@@ -39,6 +39,7 @@ export {
   createMobileDpopSigner,
   resetMobileDpopSignerForTests,
 } from "./dpopSigner";
+export { assertE2eeRuntimeGlobals, type E2eeRuntimeHost } from "./e2eeRuntime";
 export {
   clearMobileHostedSessionToken,
   createMobileSessionCredentials,
