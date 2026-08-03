@@ -52,7 +52,7 @@ const LEVEL_TINT_CLASSES: Record<LevelKey, string> = {
     "bg-gradient-to-br from-pink-500/20 to-purple-500/25 text-fuchsia-700 ring-1 ring-fuchsia-500/25 dark:text-fuchsia-300",
 };
 
-function normalizeLevel(value: string | undefined): LevelKey {
+function getKnownLevel(value: string | undefined): LevelKey | undefined {
   if (
     value === "none" ||
     value === "minimal" ||
@@ -67,7 +67,7 @@ function normalizeLevel(value: string | undefined): LevelKey {
   ) {
     return value;
   }
-  return "medium";
+  return undefined;
 }
 
 export interface ReasoningChipProps {
@@ -89,9 +89,15 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
     : typeof props.descriptor.currentValue === "string"
       ? props.descriptor.currentValue
       : undefined;
-  const level = normalizeLevel(effectiveValue);
+  const level = effectiveValue === undefined ? "medium" : getKnownLevel(effectiveValue);
   const isUltra = level === "ultra" || level === "ultrathink";
-  const abbreviation = LEVEL_ABBREVIATION[level];
+  const displayLabel =
+    level === undefined
+      ? (props.descriptor.options.find((option) => option.id === effectiveValue)?.label ??
+        effectiveValue ??
+        LEVEL_ABBREVIATION.medium)
+      : LEVEL_ABBREVIATION[level];
+  const tintClasses = level === undefined ? SLATE_TINT : LEVEL_TINT_CLASSES[level];
 
   return (
     <Menu>
@@ -101,9 +107,9 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
             size="xs"
             disabled={props.disabled ?? false}
             variant="ghost"
-            aria-label={`Reasoning: ${abbreviation}`}
-            title={`Reasoning: ${abbreviation}`}
-            className={cn("gap-1 rounded-md px-1.5 font-medium", LEVEL_TINT_CLASSES[level])}
+            aria-label={`Reasoning: ${displayLabel}`}
+            title={`Reasoning: ${displayLabel}`}
+            className={cn("gap-1 rounded-md px-1.5 font-medium", tintClasses)}
           />
         }
       >
@@ -113,7 +119,7 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
             <span>Ultra</span>
           </>
         ) : (
-          <span>{abbreviation}</span>
+          <span>{displayLabel}</span>
         )}
       </MenuTrigger>
       <MenuPopup align="start">
