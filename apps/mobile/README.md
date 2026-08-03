@@ -233,7 +233,23 @@ downgrade if it is only documented:
 - **Reconciliation runs from the classifier's own entry point.** §13.1 requires
   the marker to be reconciled against the pin set "before it evaluates any
   classification on that Hub origin", including for an install whose pins predate
-  the marker, so `classify` does it rather than leaving it to a call site.
+  the marker, so `classify` does it rather than leaving it to a call site — and it
+  is the only classification the store exposes. A synchronous snapshot accessor
+  beside it skipped the reconciliation, and on the install §13.1's migration names
+  it answered legacy-eligible branch (a) where `classify` answers `unexpected`.
+- **The writer cannot produce a document the reader refuses.** `parseDocument`
+  fails the whole document on one out-of-bounds field, which would take every pin,
+  latch, consent and marker on the device to `unobtainable` permanently — and
+  `accountId` and `nodeId` are Hub-issued (§12.1.1). Every write boundary bounds
+  its own inputs against the reader's bound, an unbounded node id is dropped rather
+  than refused because §13.1 makes it an untrusted hint, and `commit` re-parses what
+  it is about to write as the backstop for a boundary anyone adds later.
+- **A scoped forget never widens into a whole-namespace wipe.** Forgetting one node
+  or leaving one Hub origin refuses over a document that will not parse, rather
+  than removing it: the wipe clears `anyNodeVerified` for origins the owner never
+  named, and §13.1 clears that marker only by "the explicit owner action that
+  removes the last verified pin under that `hubOrigin`". Destroying an unreadable
+  document is its own owner action.
 
 Hydration slots into the ordered bootstrap in `src/hostedHub/runtime.ts`, before
 the call that installs the relay socket factory. Cleanup is registered by hand in
@@ -245,8 +261,12 @@ forgot. Both registrations have their own tests, since nothing else would catch
 one going missing.
 
 Not in this slice: the §4.4 mode machine that consults the classification, the
-§13.2 pairing screen that mints the owner decision, and the §13.1.1 security-UI
-surface for a device holding no verified pin on a connected Hub origin.
+§13.2 pairing screen that mints the owner decision, the §13.2.1 surface that
+presents the situation and takes one of its two resolutions, and the §13.1.1
+security-UI surface for a device holding no verified pin on a connected Hub
+origin. The last of those is where `destroyUnreadableTrustState` belongs: until it
+has a screen, a device whose document will not parse stays `unobtainable` — every
+classification UNEXPECTED — and the Hub-domain change refuses rather than wiping.
 
 ## Relay E2EE key custody (owner, on a physical device)
 

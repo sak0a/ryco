@@ -187,6 +187,17 @@ type E2eeTrustSnapshotBody =
       readonly kind: "pinned-unlatched";
       readonly record: E2eeResolvedRecordState;
       readonly consent: E2eeLegacyConsent;
+      /**
+       * What the pair and the Hub origin hold, evaluated exactly as for an
+       * unresolved selection. A resolution does not make the rest of the device's
+       * state irrelevant: §5.2 requires a first-contact statement "arriving under
+       * a `(hubOrigin, accountId)` pair that already holds a verified pin" to be
+       * presented as a possible node substitution whether or not the selection
+       * resolved — §13.2.1 says that copy "will fire on every genuine additional
+       * node", which is precisely a selection that resolves to its own pairing
+       * record — and §13.2.1 situation 3 is defined from this state alone.
+       */
+      readonly scope: E2eeUnresolvedScope;
     }
   | { readonly kind: "none"; readonly scope: E2eeUnresolvedScope }
   | { readonly kind: "unobtainable" };
@@ -267,13 +278,18 @@ function unresolvedScope(
   return { kind: "fresh" };
 }
 
-function snapshotForRecord(record: E2eeTrustRecord): E2eeTrustSnapshot {
+function snapshotForRecord(
+  record: E2eeTrustRecord,
+  scope: E2eeUnresolvedScope,
+  consent: E2eeLegacyConsent,
+): E2eeTrustSnapshot {
   if (isE2eeVerifiedPinRecord(record) && record.latch.kind === "set")
     return seal({ kind: "latched" });
   return seal({
     kind: "pinned-unlatched",
     record: record.state === "none" ? "unpinned" : record.state,
-    consent: record.legacyConsent,
+    consent,
+    scope,
   });
 }
 
@@ -290,23 +306,44 @@ export function snapshotE2eeSelection(
   selection: E2eeTrustSelection,
 ): E2eeTrustSnapshot {
   if (loaded === null) return seal({ kind: "unobtainable" });
+  const scope = unresolvedScope(loaded, selection.hubOrigin, selection.accountId);
   const record = resolveE2eeTrustRecord(loaded, selection);
-  if (record !== null) return snapshotForRecord(record);
-  return seal({
-    kind: "none",
-    scope: unresolvedScope(loaded, selection.hubOrigin, selection.accountId),
-  });
+  if (record === null) return seal({ kind: "none", scope });
+  // §11.2: "No Hub-supplied value may move a selection _into_ the legacy-eligible
+  // class: not the `nodeId`, which the Hub re-mints at will." §12.1.1's safety
+  // argument for an untrusted hint covers a resolution to a PIN — a wrong pin
+  // produces a statement that cannot authenticate to it, which is §13.3 fatal —
+  // and a recorded consent needs no statement at all: with the carrier withheld it
+  // releases at `T_ADV` on row K13. So a hint resolves onto the pin, and carries
+  // the owner's per-selection consent only where the device's own state already
+  // reaches the legacy-eligible class without it. A handle is client-anchored and
+  // carries it unconditionally: it is the selection the owner chose.
+  const consent: E2eeLegacyConsent =
+    selection.kind === "handle" || scope.kind === "fresh"
+      ? record.legacyConsent
+      : { kind: "absent" };
+  return snapshotForRecord(record, scope, consent);
 }
 
-/** The late-resolution counterpart of `snapshotE2eeSelection` (§12.1.1). */
+/**
+ * The late-resolution counterpart of `snapshotE2eeSelection` (§12.1.1).
+ *
+ * The continuity id is Hub-carried too, but it needs no consent suppression here:
+ * §12.1.1 admits this resolution only as one that "can only **tighten** the
+ * classification …, never move a channel into the legacy-eligible class", and
+ * `tightenE2eeTrustClassification` is where that bound is applied. Suppressing the
+ * consent as well would let a statement the Hub chose to deliver take a channel
+ * AWAY from the class the owner's own consent put it in.
+ */
 export function snapshotE2eeContinuityIdResolution(
   loaded: E2eeLoadedTrustState | null,
   input: { readonly hubOrigin: string; readonly accountId: string; readonly continuityId: string },
 ): E2eeTrustSnapshot {
   if (loaded === null) return seal({ kind: "unobtainable" });
+  const scope = unresolvedScope(loaded, input.hubOrigin, input.accountId);
   const record = resolveE2eeTrustRecordByContinuityId(loaded, input);
-  if (record !== null) return snapshotForRecord(record);
-  return seal({ kind: "none", scope: unresolvedScope(loaded, input.hubOrigin, input.accountId) });
+  if (record === null) return seal({ kind: "none", scope });
+  return snapshotForRecord(record, scope, record.legacyConsent);
 }
 
 export type E2eeTrustClass = "latched" | "legacy-eligible" | "unexpected";
@@ -320,12 +357,19 @@ export type E2eeTrustClass = "latched" | "legacy-eligible" | "unexpected";
  * requires a client that has lost its durable state to reach the class only under
  * (a). The clause is carried because §13.2.1 presents its three situations
  * differently and "conflating them re-creates exactly the click-through training
- * §13.3 opens by forbidding".
+ * §13.3 opens by forbidding". Clause (i) carries the scope for the same reason:
+ * clauses (ii) and (iii) ARE their scope, and a resolved selection would otherwise
+ * be the one case whose surface could not tell the three apart.
  */
 export type E2eeTrustClassification =
   | { readonly class: "latched" }
   | { readonly class: "legacy-eligible"; readonly branch: "a" | "b" }
-  | { readonly class: "unexpected"; readonly clause: "i"; readonly record: E2eeResolvedRecordState }
+  | {
+      readonly class: "unexpected";
+      readonly clause: "i";
+      readonly record: E2eeResolvedRecordState;
+      readonly scope: E2eeUnresolvedScope;
+    }
   | { readonly class: "unexpected"; readonly clause: "ii" | "iii" | "unobtainable" };
 
 /**
@@ -357,7 +401,7 @@ export function classifyE2eeTrustSnapshot(snapshot: E2eeTrustSnapshot): E2eeTrus
       // consented to; branch (a) cannot apply here, because a record did resolve.
       return snapshot.consent.kind === "recorded"
         ? { class: "legacy-eligible", branch: "b" }
-        : { class: "unexpected", clause: "i", record: snapshot.record };
+        : { class: "unexpected", clause: "i", record: snapshot.record, scope: snapshot.scope };
     case "none":
       return classifyUnresolved(snapshot.scope);
     case "unobtainable":
@@ -401,32 +445,56 @@ export type E2eeUnexpectedNodeEvidence =
 export type E2eeUnexpectedNodeSituation = 1 | 2 | 3;
 
 /**
+ * What the pair and the origin hold, for every unexpected clause. Clauses (ii) and
+ * (iii) ARE §12.1.1's second and third unresolved cases, so their scope is their
+ * definition; `unobtainable` has none, because nothing about the device's own pin
+ * set is readable in that state (§4.4).
+ */
+function unexpectedScope(
+  classification: Extract<E2eeTrustClassification, { readonly class: "unexpected" }>,
+): E2eeUnresolvedScope | null {
+  switch (classification.clause) {
+    case "i":
+      return classification.scope;
+    case "ii":
+      return { kind: "account-verified" };
+    case "iii":
+      return { kind: "origin-verified" };
+    case "unobtainable":
+      return null;
+  }
+}
+
+/**
  * Choose §13.2.1's situation, or `null` when the surface does not apply.
  *
+ * THE SITUATION IS THE SCOPE, NOT THE RESOLUTION. §13.2.1 situation 3 is defined
+ * from local state alone — "a selection under an account scope that holds no
+ * verified pin, on a Hub origin whose `anyNodeVerified` marker is set" — and it is
+ * classified under rows K23/K24, which ARE the no-evidence rows, so withheld
+ * evidence selects it rather than suppressing it. Situation 2 is §5.2's rule, which
+ * binds "under a `(hubOrigin, accountId)` pair that already holds a verified pin"
+ * whether or not the selection resolved: §13.2.1 says its copy "will fire on every
+ * genuine additional node", and adding one resolves to the pairing record §13.2
+ * step 2 just wrote.
+ *
  * `null` for a selection that resolved to an `unverified` record with a
- * first-contact statement is deliberate and is not a gap: that record IS the
- * §13.2 ceremony the owner already started for this selection, so continuing it
- * is correct. §13.2.1's prohibition is on presenting situations 2 and 3 as
- * routine new-node pairing, and neither of those resolves to a record at all.
- * Nothing is released either way — §13.1's release gate restricts an `unverified`
- * pin to the ceremony.
+ * first-contact statement, and with nothing else under the pair or the origin, is
+ * deliberate and is not a gap: that record IS the §13.2 ceremony the owner already
+ * started for this selection, so continuing it is correct. Nothing is released
+ * either way — §13.1's release gate restricts an `unverified` pin to the ceremony.
  */
 export function resolveE2eeUnexpectedNodeSituation(
   classification: E2eeTrustClassification,
   evidence: E2eeUnexpectedNodeEvidence,
 ): E2eeUnexpectedNodeSituation | null {
   if (classification.class !== "unexpected") return null;
+  const scope = unexpectedScope(classification);
+  if (scope?.kind === "origin-verified") return 3;
   if (evidence.kind === "none") return 1;
-  switch (classification.clause) {
-    case "ii":
-      return 2;
-    case "iii":
-      return 3;
-    case "i":
-      return classification.record === "unverified" ? null : 1;
-    case "unobtainable":
-      return 1;
-  }
+  if (scope?.kind === "account-verified") return 2;
+  if (classification.clause === "i" && classification.record === "unverified") return null;
+  return 1;
 }
 
 /** The resolutions §13.2.1 offers the owner. Neither is a default. */

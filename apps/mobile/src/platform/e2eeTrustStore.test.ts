@@ -1,4 +1,6 @@
+import { decodeBase64Url } from "@ryco/client-runtime/relay";
 import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
+import { e2eeKeyFingerprint, formatE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
 import { deriveE2eeSafetyNumber } from "@ryco/shared/relayE2eeVerificationDisplay";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -16,17 +18,18 @@ vi.mock("expo-sqlite/kv-store", () => ({
 
 import { E2EE_TRUST_DOCUMENT_KEY, type E2eeSecureStore } from "./e2eeSecureStore";
 import {
-  classifyE2eeTrustSnapshot,
   isE2eeVerifiedPinRecord,
   resolveE2eeTrustStatementOutcome,
   resolveE2eeUnexpectedNodeSituation,
   type E2eeTrustSelection,
+  type E2eeVerifiedPinRecord,
 } from "./e2eeTrustModel";
 import {
   makeMobileE2eeTrustStore,
   MobileE2eeTrustStoreError,
   mintE2eeOwnerLegacyConsentDecision,
   mintE2eeOwnerStrictLegacyDecision,
+  mintE2eeOwnerUnresolvedLegacyConsentDecision,
   mintE2eeOwnerVerificationDecision,
   type E2eeOwnerVerificationDecision,
   type MobileE2eeTrustStore,
@@ -60,6 +63,40 @@ function safetyNumber(hubOrigin: string, accountId: string): string {
     hubOrigin,
     accountId,
   }).display;
+}
+
+// The §13.1 pin bytes and the §13.1 approval state, DERIVED HERE from the fixture
+// keys rather than copied out of the implementation. The pin is the one value
+// §13.3 compares a rotated identity against and §13.4 displays to the owner, so a
+// build that pinned this device's own client key, a constant, or the wrong
+// domain-separated fingerprint must not be able to ship green.
+const NODE_FINGERPRINT = formatE2eeKeyFingerprint(
+  e2eeKeyFingerprint("node-identity", NODE_PUBLIC_KEY),
+);
+const CLIENT_FINGERPRINT = formatE2eeKeyFingerprint(
+  e2eeKeyFingerprint("client-identity", CLIENT_PUBLIC_KEY),
+);
+
+const SEEDED_INDEX = { hubOrigin: HUB, accountId: ACCOUNT, localNodeHandle: "h" };
+
+/** A durable document holding one verified pin and no latch, as §13.1's migration case does. */
+function verifiedDocument(): string {
+  return JSON.stringify({
+    version: 1,
+    records: [
+      {
+        ...SEEDED_INDEX,
+        state: "verified",
+        nodeIdHints: [],
+        verifiedFingerprint: NODE_FINGERPRINT,
+        recordedContinuityId: "continuity-1",
+        acceptedPolicyGeneration: 4,
+        approvedClientFingerprint: CLIENT_FINGERPRINT,
+        approvedAt: 1,
+      },
+    ],
+    verifiedMarkerOrigins: [HUB],
+  });
 }
 
 interface Harness {
@@ -166,6 +203,15 @@ function handleSelection(index: {
   localNodeHandle: string;
 }): E2eeTrustSelection {
   return { kind: "handle", ...index };
+}
+
+function verifiedPin(
+  store: MobileE2eeTrustStore,
+  index: { hubOrigin: string; accountId: string; localNodeHandle: string },
+): E2eeVerifiedPinRecord {
+  const record = store.resolve(handleSelection(index));
+  if (record === null || !isE2eeVerifiedPinRecord(record)) throw new Error("not a verified pin");
+  return record;
 }
 
 let context: Harness;
@@ -370,10 +416,43 @@ describe("§13.2 step 5 promotion", () => {
 
     await store.promote(decisionFor(index));
 
-    const promoted = store.resolve(handleSelection(index));
-    expect(promoted !== null && isE2eeVerifiedPinRecord(promoted)).toBe(true);
+    const promoted = verifiedPin(store, index);
+    // §13.2 step 5 writes the pin the owner compared, and every other promoted
+    // field, from the decision alone. The two fingerprints are DERIVED in this test
+    // from the fixture keys and the §7.1 domain separation, so pinning the client
+    // key, a constant, or the other domain fails here rather than downstream.
+    expect(promoted.verifiedFingerprint).toBe(NODE_FINGERPRINT);
+    expect(promoted.approval).toEqual({
+      clientIdentityFingerprint: CLIENT_FINGERPRINT,
+      approvedAt: 1_000,
+    });
+    expect(promoted.recordedContinuityId).toBe("continuity-1");
+    expect(promoted.acceptedPolicyGeneration).toBe(4);
+    expect(promoted.latch).toEqual({ kind: "set", setAt: 1_000 });
     expect(store.marker(HUB)).toEqual({ kind: "set" });
     expect(await store.classify(handleSelection(index))).toEqual({ class: "latched" });
+  });
+
+  it("mints a client-anchored handle of the full width, one per selection", async () => {
+    // §12.1.1: the handle is "client-generated at §13.2 pairing, never Hub-supplied,
+    // never derived from `nodeId`" — it is the index the whole selection-resolution
+    // argument rests on, so its width is asserted rather than assumed.
+    const draws: number[] = [];
+    const store = makeMobileE2eeTrustStore({
+      store: context.secureStore,
+      randomBytes: (length) => {
+        draws.push(length);
+        return Uint8Array.from({ length }, (_, offset) => offset + draws.length);
+      },
+    });
+    await store.hydrate();
+
+    const first = await store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT });
+    const second = await store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT });
+
+    expect(draws).toEqual([16, 16]);
+    expect(decodeBase64Url(first.localNodeHandle).byteLength).toBe(16);
+    expect(first.localNodeHandle).not.toBe(second.localNodeHandle);
   });
 
   it("leaves NEITHER the pin nor the marker applied when the write crashes", async () => {
@@ -428,25 +507,36 @@ describe("§13.2 step 5 promotion", () => {
 });
 
 describe("§12.1 latch set condition", () => {
-  it("is set by a completed ceremony and by authenticating to an already-verified pin", async () => {
+  it("is set by a completed ceremony", async () => {
     const store = context.create();
     await store.hydrate();
-    const index = await pairAndVerify(store);
-    // Drop the latch the ceremony set, so the second condition is observable on
-    // its own: a channel that authenticates a statement to this pin re-arms it.
-    await store.clearSelection(index);
-    const reintroduced = await pairAndVerify(store, { continuityId: "continuity-1" });
 
-    await store.recordAuthenticatedStatement({
-      index: reintroduced,
+    const index = await pairAndVerify(store);
+
+    expect(verifiedPin(store, index).latch).toEqual({ kind: "set", setAt: 1_000 });
+  });
+
+  it("is re-armed by authenticating a statement to an already-verified pin", async () => {
+    // §12.1's OTHER native set condition, observable only on a verified pin that
+    // is not already latched — which a promotion never leaves behind. A document
+    // written without `latchedAt` is that state, and it is the one §13.1.1 warns
+    // about: without the re-arm the selection classifies unexpected clause (i)
+    // forever, and with a recorded consent it classifies legacy-eligible branch
+    // (b) — a permanent plaintext downgrade on a node the owner verified.
+    const restored = harness(verifiedDocument()).create();
+    await restored.hydrate();
+    expect(verifiedPin(restored, SEEDED_INDEX).latch).toEqual({ kind: "unset" });
+
+    await restored.recordAuthenticatedStatement({
+      index: SEEDED_INDEX,
       anchor: "pin-unchanged",
-      identityFingerprint: "SHA256:aaaa",
+      identityFingerprint: NODE_FINGERPRINT,
       policyGeneration: 4,
       observedAt: 2_000,
     });
 
-    const record = store.resolve(handleSelection(reintroduced));
-    expect(record !== null && isE2eeVerifiedPinRecord(record) && record.latch.kind).toBe("set");
+    expect(verifiedPin(restored, SEEDED_INDEX).latch).toEqual({ kind: "set", setAt: 2_000 });
+    expect(await restored.classify(handleSelection(SEEDED_INDEX))).toEqual({ class: "latched" });
   });
 
   it("is not set by validating a self-signed first-contact statement", async () => {
@@ -479,18 +569,51 @@ describe("§12.1 latch set condition", () => {
     // The id a first-contact statement carries, offered for the selection the
     // owner is still pairing. §12.1: "A matching continuity id (§7.5) never
     // satisfies this condition."
+    const initial = {
+      class: "unexpected",
+      clause: "i",
+      record: "unverified",
+      scope: { kind: "fresh" },
+    } as const;
     const tightened = await store.tightenWithContinuityId({
       hubOrigin: HUB,
       accountId: ACCOUNT,
       continuityId: "continuity-1",
-      initial: { class: "unexpected", clause: "i", record: "unverified" },
+      initial,
     });
 
     // It is a read: nothing was written, no record was promoted, and no class
     // moved to latched.
     expect(context.log).toEqual([]);
-    expect(tightened).toEqual({ class: "unexpected", clause: "i", record: "unverified" });
+    expect(tightened).toEqual(initial);
     expect(store.resolve(handleSelection(pairing))?.state).toBe("unverified");
+  });
+
+  it("is reached by a late continuity id that matches the id the ceremony recorded", async () => {
+    // The positive half of §12.1.1's late resolution: the anchor it matches
+    // against is the id the promotion recorded, so a Hub that suppresses the
+    // node-id hint still cannot keep a latched pin unresolved.
+    const store = context.create();
+    await store.hydrate();
+    await pairAndVerify(store, { continuityId: "continuity-7" });
+
+    expect(
+      await store.tightenWithContinuityId({
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+        continuityId: "continuity-7",
+        initial: { class: "legacy-eligible", branch: "a" },
+      }),
+    ).toEqual({ class: "latched" });
+    // And an id the ceremony never recorded resolves nothing.
+    expect(
+      await store.tightenWithContinuityId({
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+        continuityId: "continuity-8",
+        initial: { class: "legacy-eligible", branch: "a" },
+      }),
+    ).toEqual({ class: "unexpected", clause: "ii" });
   });
 });
 
@@ -499,7 +622,8 @@ describe("§13.3 rotation and re-verification", () => {
     const store = context.create();
     await store.hydrate();
     const index = await pairAndVerify(store, { acceptedPolicyGeneration: 4 });
-    const before = store.resolve(handleSelection(index));
+    const before = verifiedPin(store, index);
+    expect(before.verifiedFingerprint).toBe(NODE_FINGERPRINT);
 
     await store.recordAuthenticatedStatement({
       index,
@@ -509,14 +633,14 @@ describe("§13.3 rotation and re-verification", () => {
       observedAt: 3_000,
     });
 
-    const after = store.resolve(handleSelection(index));
-    expect(after !== null && isE2eeVerifiedPinRecord(after)).toBe(true);
-    if (after === null || !isE2eeVerifiedPinRecord(after)) throw new Error("unreachable");
-    if (before === null || !isE2eeVerifiedPinRecord(before)) throw new Error("unreachable");
+    const after = verifiedPin(store, index);
     expect(after.verifiedFingerprint).toBe(ROTATED_NODE_FINGERPRINT);
-    expect(after.latch).toEqual(before.latch);
-    expect(after.approval).toEqual(before.approval);
-    expect(after.recordedContinuityId).toBe(before.recordedContinuityId);
+    expect(after.latch).toEqual({ kind: "set", setAt: 1_000 });
+    expect(after.approval).toEqual({
+      clientIdentityFingerprint: CLIENT_FINGERPRINT,
+      approvedAt: 1_000,
+    });
+    expect(after.recordedContinuityId).toBe("continuity-1");
     expect(after.acceptedPolicyGeneration).toBe(6);
     // The channel stays latched, and no surface is raised: §13.3's whole point is
     // that a legitimate rotation "MUST NOT surface a re-verification prompt".
@@ -534,15 +658,32 @@ describe("§13.3 rotation and re-verification", () => {
     await store.recordAuthenticatedStatement({
       index,
       anchor: "pin-unchanged",
-      identityFingerprint: "SHA256:aaaa",
+      identityFingerprint: NODE_FINGERPRINT,
       policyGeneration: 2,
       observedAt: 3_000,
     });
 
-    const record = store.resolve(handleSelection(index));
-    expect(
-      record !== null && isE2eeVerifiedPinRecord(record) && record.acceptedPolicyGeneration,
-    ).toBe(9);
+    expect(verifiedPin(store, index).acceptedPolicyGeneration).toBe(9);
+  });
+
+  it("leaves the pin alone under the unchanged anchor, whatever fingerprint arrives", async () => {
+    // §13.3's anchor is what decides a re-pin, and only `pin-updated` verified a
+    // chain to the new key. A statement's carried fingerprint under `pin-unchanged`
+    // is a value the §5.2 verdict never anchored to this record, so it must not
+    // reach the pin the owner compared.
+    const store = context.create();
+    await store.hydrate();
+    const index = await pairAndVerify(store);
+
+    await store.recordAuthenticatedStatement({
+      index,
+      anchor: "pin-unchanged",
+      identityFingerprint: ROTATED_NODE_FINGERPRINT,
+      policyGeneration: 5,
+      observedAt: 3_000,
+    });
+
+    expect(verifiedPin(store, index).verifiedFingerprint).toBe(NODE_FINGERPRINT);
   });
 
   it("persists the accepted policy generation across a restart", async () => {
@@ -555,10 +696,15 @@ describe("§13.3 rotation and re-verification", () => {
     const restarted = context.create();
     await restarted.hydrate();
 
-    const record = restarted.resolve(handleSelection(index));
-    expect(
-      record !== null && isE2eeVerifiedPinRecord(record) && record.acceptedPolicyGeneration,
-    ).toBe(7);
+    const record = verifiedPin(restarted, index);
+    expect(record.acceptedPolicyGeneration).toBe(7);
+    // The whole promoted record survives the round trip, not only the generation.
+    expect(record.verifiedFingerprint).toBe(NODE_FINGERPRINT);
+    expect(record.recordedContinuityId).toBe("continuity-1");
+    expect(record.approval).toEqual({
+      clientIdentityFingerprint: CLIENT_FINGERPRINT,
+      approvedAt: 1_000,
+    });
   });
 
   it("updates no pin on a chain failure, and neither prompts nor re-verifies on a regression", async () => {
@@ -638,6 +784,7 @@ describe("§12.1.1 owner legacy consent", () => {
         class: "unexpected",
         clause: "i",
         record: "unverified",
+        scope: { kind: "fresh" },
       });
     }
 
@@ -675,6 +822,56 @@ describe("§12.1.1 owner legacy consent", () => {
       class: "unexpected",
       clause: "i",
       record: "unverified",
+      scope: { kind: "fresh" },
+    });
+  });
+
+  it("records the consent on §13.1's no-pin record when the selection has none", async () => {
+    // §13.2.1 situation 1's second resolution, for the selections that raise it
+    // most often: §12.1.1 clauses (ii) and (iii) resolve to no record at all.
+    // §13.1's third shape is what it writes — "a record may also exist with no pin
+    // at all — holding only the handle, the hints, and an owner legacy consent" —
+    // rather than a pairing record for a §13.2 ceremony the owner did not start.
+    const store = context.create();
+    await store.hydrate();
+    await pairAndVerify(store);
+
+    const index = await store.recordUnresolvedLegacyConsent(
+      mintE2eeOwnerUnresolvedLegacyConsentDecision({
+        hubOrigin: HUB,
+        accountId: OTHER_ACCOUNT,
+        nodeId: "node-9",
+        decidedAt: 12,
+      }),
+    );
+
+    expect(store.resolve(handleSelection(index))).toEqual({
+      index,
+      state: "none",
+      nodeIdHints: ["node-9"],
+      legacyConsent: { kind: "recorded", recordedAt: 12 },
+      environmentId: null,
+    });
+    // It is durable, and it claims §12.1.1 branch (b) for that selection alone —
+    // the owner's own handle, never the id the Hub presented.
+    const restarted = context.create();
+    await restarted.hydrate();
+    expect(await restarted.classify(handleSelection(index))).toEqual({
+      class: "legacy-eligible",
+      branch: "b",
+    });
+    expect(
+      await restarted.classify({
+        kind: "node-id-hint",
+        hubOrigin: HUB,
+        accountId: OTHER_ACCOUNT,
+        nodeId: "node-9",
+      }),
+    ).toEqual({
+      class: "unexpected",
+      clause: "i",
+      record: "unpinned",
+      scope: { kind: "origin-verified" },
     });
   });
 });
@@ -835,7 +1032,58 @@ describe("owner-driven cleanup", () => {
     await expect(store.forgetHubOrigin(HUB)).rejects.toMatchObject({
       code: "trust_store_unavailable",
     });
+    await expect(store.destroyUnreadableTrustState()).rejects.toMatchObject({
+      code: "trust_store_unavailable",
+    });
     expect(context.log).not.toContain(`remove:${E2EE_TRUST_DOCUMENT_KEY}`);
+  });
+
+  it("writes nothing when no record was recorded under the environment", async () => {
+    const store = context.create();
+    await store.hydrate();
+    await pairAndVerify(store, { environmentId: "env-a" });
+    context.log.length = 0;
+
+    await store.forgetEnvironment("env-b");
+
+    expect(context.log).toEqual([]);
+  });
+
+  it("never widens a scoped forget into a whole-namespace wipe", async () => {
+    // The chain this closes: an unreadable document (a truncated keychain value,
+    // or one field the writer let through), then the ordinary "forget this node"
+    // action. Removing the document whole clears the `anyNodeVerified` marker for
+    // every Hub origin — including origins the owner never named — and §13.1 clears
+    // it only by "the explicit owner action that removes the last verified pin
+    // under that `hubOrigin`". Losing it returns every selection on the device to
+    // legacy-eligible branch (a), which is row K13's plaintext flush.
+    const corrupted = harness("{not json");
+    const store = corrupted.create();
+    await store.hydrate();
+
+    await expect(store.forgetEnvironment("env-a")).rejects.toMatchObject({
+      code: "trust_store_unavailable",
+    });
+    await expect(store.forgetHubOrigin(HUB)).rejects.toMatchObject({
+      code: "trust_store_unavailable",
+    });
+
+    expect(corrupted.log).not.toContain(`remove:${E2EE_TRUST_DOCUMENT_KEY}`);
+    expect(corrupted.entries.get(E2EE_TRUST_DOCUMENT_KEY)).toBe("{not json");
+    // The device stays fail-closed until the owner asks for the destruction in as
+    // many words: §4.4's `unobtainable`, never a fresh install.
+    expect(await store.classify(handleSelection(SEEDED_INDEX))).toEqual({
+      class: "unexpected",
+      clause: "unobtainable",
+    });
+
+    await store.destroyUnreadableTrustState();
+
+    expect(corrupted.entries.has(E2EE_TRUST_DOCUMENT_KEY)).toBe(false);
+    expect(await store.classify(handleSelection(SEEDED_INDEX))).toEqual({
+      class: "legacy-eligible",
+      branch: "a",
+    });
   });
 });
 
@@ -871,16 +1119,199 @@ describe("§13.1 node-id hints", () => {
       }),
     ).toEqual({ class: "unexpected", clause: "ii" });
   });
-});
 
-describe("classification is a pure read of client-anchored state", () => {
-  it("produces the same verdict from the snapshot as from the classifier", async () => {
+  it("records the id the pairing started under, and resolves a selection by it", async () => {
     const store = context.create();
     await store.hydrate();
-    const index = await pairAndVerify(store);
+    const index = await pairAndVerify(store, { nodeId: "node-0" });
 
-    expect(classifyE2eeTrustSnapshot(store.snapshot(handleSelection(index)))).toEqual(
-      await store.classify(handleSelection(index)),
-    );
+    expect(store.resolve(handleSelection(index))?.nodeIdHints).toEqual(["node-0"]);
+    expect(
+      await store.classify({
+        kind: "node-id-hint",
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+        nodeId: "node-0",
+      }),
+    ).toEqual({ class: "latched" });
+  });
+
+  it("does not let a repeated id evict the hints already recorded", async () => {
+    // A Hub re-sending one id would otherwise fill the whole ring with copies of
+    // it and evict every other hint on the record, so a later selection by a
+    // genuine id stops resolving.
+    const store = context.create();
+    await store.hydrate();
+    const index = await pairAndVerify(store, { nodeId: "node-0" });
+    await store.recordNodeIdHint(index, "node-1");
+    context.log.length = 0;
+
+    for (let repeat = 0; repeat < 10; repeat += 1) {
+      await store.recordNodeIdHint(index, "node-1");
+    }
+
+    expect(context.log).toEqual([]);
+    expect(store.resolve(handleSelection(index))?.nodeIdHints).toEqual(["node-0", "node-1"]);
+  });
+});
+
+describe("§13.1 the durable document's own bounds", () => {
+  it("refuses a document whose version this build does not know", async () => {
+    const store = harness(JSON.stringify({ version: 2, records: [] })).create();
+    await store.hydrate();
+
+    expect(await store.classify(handleSelection(SEEDED_INDEX))).toEqual({
+      class: "unexpected",
+      clause: "unobtainable",
+    });
+  });
+
+  it("refuses a record carrying a field past the length its reader accepts", async () => {
+    const store = harness(
+      JSON.stringify({
+        version: 1,
+        records: [{ ...SEEDED_INDEX, accountId: "a".repeat(513), state: "none", nodeIdHints: [] }],
+      }),
+    ).create();
+    await store.hydrate();
+
+    expect(await store.classify(handleSelection(SEEDED_INDEX))).toEqual({
+      class: "unexpected",
+      clause: "unobtainable",
+    });
+  });
+
+  it("never writes a document its own reader would refuse", async () => {
+    // The Hub issues `accountId` and `nodeId` (§12.1.1), and one out-of-bounds
+    // value written here would fail the WHOLE document on the next cold start:
+    // every pin, latch, consent and `anyNodeVerified` marker on the device gone to
+    // `unobtainable`, permanently, with `forgetHubOrigin` the only way out.
+    const store = context.create();
+    await store.hydrate();
+    const kept = await pairAndVerify(store);
+    const durable = context.entries.get(E2EE_TRUST_DOCUMENT_KEY);
+    context.log.length = 0;
+
+    await expect(
+      store.beginPairing({ hubOrigin: HUB, accountId: "a".repeat(513) }),
+    ).rejects.toMatchObject({ code: "trust_store_input_invalid" });
+    await expect(store.beginPairing({ hubOrigin: "", accountId: ACCOUNT })).rejects.toMatchObject({
+      code: "trust_store_input_invalid",
+    });
+    await expect(
+      store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT, environmentId: "e".repeat(513) }),
+    ).rejects.toMatchObject({ code: "trust_store_input_invalid" });
+    for (const policyGeneration of [Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53, -1]) {
+      await expect(
+        store.recordAuthenticatedStatement({
+          index: kept,
+          anchor: "pin-unchanged",
+          identityFingerprint: NODE_FINGERPRINT,
+          policyGeneration,
+          observedAt: 5,
+        }),
+      ).rejects.toMatchObject({ code: "trust_store_input_invalid" });
+    }
+    await expect(
+      store.recordAuthenticatedStatement({
+        index: kept,
+        anchor: "pin-updated",
+        identityFingerprint: "f".repeat(513),
+        policyGeneration: 5,
+        observedAt: 5,
+      }),
+    ).rejects.toMatchObject({ code: "trust_store_input_invalid" });
+
+    // Nothing reached the store, and the document still parses on a cold start.
+    expect(context.log).toEqual([]);
+    expect(context.entries.get(E2EE_TRUST_DOCUMENT_KEY)).toBe(durable);
+    const restarted = context.create();
+    await restarted.hydrate();
+    expect(await restarted.classify(handleSelection(kept))).toEqual({ class: "latched" });
+  });
+
+  it("refuses the write when a value no boundary owns would not read back", async () => {
+    // The backstop, driven through the one input the boundaries above cannot bound
+    // for themselves: a §14.5 source that answers with more bytes than were asked
+    // for produces a handle past the reader's field bound. The document is refused
+    // rather than written, which is the difference between one failed pairing and
+    // a device whose every pin is `unobtainable` from the next launch on.
+    const store = makeMobileE2eeTrustStore({
+      store: context.secureStore,
+      randomBytes: () => new Uint8Array(600).fill(7),
+    });
+    await store.hydrate();
+
+    await expect(store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT })).rejects.toMatchObject({
+      code: "trust_store_input_invalid",
+    });
+    expect(context.log).not.toContain(`set:${E2EE_TRUST_DOCUMENT_KEY}`);
+  });
+
+  it("drops an out-of-bounds node id instead of refusing the record it hints at", async () => {
+    // §13.1 makes the id an untrusted resolution hint that "authorizes nothing and
+    // releases nothing", so a Hub presenting an oversized one must not be able to
+    // block a pairing the owner started — and must not be able to reach the
+    // document either. A hint that never lands only costs a resolution.
+    const store = context.create();
+    await store.hydrate();
+    const index = await store.beginPairing({
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      nodeId: "n".repeat(513),
+    });
+    await store.recordNodeIdHint(index, "n".repeat(513));
+
+    expect(store.resolve(handleSelection(index))?.nodeIdHints).toEqual([]);
+    const restarted = context.create();
+    await restarted.hydrate();
+    expect(restarted.resolve(handleSelection(index))?.state).toBe("unverified");
+  });
+
+  it("refuses a new record at the local bound rather than evicting one", async () => {
+    // §13.1's oldest-first eviction is for HINTS. Applying it to records would
+    // silently drop a latched pin, and writing past the bound would produce a
+    // document `parseDocument` refuses whole on the next launch.
+    const store = context.create();
+    await store.hydrate();
+    const first = await pairAndVerify(store);
+    for (let count = 1; count < 64; count += 1) {
+      await store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT });
+    }
+    context.log.length = 0;
+
+    await expect(store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT })).rejects.toMatchObject({
+      code: "trust_store_capacity_exceeded",
+    });
+
+    expect(context.log).toEqual([]);
+    const restarted = context.create();
+    await restarted.hydrate();
+    expect(await restarted.classify(handleSelection(first))).toEqual({ class: "latched" });
+  });
+});
+
+describe("concurrent owner actions", () => {
+  it("serializes two mutators, so neither is absent from the winner's document", async () => {
+    // Both are reachable at once in the app: the bootstrap hydrates while the
+    // settings screen can drive a forget and the pairing UI drives a promotion. A
+    // read-modify-write that overlapped would drop the loser's record — and with a
+    // promotion, the `anyNodeVerified` marker written atomically with it.
+    const store = context.create();
+    await store.hydrate();
+    const existing = await store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT });
+
+    const promotion = store.promote(decisionFor(existing));
+    const second = store.beginPairing({ hubOrigin: HUB, accountId: OTHER_ACCOUNT });
+    await Promise.all([promotion, second]);
+
+    const added = await second;
+    expect(verifiedPin(store, existing).verifiedFingerprint).toBe(NODE_FINGERPRINT);
+    expect(store.resolve(handleSelection(added))?.state).toBe("unverified");
+    const restarted = context.create();
+    await restarted.hydrate();
+    expect(await restarted.classify(handleSelection(existing))).toEqual({ class: "latched" });
+    expect(restarted.resolve(handleSelection(added))?.state).toBe("unverified");
+    expect(restarted.marker(HUB)).toEqual({ kind: "set" });
   });
 });

@@ -28,7 +28,6 @@ import {
   type E2eeTrustRecord,
   type E2eeTrustRecordIndex,
   type E2eeTrustSelection,
-  type E2eeTrustSnapshot,
   type E2eeVerificationMarker,
   type E2eeVerifiedPinRecord,
 } from "./e2eeTrustModel";
@@ -83,6 +82,8 @@ export type MobileE2eeTrustStoreErrorCode =
   | "trust_store_selection_latched"
   /** The local record bound below would be exceeded. Nothing is evicted. */
   | "trust_store_capacity_exceeded"
+  /** A value the record would carry is outside the bounds this device's reader accepts. */
+  | "trust_store_input_invalid"
   /** The owner decision does not describe a comparison this device can reproduce. */
   | "trust_store_decision_invalid";
 
@@ -368,6 +369,24 @@ export interface E2eeOwnerLegacyConsentDecision {
   readonly decidedAt: number;
 }
 
+/**
+ * The same consent for a selection that resolved to NO record — the shape §13.2.1
+ * situation 1 raises most often.
+ *
+ * It carries no handle because none exists yet, and the store mints one rather
+ * than taking the Hub's: §12.1.1 records consent "per selection", and the
+ * selection is the client-anchored handle, never the `nodeId` that raised the
+ * surface. The record it creates is §13.1's third shape, not a pairing record.
+ */
+export interface E2eeOwnerUnresolvedLegacyConsentDecision {
+  readonly [ownerDecisionBrand]: "unresolved-legacy-consent";
+  readonly hubOrigin: string;
+  readonly accountId: string;
+  readonly nodeId?: string;
+  readonly environmentId?: string;
+  readonly decidedAt: number;
+}
+
 /** §12.1.1's opt-in "never legacy on this Hub", per Hub origin and nothing else. */
 export interface E2eeOwnerStrictLegacyDecision {
   readonly [ownerDecisionBrand]: "strict-legacy";
@@ -445,6 +464,18 @@ export function mintE2eeOwnerLegacyConsentDecision(input: {
   return { index: input.index, decidedAt } as E2eeOwnerLegacyConsentDecision;
 }
 
+export function mintE2eeOwnerUnresolvedLegacyConsentDecision(input: {
+  readonly hubOrigin: string;
+  readonly accountId: string;
+  readonly nodeId?: string;
+  readonly environmentId?: string;
+  readonly decidedAt: number;
+}): E2eeOwnerUnresolvedLegacyConsentDecision {
+  const decidedAt = boundedCount(input.decidedAt);
+  if (decidedAt === null) trustError("trust_store_decision_invalid");
+  return { ...input, decidedAt } as E2eeOwnerUnresolvedLegacyConsentDecision;
+}
+
 export function mintE2eeOwnerStrictLegacyDecision(input: {
   readonly hubOrigin: string;
   readonly policy: "forbid" | "permit";
@@ -492,8 +523,17 @@ export interface MobileE2eeTrustStore {
   }) => Promise<E2eeTrustClassification>;
   /** §13.1's reconciliation, exposed for the bootstrap and for tests. */
   readonly reconcileMarker: (hubOrigin: string) => Promise<void>;
-  readonly snapshot: (selection: E2eeTrustSelection) => E2eeTrustSnapshot;
-  /** Display and diagnostics only. No guard reads a record through this. */
+  /**
+   * Display and diagnostics only. No guard reads a record through this.
+   *
+   * THERE IS NO SYNCHRONOUS CLASSIFICATION PATH, and there was one: a `snapshot`
+   * accessor feeding `classifyE2eeTrustSnapshot` skipped the marker reconciliation
+   * §13.1 requires "before it evaluates any classification on that Hub origin", so
+   * on the install §13.1's migration names — pins written by a build that had no
+   * marker — it answered legacy-eligible branch (a) for a re-minted account scope
+   * where `classify` answers `unexpected`. That is row K13's plaintext flush,
+   * reachable through the accessor alone, so the accessor is gone.
+   */
   readonly resolve: (selection: E2eeTrustSelection) => E2eeTrustRecord | null;
   readonly marker: (hubOrigin: string) => E2eeVerificationMarker;
   readonly strictLegacyPolicy: (hubOrigin: string) => E2eeStrictLegacyPolicy;
@@ -509,6 +549,10 @@ export interface MobileE2eeTrustStore {
   /** §12.1's native set condition and §13.3's silent pin update. */
   readonly recordAuthenticatedStatement: (input: E2eeAuthenticatedStatementInput) => Promise<void>;
   readonly recordLegacyConsent: (decision: E2eeOwnerLegacyConsentDecision) => Promise<void>;
+  /** §13.2.1's consent resolution for a selection with no record: §13.1's no-pin shape. */
+  readonly recordUnresolvedLegacyConsent: (
+    decision: E2eeOwnerUnresolvedLegacyConsentDecision,
+  ) => Promise<E2eeTrustRecordIndex>;
   readonly setStrictLegacyPolicy: (decision: E2eeOwnerStrictLegacyDecision) => Promise<void>;
   /** §13.1's untrusted selection-resolution hint. Authorizes nothing. */
   readonly recordNodeIdHint: (index: E2eeTrustRecordIndex, nodeId: string) => Promise<void>;
@@ -518,6 +562,11 @@ export interface MobileE2eeTrustStore {
   readonly forgetHubOrigin: (hubOrigin: string) => Promise<void>;
   /** The owner forgetting a node in the connection list. */
   readonly forgetEnvironment: (environmentId: string) => Promise<void>;
+  /**
+   * The owner asking, in as many words, to destroy a durable document this device
+   * cannot read. NEVER a fallback for a scoped forget (see below).
+   */
+  readonly destroyUnreadableTrustState: () => Promise<void>;
 }
 
 export interface MobileE2eeTrustStoreDependencies {
@@ -615,8 +664,17 @@ export function makeMobileE2eeTrustStore(
    * ceremony succeeded.
    */
   const commit = async (next: TrustState): Promise<void> => {
+    const document = serializeDocument(next);
+    // THE WRITER CANNOT PRODUCE A DOCUMENT THE READER REFUSES. `parseRecord`
+    // rejects an out-of-bounds field and `parseDocument` fails the WHOLE document
+    // on one rejected record, so a single unbounded value — and `accountId` and
+    // `nodeId` are Hub-issued (§12.1.1) — would take every pin, latch, consent and
+    // `anyNodeVerified` marker on this device to `unobtainable` on the next cold
+    // start, permanently. Each write boundary below bounds its own inputs; this is
+    // the backstop that makes a missed one a refused write instead.
+    if (parseDocument(document) === null) trustError("trust_store_input_invalid");
     try {
-      await store.set(E2EE_TRUST_DOCUMENT_KEY, serializeDocument(next));
+      await store.set(E2EE_TRUST_DOCUMENT_KEY, document);
     } catch {
       trustError("trust_store_unavailable");
     }
@@ -680,16 +738,27 @@ export function makeMobileE2eeTrustStore(
   };
 
   /**
-   * The owner asked to forget part of a document this device cannot read.
+   * Destroy a document this device cannot read — its own owner action, never the
+   * fallback of a scoped one.
    *
-   * A document that would not parse is removed whole: it can no longer be edited
-   * selectively, removing it is strictly more destructive than what was asked
-   * for, and that is the safe direction for a wipe. A store that would not ANSWER
-   * is refused instead — the pins it may still hold are not this call's to
-   * discard over a locked keychain.
+   * A WHOLE-DOCUMENT WIPE IS NOT THE SAFE DIRECTION, WHICH IS WHY IT IS NOT
+   * REACHABLE FROM "FORGET THIS NODE". It clears the `anyNodeVerified` marker for
+   * every Hub origin, including origins the owner never named, and §13.1 clears
+   * that marker only by "the explicit owner action that removes the last verified
+   * pin under that `hubOrigin`". Losing it is the one loss §12.1.1 identifies as
+   * re-opening the plaintext downgrade: every selection falls from `unexpected`
+   * back to legacy-eligible branch (a), and a Hub that then withholds the carrier
+   * reaches row K13. An unreadable document is `unobtainable` instead — every
+   * classification UNEXPECTED — until the owner asks for this in as many words,
+   * after which §13.1.1's fresh-install rule is the honest description of the
+   * device ("a conforming client that keeps none is a fresh install").
+   *
+   * A store that would not ANSWER is refused even here: the pins it may still hold
+   * are not this call's to discard over a locked keychain.
    */
-  const forgetUnreadable = async (): Promise<void> => {
-    if (failure !== "unparseable") trustError("trust_store_unavailable");
+  const destroyUnreadableTrustState = async (): Promise<void> => {
+    await hydrate();
+    if (loaded !== null || failure !== "unparseable") trustError("trust_store_unavailable");
     try {
       await store.remove(E2EE_TRUST_DOCUMENT_KEY);
     } catch {
@@ -697,6 +766,56 @@ export function makeMobileE2eeTrustStore(
     }
     failure = null;
     loaded = EMPTY_STATE;
+  };
+
+  /**
+   * §13.2 step 2's handle mint, shared by the two paths that CREATE a record: the
+   * pairing flow and §13.2.1's consent resolution for a selection that resolved to
+   * nothing.
+   *
+   * Every externally supplied string is bounded here, against the same bound
+   * `parseRecord` applies on the way back in. An out-of-bounds node id is DROPPED
+   * rather than refused: §13.1 makes it an untrusted resolution hint that
+   * "authorizes nothing and releases nothing", so a Hub must not be able to block a
+   * pairing the owner started by presenting one, and a hint that never lands only
+   * costs a resolution — which fails closed into the unexpected class.
+   */
+  const mintRecordBase = (
+    state: TrustState,
+    input: {
+      readonly hubOrigin: string;
+      readonly accountId: string;
+      readonly nodeId?: string;
+      readonly environmentId?: string;
+    },
+  ): {
+    readonly index: E2eeTrustRecordIndex;
+    readonly nodeIdHints: readonly string[];
+    readonly environmentId: string | null;
+  } => {
+    if (state.records.length >= TRUST_RECORDS_MAX) {
+      trustError("trust_store_capacity_exceeded");
+    }
+    const hubOrigin = boundedString(input.hubOrigin);
+    const accountId = boundedString(input.accountId);
+    const environmentId =
+      input.environmentId === undefined ? null : boundedString(input.environmentId);
+    if (hubOrigin === null || accountId === null) trustError("trust_store_input_invalid");
+    if (input.environmentId !== undefined && environmentId === null) {
+      trustError("trust_store_input_invalid");
+    }
+    let localNodeHandle: string;
+    try {
+      localNodeHandle = encodeBase64Url(randomBytes(LOCAL_NODE_HANDLE_BYTES));
+    } catch {
+      trustError("trust_store_runtime_unavailable");
+    }
+    const hint = input.nodeId === undefined ? null : boundedString(input.nodeId);
+    return {
+      index: { hubOrigin, accountId, localNodeHandle },
+      nodeIdHints: hint === null ? [] : [hint],
+      environmentId,
+    };
   };
 
   return {
@@ -717,8 +836,6 @@ export function makeMobileE2eeTrustStore(
 
     reconcileMarker: (hubOrigin) => exclusive(() => reconcileMarker(hubOrigin)),
 
-    snapshot: (selection) => snapshotE2eeSelection(loaded, selection),
-
     resolve: (selection) => (loaded === null ? null : resolveE2eeTrustRecord(loaded, selection)),
 
     marker: (hubOrigin) => {
@@ -737,32 +854,17 @@ export function makeMobileE2eeTrustStore(
     beginPairing: (input) =>
       exclusive(async () => {
         const state = await mutable();
-        if (state.records.length >= TRUST_RECORDS_MAX) {
-          trustError("trust_store_capacity_exceeded");
-        }
-        let localNodeHandle: string;
-        try {
-          localNodeHandle = encodeBase64Url(randomBytes(LOCAL_NODE_HANDLE_BYTES));
-        } catch {
-          trustError("trust_store_runtime_unavailable");
-        }
-        const index: E2eeTrustRecordIndex = {
-          hubOrigin: input.hubOrigin,
-          accountId: input.accountId,
-          localNodeHandle,
-        };
+        const base = mintRecordBase(state, input);
         // §13.1: between §13.2 step 2 and step 5 the record carries the pairing
         // flow and nothing more. There is no field here to write a fingerprint,
         // a continuity id, a generation, a latch, or an approval into.
         const record: E2eeTrustRecord = {
-          index,
+          ...base,
           state: "unverified",
-          nodeIdHints: input.nodeId === undefined ? [] : [input.nodeId],
           legacyConsent: { kind: "absent" },
-          environmentId: input.environmentId ?? null,
         };
         await commit({ ...state, records: [...state.records, record] });
-        return index;
+        return base.index;
       }),
 
     promote: (decision) =>
@@ -801,6 +903,16 @@ export function makeMobileE2eeTrustStore(
 
     recordAuthenticatedStatement: (input) =>
       exclusive(async () => {
+        // The statement's own fields, bounded before they can reach the document.
+        // `Math.max` propagates a `NaN` generation, which `JSON.stringify` writes
+        // as `null` and `parseRecord` then refuses — one statement, and every pin
+        // on the device is unreadable.
+        const identityFingerprint = boundedString(input.identityFingerprint);
+        const policyGeneration = boundedCount(input.policyGeneration);
+        const observedAt = boundedCount(input.observedAt);
+        if (identityFingerprint === null || policyGeneration === null || observedAt === null) {
+          trustError("trust_store_input_invalid");
+        }
         const state = await mutable();
         const existing = findRecord(state, input.index);
         // §12.1's set condition is "authenticated a capability statement to an
@@ -814,19 +926,12 @@ export function makeMobileE2eeTrustStore(
           // policy-generation memory and the approval state carry over; the
           // continuity id is unchanged by construction.
           verifiedFingerprint:
-            input.anchor === "pin-updated"
-              ? input.identityFingerprint
-              : existing.verifiedFingerprint,
+            input.anchor === "pin-updated" ? identityFingerprint : existing.verifiedFingerprint,
           // §5.7 remembers the HIGHEST accepted generation, so a replayed older
           // statement cannot lower it.
-          acceptedPolicyGeneration: Math.max(
-            existing.acceptedPolicyGeneration,
-            input.policyGeneration,
-          ),
+          acceptedPolicyGeneration: Math.max(existing.acceptedPolicyGeneration, policyGeneration),
           latch:
-            existing.latch.kind === "set"
-              ? existing.latch
-              : { kind: "set", setAt: input.observedAt },
+            existing.latch.kind === "set" ? existing.latch : { kind: "set", setAt: observedAt },
         };
         await commit(replaceRecord(state, updated));
       }),
@@ -850,6 +955,24 @@ export function makeMobileE2eeTrustStore(
         );
       }),
 
+    recordUnresolvedLegacyConsent: (decision) =>
+      exclusive(async () => {
+        const state = await mutable();
+        const base = mintRecordBase(state, decision);
+        // §13.1's third shape, which is the one this resolution needs: "a record
+        // may also exist with **no pin at all** — holding only the handle, the
+        // hints, and an owner legacy consent — for a node the owner has explicitly
+        // chosen to reach over legacy". Minting a PAIRING record here instead would
+        // claim a §13.2 ceremony the owner did not start.
+        const record: E2eeTrustRecord = {
+          ...base,
+          state: "none",
+          legacyConsent: { kind: "recorded", recordedAt: decision.decidedAt },
+        };
+        await commit({ ...state, records: [...state.records, record] });
+        return base.index;
+      }),
+
     setStrictLegacyPolicy: (decision) =>
       exclusive(async () => {
         const state = await mutable();
@@ -865,11 +988,16 @@ export function makeMobileE2eeTrustStore(
       exclusive(async () => {
         const state = await mutable();
         const existing = findRecord(state, index);
-        if (existing.nodeIdHints.includes(nodeId)) return;
+        // Dropped, never refused and never written unbounded: the id is Hub-minted
+        // (§12.1.1) and the hint "authorizes nothing and releases nothing" (§13.1),
+        // so it is not worth an error to the caller and it must never be worth the
+        // document.
+        const hint = boundedString(nodeId);
+        if (hint === null || existing.nodeIdHints.includes(hint)) return;
         await commit(
           replaceRecord(state, {
             ...existing,
-            nodeIdHints: withHint(existing.nodeIdHints, nodeId),
+            nodeIdHints: withHint(existing.nodeIdHints, hint),
           }),
         );
       }),
@@ -891,12 +1019,9 @@ export function makeMobileE2eeTrustStore(
 
     forgetHubOrigin: (hubOrigin) =>
       exclusive(async () => {
-        await hydrate();
-        const state = loaded;
-        if (state === null) {
-          await forgetUnreadable();
-          return;
-        }
+        // A scoped forget over a document this device cannot read is refused, not
+        // widened into a whole-namespace wipe (see `destroyUnreadableTrustState`).
+        const state = await mutable();
         const origins = new Set(state.verifiedMarkerOrigins);
         origins.delete(hubOrigin);
         const strict = new Map(state.strictLegacyOrigins);
@@ -910,12 +1035,7 @@ export function makeMobileE2eeTrustStore(
 
     forgetEnvironment: (environmentId) =>
       exclusive(async () => {
-        await hydrate();
-        const state = loaded;
-        if (state === null) {
-          await forgetUnreadable();
-          return;
-        }
+        const state = await mutable();
         const removed = state.records.filter((record) => record.environmentId === environmentId);
         if (removed.length === 0) return;
         let next: TrustState = {
@@ -925,6 +1045,8 @@ export function makeMobileE2eeTrustStore(
         for (const record of removed) next = clearMarkerIfUnbacked(next, record.index.hubOrigin);
         await commit(next);
       }),
+
+    destroyUnreadableTrustState: () => exclusive(destroyUnreadableTrustState),
   };
 }
 

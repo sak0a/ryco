@@ -139,6 +139,7 @@ describe("§12.1.1 classification", () => {
       class: "unexpected",
       clause: "i",
       record: "unverified",
+      scope: { kind: "fresh" },
     });
     expect(classify(state([unverified({ consented: true })]), byHandle())).toEqual({
       class: "legacy-eligible",
@@ -151,9 +152,77 @@ describe("§12.1.1 classification", () => {
       class: "unexpected",
       clause: "i",
       record: "verified",
+      scope: { kind: "account-verified" },
     });
     expect(
       classify(state([verified({ latched: "unset", consented: true })], [HUB]), byHandle()),
+    ).toEqual({ class: "legacy-eligible", branch: "b" });
+  });
+
+  it("carries what the pair and the origin hold onto a resolved selection", () => {
+    // §5.2 and §13.2.1 situations 2 and 3 are decided by this scope, and a
+    // resolution does not answer it: the pairing record §13.2 step 2 writes for a
+    // SECOND node resolves, and the first node's verified pin is exactly what
+    // §13.2.1 requires the surface to display beside the newly presented one.
+    expect(
+      classify(state([unverified({}), verified({ localNodeHandle: "first" })], [HUB]), byHandle()),
+    ).toEqual({
+      class: "unexpected",
+      clause: "i",
+      record: "unverified",
+      scope: { kind: "account-verified" },
+    });
+    // And under a second account scope on a Hub origin the device has verified:
+    // §12.1.1's account re-mint, with a record that resolves.
+    expect(
+      classify(
+        state([unverified({}), verified({ accountId: OTHER_ACCOUNT })], [HUB]),
+        byHandle(HANDLE, ACCOUNT),
+      ),
+    ).toEqual({
+      class: "unexpected",
+      clause: "i",
+      record: "unverified",
+      scope: { kind: "origin-verified" },
+    });
+  });
+
+  it("never lets a node-id hint carry the owner's consent past the device's own state", () => {
+    // §11.2: "No Hub-supplied value may move a selection _into_ the
+    // legacy-eligible class: not the `nodeId`, which the Hub re-mints at will."
+    // §12.1.1's safety argument for a hint covers a resolution to a PIN — a wrong
+    // pin cannot authenticate — and a recorded consent needs no statement at all:
+    // the Hub withholds the carrier and row K13 flushes the buffered plaintext.
+    const byHint: E2eeTrustSelection = {
+      kind: "node-id-hint",
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      nodeId: "node-2",
+    };
+    const latchedAndConsented = state(
+      [
+        verified({ latched: "set", localNodeHandle: "a", nodeIdHints: ["node-1"] }),
+        unverified({ localNodeHandle: "b", consented: true, nodeIdHints: ["node-2"] }),
+      ],
+      [HUB],
+    );
+
+    expect(classify(latchedAndConsented, byHint)).toEqual({
+      class: "unexpected",
+      clause: "i",
+      record: "unverified",
+      scope: { kind: "account-verified" },
+    });
+    // The owner's own handle is client-anchored, so it carries the consent it was
+    // recorded against.
+    expect(classify(latchedAndConsented, byHandle("b"))).toEqual({
+      class: "legacy-eligible",
+      branch: "b",
+    });
+    // And where the device's own state reaches legacy-eligible without the hint,
+    // the hint moves nothing: branch (b) is the honest answer, not a downgrade.
+    expect(
+      classify(state([unverified({ consented: true, nodeIdHints: ["node-2"] })]), byHint),
     ).toEqual({ class: "legacy-eligible", branch: "b" });
   });
 
@@ -246,6 +315,31 @@ describe("§12.1.1 late continuity-id resolution", () => {
     }
   });
 
+  it("resolves nothing when two pins under one pair recorded the same continuity id", () => {
+    // The same rule the handle and hint resolver holds to: at most one record, or
+    // nothing. Picking whichever sits first in the document would make the class a
+    // statement tightens to depend on document order rather than on a unique
+    // anchor — and §12.1.1 admits the late resolution only against "a pin under the
+    // same pair", singular.
+    const ambiguous = state(
+      [
+        verified({ latched: "set", localNodeHandle: "a", continuityId: "continuity-1" }),
+        verified({ latched: "set", localNodeHandle: "b", continuityId: "continuity-1" }),
+      ],
+      [HUB],
+    );
+
+    expect(
+      classifyE2eeTrustSnapshot(
+        snapshotE2eeContinuityIdResolution(ambiguous, {
+          hubOrigin: HUB,
+          accountId: ACCOUNT,
+          continuityId: "continuity-1",
+        }),
+      ),
+    ).toEqual({ class: "unexpected", clause: "ii" });
+  });
+
   it("cannot be reached by a continuity id an unverified record never recorded", () => {
     // §13.1: an `unverified` record holds no recorded continuity id, so a
     // first-contact statement's own id resolves nothing.
@@ -262,15 +356,99 @@ describe("§12.1.1 late continuity-id resolution", () => {
 });
 
 describe("§13.2.1 unexpected-node surface", () => {
-  it("distinguishes the three situations", () => {
-    const substitution: E2eeTrustClassification = { class: "unexpected", clause: "ii" };
-    const accountChange: E2eeTrustClassification = { class: "unexpected", clause: "iii" };
-    const statement = { kind: "first-contact-statement" } as const;
+  const statement = { kind: "first-contact-statement" } as const;
+  const none = { kind: "none" } as const;
+  const substitution: E2eeTrustClassification = { class: "unexpected", clause: "ii" };
+  const accountChange: E2eeTrustClassification = { class: "unexpected", clause: "iii" };
 
+  it("distinguishes the three situations", () => {
     expect(resolveE2eeUnexpectedNodeSituation(substitution, statement)).toBe(2);
     expect(resolveE2eeUnexpectedNodeSituation(accountChange, statement)).toBe(3);
-    expect(resolveE2eeUnexpectedNodeSituation(substitution, { kind: "none" })).toBe(1);
-    expect(resolveE2eeUnexpectedNodeSituation(accountChange, { kind: "none" })).toBe(1);
+    // §13.2.1 situation 2 is §5.2's rule about a first-contact STATEMENT, so with
+    // no evidence the same selection is situation 1 — "unexpected selection with
+    // no evidence", rows K23/K24.
+    expect(resolveE2eeUnexpectedNodeSituation(substitution, none)).toBe(1);
+  });
+
+  it("keeps the account-scope change its own case when the Hub sends nothing", () => {
+    // THE ACCOUNT-REMINT ATTACK, which produces exactly this input: §12.1.1's
+    // marker classifies the selection clause (iii) and the Hub withholds the
+    // carrier, so the channel takes row K24 with no evidence at all. §13.2.1
+    // defines situation 3 from local state alone and classifies it under
+    // K23/K24 — the no-evidence rows — and requires "This device has verified
+    // nodes on this Hub, but not for this account" rather than situation 1's
+    // generic copy, because "conflating them re-creates exactly the
+    // click-through training §13.3 opens by forbidding".
+    expect(resolveE2eeUnexpectedNodeSituation(accountChange, none)).toBe(3);
+    expect(
+      resolveE2eeUnexpectedNodeSituation(
+        {
+          class: "unexpected",
+          clause: "i",
+          record: "unverified",
+          scope: { kind: "origin-verified" },
+        },
+        none,
+      ),
+    ).toBe(3);
+  });
+
+  it("presents a resolved pairing record beside the pair's verified pin", () => {
+    // §5.2: "A first-contact statement arriving under a `(hubOrigin, accountId)`
+    // pair that already holds a verified pin MUST be presented as a possible node
+    // substitution, per §13.2.1 situation 2 — never as routine new-node pairing."
+    // The owner adding a SECOND node is a selection that resolves — to the pairing
+    // record §13.2 step 2 just wrote — and §13.2.1 says that copy "will fire on
+    // every genuine additional node".
+    expect(
+      resolveE2eeUnexpectedNodeSituation(
+        {
+          class: "unexpected",
+          clause: "i",
+          record: "unverified",
+          scope: { kind: "account-verified" },
+        },
+        statement,
+      ),
+    ).toBe(2);
+    // The first node on this pair and this origin is the one case that continues
+    // the ceremony without a surface: there is nothing to compare it against.
+    expect(
+      resolveE2eeUnexpectedNodeSituation(
+        { class: "unexpected", clause: "i", record: "unverified", scope: { kind: "fresh" } },
+        statement,
+      ),
+    ).toBeNull();
+    // With no statement it is situation 1 even then: rows K23/K24 close the
+    // channel and §13.2.1 requires the surface with its two resolutions.
+    expect(
+      resolveE2eeUnexpectedNodeSituation(
+        { class: "unexpected", clause: "i", record: "unverified", scope: { kind: "fresh" } },
+        none,
+      ),
+    ).toBe(1);
+  });
+
+  it("raises a surface for every other unexpected selection, including the cold start", () => {
+    // §4.4's `unobtainable`: the load has not completed, so the device knows
+    // nothing about its own pins. Suppressing the surface here would leave the
+    // owner with no warning on the exact channel §4.4 fails closed for.
+    for (const evidence of [none, statement]) {
+      expect(
+        resolveE2eeUnexpectedNodeSituation(
+          { class: "unexpected", clause: "unobtainable" },
+          evidence,
+        ),
+      ).toBe(1);
+      for (const record of ["verified", "unpinned"] as const) {
+        expect(
+          resolveE2eeUnexpectedNodeSituation(
+            { class: "unexpected", clause: "i", record, scope: { kind: "fresh" } },
+            evidence,
+          ),
+        ).toBe(1);
+      }
+    }
   });
 
   it("is never raised for a latched or legacy-eligible selection", () => {
