@@ -93,6 +93,25 @@ function authenticate(socket: MockWebSocket) {
   socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
 }
 
+/**
+ * The frame sequence a full connect / ping / send / send / close produces, as
+ * it stood before the E2EE seams were opened inside `HostedRelayEngine`.
+ * `packages/client-runtime/src/relay/relayEngine.test.ts` pins the identical
+ * literal at the package boundary; both surfaces carry it because both apps
+ * instantiate the engine and neither owns any framing of its own.
+ */
+const LEGACY_FRAME_SEQUENCE = [
+  "a5647065657266636c69656e74647479706564617574686b72656c61795469636b6574582007070707070707070707070707070707070707070707070707070707070707076d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a4647479706564706f6e67656e6f6e63654804040404040404046d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a664747970656464617461677061796c6f61645320090d0a20090d0a7b226669727374223a317d6873657175656e636500696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a664747970656464617461677061796c6f61645420090d0a20090d0a7b227365636f6e64223a327d6873657175656e636501696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a464747970656d6368616e6e656c2e636c6f7365696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+] as const;
+
+function hex(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 function lastPayload(socket: MockWebSocket): number[] | null {
   const decoded = decodeRelayFrame(new Uint8Array(socket.sent.at(-1)!));
   return decoded.ok && decoded.value.type === "data"
@@ -176,6 +195,37 @@ describe("BrowserHostedRelaySocket destination validation", () => {
 });
 
 describe("BrowserHostedRelaySocket wire compatibility", () => {
+  it("emits the pre-E2EE frame sequence byte for byte", async () => {
+    const { facade, socket } = create();
+    const received: number[][] = [];
+    facade.addEventListener("message", (event) =>
+      received.push([...new Uint8Array((event as MessageEvent).data)]),
+    );
+    authenticate(socket);
+    socket.frame({ type: "ping", ...VERSION, nonce: new Uint8Array(8).fill(4) });
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: new TextEncoder().encode('{"inbound":1}'),
+    });
+    await Promise.resolve();
+    facade.send(new TextEncoder().encode('{"first":1}'));
+    facade.send(new TextEncoder().encode('{"second":2}'));
+    facade.close();
+
+    // The facade owns no framing — it instantiates the same engine
+    // `apps/mobile` does — so the E2EE seams inside that engine are a no-op
+    // here exactly as long as this sequence is unchanged. It is pinned as bytes
+    // for the reason the package-level copy is: an extra frame or a reordered
+    // map key would still satisfy a structural assertion.
+    expect(socket.sent.map((bytes) => hex(new Uint8Array(bytes)))).toEqual([
+      ...LEGACY_FRAME_SEQUENCE,
+    ]);
+    expect(received).toEqual([[...new TextEncoder().encode('{"inbound":1}')]]);
+  });
+
   it("coerces string, ArrayBuffer, typed-array, and SharedArrayBuffer send inputs", () => {
     const { facade, socket } = create();
     authenticate(socket);

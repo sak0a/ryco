@@ -694,24 +694,6 @@ const CAPABILITY_CARRIER_MEMBERS = ["_tag", "statement"] as const;
 const CARRIER_TEXT_DECODER = new TextDecoder();
 const CARRIER_TEXT_ENCODER = new TextEncoder();
 
-/**
- * §5.3's fixed opening bytes, taken from the same encoder the carrier is built
- * with rather than written out: the carrier text is byte-identical to a standard
- * JSON encoder's output for the two members in that order, so every conforming
- * carrier begins with exactly these bytes.
- */
-const CAPABILITY_CARRIER_PREFIX = CARRIER_TEXT_ENCODER.encode(
-  JSON.stringify({ _tag: E2EE_CAPABILITY_CARRIER_TAG }).slice(0, -1),
-);
-
-function hasCapabilityCarrierPrefix(payload: Uint8Array): boolean {
-  const length = CAPABILITY_CARRIER_PREFIX.byteLength;
-  return (
-    payload.byteLength >= length &&
-    bytesEqual(payload.subarray(0, length), CAPABILITY_CARRIER_PREFIX)
-  );
-}
-
 export type E2eeCapabilityCarrierDecodeError =
   /**
    * Not a JSON object carrying `E2EE_CAPABILITY_CARRIER_TAG`, at any size:
@@ -752,19 +734,27 @@ export type E2eeCapabilityCarrierDecodeError =
  * carrier, and this module has no encoder-side guard to add for that: the rule is
  * that a client never calls `encodeE2eeCapabilityCarrier` at all.
  *
- * THE TAG DECIDES THE CLASS AT EVERY SIZE. §4.4 partitions legacy JSON into
- * exactly two input classes, and the two reasons above are those classes, so
- * `E2EE_CAPABILITY_CARRIER_MAX_BYTES` is never answered for a payload this
- * decoder has not read: §15 places that bound on the node at emit, ordinary
- * legacy RPC traffic runs far past it — `RELAY_MAX_DATA_CHUNK_BYTES` alone is
- * more than thirty times larger, before reassembly — and a decoder that measured
- * before it looked would answer identically for row K19's large file read and for
- * an oversized carrier, making the partition undecidable exactly where a Hub can
- * choose the size. Past the bound the class is read off §5.3's fixed opening
- * bytes instead, which keeps the bound ahead of `JSON.parse` without collapsing
- * the two classes.
+ * THE TAG DECIDES THE CLASS AT EVERY SIZE, and it decides it the way §4.4
+ * defines it: `CARRIER` is "the subclass of `LEGACY-JSON` that is a top-level
+ * JSON object whose `_tag` member equals `E2EE_CAPABILITY_CARRIER_TAG`". So the
+ * §5.3 size bound is a CONFORMANCE check applied after the class is known, and
+ * never the test that decides it. Deciding the class from the payload's opening
+ * bytes instead was tried and is wrong in both directions: a top-level object
+ * carrying the reserved tag in any other member position is a `CARRIER` the
+ * prefix misses — which hands a Hub row K9's legacy lock in place of K2/K3,
+ * which never lock legacy — while an unparseable payload that merely starts with
+ * those bytes is not, and would change class with nothing but its length. Nor may
+ * the bound be answered before the payload is read at all: ordinary legacy RPC
+ * traffic runs far past it (`RELAY_MAX_DATA_CHUNK_BYTES` alone is more than
+ * thirty times larger, before reassembly), so that would make row K19's large
+ * file read indistinguishable from an oversized carrier.
  *
- * The `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` bound is NOT applied here either.
+ * The parse this needs is bounded by the relay's own `RELAY_MAX_RPC_MESSAGE_BYTES`
+ * — the same bound the RPC parser runs under on the `not_carrier` payloads this
+ * function hands straight on to it, so recognizing the class adds no reach a
+ * legacy channel did not already give the peer.
+ *
+ * The `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` bound is NOT applied here.
  * §5.2 step 0 owns it, and it owns it for every statement however it arrived —
  * §3.2.1 S5 derives the carrier bound from the statement bound, and a decoder
  * that leaned on that derivation would be relying on arithmetic performed in
@@ -775,12 +765,6 @@ export function decodeE2eeCapabilityCarrier(
 ): E2eeDecodeResult<Uint8Array, E2eeCapabilityCarrierDecodeError> {
   if (payload.byteLength === 0 || payload[0] !== LEGACY_JSON_OBJECT_FIRST_BYTE) {
     return { kind: "error", reason: "not_carrier" };
-  }
-  if (payload.byteLength > E2EE_CAPABILITY_CARRIER_MAX_BYTES) {
-    return {
-      kind: "error",
-      reason: hasCapabilityCarrierPrefix(payload) ? "malformed" : "not_carrier",
-    };
   }
   let parsed: unknown;
   try {
@@ -794,6 +778,12 @@ export function decodeE2eeCapabilityCarrier(
   const members = parsed as Readonly<Record<string, unknown>>;
   if (members._tag !== E2EE_CAPABILITY_CARRIER_TAG) {
     return { kind: "error", reason: "not_carrier" };
+  }
+  // The class is settled: from here every answer is `malformed`, the §5.3 bound
+  // included. §15 places that bound on the node at emit, so a carrier past it is
+  // one no conforming node produced.
+  if (payload.byteLength > E2EE_CAPABILITY_CARRIER_MAX_BYTES) {
+    return { kind: "error", reason: "malformed" };
   }
   const keys = Object.keys(members);
   if (

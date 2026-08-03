@@ -3,6 +3,7 @@ import { RpcSerialization } from "effect/unstable/rpc";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  planRelayMessage,
   prepareRelayMessage,
   RELAY_CHUNK_CAPABILITY_PRELUDE,
   isChunkedPayload,
@@ -326,5 +327,94 @@ describe("RelayMessageAssembler", () => {
     expect([...first.subarray(RELAY_CHUNK_HEADER_BYTES)]).toEqual(
       Array.from({ length: first.byteLength - RELAY_CHUNK_HEADER_BYTES }, () => 0),
     );
+  });
+});
+
+describe("planRelayMessage", () => {
+  // `prepareRelayMessage` is DERIVED from the plan, so it can never disagree
+  // with it: every expectation below is therefore written out independently,
+  // and the cross-check that the two stay one rule is the separate case that
+  // follows. A boundary asserted only against the function it is derived from
+  // is a boundary nothing holds.
+  const options = { maxChunkBytes: LIMIT, maxMessageBytes: 4_096, peerSupportsChunking: true };
+  const PRELUDE = RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength;
+  const CHUNK_CAPACITY = LIMIT - RELAY_CHUNK_HEADER_BYTES;
+
+  it("lays every size class out against written-out payload lengths", () => {
+    const expected: readonly (readonly [number, boolean, boolean, readonly number[]])[] = [
+      // An empty message still advertises: the prelude alone fits the frame.
+      [0, true, false, [PRELUDE]],
+      [1, true, false, [PRELUDE + 1]],
+      // The last size the prelude fits beside — `<=`, not `<`: exactly
+      // `maxChunkBytes` on the wire is a fitting payload.
+      [LIMIT - PRELUDE, true, false, [LIMIT]],
+      // One byte past it there is no headroom, so the message goes bare.
+      [LIMIT - PRELUDE + 1, false, false, [LIMIT - PRELUDE + 1]],
+      [LIMIT, false, false, [LIMIT]],
+      // Past `maxChunkBytes` the message is split, and every chunk carries the
+      // header — including the short final one.
+      [LIMIT + 1, false, true, [LIMIT, RELAY_CHUNK_HEADER_BYTES + (LIMIT + 1 - CHUNK_CAPACITY)]],
+      [CHUNK_CAPACITY * 2, false, true, [LIMIT, LIMIT]],
+      [CHUNK_CAPACITY * 2 + 1, false, true, [LIMIT, LIMIT, RELAY_CHUNK_HEADER_BYTES + 1]],
+    ];
+    for (const [size, advertised, chunked, payloadBytes] of expected) {
+      expect(planRelayMessage(size, options), String(size)).toEqual({
+        kind: "ready",
+        advertised,
+        chunked,
+        payloadBytes,
+      });
+    }
+  });
+
+  it("predicts exactly the payloads prepareRelayMessage builds", () => {
+    // A sender that must reserve capacity for every payload of a message BEFORE
+    // the message exists (docs/relay-e2ee-protocol.md §9.3) reads the plan and
+    // then spends what the preparation produces. The two are the same rule, and
+    // this is the assertion that keeps them one rule rather than two.
+    for (const size of [
+      0,
+      1,
+      LIMIT - RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength,
+      LIMIT - 1,
+      LIMIT,
+      LIMIT + 1,
+      200,
+      4_096,
+    ]) {
+      const plan = planRelayMessage(size, options);
+      const prepared = prepareRelayMessage(new Uint8Array(size).fill(0x7b), options);
+      expect(plan.kind).toBe("ready");
+      expect(prepared.kind).toBe("ready");
+      if (plan.kind !== "ready" || prepared.kind !== "ready") continue;
+      expect(plan.payloadBytes).toEqual(prepared.payloads.map((payload) => payload.byteLength));
+      expect(plan.chunked).toBe(prepared.payloads.length > 1);
+      expect(plan.advertised).toBe(
+        prepared.payloads.length === 1 && prepared.payloads[0]!.byteLength !== size,
+      );
+    }
+  });
+
+  it("refuses the same messages prepareRelayMessage refuses", () => {
+    const oversized = { maxChunkBytes: LIMIT, maxMessageBytes: 100, peerSupportsChunking: true };
+    expect(planRelayMessage(101, oversized)).toEqual({
+      kind: "error",
+      reason: "message_too_large",
+    });
+    expect(prepareRelayMessage(new Uint8Array(101), oversized).kind).toBe("error");
+
+    const unsupported = {
+      maxChunkBytes: LIMIT,
+      maxMessageBytes: 4_096,
+      peerSupportsChunking: false,
+    };
+    expect(planRelayMessage(LIMIT + 1, unsupported)).toEqual({
+      kind: "error",
+      reason: "peer_unsupported",
+    });
+    expect(prepareRelayMessage(new Uint8Array(LIMIT + 1), unsupported)).toEqual({
+      kind: "error",
+      reason: "peer_unsupported",
+    });
   });
 });

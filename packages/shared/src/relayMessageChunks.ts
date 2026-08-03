@@ -38,6 +38,18 @@ export type PreparedRelayMessage =
   | { readonly kind: "ready"; readonly payloads: ReadonlyArray<Uint8Array> }
   | { readonly kind: "error"; readonly reason: "message_too_large" | "peer_unsupported" };
 
+export type RelayMessagePlan =
+  | {
+      readonly kind: "ready";
+      /** The single payload carries the capability prelude. */
+      readonly advertised: boolean;
+      /** The message is split into `RELAY_CHUNK_MAGIC` chunks. */
+      readonly chunked: boolean;
+      /** The exact byte length of every payload, in transmission order. */
+      readonly payloadBytes: ReadonlyArray<number>;
+    }
+  | { readonly kind: "error"; readonly reason: "message_too_large" | "peer_unsupported" };
+
 export type ChunkError =
   | "bad_header"
   | "message_too_large"
@@ -124,6 +136,66 @@ export function splitRelayMessage(
   return chunks;
 }
 
+export interface RelayMessageLimits {
+  readonly maxChunkBytes: number;
+  readonly maxMessageBytes: number;
+  readonly peerSupportsChunking: boolean;
+}
+
+/**
+ * The payload layout `prepareRelayMessage` produces for a message of this
+ * length, without building a byte of it.
+ *
+ * A sender that must reserve send-queue capacity for EVERY payload of one
+ * message before the message exists needs the split rule itself and not a
+ * second approximation of it, so `prepareRelayMessage` is defined in terms of
+ * this rather than beside it.
+ */
+export function planRelayMessage(
+  messageBytes: number,
+  options: RelayMessageLimits,
+): RelayMessagePlan {
+  if (
+    !Number.isSafeInteger(options.maxChunkBytes) ||
+    options.maxChunkBytes <= 0 ||
+    !Number.isSafeInteger(options.maxMessageBytes) ||
+    options.maxMessageBytes < 0 ||
+    !Number.isSafeInteger(messageBytes) ||
+    messageBytes < 0
+  ) {
+    throw new TypeError(
+      "Relay chunk limits must be positive and message limits non-negative safe integers.",
+    );
+  }
+  if (messageBytes > options.maxMessageBytes) {
+    return { kind: "error", reason: "message_too_large" };
+  }
+  if (messageBytes <= options.maxChunkBytes) {
+    const advertised =
+      messageBytes + RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength <= options.maxChunkBytes;
+    return {
+      kind: "ready",
+      advertised,
+      chunked: false,
+      payloadBytes: [
+        advertised ? RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + messageBytes : messageBytes,
+      ],
+    };
+  }
+  if (!options.peerSupportsChunking) {
+    return { kind: "error", reason: "peer_unsupported" };
+  }
+  const capacity = options.maxChunkBytes - RELAY_CHUNK_HEADER_BYTES;
+  if (capacity <= 0) {
+    throw new Error("Relay chunk limit is too small to carry a chunk header.");
+  }
+  const payloadBytes: number[] = [];
+  for (let offset = 0; offset < messageBytes; offset += capacity) {
+    payloadBytes.push(RELAY_CHUNK_HEADER_BYTES + Math.min(capacity, messageBytes - offset));
+  }
+  return { kind: "ready", advertised: false, chunked: true, payloadBytes };
+}
+
 /**
  * Prepare one logical message for the relay.
  *
@@ -134,43 +206,18 @@ export function splitRelayMessage(
  */
 export function prepareRelayMessage(
   message: Uint8Array,
-  options: {
-    readonly maxChunkBytes: number;
-    readonly maxMessageBytes: number;
-    readonly peerSupportsChunking: boolean;
-  },
+  options: RelayMessageLimits,
 ): PreparedRelayMessage {
-  if (
-    !Number.isSafeInteger(options.maxChunkBytes) ||
-    options.maxChunkBytes <= 0 ||
-    !Number.isSafeInteger(options.maxMessageBytes) ||
-    options.maxMessageBytes < 0
-  ) {
-    throw new TypeError(
-      "Relay chunk limits must be positive and message limits non-negative safe integers.",
-    );
+  const plan = planRelayMessage(message.byteLength, options);
+  if (plan.kind === "error") return plan;
+  if (plan.chunked) {
+    return { kind: "ready", payloads: splitRelayMessage(message, options.maxChunkBytes) };
   }
-  if (message.byteLength > options.maxMessageBytes) {
-    return { kind: "error", reason: "message_too_large" };
-  }
-  if (message.byteLength <= options.maxChunkBytes) {
-    if (message.byteLength + RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength <= options.maxChunkBytes) {
-      const advertised = new Uint8Array(
-        RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + message.byteLength,
-      );
-      advertised.set(RELAY_CHUNK_CAPABILITY_PRELUDE);
-      advertised.set(message, RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength);
-      return { kind: "ready", payloads: [advertised] };
-    }
-    return { kind: "ready", payloads: [message] };
-  }
-  if (!options.peerSupportsChunking) {
-    return { kind: "error", reason: "peer_unsupported" };
-  }
-  return {
-    kind: "ready",
-    payloads: splitRelayMessage(message, options.maxChunkBytes),
-  };
+  if (!plan.advertised) return { kind: "ready", payloads: [message] };
+  const advertised = new Uint8Array(RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength + message.byteLength);
+  advertised.set(RELAY_CHUNK_CAPABILITY_PRELUDE);
+  advertised.set(message, RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength);
+  return { kind: "ready", payloads: [advertised] };
 }
 
 /**
