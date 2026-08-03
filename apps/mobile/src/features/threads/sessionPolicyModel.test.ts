@@ -31,12 +31,15 @@ describe("session policy vocabulary", () => {
     expect(runtimeModeConfig["full-access"].tone).toBe("caution");
     expect(runtimeModeConfig["approval-required"].tone).toBe("default");
     expect(runtimeModeConfig["auto-accept-edits"].tone).toBe("default");
+    // Auto still stops for the risky calls, so it is not the caution mode.
+    expect(runtimeModeConfig.auto.tone).toBe("default");
   });
 
   it("keeps declaration order as display order", () => {
     expect(build().access.segments.map((segment) => segment.value)).toEqual([
       "approval-required",
       "auto-accept-edits",
+      "auto",
       "full-access",
     ]);
     expect(build().mode?.segments.map((segment) => segment.value)).toEqual([
@@ -54,13 +57,16 @@ describe("session policy model", () => {
     expect(model.access.segments[1]?.label).toBe("Auto-accept edits");
   });
 
-  it("gives every segment a short label that fits three-up on a phone", () => {
+  it("gives every segment a short label rather than the full one", () => {
     const model = build();
-    // "Auto-accept edits" truncates to "Auto-acc…" in a third of a phone's
-    // width; the short form is what the segment renders.
+    // "Auto-accept edits" does not survive a segment's share of a phone's
+    // width; the short form is what the segment renders. Access is four-up
+    // since `auto` joined it, so the budget here is tighter than the other
+    // groups' three.
     expect(model.access.segments.map((segment) => segment.shortLabel)).toEqual([
       "Supervised",
       "Auto-accept",
+      "Auto",
       "Full access",
     ]);
     // The full label survives for screen readers.
@@ -88,7 +94,7 @@ describe("session policy model", () => {
   it("hides the whole Mode group when the provider opts out", () => {
     expect(build({ interactionModeSupported: false }).mode).toBeNull();
     // Access is never hidden — every provider has a runtime mode.
-    expect(build({ interactionModeSupported: false }).access.segments).toHaveLength(3);
+    expect(build({ interactionModeSupported: false }).access.segments).toHaveLength(4);
   });
 
   it("disables only Ask when the provider does not support it, and says why", () => {

@@ -61,10 +61,10 @@ function PolicyGroup<Value extends string>(props: {
                 segment.disabled && "opacity-40",
               )}
             >
-              {/* No per-segment icon: three segments share ~92pt each, and an
-                  icon plus its gap costs 20 of that — enough to truncate
-                  "Auto-accept" to "Auto-acc…". The glyph stays on the rail
-                  pill, where there is room for it. */}
+              {/* No per-segment icon: Access is four segments sharing ~82pt
+                  each, and an icon plus its gap costs 20 of that — enough to
+                  truncate "Auto-accept" to "Auto-acc…". The glyph stays on the
+                  rail pill, where there is room for it. */}
               <Text
                 className={cn(
                   "shrink text-center text-xs font-ryco-bold",

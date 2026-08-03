@@ -4890,6 +4890,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       const autoAcceptItem = await waitForSelectItemContainingText("Auto-accept edits");
       expect(autoAcceptItem.textContent).toContain("Auto-approve edits");
+      expect(
+        (await waitForSelectItemContainingText("Routine actions proceed without you")).textContent,
+      ).toContain("Auto");
       expect((await waitForSelectItemContainingText("Full access")).textContent).toContain(
         "Allow commands and edits without prompts",
       );
