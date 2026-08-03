@@ -88,6 +88,8 @@ import { composeSidebarTree } from "./sidebar/hooks/useSidebarTree";
 import { SidebarProjectsContent, PROJECT_ROOT_DROP_ID } from "./sidebar/SidebarProjectList";
 import { SidebarProjectItem } from "./sidebar/SidebarProjectItem";
 import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrome";
+import { SidebarNewThreadButton } from "./sidebar/SidebarNewThreadButton";
+import { resolveNewThreadProjectKey } from "./sidebar/sidebarNewThreadTarget";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { derivePhysicalProjectKey, getProjectOrderKey } from "../logicalProject";
@@ -269,6 +271,40 @@ export default function Sidebar() {
       getId: getProjectOrderKey,
     });
   }, [projectOrder, projects]);
+
+  // Target for the sidebar-level "New thread" button: the project whose thread
+  // was most recently opened or updated, falling back to sidebar order on a
+  // fresh install so the button is never a dead end.
+  const threadLastVisitedAtById = useUiStateStore((store) => store.threadLastVisitedAtById);
+  const newThreadTargetProject = useMemo(() => {
+    const projectKeyOf = (project: (typeof orderedProjects)[number]) =>
+      scopedProjectKey(scopeProjectRef(project.environmentId, project.id));
+    const targetKey = resolveNewThreadProjectKey({
+      orderedProjectKeys: orderedProjects.map(projectKeyOf),
+      threads: sidebarThreads,
+      lastVisitedAtByThreadKey: new Map(
+        Object.entries(threadLastVisitedAtById).map(([key, visitedAt]) => {
+          const parsed = Date.parse(visitedAt);
+          return [key, Number.isNaN(parsed) ? null : parsed] as const;
+        }),
+      ),
+      threadKey: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      threadProjectKey: (thread) =>
+        scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
+    });
+    return targetKey
+      ? (orderedProjects.find((project) => projectKeyOf(project) === targetKey) ?? null)
+      : null;
+  }, [orderedProjects, sidebarThreads, threadLastVisitedAtById]);
+  const startNewThreadFromSidebar = useCallback(() => {
+    if (!newThreadTargetProject) return;
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void handleNewThread(
+      scopeProjectRef(newThreadTargetProject.environmentId, newThreadTargetProject.id),
+    );
+  }, [handleNewThread, isMobile, newThreadTargetProject, setOpenMobile]);
 
   // Build a mapping from physical project key → logical project key for
   // cross-environment grouping.  Projects that share a repositoryIdentity
@@ -1045,6 +1081,12 @@ export default function Sidebar() {
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
+
+      <SidebarNewThreadButton
+        shortcutLabel={newThreadShortcutLabel}
+        disabled={newThreadTargetProject === null}
+        onClick={startNewThreadFromSidebar}
+      />
 
       <SidebarProjectsContent
         showArm64IntelBuildWarning={showArm64IntelBuildWarning}

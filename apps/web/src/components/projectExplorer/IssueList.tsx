@@ -22,14 +22,82 @@ export const IssueList = memo(function IssueList(props: {
   isLoading: boolean;
   emptyText: string;
   selectedKey?: string | null | undefined;
+  /**
+   * `compact` collapses each issue to a single line for pickers. An issue
+   * carries far less metadata than a pull request, so the second row was
+   * mostly empty — author and date fit beside the title instead.
+   */
+  density?: "default" | "compact";
   onSelect: (issue: SourceControlIssueSummary) => void;
 }) {
+  const compact = props.density === "compact";
   if (props.isLoading && props.items.length === 0) {
-    return <div className="px-4 py-8 text-center text-muted-foreground text-sm">Loading…</div>;
+    return (
+      <div
+        className={cn(
+          "text-center text-muted-foreground text-sm",
+          compact ? "px-3 py-6" : "px-4 py-8",
+        )}
+      >
+        Loading…
+      </div>
+    );
   }
   if (props.items.length === 0) {
     return (
-      <div className="px-4 py-8 text-center text-muted-foreground text-sm">{props.emptyText}</div>
+      <div
+        className={cn(
+          "text-center text-muted-foreground text-sm",
+          compact ? "px-3 py-6" : "px-4 py-8",
+        )}
+      >
+        {props.emptyText}
+      </div>
+    );
+  }
+  if (compact) {
+    return (
+      <ul role="listbox" className="divide-y divide-border/25">
+        {props.items.map((issue) => {
+          const itemKey = `${issue.provider}:${issue.number}`;
+          const isSelected = props.selectedKey === itemKey;
+          return (
+            <li key={itemKey}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={isSelected}
+                onClick={() => props.onSelect(issue)}
+                className={cn(
+                  "flex w-full items-center gap-2 px-2.5 py-1.5 text-left",
+                  "hover:bg-accent/40 focus-visible:bg-accent/60 focus-visible:outline-none",
+                  isSelected && "bg-accent/55",
+                )}
+              >
+                <StateBadge
+                  kind={issue.state === "open" ? "issue-open" : "issue-closed"}
+                  iconOnly
+                  className="shrink-0"
+                />
+                <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
+                  #{issue.number}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm">{issue.title}</span>
+                {issue.author ? (
+                  <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                    {issue.author}
+                  </span>
+                ) : null}
+                {issue.updatedAt && Option.isSome(issue.updatedAt) ? (
+                  <span className="shrink-0 text-[11px] text-muted-foreground/60">
+                    {formatItemDate(issue.updatedAt)}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     );
   }
   return (

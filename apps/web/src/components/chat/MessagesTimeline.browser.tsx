@@ -174,9 +174,6 @@ describe("MessagesTimeline", () => {
     );
 
     try {
-      await expect
-        .element(page.getByText("Send a message to start the conversation."))
-        .not.toBeInTheDocument();
       await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
     } finally {
       await screen.unmount();
@@ -382,8 +379,8 @@ describe("MessagesTimeline", () => {
 
     try {
       await expect
-        .element(page.getByText("Send a message to start the conversation."))
-        .toBeVisible();
+        .element(page.getByText("Thinking · Inspecting repository state"))
+        .not.toBeInTheDocument();
 
       await screen.rerender(
         <MessagesTimeline

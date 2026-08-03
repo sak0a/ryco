@@ -1,4 +1,10 @@
-import { CloudIcon, FolderOpenIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react";
+import {
+  CloudIcon,
+  FolderOpenIcon,
+  MoreHorizontalIcon,
+  PlusIcon,
+  SquarePenIcon,
+} from "lucide-react";
 import React from "react";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -30,6 +36,7 @@ export function SidebarProjectHeader(props: {
   onContextMenu: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onOpenProjectOverviewClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onOpenNewWorktreeClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  onOpenNewThreadClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   onCopyPath: (member: SidebarProjectGroupMember) => void;
   onGrouping: (member: SidebarProjectGroupMember) => void;
   onNewFolderWithProject: (project: SidebarProjectSnapshot) => void;
@@ -54,6 +61,7 @@ export function SidebarProjectHeader(props: {
     onContextMenu,
     onOpenProjectOverviewClick,
     onOpenNewWorktreeClick,
+    onOpenNewThreadClick,
   } = props;
 
   return (
@@ -61,7 +69,7 @@ export function SidebarProjectHeader(props: {
       <SidebarMenuButton
         ref={dragHandleProps?.setActivatorNodeRef}
         size="sm"
-        className={`gap-2 px-2 py-1.5 pr-20 phone:pointer-coarse:pr-36 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
+        className={`gap-2 px-2 py-1.5 pr-26 phone:pointer-coarse:pr-36 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
           isManualProjectSorting ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"
         }`}
         {...(dragHandleProps ? dragHandleProps.attributes : {})}
@@ -126,6 +134,27 @@ export function SidebarProjectHeader(props: {
           </TooltipPopup>
         </Tooltip>
       )}
+      {/* Opens the composer-first new-thread surface. Hidden on coarse
+          pointers: the phone shell has its own new-thread flow (`PhoneHome`)
+          and the touch action row is already at capacity. */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <div className="pointer-events-none absolute top-1 right-[4.75rem] phone:pointer-coarse:hidden opacity-0 transition-opacity duration-150 phone:pointer-events-auto phone:opacity-100 group-hover/project-header:pointer-events-auto group-hover/project-header:opacity-100 group-focus-within/project-header:pointer-events-auto group-focus-within/project-header:opacity-100">
+              <button
+                type="button"
+                aria-label={`Start a new thread in ${project.displayName}`}
+                data-testid="new-thread-composer-button"
+                className={`inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 hover:bg-secondary hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${SIDEBAR_ROW_ACTION_COARSE_CLASS_NAME}`}
+                onClick={onOpenNewThreadClick}
+              >
+                <SquarePenIcon className="size-3.5" />
+              </button>
+            </div>
+          }
+        />
+        <TooltipPopup side="top">New thread</TooltipPopup>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={

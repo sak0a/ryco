@@ -111,7 +111,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -134,6 +134,8 @@ import {
   deriveRevertTurnCountByUserMessageId,
   deriveUndoTurnCountByTurnId,
 } from "./chat/MessagesTimeline.logic";
+import { NewThreadHero } from "./chat/NewThreadHero";
+import { NewThreadWorkLocation } from "./chat/NewThreadWorkLocation";
 import { ThreadMessageSearchBar } from "./chat/ThreadMessageSearchBar";
 import {
   buildThreadMessageSearchOccurrences,
@@ -466,6 +468,7 @@ export default function ChatView(props: ChatViewProps) {
   const setComposerDraftTokenMode = useComposerDraftStore((store) => store.setTokenMode);
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
   const getDraftSessionByLogicalProjectKey = useComposerDraftStore(
     (store) => store.getDraftSessionByLogicalProjectKey,
   );
@@ -502,6 +505,9 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [planSidebarOpen, setPlanSidebarOpen] = useState(true);
+  // Set once the user opens the overview from the new-thread surface, so the
+  // empty-thread suppression below yields to an explicit request.
+  const [overviewOpenedOnEmptyThread, setOverviewOpenedOnEmptyThread] = useState(false);
   const [overviewFloatingOpen, setOverviewFloatingOpen] = useState(false);
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
@@ -1281,10 +1287,13 @@ export default function ChatView(props: ChatViewProps) {
   // is populated immediately on send while the former only updates once the
   // server acknowledges; checking only messages.length would leave a brief
   // window where the row stays visible after the user presses send.
-  const hintRowVisible =
+  // The hint row and the `NewThreadHero` share this predicate so they appear
+  // and disappear as one block.
+  const isEmptyThread =
     activeThread !== undefined &&
     activeThread.messages.length === 0 &&
     optimisticUserMessages.length === 0;
+  const hintRowVisible = isEmptyThread;
   const handleInsertHintTrigger = useCallback(
     (trigger: HintRowTrigger) => {
       composerRef.current?.insertTriggerAtCursor(trigger);
@@ -1939,14 +1948,31 @@ export default function ChatView(props: ChatViewProps) {
         const wantsOpen = typeof nextOpen === "boolean" ? nextOpen : !overviewFloatingOpen;
         setOverviewFloatingOpen(wantsOpen);
         setOverviewSidebarOpen(wantsOpen);
+        if (wantsOpen) setOverviewOpenedOnEmptyThread(true);
         return;
       }
 
-      const wantsOpen = typeof nextOpen === "boolean" ? nextOpen : !planSidebarOpen;
+      // While the thread is empty the panel reads as closed regardless of
+      // `planSidebarOpen`, so the toggle has to invert the *visible* state or
+      // the first click would be a no-op.
+      const wantsOpen =
+        typeof nextOpen === "boolean"
+          ? nextOpen
+          : isEmptyThread && !overviewOpenedOnEmptyThread
+            ? true
+            : !planSidebarOpen;
       setOverviewFloatingOpen(false);
       setOverviewSidebarOpen(wantsOpen);
+      setOverviewOpenedOnEmptyThread(wantsOpen);
     },
-    [overviewFloatingOpen, planSidebarOpen, setOverviewSidebarOpen, workspacePanelOpen],
+    [
+      isEmptyThread,
+      overviewFloatingOpen,
+      overviewOpenedOnEmptyThread,
+      planSidebarOpen,
+      setOverviewSidebarOpen,
+      workspacePanelOpen,
+    ],
   );
 
   const persistThreadSettingsForNextTurn = useCallback(
@@ -2359,6 +2385,14 @@ export default function ChatView(props: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler, true);
   }, []);
 
+  // The branch toolbar's inline chips cover the fast path (base branch + create
+  // on send); this opens the full picker for worktrees sourced from a PR,
+  // issue, or Jira item.
+  const openWorktreeSources = useCallback(() => {
+    setProjectExplorerInitialTab("prs");
+    setProjectExplorerOpen(true);
+  }, []);
+
   useChatGlobalShortcuts({
     activeThreadId,
     keybindings,
@@ -2430,30 +2464,100 @@ export default function ChatView(props: ChatViewProps) {
         sendEnvMode,
       });
 
+    // A PR / issue / work item source is only *recorded* when picked — creating
+    // a git worktree is a side effect on disk, and picking a source is not a
+    // decision to perform one. This is where the two join: the intent goes
+    // through the same `createWorktreeForProject` call the New worktree dialog
+    // makes, so the derived branch name, origin linkage, and sidebar badges all
+    // match. That call also creates the thread, so the composed message is sent
+    // into it rather than promoting the draft.
+    const pendingWorktreeSource =
+      isFirstMessage && sendEnvMode === "worktree" ? (draftThread?.worktreeSource ?? null) : null;
+    let sourceThreadRef: ScopedThreadRef | null = null;
+    if (pendingWorktreeSource) {
+      const createWorktree = api.git.createWorktreeForProject;
+      if (!createWorktree) {
+        setThreadError(threadIdForSend, "Worktree creation is unavailable in this environment.");
+        return false;
+      }
+      try {
+        const created = await createWorktree({
+          projectId: activeProject.id,
+          intent:
+            pendingWorktreeSource.kind === "pr"
+              ? { kind: "pr", number: pendingWorktreeSource.number }
+              : pendingWorktreeSource.kind === "issue"
+                ? {
+                    kind: "issue",
+                    number: pendingWorktreeSource.number,
+                    title: pendingWorktreeSource.title,
+                  }
+                : {
+                    kind: "workItem",
+                    provider: pendingWorktreeSource.provider,
+                    key: pendingWorktreeSource.key,
+                    title: pendingWorktreeSource.title,
+                    ...(pendingWorktreeSource.state ? { state: pendingWorktreeSource.state } : {}),
+                    ...(pendingWorktreeSource.stateName
+                      ? { stateName: pendingWorktreeSource.stateName }
+                      : {}),
+                    ...(pendingWorktreeSource.url ? { url: pendingWorktreeSource.url } : {}),
+                  },
+        });
+        sourceThreadRef = scopeThreadRef(environmentId, created.sessionId);
+      } catch (error) {
+        setThreadError(
+          threadIdForSend,
+          error instanceof Error ? error.message : "Failed to create the worktree.",
+        );
+        return false;
+      }
+    }
+
     // In worktree mode, require an explicit base branch so we don't silently
-    // fall back to local execution when branch selection is missing.
-    if (shouldCreateWorktree && !activeThreadBranch) {
+    // fall back to local execution when branch selection is missing. A recorded
+    // source supplies its own base, so it is exempt.
+    if (shouldCreateWorktree && !activeThreadBranch && !pendingWorktreeSource) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return false;
     }
 
     await executeChatSendTurn({
       composer: composerSnapshot,
-      thread: {
-        threadId: threadIdForSend,
-        isFirstMessage,
-        isServerThread,
-        isLocalDraftThread,
-        activeThreadBranch,
-        worktreePath: activeThread.worktreePath,
-        createdAt: activeThread.createdAt,
-        projectId: activeProject.id,
-      },
-      worktree: {
-        shouldMaterializeLegacyBranchWorktree,
-        baseBranchForWorktree,
-        shouldCreateWorktree,
-      },
+      thread: sourceThreadRef
+        ? {
+            // The worktree call already created this thread, so there is no
+            // draft to promote and no worktree left to prepare.
+            threadId: sourceThreadRef.threadId,
+            isFirstMessage: true,
+            isServerThread: true,
+            isLocalDraftThread: false,
+            activeThreadBranch: null,
+            worktreePath: null,
+            createdAt: activeThread.createdAt,
+            projectId: activeProject.id,
+          }
+        : {
+            threadId: threadIdForSend,
+            isFirstMessage,
+            isServerThread,
+            isLocalDraftThread,
+            activeThreadBranch,
+            worktreePath: activeThread.worktreePath,
+            createdAt: activeThread.createdAt,
+            projectId: activeProject.id,
+          },
+      worktree: sourceThreadRef
+        ? {
+            shouldMaterializeLegacyBranchWorktree: false,
+            baseBranchForWorktree: null,
+            shouldCreateWorktree: false,
+          }
+        : {
+            shouldMaterializeLegacyBranchWorktree,
+            baseBranchForWorktree,
+            shouldCreateWorktree,
+          },
       settings: effectiveSettingsSnapshot,
       project: {
         projectId: activeProject.id,
@@ -2470,7 +2574,9 @@ export default function ChatView(props: ChatViewProps) {
         },
       },
       draft: {
-        composerDraftTarget,
+        // Clearing has to target the thread the turn actually went to, or the
+        // composed prompt would linger on the abandoned draft.
+        composerDraftTarget: sourceThreadRef ?? composerDraftTarget,
         environmentId,
         clearComposerDraftContent,
         setComposerDraftTokenMode,
@@ -2513,6 +2619,18 @@ export default function ChatView(props: ChatViewProps) {
       composerHandle: { readComposer },
       formatOutgoingPrompt,
     });
+    if (sourceThreadRef) {
+      // The draft has served its purpose — retire it and follow the turn to
+      // the thread the worktree call created.
+      if (draftId) {
+        clearDraftThread(draftId);
+      }
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(sourceThreadRef),
+        replace: true,
+      });
+    }
     return true;
   };
   const dispatchComposerSnapshotRef = useRef(dispatchComposerSnapshot);
@@ -3083,9 +3201,17 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     setOverviewFloatingOpen(false);
+    setOverviewOpenedOnEmptyThread(false);
   }, [activeThread?.id]);
 
-  const overviewSidebarVisible = planSidebarOpen && !workspacePanelOpen;
+  // The new-thread surface reads as its own page. The overview panel describes
+  // a thread's history — checks, changes, plan — and an empty thread has none,
+  // so suppress it until the user asks for it. This is a display-time override
+  // rather than a `planSidebarOpen` reset so the panel reappears on its own the
+  // moment the first turn lands, with no second state machine to keep in sync.
+  const overviewSuppressedForEmptyThread = isEmptyThread && !overviewOpenedOnEmptyThread;
+  const overviewSidebarVisible =
+    planSidebarOpen && !workspacePanelOpen && !overviewSuppressedForEmptyThread;
   const showFloatingOverviewSidebar = overviewFloatingOpen && workspacePanelOpen;
   const overviewControlOpen = overviewSidebarVisible || showFloatingOverviewSidebar;
   // The phone tier always promotes the overview to a full-screen surface;
@@ -3234,13 +3360,15 @@ export default function ChatView(props: ChatViewProps) {
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* Messages Wrapper */}
+          {/* Messages Wrapper. Stays `flex-1` even while empty so the absolutely
+              positioned children below (search bar, floating overview, scroll
+              pill) keep a full-height containing block. */}
           <div className="relative flex min-h-0 flex-1 flex-col">
             {/* Messages — LegendList handles virtualization and scrolling internally.
                 Gated on useDeferredValue: the urgent render after a tab switch
                 paints the placeholder, then React commits the heavy timeline in
                 a low-priority transition. */}
-            {isActiveThreadIdFresh ? (
+            {isEmptyThread ? null : isActiveThreadIdFresh ? (
               <MessagesTimeline
                 key={activeThread.id}
                 isWorking={isWorking}
@@ -3346,6 +3474,51 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             )}
           </div>
+
+          {/* Empty thread: the hero sits between the (now empty) messages
+              region and the composer, sized to its own content so it can never
+              be squeezed into the header. The messages region above and the
+              spacer below the input bar are both `flex-1`, so the hero and
+              composer read as one vertically centered block. */}
+          {isEmptyThread ? (
+            <div
+              className={cn(
+                "shrink-0",
+                !prefersReducedMotion && "animate-in fade-in slide-in-from-bottom-1",
+              )}
+            >
+              <NewThreadHero
+                projectName={activeProject?.name ?? null}
+                activeProjectId={activeProject?.id ?? null}
+                activeProjectEnvironmentId={activeProject?.environmentId ?? null}
+                routeKind={routeKind}
+                envLocked={envLocked}
+                draftId={draftId ?? undefined}
+                workLocation={
+                  isGitRepo ? (
+                    <NewThreadWorkLocation
+                      draftId={draftId ?? undefined}
+                      environmentId={activeThread.environmentId}
+                      threadId={activeThread.id}
+                      projectId={activeProject?.id ?? null}
+                      projectEnvironmentId={activeProject?.environmentId ?? null}
+                      projectName={activeProject?.name ?? null}
+                      envLocked={envLocked}
+                      availableEnvironments={logicalProjectEnvironments}
+                      onEnvironmentChange={
+                        hasMultipleEnvironments ? onEnvironmentChange : undefined
+                      }
+                      onComposerFocusRequest={scheduleComposerFocus}
+                      onCheckoutPullRequestRequest={
+                        canCheckoutPullRequestIntoThread ? openPullRequestDialog : undefined
+                      }
+                      cwd={activeProject?.cwd ?? gitCwd}
+                    />
+                  ) : null
+                }
+              />
+            </div>
+          ) : null}
 
           {/* Input bar. Bottom padding composes the safe-area inset with the
               keyboard inset published by the visual-viewport adapter: with the
@@ -3469,6 +3642,8 @@ export default function ChatView(props: ChatViewProps) {
                   : {})}
                 envLocked={envLocked}
                 onComposerFocusRequest={scheduleComposerFocus}
+                onOpenWorktreeSources={openWorktreeSources}
+                contextControlsHoisted={isEmptyThread}
                 {...(canCheckoutPullRequestIntoThread
                   ? { onCheckoutPullRequestRequest: openPullRequestDialog }
                   : {})}
@@ -3482,6 +3657,12 @@ export default function ChatView(props: ChatViewProps) {
               />
             )}
           </div>
+
+          {/* Balances the empty-thread messages region above so the hero and
+              composer center together. `flex-1` with no basis means it yields
+              first when the software keyboard leaves less room than the
+              composer needs. */}
+          {isEmptyThread ? <div aria-hidden className="min-h-0 flex-1" /> : null}
 
           {pullRequestDialogState ? (
             <PullRequestThreadDialog

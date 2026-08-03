@@ -16,6 +16,7 @@ import {
   type ScopedThreadRef,
   ThreadId,
   type ComposerSourceControlContext,
+  type WorkItemState,
 } from "@ryco/contracts";
 import { scopedThreadKey, scopeThreadRef } from "../../scoped.ts";
 import * as Schema from "effect/Schema";
@@ -105,6 +106,37 @@ export interface ComposerThreadDraftState<TImage extends ComposerDraftImage = Co
  * Unlike a real server thread, a draft session can still change target
  * environment/worktree configuration before the first send.
  */
+/**
+ * A pull request, issue, or work item the user picked as the origin for a
+ * worktree that does not exist yet.
+ *
+ * Held as plain data rather than materialized on selection: picking a source
+ * is a statement of intent, and creating a git worktree is a side effect on
+ * disk. The two are joined on first send, where the worktree is created from
+ * this intent exactly as the New worktree dialog would.
+ *
+ * `label` is captured at selection time so the sentence can name the source
+ * without re-fetching it.
+ */
+export type DraftWorktreeSource =
+  | { readonly kind: "pr"; readonly number: number; readonly label: string }
+  | {
+      readonly kind: "issue";
+      readonly number: number;
+      readonly title: string;
+      readonly label: string;
+    }
+  | {
+      readonly kind: "workItem";
+      readonly provider: "jira";
+      readonly key: string;
+      readonly title: string;
+      readonly state?: WorkItemState | undefined;
+      readonly stateName?: string | undefined;
+      readonly url?: string | undefined;
+      readonly label: string;
+    };
+
 export interface DraftSessionState {
   threadId: ThreadId;
   environmentId: EnvironmentId;
@@ -117,6 +149,8 @@ export interface DraftSessionState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  /** Set only in `worktree` mode when the base is not a plain branch. */
+  worktreeSource?: DraftWorktreeSource | null;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -204,6 +238,7 @@ export interface ComposerDraftStoreState<TImage extends ComposerDraftImage = Com
     options: {
       branch?: string | null;
       worktreePath?: string | null;
+      worktreeSource?: DraftWorktreeSource | null;
       projectRef?: ScopedProjectRef;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
@@ -211,6 +246,20 @@ export interface ComposerDraftStoreState<TImage extends ComposerDraftImage = Com
       interactionMode?: ProviderInteractionMode;
       tokenMode?: AgentTokenMode;
     },
+  ) => void;
+  /**
+   * Retargets an existing draft session at a different project, keeping its
+   * composer content (prompt, attachments, model/provider selection) intact.
+   *
+   * Distinct from starting a new thread in that project: the caller is editing
+   * the project *field* of the thread being composed, not navigating to another
+   * draft. Branch and worktree path are dropped because they belong to the old
+   * repository. The logical-project mapping moves with the draft, so the old
+   * project no longer resolves to it.
+   */
+  moveDraftThreadToProject: (
+    threadRef: ComposerThreadTarget,
+    input: { projectRef: ScopedProjectRef; logicalProjectKey: string },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
   clearProjectDraftThreadById: (
@@ -611,6 +660,7 @@ function createDraftThreadState(
     threadId?: ThreadId;
     branch?: string | null;
     worktreePath?: string | null;
+    worktreeSource?: DraftWorktreeSource | null;
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
     runtimeMode?: RuntimeMode;
@@ -646,6 +696,14 @@ function createDraftThreadState(
     tokenMode: options?.tokenMode ?? existingThread?.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
     branch: nextBranch,
     worktreePath: nextWorktreePath,
+    // A source belongs to the repository it was picked from, so it is dropped
+    // alongside branch and worktree path when the project changes.
+    worktreeSource:
+      options?.worktreeSource === undefined
+        ? projectChanged
+          ? null
+          : (existingThread?.worktreeSource ?? null)
+        : options.worktreeSource,
     envMode:
       options?.envMode ??
       (nextWorktreePath
@@ -984,6 +1042,12 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                     ? null
                     : existing.branch
                   : (options.branch ?? null);
+              const nextWorktreeSource =
+                options.worktreeSource === undefined
+                  ? projectChanged
+                    ? null
+                    : (existing.worktreeSource ?? null)
+                  : options.worktreeSource;
               const nextDraftThread: DraftThreadState = {
                 threadId: existing.threadId,
                 environmentId: nextProjectRef.environmentId,
@@ -998,6 +1062,7 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                 tokenMode: options.tokenMode ?? existing.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
                 branch: nextBranch,
                 worktreePath: nextWorktreePath,
+                worktreeSource: nextWorktreeSource,
                 envMode:
                   options.envMode ??
                   (nextWorktreePath
@@ -1017,6 +1082,7 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                 nextDraftThread.tokenMode === existing.tokenMode &&
                 nextDraftThread.branch === existing.branch &&
                 nextDraftThread.worktreePath === existing.worktreePath &&
+                Equal.equals(nextDraftThread.worktreeSource, existing.worktreeSource ?? null) &&
                 nextDraftThread.envMode === existing.envMode &&
                 scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
               if (isUnchanged) {
@@ -1027,6 +1093,86 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                   ...state.draftThreadsByThreadKey,
                   [threadKey]: nextDraftThread,
                 },
+              };
+            });
+          },
+          moveDraftThreadToProject: (threadRef, input) => {
+            const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+            const normalizedLogicalProjectKey = logicalProjectDraftKey(input.logicalProjectKey);
+            if (threadKey.length === 0 || normalizedLogicalProjectKey.length === 0) {
+              return;
+            }
+            if (
+              input.projectRef.projectId.length === 0 ||
+              input.projectRef.environmentId.length === 0
+            ) {
+              return;
+            }
+            set((state) => {
+              const existingThread = state.draftThreadsByThreadKey[threadKey];
+              if (!existingThread || isDraftThreadPromoting(existingThread)) {
+                return state;
+              }
+              const nextDraftThread = createDraftThreadState(
+                input.projectRef,
+                existingThread.threadId,
+                normalizedLogicalProjectKey,
+                existingThread,
+              );
+              if (
+                draftThreadsEqual(existingThread, nextDraftThread) &&
+                state.logicalProjectDraftThreadKeyByLogicalProjectKey[
+                  normalizedLogicalProjectKey
+                ] === threadKey
+              ) {
+                return state;
+              }
+
+              // Drop every mapping that pointed at this draft before claiming
+              // the target slot: leaving the old project's entry behind would
+              // let "new thread in <old project>" resurrect a draft that now
+              // belongs to a different repository.
+              const nextLogicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string> =
+                Object.fromEntries(
+                  Object.entries(state.logicalProjectDraftThreadKeyByLogicalProjectKey).filter(
+                    ([, draftThreadKey]) => draftThreadKey !== threadKey,
+                  ),
+                );
+              const displacedThreadKey =
+                nextLogicalProjectDraftThreadKeyByLogicalProjectKey[normalizedLogicalProjectKey];
+              nextLogicalProjectDraftThreadKeyByLogicalProjectKey[normalizedLogicalProjectKey] =
+                threadKey;
+
+              const nextDraftThreadsByThreadKey: Record<string, DraftThreadState> = {
+                ...state.draftThreadsByThreadKey,
+                [threadKey]: nextDraftThread,
+              };
+              let nextDraftsByThreadKey = state.draftsByThreadKey;
+              // The target project may already have had its own empty draft
+              // parked in this slot; retire it unless it is mid-promotion or
+              // still reachable from another logical project.
+              if (
+                displacedThreadKey &&
+                displacedThreadKey !== threadKey &&
+                !isComposerThreadKeyInUse(
+                  nextLogicalProjectDraftThreadKeyByLogicalProjectKey,
+                  displacedThreadKey,
+                ) &&
+                !isDraftThreadPromoting(nextDraftThreadsByThreadKey[displacedThreadKey])
+              ) {
+                delete nextDraftThreadsByThreadKey[displacedThreadKey];
+                if (state.draftsByThreadKey[displacedThreadKey] !== undefined) {
+                  nextDraftsByThreadKey = { ...state.draftsByThreadKey };
+                  revokeDraftThreadPreviewUrls(nextDraftsByThreadKey[displacedThreadKey]);
+                  delete nextDraftsByThreadKey[displacedThreadKey];
+                }
+              }
+
+              return {
+                draftsByThreadKey: nextDraftsByThreadKey,
+                draftThreadsByThreadKey: nextDraftThreadsByThreadKey,
+                logicalProjectDraftThreadKeyByLogicalProjectKey:
+                  nextLogicalProjectDraftThreadKeyByLogicalProjectKey,
               };
             });
           },

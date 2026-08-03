@@ -4676,6 +4676,233 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("greets an empty draft thread with the new-thread hero", async () => {
+    const draftId = DraftId.make("draft-new-thread-hero");
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [draftId]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: draftId,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      initialPath: `/draft/${draftId}`,
+    });
+
+    try {
+      const hero = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="new-thread-hero"]'),
+        "Unable to find the new-thread hero.",
+      );
+
+      expect(hero.textContent).toContain("What should we do in Project?");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("drops the new-thread hero once the thread has messages", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-hero-absent" as MessageId,
+        targetText: "hero absent",
+      }),
+    });
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-timeline-root="true"]'),
+        "Unable to find the rendered timeline.",
+      );
+
+      expect(document.querySelector('[data-testid="new-thread-hero"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("switches an empty draft into new-worktree mode and clears the stale worktree path", async () => {
+    const draftId = DraftId.make("draft-env-mode-chip");
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [draftId]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "feature/existing",
+          // A draft attached to an existing worktree reads as "Local"; the chip
+          // has to clear this path or the switch back to worktree mode is a
+          // no-op once `resolveEffectiveEnvMode` runs again.
+          worktreePath: "/repo/.ryco/worktrees/existing",
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: draftId,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      initialPath: `/draft/${draftId}`,
+    });
+
+    try {
+      // The sentence names the directory even though no worktree summary
+      // matches the path, rather than silently reading "the project root".
+      const locationTrigger = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>(
+            'button[aria-label^="Change where this thread runs"]',
+          ),
+        "Unable to find the work-location picker.",
+      );
+      expect(locationTrigger.textContent).toContain("existing");
+
+      locationTrigger.click();
+
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="combobox-popup"]'),
+        "Unable to find the work-location popup.",
+      );
+      await page.getByText("A new worktree", { exact: true }).click();
+
+      await vi.waitFor(
+        () => {
+          expect(useComposerDraftStore.getState().getDraftSession(draftId)).toMatchObject({
+            envMode: "worktree",
+            worktreePath: null,
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides the overview panel on an empty thread and restores it on request", async () => {
+    const draftId = DraftId.make("draft-empty-thread-overview");
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [draftId]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: draftId,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      initialPath: `/draft/${draftId}`,
+    });
+
+    try {
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="new-thread-hero"]'),
+        "Unable to find the new-thread hero.",
+      );
+
+      // The overview describes a thread's history, so it stays out of the way
+      // until there is one — or until the user explicitly asks for it.
+      // Visibility, not DOM presence: the sheet presentation keeps the panel
+      // mounted and only toggles whether it is shown, and the inline one plays
+      // an exit transition before unmounting.
+      const overviewShowing = () => {
+        const header = document.querySelector('[data-slot="overview-branch-header"]');
+        return header !== null && header.checkVisibility();
+      };
+      await vi.waitFor(
+        () => {
+          expect(overviewShowing()).toBe(false);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const overviewToggle = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Toggle overview panel"]'),
+        "Unable to find the overview toggle.",
+      );
+      overviewToggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(overviewShowing()).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("opens the new-thread hero from the sidebar project row", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-sidebar-new-thread" as MessageId,
+        targetText: "sidebar new thread",
+      }),
+    });
+
+    try {
+      const newThreadButton = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('[data-testid="new-thread-composer-button"]'),
+        "Unable to find the sidebar new-thread button.",
+      );
+      newThreadButton.click();
+
+      await vi.waitFor(
+        () => {
+          expect(mounted.router.state.location.pathname.startsWith("/draft/")).toBe(true);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-testid="new-thread-hero"]'),
+        "Unable to find the new-thread hero after using the sidebar button.",
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("surrounds selected plain text and preserves the inner selection for repeated wrapping", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -7850,7 +8077,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(baseline.archiveActionWidth).toBeGreaterThanOrEqual(18);
       expect(baseline.archiveActionWidth).toBeLessThanOrEqual(22);
       expect(baseline.archiveHitAreaContent).toBe("none");
-      expect(baseline.headerPaddingRight).toBe("80px");
+      // pr-26 reserves the four fine-pointer header actions (new thread,
+      // overview, new workspace, settings).
+      expect(baseline.headerPaddingRight).toBe("104px");
       expect(baseline.settingsRight).toBe("6px");
       expect(baseline.settingsTop).toBe("4px");
 

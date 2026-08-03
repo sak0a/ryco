@@ -170,6 +170,12 @@ export function shouldIncludeBranchPickerItem(input: {
   normalizedQuery: string;
   createBranchItemValue: string | null;
   checkoutPullRequestItemValue: string | null;
+  /**
+   * Extra text to match an item on when its value is a synthetic key rather
+   * than the label — pull-request rows are keyed by number but should be
+   * findable by title and head branch.
+   */
+  searchTextByItemValue?: ReadonlyMap<string, string> | undefined;
 }): boolean {
   const { itemValue, normalizedQuery, createBranchItemValue, checkoutPullRequestItemValue } = input;
 
@@ -183,6 +189,11 @@ export function shouldIncludeBranchPickerItem(input: {
 
   if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
     return true;
+  }
+
+  const searchText = input.searchTextByItemValue?.get(itemValue);
+  if (searchText !== undefined) {
+    return searchText.toLowerCase().includes(normalizedQuery);
   }
 
   return itemValue.toLowerCase().includes(normalizedQuery);

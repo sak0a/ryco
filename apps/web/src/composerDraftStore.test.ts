@@ -966,6 +966,106 @@ describe("composerDraftStore project draft thread mapping", () => {
     });
   });
 
+  it("keeps composer content when moving a draft to another project", () => {
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+      threadId,
+      branch: "feature/local-only",
+      worktreePath: "/tmp/local-worktree",
+      envMode: "worktree",
+    });
+    store.setPrompt(draftId, "keep this prompt");
+
+    store.moveDraftThreadToProject(draftId, {
+      projectRef: otherProjectRef,
+      logicalProjectKey: scopedProjectKey(otherProjectRef),
+    });
+
+    // The composer draft is keyed by draft id, so retargeting the project
+    // leaves the typed prompt (and model/provider selection) untouched.
+    expect(draftByKey(draftId)?.prompt).toBe("keep this prompt");
+    expect(useComposerDraftStore.getState().getDraftThread(draftId)).toMatchObject({
+      projectId: otherProjectId,
+      threadId,
+      branch: null,
+      worktreePath: null,
+      envMode: "local",
+    });
+  });
+
+  it("releases the old logical project when moving a draft to another project", () => {
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+      threadId,
+    });
+
+    store.moveDraftThreadToProject(draftId, {
+      projectRef: otherProjectRef,
+      logicalProjectKey: scopedProjectKey(otherProjectRef),
+    });
+
+    // Without this the source project would keep resolving to a draft that now
+    // belongs to a different repository.
+    expect(
+      useComposerDraftStore
+        .getState()
+        .getDraftSessionByLogicalProjectKey(scopedProjectKey(projectRef)),
+    ).toBeNull();
+    expect(
+      useComposerDraftStore
+        .getState()
+        .getDraftSessionByLogicalProjectKey(scopedProjectKey(otherProjectRef))?.draftId,
+    ).toBe(draftId);
+  });
+
+  it("retires an empty draft already parked in the target project", () => {
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+      threadId,
+    });
+    store.setLogicalProjectDraftThreadId(
+      scopedProjectKey(otherProjectRef),
+      otherProjectRef,
+      otherDraftId,
+      { threadId: otherThreadId },
+    );
+
+    store.moveDraftThreadToProject(draftId, {
+      projectRef: otherProjectRef,
+      logicalProjectKey: scopedProjectKey(otherProjectRef),
+    });
+
+    expect(useComposerDraftStore.getState().getDraftThread(otherDraftId)).toBeNull();
+    expect(
+      useComposerDraftStore
+        .getState()
+        .getDraftSessionByLogicalProjectKey(scopedProjectKey(otherProjectRef))?.draftId,
+    ).toBe(draftId);
+  });
+
+  it("leaves a promoting draft alone when moving another draft onto its project", () => {
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+      threadId,
+    });
+    store.setLogicalProjectDraftThreadId(
+      scopedProjectKey(otherProjectRef),
+      otherProjectRef,
+      otherDraftId,
+      { threadId: otherThreadId },
+    );
+    store.markDraftThreadPromoting(otherDraftId);
+
+    store.moveDraftThreadToProject(draftId, {
+      projectRef: otherProjectRef,
+      logicalProjectKey: scopedProjectKey(otherProjectRef),
+    });
+
+    // A draft mid-promotion still owns a server thread; discarding it here
+    // would strand that thread's composer state.
+    expect(useComposerDraftStore.getState().draftThreadsByThreadKey[otherDraftId]).toBeDefined();
+  });
+
   it("clears branch and worktree context when changing a draft thread project ref", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {

@@ -10,6 +10,7 @@ import {
 import { searchSourceControlSummaries } from "../chat/composerSourceControlContextSearch";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { cn } from "~/lib/utils";
 import { PullRequestList } from "./PullRequestList";
 import { getPrCheckStatusFromChangeRequest, shouldRefreshPrCheckStatus } from "./prCheckStatus";
 import {
@@ -28,6 +29,7 @@ interface PullRequestsTabProps {
   stateFilter: ChangeRequestStateFilter;
   onStateFilterChange: (state: ChangeRequestStateFilter) => void;
   onSelect: (changeRequest: ChangeRequest) => void;
+  density?: "default" | "compact";
 }
 
 export function PullRequestsTab(props: PullRequestsTabProps) {
@@ -105,7 +107,12 @@ export function PullRequestsTab(props: PullRequestsTabProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-border/60 border-b px-4 py-2.5">
+      <div
+        className={cn(
+          "flex items-center gap-2 border-border/60 border-b",
+          props.density === "compact" ? "px-2 py-1.5" : "px-4 py-2.5",
+        )}
+      >
         <div className="relative flex-1">
           <SearchIcon className="-translate-y-1/2 absolute top-1/2 left-2 size-3.5 text-muted-foreground" />
           <Input
@@ -134,11 +141,17 @@ export function PullRequestsTab(props: PullRequestsTabProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {error ? (
-          <p className="px-4 py-6 text-destructive text-sm">
+          <p
+            className={cn(
+              "text-destructive text-sm",
+              props.density === "compact" ? "px-2.5 py-4" : "px-4 py-6",
+            )}
+          >
             {error instanceof Error ? error.message : "Failed to load pull requests."}
           </p>
         ) : (
           <PullRequestList
+            {...(props.density ? { density: props.density } : {})}
             items={items}
             isLoading={isLoading}
             emptyText={

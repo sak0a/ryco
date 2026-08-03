@@ -1,5 +1,11 @@
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
-import { WorktreeId, type EnvironmentId, type VcsRef, type ThreadId } from "@ryco/contracts";
+import {
+  WorktreeId,
+  type ChangeRequest,
+  type EnvironmentId,
+  type VcsRef,
+  type ThreadId,
+} from "@ryco/contracts";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon } from "lucide-react";
 import {
@@ -17,6 +23,7 @@ import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { readEnvironmentApi } from "../environmentApi";
 import { readLocalApi } from "../localApi";
 import { gitScopeKey, invalidateScopes, prefetchBranches, useGitBranches } from "../rpc/useGit";
+import { useSourceControlChangeRequestList } from "../rpc/useSourceControl";
 import { useGitStatus } from "../lib/gitStatusState";
 import { newCommandId } from "../lib/utils";
 import { cn } from "../lib/utils";
@@ -65,6 +72,8 @@ interface BranchToolbarBranchSelectorProps {
   onActiveThreadBranchOverrideChange?: (refName: string | null) => void;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
+  /** Drop the "From " prefix when surrounding copy already supplies it. */
+  omitBasePrefix?: boolean;
 }
 
 function toBranchActionErrorMessage(error: unknown): string {
@@ -75,12 +84,18 @@ function getBranchTriggerLabel(input: {
   activeWorktreePath: string | null;
   effectiveEnvMode: "local" | "worktree";
   resolvedActiveBranch: string | null;
+  /**
+   * Set where the surrounding copy already says "from" — the work-location
+   * sentence renders its own preposition, so the built-in prefix would read
+   * "from From main".
+   */
+  omitBasePrefix?: boolean;
 }): string {
   const { activeWorktreePath, effectiveEnvMode, resolvedActiveBranch } = input;
   if (!resolvedActiveBranch) {
     return "Select ref";
   }
-  if (effectiveEnvMode === "worktree" && !activeWorktreePath) {
+  if (effectiveEnvMode === "worktree" && !activeWorktreePath && !input.omitBasePrefix) {
     return `From ${resolvedActiveBranch}`;
   }
   return resolvedActiveBranch;
@@ -97,6 +112,7 @@ export function BranchToolbarBranchSelector({
   onActiveThreadBranchOverrideChange,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
+  omitBasePrefix = false,
 }: BranchToolbarBranchSelectorProps) {
   // ---------------------------------------------------------------------------
   // Thread / project state (pushed down from parent to colocate with mutation)
@@ -282,16 +298,58 @@ export function BranchToolbarBranchSelector({
   const createBranchItemValue = canCreateBranch
     ? `__create_new_branch__:${trimmedBranchQuery}`
     : null;
+
+  // Open pull requests are offered as base refs, so "start work on this PR"
+  // doesn't require knowing the head branch name or reaching for the full
+  // worktree dialog. Only in worktree-base mode: there the picked ref is just
+  // recorded and the server resolves it when it forks the worktree, whereas a
+  // project-root pick performs a real checkout that would fail for a head that
+  // was never fetched.
+  const pullRequestsQuery = useSourceControlChangeRequestList({
+    environmentId: isSelectingWorktreeBase ? environmentId : null,
+    cwd: isSelectingWorktreeBase ? branchCwd : null,
+    state: "open",
+    limit: 50,
+  });
+  const pullRequestByItemValue = useMemo(() => {
+    const entries = new Map<string, ChangeRequest>();
+    if (!isSelectingWorktreeBase) return entries;
+    for (const changeRequest of pullRequestsQuery.data ?? []) {
+      // A PR whose head already exists as a local ref would duplicate a row in
+      // the list above; the plain ref is the better affordance there.
+      if (branchByName.has(changeRequest.headRefName)) continue;
+      entries.set(`__pull_request_base__:${changeRequest.number}`, changeRequest);
+    }
+    return entries;
+  }, [branchByName, isSelectingWorktreeBase, pullRequestsQuery.data]);
+
   const branchPickerItems = useMemo(() => {
     const items = [...branchNames];
     if (createBranchItemValue && !hasExactBranchMatch) {
       items.push(createBranchItemValue);
     }
+    items.push(...pullRequestByItemValue.keys());
     if (checkoutPullRequestItemValue) {
       items.unshift(checkoutPullRequestItemValue);
     }
     return items;
-  }, [branchNames, checkoutPullRequestItemValue, createBranchItemValue, hasExactBranchMatch]);
+  }, [
+    branchNames,
+    checkoutPullRequestItemValue,
+    createBranchItemValue,
+    hasExactBranchMatch,
+    pullRequestByItemValue,
+  ]);
+  const pullRequestSearchText = useMemo(
+    () =>
+      new Map(
+        Array.from(pullRequestByItemValue, ([itemValue, changeRequest]) => [
+          itemValue,
+          `#${changeRequest.number} ${changeRequest.title} ${changeRequest.headRefName}`,
+        ]),
+      ),
+    [pullRequestByItemValue],
+  );
   const filteredBranchPickerItems = useMemo(
     () =>
       normalizedDeferredBranchQuery.length === 0
@@ -302,6 +360,7 @@ export function BranchToolbarBranchSelector({
               normalizedQuery: normalizedDeferredBranchQuery,
               createBranchItemValue,
               checkoutPullRequestItemValue,
+              searchTextByItemValue: pullRequestSearchText,
             }),
           ),
     [
@@ -309,6 +368,7 @@ export function BranchToolbarBranchSelector({
       checkoutPullRequestItemValue,
       createBranchItemValue,
       normalizedDeferredBranchQuery,
+      pullRequestSearchText,
     ],
   );
   const [resolvedActiveBranch, setOptimisticBranch] = useOptimistic(
@@ -513,6 +573,7 @@ export function BranchToolbarBranchSelector({
     activeWorktreePath,
     effectiveEnvMode,
     resolvedActiveBranch,
+    omitBasePrefix,
   });
 
   function renderPickerItem(itemValue: string, index: number) {
@@ -555,6 +616,38 @@ export function BranchToolbarBranchSelector({
           onClick={() => createRef(trimmedBranchQuery)}
         >
           <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
+        </ComboboxItem>
+      );
+    }
+
+    const pullRequest = pullRequestByItemValue.get(itemValue);
+    if (pullRequest) {
+      return (
+        <ComboboxItem
+          hideIndicator
+          key={itemValue}
+          index={index}
+          value={itemValue}
+          onClick={() => {
+            // Worktree-base mode only, so this records the head ref as the base
+            // to fork from — no checkout is attempted here.
+            setThreadBranch(pullRequest.headRefName, null);
+            setIsBranchMenuOpen(false);
+            setBranchQuery("");
+            onComposerFocusRequest?.();
+          }}
+        >
+          <div className="flex min-w-0 items-center gap-2 py-1">
+            <SourceControlIcon className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex min-w-0 flex-col items-start">
+              <span className="truncate">
+                #{pullRequest.number} {pullRequest.title}
+              </span>
+              <span className="truncate font-mono text-muted-foreground text-[10px]">
+                {pullRequest.headRefName}
+              </span>
+            </span>
+          </div>
         </ComboboxItem>
       );
     }

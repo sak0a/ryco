@@ -1,14 +1,20 @@
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
-import { TerminalSquareIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { GitPullRequestIcon, TerminalSquareIcon } from "lucide-react";
+import { memo, useCallback, useMemo } from "react";
 
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { useStore } from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
-import { type EnvironmentOption } from "./BranchToolbar.logic";
+import {
+  resolveEffectiveEnvMode,
+  type EnvMode,
+  type EnvironmentOption,
+} from "./BranchToolbar.logic";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSelector";
+import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
@@ -21,6 +27,19 @@ interface BranchToolbarProps {
   envLocked: boolean;
   onCheckoutPullRequestRequest?: (reference: string) => void;
   onComposerFocusRequest?: () => void;
+  /**
+   * Opens the full `NewWorktreeDialog` (branches / PRs / issues / Jira). The
+   * inline chips cover the fast path; this is the escape hatch for worktrees
+   * sourced from a tracked item.
+   */
+  onOpenWorktreeSources?: () => void;
+  /**
+   * While the thread is empty the "Work in …" row above the composer owns the
+   * project, location, branch and environment controls, so the toolbar drops
+   * them and keeps only the terminal toggle rather than offering the same
+   * settings twice on one screen.
+   */
+  contextControlsHoisted?: boolean;
   availableEnvironments?: readonly EnvironmentOption[];
   onEnvironmentChange?: (environmentId: EnvironmentId) => void;
   terminalAvailable: boolean;
@@ -39,6 +58,8 @@ export const BranchToolbar = memo(function BranchToolbar({
   envLocked,
   onCheckoutPullRequestRequest,
   onComposerFocusRequest,
+  onOpenWorktreeSources,
+  contextControlsHoisted = false,
   availableEnvironments,
   onEnvironmentChange,
   terminalAvailable,
@@ -56,6 +77,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   const draftThread = useComposerDraftStore((store) =>
     draftId ? store.getDraftSession(draftId) : store.getDraftThreadByRef(threadRef),
   );
+  const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const activeProjectRef = serverThread
     ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
     : draftThread
@@ -66,24 +88,66 @@ export const BranchToolbar = memo(function BranchToolbar({
     [activeProjectRef],
   );
   const activeProject = useStore(activeProjectSelector);
-  const hasActiveThread = serverThread !== undefined || draftThread !== null;
+  const hasServerThread = serverThread !== undefined;
+  const hasActiveThread = hasServerThread || draftThread !== null;
 
   const showEnvironmentPicker = Boolean(
     availableEnvironments && availableEnvironments.length > 1 && onEnvironmentChange,
+  );
+  // Only an unlocked draft can still choose where it runs: a server thread, or
+  // one with messages or a live session, is already bound to its checkout.
+  const canChooseEnvMode = !hasServerThread && draftThread !== null && !envLocked;
+  const envMode = resolveEffectiveEnvMode({
+    activeWorktreePath: serverThread?.worktreePath ?? draftThread?.worktreePath ?? null,
+    hasServerThread,
+    draftThreadEnvMode: draftThread?.envMode,
+  });
+  // Clearing `worktreePath` is load-bearing: `resolveEffectiveEnvMode` reports
+  // "local" whenever a path is set, so a stale one would silently defeat the
+  // switch back to worktree mode.
+  const handleEnvModeChange = useCallback(
+    (nextEnvMode: EnvMode) => {
+      setDraftThreadContext(draftId ?? threadRef, {
+        envMode: nextEnvMode,
+        worktreePath: null,
+      });
+      onComposerFocusRequest?.();
+    },
+    [draftId, onComposerFocusRequest, setDraftThreadContext, threadRef],
   );
 
   if (!hasActiveThread || !activeProject) return null;
 
   return (
-    <div className="mx-auto flex w-full max-w-208 items-center gap-2 px-2.5 pb-3 pt-1 sm:px-3">
-      {showEnvironmentPicker && availableEnvironments && onEnvironmentChange && (
-        <div className="flex min-w-0 shrink-0 items-center gap-1">
-          <BranchToolbarEnvironmentSelector
-            envLocked={envLocked}
-            environmentId={environmentId}
-            availableEnvironments={availableEnvironments}
-            onEnvironmentChange={onEnvironmentChange}
-          />
+    <div className="mx-auto flex w-full max-w-208 items-center gap-1 px-2.5 pb-3 pt-1 sm:px-3">
+      {contextControlsHoisted ? null : (
+        <div className="flex min-w-0 shrink items-center gap-0.5">
+          {canChooseEnvMode && draftId ? (
+            <ProjectSwitcher
+              activeProjectId={activeProject.id}
+              activeProjectEnvironmentId={activeProject.environmentId}
+              appearance="chip"
+              draftId={draftId}
+              label={activeProject.name}
+            />
+          ) : (
+            <span className="inline-flex min-w-0 items-center gap-1.5 px-2 py-1 font-medium text-muted-foreground/70 text-xs">
+              <span className="min-w-0 truncate">{activeProject.name}</span>
+            </span>
+          )}
+
+          {showEnvironmentPicker && availableEnvironments && onEnvironmentChange && (
+            <BranchToolbarEnvironmentSelector
+              envLocked={envLocked}
+              environmentId={environmentId}
+              availableEnvironments={availableEnvironments}
+              onEnvironmentChange={onEnvironmentChange}
+            />
+          )}
+
+          {canChooseEnvMode ? (
+            <BranchToolbarEnvModeSelector value={envMode} onChange={handleEnvModeChange} />
+          ) : null}
         </div>
       )}
 
@@ -123,17 +187,43 @@ export const BranchToolbar = memo(function BranchToolbar({
         </Tooltip>
       </div>
 
-      <BranchToolbarBranchSelector
-        className="min-w-0 flex-1 justify-end md:ml-auto md:flex-none"
-        environmentId={environmentId}
-        threadId={threadId}
-        {...(draftId ? { draftId } : {})}
-        envLocked={envLocked}
-        {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
-        {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
-        {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
-        {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
-      />
+      {contextControlsHoisted ? null : (
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-0.5 md:ml-auto md:flex-none">
+          {canChooseEnvMode && onOpenWorktreeSources ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80 phone:hidden"
+                    onClick={onOpenWorktreeSources}
+                    data-testid="branch-toolbar-worktree-sources"
+                  >
+                    <GitPullRequestIcon className="size-3 shrink-0" />
+                    <span>From PR / issue</span>
+                  </Button>
+                }
+              />
+              <TooltipPopup side="top">
+                Create a worktree from a pull request, issue, or Jira item
+              </TooltipPopup>
+            </Tooltip>
+          ) : null}
+
+          <BranchToolbarBranchSelector
+            className="min-w-0"
+            environmentId={environmentId}
+            threadId={threadId}
+            {...(draftId ? { draftId } : {})}
+            envLocked={envLocked}
+            {...(activeThreadBranchOverride !== undefined ? { activeThreadBranchOverride } : {})}
+            {...(onActiveThreadBranchOverrideChange ? { onActiveThreadBranchOverrideChange } : {})}
+            {...(onCheckoutPullRequestRequest ? { onCheckoutPullRequestRequest } : {})}
+            {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
+          />
+        </div>
+      )}
     </div>
   );
 });

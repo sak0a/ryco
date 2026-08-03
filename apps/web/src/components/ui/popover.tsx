@@ -26,6 +26,7 @@ function PopoverPopup({
   tooltipStyle = false,
   surface = "default",
   anchor,
+  viewportClassName,
   ...props
 }: PopoverPrimitive.Popup.Props & {
   side?: PopoverPrimitive.Positioner.Props["side"];
@@ -35,6 +36,12 @@ function PopoverPopup({
   tooltipStyle?: boolean;
   surface?: "default" | "glass";
   anchor?: PopoverPrimitive.Positioner.Props["anchor"];
+  /**
+   * Overrides the inner viewport's padding. The viewport, not the popup, owns
+   * the content inset, so `className="p-0"` alone cannot flush content to the
+   * edges — list-style popovers whose rows carry their own padding need this.
+   */
+  viewportClassName?: string;
 }) {
   return (
     <PopoverPrimitive.Portal>
@@ -69,6 +76,7 @@ function PopoverPopup({
               tooltipStyle
                 ? "py-1 [--viewport-inline-padding:--spacing(2)]"
                 : "not-data-transitioning:overflow-y-auto",
+              viewportClassName,
             )}
             data-slot="popover-viewport"
           >

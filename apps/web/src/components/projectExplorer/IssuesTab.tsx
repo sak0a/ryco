@@ -11,6 +11,7 @@ import { searchSourceControlSummaries } from "../chat/composerSourceControlConte
 import { NewIssueDialog } from "../issues/NewIssueDialog";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { cn } from "~/lib/utils";
 import { IssueList } from "./IssueList";
 import { StateFilterButtons, type IssueStateFilter } from "./StateFilterButtons";
 
@@ -24,6 +25,7 @@ interface IssuesTabProps {
   stateFilter: IssueStateFilter;
   onStateFilterChange: (state: IssueStateFilter) => void;
   onSelect: (issue: SourceControlIssueSummary) => void;
+  density?: "default" | "compact";
 }
 
 export function IssuesTab(props: IssuesTabProps) {
@@ -68,7 +70,12 @@ export function IssuesTab(props: IssuesTabProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-2 border-border/60 border-b px-4 py-2.5">
+      <div
+        className={cn(
+          "flex items-center gap-2 border-border/60 border-b",
+          props.density === "compact" ? "px-2 py-1.5" : "px-4 py-2.5",
+        )}
+      >
         <div className="relative flex-1">
           <SearchIcon className="-translate-y-1/2 absolute top-1/2 left-2 size-3.5 text-muted-foreground" />
           <Input
@@ -105,11 +112,17 @@ export function IssuesTab(props: IssuesTabProps) {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {error ? (
-          <p className="px-4 py-6 text-destructive text-sm">
+          <p
+            className={cn(
+              "text-destructive text-sm",
+              props.density === "compact" ? "px-2.5 py-4" : "px-4 py-6",
+            )}
+          >
             {error instanceof Error ? error.message : "Failed to load issues."}
           </p>
         ) : (
           <IssueList
+            {...(props.density ? { density: props.density } : {})}
             items={items}
             isLoading={isLoading}
             emptyText={
