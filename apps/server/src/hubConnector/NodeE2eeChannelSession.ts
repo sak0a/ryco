@@ -333,7 +333,22 @@ export function makeNodeE2eeChannelSession(
   let record: E2eeRecordSession | undefined;
   let closeMachine: E2eeCloseMachine | undefined;
   let implicitFinishAuthenticated = false;
-  let closeSettled: (() => void) | undefined;
+  /**
+   * Every caller waiting for §10's close phase to end.
+   *
+   * A SET AND NOT ONE SLOT, because the close has no single driver on this side:
+   * `NodeE2eeRelayChannel.close` enters it on the registry's channel teardown
+   * and `emit` enters it on §9.6's `close_required`, and neither orders itself
+   * against the other. Exactly one attempt transmits the `E2EEClose` — every
+   * other one finds the phase already open, plans `none`, and waits for the same
+   * end — so a single slot would let the later attempt displace the earlier
+   * one's resolver, and that earlier `beginClose` would then await a promise no
+   * terminal path can settle. Its caller is `RelayRpcChannelSession.close`,
+   * which would never return: §10.4's channel-ended input, the §9.5 erasure, and
+   * the RPC scope release behind them would never run, and the connection's own
+   * teardown would stall on the promise.
+   */
+  const closeWaiters = new Set<() => void>();
   let closePhaseFinished = false;
 
   // ─── terminal bookkeeping ──────────────────────────────────────────────────
@@ -359,6 +374,21 @@ export function makeNodeE2eeChannelSession(
   }
 
   /**
+   * Release every §10 waiter, and take them off the set in the same turn.
+   *
+   * The phase ends for all of them or for none: §10.4 fixes the verdict at the
+   * exchange, not at whichever caller happened to be the one that transmitted,
+   * so no path may release one waiter and leave another standing. Draining
+   * first and calling afterwards keeps that true even if a resolver's
+   * continuation re-entered this closure.
+   */
+  function releaseCloseWaiters(): void {
+    const waiting = [...closeWaiters];
+    closeWaiters.clear();
+    for (const release of waiting) release();
+  }
+
+  /**
    * §9.5 and §6.5 on every terminal path, plus the two sweep retirements.
    *
    * Idempotent, because several of the paths that reach it can run twice — a
@@ -375,8 +405,7 @@ export function makeNodeE2eeChannelSession(
     sessionDirectoryRelease?.();
     sessionDirectoryRelease = undefined;
     clearTimers();
-    closeSettled?.();
-    closeSettled = undefined;
+    releaseCloseWaiters();
     closePhaseFinished = true;
   }
 
@@ -1108,6 +1137,13 @@ export function makeNodeE2eeChannelSession(
     if (closePhaseFinished) return;
     if (!machine.outerCloseAllowed(now())) return;
     closePhaseFinished = true;
+    // §10.3: the verdict is already determined here and MUST NOT depend on which
+    // of the three events ends the linger, so every waiter is released on the
+    // line that ends the phase rather than on one of the branches below. A
+    // waiter left to a branch is a waiter a branch can miss — `emitOuterClose`
+    // returns early on an already-closed channel, and the linger timer resolves
+    // a turn later or not at all.
+    releaseCloseWaiters();
     if (closeTimer !== undefined) scheduler.clearTimeout(closeTimer);
     closeTimer = undefined;
     const emitOuterClose = (): void => {
@@ -1126,10 +1162,6 @@ export function makeNodeE2eeChannelSession(
         closeTimer = undefined;
         emitOuterClose();
       }, lingerFor);
-      // §10.3: the verdict is already determined and MUST NOT depend on which of
-      // the three events ends the linger, so the caller is released now.
-      closeSettled?.();
-      closeSettled = undefined;
       return;
     }
     emitOuterClose();
@@ -1235,9 +1267,19 @@ export function makeNodeE2eeChannelSession(
     const machine = closeMachine;
     if (mode !== "e2ee" || session === undefined || machine === undefined) return;
     if (machine.closePhaseActive) return;
+    // A phase that has already ended releases nothing further, so a waiter
+    // registered past it would wait for a drain that has been and gone. That is
+    // the one ordering the two guards above do not already exclude, and it is
+    // tested HERE rather than after the transmit — where the waiter is in the
+    // set and returning would leave it there.
+    if (closePhaseFinished) return;
+    // Registered before the section and never displaced by a later attempt:
+    // whichever attempt ends the phase releases this one with its own.
+    let release = (): void => undefined;
     const settled = new Promise<void>((resolve) => {
-      closeSettled = resolve;
+      release = resolve;
     });
+    closeWaiters.add(release);
     const outcome = await transmitCloseRecord(session, machine, (position) => {
       // Re-read inside the section: the peer's own `E2EEClose` may have been
       // authenticated while this attempt waited for it, and this endpoint is
@@ -1256,17 +1298,18 @@ export function makeNodeE2eeChannelSession(
       // to record. The channel is unaffected and a later attempt may still
       // close it cleanly, which is exactly what §9.6's reserve keeps possible.
       //
-      // `closeSettled` is deliberately left as it stands rather than cleared:
-      // the next attempt replaces it, and a terminal path calling a resolver
-      // whose promise nobody awaits is a no-op — while clearing a field a
-      // concurrent attempt may already own would strand that attempt.
+      // This attempt takes its own waiter back rather than leaving one behind:
+      // it is not waiting for a phase that never opened, and only its OWN
+      // waiter is removed — a concurrent attempt's is another caller's and is
+      // never touched here.
+      closeWaiters.delete(release);
       return;
     }
     if (outcome === "transmitted") armCloseWait(session, machine);
-    // A degenerate end, or a phase another attempt already finished, has already
-    // released every waiter; awaiting a resolver nobody will call again would
-    // strand this one.
-    if (closePhaseFinished) return;
+    // Every remaining outcome leaves the phase to end somewhere: this attempt's
+    // own wait, another attempt's — `none` — or the degenerate end already run
+    // inside the section, which released this waiter before the await below
+    // ever reached it.
     await settled;
   }
 
