@@ -352,6 +352,68 @@ describe("NodeE2eeChannelSession", () => {
     session.dispose();
   });
 
+  it("declares the pair the close record is actually protected at, under a same-turn send", async () => {
+    // §10.1 fields 0–1 MUST byte-equal the carrying envelope's header. `emit` and
+    // `beginClose` have independent drivers on the node — the RPC runtime's
+    // output fiber and the registry's channel teardown — and neither orders
+    // itself against the other, so a driver that read its next-send position
+    // outside the record session's own send serialization would build the close
+    // body against a pair the RPC record takes first, and would seal that
+    // nonconforming record onto the relay before `noteTransmitted` could object.
+    // The peer rejects such a close as §11.3 Q7 and records **Failed** against a
+    // CONFORMING endpoint.
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const sending = session.emit(utf8('{"_tag":"Pong"}'));
+    const closing = session.beginClose();
+    expect(await sending).toBe(true);
+    await settle();
+    node.flush();
+
+    const emitted = node.dataPayloads().slice(before);
+    expect(emitted).toHaveLength(2);
+    const rpc = clientReceive(client, emitted[0]!);
+    expect(rpc.innerType).toBe(E2EE_INNER_TYPE_RPC);
+    const close = clientReceive(client, emitted[1]!);
+    expect(close.innerType).toBe(E2EE_INNER_TYPE_CLOSE);
+    // The RPC record took the pair the close would otherwise have declared, so
+    // the close is carried one further on and MUST declare that one instead.
+    expect([rpc.counter, close.counter]).toEqual([0n, 1n]);
+
+    // THE PEER'S OWN §10.1 VALIDATION, not this side's bookkeeping: the record is
+    // conforming, rather than merely accepted here.
+    expect(
+      client.close.receive({
+        innerType: close.innerType,
+        body: close.body,
+        envelope: { epoch: close.epoch, counter: close.counter },
+        epochCompleted: close.epochCompleted,
+        currentNextSend: positionOf(client.record.sendState),
+        at: NOW,
+      }).kind,
+    ).toBe("close");
+
+    // And the exchange completes: §10.1.1's anchor is the advance of the pair the
+    // close was actually protected at, so the peer's ack validates under the
+    // strict rule and the verdict is **Clean** (§10.4).
+    await clientSendCloseRecord(
+      node,
+      client,
+      client.close.buildCloseAck({
+        sendPosition: positionOf(client.record.sendState),
+        expectedRecv: client.close.ackExpectedRecv ?? positionOf(client.record.receiveState),
+      }),
+    );
+    await closing;
+    expect(session.verdict()).toBe("clean");
+    session.dispose();
+  });
+
   it("gives every pre-key failure the same observable", async () => {
     const causes: readonly Uint8Array[] = [
       // §11.2 P5 (row N6): an envelope before establishment.
