@@ -36,11 +36,16 @@
  *   encoding, which is why the 278-byte transcript itself is not transcribed.
  * - F13 `node-identity-key-fingerprint` — the §7.1 display form.
  *
- * NOT COVERED HERE, deliberately: P-256 (`../platform/ecdsa` and the device-key
- * module already carry on-device coverage); the NX pattern (web tier only); and
- * F15's transport messages, which would need a direct `@noble/ciphers` import —
- * not a dependency of this app — to reproduce, and whose evidence for the §6.5
- * outputs and their order the F6 case already supplies.
+ * NOT COVERED HERE: P-256 (`../platform/ecdsa` and the device-key module already
+ * carry on-device coverage); the NX pattern (web tier only); the §3.6 decode and
+ * re-encode-equality path; and F15's transport messages, which would need a
+ * direct `@noble/ciphers` import — not a dependency of this app — to reproduce,
+ * and whose evidence for the §6.5 outputs and their order the F6 case supplies.
+ *
+ * THIS SUBSET DOES NOT DISCHARGE §16.4, which requires the COMPLETE corpus to
+ * pass on physical devices on both mobile platforms before the native client
+ * ships E2EE support. That gate is open; `apps/mobile/README.md` records what it
+ * still needs.
  */
 
 import { E2EE_ENVELOPE_HEADER_BYTES } from "@ryco/shared/relayE2eeConstants";
@@ -101,79 +106,127 @@ function bytesToHex(bytes: Uint8Array): string {
   return hex;
 }
 
+/** The shape of each transcribed family, widened so a test can perturb a copy. */
+interface NoiseIkVector {
+  readonly prologue: string;
+  readonly initiatorStaticSecretKey: string;
+  readonly initiatorEphemeralSecretKey: string;
+  readonly initiatorRemoteStaticPublicKey: string;
+  readonly responderStaticSecretKey: string;
+  readonly responderEphemeralSecretKey: string;
+  readonly handshakePayloads: readonly string[];
+  readonly handshakeMessages: readonly string[];
+  readonly handshakeHash: string;
+}
+
+interface RecordDirectionVector {
+  readonly innerBody: string;
+  readonly envelope: string;
+  readonly aad: string;
+}
+
+interface RecordVector {
+  readonly sessionBindingHash: string;
+  readonly epochSecretC2N: string;
+  readonly epochSecretN2C: string;
+  readonly exporterSecret: string;
+  readonly serverConfirmationKey: string;
+  readonly clientToNode: RecordDirectionVector;
+  readonly nodeToClient: RecordDirectionVector;
+}
+
+interface NodePrekeyVector {
+  readonly hubOrigin: string;
+  readonly nodeId: string;
+  readonly identityKeyId: string;
+  readonly prekeyId: string;
+  readonly identityPublicKey: string;
+  readonly agreementPublicKey: string;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  readonly transcriptBytes: number;
+  readonly identityFingerprint: string;
+  readonly crossSignature: string;
+}
+
+interface NodeIdentityVector {
+  readonly fingerprintDisplay: string;
+  readonly agreementSecretKey: string;
+}
+
+/** Every transcribed value, as each check reads it. */
+export interface E2eeVectorSet {
+  readonly f15Ik: NoiseIkVector;
+  readonly f6Ik: RecordVector;
+  readonly f4NodePrekey: NodePrekeyVector;
+  readonly f13NodeIdentity: NodeIdentityVector;
+}
+
 /**
  * TEST-ONLY MATERIAL (§16.1). Every secret below is published deterministic test
  * material transcribed from the checked-in corpus. It MUST NEVER reach a real
  * endpoint, and nothing outside this module may read it.
+ *
+ * Exported for two readers, and no others: the drift test, which reads the real
+ * corpus files with `node:fs` — which neither this module nor anything else the
+ * bundler sees may do — and compares them against these so the subset cannot
+ * silently fall behind a regenerated corpus; and the negative cases, which pass
+ * each check a perturbed copy.
  */
-const F15_IK = {
-  prologue: "4a6f686e2047616c74",
-  initiatorStaticSecretKey: "e61ef9919cde45dd5f82166404bd08e38bceb5dfdfded0a34c8df7ed542214d1",
-  initiatorEphemeralSecretKey: "893e28b9dc6ca8d611ab664754b8ceb7bac5117349a4439a6b0569da977c464a",
-  initiatorRemoteStaticPublicKey:
-    "31e0303fd6418d2f8c0e78b91f22e8caed0fbe48656dcf4767e4834f701b8f62",
-  responderStaticSecretKey: "4a3acbfdb163dec651dfa3194dece676d437029c62a408b4c5ea9114246e4893",
-  responderEphemeralSecretKey: "bbdb4cdbd309f1a1f2e1456967fe288cadd6f712d65dc7b7793d5e63da6b375b",
-  handshakePayloads: ["4c756477696720766f6e204d69736573", "4d757272617920526f746862617264"],
-  handshakeMessages: [
-    "ca35def5ae56cec33dc2036731ab14896bc4c75dbb07a61f879f8e3afa4c7944718da798efbcd91528520204f904b9bd6c7413dccdc214d951e15253e39987f18146e8cd0873654207148333479d4d16c289f0294b29960a72f48e0b7bba2e89083169825e59642148d492020664ccf7",
-    "95ebc60d2b1fa672c1f46a8aa265ef51bfe38e7ccb39ec5be34069f1448088435361e70b2ed446e6c9ec387d1d6b3b840f194e373979d241b203c4acafccf5",
-  ],
-  handshakeHash: "0b0f68fb0c27e03ce9b97565995ed4838cc0581b762ef72b062f6a546419fad7",
-} as const;
-
-const F6_IK = {
-  sessionBindingHash: "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67",
-  epochSecretC2N: "b89ee30677c2855a7b9e88f6d4e9f85b1a317007734895653baac3463b19204d",
-  epochSecretN2C: "b1acc4b4ce50246a35b4075217acda93c68e4201eee1b5c307f1b2fec5adf290",
-  exporterSecret: "3df08be20cc319578a156b636a3ae5d017a6622899a48847ae8d99d3b084f722",
-  serverConfirmationKey: "46d17787aa5f5ec03d51247fe85c3f6178bd40272d76b19ce0fef8bba1c6738a",
-  clientToNode: {
-    innerBody: "7b225f746167223a227279636f2e7270632e70696e67227d",
-    envelope:
-      "01010100000000000000000000000078fe898e903e04ca8b3290545503de837a216f91ddad4f6adcb8b6ae1f2c456e4edca85e0ad5e7458b",
-    aad: "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6763326e",
+export const testOnlyEmbeddedVectors: E2eeVectorSet = {
+  f15Ik: {
+    prologue: "4a6f686e2047616c74",
+    initiatorStaticSecretKey: "e61ef9919cde45dd5f82166404bd08e38bceb5dfdfded0a34c8df7ed542214d1",
+    initiatorEphemeralSecretKey: "893e28b9dc6ca8d611ab664754b8ceb7bac5117349a4439a6b0569da977c464a",
+    initiatorRemoteStaticPublicKey:
+      "31e0303fd6418d2f8c0e78b91f22e8caed0fbe48656dcf4767e4834f701b8f62",
+    responderStaticSecretKey: "4a3acbfdb163dec651dfa3194dece676d437029c62a408b4c5ea9114246e4893",
+    responderEphemeralSecretKey: "bbdb4cdbd309f1a1f2e1456967fe288cadd6f712d65dc7b7793d5e63da6b375b",
+    handshakePayloads: ["4c756477696720766f6e204d69736573", "4d757272617920526f746862617264"],
+    handshakeMessages: [
+      "ca35def5ae56cec33dc2036731ab14896bc4c75dbb07a61f879f8e3afa4c7944718da798efbcd91528520204f904b9bd6c7413dccdc214d951e15253e39987f18146e8cd0873654207148333479d4d16c289f0294b29960a72f48e0b7bba2e89083169825e59642148d492020664ccf7",
+      "95ebc60d2b1fa672c1f46a8aa265ef51bfe38e7ccb39ec5be34069f1448088435361e70b2ed446e6c9ec387d1d6b3b840f194e373979d241b203c4acafccf5",
+    ],
+    handshakeHash: "0b0f68fb0c27e03ce9b97565995ed4838cc0581b762ef72b062f6a546419fad7",
   },
-  nodeToClient: {
-    innerBody: "7b225f746167223a227279636f2e7270632e706f6e67227d",
-    envelope:
-      "010101000000000000000000000000deae6ba8ca34d2bae3071723cf2bfc31780cfe3e37acb8811c1a82f236a76629825f8ff5c878cd3429",
-    aad: "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a676e3263",
+  f6Ik: {
+    sessionBindingHash: "5f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a67",
+    epochSecretC2N: "b89ee30677c2855a7b9e88f6d4e9f85b1a317007734895653baac3463b19204d",
+    epochSecretN2C: "b1acc4b4ce50246a35b4075217acda93c68e4201eee1b5c307f1b2fec5adf290",
+    exporterSecret: "3df08be20cc319578a156b636a3ae5d017a6622899a48847ae8d99d3b084f722",
+    serverConfirmationKey: "46d17787aa5f5ec03d51247fe85c3f6178bd40272d76b19ce0fef8bba1c6738a",
+    clientToNode: {
+      innerBody: "7b225f746167223a227279636f2e7270632e70696e67227d",
+      envelope:
+        "01010100000000000000000000000078fe898e903e04ca8b3290545503de837a216f91ddad4f6adcb8b6ae1f2c456e4edca85e0ad5e7458b",
+      aad: "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a6763326e",
+    },
+    nodeToClient: {
+      innerBody: "7b225f746167223a227279636f2e7270632e706f6e67227d",
+      envelope:
+        "010101000000000000000000000000deae6ba8ca34d2bae3071723cf2bfc31780cfe3e37acb8811c1a82f236a76629825f8ff5c878cd3429",
+      aad: "0101010000000000000000000000005f0ca343c437b1aa35e1a1c6eff4d2be244dde8dd384ff023559a2cee8c38a676e3263",
+    },
   },
-} as const;
-
-const F4_NODE_PREKEY = {
-  hubOrigin: "https://hub.example.com",
-  nodeId: "node_AAAAAAAAAAAAAAAAAAAAAA",
-  identityKeyId: "nkey_BBBBBBBBBBBBBBBBBBBBBB",
-  prekeyId: "epk_EEEEEEEEEEEEEEEEEEEEEE",
-  identityPublicKey: "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
-  agreementPublicKey: "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
-  createdAt: 1_784_160_000_000,
-  expiresAt: 1_786_752_000_000,
-  transcriptBytes: 278,
-  identityFingerprint: "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64",
-  crossSignature:
-    "58f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c716207",
-} as const;
-
-const F13_NODE_IDENTITY = {
-  fingerprintDisplay: "SHA256:AVbN7e5vhHl7KLe-gwSBlEg8wXFlsa56_nu8d-7fm2Q",
-  agreementSecretKey: "1111111111111111111111111111111111111111111111111111111111111111",
-} as const;
-
-/**
- * The transcribed values, for the drift test only. It reads the real corpus
- * files with `node:fs` — which neither this module nor anything else the bundler
- * sees may do — and compares them against these, so the subset cannot silently
- * fall behind a regenerated corpus.
- */
-export const testOnlyEmbeddedVectors = {
-  f15Ik: F15_IK,
-  f6Ik: F6_IK,
-  f4NodePrekey: F4_NODE_PREKEY,
-  f13NodeIdentity: F13_NODE_IDENTITY,
-} as const;
+  f4NodePrekey: {
+    hubOrigin: "https://hub.example.com",
+    nodeId: "node_AAAAAAAAAAAAAAAAAAAAAA",
+    identityKeyId: "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+    prekeyId: "epk_EEEEEEEEEEEEEEEEEEEEEE",
+    identityPublicKey: "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8",
+    agreementPublicKey: "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+    createdAt: 1_784_160_000_000,
+    expiresAt: 1_786_752_000_000,
+    transcriptBytes: 278,
+    identityFingerprint: "0156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b64",
+    crossSignature:
+      "58f2c7365b5f5cfe1193fcbf194dfc34ff77e173eb622ecd187b7c5e3c38134de93dee609798456a770fa8efba8a02dd72119fe68ebbb3f365b091be3c716207",
+  },
+  f13NodeIdentity: {
+    fingerprintDisplay: "SHA256:AVbN7e5vhHl7KLe-gwSBlEg8wXFlsa56_nu8d-7fm2Q",
+    agreementSecretKey: "1111111111111111111111111111111111111111111111111111111111111111",
+  },
+};
 
 /** The runner's own admission bound; not a vector value. Larger than any case. */
 const RUNNER_PLAINTEXT_CEILING = 4_096;
@@ -187,7 +240,12 @@ export interface E2eeVectorCheck {
 export interface E2eeVectorSuiteResult {
   readonly ok: boolean;
   readonly checks: readonly E2eeVectorCheck[];
-  /** Which implementation each §14.5 global resolved to on this runtime. */
+  /**
+   * Which implementation each §14.5 global resolved to, as recorded when
+   * `../../polyfills` installed them. It answers what THIS app's startup did on
+   * this runtime, which is the question the device procedure exists to settle;
+   * it is not a re-reading of `host`, which on a device is always `globalThis`.
+   */
   readonly globals: typeof e2eeGlobalProvenance;
 }
 
@@ -195,8 +253,16 @@ function equalHex(actual: Uint8Array, expected: string): boolean {
   return bytesToHex(actual) === expected;
 }
 
-/** Drives one deterministic IK handshake at both roles, exactly as F15 pins it. */
-function checkNoiseIkVector(): void {
+/**
+ * Drives one deterministic IK handshake at both roles, exactly as F15 pins it.
+ *
+ * Every check below takes the vector set it reads. On a device it is always the
+ * transcribed one; a test perturbs a copy to prove each comparison here is the
+ * thing that rejects, because a check that signals only by throwing is otherwise
+ * indistinguishable from a check that was deleted.
+ */
+function checkNoiseIkVector(vectors: E2eeVectorSet = testOnlyEmbeddedVectors): void {
+  const F15_IK = vectors.f15Ik;
   if (e2eeNoiseProtocolName(E2EE_NOISE_PATTERN_IK) !== E2EE_NOISE_PROTOCOL_NAME_IK) {
     throw new Error("protocol name");
   }
@@ -258,27 +324,30 @@ function checkNoiseIkVector(): void {
 }
 
 /** A fresh §6.5 bundle each call: the consumer takes ownership of the buffers. */
-function f6SessionSecrets(): E2eeSessionSecrets {
+function f6SessionSecrets(vector: RecordVector): E2eeSessionSecrets {
   return e2eeSessionSecretsFromNoiseKeys({
-    epochSecretC2N: hexToBytes(F6_IK.epochSecretC2N),
-    epochSecretN2C: hexToBytes(F6_IK.epochSecretN2C),
-    exporterSecret: hexToBytes(F6_IK.exporterSecret),
+    epochSecretC2N: hexToBytes(vector.epochSecretC2N),
+    epochSecretN2C: hexToBytes(vector.epochSecretN2C),
+    exporterSecret: hexToBytes(vector.exporterSecret),
   });
 }
 
-function recordSession(sendDirection: E2eeDirection): E2eeRecordSession {
+function recordSession(vector: RecordVector, sendDirection: E2eeDirection): E2eeRecordSession {
   return new E2eeRecordSession({
-    secrets: f6SessionSecrets(),
+    secrets: f6SessionSecrets(vector),
     suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
-    sessionBindingHash: hexToBytes(F6_IK.sessionBindingHash),
+    sessionBindingHash: hexToBytes(vector.sessionBindingHash),
     sendDirection,
     plaintextCeiling: RUNNER_PLAINTEXT_CEILING,
   });
 }
 
 /** §9.1 protect and unprotect, in both directions, against the F6 envelopes. */
-async function checkRecordProtection(): Promise<void> {
-  const secrets = f6SessionSecrets();
+async function checkRecordProtection(
+  vectors: E2eeVectorSet = testOnlyEmbeddedVectors,
+): Promise<void> {
+  const F6_IK = vectors.f6Ik;
+  const secrets = f6SessionSecrets(F6_IK);
   try {
     if (!equalHex(secrets.serverConfirmationKey, F6_IK.serverConfirmationKey)) {
       throw new Error("confirmation key");
@@ -295,11 +364,11 @@ async function checkRecordProtection(): Promise<void> {
       sendDirection === E2EE_DIRECTION_CLIENT_TO_NODE
         ? E2EE_DIRECTION_NODE_TO_CLIENT
         : E2EE_DIRECTION_CLIENT_TO_NODE;
-    const sender = recordSession(sendDirection);
-    const receiver = recordSession(receiveDirection);
+    const sender = recordSession(F6_IK, sendDirection);
+    const receiver = recordSession(F6_IK, receiveDirection);
     // A fresh receiver for the tamper case: `receiver` has already consumed
     // counter 0, so it would refuse a replay as a sequence mismatch instead.
-    const tamperReceiver = recordSession(receiveDirection);
+    const tamperReceiver = recordSession(F6_IK, receiveDirection);
     try {
       let envelope: Uint8Array | undefined;
       const protectResult = await sender.protect({
@@ -346,7 +415,9 @@ async function checkRecordProtection(): Promise<void> {
 }
 
 /** §7.3 transcript encoding and §7.1 strict Ed25519 verification. */
-function checkNodePrekeyCertificate(): void {
+function checkNodePrekeyCertificate(vectors: E2eeVectorSet = testOnlyEmbeddedVectors): void {
+  const F4_NODE_PREKEY = vectors.f4NodePrekey;
+  const F13_NODE_IDENTITY = vectors.f13NodeIdentity;
   const identityPublicKey = hexToBytes(F4_NODE_PREKEY.identityPublicKey);
   const transcript = encodeNodeE2eePrekeyTranscript({
     hubOrigin: F4_NODE_PREKEY.hubOrigin,
@@ -402,7 +473,9 @@ function checkNodePrekeyCertificate(): void {
 }
 
 /** §6.2 keygen off the live §14.5 CSPRNG, plus the pinned base-point derivation. */
-function checkAgreementKeygen(): void {
+function checkAgreementKeygen(vectors: E2eeVectorSet = testOnlyEmbeddedVectors): void {
+  const F4_NODE_PREKEY = vectors.f4NodePrekey;
+  const F13_NODE_IDENTITY = vectors.f13NodeIdentity;
   if (
     !equalHex(
       deriveE2eeAgreementPublicKey(hexToBytes(F13_NODE_IDENTITY.agreementSecretKey)),
@@ -429,14 +502,37 @@ function checkAgreementKeygen(): void {
   }
 }
 
+/**
+ * The individual checks, for the negative cases the suite cannot drive from
+ * outside. Nothing on a device calls these; `runE2eeVectorSuite` is the entry.
+ */
+export const testOnlyChecks = {
+  noiseIk: checkNoiseIkVector,
+  recordProtection: checkRecordProtection,
+  nodePrekeyCertificate: checkNodePrekeyCertificate,
+  agreementKeygen: checkAgreementKeygen,
+};
+
+/** The §14.5 preflight, which gates every vector case below it. */
+const E2EE_RUNTIME_GLOBALS_CASE = "runtime globals (§14.5)";
+
+/**
+ * The vector cases, each bound to the runner that produces its verdict — one
+ * table rather than two positional arrays, so a name cannot drift onto another
+ * case's check and mislabel the failure an operator is told to capture.
+ */
+const E2EE_VECTOR_CASES: readonly (readonly [string, () => void | Promise<void>])[] = [
+  ["F15 Noise IK vector (§14.1)", checkNoiseIkVector],
+  ["F6 record protection (§9.1)", checkRecordProtection],
+  ["F4 node prekey certificate (§7.3)", checkNodePrekeyCertificate],
+  ["X25519 agreement keygen (§6.2)", checkAgreementKeygen],
+];
+
 /** The cases, in the order the on-device report prints them. */
-export const E2EE_VECTOR_SUITE_CASES = [
-  "runtime globals (§14.5)",
-  "F15 Noise IK vector (§14.1)",
-  "F6 record protection (§9.1)",
-  "F4 node prekey certificate (§7.3)",
-  "X25519 agreement keygen (§6.2)",
-] as const;
+export const E2EE_VECTOR_SUITE_CASES: readonly string[] = [
+  E2EE_RUNTIME_GLOBALS_CASE,
+  ...E2EE_VECTOR_CASES.map(([name]) => name),
+];
 
 /**
  * Run the whole subset and report a bounded verdict per case.
@@ -445,24 +541,30 @@ export const E2EE_VECTOR_SUITE_CASES = [
  * and `ok: false`, because the values that would explain it are key material.
  * `host` exists so a test can present a runtime without the §14.5 globals; on a
  * device it is always the real one.
+ *
+ * FAIL-CLOSED (§14.5). This runner is a caller like any other, so a refused
+ * preflight refuses the rest: every later case is reported `false` UNRUN — no
+ * handshake and no key generation on a source the preflight has condemned —
+ * rather than run against it and reported green.
  */
 export async function runE2eeVectorSuite(
   host: E2eeRuntimeHost = globalThis,
 ): Promise<E2eeVectorSuiteResult> {
-  const runners: readonly (() => void | Promise<void>)[] = [
-    () => assertE2eeRuntimeGlobals(host),
-    checkNoiseIkVector,
-    checkRecordProtection,
-    checkNodePrekeyCertificate,
-    checkAgreementKeygen,
-  ];
-  const checks: E2eeVectorCheck[] = [];
-  for (const [index, name] of E2EE_VECTOR_SUITE_CASES.entries()) {
-    let ok = true;
-    try {
-      await runners[index]!();
-    } catch {
-      ok = false;
+  let runtimeOk = true;
+  try {
+    assertE2eeRuntimeGlobals(host);
+  } catch {
+    runtimeOk = false;
+  }
+  const checks: E2eeVectorCheck[] = [{ name: E2EE_RUNTIME_GLOBALS_CASE, ok: runtimeOk }];
+  for (const [name, run] of E2EE_VECTOR_CASES) {
+    let ok = runtimeOk;
+    if (runtimeOk) {
+      try {
+        await run();
+      } catch {
+        ok = false;
+      }
     }
     checks.push({ name, ok });
   }

@@ -15,13 +15,20 @@
  *
  * This mirrors `assertHostedRuntimeGlobals` in `./dpopSigner` and does not extend
  * it: that one guards the hosted plane only, and E2EE is not hosted-only.
+ *
+ * NO PRODUCTION CALLER EXISTS YET. This app generates no E2EE key and drives no
+ * handshake; the §16 vector runner is the only caller, and it is a development
+ * diagnostic. §14.5's startup verification is discharged when the mobile E2EE
+ * client lands: the first key-generation call site MUST gate on this and treat
+ * the throw as "E2EE unavailable on this device". Until then §14.5's fail-closed
+ * requirement is open, and `apps/mobile/README.md` records it as such.
  */
 
 /** §14.5 preflight draw. One agreement key's worth of bytes, then discarded. */
 const E2EE_PREFLIGHT_DRAW_BYTES = 32;
 
 // Fixed, bounded, and free of anything drawn: the operator needs the verdict and
-// which of the four conditions produced it, and nothing else may leave here.
+// which of the five conditions produced it, and nothing else may leave here.
 const RANDOM_SOURCE_MISSING =
   "End-to-end encryption requires a cryptographic random source this device does not provide.";
 const RANDOM_SOURCE_FAILED =
@@ -30,14 +37,17 @@ const RANDOM_SOURCE_DEGENERATE =
   "End-to-end encryption requires a cryptographic random source, and this device's source returned no randomness.";
 const TEXT_ENCODER_MISSING =
   "End-to-end encryption requires UTF-8 text encoding this device does not provide.";
+const TEXT_DECODER_MISSING =
+  "End-to-end encryption requires UTF-8 text decoding this device does not provide.";
 
 /**
  * The globals §14.5 depends on. Injected rather than read off `globalThis` so a
  * test can present a runtime that lacks them; the default is the real one.
  */
 export interface E2eeRuntimeHost {
-  readonly crypto?: { readonly getRandomValues?: unknown } | undefined;
+  readonly crypto?: { readonly getRandomValues?: unknown } | null | undefined;
   readonly TextEncoder?: unknown;
+  readonly TextDecoder?: unknown;
 }
 
 /** Non-short-circuiting, so the check reads the whole draw either way. */
@@ -96,5 +106,15 @@ export function assertE2eeRuntimeGlobals(host: E2eeRuntimeHost = globalThis): vo
   // absent `TextEncoder` is a load failure rather than a wrong-bytes failure.
   if (typeof host.TextEncoder !== "function") {
     throw new Error(TEXT_ENCODER_MISSING);
+  }
+
+  // The same load, and the same failure shape, for the decoder: `cborg`'s string
+  // codec constructs a `TextDecoder` at module scope too, and `encode.js` imports
+  // it — so ENCODING a transcript needs both. `../../polyfills` installs only the
+  // encoder because Expo's winter runtime supplies the decoder; the preflight
+  // still verifies it rather than trusting the load order of a package this app
+  // does not own.
+  if (typeof host.TextDecoder !== "function") {
+    throw new Error(TEXT_DECODER_MISSING);
   }
 }

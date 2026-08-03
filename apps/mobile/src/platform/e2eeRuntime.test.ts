@@ -3,13 +3,18 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { assertE2eeRuntimeGlobals } from "./e2eeRuntime";
 
 // EVERY case injects its host. This suite runs in the default Node environment,
-// where `crypto` and `TextEncoder` both exist, so a case that read the ambient
-// globals would pass whether or not the preflight works.
+// where `crypto`, `TextEncoder`, and `TextDecoder` all exist, so a case that read
+// the ambient globals would pass whether or not the preflight works.
 const workingHost = (
   fill: (array: Uint8Array) => unknown = (array) => array.fill(9),
-): { crypto: { getRandomValues: (array: Uint8Array) => unknown }; TextEncoder: unknown } => ({
+): {
+  crypto: { getRandomValues: (array: Uint8Array) => unknown };
+  TextEncoder: unknown;
+  TextDecoder: unknown;
+} => ({
   crypto: { getRandomValues: fill },
   TextEncoder,
+  TextDecoder,
 });
 
 describe("relay E2EE runtime preflight (§14.5)", () => {
@@ -20,13 +25,25 @@ describe("relay E2EE runtime preflight (§14.5)", () => {
   it("draws a full agreement key's worth of bytes and reads the returned array", () => {
     const getRandomValues = vi.fn((array: Uint8Array) => array.fill(1));
 
-    assertE2eeRuntimeGlobals({ crypto: { getRandomValues }, TextEncoder });
+    assertE2eeRuntimeGlobals({ crypto: { getRandomValues }, TextEncoder, TextDecoder });
 
     expect(getRandomValues).toHaveBeenCalledTimes(1);
     const drawn = getRandomValues.mock.calls[0]![0];
     expect(drawn.byteLength).toBe(32);
     // The draw is erased before the preflight returns; nothing may outlive it.
     expect([...drawn]).toEqual(Array.from<number>({ length: 32 }).fill(0));
+  });
+
+  it("erases a draw the source hands back in a different buffer", () => {
+    // The probe and the RETURNED array are erased separately because a source may
+    // return a buffer of its own — `expo-crypto`'s `getRandomBytes` shape — and
+    // that buffer is the one the pinned primitives consume. Nothing may outlive
+    // the preflight, so this case returns a distinct array and reads it after.
+    const returned = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+
+    assertE2eeRuntimeGlobals(workingHost(() => returned));
+
+    expect([...returned]).toEqual(Array.from<number>({ length: 32 }).fill(0));
   });
 
   it("calls the source bound to its own crypto object", () => {
@@ -38,19 +55,15 @@ describe("relay E2EE runtime preflight (§14.5)", () => {
       },
     };
 
-    expect(() => assertE2eeRuntimeGlobals({ crypto, TextEncoder })).not.toThrow();
+    expect(() => assertE2eeRuntimeGlobals({ crypto, TextEncoder, TextDecoder })).not.toThrow();
   });
 
   it("refuses a runtime with no source at all", () => {
-    expect(() => assertE2eeRuntimeGlobals({ crypto: undefined, TextEncoder })).toThrow(
-      /cryptographic random source this device does not provide/,
-    );
-    expect(() => assertE2eeRuntimeGlobals({ crypto: {}, TextEncoder })).toThrow(
-      /cryptographic random source this device does not provide/,
-    );
-    expect(() =>
-      assertE2eeRuntimeGlobals({ crypto: { getRandomValues: "not a function" }, TextEncoder }),
-    ).toThrow(/cryptographic random source this device does not provide/);
+    for (const crypto of [undefined, null, {}, { getRandomValues: "not a function" }]) {
+      expect(() => assertE2eeRuntimeGlobals({ crypto, TextEncoder, TextDecoder })).toThrow(
+        /cryptographic random source this device does not provide/,
+      );
+    }
   });
 
   it("refuses a source that throws, without carrying the cause out", () => {
@@ -100,6 +113,7 @@ describe("relay E2EE runtime preflight (§14.5)", () => {
       assertE2eeRuntimeGlobals({
         crypto: { getRandomValues: (array: Uint8Array) => array.fill(marker) },
         TextEncoder: undefined,
+        TextDecoder,
       });
       expect.unreachable();
     } catch (error) {
@@ -111,6 +125,18 @@ describe("relay E2EE runtime preflight (§14.5)", () => {
   it("refuses a runtime with no text encoder", () => {
     expect(() => assertE2eeRuntimeGlobals({ ...workingHost(), TextEncoder: undefined })).toThrow(
       /UTF-8 text encoding this device does not provide/,
+    );
+  });
+
+  it("refuses a runtime with no text decoder", () => {
+    // `cborg`'s string codec constructs a `TextDecoder` at module scope and
+    // `encode.js` imports it, so ENCODING a §7 transcript needs both globals. The
+    // app installs only the encoder — the decoder is Expo's winter runtime, which
+    // evaluates after `polyfills.ts` — so a runtime that passes on the encoder
+    // alone would still fail at codec load, which is the mid-handshake discovery
+    // §14.5 forbids.
+    expect(() => assertE2eeRuntimeGlobals({ ...workingHost(), TextDecoder: undefined })).toThrow(
+      /UTF-8 text decoding this device does not provide/,
     );
   });
 

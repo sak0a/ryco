@@ -82,9 +82,12 @@ type RandomFill = (array: Uint8Array) => Uint8Array;
 
 // The host's own `getRandomValues` is only ever detected, never called from
 // here, so it is typed as `unknown`: the DOM signature is generic over the view
-// type and narrowing it would make a real `globalThis` unassignable.
+// type and narrowing it would make a real `globalThis` unassignable. `crypto`
+// admits `null` because a host is whatever the runtime hands over, and the
+// install runs at module scope of the app's first import — a `TypeError` there
+// is a white screen with no bounded error.
 export interface E2eeCsprngHost {
-  crypto?: { getRandomValues?: unknown } | undefined;
+  crypto?: { getRandomValues?: unknown } | null | undefined;
 }
 
 export interface E2eeTextEncoderHost {
@@ -129,15 +132,18 @@ export function installE2eeCsprng(
   randomFill: RandomFill = expoCryptoRandomFill,
 ): E2eeGlobalProvenance {
   const existing = host.crypto;
-  if (existing !== undefined && typeof existing.getRandomValues === "function") return "platform";
-  const target = existing ?? {};
+  if (typeof existing?.getRandomValues === "function") return "platform";
+  // `null` and any non-object are REPLACED rather than written through: defining
+  // onto them throws, and defining onto a substitute the host never adopts would
+  // report an adapter that no consumer can reach.
+  const target = typeof existing === "object" && existing !== null ? existing : {};
   Object.defineProperty(target, "getRandomValues", {
     configurable: true,
     enumerable: false,
     writable: true,
     value: randomFill,
   });
-  if (existing === undefined) {
+  if (target !== existing) {
     Object.defineProperty(host, "crypto", {
       configurable: true,
       enumerable: false,
@@ -240,13 +246,32 @@ export function installE2eeTextEncoder(host: E2eeTextEncoderHost): E2eeGlobalPro
   return "adapter";
 }
 
+/** Which implementation each §14.5 global ended up with on one runtime. */
+export interface E2eeGlobalProvenanceRecord {
+  readonly csprng: E2eeGlobalProvenance;
+  readonly textEncoder: E2eeGlobalProvenance;
+}
+
+/**
+ * Install both globals on `host` and record what each resolved to.
+ *
+ * The wiring is a function rather than two calls inside the const below so the
+ * thing that actually runs on a device — both installs, on one host, in this
+ * order — is itself reachable from a test, not only the two installers.
+ */
+export function installE2eeRuntimeGlobals(
+  host: E2eeCsprngHost & E2eeTextEncoderHost,
+): E2eeGlobalProvenanceRecord {
+  return Object.freeze({
+    csprng: installE2eeCsprng(host),
+    textEncoder: installE2eeTextEncoder(host),
+  });
+}
+
 /**
  * Which implementation each global ended up with on THIS runtime, recorded at
  * install time because it is unrecoverable afterwards. Whether Hermes ships
  * either of these is not statically knowable from the checked-in tree, and the
  * §16 vector runner prints this so a device check answers it with evidence.
  */
-export const e2eeGlobalProvenance = Object.freeze({
-  csprng: installE2eeCsprng(globalThis),
-  textEncoder: installE2eeTextEncoder(globalThis),
-});
+export const e2eeGlobalProvenance = installE2eeRuntimeGlobals(globalThis);
