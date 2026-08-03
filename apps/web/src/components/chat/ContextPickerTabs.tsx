@@ -11,6 +11,8 @@ export const ContextPickerTabs = memo(function ContextPickerTabs(props: {
   tabs: ReadonlyArray<ContextPickerTab>;
   activeId: string;
   onSelect: (id: string) => void;
+  /** Tightens the strip for popovers, where the dialog inset is too generous. */
+  density?: "default" | "compact";
 }) {
   const tablistRef = useRef<HTMLDivElement>(null);
   const [indicatorStyle, setIndicatorStyle] = useState({ width: 0, x: 0, visible: false });
@@ -36,7 +38,10 @@ export const ContextPickerTabs = memo(function ContextPickerTabs(props: {
     <div
       ref={tablistRef}
       role="tablist"
-      className="relative isolate flex gap-1 border-border border-b px-3 py-1.5"
+      className={cn(
+        "relative isolate flex gap-1 border-border border-b",
+        props.density === "compact" ? "px-1.5 py-1" : "px-3 py-1.5",
+      )}
     >
       <span
         className={cn(

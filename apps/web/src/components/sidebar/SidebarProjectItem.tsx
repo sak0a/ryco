@@ -462,6 +462,20 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     setNewWorktreeDialogOpen(true);
   }, []);
 
+  // Routes through the ordinary new-thread path, which reuses this project's
+  // existing draft when there is one and lands on `/draft/$draftId` — the
+  // composer-first surface with the hero and inline worktree controls.
+  const handleOpenNewThreadClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const member = project.memberProjects[0];
+      if (!member) return;
+      createThreadForProjectMember(member);
+    },
+    [createThreadForProjectMember, project.memberProjects],
+  );
+
   const handleOpenProjectOverviewClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -487,6 +501,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
         onContextMenu={handleProjectButtonContextMenu}
         onOpenProjectOverviewClick={handleOpenProjectOverviewClick}
         onOpenNewWorktreeClick={handleOpenNewWorktreeClick}
+        onOpenNewThreadClick={handleOpenNewThreadClick}
         onCopyPath={(member) => {
           copyPathToClipboard(member.cwd, { path: member.cwd });
         }}

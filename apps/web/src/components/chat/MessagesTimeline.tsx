@@ -495,14 +495,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
+  // A thread with nothing to show is rendered by `ChatView` as `NewThreadHero`
+  // instead of mounting this timeline; the empty branch here only covers the
+  // narrow window where an optimistic send has cleared the hero but no row has
+  // materialized yet, so it stays blank rather than flashing placeholder copy.
   if (rows.length === 0 && !isWorking) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <p className="text-sm text-muted-foreground/30">
-          Send a message to start the conversation.
-        </p>
-      </div>
-    );
+    return <div aria-hidden className="h-full" />;
   }
 
   return (

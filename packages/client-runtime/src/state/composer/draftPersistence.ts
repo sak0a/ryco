@@ -156,6 +156,34 @@ const PersistedDraftThreadState = Schema.Struct({
   tokenMode: Schema.optionalKey(AgentTokenMode),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  // Optional so drafts persisted before sources existed still decode.
+  worktreeSource: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Union([
+        Schema.Struct({
+          kind: Schema.Literal("pr"),
+          number: Schema.Number,
+          label: Schema.String,
+        }),
+        Schema.Struct({
+          kind: Schema.Literal("issue"),
+          number: Schema.Number,
+          title: Schema.String,
+          label: Schema.String,
+        }),
+        Schema.Struct({
+          kind: Schema.Literal("workItem"),
+          provider: Schema.Literal("jira"),
+          key: Schema.String,
+          title: Schema.String,
+          state: Schema.optional(Schema.String),
+          stateName: Schema.optional(Schema.String),
+          url: Schema.optional(Schema.String),
+          label: Schema.String,
+        }),
+      ]),
+    ),
+  ),
   envMode: DraftThreadEnvModeSchema,
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
