@@ -72,13 +72,17 @@ engine the app ships and no Node test runs on it:
   primitives capture `globalThis.crypto` when their module evaluates — so the
   adapter has to be installed before the first import, not checked later.
 - §3.6 canonical CBOR. `cborg` builds a `TextEncoder` at module scope, and React
-  Native provides none.
+  Native provides none. Its string codec builds a `TextDecoder` at module scope
+  too — Expo's winter runtime supplies that one — and `encode.js` imports it, so
+  encoding a transcript needs both.
 - §14.2's curve, AEAD, and hash implementations, which are BigInt- and
   typed-array-heavy pure JavaScript.
 
 **There is no Detox/Maestro/e2e infrastructure in this repository and Phase 3 is
-not building one.** The acceptance evidence is this written procedure plus the
-in-app runner (`src/devtools/e2eeVectorRunner.ts`), run by the owner on hardware.
+not building one.** The evidence below is this written procedure plus the in-app
+runner (`src/devtools/e2eeVectorRunner.ts`), run by the owner on hardware. It is
+**partial** evidence: §16.4's complete-corpus physical-device gate is not
+satisfied by it, and remains open (see below).
 
 ### Procedure
 
@@ -117,13 +121,17 @@ in-app runner (`src/devtools/e2eeVectorRunner.ts`), run by the owner on hardware
    `platform` means the Hermes build already had one. Which of the two Hermes
    provides is not knowable from the checked-in tree, and this line is the only
    place the answer is observed. Report it with the run.
-6. If `runtime globals (§14.5)` is `false`, the suite reports the verdict and
-   nothing else on purpose — the values that would explain it are key material.
-   Separate the three causes from the console directly:
+6. If `runtime globals (§14.5)` is `false`, **every later case is `false` too and
+   none of them ran**: §14.5 is fail-closed, so a runtime the preflight has
+   condemned gets no handshake and no key generation, not even diagnostic ones.
+   The suite reports the verdict and nothing else on purpose — the values that
+   would explain it are key material. Separate the causes from the console
+   directly:
 
    ```js
    typeof globalThis.crypto?.getRandomValues; // "function", or nothing is installed
    typeof globalThis.TextEncoder; // "function", or canonical CBOR cannot load
+   typeof globalThis.TextDecoder; // "function", or canonical CBOR cannot load
    crypto.getRandomValues(new Uint8Array(32)); // throws, or comes back all zeros
    ```
 
@@ -152,10 +160,23 @@ It does **not** prove:
   same pinned packages.
 - **Any live channel.** There is no relay, no node, and no Hub in this procedure;
   it is the primitive and codec layer only.
-- **Every corpus case.** The runner carries a deliberately small transcribed
-  subset (the 844 KB corpus is not bundled); `src/devtools/e2eeVectorRunner.ts`
-  documents the selection, and `e2eeVectorRunner.test.ts` proves the transcribed
-  bytes still match the real fixtures. The full corpus remains a Node gate.
+- **§16.4's device gate.** §16.4 requires the **complete** corpus to pass on
+  physical devices on **both** mobile platforms before the native client ships
+  E2EE support, and calls it an explicit acceptance gate of the native rollout.
+  This runner carries four transcribed families (F15 IK, F6, F4, F13 — the 844 KB
+  corpus is not bundled, and `e2eeVectorRunner.test.ts` proves the transcribed
+  bytes are still the real fixtures') — no NX pattern, no snow set, no
+  F1/F2/F7/F8/F10/F16/F17, no P-256, and no CBOR **decode** or
+  re-encode-equality case at all. Green here therefore does not satisfy §16.4.
+  What remains: a device harness that can stream or side-load the corpus without
+  bundling it, plus those families. **That gate is open and blocks the native
+  E2EE rollout** — it is not a documented non-goal.
+- **§14.5's startup verification.** `src/platform/e2eeRuntime.ts` implements the
+  fail-closed preflight, but this app generates no E2EE key and drives no
+  handshake yet, so its only caller is this development-build runner. The first
+  key-generation call site must gate on it and treat the throw as "E2EE
+  unavailable on this device"; until it lands, §14.5's "verifies the source at
+  startup and refuses E2EE" is open.
 - **Anything about Android.** Run the same procedure per platform.
 
 ## Notes / boundaries
