@@ -171,13 +171,43 @@ It does **not** prove:
   What remains: a device harness that can stream or side-load the corpus without
   bundling it, plus those families. **That gate is open and blocks the native
   E2EE rollout** — it is not a documented non-goal.
-- **§14.5's startup verification.** `src/platform/e2eeRuntime.ts` implements the
-  fail-closed preflight, but this app generates no E2EE key and drives no
-  handshake yet, so its only caller is this development-build runner. The first
-  key-generation call site must gate on it and treat the throw as "E2EE
-  unavailable on this device"; until it lands, §14.5's "verifies the source at
-  startup and refuses E2EE" is open.
 - **Anything about Android.** Run the same procedure per platform.
+
+§14.5's startup verification is no longer open: `src/platform/e2eeAgreementKey.ts`
+runs `assertE2eeRuntimeGlobals` before it draws this device's static X25519 key
+and turns a refusal into `agreement_key_runtime_unavailable`, with no key created
+and nothing written. That is the only path in the app that draws E2EE key
+material, so a runtime the preflight condemns can hold no E2EE key at all. The
+handshake that reaches that path — and the screen state that surfaces the refusal
+— lands with the mobile E2EE client; until then no launch calls it.
+
+## Relay E2EE key custody (owner, on a physical device)
+
+`docs/relay-e2ee-protocol.md` §6.3 puts two requirements on the native client that
+only a device can confirm. Both are implemented — see `src/platform/e2eeSecureStore.ts`
+and `plugins/withAndroidSecureStoreBackupExclusion.cjs` — and neither is proven by
+the Node suite.
+
+- **iOS reinstall must destroy the E2EE keychain namespace.** Keychain
+  generic-password items survive app deletion for the same bundle id, so the app
+  writes a first-run marker into the plain SQLite-backed KV, which does not. Pair
+  the device, delete the app, reinstall it, and confirm that re-pairing is
+  required — not that the previous install's key is silently reused. The marker
+  check runs before any read of the namespace, so nothing of the old material is
+  loaded on that launch.
+- **Android backup must not carry `shared_prefs/SecureStore.xml`.** The generated
+  manifest and rules were verified from a real `expo prebuild --platform android`
+  in this repository: `<application>` carries
+  `android:fullBackupContent="@xml/ryco_e2ee_backup_rules"` and
+  `android:dataExtractionRules="@xml/ryco_e2ee_data_extraction_rules"`, both files
+  exclude the SecureStore preferences file from `sharedpref`, and
+  `android:allowBackup` stays `true` so the environment registry and hub profile
+  keep their backup. **A device check must still confirm the effect**, because a
+  build artifact cannot: back the device up, restore onto a second device (and
+  run a device-to-device transfer), and confirm the restored app has no E2EE
+  agreement key and demands re-pairing while the ordinary saved environments come
+  back. The rules exclude both `SecureStore.xml` and `SecureStore`, so this check
+  also settles which spelling the backup engine honours.
 
 ## Notes / boundaries
 
