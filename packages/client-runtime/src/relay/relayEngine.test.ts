@@ -183,6 +183,7 @@ function stubProvider(overrides: Partial<RelayE2eeChannel> = {}) {
       beginClose: async () => {
         calls.beginCloseCalls += 1;
         host.close();
+        return "opened";
       },
       dispose: (options) => calls.disposed.push(options),
       ...overrides,
@@ -836,6 +837,7 @@ describe("HostedRelayEngine E2EE seams", () => {
         await new Promise<void>((resolve) => {
           release = resolve;
         });
+        return "opened";
       },
     });
     const handlers = callbacks();
@@ -855,6 +857,239 @@ describe("HostedRelayEngine E2EE seams", () => {
 
     expect(sentFrames(socket).some((frame) => frame.type === "channel.close")).toBe(true);
     expect(calls.disposed).toEqual([{ incompleteReassembly: false }]);
+  });
+
+  it("retries a close the send queue refused instead of latching it away", async () => {
+    // §11.4: a refused `E2EEClose` opened no close phase — no pair consumed, no
+    // wire record, no `T_CLOSE` wait armed — so nothing bounds the channel and
+    // nothing will ever emit the outer close on its own. Latching on the attempt
+    // rather than on its outcome escalates ordinary backpressure into a channel
+    // that can never be closed cleanly, with its §6.5 secrets never erased.
+    let refuse = true;
+    const { provider, calls, host } = stubProvider({
+      beginClose: async () => {
+        calls.beginCloseCalls += 1;
+        if (refuse) return "refused";
+        host.close();
+        return "opened";
+      },
+    });
+    const handlers = callbacks();
+    const { engine, socket } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    engine.close();
+    await flush();
+    engine.close();
+    await flush();
+    expect(calls.beginCloseCalls).toBe(2);
+    expect(sentFrames(socket).some((frame) => frame.type === "channel.close")).toBe(false);
+    expect(calls.disposed).toEqual([]);
+
+    refuse = false;
+    engine.close();
+    await flush();
+
+    expect(calls.beginCloseCalls).toBe(3);
+    expect(sentFrames(socket).some((frame) => frame.type === "channel.close")).toBe(true);
+    expect(calls.disposed).toEqual([{ incompleteReassembly: false }]);
+  });
+
+  it("re-attempts a refused close when the outbound queue drains", async () => {
+    // The capacity a §11.4 refusal was waiting for comes back at the drain, not
+    // at a caller: the application asked once and is owed the close.
+    let refuse = true;
+    const { provider, calls, host } = stubProvider({
+      beginClose: async () => {
+        calls.beginCloseCalls += 1;
+        if (refuse) return "refused";
+        host.close();
+        return "opened";
+      },
+    });
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 65_536,
+    });
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket, limits);
+    socket.frame({ type: "flow.pause", ...VERSION, channelId: CHANNEL_ID });
+    const reservation = host().admit(64);
+    if (reservation === undefined) throw new Error("expected an admission");
+    expect(reservation.send(new Uint8Array(64))).toBe(true);
+
+    engine.close();
+    await flush();
+    expect(calls.beginCloseCalls).toBe(1);
+    refuse = false;
+
+    socket.frame({ type: "flow.resume", ...VERSION, channelId: CHANNEL_ID });
+    await flush();
+
+    expect(calls.beginCloseCalls).toBe(2);
+    expect(sentFrames(socket).some((frame) => frame.type === "channel.close")).toBe(true);
+    expect(engine.bufferedAmount).toBe(0);
+  });
+
+  it("puts every queued record on the socket before the outer channel.close", async () => {
+    // §10.3 and §11.3: `#finish` discards whatever is still queued and the close
+    // control frame is written straight to the socket, so a close emitted over a
+    // non-empty queue destroys the record the peer needs to verify the exchange
+    // — after the sequence pair for it was spent. The node does the same thing
+    // from the other side, and a protocol that must get a final record onto the
+    // wire before the outer close cannot be built otherwise.
+    const { provider, host } = stubProvider();
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 4_096,
+    });
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket, limits);
+    const reservation = host().admit(256);
+    if (reservation === undefined) throw new Error("expected an admission");
+    // The socket backs up between admission and transmission, so the flush
+    // defers behind its own timer and the record is still queued at the close.
+    socket.bufferedAmount = limits.maxQueuedBytes;
+    expect(reservation.send(new Uint8Array(256).fill(0xab))).toBe(true);
+    expect(sentFrames(socket).some((frame) => frame.type === "data")).toBe(false);
+
+    engine.close();
+
+    const frames = sentFrames(socket);
+    const data = frames.findIndex((frame) => frame.type === "data");
+    const close = frames.findIndex((frame) => frame.type === "channel.close");
+    expect(data).toBeGreaterThanOrEqual(0);
+    expect(close).toBeGreaterThan(data);
+  });
+
+  it("refuses a second channel.accept instead of building a second channel over the first", () => {
+    // §4.4 creates the channel's machine at `channel.accept` and destroys it
+    // when the channel closes. A repeat from an untrusted Hub would leave the
+    // first machine holding live §6.5 secrets nobody erases and close timers
+    // armed on a channel nothing holds, able to tear down its replacement.
+    const { provider, calls } = stubProvider();
+    const handlers = callbacks();
+    const { socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
+
+    expect(calls.hosts).toHaveLength(1);
+    expect(events.onOpen).toHaveBeenCalledOnce();
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "protocol",
+      retryable: false,
+      closeReason: "channel_rejected",
+    });
+    expect(calls.disposed).toEqual([{ incompleteReassembly: false }]);
+  });
+
+  it("ends the linger on the peer's reasonless channel.close without reporting a failure", async () => {
+    // §10.3: observing the peer's `channel.close` is one of the three events
+    // that end the linger, and a reasonless one is the relay protocol's orderly
+    // close — §11.1 gives every E2EE-fatal condition a reason. Losing the
+    // channel here "changes the peer's verdict, never this endpoint's, and MUST
+    // NOT be reported as a failure of this endpoint's exchange".
+    let release: (() => void) | undefined;
+    const { provider, calls } = stubProvider({
+      beginClose: async () => {
+        calls.beginCloseCalls += 1;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return "opened";
+      },
+    });
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+    engine.close();
+    await flush();
+
+    socket.frame({ type: "channel.close", ...VERSION, channelId: CHANNEL_ID });
+    release?.();
+    await flush();
+
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+    expect(events.onError).not.toHaveBeenCalled();
+    expect(events.onClose).toHaveBeenCalledWith(1000, "closed");
+    expect(handlers.onSessionStatus).toHaveBeenCalledWith("closed");
+    // The channel is still told the channel ended, so §10.4 can record it.
+    expect(calls.disposed).toEqual([{ incompleteReassembly: false }]);
+  });
+
+  it("still fails on a peer close that names a reason", () => {
+    // §11.1 gives every E2EE-fatal condition a reason, so a named close is a
+    // rejection and keeps the reason's own classification.
+    const { provider } = stubProvider();
+    const handlers = callbacks();
+    const { socket } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    socket.frame({
+      type: "channel.close",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      reason: "node_offline",
+    });
+
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "offline",
+      retryable: true,
+      closeReason: "node_offline",
+    });
+  });
+
+  it("delivers inbound payloads to the channel in arrival order", async () => {
+    // §9.2 compares each envelope against ONE expected pair, so two overlapping
+    // `unprotect` calls race that comparison — and the close machine's §10.1
+    // passed-through comparison runs against a next-send another interception is
+    // in the middle of moving. The engine can complete several messages in a
+    // single synchronous drain, so the ordering is the engine's to hold.
+    const order: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const { provider } = stubProvider({
+      intercept: async (payload) => {
+        const label = String(payload[0]);
+        order.push(`enter:${label}`);
+        if (releaseFirst === undefined && label === "1") {
+          await new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          });
+        }
+        order.push(`leave:${label}`);
+        return { kind: "rpc", message: payload };
+      },
+    });
+    const { socket, events } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: new Uint8Array([1]),
+    });
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 1 as never,
+      payload: new Uint8Array([2]),
+    });
+    await flush();
+    expect(order).toEqual(["enter:1"]);
+
+    releaseFirst?.();
+    await flush();
+
+    expect(order).toEqual(["enter:1", "leave:1", "enter:2", "leave:2"]);
+    expect(events.onData.mock.calls.map(([bytes]) => bytes[0])).toEqual([1, 2]);
   });
 
   it("takes the channel's fatal failure verbatim onto the outer close", () => {

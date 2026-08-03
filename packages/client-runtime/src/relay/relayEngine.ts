@@ -98,8 +98,6 @@ export interface RelayE2eeHost {
   readonly limits: RelayLimits;
   /** §9.3: admission for the entire record; `undefined` refuses it. */
   readonly admit: (messageBytes: number) => RelayE2eeReservation | undefined;
-  /** §10.4: the relay chunk assembler is part-way through a message. */
-  readonly incompleteMessage: () => boolean;
   /**
    * The outer relay close (§10.3). With no failure this is the reasonless
    * `channel.close` that follows a clean exchange; with one it is §11.1's
@@ -121,13 +119,25 @@ export type RelayE2eeInboundDisposition =
   | { readonly kind: "claimed" }
   | { readonly kind: "rejected" };
 
+/**
+ * What one §10.2 close attempt did to the channel.
+ *
+ * `refused` is §11.4 and nothing else: the `E2EEClose` obtained no transmission
+ * admission, so no pair was consumed, no wire record of any kind was produced,
+ * and NO CLOSE PHASE OPENED — nothing is owed, no `T_CLOSE` wait is armed, and
+ * nothing bounds the channel. The caller must be able to ask again, because
+ * ordinary backpressure MUST NOT be escalated into a channel that can never be
+ * closed cleanly.
+ */
+export type RelayE2eeCloseAttempt = "opened" | "refused";
+
 export interface RelayE2eeChannel {
   /** §4.3: discriminate, authenticate, and dispatch one inbound payload. */
   readonly intercept: (payload: Uint8Array) => Promise<RelayE2eeInboundDisposition>;
   /** §4.2: one outbound application RPC message. `false` never closes anything. */
   readonly emit: (message: Uint8Array) => Promise<boolean>;
   /** §10: begin the authenticated close; the channel asks for the outer one. */
-  readonly beginClose: () => Promise<void>;
+  readonly beginClose: () => Promise<RelayE2eeCloseAttempt>;
   /** §9.5, §10.4: the channel ended. Idempotent. */
   readonly dispose: (options?: { readonly incompleteReassembly?: boolean }) => void;
 }
@@ -268,7 +278,10 @@ export class HostedRelayEngine {
   #outboundReservedBytes = 0;
   /** §9.2 requires envelopes to reach `unprotect` in arrival order. */
   #e2eeInbound: Promise<void> = Promise.resolve();
+  /** A §10 close attempt is in flight, or its phase opened. Never both at once. */
   #e2eeClosing = false;
+  /** The application asked for the close; it stands until one attempt opens a phase. */
+  #e2eeCloseRequested = false;
 
   constructor(options: RelayEngineOptions) {
     this.options = options;
@@ -347,21 +360,51 @@ export class HostedRelayEngine {
       // endpoint's role requires, or `T_CLOSE` expires. Enqueueing one's own
       // final records is never sufficient, so the channel — not this method —
       // decides when the frame below goes out, through `host.close`. A repeat
-      // call is therefore a no-op rather than a shortcut past that bound; the
-      // close phase is bounded by `T_CLOSE` and ends on its own.
-      if (this.#e2eeClosing) return;
-      this.#e2eeClosing = true;
+      // call while a phase is open is therefore a no-op rather than a shortcut
+      // past that bound; the phase is bounded by `T_CLOSE` and ends on its own.
+      this.#e2eeCloseRequested = true;
       this.options.callbacks.onTransportStatus("draining");
-      void this.#e2ee.beginClose().catch(() => this.#failE2ee(relayE2eeFailure("fatal_post_key")));
+      this.#attemptE2eeClose();
       return;
     }
     this.#outerClose(code, reason);
+  }
+
+  /**
+   * §10.2, §11.4: ask the channel to open its close phase, and keep the request
+   * standing until one attempt does.
+   *
+   * A refused attempt opened nothing — no pair consumed, no wire record, no
+   * `T_CLOSE` wait armed — so latching on the attempt rather than on its outcome
+   * would turn ordinary send-queue backpressure into a channel that can never be
+   * closed cleanly, with its §6.5 session secrets never erased. The retry is
+   * driven from the outbound drain below, which is where the capacity a refusal
+   * was waiting for actually comes back.
+   */
+  #attemptE2eeClose(): void {
+    const channel = this.#e2ee;
+    if (this.#closed || !channel || this.#e2eeClosing || !this.#e2eeCloseRequested) return;
+    this.#e2eeClosing = true;
+    void channel.beginClose().then(
+      (outcome) => {
+        if (outcome === "refused" && !this.#closed && this.#e2ee === channel) {
+          this.#e2eeClosing = false;
+        }
+      },
+      () => this.#failE2ee(relayE2eeFailure("fatal_post_key")),
+    );
   }
 
   #outerClose(code: number, reason: string): void {
     if (this.#closed) return;
     this.#e2eeClosing = true;
     this.options.callbacks.onTransportStatus("draining");
+    // §10.3 and §11.3: this endpoint's own final records go out AHEAD of the
+    // frame that ends the channel. `#finish` discards whatever is still queued
+    // and the control frame below is written straight to the socket, so a close
+    // emitted over a non-empty queue destroys the very close-machine record or
+    // `E2EEError` the peer needs — after the sequence pair for it was spent.
+    this.#flushOutbound(true);
     if (this.#channel) this.#frame({ type: "channel.close", ...VERSION, channelId: this.#channel });
     this.#finish(code, reason);
   }
@@ -442,7 +485,12 @@ export class HostedRelayEngine {
       return;
     }
     if (frame.type === "channel.accept") {
-      if (frame.channelId !== this.#channel || !this.#role)
+      // §4.4 creates the channel's machine at `channel.accept` and destroys it
+      // when the channel closes; there is no second acceptance of one channel.
+      // A repeat would build a second machine over the first, orphaning its
+      // §6.5 secrets unerased and its close timers armed on a channel nothing
+      // holds any more — so it is refused rather than obeyed.
+      if (this.#accepted || frame.channelId !== this.#channel || !this.#role)
         return this.#fail(failure("channel_rejected"));
       this.#accepted = true;
       if (this.options.e2ee && !this.#openE2eeChannel(this.#limits)) return;
@@ -450,6 +498,22 @@ export class HostedRelayEngine {
       this.options.callbacks.onSessionStatus("synchronizing");
       this.options.events.onOpen();
       return;
+    }
+    if (
+      frame.type === "channel.close" &&
+      frame.reason === undefined &&
+      frame.channelId === this.#channel &&
+      this.#e2eeClosing
+    ) {
+      // §10.3: observing the peer's `channel.close` is one of the three events
+      // that end this endpoint's linger, and a reasonless one is the relay
+      // protocol's orderly close rather than a rejection — §11.1 gives every
+      // E2EE-fatal condition a reason. Losing the channel here "changes the
+      // peer's verdict, never this endpoint's, and MUST NOT be reported as a
+      // failure of this endpoint's exchange"; §10.4 fixed that verdict when the
+      // exchange completed or `T_CLOSE` expired, and the channel records the
+      // ending itself through `dispose`.
+      return this.#outerClose(1000, "closed");
     }
     if (frame.type === "channel.close" || frame.type === "channel.reject")
       return frame.channelId === this.#channel
@@ -477,7 +541,6 @@ export class HostedRelayEngine {
       this.#e2ee = this.options.e2ee!({
         limits,
         admit: (messageBytes) => this.#reserveOutbound(messageBytes),
-        incompleteMessage: () => this.#assembler.incompleteMessage,
         close: (value) => {
           if (value) return this.#failE2ee(value);
           // §10.3: after a clean exchange the endpoint sends `channel.close`
@@ -507,6 +570,10 @@ export class HostedRelayEngine {
   #failE2ee(value: HostedRelayFailure): void {
     if (this.#closed) return;
     this.#e2eeClosing = true;
+    // §11.3's procedure emits one `E2EEError` and only then the close, so the
+    // record goes out ahead of the frame here for the same reason `#outerClose`
+    // drains: the frame is written past the queue and `#fail` discards it.
+    this.#flushOutbound(true);
     if (this.#channel && value.closeReason) {
       this.#frame({
         type: "channel.close",
@@ -698,13 +765,25 @@ export class HostedRelayEngine {
     this.#flushOutbound();
   }
 
-  #flushOutbound(): void {
+  /**
+   * `final` is the best-effort drain a close takes before its own frame: it
+   * writes past the local queue threshold, because deferring is exactly what
+   * loses the payload the caller is about to close over. It stays inside the
+   * peer's `flow.pause` — a paused channel cannot be drained without violating
+   * relay flow control, and a socket that will not take the bytes cannot be made
+   * to. Both lose the record, which is why §10.3 takes delivery proof from the
+   * peer and never from a successful enqueue.
+   */
+  #flushOutbound(final = false): void {
     if (this.#closed || this.#outboundPaused || !this.#channel || !this.#limits) return;
     if (this.#flushTimer) this.options.timers.clearTimeout(this.#flushTimer);
     this.#flushTimer = null;
     while (this.#outboundQueue.length > 0) {
       const next = this.#outboundQueue[0]!;
-      if (this.options.socket.bufferedAmount + next.reservedBytes > this.#limits.maxQueuedBytes) {
+      if (
+        !final &&
+        this.options.socket.bufferedAmount + next.reservedBytes > this.#limits.maxQueuedBytes
+      ) {
         this.#flushTimer = this.options.timers.setTimeout(() => this.#flushOutbound(), 10);
         return;
       }
@@ -726,6 +805,10 @@ export class HostedRelayEngine {
       });
       next.bytes.fill(0);
     }
+    // The queue is empty, so the capacity a §11.4 refusal was waiting for is
+    // back: a close the application already asked for gets its next attempt here
+    // rather than waiting for a caller that may never come again.
+    this.#attemptE2eeClose();
   }
 
   #frame(frame: RelayFrame): void {
