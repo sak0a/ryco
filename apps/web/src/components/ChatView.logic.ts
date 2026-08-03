@@ -484,3 +484,34 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
   );
 }
+
+/**
+ * Whether to replace the timeline with the new-thread surface (hero + "Work in
+ * …" sentence).
+ *
+ * Three conditions, each learned the hard way:
+ * - No messages *and* no optimistic sends, so the surface disappears the moment
+ *   a turn starts rather than after the server acknowledges it.
+ * - No other timeline entries either. A thread can carry work-log rows, a
+ *   proposed plan, or setup-script activity from worktree creation while
+ *   `messages` is still empty; showing the hero then would hide real progress
+ *   and real failures.
+ * - Not the phone tier. `apps/web`'s phone presentation is frozen and
+ *   `apps/mobile` owns that experience (AGENTS.md), so this surface is
+ *   desktop-only.
+ */
+export function shouldShowNewThreadSurface(input: {
+  readonly hasThread: boolean;
+  readonly messageCount: number;
+  readonly optimisticMessageCount: number;
+  readonly timelineEntryCount: number;
+  readonly presentationTier: string;
+}): boolean {
+  return (
+    input.hasThread &&
+    input.messageCount === 0 &&
+    input.optimisticMessageCount === 0 &&
+    input.timelineEntryCount === 0 &&
+    input.presentationTier !== "phone"
+  );
+}

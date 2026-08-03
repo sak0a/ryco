@@ -21,6 +21,7 @@ import {
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
   resolveChatSendWorktreePlan,
+  shouldShowNewThreadSurface,
   buildChatSendTitleSeed,
   shouldWriteThreadErrorToCurrentServerThread,
   threadIsPromotedAndPersisted,
@@ -875,5 +876,41 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
         threadError: null,
       }),
     ).toBe(true);
+  });
+});
+
+describe("shouldShowNewThreadSurface", () => {
+  const base = {
+    hasThread: true,
+    messageCount: 0,
+    optimisticMessageCount: 0,
+    timelineEntryCount: 0,
+    presentationTier: "desktop",
+  };
+
+  it("shows on an empty desktop thread", () => {
+    expect(shouldShowNewThreadSurface(base)).toBe(true);
+  });
+
+  it("hides without a thread", () => {
+    expect(shouldShowNewThreadSurface({ ...base, hasThread: false })).toBe(false);
+  });
+
+  it("hides once a message exists", () => {
+    expect(shouldShowNewThreadSurface({ ...base, messageCount: 1 })).toBe(false);
+  });
+
+  it("hides on an optimistic send, before the server acknowledges", () => {
+    expect(shouldShowNewThreadSurface({ ...base, optimisticMessageCount: 1 })).toBe(false);
+  });
+
+  it("hides when non-message timeline entries exist", () => {
+    // Setup-script activity from worktree creation, work logs, or a proposed
+    // plan can arrive with no chat messages; the hero would bury them.
+    expect(shouldShowNewThreadSurface({ ...base, timelineEntryCount: 1 })).toBe(false);
+  });
+
+  it("hides on the frozen web phone tier", () => {
+    expect(shouldShowNewThreadSurface({ ...base, presentationTier: "phone" })).toBe(false);
   });
 });

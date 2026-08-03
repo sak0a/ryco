@@ -1043,6 +1043,36 @@ describe("composerDraftStore project draft thread mapping", () => {
     ).toBe(draftId);
   });
 
+  it("keeps a populated draft parked in the target project", () => {
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {
+      threadId,
+    });
+    store.setLogicalProjectDraftThreadId(
+      scopedProjectKey(otherProjectRef),
+      otherProjectRef,
+      otherDraftId,
+      { threadId: otherThreadId },
+    );
+    store.setPrompt(otherDraftId, "half-written work in project B");
+
+    store.moveDraftThreadToProject(draftId, {
+      projectRef: otherProjectRef,
+      logicalProjectKey: scopedProjectKey(otherProjectRef),
+    });
+
+    // Retiring it to free the slot would silently destroy unsent work; it keeps
+    // its draft-thread entry (so it stays listed and routable) and only loses
+    // the logical-project mapping.
+    expect(draftByKey(otherDraftId)?.prompt).toBe("half-written work in project B");
+    expect(useComposerDraftStore.getState().draftThreadsByThreadKey[otherDraftId]).toBeDefined();
+    expect(
+      useComposerDraftStore
+        .getState()
+        .getDraftSessionByLogicalProjectKey(scopedProjectKey(otherProjectRef))?.draftId,
+    ).toBe(draftId);
+  });
+
   it("leaves a promoting draft alone when moving another draft onto its project", () => {
     const store = useComposerDraftStore.getState();
     store.setLogicalProjectDraftThreadId(scopedProjectKey(projectRef), projectRef, draftId, {

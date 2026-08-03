@@ -78,6 +78,16 @@ export interface SendTurnWorktreePlan {
   shouldCreateWorktree: boolean;
 }
 
+/**
+ * Thread identity resolved at commit time, replacing the one the turn was
+ * assembled with.
+ */
+export interface SendTurnCommitPreparation {
+  readonly threadId: ThreadId;
+  readonly isServerThread: boolean;
+  readonly isFirstMessage: boolean;
+}
+
 export interface SendTurnSettings {
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
@@ -165,6 +175,13 @@ export interface ExecuteChatSendTurnInput {
   scroll: SendTurnScrollDeps;
   /** When present, hold the provider dispatch behind a short cancellable undo window. */
   undo?: SendTurnUndoDeps;
+  /**
+   * Runs after the undo window commits and before dispatch. Use for work that
+   * must not happen if the user undoes — most importantly creating a worktree,
+   * which is a side effect on disk that Undo cannot take back. Returning a
+   * preparation redirects the dispatch at the thread it produced.
+   */
+  prepareOnCommit?: () => Promise<SendTurnCommitPreparation | null>;
   draft: SendTurnComposerDraftDeps;
   dispatch: SendTurnDispatchDeps;
   refs: SendTurnRollbackRefs;
@@ -429,14 +446,20 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       }
     }
 
+    // Anything that has to exist before dispatch but must not survive an undo
+    // happens here, past the window: creating a worktree from a PR / issue /
+    // work item also creates its thread, so that work waits until the send is
+    // committed and then redirects the dispatch at what it produced.
+    const prepared = input.prepareOnCommit ? await input.prepareOnCommit() : null;
+
     // Provider-independent dispatch assembly (title update, next-turn settings,
     // and `thread.turn.start`). Runs only once the turn commits — an undone
     // first send must not leave orphan title/settings.
     await commitSendTurnDispatch({
       api,
-      threadId: thread.threadId,
-      isFirstMessage: thread.isFirstMessage,
-      isServerThread: thread.isServerThread,
+      threadId: prepared?.threadId ?? thread.threadId,
+      isFirstMessage: prepared?.isFirstMessage ?? thread.isFirstMessage,
+      isServerThread: prepared?.isServerThread ?? thread.isServerThread,
       title,
       messageId: messageIdForSend,
       outgoingMessageText,
@@ -446,7 +469,9 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       runtimeMode: settings.runtimeMode,
       interactionMode: settings.interactionMode,
       tokenMode: settings.tokenMode,
-      bootstrap,
+      // A prepared thread already exists server-side, so there is nothing left
+      // for the bootstrap to create.
+      bootstrap: prepared ? undefined : bootstrap,
       sourceControlContexts: freshSourceControlContexts,
       createdAt: messageCreatedAt,
       newCommandId,

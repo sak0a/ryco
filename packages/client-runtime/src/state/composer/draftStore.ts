@@ -1148,12 +1148,22 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
                 [threadKey]: nextDraftThread,
               };
               let nextDraftsByThreadKey = state.draftsByThreadKey;
-              // The target project may already have had its own empty draft
-              // parked in this slot; retire it unless it is mid-promotion or
-              // still reachable from another logical project.
+              // The target project may already have had its own draft parked in
+              // this slot. Retire it only when it is genuinely empty — a parked
+              // draft can hold an unsent prompt, attachments, or a model choice,
+              // and discarding those to make room would be silent data loss. A
+              // draft that survives keeps its entry in `draftThreadsByThreadKey`
+              // (so the sidebar still lists it and its route still resolves) and
+              // simply loses the logical-project slot to the incoming draft.
+              const displacedContent = displacedThreadKey
+                ? state.draftsByThreadKey[displacedThreadKey]
+                : undefined;
+              const displacedIsEmpty =
+                displacedContent === undefined || shouldRemoveDraft(displacedContent);
               if (
                 displacedThreadKey &&
                 displacedThreadKey !== threadKey &&
+                displacedIsEmpty &&
                 !isComposerThreadKeyInUse(
                   nextLogicalProjectDraftThreadKeyByLogicalProjectKey,
                   displacedThreadKey,
