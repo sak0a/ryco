@@ -674,7 +674,7 @@ export function encodeE2eeCapabilityCarrier(statement: Uint8Array): Uint8Array {
   ) {
     throw new TypeError("Relay E2EE capability statement is outside its §5.3 bound.");
   }
-  const carrier = new TextEncoder().encode(
+  const carrier = CARRIER_TEXT_ENCODER.encode(
     JSON.stringify({
       _tag: E2EE_CAPABILITY_CARRIER_TAG,
       statement: base64urlUnpadded(statement),
@@ -686,7 +686,169 @@ export function encodeE2eeCapabilityCarrier(statement: Uint8Array): Uint8Array {
   return carrier;
 }
 
+/** §5.3: the carrier's two members, in the one order a standard JSON encoder emits them. */
+const CAPABILITY_CARRIER_MEMBERS = ["_tag", "statement"] as const;
+
+// Shared, like the discrimination singletons above: the decoder runs on every
+// inbound legacy-JSON payload, and neither of these carries per-payload state.
+const CARRIER_TEXT_DECODER = new TextDecoder();
+const CARRIER_TEXT_ENCODER = new TextEncoder();
+
+/**
+ * §5.3's fixed opening bytes, taken from the same encoder the carrier is built
+ * with rather than written out: the carrier text is byte-identical to a standard
+ * JSON encoder's output for the two members in that order, so every conforming
+ * carrier begins with exactly these bytes.
+ */
+const CAPABILITY_CARRIER_PREFIX = CARRIER_TEXT_ENCODER.encode(
+  JSON.stringify({ _tag: E2EE_CAPABILITY_CARRIER_TAG }).slice(0, -1),
+);
+
+function hasCapabilityCarrierPrefix(payload: Uint8Array): boolean {
+  const length = CAPABILITY_CARRIER_PREFIX.byteLength;
+  return (
+    payload.byteLength >= length &&
+    bytesEqual(payload.subarray(0, length), CAPABILITY_CARRIER_PREFIX)
+  );
+}
+
+export type E2eeCapabilityCarrierDecodeError =
+  /**
+   * Not a JSON object carrying `E2EE_CAPABILITY_CARRIER_TAG`, at any size:
+   * §4.4's `LEGACY-JSON (non-carrier)` class, rows K9, K10, K19, and K23.
+   */
+  | "not_carrier"
+  /**
+   * The reserved tag was claimed and the payload is not a conforming carrier,
+   * including one past `E2EE_CAPABILITY_CARRIER_MAX_BYTES`: §4.4's `CARRIER`
+   * class, rows K1–K4 and K20.
+   */
+  | "malformed";
+
+/**
+ * Recognize and decode the §5.3 carrier out of a post-strip payload (§4.3).
+ *
+ * THIS IS THE ONLY PLACE THE CARRIER SUBCLASS IS RECOGNIZED. The carrier's first
+ * byte is `{`, so `classifyPostStripPayload` can only answer `legacy-json` for
+ * it; the subclass is decided by parsing the JSON and testing `_tag`, and that
+ * rule lives here because a second copy of it anywhere would be a second
+ * definition of §5.3 and a parser differential against the `JSON.stringify`
+ * encoder that produced the bytes.
+ *
+ * `not_carrier` is the ordinary answer for the legacy RPC traffic this class is
+ * mostly made of, and the caller hands such a payload on unchanged. `malformed`
+ * is the payload that claimed the reserved tag and was not a conforming carrier;
+ * §5.3 reserves the tag, so nothing else may legitimately carry it.
+ *
+ * The §5.3 form is enforced exactly as §5.3 states it: a top-level object, its
+ * two members in that order — which subsumes the separate prohibition on a
+ * `requestId` member — and the whole text byte-identical to a standard JSON
+ * encoder's output for those two values. The byte comparison is what makes the
+ * decoder immune to the UTF-8 replacement character a lenient text decode would
+ * otherwise smuggle through: replaced bytes cannot re-encode to the bytes that
+ * arrived.
+ *
+ * Direction is node to client only (§5.3, §5.6 C5). A client MUST NOT send a
+ * carrier, and this module has no encoder-side guard to add for that: the rule is
+ * that a client never calls `encodeE2eeCapabilityCarrier` at all.
+ *
+ * THE TAG DECIDES THE CLASS AT EVERY SIZE. §4.4 partitions legacy JSON into
+ * exactly two input classes, and the two reasons above are those classes, so
+ * `E2EE_CAPABILITY_CARRIER_MAX_BYTES` is never answered for a payload this
+ * decoder has not read: §15 places that bound on the node at emit, ordinary
+ * legacy RPC traffic runs far past it — `RELAY_MAX_DATA_CHUNK_BYTES` alone is
+ * more than thirty times larger, before reassembly — and a decoder that measured
+ * before it looked would answer identically for row K19's large file read and for
+ * an oversized carrier, making the partition undecidable exactly where a Hub can
+ * choose the size. Past the bound the class is read off §5.3's fixed opening
+ * bytes instead, which keeps the bound ahead of `JSON.parse` without collapsing
+ * the two classes.
+ *
+ * The `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` bound is NOT applied here either.
+ * §5.2 step 0 owns it, and it owns it for every statement however it arrived —
+ * §3.2.1 S5 derives the carrier bound from the statement bound, and a decoder
+ * that leaned on that derivation would be relying on arithmetic performed in
+ * another file.
+ */
+export function decodeE2eeCapabilityCarrier(
+  payload: Uint8Array,
+): E2eeDecodeResult<Uint8Array, E2eeCapabilityCarrierDecodeError> {
+  if (payload.byteLength === 0 || payload[0] !== LEGACY_JSON_OBJECT_FIRST_BYTE) {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  if (payload.byteLength > E2EE_CAPABILITY_CARRIER_MAX_BYTES) {
+    return {
+      kind: "error",
+      reason: hasCapabilityCarrierPrefix(payload) ? "malformed" : "not_carrier",
+    };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(CARRIER_TEXT_DECODER.decode(payload));
+  } catch {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  const members = parsed as Readonly<Record<string, unknown>>;
+  if (members._tag !== E2EE_CAPABILITY_CARRIER_TAG) {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  const keys = Object.keys(members);
+  if (
+    keys.length !== CAPABILITY_CARRIER_MEMBERS.length ||
+    CAPABILITY_CARRIER_MEMBERS.some((member, index) => keys[index] !== member)
+  ) {
+    return { kind: "error", reason: "malformed" };
+  }
+  const statement = members.statement;
+  if (typeof statement !== "string" || statement.length === 0) {
+    return { kind: "error", reason: "malformed" };
+  }
+  const reencoded = CARRIER_TEXT_ENCODER.encode(
+    JSON.stringify({ _tag: E2EE_CAPABILITY_CARRIER_TAG, statement }),
+  );
+  if (!bytesEqual(reencoded, payload)) return { kind: "error", reason: "malformed" };
+  const decoded = base64urlUnpaddedDecode(statement);
+  if (decoded === undefined) return { kind: "error", reason: "malformed" };
+  return { kind: "ok", value: decoded };
+}
+
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+const BASE64URL_VALUES: ReadonlyMap<string, number> = new Map(
+  [...BASE64URL_ALPHABET].map((character, value) => [character, value]),
+);
+
+/**
+ * The inverse of `base64urlUnpadded`, and strict in both directions §5.3 cares
+ * about: padding, whitespace, and every character outside the alphabet are
+ * rejected, a length leaving one leftover character is rejected because no byte
+ * string encodes to it, and a final group whose unused low bits are nonzero is
+ * rejected because two texts would otherwise decode to the same statement.
+ */
+function base64urlUnpaddedDecode(text: string): Uint8Array | undefined {
+  if (text.length % 4 === 1) return undefined;
+  const bytes = new Uint8Array(Math.floor((text.length * 3) / 4));
+  let accumulator = 0;
+  let bits = 0;
+  let index = 0;
+  for (const character of text) {
+    const value = BASE64URL_VALUES.get(character);
+    if (value === undefined) return undefined;
+    accumulator = (accumulator << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes[index] = (accumulator >> bits) & 0xff;
+      accumulator &= (1 << bits) - 1;
+      index += 1;
+    }
+  }
+  if (bits > 0 && (accumulator & ((1 << bits) - 1)) !== 0) return undefined;
+  return bytes;
+}
 
 /**
  * Unpadded base64url of the statement CBOR (§5.3).

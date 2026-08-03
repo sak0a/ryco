@@ -40,6 +40,10 @@
       "types": "./src/relayE2eeHandshake.ts",
       "import": "./src/relayE2eeHandshake.ts"
     },
+    "./relayE2eeCapabilityVerify": {
+      "types": "./src/relayE2eeCapabilityVerify.ts",
+      "import": "./src/relayE2eeCapabilityVerify.ts"
+    },
     "./relayE2eeTranscripts": {
       "types": "./src/relayE2eeTranscripts.ts",
       "import": "./src/relayE2eeTranscripts.ts"
