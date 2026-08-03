@@ -1,5 +1,8 @@
 import { encodeBase64Url } from "@ryco/client-runtime/relay";
-import { E2EE_PREKEY_LIFETIME } from "@ryco/shared/relayE2eeConstants";
+import {
+  E2EE_PREKEY_LIFETIME,
+  E2EE_PREKEY_ROTATION_OVERLAP,
+} from "@ryco/shared/relayE2eeConstants";
 import { e2eeKeyFingerprint, verifyE2eeSignature } from "@ryco/shared/relayE2eeKeys";
 import { encodeClientE2eePrekeyTranscript } from "@ryco/shared/relayE2eeTranscripts";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -24,6 +27,15 @@ const { ensureKey, sign, hasKey, deleteKey } = vi.hoisted(() => ({
 vi.mock("@ryco/mobile-device-key", () => ({
   default: { ensureKey, sign, hasKey, deleteKey },
 }));
+
+/**
+ * The §14.5 preflight the agreement key runs, so this suite can present a runtime
+ * §14.5 condemns to the WHOLE path — `ensure` composed over a real agreement key,
+ * which is where the fail-closed rule has to hold. Its default is the real one's
+ * verdict under Node: it passes.
+ */
+const { preflight } = vi.hoisted(() => ({ preflight: vi.fn() }));
+vi.mock("./e2eeRuntime", () => ({ assertE2eeRuntimeGlobals: preflight }));
 
 import { resetMobileDeviceKeyForTests } from "./deviceKey";
 import { makeMobileE2eeAgreementKey, type MobileE2eeAgreementKey } from "./e2eeAgreementKey";
@@ -130,6 +142,7 @@ function harness(
 function restartApplication(): void {
   resetMobileDeviceKeyForTests();
   vi.clearAllMocks();
+  preflight.mockReset();
   ensureKey.mockResolvedValue({
     publicKey: toBase64(devicePublicPoint),
     backing: "secure-enclave",
@@ -252,6 +265,79 @@ describe("client agreement-prekey certificate (§7.4)", () => {
     expect([...reissued.agreementPublicKey]).toEqual([...first.agreementPublicKey]);
   });
 
+  it("re-signs inside the rotation overlap, not only once expired (§6.4)", async () => {
+    // §6.4's client remedy matches the node's: re-sign when the certificate is
+    // expired OR when it would expire within `E2EE_PREKEY_ROTATION_OVERLAP`.
+    // Waiting for actual expiry leaves a handshake started near the boundary — or
+    // one whose clock runs a few minutes behind the node's — failing §8.6 with
+    // `e2ee_prekey_expired` and E2EE unavailable until a later launch.
+    const clock = { value: NOW };
+    const agreementStore = inMemoryStore();
+    const first = await harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+      now: () => clock.value,
+    }).prekey.ensure(NAMESPACE);
+
+    clock.value = first.expiresAt - E2EE_PREKEY_ROTATION_OVERLAP / 2;
+    expect(clientE2eePrekeyValidity(first, clock.value)).toBe("renewable");
+    restartApplication();
+    const restarted = harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+      now: () => clock.value,
+      record: storedRecord(first),
+    });
+
+    const reissued = await restarted.prekey.ensure(NAMESPACE);
+
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(reissued.createdAt).toBe(clock.value);
+    expect(reissued.expiresAt - reissued.createdAt).toBe(E2EE_PREKEY_LIFETIME);
+    expect(clientE2eePrekeyValidity(reissued, clock.value)).toBe("usable");
+  });
+
+  it("re-signs for the requested namespace when the record validly names another", async () => {
+    // The record is INTERNALLY CONSISTENT — this device signed it, over its own
+    // keys, for a namespace it was in — so nothing downstream of the namespace
+    // comparison rejects it. Returning it would present a §7.4 certificate
+    // binding a foreign `(hubOrigin, accountId)` inside the §8.5 IK payload,
+    // which §8.6 rejects: E2EE silently unavailable until the record is evicted.
+    const other = { hubOrigin: "https://other.example", accountId: "acct_01J8ZQ5V2N7X0000000099" };
+    const agreementStore = inMemoryStore();
+    const foreign = await harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+    }).prekey.ensure(other);
+    expect(
+      verifyE2eeSignature({
+        algorithm: "p256",
+        publicKey: foreign.identityPublicKey,
+        message: foreign.transcript,
+        signature: foreign.signature,
+      }),
+    ).toBe(true);
+
+    restartApplication();
+    const restarted = harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+      record: storedRecord(foreign),
+    });
+
+    const certificate = await restarted.prekey.ensure(NAMESPACE);
+
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(certificate.hubOrigin).toBe(NAMESPACE.hubOrigin);
+    expect(certificate.accountId).toBe(NAMESPACE.accountId);
+    expect([...certificate.transcript]).toEqual([
+      ...encodeClientE2eePrekeyTranscript({
+        hubOrigin: NAMESPACE.hubOrigin,
+        accountId: NAMESPACE.accountId,
+        identityPublicKey: certificate.identityPublicKey,
+        agreementPublicKey: certificate.agreementPublicKey,
+        createdAt: certificate.createdAt,
+        expiresAt: certificate.expiresAt,
+      }),
+    ]);
+  });
+
   it("re-signs when the stored record names another namespace, key, or signature", async () => {
     const agreementStore = inMemoryStore();
     const first = await harness({
@@ -300,6 +386,62 @@ describe("client agreement-prekey certificate (§7.4)", () => {
 
     await expect(prekey.ensure(NAMESPACE)).resolves.toMatchObject({ createdAt: NOW });
   });
+
+  it("replaces a record whose window the §7.4 encoder or §6.4 would refuse", async () => {
+    // The record survives `JSON.parse`, names the right namespace and the right
+    // two keys, and classifies "usable" — but the encoder admits UNSIGNED safe
+    // integers only, so a negative `createdAt` reaching it would throw out of
+    // `ensure` instead of falling through to a re-sign. Nothing would then
+    // overwrite the record, and the device could never obtain a §7.4 certificate
+    // again — permanently defeating the very remedy §6.4 defines.
+    const agreementStore = inMemoryStore();
+    const first = await harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+    }).prekey.ensure(NAMESPACE);
+    const stored = JSON.parse(storedRecord(first)) as Record<string, unknown>;
+
+    for (const window of [
+      { createdAt: -1, expiresAt: Number.MAX_SAFE_INTEGER },
+      { createdAt: NOW, expiresAt: -1 },
+      { createdAt: NOW, expiresAt: NOW },
+      { createdAt: NOW, expiresAt: NOW + E2EE_PREKEY_LIFETIME + 1 },
+    ]) {
+      restartApplication();
+      const restarted = harness({
+        agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+        record: JSON.stringify({ ...stored, ...window }),
+      });
+
+      const reissued = await restarted.prekey.ensure(NAMESPACE);
+
+      expect(sign).toHaveBeenCalledTimes(1);
+      expect(reissued.createdAt).toBe(NOW);
+      expect(reissued.expiresAt - reissued.createdAt).toBe(E2EE_PREKEY_LIFETIME);
+      // Self-repairing: the record on disk is the new one, so the next launch
+      // starts from something the encoder accepts.
+      expect(JSON.parse(restarted.items.get(CLIENT_E2EE_PREKEY_RECORD_KEY)!)).toMatchObject({
+        createdAt: reissued.createdAt,
+        expiresAt: reissued.expiresAt,
+      });
+    }
+  });
+
+  it("signs once when two callers race at launch", async () => {
+    // Bootstrap and the first handshake both call `ensure` before either settles.
+    // Without the mutex both observe an empty record, both drive the enclave, and
+    // the caller that resolves first holds a certificate that is not the one
+    // durably stored — so the next launch rejects the record and re-signs again.
+    const { prekey, items } = harness();
+
+    const [first, second] = await Promise.all([prekey.ensure(NAMESPACE), prekey.ensure(NAMESPACE)]);
+
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(second.createdAt).toBe(first.createdAt);
+    expect([...second.transcript]).toEqual([...first.transcript]);
+    expect(JSON.parse(items.get(CLIENT_E2EE_PREKEY_RECORD_KEY)!)).toMatchObject({
+      createdAt: first.createdAt,
+    });
+  });
 });
 
 describe("§6.4 validity", () => {
@@ -345,6 +487,49 @@ describe("custody failures", () => {
     for (const detail of [E2EE_AGREEMENT_SECRET_KEY, "25300", "SecItemCopyMatching"]) {
       expect(failure?.message).not.toContain(detail);
     }
+    expect(sign).not.toHaveBeenCalled();
+  });
+
+  it("refuses its own certificate when the enclave signature does not verify", async () => {
+    // The self-check is the check a node runs in §8.6, run here against this
+    // device's own certificate: a `derSignatureToRaw` regression, a DER variant
+    // the converter mishandles, or an enclave that signed a different digest
+    // yields a well-formed signature over the wrong bytes. Failing locally with a
+    // bounded code beats failing the handshake with no local evidence of why.
+    sign.mockImplementation(async () => await derSign(toBase64(new Uint8Array(32).fill(9))));
+    const { prekey, items } = harness();
+
+    const failure = await failureOf(prekey.ensure(NAMESPACE));
+
+    expect(failure?.code).toBe("e2ee_prekey_custody_failed");
+    expect(sign).toHaveBeenCalledTimes(1);
+    expect(items.has(CLIENT_E2EE_PREKEY_RECORD_KEY)).toBe(false);
+  });
+
+  it("refuses on a runtime §14.5 condemns, even when the agreement key exists", async () => {
+    // The whole path, composed: a device that already holds an agreement key
+    // never reaches `generate` again, and every other step — the keychain read,
+    // the memoized enclave point, the canonical CBOR, the enclave signature —
+    // draws no randomness. §14.5 requires the refusal here rather than at the
+    // Noise ephemeral draw, where a silent no-op yields an all-zero ephemeral.
+    const agreementStore = inMemoryStore();
+    const first = await harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+    }).prekey.ensure(NAMESPACE);
+
+    restartApplication();
+    preflight.mockImplementation(() => {
+      throw new Error("End-to-end encryption requires a cryptographic random source…");
+    });
+    const restarted = harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+      record: storedRecord(first),
+    });
+
+    const failure = await failureOf(restarted.prekey.ensure(NAMESPACE));
+
+    expect(failure).toBeInstanceOf(MobileClientE2eePrekeyError);
+    expect(failure?.code).toBe("e2ee_prekey_custody_failed");
     expect(sign).not.toHaveBeenCalled();
   });
 

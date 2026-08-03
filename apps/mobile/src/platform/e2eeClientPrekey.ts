@@ -41,6 +41,17 @@ import { mobileKV } from "./kv";
 // `agreementPublicKey` no longer matches this device's key is re-signed below,
 // and the key it named cannot follow it (§6.3's storage class, and the Android
 // backup exclusion).
+//
+// WHAT THAT PLACEMENT OWES §13.1.1, AND WHO PAYS IT. The plain KV is carried by
+// iOS iCloud backup and Android Auto Backup while the §6.3 namespace is not, so
+// on an OS migration to a new handset this record survives and the key it names
+// does not. That makes it exactly the "non-secret application state recording a
+// prior E2EE association" of §13.1.1's partial-loss clause, which requires the
+// missing E2EE state to be treated as UNEXPECTED (rows K23/K24, the §13.2.1
+// surface) rather than as legacy-eligible. Re-signing below is the right custody
+// answer and is NOT that surface; §13 is not implemented in this app yet, so the
+// obligation is recorded as open in `README.md` beside the other rollout
+// blockers rather than silently discharged here.
 
 /** The `(hubOrigin, accountId)` namespace a certificate claims (§7.4). */
 export interface ClientE2eePrekeyNamespace {
@@ -160,9 +171,15 @@ function parseStored(value: string | null): StoredClientE2eePrekey | null {
     record.signature,
   ];
   if (strings.some((field) => typeof field !== "string" || field.length === 0)) return null;
-  if (!Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.expiresAt)) {
-    return null;
-  }
+  const { createdAt, expiresAt } = record;
+  if (typeof createdAt !== "number" || typeof expiresAt !== "number") return null;
+  // The §7.4 encoder admits UNSIGNED safe integers only, and §6.4 bounds
+  // `expiresAt − createdAt` — the same bound the node applies in §8.6. The range
+  // is settled here, where an out-of-range record is simply not a record, so a
+  // negative or over-long window can never reach the encoder as a rejection.
+  if (!Number.isSafeInteger(createdAt) || createdAt < 0) return null;
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= createdAt) return null;
+  if (expiresAt - createdAt > E2EE_PREKEY_LIFETIME) return null;
   return record as StoredClientE2eePrekey;
 }
 
@@ -324,19 +341,29 @@ export function makeMobileClientE2eePrekey(
     } catch {
       return null;
     }
-    const certificate: ClientE2eePrekeyCertificate = {
-      hubOrigin: stored.hubOrigin,
-      accountId: stored.accountId,
-      identityPublicKey,
-      agreementPublicKey,
-      transcript: encodeTranscript({
+    let transcript: Uint8Array;
+    try {
+      transcript = encodeTranscript({
         hubOrigin: stored.hubOrigin,
         accountId: stored.accountId,
         identityPublicKey,
         agreementPublicKey,
         createdAt: stored.createdAt,
         expiresAt: stored.expiresAt,
-      }),
+      });
+    } catch {
+      // TOTAL BY CONSTRUCTION. Every other outcome here is `null`, and a throw
+      // from this one call would escape `ensure` instead of falling through to
+      // `issue` — leaving a record the encoder refuses to defeat §6.4's re-sign
+      // remedy permanently, since `issue` is what would have overwritten it.
+      return null;
+    }
+    const certificate: ClientE2eePrekeyCertificate = {
+      hubOrigin: stored.hubOrigin,
+      accountId: stored.accountId,
+      identityPublicKey,
+      agreementPublicKey,
+      transcript,
       signature,
       createdAt: stored.createdAt,
       expiresAt: stored.expiresAt,
