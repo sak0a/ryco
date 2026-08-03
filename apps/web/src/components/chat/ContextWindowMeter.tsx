@@ -1,7 +1,7 @@
 import type { ServerProviderRateLimits, ServerProviderRateLimitWindow } from "@ryco/contracts";
 
 import { cn } from "~/lib/utils";
-import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
+import { type ContextWindowUsage, formatContextWindowTokens } from "~/lib/contextWindow";
 import {
   clampUsedPercent,
   describeRateLimitWindow,
@@ -41,7 +41,7 @@ function UsageLimitRow(props: {
 }
 
 export function ContextWindowMeter(props: {
-  usage: ContextWindowSnapshot;
+  usage: ContextWindowUsage;
   rateLimits?: ServerProviderRateLimits | undefined;
 }) {
   const { usage, rateLimits } = props;
@@ -61,7 +61,7 @@ export function ContextWindowMeter(props: {
         render={
           <button
             type="button"
-            className="group inline-flex items-center justify-center rounded-full transition-opacity hover:opacity-85"
+            className="group inline-flex h-9 w-6 items-center justify-center rounded-full transition-opacity hover:opacity-85 sm:h-8"
             aria-label={
               usage.maxTokens !== null && usedPercentage
                 ? `Context window ${usedPercentage} used`
@@ -129,8 +129,8 @@ export function ContextWindowMeter(props: {
               <span>{formatContextWindowTokens(usage.maxTokens ?? null)} context used</span>
             </div>
           ) : (
-            <div className="text-sm text-foreground">
-              {formatContextWindowTokens(usage.usedTokens)} tokens used so far
+            <div className="whitespace-nowrap text-xs font-medium text-foreground">
+              {formatContextWindowTokens(usage.usedTokens)} context used
             </div>
           )}
           {(usage.totalProcessedTokens ?? null) !== null &&

@@ -111,7 +111,7 @@ import type { UnifiedSettings } from "@ryco/contracts/settings";
 import type { SessionPhase, Thread } from "../../types";
 import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
-import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import { deriveContextWindowUsage } from "../../lib/contextWindow";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { hydrateImagesFromPersistedWithFailures } from "../../composerDraftPersistence";
 import { usePromptStashStore } from "../../promptStashStore";
@@ -695,9 +695,17 @@ export const ChatComposer = memo(
     // ------------------------------------------------------------------
     // Context window
     // ------------------------------------------------------------------
-    const activeContextWindow = useMemo(
-      () => deriveLatestContextWindowSnapshot(activeThreadActivities ?? []),
-      [activeThreadActivities],
+    const selectedContextWindow =
+      composerProviderState.modelOptionsForDispatch?.find(
+        (selection) => selection.id === "contextWindow",
+      )?.value ?? null;
+    const contextWindowUsage = useMemo(
+      () =>
+        deriveContextWindowUsage(
+          activeThreadActivities ?? [],
+          typeof selectedContextWindow === "string" ? selectedContextWindow : null,
+        ),
+      [activeThreadActivities, selectedContextWindow],
     );
     const contextWindowRateLimits = selectedProviderStatus?.rateLimits;
 
@@ -2464,7 +2472,7 @@ export const ChatComposer = memo(
                 onTogglePlanSidebar={togglePlanSidebar}
                 onRuntimeModeChange={handleRuntimeModeChange}
                 onTokenModeChange={handleTokenModeChange}
-                activeContextWindow={activeContextWindow}
+                contextWindowUsage={contextWindowUsage}
                 contextWindowRateLimits={contextWindowRateLimits}
                 pendingAction={pendingPrimaryAction}
                 isRunning={phase === "running"}

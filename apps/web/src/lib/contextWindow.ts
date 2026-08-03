@@ -18,12 +18,58 @@ type NullableContextWindowUsage = {
     : ThreadTokenUsageSnapshot[Key];
 };
 
-export type ContextWindowSnapshot = NullableContextWindowUsage & {
+export type ContextWindowUsage = NullableContextWindowUsage & {
   readonly remainingTokens: number | null;
   readonly usedPercentage: number | null;
   readonly remainingPercentage: number | null;
+};
+
+export type ContextWindowSnapshot = ContextWindowUsage & {
   readonly updatedAt: string;
 };
+
+export function parseContextWindowTokenLimit(value: string | null | undefined): number | null {
+  const match = value?.trim().match(/^(\d+(?:\.\d+)?)\s*([km]?)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+  const suffix = match[2]?.toLowerCase() ?? "";
+  if (!Number.isFinite(amount) || amount <= 0 || (suffix === "" && !Number.isInteger(amount))) {
+    return null;
+  }
+
+  const multiplier = suffix === "m" ? 1_000_000 : suffix === "k" ? 1_000 : 1;
+  const tokens = Math.round(amount * multiplier);
+  return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : null;
+}
+
+export function createInitialContextWindowUsage(maxTokens: number | null): ContextWindowUsage {
+  const normalizedMaxTokens =
+    maxTokens !== null && Number.isSafeInteger(maxTokens) && maxTokens > 0 ? maxTokens : null;
+
+  return {
+    usedTokens: 0,
+    totalProcessedTokens: null,
+    maxTokens: normalizedMaxTokens,
+    remainingTokens: normalizedMaxTokens,
+    usedPercentage: normalizedMaxTokens === null ? null : 0,
+    remainingPercentage: normalizedMaxTokens === null ? null : 100,
+    inputTokens: null,
+    cachedInputTokens: null,
+    outputTokens: null,
+    reasoningOutputTokens: null,
+    lastUsedTokens: null,
+    lastInputTokens: null,
+    lastCachedInputTokens: null,
+    lastOutputTokens: null,
+    lastReasoningOutputTokens: null,
+    toolUses: null,
+    durationMs: null,
+    compactsAutomatically: false,
+  };
+}
 
 export function deriveLatestContextWindowSnapshot(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -71,6 +117,16 @@ export function deriveLatestContextWindowSnapshot(
   }
 
   return null;
+}
+
+export function deriveContextWindowUsage(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  configuredContextWindow: string | null | undefined,
+): ContextWindowUsage {
+  return (
+    deriveLatestContextWindowSnapshot(activities) ??
+    createInitialContextWindowUsage(parseContextWindowTokenLimit(configuredContextWindow))
+  );
 }
 
 export function formatContextWindowTokens(value: number | null): string {
