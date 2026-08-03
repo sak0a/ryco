@@ -1329,11 +1329,13 @@ describe("relay E2EE client channel: §11.3 receive rows", () => {
     expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
   });
 
-  it("emits no second E2EEError once the close machine has spent its terminal allowance", async () => {
-    // §10.2's carve-out is exactly one terminal record, and §11.3 makes a
-    // received `E2EEError` terminal in both directions: the receiver "MUST NOT
-    // reply". A condition detected after that point still takes §11.3's
-    // procedure minus the record.
+  it("answers nothing to anything that arrives after the peer's terminal error", async () => {
+    // §11.3 makes the received `E2EEError` terminal in both directions, and the
+    // §10.2 carve-out it spends is exactly one record. What keeps a second one off
+    // the wire HERE is the closed channel: every later entry — a further violation,
+    // a further send, a close — is refused before it can reach the error path or
+    // the relay. (The allowance itself is the close machine's own invariant and is
+    // covered where it lives, in `relayE2eeClose.test.ts`.)
     const { channel, wire, diagnostics } = makeChannel();
     const peer = makePeer();
 
@@ -1343,6 +1345,12 @@ describe("relay E2EE client channel: §11.3 receive rows", () => {
         encodeE2eeErrorRecordBody(E2EE_ERROR_CODE_PROTOCOL_VIOLATION),
       ),
     );
+
+    expect(await channel.intercept(new TextEncoder().encode('{"legacy":true}'))).toEqual({
+      kind: "rejected",
+    });
+    expect(await channel.emit(RPC)).toBe(false);
+    await channel.beginClose();
 
     expect(wire.sent).toEqual([]);
     // `local`, not Q7 — see the §11.3 terminal-`E2EEError` case above for why
