@@ -1,11 +1,10 @@
 import { type ProviderOptionDescriptor } from "@ryco/contracts";
 import { memo } from "react";
-import { BrainIcon, SparklesIcon } from "lucide-react";
+import { SparklesIcon } from "lucide-react";
 
 import { Button } from "../ui/button";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { applyDescriptorSelection } from "./traitsMenuLogic";
-import { useUiStateStore } from "../../uiStateStore";
 import { cn } from "~/lib/utils";
 
 type EffortDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
@@ -85,7 +84,6 @@ export interface ReasoningChipProps {
 }
 
 export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipProps) {
-  const indicatorStyle = useUiStateStore((state) => state.reasoningIndicatorStyle);
   const effectiveValue = props.ultrathinkPromptControlled
     ? "ultrathink"
     : typeof props.descriptor.currentValue === "string"
@@ -94,33 +92,6 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
   const level = normalizeLevel(effectiveValue);
   const isUltra = level === "ultra" || level === "ultrathink";
   const abbreviation = LEVEL_ABBREVIATION[level];
-
-  // Dot scale is derived from the model's actual options so the chip shows
-  // exactly as many dots as the model supports. Ultra variants get the sparkle
-  // treatment because they are outside the normal compact dot scale.
-  const promptInjectedSet = new Set(props.descriptor.promptInjectedValues ?? []);
-  const scaleOptions = props.descriptor.options.filter(
-    (option) => !promptInjectedSet.has(option.id),
-  );
-  const totalDots = scaleOptions.length;
-  const currentScaleIndex = effectiveValue
-    ? scaleOptions.findIndex((option) => option.id === effectiveValue)
-    : -1;
-  const ordinal = currentScaleIndex >= 0 ? currentScaleIndex + 1 : 0;
-  const dotIndicator = (
-    <span className="inline-flex items-center gap-0.5">
-      {Array.from({ length: totalDots }, (_, index) => {
-        const on = index + 1 <= ordinal;
-        return (
-          <span
-            key={index}
-            data-testid={on ? "reasoning-dot-on" : "reasoning-dot-off"}
-            className={cn("size-[5px] rounded-full bg-current", on ? "opacity-100" : "opacity-30")}
-          />
-        );
-      })}
-    </span>
-  );
 
   return (
     <Menu>
@@ -141,15 +112,8 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
             <SparklesIcon aria-hidden="true" className="size-3" />
             <span>Ultra</span>
           </>
-        ) : indicatorStyle === "text" ? (
-          <span>{abbreviation}</span>
         ) : (
-          <>
-            {indicatorStyle === "icon-dots" ? (
-              <BrainIcon aria-hidden="true" className="size-3" />
-            ) : null}
-            {dotIndicator}
-          </>
+          <span>{abbreviation}</span>
         )}
       </MenuTrigger>
       <MenuPopup align="start">

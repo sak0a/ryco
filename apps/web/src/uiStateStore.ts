@@ -17,19 +17,11 @@ const LEGACY_PERSISTED_STATE_KEYS = [
   "codething:renderer-state:v1",
 ] as const;
 
-export type ReasoningIndicatorStyle = "icon-dots" | "dots" | "text";
 export type TokenModeControlStyle = "icon-text" | "icon" | "text";
 
-const DEFAULT_REASONING_INDICATOR_STYLE: ReasoningIndicatorStyle = "icon-dots";
 const DEFAULT_TOKEN_MODE_CONTROL_STYLE: TokenModeControlStyle = "icon-text";
 const DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE = true;
 const DEFAULT_ALWAYS_USE_BUILD_MODE = false;
-
-function sanitizeReasoningIndicatorStyle(value: unknown): ReasoningIndicatorStyle {
-  return value === "text" || value === "dots" || value === "icon-dots"
-    ? value
-    : DEFAULT_REASONING_INDICATOR_STYLE;
-}
 
 function sanitizeTokenModeControlStyle(value: unknown): TokenModeControlStyle {
   return value === "icon" || value === "text" || value === "icon-text"
@@ -55,7 +47,6 @@ export interface PersistedUiState {
   defaultAdvertisedEndpointKey?: string | null;
   pinnedThreadKeys?: string[];
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
-  reasoningIndicatorStyle?: ReasoningIndicatorStyle;
   tokenModeControlStyle?: TokenModeControlStyle;
   wideComposerControlsAutoCollapse?: boolean;
   alwaysUseBuildMode?: boolean;
@@ -113,7 +104,6 @@ export interface UiEndpointState {
 }
 
 export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {
-  reasoningIndicatorStyle: ReasoningIndicatorStyle;
   tokenModeControlStyle: TokenModeControlStyle;
   wideComposerControlsAutoCollapse: boolean;
   alwaysUseBuildMode: boolean;
@@ -145,7 +135,6 @@ const initialState: UiState = {
   threadWorkGroupExpandedById: {},
   threadWorkEntryExpandedById: {},
   defaultAdvertisedEndpointKey: null,
-  reasoningIndicatorStyle: DEFAULT_REASONING_INDICATOR_STYLE,
   tokenModeControlStyle: DEFAULT_TOKEN_MODE_CONTROL_STYLE,
   wideComposerControlsAutoCollapse: DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE,
   alwaysUseBuildMode: DEFAULT_ALWAYS_USE_BUILD_MODE,
@@ -462,7 +451,6 @@ function readPersistedState(): UiState {
       threadChangedFilesExpandedById: sanitizePersistedThreadChangedFilesExpanded(
         parsed.threadChangedFilesExpandedById,
       ),
-      reasoningIndicatorStyle: sanitizeReasoningIndicatorStyle(parsed.reasoningIndicatorStyle),
       tokenModeControlStyle: sanitizeTokenModeControlStyle(parsed.tokenModeControlStyle),
       wideComposerControlsAutoCollapse: sanitizeWideComposerControlsAutoCollapse(
         parsed.wideComposerControlsAutoCollapse,
@@ -588,7 +576,6 @@ export function persistState(state: UiState): void {
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         pinnedThreadKeys,
         threadChangedFilesExpandedById,
-        reasoningIndicatorStyle: state.reasoningIndicatorStyle,
         tokenModeControlStyle: state.tokenModeControlStyle,
         wideComposerControlsAutoCollapse: state.wideComposerControlsAutoCollapse,
         alwaysUseBuildMode: state.alwaysUseBuildMode,
@@ -1170,19 +1157,6 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
-export function setReasoningIndicatorStyle(
-  state: UiState,
-  style: ReasoningIndicatorStyle,
-): UiState {
-  if (state.reasoningIndicatorStyle === style) {
-    return state;
-  }
-  return {
-    ...state,
-    reasoningIndicatorStyle: style,
-  };
-}
-
 export function setTokenModeControlStyle(state: UiState, style: TokenModeControlStyle): UiState {
   if (state.tokenModeControlStyle === style) {
     return state;
@@ -1546,7 +1520,6 @@ interface UiStateStore extends UiState {
   setThreadWorkGroupExpanded: (threadId: string, groupId: string, expanded: boolean) => void;
   setThreadWorkEntryExpanded: (threadId: string, entryId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
-  setReasoningIndicatorStyle: (style: ReasoningIndicatorStyle) => void;
   setTokenModeControlStyle: (style: TokenModeControlStyle) => void;
   setWideComposerControlsAutoCollapse: (enabled: boolean) => void;
   setAlwaysUseBuildMode: (enabled: boolean) => void;
@@ -1599,7 +1572,6 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadWorkEntryExpanded(state, threadId, entryId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
-  setReasoningIndicatorStyle: (style) => set((state) => setReasoningIndicatorStyle(state, style)),
   setTokenModeControlStyle: (style) => set((state) => setTokenModeControlStyle(state, style)),
   setWideComposerControlsAutoCollapse: (enabled) =>
     set((state) => setWideComposerControlsAutoCollapse(state, enabled)),
