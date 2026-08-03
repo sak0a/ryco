@@ -1,6 +1,7 @@
 import type { ProviderUserInputAnswers, UserInputQuestion } from "@ryco/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -16,14 +17,25 @@ const XAiPromptCompleteNotification = Schema.Struct({
 
 type XAiPromptCompleteNotification = typeof XAiPromptCompleteNotification.Type;
 
-interface PendingXAiPromptCompletion {
+interface XAiPromptCompletionRegistration {
   readonly sessionId: string;
   readonly promptId: string;
+  readonly responsePromptId?: string;
   readonly deferred: Deferred.Deferred<EffectAcpSchema.PromptResponse>;
+  readonly state: "pending" | "settled";
 }
 
-const completedXAiPromptIdLimit = 128;
+interface XAiPromptCompletionState {
+  readonly registrations: ReadonlyArray<XAiPromptCompletionRegistration>;
+  readonly compactedSettledBySession: ReadonlyMap<string, number>;
+}
+
+const defaultXAiPromptCompletionHistoryLimit = 128;
 const xAiStopReasonMissingMetaKey = "xAiStopReasonMissing";
+
+export interface XAiPromptCompletionRuntimeOptions {
+  readonly completionHistoryLimit?: number;
+}
 
 const XAiAskUserQuestionOption = Schema.Struct({
   label: Schema.String,
@@ -201,9 +213,21 @@ export function makeXAiAskUserQuestionCancelledResponse(): XAiAskUserQuestionCan
  * The underlying runtime remains unaware of xAI methods and metadata.
  */
 export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletionRuntime")(
-  function* (runtime: AcpSessionRuntime.AcpSessionRuntime["Service"]) {
+  function* (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    options?: XAiPromptCompletionRuntimeOptions,
+  ) {
+    const requestedCompletionHistoryLimit =
+      options?.completionHistoryLimit ?? defaultXAiPromptCompletionHistoryLimit;
+    const completionHistoryLimit =
+      Number.isSafeInteger(requestedCompletionHistoryLimit) && requestedCompletionHistoryLimit > 0
+        ? requestedCompletionHistoryLimit
+        : defaultXAiPromptCompletionHistoryLimit;
     const activeSessionIdRef = yield* Ref.make<string | undefined>(undefined);
-    const pendingRef = yield* Ref.make<ReadonlyArray<PendingXAiPromptCompletion>>([]);
+    const completionStateRef = yield* Ref.make<XAiPromptCompletionState>({
+      registrations: [],
+      compactedSettledBySession: new Map(),
+    });
     const completedPromptIdsRef = yield* Ref.make<ReadonlyArray<string>>([]);
     let nextPromptFallbackId = 0;
     const allocatePromptFallbackId = Effect.sync(() => {
@@ -216,7 +240,7 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
       XAiPromptCompleteNotification,
       (notification) =>
         resolveXAiPromptCompletionFallback({
-          pendingRef,
+          completionStateRef,
           completedPromptIdsRef,
           notification,
         }),
@@ -237,9 +261,10 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
 
           const promptId = yield* allocatePromptFallbackId;
           const fallback = yield* registerXAiPromptCompletionFallback(
-            pendingRef,
+            completionStateRef,
             sessionId,
             promptId,
+            completionHistoryLimit,
           );
           const requestPayload = {
             ...payload,
@@ -251,20 +276,45 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
           } satisfies Omit<EffectAcpSchema.PromptRequest, "sessionId">;
 
           return yield* Effect.raceFirst(
-            runtime.prompt(requestPayload),
-            Deferred.await(fallback.deferred),
-          ).pipe(
-            Effect.tap((response) =>
-              rememberCompletedXAiPromptId(completedPromptIdsRef, response, fallback.promptId),
+            runtime
+              .prompt(requestPayload)
+              .pipe(Effect.map((response) => ({ source: "standard", response }) as const)),
+            Deferred.await(fallback.deferred).pipe(
+              Effect.map((response) => ({ source: "extension", response }) as const),
             ),
-            Effect.ensuring(unregisterXAiPromptCompletionFallback(pendingRef, fallback.deferred)),
+          ).pipe(
+            Effect.tap(({ source, response }) =>
+              rememberCompletedXAiPromptIds(
+                completedPromptIdsRef,
+                response,
+                fallback.promptId,
+                completionHistoryLimit,
+              ).pipe(
+                Effect.andThen(
+                  source === "standard"
+                    ? settleXAiPromptCompletionFallback(
+                        completionStateRef,
+                        fallback.deferred,
+                        response,
+                        completionHistoryLimit,
+                      )
+                    : unregisterXAiPromptCompletionFallback(completionStateRef, fallback.deferred),
+                ),
+              ),
+            ),
+            Effect.map(({ response }) => response),
+            Effect.onExit((exit) =>
+              Exit.isSuccess(exit)
+                ? Effect.void
+                : unregisterXAiPromptCompletionFallback(completionStateRef, fallback.deferred),
+            ),
           );
         }),
       cancel: Ref.get(activeSessionIdRef).pipe(
         Effect.flatMap((sessionId) =>
           sessionId === undefined
             ? runtime.cancel
-            : abortPendingPromptCompletions(pendingRef, sessionId).pipe(
+            : abortPendingPromptCompletions(completionStateRef, sessionId).pipe(
                 Effect.andThen(runtime.cancel),
               ),
         ),
@@ -274,36 +324,113 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
 );
 
 const registerXAiPromptCompletionFallback = (
-  pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>,
+  completionStateRef: Ref.Ref<XAiPromptCompletionState>,
   sessionId: string,
   promptId: string,
+  completionHistoryLimit: number,
 ) =>
   Deferred.make<EffectAcpSchema.PromptResponse>().pipe(
     Effect.tap((deferred) =>
-      Ref.update(pendingRef, (pending) => [...pending, { sessionId, promptId, deferred }]),
+      Ref.update(completionStateRef, (state) =>
+        trimSettledXAiPromptCompletions(
+          {
+            ...state,
+            registrations: [
+              ...state.registrations,
+              { sessionId, promptId, deferred, state: "pending" },
+            ],
+          },
+          completionHistoryLimit,
+        ),
+      ),
     ),
     Effect.map((deferred) => ({ deferred, promptId })),
   );
 
-const unregisterXAiPromptCompletionFallback = (
-  pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>,
+const trimSettledXAiPromptCompletions = (
+  state: XAiPromptCompletionState,
+  completionHistoryLimit: number,
+): XAiPromptCompletionState => {
+  let settledToDrop = Math.max(
+    0,
+    state.registrations.filter((entry) => entry.state === "settled").length -
+      completionHistoryLimit,
+  );
+  if (settledToDrop === 0) {
+    return state;
+  }
+  const compactedSettledBySession = new Map(state.compactedSettledBySession);
+  const registrations = state.registrations.filter((entry) => {
+    if (entry.state === "pending" || settledToDrop === 0) {
+      return true;
+    }
+    settledToDrop -= 1;
+    compactedSettledBySession.set(
+      entry.sessionId,
+      (compactedSettledBySession.get(entry.sessionId) ?? 0) + 1,
+    );
+    return false;
+  });
+  return { registrations, compactedSettledBySession };
+};
+
+const settleXAiPromptCompletionFallback = (
+  completionStateRef: Ref.Ref<XAiPromptCompletionState>,
   deferred: Deferred.Deferred<EffectAcpSchema.PromptResponse>,
-) => Ref.update(pendingRef, (pending) => pending.filter((entry) => entry.deferred !== deferred));
+  response: EffectAcpSchema.PromptResponse,
+  completionHistoryLimit: number,
+) =>
+  Ref.update(completionStateRef, (state) =>
+    trimSettledXAiPromptCompletions(
+      {
+        ...state,
+        registrations: state.registrations.map((entry) => {
+          if (entry.deferred !== deferred) {
+            return entry;
+          }
+          const responsePromptId = promptIdFromResponse(response);
+          return {
+            ...entry,
+            state: "settled" as const,
+            ...(responsePromptId ? { responsePromptId } : {}),
+          };
+        }),
+      },
+      completionHistoryLimit,
+    ),
+  );
+
+const unregisterXAiPromptCompletionFallback = (
+  completionStateRef: Ref.Ref<XAiPromptCompletionState>,
+  deferred: Deferred.Deferred<EffectAcpSchema.PromptResponse>,
+) =>
+  Ref.update(completionStateRef, (state) => ({
+    ...state,
+    registrations: state.registrations.filter((entry) => entry.deferred !== deferred),
+  }));
 
 const abortPendingPromptCompletions = (
-  pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>,
+  completionStateRef: Ref.Ref<XAiPromptCompletionState>,
   sessionId: string,
 ) =>
-  Ref.modify(pendingRef, (pending) => {
-    const [toAbort, remaining] = pending.reduce<
-      [ReadonlyArray<PendingXAiPromptCompletion>, ReadonlyArray<PendingXAiPromptCompletion>]
+  Ref.modify(completionStateRef, (state) => {
+    const [toAbort, remaining] = state.registrations.reduce<
+      [
+        ReadonlyArray<XAiPromptCompletionRegistration>,
+        ReadonlyArray<XAiPromptCompletionRegistration>,
+      ]
     >(
       ([aborting, kept], entry) =>
         entry.sessionId === sessionId ? [[...aborting, entry], kept] : [aborting, [...kept, entry]],
       [[], []],
     );
+    const compactedSettledBySession = new Map(state.compactedSettledBySession);
+    const hadCompactedSettled = compactedSettledBySession.delete(sessionId);
     if (toAbort.length === 0) {
-      return [Effect.void, pending] as const;
+      return [
+        Effect.void,
+        hadCompactedSettled ? { ...state, compactedSettledBySession } : state,
+      ] as const;
     }
     return [
       Effect.forEach(
@@ -320,62 +447,87 @@ const abortPendingPromptCompletions = (
           ),
         { concurrency: "unbounded" },
       ).pipe(Effect.asVoid),
-      remaining,
+      { registrations: remaining, compactedSettledBySession },
     ] as const;
   }).pipe(Effect.flatten);
 
 const resolveXAiPromptCompletionFallback = ({
-  pendingRef,
+  completionStateRef,
   completedPromptIdsRef,
   notification,
 }: {
-  readonly pendingRef: Ref.Ref<ReadonlyArray<PendingXAiPromptCompletion>>;
+  readonly completionStateRef: Ref.Ref<XAiPromptCompletionState>;
   readonly completedPromptIdsRef: Ref.Ref<ReadonlyArray<string>>;
   readonly notification: XAiPromptCompleteNotification;
 }) =>
   Ref.get(completedPromptIdsRef).pipe(
     Effect.flatMap((completedPromptIds) => {
-      if (
-        notification.promptId !== undefined &&
-        completedPromptIds.includes(notification.promptId)
-      ) {
-        return Effect.void;
-      }
-      return Ref.modify(pendingRef, (pending) => {
+      return Ref.modify(completionStateRef, (state) => {
+        if (notification.promptId === undefined) {
+          const compactedCount = state.compactedSettledBySession.get(notification.sessionId) ?? 0;
+          if (compactedCount > 0) {
+            const compactedSettledBySession = new Map(state.compactedSettledBySession);
+            if (compactedCount === 1) {
+              compactedSettledBySession.delete(notification.sessionId);
+            } else {
+              compactedSettledBySession.set(notification.sessionId, compactedCount - 1);
+            }
+            return [Effect.void, { ...state, compactedSettledBySession }] as const;
+          }
+        }
+
         const index =
           notification.promptId !== undefined
-            ? pending.findIndex(
+            ? state.registrations.findIndex(
                 (entry) =>
                   entry.sessionId === notification.sessionId &&
-                  entry.promptId === notification.promptId,
+                  (entry.promptId === notification.promptId ||
+                    entry.responsePromptId === notification.promptId),
               )
-            : pending.findIndex((entry) => entry.sessionId === notification.sessionId);
+            : state.registrations.findIndex((entry) => entry.sessionId === notification.sessionId);
         if (index < 0) {
-          return [Effect.void, pending] as const;
+          return [Effect.void, state] as const;
         }
-        const entry = pending[index];
+        const entry = state.registrations[index];
         if (!entry) {
-          return [Effect.void, pending] as const;
+          return [Effect.void, state] as const;
         }
+        const shouldDiscard =
+          entry.state === "settled" ||
+          (notification.promptId !== undefined &&
+            completedPromptIds.includes(notification.promptId));
         return [
-          Deferred.succeed(entry.deferred, promptResponseFromXAi(notification)).pipe(Effect.asVoid),
-          [...pending.slice(0, index), ...pending.slice(index + 1)],
+          shouldDiscard
+            ? Effect.void
+            : Deferred.succeed(entry.deferred, promptResponseFromXAi(notification)).pipe(
+                Effect.asVoid,
+              ),
+          {
+            ...state,
+            registrations: [
+              ...state.registrations.slice(0, index),
+              ...state.registrations.slice(index + 1),
+            ],
+          },
         ] as const;
       }).pipe(Effect.flatten);
     }),
   );
 
-const rememberCompletedXAiPromptId = (
+const rememberCompletedXAiPromptIds = (
   completedPromptIdsRef: Ref.Ref<ReadonlyArray<string>>,
   response: EffectAcpSchema.PromptResponse,
   fallbackPromptId: string,
+  completionHistoryLimit: number,
 ) => {
-  const promptId = promptIdFromResponse(response) ?? fallbackPromptId;
+  const responsePromptId = promptIdFromResponse(response);
+  const promptIds =
+    responsePromptId === undefined || responsePromptId === fallbackPromptId
+      ? [fallbackPromptId]
+      : [fallbackPromptId, responsePromptId];
   return Ref.update(completedPromptIdsRef, (completedPromptIds) => {
-    if (completedPromptIds.includes(promptId)) {
-      return completedPromptIds;
-    }
-    return [...completedPromptIds, promptId].slice(-completedXAiPromptIdLimit);
+    const next = [...new Set([...completedPromptIds, ...promptIds])];
+    return next.slice(-completionHistoryLimit);
   });
 };
 

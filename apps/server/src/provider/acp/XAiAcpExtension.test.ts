@@ -21,7 +21,10 @@ import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const mockAgentPath = NodePath.join(__dirname, "../../../scripts/acp-mock-agent.ts");
 
-const makePromptCompletionRuntime = (env: NodeJS.ProcessEnv) =>
+const makePromptCompletionRuntime = (
+  env: NodeJS.ProcessEnv,
+  options?: Parameters<typeof makeXAiPromptCompletionRuntime>[1],
+) =>
   Effect.gen(function* () {
     const context = yield* Layer.build(
       AcpSessionRuntime.AcpSessionRuntime.layer({
@@ -38,7 +41,7 @@ const makePromptCompletionRuntime = (env: NodeJS.ProcessEnv) =>
     const runtime = yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
       Effect.provide(context),
     );
-    return yield* makeXAiPromptCompletionRuntime(runtime);
+    return yield* makeXAiPromptCompletionRuntime(runtime, options);
   });
 
 const decodeXAiAskUserQuestionRequest = Schema.decodeUnknownSync(XAiAskUserQuestionRequest);
@@ -331,6 +334,38 @@ describe("XAiAcpExtension", () => {
         _meta: {
           promptId: secondPromptId,
           requestId: secondPromptId,
+        },
+      });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("preserves ID-less sequencing after settled registrations are compacted", () =>
+    Effect.gen(function* () {
+      const runtime = yield* makePromptCompletionRuntime(
+        {
+          RYCO_ACP_EMIT_LATE_IDLESS_XAI_PROMPT_SEQUENCE: "1",
+        },
+        { completionHistoryLimit: 1 },
+      );
+      yield* runtime.start();
+
+      const firstPromptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "first" }],
+      });
+      expect(firstPromptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const secondPromptResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "second" }],
+      });
+      expect(secondPromptResult).toMatchObject({ stopReason: "end_turn" });
+
+      const currentResult = yield* runtime.prompt({
+        prompt: [{ type: "text", text: "third" }],
+      });
+      expect(currentResult).toMatchObject({
+        stopReason: "end_turn",
+        _meta: {
+          agentResult: "current-third-prompt",
         },
       });
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
