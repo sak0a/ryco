@@ -16,14 +16,17 @@
  * This mirrors `assertHostedRuntimeGlobals` in `./dpopSigner` and does not extend
  * it: that one guards the hosted plane only, and E2EE is not hosted-only.
  *
- * THE PRODUCTION CALLER IS THE AGREEMENT-KEY GENERATION PATH. `./e2eeAgreementKey`
- * runs this before it draws the device's static X25519 key (§6.2) and turns a
- * throw into `agreement_key_runtime_unavailable` — "E2EE is unavailable on this
- * device" — with no key created and nothing written. That is the only place in
- * this app that draws E2EE key material, so §14.5's "verifies the source at
- * startup and refuses E2EE, rather than discovering the absence mid-handshake"
- * holds for every key this device can hold. The §16 vector runner still calls it
- * too, as a development diagnostic.
+ * THE PRODUCTION CALLER IS THE AGREEMENT-KEY CUSTODY PATH. `./e2eeAgreementKey`
+ * runs this before it draws the device's static X25519 key (§6.2), before it
+ * derives that key's public half, and before it lends the scalar to a handshake,
+ * turning a throw into `agreement_key_runtime_unavailable` — "E2EE is unavailable
+ * on this device" — with no key created and nothing written. Gating creation
+ * alone would verify the source on exactly the one launch that mints the key, so
+ * §14.5's "verifies the source at startup and refuses E2EE, rather than
+ * discovering the absence mid-handshake" holds only if every operation that
+ * reaches the key passes through it. Destruction is the one exception: §6.3's
+ * purge must still run on a runtime E2EE is refused on. The §16 vector runner
+ * calls this too, as a development diagnostic.
  */
 
 /** §14.5 preflight draw. One agreement key's worth of bytes, then discarded. */

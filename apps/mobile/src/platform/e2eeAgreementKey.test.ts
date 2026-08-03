@@ -161,6 +161,10 @@ describe("device agreement key (§6.2, §6.3)", () => {
 
     await expect(codeOf(agreement.generate())).resolves.toBe("agreement_key_runtime_unavailable");
     expect(preflight).toHaveBeenCalledTimes(1);
+    // Applied to the real globals: §14.5 verifies THE source that supplies the
+    // entropy, so a host object handed in here would validate something other
+    // than what `generateE2eeAgreementKeyPair` draws from.
+    expect(preflight).toHaveBeenCalledWith();
     expect(touched).toBe(false);
     expect(fake.entries.size).toBe(0);
   });
@@ -171,6 +175,52 @@ describe("device agreement key (§6.2, §6.3)", () => {
     await agreement.generate();
 
     expect(preflight).toHaveBeenCalledTimes(1);
+    expect(preflight).toHaveBeenCalledWith();
+  });
+
+  it("verifies the §14.5 source on every use, not only the launch that mints the key", async () => {
+    // A device that already holds a key never reaches `generate` again, so gating
+    // creation alone would verify the source once per install. §14.5 requires the
+    // refusal "rather than discovering the absence mid-handshake", and the
+    // handshake reaches the key through these two accessors.
+    const fake = fakeStore();
+    await makeMobileE2eeAgreementKey(fake.store).generate();
+    expect(fake.entries.size).toBe(1);
+
+    let touched = false;
+    const seeded = fakeStore({
+      seeded: fake.entries.get(E2EE_AGREEMENT_SECRET_KEY),
+      onGet: () => (touched = true),
+    });
+    preflight.mockImplementation(() => {
+      throw new Error("End-to-end encryption requires a cryptographic random source…");
+    });
+    const agreement = makeMobileE2eeAgreementKey(seeded.store);
+
+    await expect(codeOf(agreement.getPublicDescriptor())).resolves.toBe(
+      "agreement_key_runtime_unavailable",
+    );
+    await expect(codeOf(agreement.withSecretKey(() => 1))).resolves.toBe(
+      "agreement_key_runtime_unavailable",
+    );
+    // The stored key is never even read on a runtime §14.5 condemns.
+    expect(touched).toBe(false);
+  });
+
+  it("still destroys the key on a runtime the preflight refuses", async () => {
+    // §6.3's clone/restore purge and §13's re-pairing destroy are the one thing
+    // that must survive a refused runtime: refusing to destroy key material would
+    // be refusing to destroy it.
+    const fake = fakeStore();
+    await makeMobileE2eeAgreementKey(fake.store).generate();
+    const seeded = fakeStore({ seeded: fake.entries.get(E2EE_AGREEMENT_SECRET_KEY) });
+    preflight.mockImplementation(() => {
+      throw new Error("End-to-end encryption requires a cryptographic random source…");
+    });
+
+    await makeMobileE2eeAgreementKey(seeded.store).delete();
+
+    expect(seeded.entries.size).toBe(0);
   });
 
   it("is create-only: a second generate conflicts and never overwrites", async () => {
@@ -283,6 +333,25 @@ describe("key loss and store failure", () => {
 });
 
 describe("borrow window (§6.3)", () => {
+  it("keeps the scalar live across an asynchronous borrow", async () => {
+    // The documented consumer is the Noise IK initiator (§8), which is async, and
+    // `use` is typed to return a promise. A borrow that erased the buffer at the
+    // borrower's first suspension would hand the handshake 32 zero bytes —
+    // X25519 clamps an all-zero scalar to the fixed, publicly known 2^254, so the
+    // device's static agreement key would become attacker-known while every
+    // after-the-fact zeroization assertion below still passed.
+    const agreement = makeMobileE2eeAgreementKey(fakeStore().store);
+    const generated = await agreement.generate();
+
+    const derived = await agreement.withSecretKey(async (secretKey) => {
+      await Promise.resolve();
+      expect([...secretKey].some((byte) => byte !== 0)).toBe(true);
+      return deriveE2eeAgreementPublicKey(secretKey);
+    });
+
+    expect([...derived]).toEqual([...generated.publicKey]);
+  });
+
   it("zeroizes the borrowed scalar after the borrow returns", async () => {
     const agreement = makeMobileE2eeAgreementKey(fakeStore().store);
     await agreement.generate();
@@ -364,6 +433,45 @@ describe("borrow window (§6.3)", () => {
     expect(recorder.filled.some((bytes) => bytes.length === 32 && bytes.some((b) => b !== 0))).toBe(
       true,
     );
+  });
+});
+
+describe("destruction (§6.3, §13 re-pairing)", () => {
+  it("removes the entry, so the next read reports no key", async () => {
+    const fake = fakeStore();
+    const agreement = makeMobileE2eeAgreementKey(fake.store);
+    await agreement.generate();
+
+    await agreement.delete();
+
+    expect(fake.entries.size).toBe(0);
+    await expect(codeOf(agreement.getPublicDescriptor())).resolves.toBe("agreement_key_not_found");
+  });
+
+  it("reports a failed destroy rather than resolving as if the key were gone", async () => {
+    const fake = fakeStore({
+      onRemove: () => {
+        throw new Error(`keychain -25300 for ${E2EE_AGREEMENT_SECRET_KEY}`);
+      },
+    });
+    const agreement = makeMobileE2eeAgreementKey(fake.store);
+    await agreement.generate();
+
+    await expect(codeOf(agreement.delete())).resolves.toBe("agreement_key_operation_failed");
+    expect(fake.entries.size).toBe(1);
+  });
+
+  it("is serialized against generation, so a destroy never lands mid-create", async () => {
+    const fake = fakeStore();
+    const agreement = makeMobileE2eeAgreementKey(fake.store);
+
+    const [generated] = await Promise.all([codeOf(agreement.generate()), agreement.delete()]);
+
+    // The delete queued behind the generate: the key was minted and then removed,
+    // never removed from under a half-finished create.
+    expect(generated).toBe("resolved");
+    expect(fake.writes).toHaveLength(1);
+    expect(fake.entries.size).toBe(0);
   });
 });
 
