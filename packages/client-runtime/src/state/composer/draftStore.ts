@@ -88,7 +88,7 @@ export interface ComposerThreadDraftState<TImage extends ComposerDraftImage = Co
    * branded slug) so a default `codex` instance and a user-authored
    * `codex_personal` instance each persist their own selected model. Every
    * historical `ProviderDriverKind` literal (`codex` / `claudeAgent` / `cursor` /
-   * `opencode`) also satisfies the `ProviderInstanceId` slug pattern, so
+   * `grok` / `opencode`) also satisfies the `ProviderInstanceId` slug pattern, so
    * legacy kind-keyed drafts round-trip unchanged.
    */
   modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
@@ -1290,7 +1290,13 @@ export function createComposerDraftStore<TImage extends ComposerDraftImage>(
               }
               const base = existing ?? createEmptyThreadDraft();
               const nextMap = { ...base.modelSelectionByProvider };
-              for (const provider of ["codex", "claudeAgent", "cursor", "opencode"] as const) {
+              for (const provider of [
+                "codex",
+                "claudeAgent",
+                "cursor",
+                "grok",
+                "opencode",
+              ] as const) {
                 if (!modelOptions || !(provider in modelOptions)) continue;
                 const opts = modelOptions[provider];
                 const driverKind = ProviderDriverKind.make(provider);

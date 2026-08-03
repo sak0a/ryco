@@ -6,7 +6,7 @@
 
 **A fast local workspace for coding agents.**
 
-Codex · Claude · GitHub Copilot · OpenCode · Cursor (Early Access)
+Codex · Claude · GitHub Copilot · OpenCode · Cursor (Early Access) · Grok (Early Access)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-blue.svg?style=flat-square)](https://github.com/sak0a/ryco/releases)
@@ -21,7 +21,7 @@ Codex · Claude · GitHub Copilot · OpenCode · Cursor (Early Access)
 
 ## What is Ryco?
 
-Ryco is a small, practical workspace for AI coding agents. It runs Codex, Claude, GitHub Copilot, OpenCode, and early-access Cursor side by side, with fast local workflows, clear per-provider customization, and visibility into provider behavior.
+Ryco is a small, practical workspace for AI coding agents. It runs Codex, Claude, GitHub Copilot, OpenCode, Cursor, and Grok side by side, with fast local workflows, clear per-provider customization, and visibility into provider behavior.
 
 It ships as a cross-platform desktop app (macOS, Linux, Windows) and as a local web CLI backed by an Effect/TypeScript server and a React/TanStack UI.
 
@@ -34,6 +34,7 @@ It ships as a cross-platform desktop app (macOS, Linux, Windows) and as a local 
 - **GitHub Copilot** — via `@github/copilot-sdk`
 - **OpenCode** — via `@opencode-ai/sdk` or a configured OpenCode server URL
 - **Cursor** _(Early Access)_ — via the Cursor Agent ACP runtime
+- **Grok** _(Early Access)_ — via the Grok CLI's native ACP runtime
 - Multiple **named provider instances** per driver (e.g. `codex_personal`, `claude_openrouter`) with independent config, environment variables, auth identity, model preferences, and accent colors
 
 ### Workflow
@@ -76,6 +77,7 @@ It ships as a cross-platform desktop app (macOS, Linux, Windows) and as a local 
 > - **Codex** — install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
 > - **Claude** — install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
 > - **OpenCode** — install [OpenCode](https://opencode.ai) and run `opencode auth login`
+> - **Grok** — install [Grok Build](https://docs.x.ai/build/overview) and run `grok login`, or configure `XAI_API_KEY` on the provider instance
 >
 > GitHub Copilot and Cursor are also supported when their provider CLIs/accounts are available on the machine running Ryco. Check **Settings → Providers** for live auth and version status.
 
@@ -146,6 +148,7 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 - [Hosted Hub client](./docs/hosted-hub-client.md)
 - [Codex provider guide](./docs/providers/codex.md)
 - [Claude provider guide](./docs/providers/claude.md)
+- [Grok provider guide](./docs/providers/grok.md)
 - [Observability guide](./docs/observability.md)
 - [Source-control providers](./docs/source-control-providers.md)
 - [Release process](./docs/release.md)

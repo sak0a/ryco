@@ -34,6 +34,11 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     // Legacy `providers` struct is still hydrated with its per-driver defaults
     // so existing call sites keep working through the migration.
     expect(decoded.providers.codex.enabled).toBe(true);
+    expect(decoded.providers.grok).toEqual({
+      enabled: true,
+      binaryPath: "grok",
+      customModels: [],
+    });
   });
 
   it("decodes a multi-instance map mixing first-party and fork drivers", () => {
@@ -106,5 +111,23 @@ describe("ServerSettingsPatch.providerInstances", () => {
     });
     const ollamaId = ProviderInstanceId.make("ollama_local");
     expect(patch.providerInstances?.[ollamaId]?.driver).toBe("ollama");
+  });
+});
+
+describe("ServerSettingsPatch.providers.grok", () => {
+  it("decodes Grok binary and model overrides", () => {
+    const patch = decodeServerSettingsPatch({
+      providers: {
+        grok: {
+          binaryPath: "/opt/grok",
+          customModels: ["grok-build"],
+        },
+      },
+    });
+
+    expect(patch.providers?.grok).toEqual({
+      binaryPath: "/opt/grok",
+      customModels: ["grok-build"],
+    });
   });
 });

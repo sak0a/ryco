@@ -18,9 +18,20 @@ const emitInterleavedAssistantToolCalls =
   readEnv("RYCO_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS") === "1";
 const emitGenericToolPlaceholders = readEnv("RYCO_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS") === "1";
 const emitAskQuestion = readEnv("RYCO_ACP_EMIT_ASK_QUESTION") === "1";
+const emitXAiAskUserQuestion = readEnv("RYCO_ACP_EMIT_XAI_ASK_USER_QUESTION") === "1";
+const emitUsageUpdate = readEnv("RYCO_ACP_EMIT_USAGE_UPDATE") === "1";
+const emitXAiPromptCompleteThenHang =
+  readEnv("RYCO_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG") === "1";
+const emitStaleXAiPromptCompleteBeforeSecondHang =
+  readEnv("RYCO_ACP_EMIT_STALE_XAI_PROMPT_COMPLETE_BEFORE_SECOND_HANG") === "1";
 const failSetConfigOption = readEnv("RYCO_ACP_FAIL_SET_CONFIG_OPTION") === "1";
 const exitOnSetConfigOption = readEnv("RYCO_ACP_EXIT_ON_SET_CONFIG_OPTION") === "1";
 const promptResponseText = readEnv("RYCO_ACP_PROMPT_RESPONSE_TEXT");
+const permissionOptionIds = {
+  allowOnce: readEnv("RYCO_ACP_ALLOW_ONCE_OPTION_ID") ?? "allow-once",
+  allowAlways: readEnv("RYCO_ACP_ALLOW_ALWAYS_OPTION_ID") ?? "allow-always",
+  rejectOnce: readEnv("RYCO_ACP_REJECT_ONCE_OPTION_ID") ?? "reject-once",
+};
 const sessionId = "mock-session-1";
 
 let currentModeId = "ask";
@@ -29,13 +40,29 @@ let parameterizedModelPicker = false;
 let currentReasoning = "medium";
 let currentContext = "272k";
 let currentFast = false;
+let promptCount = 0;
 const cancelledSessions = new Set<string>();
+
+function promptIdFromRequestMeta(
+  request: Pick<AcpSchema.PromptRequest, "_meta">,
+): string | undefined {
+  const meta = request._meta;
+  if (meta === null || typeof meta !== "object") {
+    return undefined;
+  }
+  const promptId = meta.promptId ?? meta.requestId;
+  return typeof promptId === "string" && promptId.length > 0 ? promptId : undefined;
+}
 
 function logExit(reason: string): void {
   if (!exitLogPath) {
     return;
   }
   appendFileSync(exitLogPath, `${reason}\n`, "utf8");
+}
+
+function writeJsonRpcNotification(method: string, params: unknown): void {
+  process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
 }
 
 process.once("SIGTERM", () => {
@@ -237,6 +264,21 @@ function modeState(): AcpSchema.SessionModeState {
   };
 }
 
+const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
+  { modelId: "grok-build", name: "Grok Build" },
+  { modelId: "grok-mock-alt", name: "Grok Mock Alt" },
+];
+
+function modelState(): AcpSchema.SessionModelState {
+  const modelId = grokAcpModels.some((model) => model.modelId === currentModelId)
+    ? currentModelId
+    : "grok-build";
+  return {
+    currentModelId: modelId,
+    availableModels: grokAcpModels,
+  };
+}
+
 const program = Effect.gen(function* () {
   const agent = yield* EffectAcpAgent.AcpAgent;
 
@@ -257,6 +299,7 @@ const program = Effect.gen(function* () {
     Effect.succeed({
       sessionId,
       modes: modeState(),
+      models: modelState(),
       configOptions: configOptions(),
     }),
   );
@@ -273,9 +316,26 @@ const program = Effect.gen(function* () {
       .pipe(
         Effect.as({
           modes: modeState(),
+          models: modelState(),
           configOptions: configOptions(),
         }),
       ),
+  );
+
+  yield* agent.handleSetSessionModel((request) =>
+    Effect.gen(function* () {
+      if (!grokAcpModels.some((model) => model.modelId === request.modelId)) {
+        return yield* AcpError.AcpRequestError.invalidParams(
+          `Unknown mock model id: ${request.modelId}`,
+          {
+            method: "session/set_model",
+            params: request,
+          },
+        );
+      }
+      currentModelId = request.modelId;
+      return {};
+    }),
   );
 
   yield* agent.handleSetSessionConfigOption((request) =>
@@ -324,6 +384,44 @@ const program = Effect.gen(function* () {
   yield* agent.handlePrompt((request) =>
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
+      promptCount += 1;
+
+      if (emitStaleXAiPromptCompleteBeforeSecondHang && promptCount === 1) {
+        return {
+          stopReason: "end_turn",
+          _meta: {
+            promptId: "mock-stale-xai-prompt-1",
+            requestId: "mock-stale-xai-prompt-1",
+          },
+        };
+      }
+
+      if (emitStaleXAiPromptCompleteBeforeSecondHang && promptCount === 2) {
+        const currentPromptId = promptIdFromRequestMeta(request) ?? "mock-current-xai-prompt-2";
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          promptId: "mock-stale-xai-prompt-1",
+          stopReason: "end_turn",
+          agentResult: null,
+        });
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          promptId: currentPromptId,
+          stopReason: "end_turn",
+          agentResult: null,
+        });
+        return yield* Effect.never;
+      }
+
+      if (emitXAiPromptCompleteThenHang) {
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          promptId: promptIdFromRequestMeta(request) ?? "mock-xai-prompt-1",
+          stopReason: "end_turn",
+          agentResult: null,
+        });
+        return yield* Effect.never;
+      }
 
       if (emitInterleavedAssistantToolCalls) {
         const toolCallId = "tool-call-1";
@@ -419,9 +517,13 @@ const program = Effect.gen(function* () {
             ],
           },
           options: [
-            { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
-            { optionId: "allow-always", name: "Allow always", kind: "allow_always" },
-            { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+            { optionId: permissionOptionIds.allowOnce, name: "Allow once", kind: "allow_once" },
+            {
+              optionId: permissionOptionIds.allowAlways,
+              name: "Allow always",
+              kind: "allow_always",
+            },
+            { optionId: permissionOptionIds.rejectOnce, name: "Reject", kind: "reject_once" },
           ],
         });
 
@@ -514,6 +616,31 @@ const program = Effect.gen(function* () {
         return { stopReason: "end_turn" };
       }
 
+      if (emitXAiAskUserQuestion) {
+        const result = yield* agent.client.extRequest("_x.ai/ask_user_question", {
+          method: "x.ai/ask_user_question",
+          params: {
+            sessionId: requestedSessionId,
+            toolCallId: "ask-user-question-tool-call-1",
+            questions: [
+              {
+                question: "Which scope should Grok use?",
+                multiSelect: null,
+                options: [
+                  { label: "Workspace", description: "Use the current workspace" },
+                  { label: "Session", description: "Only use this session" },
+                ],
+              },
+            ],
+            mode: "default",
+          },
+        });
+        if (typeof result !== "object" || result === null || !("outcome" in result)) {
+          throw new Error("Expected _x.ai/ask_user_question response outcome.");
+        }
+        return { stopReason: "end_turn" };
+      }
+
       yield* agent.client.sessionUpdate({
         sessionId: requestedSessionId,
         update: {
@@ -540,6 +667,17 @@ const program = Effect.gen(function* () {
           content: { type: "text", text: promptResponseText ?? "hello from mock" },
         },
       });
+
+      if (emitUsageUpdate) {
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "usage_update",
+            used: 321,
+            size: 128_000,
+          },
+        });
+      }
 
       return { stopReason: "end_turn" };
     }),
