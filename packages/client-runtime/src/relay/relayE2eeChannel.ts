@@ -27,6 +27,8 @@ import {
 import {
   relayE2eeFailure,
   type RelayE2eeChannel,
+  type RelayE2eeCloseAttempt,
+  type RelayE2eeFailureKind,
   type RelayE2eeHost,
   type RelayE2eeInboundDisposition,
   type RelayE2eeReservation,
@@ -204,6 +206,30 @@ export function makeRelayE2eeClientChannel(
   // ─── §9.3: admission, then the pair, then the AEAD ─────────────────────────
 
   /**
+   * The channel's SEND CRITICAL SECTION, which every `protect` this channel
+   * issues runs inside.
+   *
+   * It is not a second copy of `E2eeRecordSession`'s own send serialization —
+   * that one already makes the pair assignment, the AEAD, and the state advance
+   * atomic. It is the rule one level up: a close-machine record's BODY and the
+   * pair it is protected at are chosen TOGETHER. §10.1 fields 0–1 MUST byte-equal
+   * the carrying envelope's header, and the pair `protect` assigns is knowable
+   * only inside its own serialization — so a position read outside it is a
+   * position another send may take first, and the record declaring it is already
+   * sealed onto the relay by the time `noteTransmitted` can object. The peer then
+   * rejects a conforming endpoint's close as §11.3 Q7.
+   */
+  let sendCritical: Promise<unknown> = Promise.resolve();
+  function serializeSend<T>(run: () => Promise<T>): Promise<T> {
+    const result = sendCritical.then(run, run);
+    sendCritical = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  /**
    * What one `protect` attempt did, reduced to what a caller here reacts to.
    *
    * `close_required` is §9.6's reserve boundary and `unusable` is §9.3's
@@ -258,11 +284,19 @@ export function makeRelayE2eeClientChannel(
    * that admit and then decline to transmit — an erasure racing the admission,
    * and a local AEAD or encoder failure — and an unspent reservation would
    * otherwise hold relay capacity until the channel closed.
+   *
+   * CALLERS MUST BE INSIDE `serializeSend`: every position this channel reads
+   * for a record body is read in the same section as the assignment.
    */
   async function protectRecord(
     innerType: E2eeInnerRecordType,
     body: Uint8Array,
   ): Promise<ProtectOutcome> {
+    // §9.5: the section this send waited for may have erased the session. The
+    // record session asserts on an erased session before its own funnel can
+    // answer, and this is that answer — the send path declines the record and
+    // the caller leaves the channel exactly as it found it.
+    if (session.erased) return { kind: "unavailable" };
     let admission: RelayE2eeReservation | undefined;
     let result: E2eeProtectResult;
     try {
@@ -327,17 +361,39 @@ export function makeRelayE2eeClientChannel(
     if (closed) return REJECTED;
     closed = true;
     const verdict = machine.noteFatal();
-    if (session.sendPathUsable && machine.mayProtectTerminalError) {
+    await serializeSend(async () => {
+      // §11.5's "none when the send path is unusable", and §10.2's carve-out of
+      // exactly one terminal record. Both are read INSIDE the section, because
+      // both are properties of the send state at the moment the record would be
+      // protected and a send admitted ahead of this one can change either.
+      if (!session.sendPathUsable || !machine.mayProtectTerminalError) return;
       const result = await protectRecord(
         E2EE_INNER_TYPE_ERROR,
         encodeE2eeErrorRecordBody(errorCode),
       );
       if (result.kind === "protected") machine.noteTerminalErrorTransmitted();
-    }
+    });
     release();
     diagnostic({ phase: "post_key", row, verdict });
     host.close(relayE2eeFailure("fatal_post_key"));
     return REJECTED;
+  }
+
+  /**
+   * §11.3 Q10: a local failure, on a path that has no caller to report it to.
+   *
+   * No `E2EEError` follows and none may: the condition IS this endpoint's send
+   * path, and a record protected out of it would create the very sequence gap
+   * being avoided. Verdict **Failed** (§10.4), secrets erased (§9.5), and §11.1's
+   * non-retryable close.
+   */
+  function failLocal(kind: RelayE2eeFailureKind): void {
+    if (closed) return;
+    closed = true;
+    const verdict = machine.noteFatal();
+    release();
+    diagnostic({ phase: "post_key", row: "Q10", verdict });
+    host.close(relayE2eeFailure(kind));
   }
 
   // ─── §10: the authenticated close ──────────────────────────────────────────
@@ -444,83 +500,124 @@ export function makeRelayE2eeClientChannel(
    * the record simply stays owed, and the close phase's own `T_CLOSE` wait,
    * the peer's, or the channel ending is what bounds it. `ended` is §9.6's
    * degenerate state and §9.3's post-AEAD failure, both of which end the close.
+   * `none` is the obligation having changed inside the section — a peer record
+   * authenticated while this attempt waited — and nothing was built for it.
    */
-  type CloseTransmitOutcome = "transmitted" | "refused" | "ended";
+  type CloseTransmitOutcome = "transmitted" | "refused" | "ended" | "none";
 
-  async function transmitCloseRecord(toSend: E2eeCloseRecordToSend): Promise<CloseTransmitOutcome> {
-    const outcome = await protectRecord(toSend.innerType, toSend.body);
-    if (outcome.kind === "refused") return "refused";
-    if (outcome.kind !== "protected") {
-      // §9.6's degenerate state and §9.3's post-AEAD failure alike: no further
-      // close-machine record follows, the close is **Unclean — abrupt**, and no
-      // wire record is emitted for it (§10.4).
-      endDegenerate();
-      return "ended";
-    }
-    machine.noteTransmitted({
-      record: toSend,
-      epoch: outcome.epoch,
-      counter: outcome.counter,
-      epochCompleted: outcome.epochCompleted,
-      at: now(),
+  /**
+   * What the §10 driver decided for one attempt, INSIDE the send critical
+   * section and against the position that attempt will actually be protected at.
+   */
+  type CloseRecordPlan =
+    | { readonly kind: "send"; readonly record: E2eeCloseRecordToSend }
+    /** §9.6: no position left to declare, so no conforming record exists. */
+    | { readonly kind: "degenerate" }
+    /** The obligation changed while this attempt waited for the section. */
+    | { readonly kind: "none" };
+
+  /**
+   * Build one close-machine record and transmit it, with the §9.2 position read,
+   * the §10.1 body built from it, the AEAD, and the machine's commit all inside
+   * one send critical section — see `serializeSend` for why that is the rule
+   * rather than an optimization.
+   */
+  async function transmitCloseRecord(
+    plan: (position: E2eeSequencePosition | undefined) => CloseRecordPlan,
+  ): Promise<CloseTransmitOutcome> {
+    return serializeSend(async () => {
+      const planned = plan(sendPosition());
+      if (planned.kind === "none") return "none";
+      if (planned.kind === "degenerate") {
+        endDegenerate();
+        return "ended";
+      }
+      const toSend = planned.record;
+      const outcome = await protectRecord(toSend.innerType, toSend.body);
+      if (outcome.kind === "refused") return "refused";
+      if (outcome.kind !== "protected") {
+        // §9.6's degenerate state and §9.3's post-AEAD failure alike: no further
+        // close-machine record follows, the close is **Unclean — abrupt**, and
+        // no wire record is emitted for it (§10.4).
+        endDegenerate();
+        return "ended";
+      }
+      machine.noteTransmitted({
+        record: toSend,
+        epoch: outcome.epoch,
+        counter: outcome.counter,
+        epochCompleted: outcome.epochCompleted,
+        at: now(),
+      });
+      return "transmitted";
     });
-    return "transmitted";
   }
 
   /** Send whatever §10.2 currently obliges this endpoint to send, then wait or finish. */
   async function drainPendingCloseRecord(): Promise<void> {
     while (machine.pendingRecord !== undefined) {
-      // An ack answering the peer's `E2EEClose` MUST declare the expected-next
-      // AS OF processing that close (§10.1.1); the final confirmation declares
-      // the current one, and the machine reports which by leaving
-      // `ackExpectedRecv` undefined.
-      const declaration = machine.ackExpectedRecv ?? expectedRecv();
-      const position = sendPosition();
-      if (declaration === undefined || position === undefined) {
-        endDegenerate();
-        return;
-      }
-      const toSend = machine.buildCloseAck({ sendPosition: position, expectedRecv: declaration });
-      const outcome = await transmitCloseRecord(toSend);
+      const outcome = await transmitCloseRecord((position) => {
+        if (closed || machine.pendingRecord === undefined) return { kind: "none" };
+        // An ack answering the peer's `E2EEClose` MUST declare the expected-next
+        // AS OF processing that close (§10.1.1); the final confirmation declares
+        // the current one, and the machine reports which by leaving
+        // `ackExpectedRecv` undefined.
+        const declaration = machine.ackExpectedRecv ?? expectedRecv();
+        if (declaration === undefined || position === undefined) return { kind: "degenerate" };
+        return {
+          kind: "send",
+          record: machine.buildCloseAck({ sendPosition: position, expectedRecv: declaration }),
+        };
+      });
       // Backpressure leaves the record owed and the channel untouched (§11.4).
       // Re-running the loop would spin on a queue that is still full, so the
       // obligation is left standing and the wait — this endpoint's own if one is
       // armed, the peer's otherwise — is what ends the phase.
-      if (outcome === "refused") break;
+      if (outcome === "refused" || outcome === "none") break;
       if (outcome === "ended") return;
     }
+    if (closed) return;
     if (machine.exchangeComplete) finishClose();
     else armCloseWait();
   }
 
-  async function beginClose(): Promise<void> {
-    if (closed) return;
-    if (machine.closePhaseActive) return;
-    const position = sendPosition();
-    const declaration = expectedRecv();
-    if (position === undefined || declaration === undefined) {
-      endDegenerate();
-      return;
-    }
+  async function beginClose(): Promise<RelayE2eeCloseAttempt> {
+    if (closed || machine.closePhaseActive) return "opened";
     const settled = new Promise<void>((resolve) => {
       closeSettled = resolve;
     });
-    const toSend = machine.buildClose({ sendPosition: position, expectedRecv: declaration });
-    const outcome = await transmitCloseRecord(toSend);
+    const outcome = await transmitCloseRecord((position) => {
+      // Re-read inside the section: the peer's own `E2EEClose` may have been
+      // authenticated while this attempt waited for it, and this endpoint is
+      // then the responder of §10.2 step 2 and owes an ack rather than a close.
+      if (closed || machine.closePhaseActive) return { kind: "none" };
+      const declaration = expectedRecv();
+      if (position === undefined || declaration === undefined) return { kind: "degenerate" };
+      return {
+        kind: "send",
+        record: machine.buildClose({ sendPosition: position, expectedRecv: declaration }),
+      };
+    });
     if (outcome === "refused") {
       // §11.4: no `E2EEClose` reached the relay, no pair was consumed, and the
-      // close phase never opened — so there is nothing to wait for and nothing
-      // to record. The channel is unaffected and a later attempt may still
-      // close it cleanly, which is exactly what §9.6's reserve keeps possible.
+      // close phase never opened — so there is nothing to wait for, nothing to
+      // record, and nothing bounding this channel. The caller is TOLD, because
+      // the channel is unaffected and a later attempt may still close it
+      // cleanly, which is exactly what §9.6's reserve keeps possible.
       //
       // `closeSettled` is deliberately left as it stands rather than cleared:
       // the next attempt replaces it, and a terminal path calling a resolver
       // whose promise nobody awaits is a no-op — while clearing a field a
       // concurrent attempt may already own would strand that attempt.
-      return;
+      return "refused";
     }
     if (outcome === "transmitted") armCloseWait();
+    // A degenerate end, or a phase another attempt already finished, has already
+    // released every waiter; awaiting a resolver nobody will call again would
+    // strand this one.
+    if (closePhaseFinished) return "opened";
     await settled;
+    return "opened";
   }
 
   /**
@@ -617,25 +714,22 @@ export function makeRelayE2eeClientChannel(
     // gate is the machine's own and not a check for the close inner types. A
     // `Ping` the close phase stalls is DISCARDED, not buffered.
     if (!machine.mayProtectApplicationRecord) return false;
-    const outcome = await protectRecord(E2EE_INNER_TYPE_RPC, message);
+    const outcome = await serializeSend(() => protectRecord(E2EE_INNER_TYPE_RPC, message));
     if (outcome.kind === "protected") return true;
     if (outcome.kind === "close_required") {
       // §9.6: protecting this record would leave less than the post-application
       // reserve. Nothing was consumed, and the endpoint MUST initiate §10's
-      // close no later than this point rather than protect it.
-      void beginClose();
+      // close no later than this point rather than protect it. The close is
+      // driven rather than awaited — this caller is owed only its `false` — so
+      // a throw escaping it has no caller to reach and takes the fail-closed
+      // teardown every other local defect takes.
+      void beginClose().catch(() => failLocal("fatal_post_key"));
       return false;
     }
     if (outcome.kind === "unusable") {
       // §11.3 Q10: no byte reached the relay, so no `E2EEError` may follow — it
       // would itself create the sequence gap being avoided.
-      if (!closed) {
-        closed = true;
-        const verdict = machine.noteFatal();
-        release();
-        diagnostic({ phase: "post_key", row: "Q10", verdict });
-        host.close(relayE2eeFailure("send_path_unusable"));
-      }
+      failLocal("send_path_unusable");
       return false;
     }
     // `refused` is §11.4 sender-local — `e2ee_message_too_large` or

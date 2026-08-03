@@ -42,7 +42,11 @@ import {
 } from "@ryco/shared/relayE2eeWire";
 import { describe, expect, it } from "vite-plus/test";
 
-import { makeRelayE2eeClientChannel, type RelayE2eeChannelDiagnostic } from "./relayE2eeChannel";
+import {
+  CLIENT_E2EE_RECEIVE_FATAL_ROWS,
+  makeRelayE2eeClientChannel,
+  type RelayE2eeChannelDiagnostic,
+} from "./relayE2eeChannel";
 import {
   relayE2eeFailure,
   type HostedRelayFailure,
@@ -88,8 +92,10 @@ interface Wire {
   refuseAdmission: boolean;
   /** The reservation is granted but the send path takes nothing (§9.3 `none`). */
   refuseSend: boolean;
-  /** §10.4: the relay chunk assembler holds a partial message. */
-  incompleteMessage: boolean;
+  /** The send path fails unreadably: §9.3's `ambiguous` delivery, not `none`. */
+  throwOnSend: boolean;
+  /** Run inside `admit`, after the reservation is granted (§9.3's race window). */
+  onAdmit: (() => void) | undefined;
   readonly closes: (HostedRelayFailure | undefined)[];
   now: number;
   readonly timers: Map<number, { at: number; callback: () => void }>;
@@ -110,7 +116,8 @@ function makeHost(limits: RelayLimitsType = RELAY_INITIAL_LIMITS): {
     released: 0,
     refuseAdmission: false,
     refuseSend: false,
-    incompleteMessage: false,
+    throwOnSend: false,
+    onAdmit: undefined,
     closes: [],
     now: 1_000,
     timers: new Map(),
@@ -121,11 +128,16 @@ function makeHost(limits: RelayLimitsType = RELAY_INITIAL_LIMITS): {
     admit: (messageBytes): RelayE2eeReservation | undefined => {
       if (wire.refuseAdmission || messageBytes <= 0) return undefined;
       wire.admitted += 1;
+      wire.onAdmit?.();
       let settled = false;
       return {
+        // Mirrors the engine's own reservation: capacity is spent on the
+        // attempt, so a refusal settles too and only a record that never
+        // reached the send path at all can be released.
         send: (message) => {
           if (settled) return false;
           settled = true;
+          if (wire.throwOnSend) throw new Error("relay send failed unreadably");
           if (wire.refuseSend) return false;
           wire.spent += 1;
           wire.sent.push(Uint8Array.from(message));
@@ -138,7 +150,6 @@ function makeHost(limits: RelayLimitsType = RELAY_INITIAL_LIMITS): {
         },
       };
     },
-    incompleteMessage: () => wire.incompleteMessage,
     close: (failure) => wire.closes.push(failure),
     now: () => wire.now,
     setTimeout: (callback, ms) => {
@@ -318,6 +329,63 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     expect(wire.admitted).toBe(1);
     expect(wire.spent).toBe(0);
     expect(wire.sent).toEqual([]);
+  });
+
+  it("gives the reservation back when the session is erased between admission and transmit", async () => {
+    // §9.3's own race window: `protect` re-checks erasure AFTER admission, so a
+    // channel that ended while a send sat at that await answers `unavailable`
+    // having never called `transmit`. Without the release the engine's
+    // `#outboundReservedBytes` would be permanently inflated by the whole
+    // multi-chunk reservation, and every later admission would see less capacity
+    // — a channel that silently degrades to admitting nothing at all.
+    const { channel, wire } = makeChannel();
+    wire.onAdmit = () => channel.dispose({});
+
+    expect(await channel.emit(RPC)).toBe(false);
+
+    expect(wire.admitted).toBe(1);
+    expect(wire.released).toBe(1);
+    expect(wire.spent).toBe(0);
+    expect(wire.sent).toEqual([]);
+  });
+
+  it("leaves the channel alone when the send path declines a record in this state", async () => {
+    // §10.2's application-phase gate, reached from the RECORD SESSION rather
+    // than from the close machine: this `emit` was admitted while the machine
+    // was still open and ordered behind the `E2EEClose`, so by the time it is
+    // protected the send path is closing and declines it. That is §11.4's "leave
+    // the channel exactly as they found it" — the opposite of §11.3's erase,
+    // record **Failed**, and tear the connection down non-retryably.
+    const { channel, wire, diagnostics } = makeChannel();
+
+    const closing = channel.beginClose();
+    const sending = channel.emit(RPC);
+
+    expect(await sending).toBe(false);
+    expect(wire.sent).toHaveLength(1);
+    expect(wire.closes).toEqual([]);
+    expect(channel.verdict()).toBeUndefined();
+    expect(diagnostics).toEqual([]);
+    void closing;
+  });
+
+  it("leaves the channel usable when the send path declines a record it cannot attribute", async () => {
+    // §9.3's `ambiguous` branch: the pair is spent and this endpoint can
+    // establish nothing about delivery. §11.4 and §11.3 Q10 are BOTH wrong for
+    // it — it is neither retryable backpressure nor a failure this sender may
+    // resolve by tearing the channel down — so `emit` refuses the message and
+    // changes nothing else.
+    const { channel, wire, diagnostics } = makeChannel();
+    wire.throwOnSend = true;
+
+    expect(await channel.emit(RPC)).toBe(false);
+
+    expect(wire.closes).toEqual([]);
+    expect(channel.verdict()).toBeUndefined();
+    expect(diagnostics).toEqual([]);
+    // The pair IS consumed — §11.4's "channel unaffected" is false of it — which
+    // is exactly why it is not reported as backpressure.
+    expect(channel.sendPosition()).toEqual({ epoch: 0n, counter: 1n });
   });
 
   it("serializes concurrent sends so no two records observe the same pair", async () => {
@@ -842,6 +910,187 @@ describe("relay E2EE client channel: §10 authenticated close", () => {
     expect(wire.sent).toHaveLength(afterClose);
   });
 
+  it("declares the pair the close record is actually protected at, under a same-turn send", async () => {
+    // §10.1 fields 0–1 MUST byte-equal the carrying envelope's header. The
+    // engine drives both of these fire-and-forget on one turn — `send()` is
+    // `void emit(...)` and `close()` is `void beginClose()` — so a driver that
+    // read its next-send position outside the record session's own send
+    // serialization would build the close body against a pair the RPC record
+    // takes first, and would seal that nonconforming record onto the relay
+    // before anything could object. The peer rejects such a close as §11.3 Q7.
+    const { channel, wire } = makeChannel();
+    const peer = makePeer();
+
+    const sending = channel.emit(RPC);
+    const closing = channel.beginClose();
+    expect(await sending).toBe(true);
+    await tick();
+
+    expect(wire.sent).toHaveLength(2);
+    expect(wire.sent.map(envelopeHeader)).toEqual([
+      { epoch: 0n, counter: 0n },
+      { epoch: 0n, counter: 1n },
+    ]);
+    // The peer authenticates both in order and validates the close under §10.1
+    // against its own state: the record is conforming, not merely accepted here.
+    expect(peer.authenticate(wire.sent[0]!).innerType).toBe(E2EE_INNER_TYPE_RPC);
+    const opened = peerReceive(peer, wire.sent[1]!);
+    expect(opened.record.innerType).toBe(E2EE_INNER_TYPE_CLOSE);
+    expect(opened.outcome.kind).toBe("close");
+
+    await channel.intercept(
+      await peer.transmit(
+        peer.machine.buildCloseAck({
+          sendPosition: peer.sendPosition(),
+          expectedRecv: peer.machine.ackExpectedRecv!,
+        }),
+      ),
+    );
+    await closing;
+    expect(channel.verdict()).toBe("clean");
+  });
+
+  it("answers as the §10.2 responder when the peer's close lands on the same turn as its own", async () => {
+    // The network never guarantees the turn boundary a test can insert between
+    // `beginClose()` and the peer's `E2EEClose`. With none, the peer's close is
+    // authenticated before this endpoint has protected anything, so §10.2 makes
+    // this endpoint the sequential RESPONDER — one record, the ack, at the pair
+    // the aborted close would have taken. An `E2EEClose` protected anyway would
+    // be a second close-machine record the peer answers as Q7, and an ack built
+    // against a position read before the section would declare a pair it is not
+    // carried at.
+    const { channel, wire } = makeChannel();
+    const peer = makePeer();
+    const peerClose = await peer.transmit(
+      peer.machine.buildClose({
+        sendPosition: peer.sendPosition(),
+        expectedRecv: peer.expectedRecv(),
+      }),
+    );
+
+    const closing = channel.beginClose();
+    expect(await channel.intercept(peerClose)).toEqual({ kind: "claimed" });
+    await tick();
+
+    expect(wire.sent.map(envelopeHeader)).toEqual([{ epoch: 0n, counter: 0n }]);
+    expect(peerReceive(peer, wire.sent[0]!).outcome).toMatchObject({ kind: "close_ack" });
+    await channel.intercept(
+      await peer.transmit(
+        peer.machine.buildCloseAck({
+          sendPosition: peer.sendPosition(),
+          expectedRecv: peer.expectedRecv(),
+        }),
+      ),
+    );
+    await closing;
+    expect(channel.verdict()).toBe("clean");
+    expect(wire.sent).toHaveLength(1);
+  });
+
+  it("declares the ack anchor rather than an expected-next a later record advanced", async () => {
+    // §10.1.1 on the DECLARING side: an ack answering the peer's `E2EEClose`
+    // declares this endpoint's expected-next AS OF processing that close, which
+    // is exactly the peer's close anchor. The two disagree in one case — the
+    // peer's close and its ack were read in the same batch and the later one was
+    // authenticated first — and a driver that declared its CURRENT expected-next
+    // there would emit an ack one advance past the peer's anchor and be rejected
+    // as §11.3 Q7 by a conforming peer.
+    const { channel, wire } = makeChannel();
+    const peer = makePeer();
+    const closing = channel.beginClose();
+    await tick();
+    const peerClose = await peer.transmit(
+      peer.machine.buildClose({
+        sendPosition: peer.sendPosition(),
+        expectedRecv: peer.expectedRecv(),
+      }),
+    );
+    expect(peerReceive(peer, wire.sent[0]!).outcome.kind).toBe("close");
+    const peerAck = await peer.transmit(
+      peer.machine.buildCloseAck({
+        sendPosition: peer.sendPosition(),
+        expectedRecv: peer.machine.ackExpectedRecv!,
+      }),
+    );
+
+    // Both arrive in one batch, with no turn boundary between them.
+    const first = channel.intercept(peerClose);
+    const second = channel.intercept(peerAck);
+    expect(await first).toEqual({ kind: "claimed" });
+    expect(await second).toEqual({ kind: "claimed" });
+    await closing;
+
+    // This endpoint's expected-next is now past the peer's anchor, and its ack
+    // still validates under the peer's strict rule.
+    expect(channel.expectedRecv()).toEqual({ epoch: 0n, counter: 2n });
+    expect(wire.sent).toHaveLength(2);
+    expect(peerReceive(peer, wire.sent[1]!).outcome).toMatchObject({
+      kind: "close_ack",
+      exchangeComplete: true,
+    });
+    expect(channel.verdict()).toBe("clean");
+  });
+
+  it("records Unclean — abrupt with no wire record when a close record cannot be protected", async () => {
+    // §9.6's degenerate outcome reached through `transmitCloseRecord`: the send
+    // path took no byte of the `E2EEClose`, so no further close-machine record
+    // follows, no wire record of any kind is emitted for the close, and §10.3's
+    // lower bound still governs the outer one.
+    const { channel, wire } = makeChannel();
+    wire.refuseSend = true;
+
+    await channel.beginClose();
+
+    expect(channel.verdict()).toBe("unclean_abrupt");
+    expect(wire.sent).toEqual([]);
+    expect(wire.closes).toEqual([undefined]);
+  });
+
+  it("records Unclean — abrupt when the send direction spent its last position", async () => {
+    // §9.6 on the RECEIVE path: this endpoint's `E2EEClose` took the last
+    // position its direction had, so §10.1's passed-through rule has no current
+    // next-send to evaluate the peer's ack against and no answer can be
+    // protected. The outcome is fixed — Unclean — abrupt, no wire record — and
+    // nothing beyond it is delivered to the application.
+    const spent = { epoch: E2EE_EPOCH_MAX, counter: E2EE_COUNTER_MAX };
+    const { channel, wire } = makeChannel({ send: spent });
+    const peer = makePeer({ receive: spent });
+
+    const closing = channel.beginClose();
+    await tick();
+    expect(wire.sent).toHaveLength(1);
+    expect(channel.sendPosition()).toBeUndefined();
+
+    // The peer's own send direction is untouched, so it can still deliver — and
+    // an authentic RPC record is what §10.2 permits it to deliver here.
+    const disposition = await channel.intercept(await peer.protect(E2EE_INNER_TYPE_RPC, RPC));
+    await closing;
+
+    expect(disposition).toEqual({ kind: "claimed" });
+    expect(channel.verdict()).toBe("unclean_abrupt");
+    expect(wire.sent).toHaveLength(1);
+    expect(wire.closes).toEqual([undefined]);
+  });
+
+  it("records Unclean — abrupt when there is no expected-next left to declare", async () => {
+    // The receive-side mirror, reached before any close record is built: §9.6
+    // leaves this endpoint no §9.2 expected-next for the close body to declare,
+    // so no conforming `E2EEClose` exists and none is emitted.
+    const spent = { epoch: E2EE_EPOCH_MAX, counter: E2EE_COUNTER_MAX };
+    const { channel, wire } = makeChannel({ receive: spent });
+    const peer = makePeer({ send: spent });
+    expect((await channel.intercept(await peer.protect(E2EE_INNER_TYPE_RPC, RPC))).kind).toBe(
+      "rpc",
+    );
+    expect(channel.expectedRecv()).toBeUndefined();
+
+    await channel.beginClose();
+
+    expect(channel.verdict()).toBe("unclean_abrupt");
+    expect(wire.sent).toEqual([]);
+    expect(wire.closes).toEqual([undefined]);
+  });
+
   it("leaves an E2EEClose the queue refuses owed, with the channel unaffected", async () => {
     const { channel, wire } = makeChannel();
     wire.refuseAdmission = true;
@@ -866,8 +1115,7 @@ describe("relay E2EE client channel: §10 authenticated close", () => {
 
 describe("relay E2EE client channel: §10.4 verdicts", () => {
   it("records truncation from a partial reassembly held when the channel ends", () => {
-    const { channel, wire } = makeChannel();
-    wire.incompleteMessage = true;
+    const { channel } = makeChannel();
 
     channel.dispose({ incompleteReassembly: true });
 
@@ -993,6 +1241,107 @@ describe("relay E2EE client channel: §11.3 terminal E2EEError", () => {
     // Still nothing replied: two records went out, both of them this
     // endpoint's own close-machine records.
     expect(wire.sent).toHaveLength(2);
+  });
+});
+
+// ─── §11.3 the receive-failure row table ─────────────────────────────────────
+
+describe("relay E2EE client channel: §11.3 receive rows", () => {
+  it("maps every §9 receive failure onto the row §11.3's table gives it", () => {
+    // §16.2 requires every expected failure to name a row of §11.3's table, and
+    // an operator who cannot tell a suite downgrade attempt (Q1) from a framing
+    // bug (Q4) in the field has the diagnostic and not the table.
+    expect(CLIENT_E2EE_RECEIVE_FATAL_ROWS).toEqual({
+      version_mismatch: "Q1",
+      suite_mismatch: "Q1",
+      sequence_mismatch: "Q2",
+      authentication_failed: "Q3",
+      malformed_envelope: "Q4",
+      reserved_inner_type: "Q5",
+      malformed_record: "Q5",
+      // Not a condition of its own: the latch an earlier fatal condition left.
+      receive_terminated: "Q2",
+    });
+  });
+
+  it.each([
+    ["Q1 an envelope version the session did not establish", 1, 0xfe],
+    ["Q1 an envelope suite the session did not establish", 2, 0xfe],
+    ["Q3 a flipped ciphertext byte", -1, undefined],
+  ] as const)("reports %s on the wire", async (label, index, value) => {
+    const { channel, wire, diagnostics } = makeChannel();
+    const peer = makePeer();
+    const envelope = await peer.protect(E2EE_INNER_TYPE_RPC, RPC);
+    const at = index < 0 ? envelope.byteLength + index : index;
+    envelope[at] = value ?? envelope[at]! ^ 0x01;
+
+    expect(await channel.intercept(envelope)).toEqual({ kind: "rejected" });
+
+    expect(diagnostics, label).toEqual([
+      { phase: "post_key", row: label.slice(0, 2), verdict: "failed" },
+    ]);
+    // §11.3's procedure, unchanged for every row of it: one `E2EEError` while
+    // the send path is usable, then `channel_rejected`.
+    expect(wire.sent).toHaveLength(1);
+    expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
+  });
+
+  it("reports Q4 for an envelope shorter than the §3.3 overhead", async () => {
+    const { channel, wire, diagnostics } = makeChannel();
+    const peer = makePeer();
+    const envelope = await peer.protect(E2EE_INNER_TYPE_RPC, RPC);
+
+    expect(await channel.intercept(envelope.subarray(0, E2EE_ENVELOPE_OVERHEAD_BYTES - 1))).toEqual(
+      {
+        kind: "rejected",
+      },
+    );
+
+    expect(diagnostics).toEqual([{ phase: "post_key", row: "Q4", verdict: "failed" }]);
+    expect(wire.sent).toHaveLength(1);
+    expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
+  });
+
+  it("orders the one terminal E2EEError behind an application record admitted before it", async () => {
+    // §11.5 counts the post-key observable at "at most one length-uniform
+    // encrypted record". The condition is detected on the receive path while an
+    // application record is already inside `protect`, so the terminal record's
+    // §11.3 preconditions — a usable send path, and the close machine's single
+    // terminal allowance — are read after that record has taken its pair, not
+    // before.
+    const { channel, wire, diagnostics } = makeChannel();
+
+    const sending = channel.emit(RPC);
+    const intercepted = channel.intercept(new TextEncoder().encode('{"legacy":true}'));
+    expect(await sending).toBe(true);
+    expect(await intercepted).toEqual({ kind: "rejected" });
+
+    expect(wire.sent.map(envelopeHeader)).toEqual([
+      { epoch: 0n, counter: 0n },
+      { epoch: 0n, counter: 1n },
+    ]);
+    expect(diagnostics).toEqual([{ phase: "post_key", row: "Q6", verdict: "failed" }]);
+    expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
+  });
+
+  it("emits no second E2EEError once the close machine has spent its terminal allowance", async () => {
+    // §10.2's carve-out is exactly one terminal record, and §11.3 makes a
+    // received `E2EEError` terminal in both directions: the receiver "MUST NOT
+    // reply". A condition detected after that point still takes §11.3's
+    // procedure minus the record.
+    const { channel, wire, diagnostics } = makeChannel();
+    const peer = makePeer();
+
+    await channel.intercept(
+      await peer.protect(
+        E2EE_INNER_TYPE_ERROR,
+        encodeE2eeErrorRecordBody(E2EE_ERROR_CODE_PROTOCOL_VIOLATION),
+      ),
+    );
+
+    expect(wire.sent).toEqual([]);
+    expect(diagnostics).toEqual([{ phase: "post_key", row: "Q7", verdict: "failed" }]);
+    expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
   });
 });
 
