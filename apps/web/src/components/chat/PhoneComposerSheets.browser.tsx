@@ -80,6 +80,7 @@ import {
 } from "../../providerInstances";
 import { setCoarsePointerEmulation, resetPointerEmulation } from "../../../test/browserPointer";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
+import { createInitialContextWindowUsage } from "../../lib/contextWindow";
 import { DraftId } from "../../composerDraftStore";
 import { ComposerFooter, type ComposerFooterProps } from "./ComposerFooter";
 import { renderProviderTraitsMenuContent } from "./composerProviderState";
@@ -344,7 +345,7 @@ function footerProps(overrides: Partial<ComposerFooterProps> = {}): ComposerFoot
     onTogglePlanSidebar: () => {},
     onRuntimeModeChange: () => {},
     onTokenModeChange: () => {},
-    activeContextWindow: null,
+    contextWindowUsage: createInitialContextWindowUsage(null),
     contextWindowRateLimits: undefined,
     pendingAction: null,
     isRunning: false,

@@ -33,7 +33,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { cn } from "~/lib/utils";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
-import { deriveLatestContextWindowSnapshot } from "../../lib/contextWindow";
+import type { ContextWindowUsage } from "../../lib/contextWindow";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import type { AppModelOption } from "../../modelSelection";
 import { useUiStateStore } from "../../uiStateStore";
@@ -382,7 +382,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
 
 export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean;
-  activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
+  contextWindowUsage: ContextWindowUsage;
   contextWindowRateLimits: ServerProvider["rateLimits"] | undefined;
   isPreparingWorktree: boolean;
   pendingAction: {
@@ -406,12 +406,10 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
 }) {
   return (
     <>
-      {props.activeContextWindow ? (
-        <ContextWindowMeter
-          usage={props.activeContextWindow}
-          rateLimits={props.contextWindowRateLimits}
-        />
-      ) : null}
+      <ContextWindowMeter
+        usage={props.contextWindowUsage}
+        rateLimits={props.contextWindowRateLimits}
+      />
       {props.isPreparingWorktree ? (
         <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
       ) : null}
@@ -480,7 +478,7 @@ export interface ComposerFooterProps {
   onTokenModeChange: (mode: AgentTokenMode) => void;
 
   // Primary actions
-  activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
+  contextWindowUsage: ContextWindowUsage;
   contextWindowRateLimits: ServerProvider["rateLimits"] | undefined;
   pendingAction: {
     questionIndex: number;
@@ -639,11 +637,11 @@ export const ComposerFooter = memo(function ComposerFooter(props: ComposerFooter
         data-chat-composer-primary-actions-compact={
           props.isPrimaryActionsCompact ? "true" : "false"
         }
-        className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
+        className="flex shrink-0 flex-nowrap items-start justify-end gap-2"
       >
         <ComposerFooterPrimaryActions
           compact={props.isPrimaryActionsCompact}
-          activeContextWindow={props.activeContextWindow}
+          contextWindowUsage={props.contextWindowUsage}
           contextWindowRateLimits={props.contextWindowRateLimits}
           pendingAction={props.pendingAction}
           isRunning={props.isRunning}
