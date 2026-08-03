@@ -10,4 +10,15 @@ import App from "./src/App";
 // native stack is rendered inside a non-fitToContents formSheet.
 featureFlags.experiment.synchronousScreenUpdatesEnabled = true;
 
+// The relay-E2EE vector runner is a development-build diagnostic, and this is
+// the only reference to it anywhere in the app graph. Metro replaces `__DEV__`
+// and folds the dead branch away BEFORE it collects dependencies, so a release
+// bundle contains neither the `require` nor the module it names; the runner's
+// own `APP_VARIANT` check is the second gate. See apps/mobile/README.md.
+if (__DEV__) {
+  (
+    require("./src/devtools/e2eeVectorRunner") as typeof import("./src/devtools/e2eeVectorRunner")
+  ).installE2eeVectorRunnerDevHook();
+}
+
 registerRootComponent(App);

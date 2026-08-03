@@ -62,6 +62,102 @@ browser and the app's custom callback scheme.
      background -> foreground transition re-drives reconnect for any connection
      whose heartbeat went stale while iOS suspended the socket.
 
+## Relay E2EE runtime acceptance (owner, on a physical device)
+
+The relay E2EE protocol (`docs/relay-e2ee-protocol.md`) puts three requirements
+on the mobile runtime that no Node test can discharge, because Hermes is the only
+engine the app ships and no Node test runs on it:
+
+- §14.5 randomness. Hermes has no `crypto.getRandomValues`, and the pinned
+  primitives capture `globalThis.crypto` when their module evaluates — so the
+  adapter has to be installed before the first import, not checked later.
+- §3.6 canonical CBOR. `cborg` builds a `TextEncoder` at module scope, and React
+  Native provides none.
+- §14.2's curve, AEAD, and hash implementations, which are BigInt- and
+  typed-array-heavy pure JavaScript.
+
+**There is no Detox/Maestro/e2e infrastructure in this repository and Phase 3 is
+not building one.** The acceptance evidence is this written procedure plus the
+in-app runner (`src/devtools/e2eeVectorRunner.ts`), run by the owner on hardware.
+
+### Procedure
+
+1. Build and launch the **development** variant on a **physical device** — not
+   the Simulator, whose entropy and native module hosting are the Mac's:
+   `cd apps/mobile && APP_VARIANT=development bun run ios:dev`, with
+   `RYCO_IOS_PERSONAL_TEAM=1` and `RYCO_IOS_PERSONAL_TEAM_BUNDLE_ID` set for a
+   free Apple Personal Team.
+2. **The app reaching its first screen is itself step 2.** `polyfills.ts` runs
+   before `expo` and before `react-native/Libraries/Core/InitializeCore`; it
+   reaches `expo-crypto` through a lazy `require` inside the installed function
+   precisely so it does not pull `expo-modules-core` in that early. A white
+   screen or an immediate native crash on launch is the signal that the ordering
+   broke — check it here rather than assuming it.
+3. Open the JS console for the running app (Metro's dev menu → **Open debugger**,
+   or `j` in the Metro terminal — the JS keeps running in the device's Hermes,
+   which is the point) and run:
+
+   ```js
+   await __rycoRunE2eeVectors();
+   ```
+
+4. Expect `ok: true` and five `ok: true` checks:
+
+   ```
+   { ok: true,
+     checks: [ { name: 'runtime globals (§14.5)',           ok: true },
+               { name: 'F15 Noise IK vector (§14.1)',       ok: true },
+               { name: 'F6 record protection (§9.1)',       ok: true },
+               { name: 'F4 node prekey certificate (§7.3)', ok: true },
+               { name: 'X25519 agreement keygen (§6.2)',    ok: true } ],
+     globals: { csprng: 'adapter', textEncoder: 'adapter' } }
+   ```
+
+5. **Record `globals`.** `adapter` means this app installed the implementation;
+   `platform` means the Hermes build already had one. Which of the two Hermes
+   provides is not knowable from the checked-in tree, and this line is the only
+   place the answer is observed. Report it with the run.
+6. If `runtime globals (§14.5)` is `false`, the suite reports the verdict and
+   nothing else on purpose — the values that would explain it are key material.
+   Separate the three causes from the console directly:
+
+   ```js
+   typeof globalThis.crypto?.getRandomValues; // "function", or nothing is installed
+   typeof globalThis.TextEncoder; // "function", or canonical CBOR cannot load
+   crypto.getRandomValues(new Uint8Array(32)); // throws, or comes back all zeros
+   ```
+
+   An all-zero return is `expo-crypto`'s native call silently no-opping — the
+   failure that asserting the function merely _exists_ would have missed. A throw
+   usually means its native module is not registered in this build. If a later
+   check is `false` while this one passes, the primitives disagree with the
+   corpus on Hermes; capture the failing case name and stop — do not ship E2EE.
+
+### What this does and does not prove
+
+It **does** prove, on the shipped engine: that the §14.5 source is installed
+early enough and returns real bytes; that a full Noise IK handshake reproduces a
+published upstream vector at both roles; that a §9.1 record protects to the exact
+corpus envelope, round-trips, and rejects a one-byte tamper; that a §7.3
+transcript re-encodes to bytes a strict Ed25519 signature still covers; and that
+X25519 keygen off the live CSPRNG produces consistent, non-repeating keys.
+
+It does **not** prove:
+
+- **The production binary.** The runner is absent from a release bundle by
+  construction — its only reference sits behind `if (__DEV__)`, which Metro folds
+  away before it collects dependencies. What a development build shares with
+  production is the code that matters: `polyfills.ts` and
+  `src/platform/e2eeRuntime.ts` are the same source, and the primitives are the
+  same pinned packages.
+- **Any live channel.** There is no relay, no node, and no Hub in this procedure;
+  it is the primitive and codec layer only.
+- **Every corpus case.** The runner carries a deliberately small transcribed
+  subset (the 844 KB corpus is not bundled); `src/devtools/e2eeVectorRunner.ts`
+  documents the selection, and `e2eeVectorRunner.test.ts` proves the transcribed
+  bytes still match the real fixtures. The full corpus remains a Node gate.
+- **Anything about Android.** Run the same procedure per platform.
+
 ## Notes / boundaries
 
 - Expo Go is not supported because hosted sessions use Ryco's custom
