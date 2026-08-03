@@ -56,6 +56,7 @@ describe("buildTurnStartParams", () => {
     assert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "dangerFullAccess",
       },
@@ -93,6 +94,7 @@ describe("buildTurnStartParams", () => {
     assert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "never",
+      approvalsReviewer: "user",
       // Ask mode forces a read-only sandbox even in full-access runtime mode.
       sandboxPolicy: {
         type: "readOnly",
@@ -137,6 +139,7 @@ describe("buildTurnStartParams", () => {
     assert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "on-request",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "workspaceWrite",
       },
@@ -180,6 +183,31 @@ describe("buildTurnStartParams", () => {
     );
   });
 
+  it("routes approvals to the reviewer subagent in auto mode", () => {
+    const params = Effect.runSync(
+      buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "auto",
+        prompt: "Ship it",
+      }),
+    );
+
+    assert.deepStrictEqual(params, {
+      threadId: "provider-thread-1",
+      approvalPolicy: "on-request",
+      approvalsReviewer: "guardian_subagent",
+      sandboxPolicy: {
+        type: "workspaceWrite",
+      },
+      input: [
+        {
+          type: "text",
+          text: "Ship it",
+        },
+      ],
+    });
+  });
+
   it("omits collaboration mode when interaction mode is absent", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -192,6 +220,7 @@ describe("buildTurnStartParams", () => {
     assert.deepStrictEqual(params, {
       threadId: "provider-thread-1",
       approvalPolicy: "untrusted",
+      approvalsReviewer: "user",
       sandboxPolicy: {
         type: "readOnly",
       },
@@ -286,6 +315,7 @@ describe("openCodexThread", () => {
           cwd: "/tmp/project",
           approvalPolicy: "never",
           sandbox: "danger-full-access",
+          approvalsReviewer: "user",
           model: "gpt-5.5",
           serviceTier: "fast",
         },

@@ -546,7 +546,8 @@ describe("phone model and session-policy sheets", () => {
     const segments = [
       ...document.querySelectorAll<HTMLButtonElement>('[data-slot="mobile-segmented-option"]'),
     ];
-    expect(segments).toHaveLength(9);
+    // Access carries four modes; Mode and Tokens three each.
+    expect(segments).toHaveLength(10);
     for (const segment of segments) {
       const rect = segment.getBoundingClientRect();
       expect(
@@ -784,7 +785,7 @@ describe("phone model and session-policy sheets", () => {
     const segments = [
       ...document.querySelectorAll<HTMLButtonElement>('[data-slot="mobile-segmented-option"]'),
     ];
-    expect(segments).toHaveLength(9);
+    expect(segments).toHaveLength(10);
     for (const segment of segments) {
       expect(segment.disabled, `"${segment.textContent?.trim()}" should be disabled`).toBe(true);
       segment.click();

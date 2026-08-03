@@ -54,6 +54,13 @@ export const runtimeModeConfig: Readonly<Record<RuntimeMode, SessionPolicyOption
     icon: "square.and.pencil",
     tone: "default",
   },
+  auto: {
+    label: "Auto",
+    triggerLabel: "Auto",
+    description: "Routine actions proceed without you; risky ones still ask.",
+    icon: "checkmark.shield",
+    tone: "default",
+  },
   "full-access": {
     label: "Full access",
     triggerLabel: "Full access",

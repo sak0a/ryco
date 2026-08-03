@@ -7,6 +7,7 @@ import {
   LockOpenIcon,
   MessageCircleQuestionMarkIcon,
   PenLineIcon,
+  ShieldCheckIcon,
 } from "lucide-react";
 
 /**
@@ -36,6 +37,12 @@ export const runtimeModeConfig: Record<RuntimeMode, SessionPolicyOptionPresentat
     triggerLabel: "Auto-accept",
     description: "Auto-approve edits, ask before other actions.",
     icon: PenLineIcon,
+  },
+  auto: {
+    label: "Auto",
+    triggerLabel: "Auto",
+    description: "Routine actions proceed without you; risky ones still ask.",
+    icon: ShieldCheckIcon,
   },
   "full-access": {
     label: "Full access",
