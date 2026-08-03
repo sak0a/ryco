@@ -3,6 +3,7 @@ import { RpcSerialization } from "effect/unstable/rpc";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  planRelayMessage,
   prepareRelayMessage,
   RELAY_CHUNK_CAPABILITY_PRELUDE,
   isChunkedPayload,
@@ -326,5 +327,59 @@ describe("RelayMessageAssembler", () => {
     expect([...first.subarray(RELAY_CHUNK_HEADER_BYTES)]).toEqual(
       Array.from({ length: first.byteLength - RELAY_CHUNK_HEADER_BYTES }, () => 0),
     );
+  });
+});
+
+describe("planRelayMessage", () => {
+  it("predicts exactly the payloads prepareRelayMessage builds", () => {
+    // A sender that must reserve capacity for every payload of a message BEFORE
+    // the message exists (docs/relay-e2ee-protocol.md §9.3) reads the plan and
+    // then spends what the preparation produces. The two are the same rule, and
+    // this is the assertion that keeps them one rule rather than two.
+    const options = { maxChunkBytes: LIMIT, maxMessageBytes: 4_096, peerSupportsChunking: true };
+    for (const size of [
+      0,
+      1,
+      LIMIT - RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength,
+      LIMIT - 1,
+      LIMIT,
+      LIMIT + 1,
+      200,
+      4_096,
+    ]) {
+      const plan = planRelayMessage(size, options);
+      const prepared = prepareRelayMessage(new Uint8Array(size).fill(0x7b), options);
+      expect(plan.kind).toBe("ready");
+      expect(prepared.kind).toBe("ready");
+      if (plan.kind !== "ready" || prepared.kind !== "ready") continue;
+      expect(plan.payloadBytes).toEqual(prepared.payloads.map((payload) => payload.byteLength));
+      expect(plan.chunked).toBe(prepared.payloads.length > 1);
+      expect(plan.advertised).toBe(
+        prepared.payloads.length === 1 && prepared.payloads[0]!.byteLength !== size,
+      );
+    }
+  });
+
+  it("refuses the same messages prepareRelayMessage refuses", () => {
+    const oversized = { maxChunkBytes: LIMIT, maxMessageBytes: 100, peerSupportsChunking: true };
+    expect(planRelayMessage(101, oversized)).toEqual({
+      kind: "error",
+      reason: "message_too_large",
+    });
+    expect(prepareRelayMessage(new Uint8Array(101), oversized).kind).toBe("error");
+
+    const unsupported = {
+      maxChunkBytes: LIMIT,
+      maxMessageBytes: 4_096,
+      peerSupportsChunking: false,
+    };
+    expect(planRelayMessage(LIMIT + 1, unsupported)).toEqual({
+      kind: "error",
+      reason: "peer_unsupported",
+    });
+    expect(prepareRelayMessage(new Uint8Array(LIMIT + 1), unsupported)).toEqual({
+      kind: "error",
+      reason: "peer_unsupported",
+    });
   });
 });

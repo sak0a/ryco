@@ -18,8 +18,12 @@ import { encodeBase64Url } from "./base64url";
 import {
   HostedRelayEngine,
   type HostedRelaySocketCallbacks,
+  type RelayE2eeChannel,
+  type RelayE2eeHost,
+  type RelayE2eeProvider,
   type RelaySocket,
   type RelayTimers,
+  relayE2eeFailure,
 } from "./relayEngine";
 
 const CHANNEL_ID = "ch_cccccccccccccccccccccc" as RelayChannelId;
@@ -80,6 +84,35 @@ class MockRelaySocket implements RelaySocket {
   }
 }
 
+/**
+ * The exact frame sequence a full connect / ping / send / send / close produces
+ * with NO E2EE provider injected, captured from the engine as it stood before
+ * the E2EE seams were opened.
+ *
+ * It is pinned as bytes rather than as decoded frames because the seams are
+ * only a no-op if nothing about the wire moved: an extra field, a reordered
+ * map key, or one more frame would all decode to something a structural
+ * assertion still accepts. `apps/web` and `apps/mobile` both instantiate this
+ * engine and own no framing of their own (relaySocket.ts in each), so this one
+ * sequence is the no-op proof for both surfaces.
+ */
+const LEGACY_FRAME_SEQUENCE = [
+  "a5647065657266636c69656e74647479706564617574686b72656c61795469636b6574582007070707070707070707070707070707070707070707070707070707070707076d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a4647479706564706f6e67656e6f6e63654804040404040404046d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a664747970656464617461677061796c6f61645320090d0a20090d0a7b226669727374223a317d6873657175656e636500696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a664747970656464617461677061796c6f61645420090d0a20090d0a7b227365636f6e64223a327d6873657175656e636501696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+  "a464747970656d6368616e6e656c2e636c6f7365696368616e6e656c4964781963685f636363636363636363636363636363636363636363636d70726f746f636f6c4d616a6f72016d70726f746f636f6c4d696e6f7202",
+] as const;
+
+function hex(bytes: Uint8Array): string {
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/** One full turn of the microtask chain the E2EE seam interposes. */
+const flush = async (): Promise<void> => {
+  await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+};
+
 function callbacks() {
   return {
     onTransportStatus: vi.fn(),
@@ -98,7 +131,11 @@ function realTimers(): RelayTimers {
   };
 }
 
-function create(callbackSet = callbacks(), timers: RelayTimers = realTimers()) {
+function create(
+  callbackSet = callbacks(),
+  timers: RelayTimers = realTimers(),
+  e2ee?: RelayE2eeProvider,
+) {
   const socket = new MockRelaySocket();
   const events = {
     onOpen: vi.fn(),
@@ -113,8 +150,45 @@ function create(callbackSet = callbacks(), timers: RelayTimers = realTimers()) {
     timers,
     callbacks: callbackSet,
     events,
+    ...(e2ee === undefined ? {} : { e2ee }),
   });
   return { engine, socket, callbacks: callbackSet, events };
+}
+
+/**
+ * A provider that records what the seam handed it and does nothing else. It is
+ * the whole point of the seam: everything the protocol decides is the channel's,
+ * and the engine's contribution is the reservation, the limits, the assembler
+ * verdict, and the outer close.
+ */
+function stubProvider(overrides: Partial<RelayE2eeChannel> = {}) {
+  const calls = {
+    hosts: [] as RelayE2eeHost[],
+    emitted: [] as Uint8Array[],
+    intercepted: [] as Uint8Array[],
+    beginCloseCalls: 0,
+    disposed: [] as ({ readonly incompleteReassembly?: boolean } | undefined)[],
+  };
+  const provider: RelayE2eeProvider = (host) => {
+    calls.hosts.push(host);
+    return {
+      intercept: async (payload) => {
+        calls.intercepted.push(Uint8Array.from(payload));
+        return { kind: "rpc", message: payload };
+      },
+      emit: async (message) => {
+        calls.emitted.push(Uint8Array.from(message));
+        return true;
+      },
+      beginClose: async () => {
+        calls.beginCloseCalls += 1;
+        host.close();
+      },
+      dispose: (options) => calls.disposed.push(options),
+      ...overrides,
+    };
+  };
+  return { provider, calls, host: () => calls.hosts[0]! };
 }
 
 function authenticate(socket: MockRelaySocket, limits: RelayLimits = RELAY_INITIAL_LIMITS) {
@@ -156,6 +230,29 @@ afterEach(() => {
 });
 
 describe("HostedRelayEngine", () => {
+  it("emits the pre-E2EE frame sequence byte for byte when no provider is injected", async () => {
+    const { engine, socket, events } = create();
+    authenticate(socket);
+    socket.frame({ type: "ping", ...VERSION, nonce: new Uint8Array(8).fill(4) });
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: new TextEncoder().encode('{"inbound":1}'),
+    });
+    await Promise.resolve();
+    engine.send(new TextEncoder().encode('{"first":1}'));
+    engine.send(new TextEncoder().encode('{"second":2}'));
+    engine.close();
+
+    expect(socket.sent.map(hex)).toEqual([...LEGACY_FRAME_SEQUENCE]);
+    // The inbound payload still reaches the application on the same turn it
+    // always did: with no provider there is no interception seam between the
+    // assembler and onData.
+    expect(events.onData).toHaveBeenCalledWith(new TextEncoder().encode('{"inbound":1}'));
+  });
+
   it("authenticates with a memory-only first frame and forwards RPC bytes exactly", async () => {
     const { engine, socket, callbacks: handlers, events } = create();
     const received: number[][] = [];
@@ -549,5 +646,235 @@ describe("HostedRelayEngine", () => {
     });
     expect(handlers.onFailure).toHaveBeenCalledWith(expect.objectContaining({ kind, retryable }));
     expect(handlers.onSessionStatus).not.toHaveBeenCalledWith("closed");
+  });
+});
+
+describe("HostedRelayEngine E2EE seams", () => {
+  it("builds the channel at channel.accept, from the negotiated limits, before onOpen", () => {
+    const { provider, calls, host } = stubProvider();
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 8_192,
+    });
+    const { socket, events } = create(callbacks(), realTimers(), provider);
+
+    socket.open();
+    socket.frame({ type: "ready", ...VERSION, limits });
+    socket.frame({
+      type: "channel.open",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
+    });
+    expect(calls.hosts).toHaveLength(0);
+    socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
+
+    // The limits are the Hub-asserted ones, adopted verbatim: the engine holds
+    // no ceiling of its own and no tier constant of its own.
+    expect(host().limits).toEqual(limits);
+    expect(calls.hosts).toHaveLength(1);
+    expect(events.onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("fails the channel and never opens it when the provider refuses these limits", () => {
+    const handlers = callbacks();
+    const provider: RelayE2eeProvider = () => {
+      throw new RangeError("Relay E2EE session requires a positive plaintext ceiling.");
+    };
+    const { socket, events } = create(handlers, realTimers(), provider);
+
+    authenticate(socket);
+
+    // §4.5: establishment fails BEFORE the channel is released to the
+    // application, and §11.1's reason is non-retryable.
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "protocol",
+      retryable: false,
+      closeReason: "channel_rejected",
+    });
+  });
+
+  it("routes outbound RPC through the channel instead of framing it directly", () => {
+    const { provider, calls } = stubProvider();
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+    const before = sentFrames(socket).filter((frame) => frame.type === "data").length;
+
+    engine.send(new Uint8Array([1, 2, 3]));
+
+    expect(calls.emitted).toEqual([new Uint8Array([1, 2, 3])]);
+    // Nothing was chunked or queued here: §4.2's whole pipeline is the
+    // channel's, including the reservation that precedes the pair assignment.
+    expect(sentFrames(socket).filter((frame) => frame.type === "data")).toHaveLength(before);
+  });
+
+  it("routes inbound payloads through the channel and delivers only what it returns", async () => {
+    const claimed: Uint8Array[] = [];
+    const { provider } = stubProvider({
+      intercept: async (payload) => {
+        claimed.push(Uint8Array.from(payload));
+        return { kind: "claimed" };
+      },
+    });
+    const { socket, events } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: new Uint8Array([9, 9, 9]),
+    });
+    await flush();
+
+    expect(claimed).toEqual([new Uint8Array([9, 9, 9])]);
+    // A record the channel claims never reaches the RPC parser (§4.3).
+    expect(events.onData).not.toHaveBeenCalled();
+  });
+
+  it("reserves capacity for every chunk of a record before the record exists", async () => {
+    const { provider, host } = stubProvider();
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 65_536,
+    });
+    const { engine, socket, events } = create(callbacks(), realTimers(), provider);
+    authenticate(socket, limits);
+    // Latch peer chunk support, so an oversized record is admissible at all.
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: advertisedPayload(new Uint8Array([1])),
+    });
+    await flush();
+    expect(events.onData).toHaveBeenCalled();
+
+    const reservation = host().admit(3_000);
+    if (reservation === undefined) throw new Error("expected an admission");
+    // Three chunks of 1024/1024/976 bytes plus per-entry bookkeeping: the
+    // reservation is the queue capacity the record will actually spend, and it
+    // is visible as backpressure before a single byte is encrypted.
+    expect(engine.bufferedAmount).toBe(1_024 + 1_024 + 976 + 3 * 32);
+
+    const before = sentFrames(socket).filter((frame) => frame.type === "data").length;
+    expect(reservation.send(new Uint8Array(3_000))).toBe(true);
+    expect(sentFrames(socket).filter((frame) => frame.type === "data")).toHaveLength(before + 3);
+    expect(engine.bufferedAmount).toBe(0);
+    // A spent reservation is spent once.
+    expect(reservation.send(new Uint8Array(3_000))).toBe(false);
+    reservation.release();
+    expect(engine.bufferedAmount).toBe(0);
+  });
+
+  it("refuses admission the queue cannot hold, without failing the channel", () => {
+    const { provider, host } = stubProvider();
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 8_192,
+    });
+    const handlers = callbacks();
+    const { engine, socket } = create(handlers, realTimers(), provider);
+    authenticate(socket, limits);
+    socket.frame({ type: "flow.pause", ...VERSION, channelId: CHANNEL_ID });
+
+    const held: unknown[] = [];
+    for (let index = 0; index < 8; index += 1) {
+      const reservation = host().admit(1_000);
+      if (reservation) held.push(reservation);
+    }
+
+    // Backpressure is not a fatal condition: the channel is untouched and the
+    // record session sees `e2ee_send_unavailable` rather than a closed channel.
+    expect(host().admit(1_000)).toBeUndefined();
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+    expect(engine.bufferedAmount).toBeGreaterThan(0);
+  });
+
+  it("reports the assembler's partial reassembly to the channel before resetting it", async () => {
+    const { provider, calls } = stubProvider();
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 65_536,
+    });
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket, limits);
+    const chunks = splitRelayMessage(new Uint8Array(3_000), limits.maxDataChunkBytes);
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: chunks[0]!,
+    });
+    await flush();
+
+    engine.close();
+
+    // §10.4: a partial reassembly held when the channel ends IS truncation, and
+    // the verdict is recorded from the assembler's own state rather than
+    // inferred after it has been reset.
+    expect(calls.disposed).toEqual([{ incompleteReassembly: true }]);
+  });
+
+  it("holds the outer channel.close until the channel asks for it", async () => {
+    let release: (() => void) | undefined;
+    const { provider, calls, host } = stubProvider({
+      beginClose: async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    const handlers = callbacks();
+    const { engine, socket } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    engine.close();
+
+    // §10.3 lower bound: enqueueing one's own final records is not delivering
+    // them, so the outer frame waits for the channel's own decision.
+    expect(handlers.onTransportStatus).toHaveBeenCalledWith("draining");
+    expect(sentFrames(socket).some((frame) => frame.type === "channel.close")).toBe(false);
+
+    host().close();
+    release?.();
+    await Promise.resolve();
+
+    expect(sentFrames(socket).some((frame) => frame.type === "channel.close")).toBe(true);
+    expect(calls.disposed).toEqual([{ incompleteReassembly: false }]);
+  });
+
+  it("takes the channel's fatal failure verbatim onto the outer close", () => {
+    const { provider, host } = stubProvider();
+    const handlers = callbacks();
+    const { socket } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    host().close(relayE2eeFailure("fatal_post_key"));
+
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "protocol",
+      retryable: false,
+      closeReason: "channel_rejected",
+    });
+    // §11.1: the detecting endpoint emits the outer `channel.close` WITH
+    // `channel_rejected` after completing the §11.3 procedure. The relay-level
+    // failure path sends no frame at all, so the E2EE path cannot inherit it.
+    expect(sentFrames(socket).find((frame) => frame.type === "channel.close")).toMatchObject({
+      reason: "channel_rejected",
+    });
   });
 });
