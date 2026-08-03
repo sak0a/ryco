@@ -1,18 +1,31 @@
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 // A sentinel rather than the real constant: the E2EE store must pass THE
 // library's `WHEN_UNLOCKED_THIS_DEVICE_ONLY` value through, and comparing two
 // copies of the same literal would pass even if the option were dropped.
-const { WHEN_UNLOCKED_THIS_DEVICE_ONLY } = vi.hoisted(() => ({
-  WHEN_UNLOCKED_THIS_DEVICE_ONLY: 0xd,
-}));
+//
+// Mutable, because the two things this suite has to be able to present are a
+// runtime where the constant is missing (`undefined`, which is what the whole
+// Android module set looks like from JavaScript and what a stripped iOS native
+// module looks like) and a platform that is not iOS.
+const { WHEN_UNLOCKED_THIS_DEVICE_ONLY, library, platform } = vi.hoisted(() => {
+  const accessible = 0xd;
+  return {
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: accessible,
+    library: { accessible: accessible as number | undefined },
+    platform: { OS: "ios" as "ios" | "android" | "web" },
+  };
+});
 
 vi.mock("expo-secure-store", () => ({
-  WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  get WHEN_UNLOCKED_THIS_DEVICE_ONLY() {
+    return library.accessible;
+  },
   getItemAsync: async () => null,
   setItemAsync: async () => {},
   deleteItemAsync: async () => {},
 }));
+vi.mock("react-native", () => ({ Platform: platform }));
 vi.mock("expo-sqlite/kv-store", () => ({
   default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
 }));
@@ -80,6 +93,11 @@ function harness(
   return { calls, entries, marker, store: createE2eeSecureStore({ store, kv }) };
 }
 
+afterEach(() => {
+  library.accessible = WHEN_UNLOCKED_THIS_DEVICE_ONLY;
+  platform.OS = "ios";
+});
+
 describe("E2EE keychain namespace (§6.3 storage class)", () => {
   it("writes with a this-device-only class and its own keychain service", async () => {
     const { calls, store } = harness({ marker: "1" });
@@ -126,6 +144,57 @@ describe("E2EE keychain namespace (§6.3 storage class)", () => {
     for (const call of calls) {
       expect(call.options).toMatchObject({ keychainService: E2EE_KEYCHAIN_SERVICE });
     }
+  });
+
+  it("refuses on iOS when the accessibility constant is missing, without reaching the store", async () => {
+    // expo-secure-store's iOS default is `.whenUnlocked` — NOT this-device-only —
+    // so a stripped native module, an upgrade that renamed the constant, or any
+    // build where it resolves `undefined` would put the static X25519 agreement
+    // secret into an item that encrypted backups carry and another device can
+    // restore. §6.3 forbids exactly that, so the refusal is the only outcome.
+    library.accessible = undefined;
+    const { calls, store } = harness({ marker: "1" });
+
+    for (const operation of [
+      () => store.get(E2EE_AGREEMENT_SECRET_KEY),
+      () => store.set(E2EE_AGREEMENT_SECRET_KEY, "secret"),
+      () => store.remove(E2EE_AGREEMENT_SECRET_KEY),
+      () => store.destroy(),
+    ]) {
+      await expect(operation()).rejects.toBeInstanceOf(E2eeSecureStoreError);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("writes on Android, where the accessibility option is iOS-only", async () => {
+    // `keychainAccessible` is `@platform ios` and the Android native module
+    // declares no constants at all, so `WHEN_UNLOCKED_THIS_DEVICE_ONLY` is
+    // `undefined` there. Requiring it would refuse every E2EE operation on the
+    // platform — no agreement key, no §7.4 certificate, ever. Android's half of
+    // §6.3 is the keystore key plus the backup exclusion config plugin.
+    platform.OS = "android";
+    library.accessible = undefined;
+    const { calls, entries, store } = harness({ marker: "1" });
+
+    await store.set(E2EE_AGREEMENT_SECRET_KEY, "secret");
+    await expect(store.get(E2EE_AGREEMENT_SECRET_KEY)).resolves.toBe("secret");
+
+    expect(entries.get(E2EE_AGREEMENT_SECRET_KEY)).toBe("secret");
+    for (const call of calls) {
+      expect(call.options).toEqual({ keychainService: E2EE_KEYCHAIN_SERVICE });
+      expect(call.options).not.toHaveProperty("keychainAccessible");
+    }
+  });
+
+  it("refuses on any platform §6.3 gives no durable private-key home", async () => {
+    // §6.3's only other row is web, whose private-key home is process memory.
+    platform.OS = "web";
+    const { calls, store } = harness({ marker: "1" });
+
+    await expect(store.set(E2EE_AGREEMENT_SECRET_KEY, "secret")).rejects.toBeInstanceOf(
+      E2eeSecureStoreError,
+    );
+    expect(calls).toHaveLength(0);
   });
 
   it("uses key names that survive sanitizeSecretKey unchanged", () => {
@@ -286,6 +355,35 @@ describe("device custody (§6.3 clone and restore prohibition)", () => {
 
     expect(calls.filter((call) => call.operation === "delete")).toHaveLength(2);
     expect(calls.filter((call) => call.operation === "get")).toHaveLength(1);
+  });
+});
+
+describe("namespace destruction (§6.3, §13 re-pairing)", () => {
+  it("removes every name in the namespace", async () => {
+    // §6.3's clone/restore purge and §13's re-pairing both run through here, and
+    // "destroy the namespace" is only complete because the key set is closed.
+    const { calls, entries, store } = harness({ marker: "1", resurrected: "ours" });
+
+    await store.destroy();
+
+    expect(entries.size).toBe(0);
+    expect(calls.map((call) => call.operation)).toEqual(["delete"]);
+    expect(calls[0]?.key).toBe(E2EE_AGREEMENT_SECRET_KEY);
+    await expect(store.get(E2EE_AGREEMENT_SECRET_KEY)).resolves.toBeNull();
+  });
+
+  it("reports a failed destroy rather than resolving as if it had run", async () => {
+    // A silently swallowed rejection would leave the device's static agreement
+    // secret in the keychain after a logout or a forced re-pair.
+    const { store } = harness({
+      marker: "1",
+      resurrected: "ours",
+      onDelete: () => {
+        throw new Error(`keychain -25300 for ${E2EE_AGREEMENT_SECRET_KEY}`);
+      },
+    });
+
+    await expect(store.destroy()).rejects.toBeInstanceOf(E2eeSecureStoreError);
   });
 });
 

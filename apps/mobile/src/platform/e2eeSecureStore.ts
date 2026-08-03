@@ -1,5 +1,6 @@
 import type { KVService } from "@ryco/client-runtime/platform";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 
 import { mobileKV } from "./kv";
 import { sanitizeSecretKey } from "./secretKv";
@@ -52,27 +53,37 @@ const E2EE_SECURE_STORE_KEYS: readonly E2eeSecureStoreKey[] = [E2EE_AGREEMENT_SE
 export const E2EE_KEYCHAIN_SERVICE = "ryco.e2ee.v1";
 
 /**
- * §6.3's storage class. `WHEN_UNLOCKED_THIS_DEVICE_ONLY` is both halves of the
- * iOS requirement in one attribute: the item is readable only while the device
- * is unlocked, and a `ThisDeviceOnly` item is never placed in an encrypted
- * backup, never restored onto another device, and never synchronized to iCloud
- * Keychain. Android ignores the attribute; its half of §6.3 is the backup
- * exclusion in `plugins/withAndroidSecureStoreBackupExclusion.cjs`.
+ * §6.3's storage class, which is a different attribute on each platform.
+ *
+ * iOS: `WHEN_UNLOCKED_THIS_DEVICE_ONLY` is both halves of the requirement in one
+ * attribute — the item is readable only while the device is unlocked, and a
+ * `ThisDeviceOnly` item is never placed in an encrypted backup, never restored
+ * onto another device, and never synchronized to iCloud Keychain. It is refused
+ * outright when it is not a number: the library's iOS default is `.whenUnlocked`,
+ * which is NOT this-device-only, so a dropped constant would write private key
+ * material into an item that backup and device transfer carry while looking like
+ * it had asked for something stronger.
+ *
+ * Android: `keychainAccessible` IS AN iOS-ONLY OPTION and the constant that names
+ * it is an iOS-only native constant — the Android module declares none, so
+ * `SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY` is `undefined` there and requiring
+ * it would refuse every E2EE operation on the platform. Android's half of §6.3 is
+ * the non-exportable keystore key plus the backup and device-transfer exclusion
+ * in `plugins/withAndroidSecureStoreBackupExclusion.cjs`.
+ *
+ * Anything else is refused. §6.3's only other row is web, whose private-key home
+ * is process memory and which has no durable store at all.
  *
  * Read on first use rather than at module scope, because the constant comes from
- * the native module and this file is on the platform barrel's import graph — and
- * refused outright when it is not a number, since the alternative is writing
- * private key material under the library's default accessibility while looking
- * like it asked for something stronger.
+ * the native module — and rebuilt on every call rather than cached, so a class
+ * this file could not assert once is never assumed later.
  */
-let storeOptions: SecureStore.SecureStoreOptions | undefined;
 function e2eeSecureStoreOptions(): SecureStore.SecureStoreOptions {
-  if (storeOptions === undefined) {
-    const keychainAccessible = SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY;
-    if (typeof keychainAccessible !== "number") throw new E2eeSecureStoreError();
-    storeOptions = { keychainService: E2EE_KEYCHAIN_SERVICE, keychainAccessible };
-  }
-  return storeOptions;
+  if (Platform.OS === "android") return { keychainService: E2EE_KEYCHAIN_SERVICE };
+  if (Platform.OS !== "ios") throw new E2eeSecureStoreError();
+  const keychainAccessible = SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY;
+  if (typeof keychainAccessible !== "number") throw new E2eeSecureStoreError();
+  return { keychainService: E2EE_KEYCHAIN_SERVICE, keychainAccessible };
 }
 
 /**

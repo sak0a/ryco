@@ -12,6 +12,7 @@ vi.mock("expo-secure-store", () => ({
   setItemAsync: async () => {},
   deleteItemAsync: async () => {},
 }));
+vi.mock("react-native", () => ({ Platform: { OS: "ios" } }));
 vi.mock("expo-sqlite/kv-store", () => ({
   default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
 }));
