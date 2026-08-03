@@ -298,7 +298,7 @@ describe("§5.3 capability carrier", () => {
       reason: "malformed",
     });
 
-    // Past the bound and not JSON at all: still classified, and never parsed.
+    // Past the bound and not JSON at all: still classified, and never a carrier.
     const oversized = new Uint8Array(E2EE_CAPABILITY_CARRIER_MAX_BYTES + 1).fill(0x7b);
     expect(decodeE2eeCapabilityCarrier(oversized)).toEqual({
       kind: "error",
@@ -316,6 +316,56 @@ describe("§5.3 capability carrier", () => {
       }),
     );
     expect([...reasons].toSorted()).toEqual(["malformed", "not_carrier"]);
+  });
+
+  it("enforces the §5.3 bound on a carrier that is otherwise perfectly conforming", () => {
+    // The §5.3 bound is the ONLY thing rejecting this payload: the tag is the
+    // reserved one, the members are the two §5.3 names in order, the text is
+    // byte-identical to a standard encoder's output, and the statement text is
+    // canonical unpadded base64url that decodes cleanly. A decoder that dropped
+    // the bound would answer `ok` and hand a 15 KB "statement" on to §5.2.
+    const statement = new Uint8Array(15_000).fill(0x41);
+    const carrier = utf8(
+      JSON.stringify({
+        _tag: E2EE_CAPABILITY_CARRIER_TAG,
+        statement: Buffer.from(statement).toString("base64url"),
+      }),
+    );
+    expect(carrier.byteLength).toBeGreaterThan(E2EE_CAPABILITY_CARRIER_MAX_BYTES);
+    expect(decodeE2eeCapabilityCarrier(carrier)).toEqual({ kind: "error", reason: "malformed" });
+
+    // And it is a bound rather than a length filter: one byte inside it, the
+    // same construction round-trips.
+    const fitting = new Uint8Array(16).fill(0x41);
+    expect(decodeE2eeCapabilityCarrier(encodeE2eeCapabilityCarrier(fitting)).kind).toBe("ok");
+  });
+
+  it("decides the §4.4 class from the tag and not from the payload's opening bytes", () => {
+    // §4.4: `CARRIER` is the subclass of `LEGACY-JSON` that is a top-level JSON
+    // object whose `_tag` member equals the reserved tag — wherever that member
+    // sits. A rule reading §5.3's fixed opening bytes instead misses this one,
+    // and a Hub that reordered the members would take row K9's legacy lock
+    // instead of K2/K3, which never lock legacy.
+    const reordered = utf8(
+      JSON.stringify({ statement: "A".repeat(7_000), _tag: E2EE_CAPABILITY_CARRIER_TAG }),
+    );
+    expect(reordered.byteLength).toBeGreaterThan(E2EE_CAPABILITY_CARRIER_MAX_BYTES);
+    expect(reordered[1]).not.toBe("_".charCodeAt(0));
+    expect(decodeE2eeCapabilityCarrier(reordered)).toEqual({ kind: "error", reason: "malformed" });
+
+    // And the converse: opening with §5.3's exact bytes makes nothing a carrier,
+    // at either side of the bound. One byte-string, one class, whatever its
+    // length — the truncation below is unparseable and so is not a JSON object
+    // at all.
+    const opening = `{"_tag":${JSON.stringify(E2EE_CAPABILITY_CARRIER_TAG)},"statement":"`;
+    for (const length of [E2EE_CAPABILITY_CARRIER_MAX_BYTES - 1, 7_000]) {
+      const truncated = utf8(opening + "A".repeat(length - opening.length));
+      expect(truncated.byteLength, String(length)).toBe(length);
+      expect(decodeE2eeCapabilityCarrier(truncated), String(length)).toEqual({
+        kind: "error",
+        reason: "not_carrier",
+      });
+    }
   });
 
   it("answers `not_carrier` for the legacy JSON this class is mostly made of", () => {
@@ -954,15 +1004,20 @@ describe("§5.2 statement verification", () => {
       }
     });
 
-    it("recomputes a chain certificate's own fingerprints inside the §7.5 walk", () => {
-      // §5.2 step 2 recomputes the two STATEMENT-level fingerprints; the two on
-      // each carried certificate are recomputed by the walk one step later, and
-      // that is where they belong: a pin is a `ryco.node-key.v1` fingerprint and
-      // reachability is decided by comparing it against a certificate's
-      // `oldFingerprint`, so accepting either on the carrier's authority would
-      // let a spliced chain claim a pin it never touched. Their disagreement is
-      // therefore §7.5's verdict and takes §7.5's disposition — which, per the
-      // pin rule, is the identity event only when there is a pin to re-verify.
+    it("recomputes a chain certificate's own fingerprints and calls a disagreement invalid, pin or no pin", () => {
+      // §5.2 step 2 recomputes EVERY advertised fingerprint and rejects any
+      // disagreement, and it does so before step 6 has an anchor to authenticate
+      // against. The two on each carried certificate are recomputed inside the
+      // §7.5 walk — a pin is a `ryco.node-key.v1` fingerprint and reachability is
+      // decided by comparing it against a certificate's `oldFingerprint`, so
+      // accepting either on the carrier's authority would let a spliced chain
+      // claim a pin it never touched — but their DISPOSITION is step 2's.
+      //
+      // So this is `invalid` at every footing, and specifically NOT §13.3. The
+      // statement below is signed by the very key the pin names: reporting "the
+      // node you previously verified is presenting a different identity" for a
+      // node whose identity key is byte-identical to the pinned one is the false
+      // re-verification prompt this module exists to avoid.
       const elements = elementsOf(CHAIN_SECOND.transcript);
       elements[11] = UNRELATED_FINGERPRINT;
       const transcript = encodeCanonicalE2eeCbor(elements);
@@ -970,15 +1025,14 @@ describe("§5.2 statement verification", () => {
         CHAIN_FIRST,
         { transcript, signature: ed25519.sign(transcript, NEW_SEED) },
       ]);
-      expect(verdict(verify({ statement, pin: pinnedToOldKey }))).toEqual({
-        kind: "identity-event",
-        event: { reason: "continuity_chain", failure: "malformed_entry" },
-      });
-      expect(verdict(verify({ statement }))).toEqual({
+      const invalidChain = {
         kind: "invalid",
         reason: "continuity_chain_invalid",
         chainFailure: "malformed_entry",
-      });
+      };
+      expect(verdict(verify({ statement, pin: pinnedToOldKey }))).toEqual(invalidChain);
+      expect(verdict(verify({ statement, pin: pinnedToCurrentKey }))).toEqual(invalidChain);
+      expect(verdict(verify({ statement }))).toEqual(invalidChain);
     });
 
     it("carries the identity material the §13.3 and §13.2.1 surfaces have to display", () => {

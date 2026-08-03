@@ -245,14 +245,14 @@ const utf8 = new TextEncoder();
  * disagrees with itself fails instead of being repaired on the way past.
  *
  * The two remaining advertised fingerprints, on each carried continuity
- * certificate, are recomputed by the §7.5 walk in step 6. That is a step later
- * than §5.2 step 2 names, and deliberately: those two are what makes the pin
- * REACHABLE — a pin is a `ryco.node-key.v1` fingerprint and reachability is
- * decided by comparing it against a certificate's `oldFingerprint` — so accepting
- * either on the carrier's authority would let a spliced chain claim to reach a
- * pin it never touched. Recomputing them is therefore part of authenticating the
- * chain rather than a separate shape check, and §7.5's verdict is the one that
- * describes their failure.
+ * certificate, are recomputed inside the §7.5 walk rather than beside it: those
+ * two are what makes the pin REACHABLE — a pin is a `ryco.node-key.v1`
+ * fingerprint and reachability is decided by comparing it against a
+ * certificate's `oldFingerprint` — so accepting either on the carrier's
+ * authority would let a spliced chain claim to reach a pin it never touched, and
+ * a second copy of the recomputation here would be a second §5.2 step 2. Their
+ * DISPOSITION is step 2's all the same, which is why the walk's `malformed_entry`
+ * is answered `invalid` below and never as an identity event.
  *
  * The chain is walked whether or not a pin was supplied — §7.5's chain rules are
  * properties of the carried chain itself, and a break in them is channel-fatal on
@@ -383,7 +383,20 @@ export function verifyNodeE2eeCapabilityStatement(
       : { pinnedIdentityFingerprint: input.pin.identityFingerprint }),
   });
   if (chain.kind === "error") {
-    if (input.pin === undefined) {
+    // `malformed_entry` is the walk's §5.2 STEP 2 verdict, reached before it
+    // authenticates anything: the statement decoder above already fixed every
+    // entry's carried shape, so the only way the walk reaches it here is the
+    // §7.5 transcript decode — which is exactly step 2's recomputation of that
+    // certificate's two advertised fingerprints from the keys they name, plus
+    // that certificate's own structure. Step 2 says reject, and §5.2 places it
+    // before step 6 has an anchor to authenticate against: a statement whose own
+    // chain does not decode presents no identity to compare, so it is INVALID at
+    // every footing rather than §13.3's "the node you previously verified is
+    // presenting a different identity". Only the walk's authentication failures
+    // — a spliced, reordered, truncated, or signature-invalid chain, a
+    // generation regression, a continuity id disagreement, an unreached pin —
+    // are step 6's, and only they take the identity event.
+    if (input.pin === undefined || chain.failure === "malformed_entry") {
       return { kind: "invalid", reason: "continuity_chain_invalid", chainFailure: chain.failure };
     }
     return {

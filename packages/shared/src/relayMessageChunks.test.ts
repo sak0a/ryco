@@ -331,12 +331,47 @@ describe("RelayMessageAssembler", () => {
 });
 
 describe("planRelayMessage", () => {
+  // `prepareRelayMessage` is DERIVED from the plan, so it can never disagree
+  // with it: every expectation below is therefore written out independently,
+  // and the cross-check that the two stay one rule is the separate case that
+  // follows. A boundary asserted only against the function it is derived from
+  // is a boundary nothing holds.
+  const options = { maxChunkBytes: LIMIT, maxMessageBytes: 4_096, peerSupportsChunking: true };
+  const PRELUDE = RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength;
+  const CHUNK_CAPACITY = LIMIT - RELAY_CHUNK_HEADER_BYTES;
+
+  it("lays every size class out against written-out payload lengths", () => {
+    const expected: readonly (readonly [number, boolean, boolean, readonly number[]])[] = [
+      // An empty message still advertises: the prelude alone fits the frame.
+      [0, true, false, [PRELUDE]],
+      [1, true, false, [PRELUDE + 1]],
+      // The last size the prelude fits beside — `<=`, not `<`: exactly
+      // `maxChunkBytes` on the wire is a fitting payload.
+      [LIMIT - PRELUDE, true, false, [LIMIT]],
+      // One byte past it there is no headroom, so the message goes bare.
+      [LIMIT - PRELUDE + 1, false, false, [LIMIT - PRELUDE + 1]],
+      [LIMIT, false, false, [LIMIT]],
+      // Past `maxChunkBytes` the message is split, and every chunk carries the
+      // header — including the short final one.
+      [LIMIT + 1, false, true, [LIMIT, RELAY_CHUNK_HEADER_BYTES + (LIMIT + 1 - CHUNK_CAPACITY)]],
+      [CHUNK_CAPACITY * 2, false, true, [LIMIT, LIMIT]],
+      [CHUNK_CAPACITY * 2 + 1, false, true, [LIMIT, LIMIT, RELAY_CHUNK_HEADER_BYTES + 1]],
+    ];
+    for (const [size, advertised, chunked, payloadBytes] of expected) {
+      expect(planRelayMessage(size, options), String(size)).toEqual({
+        kind: "ready",
+        advertised,
+        chunked,
+        payloadBytes,
+      });
+    }
+  });
+
   it("predicts exactly the payloads prepareRelayMessage builds", () => {
     // A sender that must reserve capacity for every payload of a message BEFORE
     // the message exists (docs/relay-e2ee-protocol.md §9.3) reads the plan and
     // then spends what the preparation produces. The two are the same rule, and
     // this is the assertion that keeps them one rule rather than two.
-    const options = { maxChunkBytes: LIMIT, maxMessageBytes: 4_096, peerSupportsChunking: true };
     for (const size of [
       0,
       1,
