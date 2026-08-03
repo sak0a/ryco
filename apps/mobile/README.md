@@ -174,12 +174,35 @@ It does **not** prove:
 - **Anything about Android.** Run the same procedure per platform.
 
 §14.5's startup verification is no longer open: `src/platform/e2eeAgreementKey.ts`
-runs `assertE2eeRuntimeGlobals` before it draws this device's static X25519 key
-and turns a refusal into `agreement_key_runtime_unavailable`, with no key created
-and nothing written. That is the only path in the app that draws E2EE key
-material, so a runtime the preflight condemns can hold no E2EE key at all. The
-handshake that reaches that path — and the screen state that surfaces the refusal
-— lands with the mobile E2EE client; until then no launch calls it.
+runs `assertE2eeRuntimeGlobals` before **every** operation that produces or uses
+this device's static X25519 key — creating it, deriving its public half, and
+lending the scalar to a handshake — and turns a refusal into
+`agreement_key_runtime_unavailable`, with no key created and nothing written.
+Gating creation alone would have verified the source on the one launch that mints
+the key and on no other, so a runtime that lost its CSPRNG between launches would
+have kept issuing §7.4 certificates and discovered the absence mid-handshake.
+Destruction is the one ungated path: §6.3's purge must still run on a runtime
+E2EE is refused on. The handshake that reaches this custody path — and the screen
+state that surfaces the refusal — lands with the mobile E2EE client; until then
+no launch calls it.
+
+Two obligations this slice creates and does **not** discharge:
+
+- **§13.1.1's partial-loss surface.** The §7.4 certificate record lives in the
+  plain KV (`src/platform/e2eeClientPrekey.ts`), which iOS iCloud backup and
+  Android Auto Backup carry while the §6.3 namespace is excluded from both. On an
+  OS migration to a new handset the record therefore survives and the agreement
+  key it names does not — which is exactly the "non-secret application state
+  recording a prior E2EE association" §13.1.1 names, and it requires the missing
+  E2EE state to be treated as **unexpected** (rows K23/K24, the §13.2.1 surface),
+  not as legacy-eligible. Today a restored-but-unmatched record is silently
+  re-signed, which is the correct custody answer and is not that surface. **The
+  §13 slice MUST route that case to it** (or move the record into the §6.3
+  storage class, which makes the device a genuine fresh install and removes the
+  obligation).
+- **The screen state for a refused runtime.** `agreement_key_runtime_unavailable`
+  and `e2ee_prekey_custody_failed` have no owner-visible surface yet, because no
+  launch calls this path.
 
 ## Relay E2EE key custody (owner, on a physical device)
 
@@ -195,9 +218,12 @@ the Node suite.
   required — not that the previous install's key is silently reused. The marker
   check runs before any read of the namespace, so nothing of the old material is
   loaded on that launch.
-- **Android backup must not carry `shared_prefs/SecureStore.xml`.** The generated
-  manifest and rules were verified from a real `expo prebuild --platform android`
-  in this repository: `<application>` carries
+- **Android backup must not carry `shared_prefs/SecureStore.xml`.** These rules are
+  the whole of Android's §6.3 compliance: `keychainAccessible` is an iOS-only
+  option and the Android native module publishes no constants at all, so the
+  store passes only `keychainService` there and there is no accessibility class to
+  assert. The generated manifest and rules were verified from a real
+  `expo prebuild --platform android` in this repository: `<application>` carries
   `android:fullBackupContent="@xml/ryco_e2ee_backup_rules"` and
   `android:dataExtractionRules="@xml/ryco_e2ee_data_extraction_rules"`, both files
   exclude the SecureStore preferences file from `sharedpref`, and
