@@ -1203,7 +1203,12 @@ describe("relay E2EE client channel: §11.3 terminal E2EEError", () => {
     // not reserve.
     expect(wire.sent).toEqual([]);
     expect(channel.verdict()).toBe("failed");
-    expect(diagnostics).toEqual([{ phase: "post_key", row: "Q7", verdict: "failed" }]);
+    // NOT Q7. §10.2 and §11.3 carve this exact case out in the same words, and
+    // the row is pinned beside the wire surface it has to agree with: Q7's
+    // obligation is one `E2EEError` with `protocol_violation`, which the empty
+    // `wire.sent` above proves this path does not discharge. A row naming an
+    // obligation the same test proves unmet is a record that contradicts itself.
+    expect(diagnostics).toEqual([{ phase: "post_key", row: "local", verdict: "failed" }]);
     expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
   });
 
@@ -1340,7 +1345,9 @@ describe("relay E2EE client channel: §11.3 receive rows", () => {
     );
 
     expect(wire.sent).toEqual([]);
-    expect(diagnostics).toEqual([{ phase: "post_key", row: "Q7", verdict: "failed" }]);
+    // `local`, not Q7 — see the §11.3 terminal-`E2EEError` case above for why
+    // naming Q7 beside an empty `wire.sent` is a record that contradicts itself.
+    expect(diagnostics).toEqual([{ phase: "post_key", row: "local", verdict: "failed" }]);
     expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
   });
 });

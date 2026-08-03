@@ -100,7 +100,11 @@ export const CLIENT_E2EE_RECEIVE_FATAL_ROWS: Readonly<Record<E2eeReceiveFatalRea
  */
 export interface RelayE2eeChannelDiagnostic {
   readonly phase: "post_key";
-  /** A §11.3 row, or `local` for a failure §11.3's table does not enumerate. */
+  /**
+   * A §11.3 row, or `local` for a condition that table does not enumerate — a
+   * client-local failure, and the peer's terminal `E2EEError`, which §10.2
+   * explicitly carves out of Q7.
+   */
   readonly row: string;
   readonly verdict?: E2eeCloseVerdict | undefined;
 }
@@ -669,7 +673,16 @@ export function makeRelayE2eeClientChannel(
         if (!closed) {
           closed = true;
           release();
-          diagnostic({ phase: "post_key", row: "Q7", verdict: machine.verdict });
+          // NOT Q7, and §10.2 and §11.3 both say so in the same words: an
+          // authenticated envelope carrying an `E2EEError` "is not a Q7 record.
+          // It is the peer's terminal record under §11.3". Q7 is a close-machine
+          // violation THIS endpoint detected on peer input, and its obligation is
+          // one `E2EEError` with code `protocol_violation` — which this path
+          // MUST NOT send. Naming it would make the local record disagree with
+          // this client's own wire behavior and put a channel the peer terminated
+          // next to a commitment mismatch the client caught itself. §11.3's table
+          // enumerates no row for it, so it takes the documented escape.
+          diagnostic({ phase: "post_key", row: "local", verdict: machine.verdict });
           host.close(relayE2eeFailure("fatal_post_key"));
         }
         return REJECTED;
