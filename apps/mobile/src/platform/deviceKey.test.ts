@@ -13,6 +13,7 @@ vi.mock("@ryco/mobile-device-key", () => ({
 }));
 
 import {
+  getMobileDeviceIdentityPublicKey,
   getMobileDeviceSigningKey,
   isMobileDeviceKeyAvailable,
   resetMobileDeviceKeyForTests,
@@ -119,6 +120,36 @@ describe("hardware device key", () => {
     });
 
     await expect(getMobileDeviceSigningKey()).rejects.toThrow(UNAVAILABLE);
+  });
+
+  it("surfaces the uncompressed public point the E2EE prekey certificate signs over", async () => {
+    // `docs/relay-e2ee-protocol.md` §7.4 element 4 carries the X9.63 point
+    // verbatim and §7.1 fingerprints it, so the JWK is not a substitute.
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "secure-enclave" });
+
+    const point = await getMobileDeviceIdentityPublicKey();
+
+    expect(point).toHaveLength(65);
+    expect(point[0]).toBe(0x04);
+    expect([...point.subarray(1, 33)]).toEqual(Array.from({ length: 32 }, () => 0xa1));
+    expect([...point.subarray(33)]).toEqual(Array.from({ length: 32 }, () => 0xb2));
+  });
+
+  it("hands out a copy of the point, so a caller cannot corrupt the memoized key", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "secure-enclave" });
+
+    const first = await getMobileDeviceIdentityPublicKey();
+    first.fill(0);
+    const second = await getMobileDeviceIdentityPublicKey();
+
+    expect(second[0]).toBe(0x04);
+    expect(ensureKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses the point on the same terms as the signing key", async () => {
+    ensureKey.mockResolvedValue({ publicKey: publicKeyBase64(), backing: "unavailable" });
+
+    await expect(getMobileDeviceIdentityPublicKey()).rejects.toThrow(UNAVAILABLE);
   });
 
   it("exposes no export or extract path on the key", async () => {

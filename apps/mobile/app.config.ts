@@ -242,7 +242,17 @@ const config: ExpoConfig = {
         },
       },
     ],
-    "expo-secure-store",
+    [
+      "expo-secure-store",
+      {
+        // This app owns its Android backup rules
+        // (./plugins/withAndroidSecureStoreBackupExclusion.cjs). The library's
+        // own rules open with `<include domain="sharedpref" path="."/>`, which
+        // turns Auto Backup into an allow-list and would silently stop backing
+        // up the SQLite-backed environment registry and the hub profile.
+        configureAndroidBackup: false,
+      },
+    ],
     "expo-sqlite",
     [
       "expo-notifications",
@@ -286,6 +296,7 @@ const config: ExpoConfig = {
     "./plugins/withIosCocoaPodsUuidCache.cjs",
     "./plugins/withIosSceneLifecycle.cjs",
     "./plugins/withAndroidCleartextTraffic.cjs",
+    "./plugins/withAndroidSecureStoreBackupExclusion.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
     "./plugins/withAndroidModernAlertDialog.cjs",
