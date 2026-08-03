@@ -188,7 +188,11 @@ export type NodeE2eeChannelAuthorization = Pick<
  */
 export interface NodeE2eeChannelDiagnostic {
   readonly phase: "pre_key" | "post_key";
-  /** A §11.2 or §11.3 row, or `local` for a failure §11.2's table does not enumerate. */
+  /**
+   * A §11.2 or §11.3 row, or `local` for a condition neither table enumerates —
+   * a node-local pre-key failure, and the peer's terminal `E2EEError`, which
+   * §10.2 explicitly carves out of Q7.
+   */
   readonly row: string;
   readonly verdict?: E2eeCloseVerdict | undefined;
 }
@@ -1375,7 +1379,16 @@ export function makeNodeE2eeChannelSession(
         if (mode !== "closed") {
           mode = "closed";
           releaseChannel();
-          diagnostic({ phase: "post_key", row: "Q7", verdict: machine.verdict });
+          // NOT Q7, and §10.2 and §11.3 both say so in the same words: an
+          // authenticated envelope carrying an `E2EEError` "is not a Q7 record.
+          // It is the peer's terminal record under §11.3". Q7 is a close-machine
+          // violation THIS endpoint detected on peer input, and its obligation is
+          // one `E2EEError` with code `protocol_violation` — which this path
+          // MUST NOT send. Naming it would make the operator record disagree with
+          // the node's own wire behavior and put a channel the peer terminated
+          // next to a commitment mismatch the node caught itself. §11.3's table
+          // enumerates no row for it, so it takes the documented escape.
+          diagnostic({ phase: "post_key", row: "local", verdict: machine.verdict });
           sources.close(FATAL_CLOSE_REASON);
         }
         return REJECTED;

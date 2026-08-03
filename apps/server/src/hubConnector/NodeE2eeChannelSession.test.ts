@@ -11,6 +11,7 @@ import {
   E2EE_ERROR_CODE_PROTOCOL_VIOLATION,
   decodeE2eeCloseRecordBody,
   decodeE2eeErrorRecordBody,
+  encodeE2eeErrorRecordBody,
 } from "@ryco/shared/relayE2eeClose";
 import { E2eeClientHandshake } from "@ryco/shared/relayE2eeHandshake";
 import { deriveE2eeAgreementPublicKey } from "@ryco/shared/relayE2eeKeys";
@@ -1148,6 +1149,36 @@ describe("NodeE2eeChannelSession", () => {
     expect(node.releases()).toBe(1);
     // The peer is gone, so §10's exchange put nothing further on the wire.
     expect(node.dataPayloads().slice(before)).toHaveLength(0);
+  });
+
+  it("names no §11.3 row for the peer's terminal E2EEError, which §10.2 excludes", async () => {
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const before = node.dataPayloads().length;
+    await clientSend(
+      node,
+      client,
+      E2EE_INNER_TYPE_ERROR,
+      encodeE2eeErrorRecordBody(E2EE_ERROR_CODE_PROTOCOL_VIOLATION),
+    );
+    // §11.3: this endpoint erases, closes, and MUST NOT reply — the wire surface
+    // of a peer-terminated channel is no record of any kind.
+    expect(node.dataPayloads().slice(before)).toHaveLength(0);
+    expect(node.deliveredToParser).toHaveLength(1);
+    expect(node.session().mode()).toBe("closed");
+    expect(node.session().verdict()).toBe("failed");
+    expect(node.closeReasons()).toEqual(["channel_rejected"]);
+    // AND THE OPERATOR RECORD AGREES WITH THAT WIRE SURFACE. §10.2 and §11.3's
+    // Q7 row both carve this event out of Q7 in the same words, and Q7's
+    // obligation is one `E2EEError` with code `protocol_violation` — which this
+    // path did not and may not send. A Q7 here would report a close-machine
+    // violation the node never detected and would be indistinguishable from a
+    // commitment mismatch it did.
+    expect(node.rows()).toEqual(["local"]);
+    expect(node.rows()).not.toContain("Q7");
   });
 
   it("protects nothing after §11.3's terminal record, under a same-turn send", async () => {
