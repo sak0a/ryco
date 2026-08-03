@@ -18,8 +18,9 @@ usage, the existing live snapshot remains authoritative.
 - When the selected model exposes a context-window option such as `200k` or
   `1m`, the ring shows `0%` and its popover shows `0 / <selected limit>`.
 - When the selected model does not expose a parseable limit, the ring remains
-  visible in a neutral zero state and its popover says that zero tokens have
-  been used so far.
+  visible in a neutral zero state. Its popover uses the same compact typography
+  as the normal usage row and shows `0 context used`, without inventing a
+  context limit.
 - Changing the provider, model, or context-window option before the first
   message immediately updates the initial ring.
 - The latest valid provider-reported context snapshot replaces the initial
@@ -54,6 +55,8 @@ maximum.
   defaults, rather than maintaining a separate provider/model lookup table.
 - Preserve the existing meter visuals, popover, usage-limit rows, compact
   composer behavior, and provider-reported usage interpretation.
+- Keep known- and unknown-limit zero states visually consistent. Do not add a
+  larger prose-style empty-state message to the popover.
 - Do not emit synthetic provider/runtime events, persist zero-usage activities,
   change server contracts, or extend the frozen web phone presentation tier.
 
@@ -62,7 +65,8 @@ maximum.
 - Unit-test compact limit parsing, invalid/unknown limits, and zero-usage
   display derivation.
 - Add browser coverage showing that the ring is visible before the first
-  message and reflects the selected known limit.
+  message, reflects a selected known limit, and uses the compact usage row when
+  the selected model's limit is unknown.
 - Verify that a real provider snapshot still wins over the fallback.
 - Run the repository-required formatter, formatting check, lint, both
   typechecks, test suite, and build.
