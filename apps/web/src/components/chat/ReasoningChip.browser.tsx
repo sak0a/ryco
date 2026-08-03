@@ -173,4 +173,47 @@ describe("ReasoningChip", () => {
       expect(text).not.toContain("Med");
     });
   });
+
+  it("preserves the advertised label for an unrecognized future effort", async () => {
+    const futureEffortDescriptor = {
+      id: "reasoningEffort",
+      label: "Reasoning",
+      type: "select" as const,
+      options: [
+        { id: "medium", label: "Medium" },
+        { id: "ultra-deep", label: "Ultra Deep", isDefault: true },
+      ],
+      currentValue: "ultra-deep",
+    } as const;
+    mounted = await render(
+      <ReasoningChip
+        descriptor={futureEffortDescriptor}
+        descriptors={[futureEffortDescriptor]}
+        prompt=""
+        primarySelectDescriptorId="reasoningEffort"
+        ultrathinkInBodyText={false}
+        ultrathinkPromptControlled={false}
+        onChangeDescriptors={vi.fn()}
+        onPromptChange={vi.fn()}
+      />,
+    );
+    await vi.waitFor(() => {
+      const button = document.querySelector("button");
+      const text = button?.textContent ?? "";
+      expect(text).toContain("Ultra Deep");
+      expect(text).not.toContain("Med");
+      expect(button?.getAttribute("aria-label")).toBe("Reasoning: Ultra Deep");
+      expect(button?.getAttribute("title")).toBe("Reasoning: Ultra Deep");
+      expect(button?.className).toContain("bg-slate-400/15");
+      expect(button?.querySelector("svg")).toBeNull();
+    });
+
+    await page.getByRole("button", { name: "Reasoning: Ultra Deep" }).click();
+    await vi.waitFor(() => {
+      const menuItem = Array.from(document.querySelectorAll('[role="menuitemradio"]')).find(
+        (item) => item.textContent?.includes("Ultra Deep"),
+      );
+      expect(menuItem).toBeTruthy();
+    });
+  });
 });
