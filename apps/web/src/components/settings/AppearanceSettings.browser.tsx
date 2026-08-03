@@ -43,7 +43,6 @@ describe("AppearanceSettingsPanel", () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-    useUiStateStore.getState().setReasoningIndicatorStyle("icon-dots");
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
     useUiStateStore.getState().setTokenModeControlStyle("icon-text");
     useUiStateStore.getState().setAlwaysUseBuildMode(false);
@@ -61,7 +60,6 @@ describe("AppearanceSettingsPanel", () => {
     document.documentElement.className = "";
     document.getElementById(THEME_STYLE_ELEMENT_ID)?.remove();
     document.getElementById(APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID)?.remove();
-    useUiStateStore.getState().setReasoningIndicatorStyle("icon-dots");
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
     useUiStateStore.getState().setTokenModeControlStyle("icon-text");
     useUiStateStore.getState().setAlwaysUseBuildMode(false);
@@ -216,17 +214,14 @@ describe("AppearanceSettingsPanel", () => {
       .toBeInTheDocument();
   });
 
-  it("updates composer control display styles", async () => {
+  it("omits reasoning style controls and updates token mode display style", async () => {
     mounted = await render(<AppearanceSettingsPanel />);
 
-    await page.getByRole("radio", { name: /Dots only/ }).click();
-    expect(useUiStateStore.getState().reasoningIndicatorStyle).toBe("dots");
-
     await expect
-      .element(page.getByRole("button", { name: "Reset reasoning indicator to default" }))
-      .toBeInTheDocument();
-    await page.getByRole("button", { name: "Reset reasoning indicator to default" }).click();
-    expect(useUiStateStore.getState().reasoningIndicatorStyle).toBe("icon-dots");
+      .element(page.getByText("Reasoning chip style", { exact: true }))
+      .not.toBeInTheDocument();
+    await expect.element(page.getByText("Dots only", { exact: true })).not.toBeInTheDocument();
+    await expect.element(page.getByText("Icon + dots", { exact: true })).not.toBeInTheDocument();
 
     await page.getByRole("radio", { name: /Icon only/ }).click();
     expect(useUiStateStore.getState().tokenModeControlStyle).toBe("icon");

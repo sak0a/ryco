@@ -23,7 +23,6 @@ import {
   setDefaultAdvertisedEndpointKey,
   setProjectFolderExpanded,
   setProjectExpanded,
-  setReasoningIndicatorStyle,
   setThreadChangedFilesExpanded,
   setThreadPinned,
   setThreadTurnFoldExpanded,
@@ -51,7 +50,6 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadWorkGroupExpandedById: {},
     threadWorkEntryExpandedById: {},
     defaultAdvertisedEndpointKey: null,
-    reasoningIndicatorStyle: "icon-dots",
     tokenModeControlStyle: "icon-text",
     wideComposerControlsAutoCollapse: true,
     alwaysUseBuildMode: false,
@@ -1086,7 +1084,7 @@ describe("uiStateStore persistence round-trip", () => {
   });
 });
 
-describe("uiStateStore — reasoningIndicatorStyle", () => {
+describe("uiStateStore — composer controls", () => {
   let localStorageStub: Storage;
 
   beforeEach(() => {
@@ -1100,41 +1098,16 @@ describe("uiStateStore — reasoningIndicatorStyle", () => {
     vi.unstubAllGlobals();
   });
 
-  it("defaults to icon-dots", () => {
-    expect(makeUiState().reasoningIndicatorStyle).toBe("icon-dots");
-  });
+  it("omits obsolete reasoning indicator styles from active and persisted state", () => {
+    const state = makeUiState();
+    expect(state).not.toHaveProperty("reasoningIndicatorStyle");
 
-  it("setReasoningIndicatorStyle returns a new state with the chosen style", () => {
-    const next = setReasoningIndicatorStyle(makeUiState(), "text");
-    expect(next.reasoningIndicatorStyle).toBe("text");
-  });
-
-  it("setReasoningIndicatorStyle supports dots-only style", () => {
-    const next = setReasoningIndicatorStyle(makeUiState(), "dots");
-    expect(next.reasoningIndicatorStyle).toBe("dots");
-  });
-
-  it("setReasoningIndicatorStyle is a no-op when value is unchanged", () => {
-    const state = makeUiState({ reasoningIndicatorStyle: "text" });
-    expect(setReasoningIndicatorStyle(state, "text")).toBe(state);
-  });
-
-  it("persists the chosen style and reads it back", () => {
-    const state = setReasoningIndicatorStyle(makeUiState(), "text");
-    persistState(state);
+    const legacyState = { ...state, reasoningIndicatorStyle: "dots" as const };
+    persistState(legacyState);
     const raw = localStorageStub.getItem(PERSISTED_STATE_KEY);
     expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!) as PersistedUiState;
-    expect(parsed.reasoningIndicatorStyle).toBe("text");
-  });
-
-  it("persists the dots-only reasoning style and reads it back", () => {
-    const state = setReasoningIndicatorStyle(makeUiState(), "dots");
-    persistState(state);
-    const raw = localStorageStub.getItem(PERSISTED_STATE_KEY);
-    expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!) as PersistedUiState;
-    expect(parsed.reasoningIndicatorStyle).toBe("dots");
+    const parsed = JSON.parse(raw!) as Record<string, unknown>;
+    expect(parsed).not.toHaveProperty("reasoningIndicatorStyle");
   });
 
   it("persists the token mode control style and reads it back", () => {
