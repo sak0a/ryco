@@ -5,6 +5,7 @@ import { Exit, Schema } from "effect";
 
 import {
   E2EE_ACCOUNT_ID_MAX_BYTES,
+  E2EE_AGREEMENT_PUBLIC_KEY_BYTES,
   E2EE_CAPABILITY_CARRIER_MAX_BYTES,
   E2EE_CAPABILITY_SIGNING_ENVELOPE_BYTES,
   E2EE_CAPABILITY_STATEMENT_MAX_BYTES,
@@ -1046,6 +1047,307 @@ export function encodeNodeE2eeCapabilityTranscript(
       continuityId,
     ]),
   );
+}
+
+/**
+ * The §7.6 statement as a verifier holds it: the exact transcript and signature
+ * bytes received, and every element decoded AS CARRIED.
+ *
+ * NOTHING HERE IS RE-DERIVED. Element 6 and the prekey's member 3 are the values
+ * the wire supplied, not recomputations from the keys beside them, because §5.2
+ * step 2 is a COMPARISON against the carried value and a decoder that quietly
+ * substituted a recomputation would repair the attacker's statement on the way
+ * past. The same reasoning fixes §7.6's cross-signature reconstruction to the
+ * carried element 6.
+ */
+export interface NodeE2eeCapabilityStatement {
+  /** The exact element bytes the §7.2.1 envelope is rebuilt from (§5.2 step 1). */
+  readonly transcript: Uint8Array;
+  readonly signature: Uint8Array;
+  readonly hubOrigin: string;
+  readonly nodeId: string;
+  readonly identityKeyId: string;
+  readonly identityPublicKey: Uint8Array;
+  /** §7.6 element 6, as carried. */
+  readonly identityFingerprint: Uint8Array;
+  readonly e2eeVersionMin: number;
+  readonly e2eeVersionMax: number;
+  readonly suiteRegistry: readonly number[];
+  readonly prekeyCertificate: NodeE2eeCapabilityAdvertisedPrekeyCertificate;
+  readonly continuityChain: readonly NodeIdentityContinuityChainEntry[];
+  readonly requireE2EE: boolean;
+  readonly requireApprovedClientE2EE: boolean;
+  readonly admittedPatterns: readonly E2eeNoisePattern[];
+  readonly policyGeneration: number;
+  readonly issuedAt: number;
+  readonly expiresAt: number;
+  readonly continuityId: string;
+}
+
+export type NodeE2eeCapabilityStatementDecodeFailure =
+  /** §5.2 step 0 / §15, applied BEFORE the statement CBOR is decoded. */
+  | "statement_too_large"
+  | "statement_malformed"
+  | "statement_non_canonical"
+  | "statement_float_forbidden"
+  /** §5.2 step 0 / §15, applied BEFORE the transcript CBOR is decoded. */
+  | "transcript_too_large"
+  | "transcript_malformed"
+  | "transcript_non_canonical"
+  | "transcript_float_forbidden"
+  /** §7.1 / §15, over element 1. */
+  | "hub_origin_too_long"
+  /** §7.6 element 9 / §15, checked before any signature verification. */
+  | "suite_registry_too_large"
+  /** §7.5 / §15, checked before any signature verification. */
+  | "continuity_chain_too_long";
+
+export type NodeE2eeCapabilityStatementDecodeResult =
+  | { readonly kind: "ok"; readonly value: NodeE2eeCapabilityStatement }
+  | { readonly kind: "error"; readonly failure: NodeE2eeCapabilityStatementDecodeFailure };
+
+const CAPABILITY_STATEMENT_ELEMENTS = 2;
+const CAPABILITY_TRANSCRIPT_ELEMENTS = 19;
+const CAPABILITY_PREKEY_MEMBERS = 6;
+const CONTINUITY_CHAIN_ENTRY_MEMBERS = 2;
+/** §3.3 gives the envelope's suite field one byte, so no larger id is representable. */
+const SUITE_ID_MAX = 0xff;
+
+function statementDecodeFailure(
+  reason: E2eeCanonicalDecodeError,
+): NodeE2eeCapabilityStatementDecodeFailure {
+  if (reason === "non_canonical") return "statement_non_canonical";
+  if (reason === "float_forbidden") return "statement_float_forbidden";
+  return "statement_malformed";
+}
+
+function transcriptDecodeFailure(
+  reason: E2eeCanonicalDecodeError,
+): NodeE2eeCapabilityStatementDecodeFailure {
+  if (reason === "non_canonical") return "transcript_non_canonical";
+  if (reason === "float_forbidden") return "transcript_float_forbidden";
+  return "transcript_malformed";
+}
+
+function decodeFailed(
+  failure: NodeE2eeCapabilityStatementDecodeFailure,
+): NodeE2eeCapabilityStatementDecodeResult {
+  return { kind: "error", failure };
+}
+
+function isProtocolVersionElement(value: unknown): value is number {
+  return isUintElement(value) && value <= 65_535;
+}
+
+function decodeCapabilityPrekey(
+  value: unknown,
+): NodeE2eeCapabilityAdvertisedPrekeyCertificate | undefined {
+  if (!Array.isArray(value) || value.length !== CAPABILITY_PREKEY_MEMBERS) return undefined;
+  const [prekeyId, agreementPublicKey, crossSignature, agreementFingerprint, createdAt, expiresAt] =
+    value as readonly unknown[];
+  if (
+    !isTextElement(prekeyId) ||
+    !NODE_PREKEY_ID.test(prekeyId) ||
+    !isBytesElement(agreementPublicKey, E2EE_AGREEMENT_PUBLIC_KEY_BYTES) ||
+    !isBytesElement(crossSignature, ED25519_SIGNATURE_BYTES) ||
+    !isBytesElement(agreementFingerprint, E2EE_KEY_FINGERPRINT_BYTES) ||
+    !isUintElement(createdAt) ||
+    !isUintElement(expiresAt)
+  ) {
+    return undefined;
+  }
+  return {
+    prekeyId,
+    agreementPublicKey,
+    crossSignature,
+    agreementFingerprint,
+    createdAt,
+    expiresAt,
+  };
+}
+
+function decodeCapabilityChainEntry(value: unknown): NodeIdentityContinuityChainEntry | undefined {
+  if (!Array.isArray(value) || value.length !== CONTINUITY_CHAIN_ENTRY_MEMBERS) return undefined;
+  const [transcript, signature] = value as readonly unknown[];
+  if (
+    !(transcript instanceof Uint8Array) ||
+    transcript.byteLength === 0 ||
+    transcript.byteLength > E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES ||
+    !isBytesElement(signature, ED25519_SIGNATURE_BYTES)
+  ) {
+    return undefined;
+  }
+  return { transcript, signature };
+}
+
+/**
+ * Decode the §7.6 signed capability statement — the canonical-CBOR array
+ * `[ bstr(transcript), bstr(signature) ]` — into its 19 transcript elements,
+ * under the §3.6 profile including the re-encode equality rule at BOTH layers.
+ *
+ * The order is the one §5.2 step 0 and §15 fix and is not an implementation
+ * detail: the statement bound is applied before the statement is decoded, the
+ * transcript bound before the transcript is decoded, and the §15 counting bounds
+ * — suite registry entries and continuity chain depth — before this returns at
+ * all, so no signature verification anywhere downstream is reached with an
+ * unbounded structure in hand.
+ *
+ * Element 14 is checked against the set §7.6 DERIVES from element 13 rather than
+ * merely parsed: the effective admitted pattern set is computed from the
+ * committed policy, so a statement whose two policy elements disagree is
+ * self-inconsistent and no admission rule may be run from it.
+ *
+ * The advertised protocol range is NOT compared against `E2EE_PROTOCOL_VERSION`
+ * here, and an inverted range is not a decode failure: §5.2 step 8 gives both
+ * the `unusable evidence` disposition, which is not the disposition an invalid
+ * statement takes, and a decoder that rejected them would collapse the two.
+ *
+ * Unregistered suite ids are likewise carried rather than rejected. §3.4 reserves
+ * them, so §8.2 cannot select one; refusing the statement instead would make a
+ * node that offers one future suite alongside a registered one unreachable.
+ */
+export function decodeNodeE2eeCapabilityStatement(
+  statement: Uint8Array,
+): NodeE2eeCapabilityStatementDecodeResult {
+  if (!(statement instanceof Uint8Array)) return decodeFailed("statement_malformed");
+  if (statement.byteLength > E2EE_CAPABILITY_STATEMENT_MAX_BYTES) {
+    return decodeFailed("statement_too_large");
+  }
+  const outer = decodeCanonicalE2eeCbor(statement);
+  if (outer.kind === "error") return decodeFailed(statementDecodeFailure(outer.reason));
+  if (!Array.isArray(outer.value) || outer.value.length !== CAPABILITY_STATEMENT_ELEMENTS) {
+    return decodeFailed("statement_malformed");
+  }
+  const [transcript, signature] = outer.value as readonly unknown[];
+  if (!(transcript instanceof Uint8Array) || transcript.byteLength === 0) {
+    return decodeFailed("statement_malformed");
+  }
+  // Before anything else is read off the statement, including the shape of the
+  // signature element: §5.2 step 0 rejects an over-long transcript rather than
+  // reporting whatever else is wrong with the statement carrying it.
+  if (transcript.byteLength > E2EE_CAPABILITY_TRANSCRIPT_MAX_BYTES) {
+    return decodeFailed("transcript_too_large");
+  }
+  if (!isBytesElement(signature, ED25519_SIGNATURE_BYTES)) {
+    return decodeFailed("statement_malformed");
+  }
+
+  const inner = decodeCanonicalE2eeCbor(transcript);
+  if (inner.kind === "error") return decodeFailed(transcriptDecodeFailure(inner.reason));
+  if (!Array.isArray(inner.value) || inner.value.length !== CAPABILITY_TRANSCRIPT_ELEMENTS) {
+    return decodeFailed("transcript_malformed");
+  }
+  const [
+    domain,
+    hubOrigin,
+    nodeId,
+    identityAlgorithm,
+    identityKeyId,
+    identityPublicKey,
+    identityFingerprint,
+    e2eeVersionMin,
+    e2eeVersionMax,
+    suiteRegistry,
+    prekeyCertificate,
+    continuityChain,
+    requireE2EE,
+    requireApprovedClientE2EE,
+    admittedPatterns,
+    policyGeneration,
+    issuedAt,
+    expiresAt,
+    continuityId,
+  ] = inner.value as readonly unknown[];
+
+  if (
+    domain !== E2EE_NODE_CAPABILITY_TRANSCRIPT_DOMAIN ||
+    identityAlgorithm !== E2EE_NODE_IDENTITY_ALGORITHM ||
+    !isTextElement(hubOrigin) ||
+    !isTextElement(nodeId) ||
+    !NODE_ID.test(nodeId) ||
+    !isTextElement(identityKeyId) ||
+    !NODE_KEY_ID.test(identityKeyId) ||
+    !isBytesElement(identityPublicKey, ED25519_PUBLIC_KEY_BYTES) ||
+    !isBytesElement(identityFingerprint, E2EE_KEY_FINGERPRINT_BYTES) ||
+    !isProtocolVersionElement(e2eeVersionMin) ||
+    !isProtocolVersionElement(e2eeVersionMax) ||
+    typeof requireE2EE !== "boolean" ||
+    typeof requireApprovedClientE2EE !== "boolean" ||
+    !isUintElement(policyGeneration) ||
+    !isUintElement(issuedAt) ||
+    !isUintElement(expiresAt) ||
+    !isTextElement(continuityId) ||
+    !CONTINUITY_ID.test(continuityId)
+  ) {
+    return decodeFailed("transcript_malformed");
+  }
+
+  if (utf8.encode(hubOrigin).byteLength > E2EE_HUB_ORIGIN_MAX_BYTES) {
+    return decodeFailed("hub_origin_too_long");
+  }
+  try {
+    canonicalizeE2eeHubOrigin(hubOrigin);
+  } catch {
+    return decodeFailed("transcript_malformed");
+  }
+
+  if (!Array.isArray(suiteRegistry) || suiteRegistry.length === 0) {
+    return decodeFailed("transcript_malformed");
+  }
+  if (suiteRegistry.length > E2EE_SUITE_REGISTRY_MAX_ENTRIES) {
+    return decodeFailed("suite_registry_too_large");
+  }
+  if (!suiteRegistry.every((entry) => isUintElement(entry) && entry <= SUITE_ID_MAX)) {
+    return decodeFailed("transcript_malformed");
+  }
+
+  if (!Array.isArray(continuityChain)) return decodeFailed("transcript_malformed");
+  if (continuityChain.length > E2EE_CONTINUITY_CHAIN_MAX_LENGTH) {
+    return decodeFailed("continuity_chain_too_long");
+  }
+  const chain: NodeIdentityContinuityChainEntry[] = [];
+  for (const entry of continuityChain) {
+    const decoded = decodeCapabilityChainEntry(entry);
+    if (decoded === undefined) return decodeFailed("transcript_malformed");
+    chain.push(decoded);
+  }
+
+  const prekey = decodeCapabilityPrekey(prekeyCertificate);
+  if (prekey === undefined) return decodeFailed("transcript_malformed");
+
+  const derivedPatterns = e2eeEffectiveAdmittedPatterns(requireApprovedClientE2EE);
+  if (
+    !Array.isArray(admittedPatterns) ||
+    admittedPatterns.length !== derivedPatterns.length ||
+    !derivedPatterns.every((pattern, index) => admittedPatterns[index] === pattern)
+  ) {
+    return decodeFailed("transcript_malformed");
+  }
+
+  return {
+    kind: "ok",
+    value: {
+      transcript,
+      signature,
+      hubOrigin,
+      nodeId,
+      identityKeyId,
+      identityPublicKey,
+      identityFingerprint,
+      e2eeVersionMin,
+      e2eeVersionMax,
+      suiteRegistry,
+      prekeyCertificate: prekey,
+      continuityChain: chain,
+      requireE2EE,
+      requireApprovedClientE2EE,
+      admittedPatterns: derivedPatterns,
+      policyGeneration,
+      issuedAt,
+      expiresAt,
+      continuityId,
+    },
+  };
 }
 
 // ─── §7.2.1 capability signing envelope ──────────────────────────────────────

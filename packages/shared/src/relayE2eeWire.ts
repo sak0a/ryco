@@ -674,7 +674,7 @@ export function encodeE2eeCapabilityCarrier(statement: Uint8Array): Uint8Array {
   ) {
     throw new TypeError("Relay E2EE capability statement is outside its §5.3 bound.");
   }
-  const carrier = new TextEncoder().encode(
+  const carrier = CARRIER_TEXT_ENCODER.encode(
     JSON.stringify({
       _tag: E2EE_CAPABILITY_CARRIER_TAG,
       statement: base64urlUnpadded(statement),
@@ -686,7 +686,135 @@ export function encodeE2eeCapabilityCarrier(statement: Uint8Array): Uint8Array {
   return carrier;
 }
 
+/** §5.3: the carrier's two members, in the one order a standard JSON encoder emits them. */
+const CAPABILITY_CARRIER_MEMBERS = ["_tag", "statement"] as const;
+
+// Shared, like the discrimination singletons above: the decoder runs on every
+// inbound legacy-JSON payload, and neither of these carries per-payload state.
+const CARRIER_TEXT_DECODER = new TextDecoder();
+const CARRIER_TEXT_ENCODER = new TextEncoder();
+
+export type E2eeCapabilityCarrierDecodeError =
+  /**
+   * Over `E2EE_CAPABILITY_CARRIER_MAX_BYTES`, rejected BEFORE `JSON.parse` (§5.3,
+   * §15). No conforming carrier reaches this size, so the payload is not one —
+   * but it is reported apart from `not_carrier` because it is the one class the
+   * decoder refuses without ever looking at the tag.
+   */
+  | "too_large"
+  /** Not a JSON object carrying `E2EE_CAPABILITY_CARRIER_TAG`: ordinary legacy JSON. */
+  | "not_carrier"
+  /** Carrier-tagged and not the exact §5.3 form. */
+  | "malformed";
+
+/**
+ * Recognize and decode the §5.3 carrier out of a post-strip payload (§4.3).
+ *
+ * THIS IS THE ONLY PLACE THE CARRIER SUBCLASS IS RECOGNIZED. The carrier's first
+ * byte is `{`, so `classifyPostStripPayload` can only answer `legacy-json` for
+ * it; the subclass is decided by parsing the JSON and testing `_tag`, and that
+ * rule lives here because a second copy of it anywhere would be a second
+ * definition of §5.3 and a parser differential against the `JSON.stringify`
+ * encoder that produced the bytes.
+ *
+ * `not_carrier` is the ordinary answer for the legacy RPC traffic this class is
+ * mostly made of, and the caller hands such a payload on unchanged. `malformed`
+ * is the payload that claimed the reserved tag and was not a conforming carrier;
+ * §5.3 reserves the tag, so nothing else may legitimately carry it.
+ *
+ * The §5.3 form is enforced exactly as §5.3 states it: a top-level object, its
+ * two members in that order — which subsumes the separate prohibition on a
+ * `requestId` member — and the whole text byte-identical to a standard JSON
+ * encoder's output for those two values. The byte comparison is what makes the
+ * decoder immune to the UTF-8 replacement character a lenient text decode would
+ * otherwise smuggle through: replaced bytes cannot re-encode to the bytes that
+ * arrived.
+ *
+ * Direction is node to client only (§5.3, §5.6 C5). A client MUST NOT send a
+ * carrier, and this module has no encoder-side guard to add for that: the rule is
+ * that a client never calls `encodeE2eeCapabilityCarrier` at all.
+ *
+ * The `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` bound is NOT applied here. §5.2 step
+ * 0 owns it, and it owns it for every statement however it arrived — §3.2.1 S5
+ * derives the carrier bound from the statement bound, and a decoder that leaned
+ * on that derivation would be relying on arithmetic performed in another file.
+ */
+export function decodeE2eeCapabilityCarrier(
+  payload: Uint8Array,
+): E2eeDecodeResult<Uint8Array, E2eeCapabilityCarrierDecodeError> {
+  if (payload.byteLength > E2EE_CAPABILITY_CARRIER_MAX_BYTES) {
+    return { kind: "error", reason: "too_large" };
+  }
+  if (payload.byteLength === 0 || payload[0] !== LEGACY_JSON_OBJECT_FIRST_BYTE) {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(CARRIER_TEXT_DECODER.decode(payload));
+  } catch {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  const members = parsed as Readonly<Record<string, unknown>>;
+  if (members._tag !== E2EE_CAPABILITY_CARRIER_TAG) {
+    return { kind: "error", reason: "not_carrier" };
+  }
+  const keys = Object.keys(members);
+  if (
+    keys.length !== CAPABILITY_CARRIER_MEMBERS.length ||
+    CAPABILITY_CARRIER_MEMBERS.some((member, index) => keys[index] !== member)
+  ) {
+    return { kind: "error", reason: "malformed" };
+  }
+  const statement = members.statement;
+  if (typeof statement !== "string" || statement.length === 0) {
+    return { kind: "error", reason: "malformed" };
+  }
+  const reencoded = CARRIER_TEXT_ENCODER.encode(
+    JSON.stringify({ _tag: E2EE_CAPABILITY_CARRIER_TAG, statement }),
+  );
+  if (!bytesEqual(reencoded, payload)) return { kind: "error", reason: "malformed" };
+  const decoded = base64urlUnpaddedDecode(statement);
+  if (decoded === undefined) return { kind: "error", reason: "malformed" };
+  return { kind: "ok", value: decoded };
+}
+
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+const BASE64URL_VALUES: ReadonlyMap<string, number> = new Map(
+  [...BASE64URL_ALPHABET].map((character, value) => [character, value]),
+);
+
+/**
+ * The inverse of `base64urlUnpadded`, and strict in both directions §5.3 cares
+ * about: padding, whitespace, and every character outside the alphabet are
+ * rejected, a length leaving one leftover character is rejected because no byte
+ * string encodes to it, and a final group whose unused low bits are nonzero is
+ * rejected because two texts would otherwise decode to the same statement.
+ */
+function base64urlUnpaddedDecode(text: string): Uint8Array | undefined {
+  if (text.length % 4 === 1) return undefined;
+  const bytes = new Uint8Array(Math.floor((text.length * 3) / 4));
+  let accumulator = 0;
+  let bits = 0;
+  let index = 0;
+  for (const character of text) {
+    const value = BASE64URL_VALUES.get(character);
+    if (value === undefined) return undefined;
+    accumulator = (accumulator << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes[index] = (accumulator >> bits) & 0xff;
+      accumulator &= (1 << bits) - 1;
+      index += 1;
+    }
+  }
+  if (bits > 0 && (accumulator & ((1 << bits) - 1)) !== 0) return undefined;
+  return bytes;
+}
 
 /**
  * Unpadded base64url of the statement CBOR (§5.3).
