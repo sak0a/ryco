@@ -206,18 +206,42 @@ const BASE_INPUT: NodeE2eeCapabilityVerificationInput = {
   now: NOW,
 };
 
+/** The §13.1 records the §5.2 step 6 cases resolve to, per §12.1.1. */
+const PINNED_TO_OLD_KEY = { identityFingerprint: OLD_FINGERPRINT, continuityId: CONTINUITY_ID };
+const PINNED_TO_CURRENT_KEY = {
+  identityFingerprint: IDENTITY_FINGERPRINT,
+  continuityId: CONTINUITY_ID,
+};
+
 function verify(
   overrides: Partial<NodeE2eeCapabilityVerificationInput> = {},
 ): NodeE2eeCapabilityVerification {
   return verifyNodeE2eeCapabilityStatement({ ...BASE_INPUT, ...overrides });
 }
 
-/** The `{ kind, reason }` / `{ kind, event }` shape a case asserts, without the payload. */
+/**
+ * The `{ kind, reason }` / `{ kind, event }` shape a case asserts, without the
+ * statement. `selectedSuite` is carried rather than dropped: it is the §8.2
+ * decision every verified case is also about, and a helper that discarded it
+ * would leave the selection asserted in exactly one test.
+ */
 function verdict(result: NodeE2eeCapabilityVerification): unknown {
-  if (result.kind === "verified") return { kind: "verified", anchor: result.anchor };
+  if (result.kind === "verified") {
+    return { kind: "verified", anchor: result.anchor, selectedSuite: result.selectedSuite };
+  }
   if (result.kind === "identity-event") return { kind: "identity-event", event: result.event };
+  if (result.kind === "invalid" && result.chainFailure !== undefined) {
+    return { kind: "invalid", reason: result.reason, chainFailure: result.chainFailure };
+  }
   return { kind: result.kind, reason: result.reason };
 }
+
+/** A verified verdict, with the one suite §3.4 registers in version 1. */
+const verified = (anchor: string): unknown => ({
+  kind: "verified",
+  anchor,
+  selectedSuite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+});
 
 describe("§5.3 capability carrier", () => {
   it("emits the bytes the node's own carrier assertions pin, and reads them back", () => {
@@ -251,15 +275,47 @@ describe("§5.3 capability carrier", () => {
     }
   });
 
-  it("rejects an oversized payload before it is parsed at all", () => {
-    // Over the bound AND not JSON: only a decoder that measured first can answer
-    // `too_large` for it.
+  it("keeps the §4.4 class partition decidable past the §5.3 bound", () => {
+    // Ordinary legacy JSON runs far past this bound — `RELAY_MAX_DATA_CHUNK_BYTES`
+    // is 262,144 — and every byte of it is row K19's `LEGACY-JSON (non-carrier)`.
+    // A decoder that measured before it looked at the tag would answer the same
+    // thing for this payload and for the oversized carrier below, and the caller
+    // would have no way to tell K19 from K3.
+    const legacy = utf8(
+      JSON.stringify({ _tag: "rpc.response", requestId: "01HZ", value: "A".repeat(6_969) }),
+    );
+    expect(legacy.byteLength).toBeGreaterThan(E2EE_CAPABILITY_CARRIER_MAX_BYTES);
+    expect(decodeE2eeCapabilityCarrier(legacy)).toEqual({ kind: "error", reason: "not_carrier" });
+
+    // Carrier-tagged and past the bound: the reserved tag (§5.3) makes it a
+    // carrier attempt, so it takes the CARRIER rows and never K19.
+    const oversizedCarrier = utf8(
+      JSON.stringify({ _tag: E2EE_CAPABILITY_CARRIER_TAG, statement: "A".repeat(6_969) }),
+    );
+    expect(oversizedCarrier.byteLength).toBeGreaterThan(E2EE_CAPABILITY_CARRIER_MAX_BYTES);
+    expect(decodeE2eeCapabilityCarrier(oversizedCarrier)).toEqual({
+      kind: "error",
+      reason: "malformed",
+    });
+
+    // Past the bound and not JSON at all: still classified, and never parsed.
     const oversized = new Uint8Array(E2EE_CAPABILITY_CARRIER_MAX_BYTES + 1).fill(0x7b);
-    expect(decodeE2eeCapabilityCarrier(oversized)).toEqual({ kind: "error", reason: "too_large" });
-    // One byte under, the same bytes reach the parser and fail there instead.
+    expect(decodeE2eeCapabilityCarrier(oversized)).toEqual({
+      kind: "error",
+      reason: "not_carrier",
+    });
     expect(
       decodeE2eeCapabilityCarrier(oversized.subarray(0, E2EE_CAPABILITY_CARRIER_MAX_BYTES)),
     ).toEqual({ kind: "error", reason: "not_carrier" });
+
+    // The vocabulary IS the §4.4 partition: two reasons, two input classes.
+    const reasons = new Set(
+      [legacy, oversizedCarrier, oversized, utf8("{}"), new Uint8Array(0)].map((payload) => {
+        const decoded = decodeE2eeCapabilityCarrier(payload);
+        return decoded.kind === "error" ? decoded.reason : "ok";
+      }),
+    );
+    expect([...reasons].toSorted()).toEqual(["malformed", "not_carrier"]);
   });
 
   it("answers `not_carrier` for the legacy JSON this class is mostly made of", () => {
@@ -377,6 +433,24 @@ describe("§5.2 statement verification", () => {
         kind: "invalid",
         reason: "transcript_too_large",
       });
+    });
+
+    it("refuses a statement whose signature element is not one Ed25519 signature", () => {
+      // A shape rejection, not a signature rejection: the wrong-length case must
+      // fail at step 0 rather than being handed to `verifyE2eeSignature`, which
+      // is the only thing containing it today. The transcript is well formed, so
+      // nothing else in the statement can be what fails.
+      const transcript = transcriptOf();
+      for (const length of [0, 63, 65, 512]) {
+        const statement = encodeCanonicalE2eeCbor([transcript, new Uint8Array(length)]);
+        expect(statement.byteLength).toBeLessThanOrEqual(E2EE_CAPABILITY_STATEMENT_MAX_BYTES);
+        expect(verdict(verify({ statement })), String(length)).toEqual({
+          kind: "invalid",
+          reason: "statement_malformed",
+        });
+      }
+      // The control: the same transcript with a real 64-byte signature verifies.
+      expect(verify({ statement: statementOf(transcript) }).kind).toBe("verified");
     });
 
     it("pins the §3.2.1 S4 arithmetic the two bounds are derived by", () => {
@@ -621,32 +695,146 @@ describe("§5.2 statement verification", () => {
         reason: "prekey_lifetime_inverted",
       });
     });
+
+    it("rejects a zero-length window and one that has not opened yet", () => {
+      // §6.4 bounds the LENGTH of the window and leaves its POSITION to these two
+      // rules. Both are checked by the node against the mirror-image §7.4
+      // certificate (`verifyE2eeClientPrekeyCertificate`), and §6.4 puts the
+      // identical obligation on both verifiers, so a window one accepts and the
+      // other refuses is a divergence between the two ends of the same rule.
+      const withWindow = (createdAt: number, expiresAt: number): Uint8Array => {
+        const crossSignature = ed25519.sign(
+          encodeNodeE2eePrekeyTranscript({
+            hubOrigin: HUB_ORIGIN,
+            nodeId: NODE_ID,
+            identityKeyId: IDENTITY_KEY_ID,
+            prekeyId: PREKEY_ID,
+            identityPublicKey: NODE_PUBLIC_KEY,
+            agreementPublicKey: AGREEMENT_PUBLIC_KEY,
+            createdAt,
+            expiresAt,
+          }),
+          NODE_SEED,
+        );
+        return statementOf(
+          transcriptOf({
+            prekeyCertificate: {
+              ...BASE_TRANSCRIPT.prekeyCertificate,
+              crossSignature,
+              createdAt,
+              expiresAt,
+            },
+          }),
+        );
+      };
+
+      // A correctly cross-signed certificate that expires the instant it is
+      // created. Without it the §6.4 lifetime bound is satisfied by a window
+      // holding no instant at all.
+      expect(verdict(verify({ statement: withWindow(NOW, NOW) }))).toEqual({
+        kind: "invalid",
+        reason: "prekey_lifetime_inverted",
+      });
+
+      // A decade in the future, one full `E2EE_PREKEY_LIFETIME` long, so only the
+      // window's POSITION is wrong. A verifier checking the upper edge alone
+      // accepts it, and keeps accepting it for ten years plus thirty days.
+      const distant = NOW + 10 * 365 * 24 * 3_600_000;
+      expect(
+        verdict(verify({ statement: withWindow(distant, distant + E2EE_PREKEY_LIFETIME) })),
+      ).toEqual({ kind: "invalid", reason: "prekey_not_yet_valid" });
+
+      // Exactly `E2EE_MAX_CLOCK_SKEW` of future creation is allowed, and no more.
+      const atSkew = NOW + E2EE_MAX_CLOCK_SKEW;
+      expect(verify({ statement: withWindow(atSkew, atSkew + E2EE_PREKEY_LIFETIME) }).kind).toBe(
+        "verified",
+      );
+      expect(
+        verdict(verify({ statement: withWindow(atSkew + 1, atSkew + 1 + E2EE_PREKEY_LIFETIME) })),
+      ).toEqual({ kind: "invalid", reason: "prekey_not_yet_valid" });
+    });
+  });
+
+  describe("§7.1 identifier formats and §7.6 self-consistency", () => {
+    it("refuses every malformed identifier the §7.1 formats fix", () => {
+      // `isTextElement` bounds neither length nor shape, so these formats are the
+      // only thing between a node-signed statement and an empty or kilobyte-long
+      // identifier reaching §8.3, §8.5, and whatever the client persists.
+      const malformed = ["", "wrong_AAAAAAAAAAAAAAAAAAAAAA", `nkey_${"A".repeat(512)}`];
+      const cases: readonly (readonly [string, (elements: unknown[], value: string) => void])[] = [
+        ["nodeId", (elements, value) => (elements[2] = value)],
+        ["identityKeyId", (elements, value) => (elements[4] = value)],
+        [
+          "prekeyId",
+          (elements, value) => {
+            const prekey = [...(elements[10] as readonly unknown[])];
+            prekey[0] = value;
+            elements[10] = prekey;
+          },
+        ],
+        // Element 18 is the value §5.2 step 6 compares against the §13.1 pin and
+        // the value the client persists at promotion.
+        ["continuityId", (elements, value) => (elements[18] = value)],
+      ];
+      for (const [label, mutate] of cases) {
+        for (const value of malformed) {
+          expect(
+            verdict(
+              verify({ statement: tamperedStatement((elements) => mutate(elements, value)) }),
+            ),
+            `${label}=${JSON.stringify(value.slice(0, 16))}`,
+          ).toEqual({ kind: "invalid", reason: "transcript_malformed" });
+        }
+      }
+    });
+
+    it("refuses a statement whose element 14 disagrees with the set §7.6 derives from element 13", () => {
+      // §7.6 computes element 14 from element 13 — exactly `["IK"]` when
+      // `requireApprovedClientE2EE` is true — so a signed statement carrying the
+      // two out of agreement is self-inconsistent and no admission rule may run
+      // from it. A verifier that merely parsed element 14 would accept it and
+      // silently substitute the derived set, leaving the client's view of the
+      // node's committed policy different from the bytes the node signed.
+      expect(
+        verdict(verify({ statement: tamperedStatement((elements) => (elements[13] = true)) })),
+      ).toEqual({ kind: "invalid", reason: "transcript_malformed" });
+      expect(
+        verdict(
+          verify({
+            statement: statementOf(
+              encodeCanonicalE2eeCbor(
+                (() => {
+                  const elements = elementsOf(transcriptOf({ requireApprovedClientE2EE: true }));
+                  elements[13] = false;
+                  return elements;
+                })(),
+              ),
+            ),
+          }),
+        ),
+      ).toEqual({ kind: "invalid", reason: "transcript_malformed" });
+      // The controls: each policy value with the set §7.6 derives from it.
+      expect(verify().kind).toBe("verified");
+      expect(
+        verify({ statement: statementOf(transcriptOf({ requireApprovedClientE2EE: true })) }).kind,
+      ).toBe("verified");
+    });
   });
 
   describe("step 6 — the §7.5 chain, and the only step that answers `identity-event`", () => {
-    const pinnedToOldKey = { identityFingerprint: OLD_FINGERPRINT, continuityId: CONTINUITY_ID };
-    const pinnedToCurrentKey = {
-      identityFingerprint: IDENTITY_FINGERPRINT,
-      continuityId: CONTINUITY_ID,
-    };
+    const pinnedToOldKey = PINNED_TO_OLD_KEY;
+    const pinnedToCurrentKey = PINNED_TO_CURRENT_KEY;
 
     const withChain = (chain: readonly NodeIdentityContinuityChainEntry[]): Uint8Array =>
       statementOf(transcriptOf({ continuityChain: chain }));
 
     it("walks a pin forward to the current key silently, and reports which anchor held", () => {
-      expect(verdict(verify({ pin: pinnedToOldKey }))).toEqual({
-        kind: "verified",
-        anchor: "pin-updated",
-      });
-      expect(verdict(verify({ pin: pinnedToCurrentKey }))).toEqual({
-        kind: "verified",
-        anchor: "pin-unchanged",
-      });
-      expect(verdict(verify())).toEqual({ kind: "verified", anchor: "none" });
-      expect(verdict(verify({ statement: withChain([]), pin: undefined }))).toEqual({
-        kind: "verified",
-        anchor: "none",
-      });
+      expect(verdict(verify({ pin: pinnedToOldKey }))).toEqual(verified("pin-updated"));
+      expect(verdict(verify({ pin: pinnedToCurrentKey }))).toEqual(verified("pin-unchanged"));
+      expect(verdict(verify())).toEqual(verified("none"));
+      expect(verdict(verify({ statement: withChain([]), pin: undefined }))).toEqual(
+        verified("none"),
+      );
     });
 
     it("answers `identity-event` for every chain break §7.5 enumerates", () => {
@@ -727,9 +915,6 @@ describe("§5.2 statement verification", () => {
             continuityId: CONTINUITY_ID,
           },
         ],
-        // Every break is channel-fatal on first contact too: §7.5's chain rules
-        // are properties of the carried chain, not of the pin.
-        ["spliced, unpinned", withChain([CHAIN_FIRST, spliced]), "link_mismatch", undefined],
       ];
 
       for (const [label, statement, failure, pin] of cases) {
@@ -741,6 +926,74 @@ describe("§5.2 statement verification", () => {
           event: { reason: "continuity_chain", failure },
         });
       }
+
+      // WITH NO PIN, NONE OF THEM IS AN IDENTITY EVENT. §5.2 step 6 is scoped to
+      // "when a **verified** pin exists for this node", §7.6 element 18 calls a
+      // statement disagreeing with its own chain invalid, and §13.2.1 forbids
+      // conflating first contact with the §13.3 message. Every break is still
+      // channel-fatal — §7.5's chain rules are properties of the carried chain —
+      // but it takes rows K2/K3, because a Hub that synthesizes the whole
+      // first-contact statement could otherwise raise the re-verification prompt
+      // on every channel for a node the owner has never verified.
+      const unpinned: readonly (readonly [string, Uint8Array, string])[] = [
+        ["spliced", withChain([CHAIN_FIRST, spliced]), "link_mismatch"],
+        ["reordered", withChain([CHAIN_SECOND, CHAIN_FIRST]), "generation_not_consecutive"],
+        ["truncated tail", withChain([CHAIN_FIRST]), "identity_key_mismatch"],
+        ["hub origin", withChain([CHAIN_FIRST, otherOriginEntry]), "hub_origin_mismatch"],
+        ["continuity id", withChain([CHAIN_FIRST, otherContinuityEntry]), "continuity_id_mismatch"],
+        ["signature", withChain([CHAIN_FIRST, wronglySigned]), "invalid_signature"],
+      ];
+      for (const [label, statement, chainFailure] of unpinned) {
+        const result = verify({ statement, pin: undefined });
+        expect(verdict(result), label).toEqual({
+          kind: "invalid",
+          reason: "continuity_chain_invalid",
+          chainFailure,
+        });
+        expect(result.kind, label).not.toBe("identity-event");
+      }
+    });
+
+    it("recomputes a chain certificate's own fingerprints inside the §7.5 walk", () => {
+      // §5.2 step 2 recomputes the two STATEMENT-level fingerprints; the two on
+      // each carried certificate are recomputed by the walk one step later, and
+      // that is where they belong: a pin is a `ryco.node-key.v1` fingerprint and
+      // reachability is decided by comparing it against a certificate's
+      // `oldFingerprint`, so accepting either on the carrier's authority would
+      // let a spliced chain claim a pin it never touched. Their disagreement is
+      // therefore §7.5's verdict and takes §7.5's disposition — which, per the
+      // pin rule, is the identity event only when there is a pin to re-verify.
+      const elements = elementsOf(CHAIN_SECOND.transcript);
+      elements[11] = UNRELATED_FINGERPRINT;
+      const transcript = encodeCanonicalE2eeCbor(elements);
+      const statement = withChain([
+        CHAIN_FIRST,
+        { transcript, signature: ed25519.sign(transcript, NEW_SEED) },
+      ]);
+      expect(verdict(verify({ statement, pin: pinnedToOldKey }))).toEqual({
+        kind: "identity-event",
+        event: { reason: "continuity_chain", failure: "malformed_entry" },
+      });
+      expect(verdict(verify({ statement }))).toEqual({
+        kind: "invalid",
+        reason: "continuity_chain_invalid",
+        chainFailure: "malformed_entry",
+      });
+    });
+
+    it("carries the identity material the §13.3 and §13.2.1 surfaces have to display", () => {
+      // §13.3 displays "the new fingerprint and safety number" and §13.2.1
+      // situation 2 displays it beside the previously verified one. Steps 0–5
+      // already proved the statement authentic to its carried key, so the caller
+      // reads that value here rather than re-decoding bytes it has not checked.
+      const result = verify({
+        statement: statementOf(transcriptOf({ continuityChain: [CHAIN_FIRST] })),
+        pin: pinnedToOldKey,
+      });
+      if (result.kind !== "identity-event") throw new Error("expected an identity event");
+      expect(hex(result.statement.identityFingerprint)).toBe(hex(IDENTITY_FINGERPRINT));
+      expect(result.statement.nodeId).toBe(NODE_ID);
+      expect(result.statement.continuityId).toBe(CONTINUITY_ID);
     });
 
     it("treats a continuity id differing from the pinned one as an identity event, never first contact", () => {
@@ -759,8 +1012,8 @@ describe("§5.2 statement verification", () => {
         verdict(
           verify({ statement, pin: { ...pinnedToCurrentKey, continuityId: OTHER_CONTINUITY_ID } }),
         ),
-      ).toEqual({ kind: "verified", anchor: "pin-unchanged" });
-      expect(verdict(verify({ statement }))).toEqual({ kind: "verified", anchor: "none" });
+      ).toEqual(verified("pin-unchanged"));
+      expect(verdict(verify({ statement }))).toEqual(verified("none"));
     });
   });
 
@@ -771,6 +1024,44 @@ describe("§5.2 statement verification", () => {
       expect(result.kind).not.toBe("identity-event");
       expect(verify({ acceptedPolicyGeneration: 7 }).kind).toBe("verified");
       expect(verify({ acceptedPolicyGeneration: 6 }).kind).toBe("verified");
+    });
+
+    it("SURFACES AN IDENTITY EVENT THROUGH A FAILING STEP 7", () => {
+      // The same hazard steps 8 and 9 are tested for, one step earlier and one
+      // step subtler: a node substitution reported to the owner as a routine
+      // rollback is the exact masking §5.2's step order exists to prevent, and
+      // §5.7 is explicit that a regressed generation "MUST NOT auto-launch the
+      // §13.2 ceremony or the §13.3 re-verification UI" — which only holds as a
+      // separation if the identity event wins when both apply.
+      const spliced = continuityEntry({
+        generation: 2,
+        oldSeed: UNRELATED_SEED,
+        oldKeyId: NEW_KEY_ID,
+        newPublicKey: NODE_PUBLIC_KEY,
+        newKeyId: IDENTITY_KEY_ID,
+      });
+      const statement = statementOf(
+        transcriptOf({ continuityChain: [CHAIN_FIRST, spliced], policyGeneration: 7 }),
+      );
+      expect(
+        verdict(verify({ statement, pin: PINNED_TO_OLD_KEY, acceptedPolicyGeneration: 9 })),
+      ).toEqual({
+        kind: "identity-event",
+        event: { reason: "continuity_chain", failure: "link_mismatch" },
+      });
+      // The control: the same generation against the same accepted high-water
+      // mark, with the chain intact, is the rollback the step-6 failure masked.
+      expect(verdict(verify({ pin: PINNED_TO_OLD_KEY, acceptedPolicyGeneration: 9 }))).toEqual({
+        kind: "invalid",
+        reason: "policy_generation_regressed",
+      });
+      // And with no pin the two orders are still distinguishable, because a
+      // chain break is its own invalid reason rather than the rollback's.
+      expect(verdict(verify({ statement, acceptedPolicyGeneration: 9 }))).toEqual({
+        kind: "invalid",
+        reason: "continuity_chain_invalid",
+        chainFailure: "link_mismatch",
+      });
     });
   });
 
@@ -813,6 +1104,41 @@ describe("§5.2 statement verification", () => {
         kind: "unusable",
         reason: "empty_suite_intersection",
       });
+    });
+
+    it("selects from the CLIENT's preference order against the node's registry, not the reverse", () => {
+      // §8.2: "Selection is the client's: it takes its own fixed local preference
+      // order and selects the first entry that appears in the advertised
+      // registry." §3.4 registers one suite in version 1, so the two lists cannot
+      // yet be told apart by the id selected — but they can by their bounds, which
+      // are not the same bound. `E2EE_SUITE_REGISTRY_MAX_ENTRIES` is §15's limit on
+      // the ADVERTISED registry and is enforced at decode (§7.6); the client's own
+      // local policy is local configuration and carries no such cap. A call site
+      // that passed the two the other way round would take the client's policy for
+      // the advertised registry and refuse this input outright.
+      const longPreference = [
+        ...Array.from(
+          { length: E2EE_SUITE_REGISTRY_MAX_ENTRIES },
+          (_unused, index) => index + 0x70,
+        ),
+        E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      ];
+      expect(longPreference.length).toBeGreaterThan(E2EE_SUITE_REGISTRY_MAX_ENTRIES);
+      expect(verdict(verify({ localSuitePreference: longPreference }))).toEqual(verified("none"));
+      // And the registry keeps its bound: an advertised one this long never
+      // validates at all, so the asymmetry above is the specified one.
+      const overBound = elementsOf(transcriptOf());
+      overBound[9] = longPreference;
+      expect(
+        verdict(verify({ statement: statementOf(encodeCanonicalE2eeCbor(overBound)) })),
+      ).toEqual({ kind: "invalid", reason: "suite_registry_too_large" });
+      // The node's own order never decides: its registry offers an unregistered
+      // suite first, and §3.4 makes that unselectable rather than preferred.
+      const registry = elementsOf(transcriptOf());
+      registry[9] = [0x7f, E2EE_SUITE_25519_CHACHAPOLY_SHA256];
+      expect(
+        verdict(verify({ statement: statementOf(encodeCanonicalE2eeCbor(registry)) })),
+      ).toEqual(verified("none"));
     });
 
     it("SURFACES AN IDENTITY EVENT THROUGH A FAILING STEP 8 OR 9", () => {
@@ -880,16 +1206,43 @@ describe("§5.2 statement verification", () => {
 
     it("keeps the identity vocabulary and the unusable vocabulary disjoint", () => {
       // The structural claim, stated as a value: an `unusable` verdict carries a
-      // reason and nothing else, so there is no field an identity substitution
-      // could travel in even if some later step tried to report one here.
+      // reason drawn from §8.2's own vocabulary and the validated statement, and
+      // nothing else — so there is no field an identity substitution could travel
+      // in even if some later step tried to report one here.
       const unusable = verify({ statement: outOfRange });
       if (unusable.kind !== "unusable") throw new Error("expected an unusable verdict");
-      expect(Object.keys(unusable).toSorted()).toEqual(["kind", "reason"]);
+      expect(Object.keys(unusable).toSorted()).toEqual(["kind", "reason", "statement"]);
       expect([
         "protocol_version_out_of_range",
         "pattern_not_admitted",
         "empty_suite_intersection",
       ]).toContain(unusable.reason);
+    });
+
+    it("carries the statement §12.1 says an unusable verdict HAS VALIDATED", () => {
+      // §12.1: a statement unusable under §5.2 step 8, step 9, or §8.2 "has
+      // validated", so it sets the web latch; §5.7 requires web to remember the
+      // highest generation "set on the first statement it validates for a node in
+      // that session". Both read the statement, so a verdict that dropped it would
+      // make §5.7's web rollback resistance unimplementable through this API: the
+      // next channel could then replay a genuine lower-generation statement and
+      // step 7 would have nothing to compare it against.
+      const superseded = statementOf(transcriptOf({ policyGeneration: 5 }));
+      for (const [label, result] of [
+        ["step 8", verify({ statement: outOfRange })],
+        ["step 9", verify({ statement: ikOnly, tier: "web" })],
+        ["§8.2", verify({ localSuitePreference: [0x7f] })],
+      ] as const) {
+        if (result.kind !== "unusable") throw new Error(`expected an unusable verdict: ${label}`);
+        expect(result.statement.policyGeneration, label).toBe(7);
+        expect(result.statement.nodeId, label).toBe(NODE_ID);
+      }
+      // Having recorded generation 7 from the unusable verdict, the replay of a
+      // genuine generation-5 statement on the next channel is refused.
+      expect(verdict(verify({ statement: superseded, acceptedPolicyGeneration: 7 }))).toEqual({
+        kind: "invalid",
+        reason: "policy_generation_regressed",
+      });
     });
   });
 
@@ -991,19 +1344,40 @@ describe("§5.2 statement verification", () => {
         reason: "suite_registry_too_large",
       });
       expect(E2EE_SUITE_REGISTRY_MAX_ENTRIES).toBe(8);
+
+      // §7.6 element 9 is nonempty. This is the only thing between a peer
+      // statement and `selectE2eeSuite`, whose empty-registry guard is a
+      // PRECONDITION failure — it throws rather than answering a verdict — so
+      // this rejection is what keeps §5.3 carrier bytes off that path.
+      const empty = elementsOf(transcriptOf());
+      empty[9] = [];
+      expect(verdict(verify({ statement: statementOf(encodeCanonicalE2eeCbor(empty)) }))).toEqual({
+        kind: "invalid",
+        reason: "transcript_malformed",
+      });
     });
 
     it("checks the continuity chain depth before any signature verification", () => {
       const entry = elementsOf(transcriptOf())[11] as readonly unknown[];
-      const elements = elementsOf(transcriptOf());
-      elements[11] = Array.from(
-        { length: E2EE_CONTINUITY_CHAIN_MAX_LENGTH + 1 },
-        () => entry[0] as unknown,
-      );
-      expect(verdict(verify({ statement: unsigned(encodeCanonicalE2eeCbor(elements)) }))).toEqual({
+      const chainOf = (length: number): Uint8Array => {
+        const elements = elementsOf(transcriptOf());
+        elements[11] = Array.from({ length }, () => entry[0] as unknown);
+        return unsigned(encodeCanonicalE2eeCbor(elements));
+      };
+      // At the bound the statement gets PAST the depth check, so a node that has
+      // rotated exactly `E2EE_CONTINUITY_CHAIN_MAX_LENGTH` times is still
+      // reachable. Without this half, an off-by-one closes the E2EE channel for
+      // that node permanently and nothing here notices.
+      expect(verdict(verify({ statement: chainOf(E2EE_CONTINUITY_CHAIN_MAX_LENGTH) }))).toEqual({
         kind: "invalid",
-        reason: "continuity_chain_too_long",
+        reason: "identity_signature_invalid",
       });
+      expect(verdict(verify({ statement: chainOf(E2EE_CONTINUITY_CHAIN_MAX_LENGTH + 1) }))).toEqual(
+        {
+          kind: "invalid",
+          reason: "continuity_chain_too_long",
+        },
+      );
       expect(E2EE_CONTINUITY_CHAIN_MAX_LENGTH).toBe(8);
     });
 
@@ -1039,6 +1413,59 @@ describe("§5.2 statement verification", () => {
       });
       expect(E2EE_ACCOUNT_ID_MAX_BYTES).toBe(256);
     });
+
+    it("measures the account scope in UTF-8 BYTES, which is the unit §7.1 states", () => {
+      // Every ASCII assertion above holds identically under a UTF-16 unit count,
+      // so the unit is pinned here or not at all. `assertE2eeAccountId` measures
+      // bytes, and a verifier disagreeing with it would admit a scope the rest of
+      // the protocol refuses.
+      const emoji = "😀".repeat(E2EE_ACCOUNT_ID_MAX_BYTES / 4 + 1);
+      expect(utf8(emoji).byteLength).toBeGreaterThan(E2EE_ACCOUNT_ID_MAX_BYTES);
+      expect(emoji.length).toBeLessThan(E2EE_ACCOUNT_ID_MAX_BYTES);
+      expect(verdict(verify({ accountId: emoji }))).toEqual({
+        kind: "invalid",
+        reason: "account_scope_invalid",
+      });
+      // The control: the same alphabet exactly at the byte bound is accepted.
+      const atBound = "😀".repeat(E2EE_ACCOUNT_ID_MAX_BYTES / 4);
+      expect(utf8(atBound).byteLength).toBe(E2EE_ACCOUNT_ID_MAX_BYTES);
+      expect(verify({ accountId: atBound }).kind).toBe("verified");
+    });
+  });
+
+  it("ANSWERS A VERDICT FOR EVERY PEER BYTE STRING AND THROWS FOR NONE", () => {
+    // The typed-result design exists so that peer-controlled §5.3 carrier bytes
+    // cannot raise: an uncaught exception on the receive path is a denial of
+    // service on a channel a Hub can drive at will, not a verdict. Every guard
+    // that upholds this is one line long somewhere, so the invariant is asserted
+    // over the corpus rather than left to whichever case happens to cover it.
+    const emptyRegistry = elementsOf(transcriptOf());
+    emptyRegistry[9] = [];
+    const overLongRegistry = elementsOf(transcriptOf());
+    overLongRegistry[9] = Array.from({ length: 64 }, (_unused, index) => index + 1);
+    const emptyChainEntry = elementsOf(transcriptOf());
+    emptyChainEntry[11] = [[new Uint8Array(0), new Uint8Array(64)]];
+
+    const corpus: readonly Uint8Array[] = [
+      new Uint8Array(0),
+      Uint8Array.from([0xf7]),
+      Uint8Array.from([0x9f, 0x01, 0xff]),
+      Uint8Array.from({ length: 512 }, (_unused, index) => (index * 137 + 61) & 0xff),
+      new Uint8Array(E2EE_CAPABILITY_STATEMENT_MAX_BYTES + 1).fill(0xff),
+      encodeCanonicalE2eeCbor([transcriptOf(), new Uint8Array(0)]),
+      statementOf(encodeCanonicalE2eeCbor(emptyRegistry)),
+      statementOf(encodeCanonicalE2eeCbor(overLongRegistry)),
+      statementOf(encodeCanonicalE2eeCbor(emptyChainEntry)),
+      STATEMENT,
+    ];
+    for (const statement of corpus) {
+      for (const pin of [undefined, PINNED_TO_OLD_KEY, PINNED_TO_CURRENT_KEY]) {
+        expect(() => verify({ statement, pin }), hex(statement.subarray(0, 8))).not.toThrow();
+        expect(["verified", "invalid", "identity-event", "unusable"]).toContain(
+          verify({ statement, pin }).kind,
+        );
+      }
+    }
   });
 });
 
@@ -1105,7 +1532,7 @@ describe("§16.3 corpus, driven through the §5.2 verifier", () => {
     ]) {
       const entry = caseByName(F03, name);
       const result = verify({ statement: fixtureBytes(entry.expected.statement), now: NOW });
-      expect(verdict(result), name).toEqual({ kind: "verified", anchor: "none" });
+      expect(verdict(result), name).toEqual(verified("none"));
       if (result.kind !== "verified") continue;
       expect(result.statement.admittedPatterns, name).toEqual(entry.expected.admittedPatterns);
       expect(hex(result.statement.prekeyCertificate.agreementFingerprint), name).toBe(

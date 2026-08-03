@@ -694,17 +694,35 @@ const CAPABILITY_CARRIER_MEMBERS = ["_tag", "statement"] as const;
 const CARRIER_TEXT_DECODER = new TextDecoder();
 const CARRIER_TEXT_ENCODER = new TextEncoder();
 
+/**
+ * §5.3's fixed opening bytes, taken from the same encoder the carrier is built
+ * with rather than written out: the carrier text is byte-identical to a standard
+ * JSON encoder's output for the two members in that order, so every conforming
+ * carrier begins with exactly these bytes.
+ */
+const CAPABILITY_CARRIER_PREFIX = CARRIER_TEXT_ENCODER.encode(
+  JSON.stringify({ _tag: E2EE_CAPABILITY_CARRIER_TAG }).slice(0, -1),
+);
+
+function hasCapabilityCarrierPrefix(payload: Uint8Array): boolean {
+  const length = CAPABILITY_CARRIER_PREFIX.byteLength;
+  return (
+    payload.byteLength >= length &&
+    bytesEqual(payload.subarray(0, length), CAPABILITY_CARRIER_PREFIX)
+  );
+}
+
 export type E2eeCapabilityCarrierDecodeError =
   /**
-   * Over `E2EE_CAPABILITY_CARRIER_MAX_BYTES`, rejected BEFORE `JSON.parse` (§5.3,
-   * §15). No conforming carrier reaches this size, so the payload is not one —
-   * but it is reported apart from `not_carrier` because it is the one class the
-   * decoder refuses without ever looking at the tag.
+   * Not a JSON object carrying `E2EE_CAPABILITY_CARRIER_TAG`, at any size:
+   * §4.4's `LEGACY-JSON (non-carrier)` class, rows K9, K10, K19, and K23.
    */
-  | "too_large"
-  /** Not a JSON object carrying `E2EE_CAPABILITY_CARRIER_TAG`: ordinary legacy JSON. */
   | "not_carrier"
-  /** Carrier-tagged and not the exact §5.3 form. */
+  /**
+   * The reserved tag was claimed and the payload is not a conforming carrier,
+   * including one past `E2EE_CAPABILITY_CARRIER_MAX_BYTES`: §4.4's `CARRIER`
+   * class, rows K1–K4 and K20.
+   */
   | "malformed";
 
 /**
@@ -734,19 +752,35 @@ export type E2eeCapabilityCarrierDecodeError =
  * carrier, and this module has no encoder-side guard to add for that: the rule is
  * that a client never calls `encodeE2eeCapabilityCarrier` at all.
  *
- * The `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` bound is NOT applied here. §5.2 step
- * 0 owns it, and it owns it for every statement however it arrived — §3.2.1 S5
- * derives the carrier bound from the statement bound, and a decoder that leaned
- * on that derivation would be relying on arithmetic performed in another file.
+ * THE TAG DECIDES THE CLASS AT EVERY SIZE. §4.4 partitions legacy JSON into
+ * exactly two input classes, and the two reasons above are those classes, so
+ * `E2EE_CAPABILITY_CARRIER_MAX_BYTES` is never answered for a payload this
+ * decoder has not read: §15 places that bound on the node at emit, ordinary
+ * legacy RPC traffic runs far past it — `RELAY_MAX_DATA_CHUNK_BYTES` alone is
+ * more than thirty times larger, before reassembly — and a decoder that measured
+ * before it looked would answer identically for row K19's large file read and for
+ * an oversized carrier, making the partition undecidable exactly where a Hub can
+ * choose the size. Past the bound the class is read off §5.3's fixed opening
+ * bytes instead, which keeps the bound ahead of `JSON.parse` without collapsing
+ * the two classes.
+ *
+ * The `E2EE_CAPABILITY_STATEMENT_MAX_BYTES` bound is NOT applied here either.
+ * §5.2 step 0 owns it, and it owns it for every statement however it arrived —
+ * §3.2.1 S5 derives the carrier bound from the statement bound, and a decoder
+ * that leaned on that derivation would be relying on arithmetic performed in
+ * another file.
  */
 export function decodeE2eeCapabilityCarrier(
   payload: Uint8Array,
 ): E2eeDecodeResult<Uint8Array, E2eeCapabilityCarrierDecodeError> {
-  if (payload.byteLength > E2EE_CAPABILITY_CARRIER_MAX_BYTES) {
-    return { kind: "error", reason: "too_large" };
-  }
   if (payload.byteLength === 0 || payload[0] !== LEGACY_JSON_OBJECT_FIRST_BYTE) {
     return { kind: "error", reason: "not_carrier" };
+  }
+  if (payload.byteLength > E2EE_CAPABILITY_CARRIER_MAX_BYTES) {
+    return {
+      kind: "error",
+      reason: hasCapabilityCarrierPrefix(payload) ? "malformed" : "not_carrier",
+    };
   }
   let parsed: unknown;
   try {

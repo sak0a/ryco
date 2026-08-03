@@ -49,8 +49,10 @@ import { type E2eeSuiteId } from "./relayE2eeWire.ts";
 // So the requirement is carried by the TYPE. Each variant has its own reason
 // vocabulary and the three do not overlap:
 //
-//   • `invalid`        — steps 0–5 and step 7. Rows K2/K3 of §4.4.
-//   • `identity-event` — step 6 alone. The §13.3 re-verification path.
+//   • `invalid`        — steps 0–5, step 7, and step 6 for a caller holding no
+//                        verified pin. Rows K2/K3 of §4.4.
+//   • `identity-event` — step 6 with a VERIFIED pin, and nothing else. The §13.3
+//                        re-verification path.
 //   • `unusable`       — steps 8 and 9, and §8.2's empty suite intersection,
 //                        which §5.2 step 8 explicitly gives the same disposition.
 //
@@ -58,6 +60,21 @@ import { type E2eeSuiteId } from "./relayE2eeWire.ts";
 // representing an identity substitution: `E2eeStatementUnusableReason` contains
 // no identity reason and cannot be widened to hold one without changing §8.2's
 // own type. Downstream switches on the variant, never on a boolean.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THE IDENTITY EVENT NEEDS A PIN
+// ─────────────────────────────────────────────────────────────────────────────
+// §5.2 step 6 is scoped to "when a **verified** pin exists for this node", and
+// §13.3's surface says "the node you previously verified is presenting a
+// different identity" — copy §13.2.1 requires to fire only "when a channel
+// resolves to a verified pin and the identity fails to authenticate to it".
+// With no pin there is nothing to re-verify against: §12.1.1 classifies such a
+// selection, §13.2.1 owns its surface, and §7.6 element 18 calls a statement
+// disagreeing with its own chain INVALID. An unpinned chain break therefore
+// takes rows K2/K3 as any other invalid statement does. Answering the §13.3 path
+// there would hand a Hub — which synthesizes the whole self-signed statement on
+// first contact — a re-verification prompt it can raise on every channel at zero
+// cost, which is the click-through training §13.3 opens by forbidding.
 //
 // Steps 8 and 9 are not re-implemented here either. `selectE2eeSuite` already is
 // them, together with §8.2, and a second copy would be a second §5.2 step 8.
@@ -126,18 +143,28 @@ export type NodeE2eeCapabilityInvalidReason =
   | "statement_expired"
   /** §5.2 step 4. */
   | "hub_origin_mismatch"
-  /** §5.2 step 5 / §6.4 / §7.6. */
+  /**
+   * §5.2 step 5 / §6.4 / §7.6. The four window rules are the ones the node
+   * applies to the mirror-image §7.4 certificate (`verifyE2eeClientPrekeyCertificate`):
+   * §6.4 puts the identical obligation on both verifiers, so a window one accepts
+   * and the other refuses is a divergence and not a tier difference. The local
+   * diagnostic §6.4 and §11.4 name for all four is `e2ee_prekey_expired`.
+   */
   | "prekey_lifetime_inverted"
   | "prekey_lifetime_too_long"
+  | "prekey_not_yet_valid"
   | "prekey_expired"
   | "prekey_cross_signature_invalid"
+  /** §5.2 step 6 with NO verified pin: §7.6 element 18's `invalid`, never §13.3. */
+  | "continuity_chain_invalid"
   /** §5.2 step 7 / §5.7. The client-side diagnostic is `e2ee_policy_generation_regressed`. */
   | "policy_generation_regressed";
 
 /**
- * §5.2 step 6, and nothing else can produce one. The chain verdict is forwarded
- * as §7.5's own typed failure rather than flattened into a second vocabulary:
- * one set of names describes a chain wherever it is walked.
+ * §5.2 step 6 against a VERIFIED pin, and nothing else can produce one. The
+ * chain verdict is forwarded as §7.5's own typed failure rather than flattened
+ * into a second vocabulary: one set of names describes a chain wherever it is
+ * walked, pinned or not.
  */
 export type NodeE2eeCapabilityIdentityEvent =
   | { readonly reason: "continuity_chain"; readonly failure: NodeIdentityContinuityChainFailure }
@@ -155,6 +182,26 @@ export type NodeE2eeCapabilityIdentityEvent =
  */
 export type NodeE2eeCapabilityAnchor = "none" | "pin-unchanged" | "pin-updated";
 
+/**
+ * Every variant reached AFTER §5.2 steps 0–5 succeeded carries the decoded
+ * statement, because at that point the verifier has proved what the surfaces
+ * downstream have to display or record and no caller may re-derive it from the
+ * raw bytes instead:
+ *
+ *   • `identity-event` — §13.3 displays "the new fingerprint and safety number"
+ *     and §13.2.1 situation 2 displays it beside the previously verified one. A
+ *     caller re-decoding `input.statement` to obtain that value would be showing
+ *     the owner bytes whose signature and fingerprint agreement it never checked,
+ *     in the one ceremony that rests on the owner comparing them.
+ *   • `unusable` — §12.1 states that a statement unusable under §5.2 step 8, §5.2
+ *     step 9, or §8.2 "**has validated**", so it sets the web latch, and §5.7
+ *     requires web to remember the highest generation "set on the first statement
+ *     it **validates**". Both read the statement; a verdict that dropped it would
+ *     make §5.7's web rollback resistance unimplementable through this API.
+ *
+ * `invalid` carries none, and cannot: it is reachable before the statement
+ * decodes at all.
+ */
 export type NodeE2eeCapabilityVerification =
   | {
       readonly kind: "verified";
@@ -163,9 +210,22 @@ export type NodeE2eeCapabilityVerification =
       readonly selectedSuite: E2eeSuiteId;
       readonly anchor: NodeE2eeCapabilityAnchor;
     }
-  | { readonly kind: "invalid"; readonly reason: NodeE2eeCapabilityInvalidReason }
-  | { readonly kind: "identity-event"; readonly event: NodeE2eeCapabilityIdentityEvent }
-  | { readonly kind: "unusable"; readonly reason: E2eeStatementUnusableReason };
+  | {
+      readonly kind: "invalid";
+      readonly reason: NodeE2eeCapabilityInvalidReason;
+      /** §7.5's own verdict, present exactly when `reason` is `continuity_chain_invalid`. */
+      readonly chainFailure?: NodeIdentityContinuityChainFailure;
+    }
+  | {
+      readonly kind: "identity-event";
+      readonly event: NodeE2eeCapabilityIdentityEvent;
+      readonly statement: NodeE2eeCapabilityStatement;
+    }
+  | {
+      readonly kind: "unusable";
+      readonly reason: E2eeStatementUnusableReason;
+      readonly statement: NodeE2eeCapabilityStatement;
+    };
 
 function invalid(reason: NodeE2eeCapabilityInvalidReason): NodeE2eeCapabilityVerification {
   return { kind: "invalid", reason };
@@ -186,16 +246,19 @@ const utf8 = new TextEncoder();
  *
  * The two remaining advertised fingerprints, on each carried continuity
  * certificate, are recomputed by the §7.5 walk in step 6. That is a step later
- * than §5.2 step 2 names, and deliberately: §7.5 makes a chain-fingerprint
- * disagreement a chain failure, which is channel-fatal on the §13 path, and
- * reporting it as an ordinary invalid statement would lose exactly the
- * distinction step 6 exists to preserve.
+ * than §5.2 step 2 names, and deliberately: those two are what makes the pin
+ * REACHABLE — a pin is a `ryco.node-key.v1` fingerprint and reachability is
+ * decided by comparing it against a certificate's `oldFingerprint` — so accepting
+ * either on the carrier's authority would let a spliced chain claim to reach a
+ * pin it never touched. Recomputing them is therefore part of authenticating the
+ * chain rather than a separate shape check, and §7.5's verdict is the one that
+ * describes their failure.
  *
- * The chain is walked whether or not a pin was supplied. §7.5's chain rules are
- * properties of the carried chain itself — consecutive generations, matching
- * links, one continuity id, one Hub origin, the final new key equal to the
- * statement's identity key — and a break in them is channel-fatal on first
- * contact too.
+ * The chain is walked whether or not a pin was supplied — §7.5's chain rules are
+ * properties of the carried chain itself, and a break in them is channel-fatal on
+ * first contact too — but the DISPOSITION differs: with a pin the break is the
+ * §13.3 identity event, without one it is an invalid statement taking rows K2/K3.
+ * See the pin rule in this module's header.
  *
  * PRECONDITION: `localSuitePreference` is the client's own nonempty policy. It
  * is local configuration, so `selectE2eeSuite` throws on an empty one; every
@@ -279,11 +342,18 @@ export function verifyNodeE2eeCapabilityStatement(
   // window checked here, over the certificate advertised on this channel (§5.1).
   // There is no separate overlap comparison for a client to make: it never sees
   // the other certificate.
+  //
+  // Both edges of the window are checked, and an empty window is refused: §6.4
+  // bounds the LENGTH of a prekey's validity, so a rule testing only the upper
+  // edge would leave its POSITION unbounded and a certificate dated ten years
+  // out would be accepted for ten years plus its lifetime. The node applies the
+  // same four rules to the §7.4 mirror.
   const prekey = statement.prekeyCertificate;
-  if (prekey.expiresAt < prekey.createdAt) return invalid("prekey_lifetime_inverted");
+  if (prekey.expiresAt <= prekey.createdAt) return invalid("prekey_lifetime_inverted");
   if (prekey.expiresAt - prekey.createdAt > E2EE_PREKEY_LIFETIME) {
     return invalid("prekey_lifetime_too_long");
   }
+  if (input.now + E2EE_MAX_CLOCK_SKEW < prekey.createdAt) return invalid("prekey_not_yet_valid");
   if (prekey.expiresAt < input.now - E2EE_MAX_CLOCK_SKEW) return invalid("prekey_expired");
   if (
     !verifyNodeE2eeCapabilityCrossSignature({
@@ -298,9 +368,10 @@ export function verifyNodeE2eeCapabilityStatement(
     return invalid("prekey_cross_signature_invalid");
   }
 
-  // Step 6, and the only step that can answer `identity-event`.
+  // Step 6, and the only step that can answer `identity-event` — which it does
+  // only against a verified pin, per the pin rule in this module's header.
   if (input.pin !== undefined && statement.continuityId !== input.pin.continuityId) {
-    return { kind: "identity-event", event: { reason: "pinned_continuity_id" } };
+    return { kind: "identity-event", event: { reason: "pinned_continuity_id" }, statement };
   }
   const chain = validateNodeE2eeContinuityChain({
     chain: statement.continuityChain,
@@ -312,9 +383,13 @@ export function verifyNodeE2eeCapabilityStatement(
       : { pinnedIdentityFingerprint: input.pin.identityFingerprint }),
   });
   if (chain.kind === "error") {
+    if (input.pin === undefined) {
+      return { kind: "invalid", reason: "continuity_chain_invalid", chainFailure: chain.failure };
+    }
     return {
       kind: "identity-event",
       event: { reason: "continuity_chain", failure: chain.failure },
+      statement,
     };
   }
 
@@ -338,7 +413,9 @@ export function verifyNodeE2eeCapabilityStatement(
     advertisedVersionMax: statement.e2eeVersionMax,
     advertisedAdmittedPatterns: statement.admittedPatterns,
   });
-  if (selection.kind === "unusable") return { kind: "unusable", reason: selection.reason };
+  if (selection.kind === "unusable") {
+    return { kind: "unusable", reason: selection.reason, statement };
+  }
 
   return {
     kind: "verified",
