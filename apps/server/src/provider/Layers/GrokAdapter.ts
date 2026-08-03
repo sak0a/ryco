@@ -335,6 +335,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               issue: "cwd is required and must be non-empty.",
             });
           }
+          const grokResume =
+            input.resumeCursor === undefined ? undefined : parseGrokResume(input.resumeCursor);
+          if (input.resumeCursor !== undefined && grokResume === undefined) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: "resumeCursor must use schema version 1 and contain a non-empty sessionId.",
+            });
+          }
 
           const cwd = path.resolve(input.cwd.trim());
           const grokModelSelection =
@@ -352,7 +361,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
           );
 
-          const resumeSessionId = parseGrokResume(input.resumeCursor)?.sessionId;
+          const resumeSessionId = grokResume?.sessionId;
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,

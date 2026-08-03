@@ -204,6 +204,55 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
+  it.effect("rejects malformed resume cursors without replacing the active session", () =>
+    Effect.gen(function* () {
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const threadId = ThreadId.make("grok-invalid-resume-cursor");
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+      });
+
+      const invalidResumeCursors: ReadonlyArray<unknown> = [
+        null,
+        "mock-session-1",
+        {},
+        { schemaVersion: 2, sessionId: "mock-session-1" },
+        { schemaVersion: 1 },
+        { schemaVersion: 1, sessionId: "   " },
+      ];
+
+      for (const resumeCursor of invalidResumeCursors) {
+        const error = yield* Effect.flip(
+          adapter.startSession({
+            threadId,
+            provider: ProviderDriverKind.make("grok"),
+            cwd: process.cwd(),
+            runtimeMode: "full-access",
+            modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+            resumeCursor,
+          }),
+        );
+
+        assert.equal(error._tag, "ProviderAdapterValidationError");
+        if (error._tag === "ProviderAdapterValidationError") {
+          assert.equal(
+            error.issue,
+            "resumeCursor must use schema version 1 and contain a non-empty sessionId.",
+          );
+        }
+        assert.isTrue(yield* adapter.hasSession(threadId));
+      }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("rejects sendTurn with empty input and no attachments", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-empty-turn");

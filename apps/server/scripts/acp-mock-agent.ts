@@ -24,6 +24,8 @@ const emitXAiPromptCompleteThenHang =
   readEnv("RYCO_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG") === "1";
 const emitStaleXAiPromptCompleteBeforeSecondHang =
   readEnv("RYCO_ACP_EMIT_STALE_XAI_PROMPT_COMPLETE_BEFORE_SECOND_HANG") === "1";
+const emitLateIdlessXAiPromptSequence =
+  readEnv("RYCO_ACP_EMIT_LATE_IDLESS_XAI_PROMPT_SEQUENCE") === "1";
 const failSetConfigOption = readEnv("RYCO_ACP_FAIL_SET_CONFIG_OPTION") === "1";
 const exitOnSetConfigOption = readEnv("RYCO_ACP_EXIT_ON_SET_CONFIG_OPTION") === "1";
 const promptResponseText = readEnv("RYCO_ACP_PROMPT_RESPONSE_TEXT");
@@ -409,6 +411,29 @@ const program = Effect.gen(function* () {
           promptId: currentPromptId,
           stopReason: "end_turn",
           agentResult: null,
+        });
+        return yield* Effect.never;
+      }
+
+      if (emitLateIdlessXAiPromptSequence && promptCount <= 2) {
+        return { stopReason: "end_turn" };
+      }
+
+      if (emitLateIdlessXAiPromptSequence && promptCount === 3) {
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          stopReason: "end_turn",
+          agentResult: "stale-first-prompt",
+        });
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          stopReason: "end_turn",
+          agentResult: "stale-second-prompt",
+        });
+        writeJsonRpcNotification("_x.ai/session/prompt_complete", {
+          sessionId: requestedSessionId,
+          stopReason: "end_turn",
+          agentResult: "current-third-prompt",
         });
         return yield* Effect.never;
       }
