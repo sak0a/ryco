@@ -1,7 +1,7 @@
 /**
  * Pure presentation logic for the empty-thread hero. Kept apart from the view
  * so the headline copy and the project-switch gating are unit-testable without
- * a DOM, matching the split used by `ComposerHintRow.logic.ts`.
+ * a DOM.
  */
 
 /** How long a project name may grow before the headline elides it. */

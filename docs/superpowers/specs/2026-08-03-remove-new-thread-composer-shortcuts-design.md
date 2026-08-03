@@ -29,4 +29,3 @@ composer input triggers; only the shortcut controls are removed.
 - Build the web package and run the browser suite because the change affects web layout and
   interaction.
 - Run the repository's full required formatting, linting, typechecking, test, and build backstop.
-
