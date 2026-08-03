@@ -6,6 +6,7 @@ import {
 
 import { mobileAppLifecycle } from "../platform/appLifecycle";
 import { createMobileDpopSigner } from "../platform/dpopSigner";
+import { mobileE2eeTrustStore } from "../platform/e2eeTrustStore";
 import { mobileKV } from "../platform/kv";
 import { mobileNativeAuthorization } from "../platform/nativeAuthorization";
 import { mobilePasskeyCeremony } from "../platform/passkeyCeremony";
@@ -139,6 +140,17 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
  * `hostedHubController.bootstrap()` runs. `readBearerToken()` is synchronous,
  * so a null read would make `restoreSession` fail with a 401 and drop the user
  * to the bootstrap-availability probe even though a valid session exists.
+ *
+ * The §13 trust store is hydrated before `configureMobileHostedRuntime`, which
+ * is what installs the relay socket factory: no channel can exist until the load
+ * has completed or failed. `docs/relay-e2ee-protocol.md` §4.4 requires every
+ * latch and pin guard to be "evaluated against the pin the client resolves from
+ * **its own** channel selection" before any payload arrives, and §13.1.1's
+ * partial-loss rule makes an unread store UNEXPECTED rather than legacy-eligible.
+ * The load therefore has to precede the first `channel.accept`, and it never
+ * rejects: a store that cannot be read leaves the classifier at `unobtainable`,
+ * which fails closed, and taking the whole hosted session down for it would put
+ * a keychain hiccup between the owner and their nodes.
  */
 export function ensureMobileHostedSession(): Promise<void> {
   session ??= (async () => {
@@ -149,6 +161,7 @@ export function ensureMobileHostedSession(): Promise<void> {
     invalidateMobileHostedRuntimeConfig();
     if (!isMobileHostedModeConfigured()) return;
     await hydrateMobileHostedSessionToken();
+    await mobileE2eeTrustStore.hydrate();
     if (!(await configureMobileHostedRuntime())) return;
     await hostedHubController.bootstrap();
   })().catch(() => {

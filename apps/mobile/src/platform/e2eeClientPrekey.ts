@@ -14,6 +14,11 @@ import {
   MobileE2eeAgreementKeyError,
   type MobileE2eeAgreementKey,
 } from "./e2eeAgreementKey";
+import {
+  E2EE_CLIENT_PREKEY_RECORD_KEY,
+  mobileE2eeSecureStore,
+  type E2eeSecureStore,
+} from "./e2eeSecureStore";
 import { mobileKV } from "./kv";
 
 // The device's §7.4 client agreement-prekey certificate —
@@ -33,25 +38,22 @@ import { mobileKV } from "./kv";
 // accepts bytes to sign. A caller can ask for a certificate over a namespace; it
 // cannot ask for a signature over anything.
 //
-// THE CERTIFICATE IS NOT A SECRET. It is a signed public statement — two public
-// keys, a namespace, a validity window, and a signature — so it lives in the
-// plain KV beside the rest of the app's durable state, and only the agreement
-// SECRET is in the device-only keychain namespace (§6.3). Storage that is backed
-// up therefore cannot resurrect anything usable: a restored certificate whose
-// `agreementPublicKey` no longer matches this device's key is re-signed below,
-// and the key it named cannot follow it (§6.3's storage class, and the Android
-// backup exclusion).
+// THE CERTIFICATE IS NOT A SECRET, AND IT STILL LIVES IN THE §6.3 NAMESPACE. It
+// is a signed public statement — two public keys, a namespace, a validity window,
+// and a signature — so confidentiality is not the reason. SURVIVAL is. §6.3's
+// class is excluded from backup, restore, and device transfer, and the agreement
+// key it names is in it; the plain KV is carried by iOS iCloud backup and Android
+// Auto Backup. A record kept there would therefore outlive the key it names on an
+// OS migration to a new handset, which is exactly the "non-secret application
+// state recording a prior E2EE association" of §13.1.1's partial-loss clause —
+// state that then has to be treated as UNEXPECTED (rows K23/K24, the §13.2.1
+// surface) rather than as legacy-eligible. §13.1.1 names the alternative this
+// module takes: "a conforming client that keeps none is a fresh install by the
+// rule above". Holding the record in the same namespace as the key makes the two
+// die together, so the partial-loss condition cannot arise on this device.
 //
-// WHAT THAT PLACEMENT OWES §13.1.1, AND WHO PAYS IT. The plain KV is carried by
-// iOS iCloud backup and Android Auto Backup while the §6.3 namespace is not, so
-// on an OS migration to a new handset this record survives and the key it names
-// does not. That makes it exactly the "non-secret application state recording a
-// prior E2EE association" of §13.1.1's partial-loss clause, which requires the
-// missing E2EE state to be treated as UNEXPECTED (rows K23/K24, the §13.2.1
-// surface) rather than as legacy-eligible. Re-signing below is the right custody
-// answer and is NOT that surface; §13 is not implemented in this app yet, so the
-// obligation is recorded as open in `README.md` beside the other rollout
-// blockers rather than silently discharged here.
+// The legacy plain-KV entry is removed once per process below, so a build that
+// wrote it there cannot leave the very record this placement exists to avoid.
 
 /** The `(hubOrigin, accountId)` namespace a certificate claims (§7.4). */
 export interface ClientE2eePrekeyNamespace {
@@ -121,7 +123,15 @@ export function clientE2eePrekeyValidity(
  * certificate for a namespace this device is no longer in is not evidence worth
  * retaining.
  */
-export const CLIENT_E2EE_PREKEY_RECORD_KEY = "ryco.e2ee.clientPrekeyCertificate.v1";
+export const CLIENT_E2EE_PREKEY_RECORD_KEY = E2EE_CLIENT_PREKEY_RECORD_KEY;
+
+/**
+ * The same NAME under the plain KV, which is where an earlier build kept it. Only
+ * the store moved; the entry there is purged below and never read, so the two
+ * constants are stated separately rather than shared — a later rename of the
+ * §6.3 entry must not silently retarget the purge.
+ */
+const LEGACY_PLAIN_KV_RECORD_KEY = "ryco.e2ee.clientPrekeyCertificate.v1";
 
 interface StoredClientE2eePrekey {
   readonly hubOrigin: string;
@@ -145,7 +155,9 @@ export interface MobileClientE2eePrekey {
 
 export interface MobileClientE2eePrekeyDependencies {
   readonly agreementKey?: MobileE2eeAgreementKey;
-  readonly kv?: Pick<KVService, "getItem" | "setItem">;
+  readonly store?: E2eeSecureStore;
+  /** The plain KV, for the legacy purge alone. Nothing is read from it. */
+  readonly kv?: Pick<KVService, "removeItem">;
   readonly now?: () => number;
 }
 
@@ -187,8 +199,18 @@ export function makeMobileClientE2eePrekey(
   dependencies: MobileClientE2eePrekeyDependencies = {},
 ): MobileClientE2eePrekey {
   const agreementKey = dependencies.agreementKey ?? mobileE2eeAgreementKey;
+  const store = dependencies.store ?? mobileE2eeSecureStore;
   const kv = dependencies.kv ?? mobileKV;
   const now = dependencies.now ?? Date.now;
+
+  /**
+   * Best effort, once per process, and never read: an entry an earlier build
+   * left in the backed-up store is the §13.1.1 partial-loss record this module
+   * no longer keeps, so it is removed rather than migrated.
+   */
+  let purged: Promise<void> | undefined;
+  const purgeLegacyRecord = (): Promise<void> =>
+    (purged ??= kv.removeItem(LEGACY_PLAIN_KV_RECORD_KEY).catch(() => undefined));
 
   /**
    * The device's agreement key, created on first use.
@@ -264,7 +286,7 @@ export function makeMobileClientE2eePrekey(
       createdAt: certificate.createdAt,
       expiresAt: certificate.expiresAt,
     };
-    await kv.setItem(CLIENT_E2EE_PREKEY_RECORD_KEY, JSON.stringify(record)).catch(() => undefined);
+    await store.set(CLIENT_E2EE_PREKEY_RECORD_KEY, JSON.stringify(record)).catch(() => undefined);
   };
 
   const issue = async (
@@ -397,8 +419,9 @@ export function makeMobileClientE2eePrekey(
         const identityPublicKey = await getMobileDeviceIdentityPublicKey().catch(() =>
           prekeyError("e2ee_prekey_custody_failed"),
         );
+        await purgeLegacyRecord();
         const stored = parseStored(
-          await kv.getItem(CLIENT_E2EE_PREKEY_RECORD_KEY).catch(() => null),
+          await store.get(CLIENT_E2EE_PREKEY_RECORD_KEY).catch(() => null),
         );
         const restored =
           stored === null

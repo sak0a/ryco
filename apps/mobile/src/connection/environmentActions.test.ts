@@ -89,11 +89,14 @@ function fakeRegistry(
   };
 }
 
+const forgetEnvironment = vi.fn(async () => undefined);
+
 function actions(reg: ReturnType<typeof fakeRegistry>) {
   return createEnvironmentActions({
     registry: reg.registry,
     resolvePairingTarget: () => TARGET,
     now: () => "2026-07-24T00:00:00.000Z",
+    trustStore: { forgetEnvironment },
   });
 }
 
@@ -148,6 +151,10 @@ describe("environmentActions", () => {
     expect(reg.spies.clearRuntime).toHaveBeenCalledWith(ENV);
     expect(removeEnvironmentState).toHaveBeenCalledWith(ENV);
     expect(reg.spies.removeBearerToken).toHaveBeenCalledWith(ENV);
+    // docs/relay-e2ee-protocol.md §13.1/§13.3: forgetting a node forgets its pin,
+    // latch, approval and legacy consent too. There is no generic secret-wipe
+    // path this rides on, so a missed registration would show up only here.
+    expect(forgetEnvironment).toHaveBeenCalledWith(ENV);
 
     removeEnvironmentState.mockRestore();
   });

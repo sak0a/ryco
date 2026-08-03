@@ -41,10 +41,63 @@ import { sanitizeSecretKey } from "./secretKv";
 /** The device's static X25519 agreement secret (§6.2: one per device). */
 export const E2EE_AGREEMENT_SECRET_KEY = "ryco.e2ee.agreementKey.v1";
 
-export type E2eeSecureStoreKey = typeof E2EE_AGREEMENT_SECRET_KEY;
+/**
+ * The whole §13.1 trust document — pin records, the `anyNodeVerified` markers,
+ * and the strict-legacy policy — as ONE entry.
+ *
+ * §13.1.1 places every durable trust value in this storage class, not only the
+ * secret ones, and §13.1 requires the marker to be "committed atomically with the
+ * promotion that sets it". Neither platform store offers a transaction across
+ * two entries, so one entry is the only construction under which a crash between
+ * the promotion and the marker write cannot exist to be observed.
+ *
+ * It joins the closed union rather than sitting beside it: §6.3's clone/restore
+ * purge destroys exactly the names listed below, and a pin set that survived a
+ * reinstall while the agreement key it was taken against did not is the state
+ * §13.1.1 describes as indistinguishable from a fresh install. The first-run
+ * marker value is deliberately NOT bumped for it — this name has never been
+ * written by an earlier build, so no installation can be holding an orphan under
+ * it, and a bump would destroy a working device's agreement key on upgrade.
+ */
+export const E2EE_TRUST_DOCUMENT_KEY = "ryco.e2ee.trustDocument.v1";
 
-/** Every name in the namespace, in destruction order. */
-const E2EE_SECURE_STORE_KEYS: readonly E2eeSecureStoreKey[] = [E2EE_AGREEMENT_SECRET_KEY];
+/**
+ * The device's §7.4 client agreement-prekey certificate.
+ *
+ * IT IS NOT A SECRET, AND THAT IS NOT WHY IT IS HERE. §6.3's class governs
+ * SURVIVAL, not confidentiality: this entry names the agreement key, and an entry
+ * that outlived the key it names is exactly §13.1.1's partial-loss shape —
+ * "non-secret application state recording a prior E2EE association" that survives
+ * an OS migration while the §6.3 namespace does not, which §13.1.1 then requires
+ * be treated as UNEXPECTED rather than legacy-eligible. §13.1.1 also names the
+ * alternative this takes: a client that keeps no such record "is a fresh install
+ * by the rule above", and the obligation does not arise. Storing it here makes it
+ * die with the key, so it can never be the odd one out.
+ */
+export const E2EE_CLIENT_PREKEY_RECORD_KEY = "ryco.e2ee.clientPrekeyCertificate.v1";
+
+export type E2eeSecureStoreKey =
+  | typeof E2EE_AGREEMENT_SECRET_KEY
+  | typeof E2EE_TRUST_DOCUMENT_KEY
+  | typeof E2EE_CLIENT_PREKEY_RECORD_KEY;
+
+/**
+ * Every name in the namespace, in destruction order.
+ *
+ * Built from a record over the key union rather than written as an array
+ * literal: TypeScript checks a record for exhaustiveness and cannot check an
+ * array for it, so a name added to `E2eeSecureStoreKey` and not added here is a
+ * compile error rather than an entry §6.3's purge silently leaves behind.
+ */
+const E2EE_SECURE_STORE_KEY_SET: Readonly<Record<E2eeSecureStoreKey, null>> = {
+  [E2EE_AGREEMENT_SECRET_KEY]: null,
+  [E2EE_TRUST_DOCUMENT_KEY]: null,
+  [E2EE_CLIENT_PREKEY_RECORD_KEY]: null,
+};
+
+export const E2EE_SECURE_STORE_KEYS = Object.keys(
+  E2EE_SECURE_STORE_KEY_SET,
+) as readonly E2eeSecureStoreKey[];
 
 /**
  * Distinct from the bearer stores by construction: they pass no options at all,

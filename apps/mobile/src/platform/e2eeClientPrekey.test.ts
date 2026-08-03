@@ -47,7 +47,11 @@ import {
   MobileClientE2eePrekeyError,
   type ClientE2eePrekeyNamespace,
 } from "./e2eeClientPrekey";
-import { E2EE_AGREEMENT_SECRET_KEY, type E2eeSecureStore } from "./e2eeSecureStore";
+import {
+  E2EE_AGREEMENT_SECRET_KEY,
+  E2EE_SECURE_STORE_KEYS,
+  type E2eeSecureStore,
+} from "./e2eeSecureStore";
 
 const NAMESPACE = { hubOrigin: "https://hub.example", accountId: "acct_01J8ZQ5V2N7X0000000000" };
 const NOW = 1_780_000_000_000;
@@ -123,18 +127,38 @@ function harness(
 ) {
   const items = new Map<string, string>();
   if (overrides.record !== undefined) items.set(CLIENT_E2EE_PREKEY_RECORD_KEY, overrides.record);
-  const kv = {
-    getItem: async (key: string): Promise<string | null> => items.get(key) ?? null,
-    setItem: async (key: string, value: string): Promise<void> => {
+  // §13.1.1: the certificate lives in the §6.3 namespace beside the key it names,
+  // so it cannot outlive that key on an OS migration.
+  const store: E2eeSecureStore = {
+    get: async (key) => items.get(key) ?? null,
+    set: async (key, value) => {
       overrides.onSetItem?.();
       items.set(key, value);
+    },
+    remove: async (key) => {
+      items.delete(key);
+    },
+    destroy: async () => {
+      items.clear();
+    },
+  };
+  const purged: string[] = [];
+  const kv = {
+    removeItem: async (key: string): Promise<void> => {
+      purged.push(key);
     },
   };
   const agreementKey = overrides.agreementKey ?? makeMobileE2eeAgreementKey(inMemoryStore());
   return {
     items,
+    purged,
     agreementKey,
-    prekey: makeMobileClientE2eePrekey({ agreementKey, kv, now: overrides.now ?? (() => NOW) }),
+    prekey: makeMobileClientE2eePrekey({
+      agreementKey,
+      store,
+      kv,
+      now: overrides.now ?? (() => NOW),
+    }),
   };
 }
 
@@ -441,6 +465,37 @@ describe("client agreement-prekey certificate (§7.4)", () => {
     expect(JSON.parse(items.get(CLIENT_E2EE_PREKEY_RECORD_KEY)!)).toMatchObject({
       createdAt: first.createdAt,
     });
+  });
+});
+
+describe("§13.1.1 partial loss", () => {
+  it("keeps the record in the §6.3 namespace, so it dies with the key it names", async () => {
+    // The record is not a secret; the placement is about SURVIVAL. Kept in the
+    // backed-up plain KV it would outlive the agreement key on an OS migration,
+    // which is §13.1.1's "non-secret application state recording a prior E2EE
+    // association" — the case that then has to raise the §13.2.1 surface. §13.1.1
+    // also names the way out this takes: a client that keeps no such record "is a
+    // fresh install by the rule above".
+    const { prekey, items } = harness();
+    await prekey.ensure(NAMESPACE);
+    expect(items.has(CLIENT_E2EE_PREKEY_RECORD_KEY)).toBe(true);
+    expect([...E2EE_SECURE_STORE_KEYS]).toContain(CLIENT_E2EE_PREKEY_RECORD_KEY);
+
+    // §6.3's clone/restore purge and §13's re-pairing destroy the namespace whole.
+    items.clear();
+
+    expect(items.has(CLIENT_E2EE_PREKEY_RECORD_KEY)).toBe(false);
+  });
+
+  it("purges the entry an earlier build left in the backed-up store", async () => {
+    const { prekey, purged } = harness();
+
+    await prekey.ensure(NAMESPACE);
+    await prekey.ensure(NAMESPACE);
+
+    // Removed, never read: a migrated record would be the very thing the move
+    // exists to avoid. Once per process, not once per call.
+    expect(purged).toEqual([CLIENT_E2EE_PREKEY_RECORD_KEY]);
   });
 });
 

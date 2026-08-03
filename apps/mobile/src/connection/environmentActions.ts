@@ -2,6 +2,7 @@ import type { EnvironmentId } from "@ryco/contracts";
 import type { SavedEnvironmentRecord } from "@ryco/client-runtime/connection";
 
 import { useStore } from "../state/threadsRuntime";
+import { mobileE2eeTrustStore, type MobileE2eeTrustStore } from "../platform/e2eeTrustStore";
 import type { MobileConnectionRegistry } from "../runtime/bootstrap";
 
 // §2.6 / §3-22..26: the saved-environment lifecycle actions, mirroring
@@ -33,6 +34,8 @@ export interface EnvironmentActionsDeps {
     readonly pairingCode?: string;
   }) => ResolvedPairingTarget;
   readonly now?: () => string;
+  /** §13.1 client trust records, cleared when the owner forgets a node. */
+  readonly trustStore?: Pick<MobileE2eeTrustStore, "forgetEnvironment">;
 }
 
 const MISSING_CREDENTIAL_MESSAGE = "Unable to persist saved environment credentials.";
@@ -40,6 +43,7 @@ const MISSING_CREDENTIAL_MESSAGE = "Unable to persist saved environment credenti
 export function createEnvironmentActions(deps: EnvironmentActionsDeps) {
   const { registry } = deps;
   const isoNow = deps.now ?? (() => new Date().toISOString());
+  const trustStore = deps.trustStore ?? mobileE2eeTrustStore;
 
   const connect = (record: SavedEnvironmentRecord) =>
     registry.driver.supervisor.ensureSavedEnvironmentConnection(record, (isCancelled) =>
@@ -115,6 +119,14 @@ export function createEnvironmentActions(deps: EnvironmentActionsDeps) {
     registry.catalog.runtimeStore.getState().clear(environmentId);
     useStore.getState().removeEnvironmentState(environmentId);
     await registry.catalog.removeBearerToken(environmentId);
+    // The owner forgetting a node also forgets its §13 trust state — the pin, the
+    // latch, the approval, and any legacy consent — and drops the
+    // `anyNodeVerified` marker for that Hub origin if no verified pin under it
+    // survives (docs/relay-e2ee-protocol.md §13.1, §13.3). A node is reachable on
+    // both planes under one environment id, and this is the only place that acts
+    // on the owner's decision to forget it; there is no generic secret-wipe path
+    // to inherit, so the registration is by hand.
+    await trustStore.forgetEnvironment(environmentId);
   }
 
   function renameSavedEnvironment(environmentId: EnvironmentId, label: string): void {
