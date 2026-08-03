@@ -161,18 +161,18 @@ describe("timeline minimap", () => {
 
 describe("isTimelineScrolledToEnd", () => {
   it("counts a transcript that cannot scroll as being at the end", () => {
-    expect(
-      isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 400, clientHeight: 800 }),
-    ).toBe(true);
-    expect(
-      isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 800, clientHeight: 800 }),
-    ).toBe(true);
+    expect(isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 400, clientHeight: 800 })).toBe(
+      true,
+    );
+    expect(isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 800, clientHeight: 800 })).toBe(
+      true,
+    );
   });
 
   it("tolerates sub-pixel content overflow", () => {
-    expect(
-      isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 800.6, clientHeight: 800 }),
-    ).toBe(true);
+    expect(isTimelineScrolledToEnd({ scrollTop: 0, scrollHeight: 800.6, clientHeight: 800 })).toBe(
+      true,
+    );
   });
 
   it("reports away-from-end once the user scrolls past the pin threshold", () => {

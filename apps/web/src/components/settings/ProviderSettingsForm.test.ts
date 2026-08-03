@@ -36,6 +36,13 @@ describe("ProviderSettingsForm helpers", () => {
     });
   });
 
+  it("exposes Grok as an early-access provider with a binary path field", () => {
+    const grok = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("grok")];
+
+    expect(grok).toMatchObject({ label: "Grok", badgeLabel: "Early Access" });
+    expect(deriveProviderSettingsFields(grok!).map((field) => field.key)).toEqual(["binaryPath"]);
+  });
+
   it("preserves unknown config keys while omitting empty configurable fields", () => {
     const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
     expect(opencode).toBeDefined();
