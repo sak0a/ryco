@@ -2,6 +2,7 @@ import type { DpopSignerService } from "@ryco/client-runtime/platform";
 import {
   HostedRelayEngine,
   type HostedRelaySocketCallbacks,
+  type RelayE2eeProvider,
   type RelaySocket,
 } from "@ryco/client-runtime/relay";
 
@@ -76,6 +77,18 @@ export interface MobileHostedRelaySocketOptions {
   readonly readBearerToken?: () => string | null;
   readonly relayUrl?: () => string;
   readonly now?: () => number;
+  /**
+   * docs/relay-e2ee-protocol.md §4.4: the channel's mode machine, built at
+   * `channel.accept` from the negotiated limits.
+   *
+   * Supplied by the CALLER rather than constructed here, because §4.4 requires
+   * every selection guard — the resolved pin, the §12.1.1 classification, the
+   * device-level verification marker, the owner's recorded consent — to be
+   * evaluated "before it has received any payload", which means before this
+   * socket exists. A caller that cannot resolve them omits the provider, and
+   * the engine runs the unchanged legacy channel.
+   */
+  readonly e2ee?: RelayE2eeProvider | undefined;
 }
 
 const CONNECTING = 0;
@@ -208,6 +221,7 @@ export class MobileHostedRelaySocket {
         ticketExpiresAt: options.ticketExpiresAt,
         socket: relaySocket,
         callbacks: options.callbacks,
+        ...(options.e2ee === undefined ? {} : { e2ee: options.e2ee }),
         timers: {
           // Bound wrappers: unbound platform methods throw "Illegal invocation".
           now,
