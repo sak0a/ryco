@@ -106,6 +106,26 @@ describe("the channel's claim", () => {
     expect(getMobileE2eeSessionState().channel).toBe("unverified");
   });
 
+  it("never reports the shared vocabulary's web row, on any input", () => {
+    // §8.1's role/tier matrix gives this app a static agreement key and the IK
+    // pattern, so `web-unsigned` — §2.2's *Web, unsigned ephemeral* row — is a
+    // state it cannot occupy. The shared union carries the member because the
+    // web tier needs a word that is not `Encrypted`; this asserts that adding it
+    // there left the native projection alone, rather than opening a path by
+    // which a signed channel could be labelled the unsigned way.
+    const reported = new Set<string>();
+    for (const pinVerified of [true, false]) {
+      for (const mode of ["e2ee", "legacy"] as const) {
+        resetMobileE2eeSessionForTests();
+        begin({ pinVerified });
+        reported.add(getMobileE2eeSessionState().channel);
+        lockMobileE2eeChannelMode(mode);
+        reported.add(getMobileE2eeSessionState().channel);
+      }
+    }
+    expect([...reported].toSorted()).toEqual(["legacy", "negotiating", "unverified", "verified"]);
+  });
+
   it("labels a fallback legacy whether or not a pin resolved", () => {
     for (const pinVerified of [true, false]) {
       resetMobileE2eeSessionForTests();

@@ -607,6 +607,55 @@ describe("§6.5 and §9.5 erasure", () => {
     expect(hex(ephemeral)).toBe(hex(new Uint8Array(32)));
   });
 
+  it("keeps the initiator's own ephemeral PUBLIC key past split, and zeroes the secret", () => {
+    // §13.5's client half. The public component has to outlive the handshake —
+    // the `WebSAS` is rendered at the `e2ee` lock, after `Split()` — while §6.2
+    // requires the private half to be erased at exactly that moment.
+    const ephemeral = Uint8Array.from(CLIENT_EPHEMERAL_SECRET);
+    const client = nxClient({ testOnlyEphemeralSecretKey: ephemeral });
+    // Before message 1 there is no `e` to publish, on either pattern.
+    expect(client.localEphemeralPublicKey).toBeUndefined();
+    expect(nxClient().localEphemeralPublicKey).toBeUndefined();
+    expect(ikClient().localEphemeralPublicKey).toBeUndefined();
+
+    const node = nxNode();
+    node.readMessage(client.writeMessage(EMPTY_PAYLOAD));
+    expect(hex(client.localEphemeralPublicKey!)).toBe(CLIENT_EPHEMERAL_PUBLIC);
+    client.readMessage(node.writeMessage(MESSAGE_2_PAYLOAD));
+    client.split();
+
+    expect(hex(client.localEphemeralPublicKey!)).toBe(CLIENT_EPHEMERAL_PUBLIC);
+    expect(hex(ephemeral)).toBe(hex(new Uint8Array(32)));
+    // A copy per read, like the two remote accessors beside it.
+    const first = client.localEphemeralPublicKey!;
+    first.fill(0);
+    expect(hex(client.localEphemeralPublicKey!)).toBe(CLIENT_EPHEMERAL_PUBLIC);
+    // It is byte-identical to the `e` the responder observed, which is what
+    // makes the two ends of §13.5 render the same string.
+    expect(hex(node.remoteEphemeralPublicKey!)).toBe(CLIENT_EPHEMERAL_PUBLIC);
+  });
+
+  it("publishes no local ephemeral on the responder, which nothing displays", () => {
+    // The accessor is the initiator's alone: §13.5 is defined over the WEB
+    // client's ephemeral, and no surface in this protocol shows the node's. The
+    // responder DOES generate one — its message 2 carries `e` on both patterns —
+    // so this is a retention decision and not an absence of key material.
+    const cases = [
+      { responder: ikNode(), hello: ikClient().writeMessage(MESSAGE_1_PAYLOAD) },
+      { responder: nxNode(), hello: nxClient().writeMessage(EMPTY_PAYLOAD) },
+    ];
+    for (const { responder, hello } of cases) {
+      expect(responder.localEphemeralPublicKey).toBeUndefined();
+      responder.readMessage(hello);
+      const message2 = responder.writeMessage(MESSAGE_2_PAYLOAD);
+      // The responder's own `e` is on the wire and still not readable here.
+      expect(hex(message2).startsWith(NODE_EPHEMERAL_PUBLIC)).toBe(true);
+      expect(responder.localEphemeralPublicKey).toBeUndefined();
+      responder.split();
+      expect(responder.localEphemeralPublicKey).toBeUndefined();
+    }
+  });
+
   it("zeroes the ephemeral secret key at destroy(), including before it is used", () => {
     const used = Uint8Array.from(CLIENT_EPHEMERAL_SECRET);
     const client = ikClient({ testOnlyEphemeralSecretKey: used });

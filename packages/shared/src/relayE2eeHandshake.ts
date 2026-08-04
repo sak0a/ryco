@@ -1271,6 +1271,21 @@ export type E2eeClientEstablishedResult =
       readonly contextBlock: Uint8Array;
       readonly serverAcceptTbs: Uint8Array;
       readonly confirmationTranscript: Uint8Array;
+      /**
+       * This client's own Noise ephemeral public key for this handshake (§6.2),
+       * present ON THE WEB ARM ALONE and consumed by exactly one caller: §13.5's
+       * `WebSAS`. Public material, never a session secret.
+       *
+       * ABSENT — not `undefined`-valued — whenever the credentials took the
+       * `{ tier: "native" }` arm. §13.5 exists because web has no long-term
+       * client identity; the native tier's owner-facing value is §13.4's
+       * long-term safety number, computed from the client identity key and never
+       * from an ephemeral. An IK result that carried one would be a per-session
+       * string the native surfaces have no honest use for, so the field is
+       * populated from the credentials union rather than from the presence of an
+       * ephemeral, which BOTH patterns transmit.
+       */
+      readonly webEphemeralPublicKey?: Uint8Array;
     }
   | E2eeHandshakeFailure;
 
@@ -1636,6 +1651,23 @@ export class E2eeClientHandshake {
       contextBlock,
     });
 
+    // §13.5, and only on the web arm — the mirror of the node's own read at
+    // `E2eeNodeAcceptResult.peerEphemeralPublicKey`. Taken INSIDE the funnel and
+    // before the state flip: `Split()` has already run above, so a throw here
+    // would otherwise strand the §6.5 secrets on an object that had already
+    // declared itself established. The public component survives `Split()` by
+    // design (`E2eeNoiseHandshake.localEphemeralPublicKey`) while the secret is
+    // erased with everything else, so the absence branch is a shape check
+    // against a pattern-table edit — both patterns write `e` in message 1 — and
+    // not a runtime condition.
+    let webEphemeralPublicKey: Uint8Array | undefined;
+    if (this.#options.credentials.tier === "web") {
+      webEphemeralPublicKey = noise.localEphemeralPublicKey;
+      if (webEphemeralPublicKey === undefined) {
+        throw new TypeError("Relay E2EE client handshake has no local ephemeral.");
+      }
+    }
+
     this.#state = "established";
     this.#noise = undefined;
     return {
@@ -1646,6 +1678,7 @@ export class E2eeClientHandshake {
       contextBlock,
       serverAcceptTbs,
       confirmationTranscript,
+      ...(webEphemeralPublicKey === undefined ? {} : { webEphemeralPublicKey }),
     };
   }
 

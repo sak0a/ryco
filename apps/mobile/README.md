@@ -334,6 +334,20 @@ Four properties are structural rather than documented:
   `deriveHubNodeSectionModel`) and supplied from `useMobileE2eeChannelStatus()`:
   an optional field with a benign default is how the whole vocabulary stayed
   unreachable in the shipped app while its unit tests passed.
+- **The shared vocabulary now carries a web row, and this app cannot reach it.**
+  `HostedE2eeChannelStatus` has a `web-unsigned` member — §2.2's _Web, unsigned
+  ephemeral_ row, rendered `Browser encrypted` with `guarantee: "web"` — because
+  a Hub that serves the browser's JavaScript can exfiltrate plaintext while
+  completing a genuine handshake, so §2.2 and §2.3 forbid the web tier from
+  spelling its channel the way this one does. Nothing here changed as a result:
+  §8.1's role/tier matrix makes this app the IK initiator, and
+  `lockMobileE2eeChannelMode` emits only `legacy`, `verified`, and `unverified`
+  — asserted over every input in `e2eeSession.test.ts`. The one native edit the
+  member forced was an arm in `e2eeTrustUiModel`'s `claimFor`, which the
+  exhaustive switch would not compile without; it answers `none`, the claim that
+  asserts nothing, because a state this tier does not have has no honest label.
+  `guarantee: "e2ee"` remains reachable from exactly one status text and only
+  from a verified pin, so `hostedStatusTone` is untouched.
 - **Every guard is re-resolved on every owner decision.** The prepared §4.4
   attempt is keyed on the selection **and** on `mobileE2eeTrustStore.revision()`,
   which the store bumps on every commit. §13.2 step 5's promotion, §13.3's

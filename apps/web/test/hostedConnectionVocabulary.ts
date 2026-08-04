@@ -14,6 +14,17 @@ import {
  * Shared rather than copied per suite so a suite cannot quietly cover a subset:
  * every consumer walks the same cross-product, built from the compile-time
  * exhaustive enumerations `connectionStatus.ts` exports.
+ *
+ * FOUR INPUTS, NOT FIVE, AND DELIBERATELY SO. The derivation's fifth input is
+ * the §4.4 channel state, and `apps/web` supplies none: it runs no §4 channel
+ * yet, so `deriveHostedConnectionStatusText` takes its documented `unavailable`
+ * default and the five statuses that input alone can reach — `Encrypted`,
+ * `Browser encrypted`, `Legacy`, `Not verified`, and `Securing` — are outside
+ * this sweep rather than skipped by it. `packages/client-runtime`'s copy of
+ * these helpers walks all five and is the authority for those rows; this file
+ * gains the dimension in the same change that gives the web app an
+ * `e2eeStatus` to report, and not before, because a browser suite that rendered
+ * a status the shipped app cannot produce would be asserting nothing.
  */
 
 /** Every combination of the four bounded inputs. Pure — nothing is rendered. */

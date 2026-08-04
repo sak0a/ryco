@@ -562,6 +562,7 @@ export class E2eeNoiseHandshake {
   #e: NoiseKeyPair | undefined;
   #rs: Uint8Array | undefined;
   #re: Uint8Array | undefined;
+  #localEphemeralPublicKey: Uint8Array | undefined;
   #pendingEphemeralSecretKey: Uint8Array | undefined;
   #messageIndex = 0;
   #status: E2eeNoiseHandshakeStatus;
@@ -690,6 +691,31 @@ export class E2eeNoiseHandshake {
   }
 
   /**
+   * THIS PARTY'S OWN ephemeral public key, on the INITIATOR alone, once message
+   * 1 has transmitted it — and `undefined` before that, and on the responder.
+   *
+   * PUBLIC MATERIAL, on exactly the footing the two accessors above are on: the
+   * public component is retained past `#eraseSecrets` while the SECRET is zeroed
+   * there with every other private byte, so §6.2's "ephemeral private keys MUST
+   * be erased when `Split()` completes" and §6.5/§9.5 are untouched. Nothing
+   * derived is retained; a public key is not a session value and no key schedule
+   * reads it back.
+   *
+   * IT EXISTS FOR ONE CALLER, AND ONLY ON ONE TIER. §13.5's `WebSAS` is defined
+   * over the WEB CLIENT'S Noise ephemeral, and the node reaches that value
+   * through `remoteEphemeralPublicKey`; the client is the initiator in both
+   * patterns (§8.1), so this is the mirror the client half needs to render the
+   * same string. The responder is excluded rather than merely unused: nothing in
+   * this protocol displays the NODE'S ephemeral, so retaining it would be a
+   * surface with no consumer.
+   */
+  get localEphemeralPublicKey(): Uint8Array | undefined {
+    return this.#localEphemeralPublicKey === undefined
+      ? undefined
+      : Uint8Array.from(this.#localEphemeralPublicKey);
+  }
+
+  /**
    * TEST AND FIXTURE USE ONLY: Noise §5.2 `h`, the handshake hash of the LIVE
    * handshake, or `undefined` once `split()` or `destroy()` has erased it.
    *
@@ -733,6 +759,12 @@ export class E2eeNoiseHandshake {
           case "e": {
             const ephemeral = this.#generateEphemeral();
             this.#e = ephemeral;
+            // §13.5's initiator half: the PUBLIC component only, retained past
+            // the erasure funnel because the display duty that reads it outlives
+            // the handshake. See `localEphemeralPublicKey`.
+            if (this.#role === "initiator") {
+              this.#localEphemeralPublicKey = Uint8Array.from(ephemeral.publicKey);
+            }
             parts.push(ephemeral.publicKey);
             this.#symmetric.mixHash(ephemeral.publicKey);
             break;

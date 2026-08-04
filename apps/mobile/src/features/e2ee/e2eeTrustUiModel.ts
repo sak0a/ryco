@@ -708,6 +708,15 @@ function claimFor(session: MobileE2eeSessionState): E2eeChannelClaim {
       return "pairing-only";
     case "legacy":
       return session.keyCustodyUnavailable ? "legacy-no-custody" : "legacy";
+    case "web-unsigned":
+    // §2.2's web NX row, which THIS app cannot occupy: §8.1's role/tier matrix
+    // gives the native client a static agreement key and the IK pattern, and
+    // `lockMobileE2eeChannelMode` emits only `legacy`, `verified`, and
+    // `unverified`. The arm exists because the shared union is exhaustive — the
+    // point of adding the member there was to make "what does this tier call the
+    // web row?" a compile error rather than a silent fall-through — and it
+    // answers with the claim that asserts nothing, which is the only honest
+    // answer for a state this tier does not have.
     case "negotiating":
     case "unavailable":
       return "none";

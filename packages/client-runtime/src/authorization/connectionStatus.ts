@@ -49,6 +49,22 @@ export type HostedE2eeChannelStatus =
   | "verified"
   /** §4.4 `e2ee` with no verified pin: the §13.2 ceremony, and nothing more. */
   | "unverified"
+  /**
+   * §4.4 `e2ee` locked on the WEB tier — §2.2's *Web, unsigned ephemeral* row,
+   * the NX pattern, and a USABLE session: web releases application payload
+   * normally, because §13.1's release gate is native-only by construction (web
+   * holds no durable pin of any kind, §6.3, §13.1).
+   *
+   * IT IS A SEPARATE MEMBER BECAUSE NEITHER EXISTING ONE IS HONEST FOR IT.
+   * `verified` means both halves of §2.2's bottom row and carries the E2EE
+   * guarantee, which §2.2 and §2.3 forbid the web tier from claiming: the Hub
+   * serves the JavaScript, so it can exfiltrate plaintext while completing a
+   * genuine handshake and drawing a genuine §13.5 `WebSAS`. `unverified` means
+   * §13.1's release-gated pairing channel and reports the session unusable,
+   * which would be a lie about connectedness. The name is §2.2's own row name,
+   * so nothing about it reads as the signed native tier.
+   */
+  | "web-unsigned"
   /** §4.4 `legacy` (§12.2 honest labeling): plaintext, and labeled as such. */
   | "legacy";
 
@@ -57,6 +73,7 @@ export const HOSTED_E2EE_CHANNEL_STATUSES = Object.keys({
   negotiating: true,
   verified: true,
   unverified: true,
+  "web-unsigned": true,
   legacy: true,
 } satisfies Record<HostedE2eeChannelStatus, true>) as ReadonlyArray<HostedE2eeChannelStatus>;
 
@@ -128,6 +145,7 @@ export type HostedConnectionStatusText =
   | "Incompatible"
   | "Online"
   | "Encrypted"
+  | "Browser encrypted"
   | "Legacy"
   | "Not verified"
   | "Securing"
@@ -179,6 +197,11 @@ const HOSTED_E2EE_READY_TEXTS: Record<HostedE2eeChannelStatus, HostedConnectionS
   negotiating: "Securing",
   verified: "Encrypted",
   unverified: "Not verified",
+  // §2.2's web NX row, and deliberately NOT the native word. The qualifier
+  // leads, so the collapsed chip reads `Browser` rather than a prefix of
+  // `Encrypted`: on this tier the encryption is performed by code the Hub
+  // served, and §2.2/§2.3 forbid presenting that as the signed tier's claim.
+  "web-unsigned": "Browser encrypted",
   legacy: "Legacy",
 };
 
@@ -255,8 +278,17 @@ export interface HostedConnectionStatusIndicator {
  * `none` is not "insecure": it is the absence of a claim, which is what every
  * state that is not a locked channel has. `legacy` is §12.2's mandatory label
  * for a channel that fell back — it is an assertion, and a negative one.
+ *
+ * `web` is §2.2's *Web, unsigned ephemeral* row, and it is a WEAKER claim than
+ * `e2ee` rather than a flavour of it: passive and retroactive read are protected
+ * only "while the served web code is honest", and an active Hub is **not
+ * protected** against, because it can originate an unsigned NX session and
+ * controls the JavaScript that draws every indicator including §13.5's advisory
+ * `WebSAS`. A tone or glyph mapper keyed on this member cannot dress that row as
+ * the verified one; a mapper keyed on `connected` alone can, which is why the
+ * member exists rather than the web row reusing `none`.
  */
-export type HostedConnectionGuarantee = "none" | "legacy" | "e2ee";
+export type HostedConnectionGuarantee = "none" | "legacy" | "web" | "e2ee";
 
 /**
  * The collapsed presentation of every bounded status, as an exhaustive map.
@@ -294,6 +326,11 @@ export const HOSTED_CONNECTION_STATUS_INDICATORS = {
   // The one entry that may claim §2.2's bottom row, and the only one produced
   // by `HostedE2eeChannelStatus.verified`.
   Encrypted: { shortLabel: "Encrypted", connected: true, guarantee: "e2ee" },
+  // §2.2's web NX row: a usable session, encrypted against a passive Hub while
+  // the served code is honest, and NOT the row above. The collapsed label is the
+  // qualifier alone rather than a prefix of `Encrypted` — a chip is read at a
+  // glance and `Encrypted…` at a glance is the native claim.
+  "Browser encrypted": { shortLabel: "Browser", connected: true, guarantee: "web" },
   // §12.2: a channel that fell back is labeled legacy in EVERY user-facing
   // surface. It is a usable connection and says so; it makes no E2EE claim.
   Legacy: { shortLabel: "Legacy", connected: true, guarantee: "legacy" },
