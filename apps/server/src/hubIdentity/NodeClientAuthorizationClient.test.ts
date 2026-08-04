@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   E2EE_APPROVED_CLIENTS_MAX,
+  E2EE_KEY_FINGERPRINT_BYTES,
   E2EE_PAIRING_RESERVATION_LIFETIME,
   E2EE_PAIRING_WINDOW,
   E2EE_PENDING_CLIENT_RETENTION,
@@ -499,6 +500,33 @@ describe("node client authorization pairing window", () => {
     expect(await test.pair(key(901))).toMatchObject({ kind: "existing" });
     expect((await test.client.list()).pairingWindow).toMatchObject({ spent: false });
     expect((await test.stored()).pairingWindow?.spentAt).toBeUndefined();
+  });
+
+  it("matches the discriminator on the whole digest and never a prefix of it", async () => {
+    // §11.2 names key and fingerprint equality (§7.1) among the comparisons that
+    // MUST be constant-time, and §13.2 step 3 now reaches this one from an
+    // unauthenticated peer's hello. Whatever primitive carries it, the property
+    // it has to keep is this: the digests differ only in their LAST byte, and
+    // the owner's window is not spent on a device they never named.
+    const test = await harness();
+    const named = fingerprintBytes(900);
+    const nearMiss = Uint8Array.from(named);
+    nearMiss[E2EE_KEY_FINGERPRINT_BYTES - 1] = 1;
+    await test.client.openPairingWindow(named);
+
+    await test.client.commitPairingAdmission(
+      test.client.evaluatePairingAdmission({
+        hubOrigin: HUB_ORIGIN,
+        accountId: ACCOUNT_ID,
+        clientIdentityFingerprint: nearMiss,
+        safetyNumber: SAFETY_NUMBER,
+      }),
+    );
+    expect((await test.client.list()).pairingWindow).toMatchObject({ spent: false });
+    expect((await test.stored()).pairingWindow?.spentAt).toBeUndefined();
+    // And the device the owner DID name still has its reservation.
+    expect(await test.pair(key(900))).toMatchObject({ kind: "admit" });
+    expect((await test.stored()).pairingWindow?.spentAt).toBe(START);
   });
 
   it("requires a fingerprint to open a window", async () => {

@@ -16,6 +16,7 @@ import {
   type E2eeClientAuthorizationStatus,
   e2eeAuthorizationWithdrawn,
   e2eeRoleRank,
+  e2eeSecretBytesEqual,
 } from "@ryco/shared/relayE2eeHandshake";
 import { formatE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import {
@@ -545,8 +546,13 @@ function windowLatch(window: StoredClientPairingWindow): string {
   return `${window.openedAt}:${window.clientIdentityFingerprint}`;
 }
 
+/** A stored base64url fingerprint, back in the raw digest form §7.1 compares. */
+function storedFingerprintBytes(stored: string): Uint8Array {
+  return Uint8Array.from(Buffer.from(stored, "base64url"));
+}
+
 function fingerprintDisplayOf(stored: string): string {
-  return formatE2eeKeyFingerprint(Uint8Array.from(Buffer.from(stored, "base64url")));
+  return formatE2eeKeyFingerprint(storedFingerprintBytes(stored));
 }
 
 function toRecord(classified: ClassifiedEntry, now: number): NodeClientAuthorizationRecord {
@@ -933,7 +939,16 @@ export async function makeNodeClientAuthorizationClient(options: {
       window !== undefined &&
       window.spentAt === undefined &&
       spentWindowLatch !== windowLatch(window) &&
-      window.clientIdentityFingerprint === fingerprint;
+      // §11.2 names key and fingerprint equality (§7.1) among the comparisons
+      // that MUST be constant-time, and §13.2 step 3 now reaches this one from
+      // an unauthenticated peer's hello: it is the same digest equality
+      // `e2eeAuthorizationKeysEqual` performs, so it uses the same primitive
+      // rather than `===` over the stored base64url form, which short-circuits
+      // at the first differing character.
+      e2eeSecretBytesEqual(
+        storedFingerprintBytes(window.clientIdentityFingerprint),
+        input.clientIdentityFingerprint,
+      );
     // Spent the moment it is granted, whatever this attempt's outcome (§13.6),
     // and spent in memory because §13.2 step 3 keeps every durable write off the
     // response path. Two attempts cannot both receive it; the durable spend
