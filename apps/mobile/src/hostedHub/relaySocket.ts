@@ -343,7 +343,13 @@ export class MobileHostedRelaySocket {
                 throw new Error("Unsupported relay payload.");
               })();
     // React Native has no DOMException, so the engine's messages are preserved
-    // on plain Errors rather than mapped to DOMException names as on web.
+    // on plain Errors rather than mapped to DOMException names as on web. That
+    // includes `RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE`, the §11.4
+    // `e2ee_send_unavailable` this tier CAN reach: it is deliberately the
+    // identity mapping rather than an unmapped case. Re-throwing it as a new
+    // Error would discard the stack and make an ordinary backpressure refusal
+    // — the channel is unaffected and the caller may submit again — look like a
+    // failure originating here.
     this.#engine.send(Uint8Array.from(bytes));
   }
 

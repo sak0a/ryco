@@ -14,6 +14,7 @@ import {
   type RelayLimits,
 } from "@ryco/contracts";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
+import { e2eeNegotiationBufferMaxBytes } from "@ryco/shared/relayE2eeConstants";
 import {
   planRelayMessage,
   prepareRelayMessage,
@@ -92,12 +93,53 @@ export interface RelayE2eeReservation {
   release(): void;
 }
 
+/**
+ * §4.4: what a channel's mode machine locked it to. There are only these two
+ * transitions out of `negotiating`, they are one-way, and exactly one of them
+ * happens on any channel that is released to the application at all.
+ */
+export type RelayE2eeMode = "e2ee" | "legacy";
+
+/**
+ * §8.3 elements 2, 13, and 14, plus the §8.4 prologue's protocol version.
+ *
+ * The engine hands the mode machine the `channel.open` IT RECEIVED rather than
+ * letting the machine's owner configure the same values from application state:
+ * §8.3 requires elements 11–12 to byte-equal elements 13–14 at both endpoints,
+ * and a second source for the received half would be a second thing that can
+ * disagree with the frame that actually arrived.
+ */
+export interface RelayE2eeChannelIdentity {
+  readonly channelId: string;
+  readonly capability: string;
+  readonly effectiveRole: string;
+  readonly relayProtocolMajor: number;
+  readonly relayProtocolMinor: number;
+}
+
 /** The engine surface one E2EE channel drives, and no more of it. */
 export interface RelayE2eeHost {
   /** §4.5: the Hub-asserted `ready` limits, adopted verbatim. */
   readonly limits: RelayLimits;
+  /** §8.3: the `channel.open` this endpoint received, and nothing derived from it. */
+  readonly channel: RelayE2eeChannelIdentity;
   /** §9.3: admission for the entire record; `undefined` refuses it. */
   readonly admit: (messageBytes: number) => RelayE2eeReservation | undefined;
+  /**
+   * §4.4: THE RELEASE VALVE, and its single owner.
+   *
+   * Nothing is released to the application before a mode is locked — not the
+   * open event, not one inbound payload, and not one buffered outbound byte.
+   * The engine no longer opens the valve at `channel.accept`, because a channel
+   * that is `negotiating` has decided nothing yet: it may still lock `e2ee`
+   * (rows K1/K5), lock `legacy` (rows K9/K13), or close FATAL-PRE without ever
+   * releasing anything. Calling it flushes the §4.4 send buffer in the way the
+   * locked mode requires — as envelopes, or as plaintext — and then opens.
+   *
+   * One-way and idempotent: a second call, or one after the channel closed, is
+   * ignored rather than obeyed (§4.4 mode transitions are one-way).
+   */
+  readonly lockMode: (mode: RelayE2eeMode) => void;
   /**
    * The outer relay close (§10.3). With no failure this is the reasonless
    * `channel.close` that follows a clean exchange; with one it is §11.1's
@@ -142,8 +184,33 @@ export interface RelayE2eeChannel {
   readonly dispose: (options?: { readonly incompleteReassembly?: boolean }) => void;
 }
 
-/** Built once per channel, at `channel.accept`, from the negotiated limits. */
+/**
+ * Built once per channel, at `channel.accept`, from the negotiated limits.
+ *
+ * What it returns is the channel's §4.4 MODE MACHINE, not an established
+ * session: at `channel.accept` nothing has been negotiated, and every inbound
+ * payload from that instant belongs to the machine until it locks a mode. A
+ * caller that supplies no provider gets no machine, an immediate `legacy` lock,
+ * and the byte-identical frame sequence it got before the seam existed.
+ */
 export type RelayE2eeProvider = (host: RelayE2eeHost) => RelayE2eeChannel;
+
+/**
+ * §11.4 `e2ee_send_unavailable`, in the one form this engine can raise it: the
+ * §4.4 negotiation send buffer is already at `E2EE_NEGOTIATION_BUFFER_MAX_BYTES`.
+ *
+ * Exported because both facades map the engine's send errors and this one is a
+ * NEW refusal reason rather than a re-shaped old one. It is deliberately
+ * distinct from `"Relay send queue is full."`: that one has already failed the
+ * channel with `slow_consumer`, and this one leaves the channel completely
+ * unaffected — §11.4 forbids escalating ordinary backpressure to channel-fatal,
+ * and forbids a silent drop just as firmly.
+ */
+export const RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE =
+  "Relay E2EE negotiation send buffer is full.";
+
+/** The engine's view of §4.4's three channel states. */
+type RelayEngineMode = "negotiating" | RelayE2eeMode;
 
 /**
  * Every way an E2EE channel ends the connection. §11.1 introduces no close
@@ -274,6 +341,32 @@ export class HostedRelayEngine {
   #authTimer: unknown = null;
   #flushTimer: unknown = null;
   #e2ee: RelayE2eeChannel | null = null;
+  /**
+   * §4.4, which creates the channel's machine at `channel.accept`.
+   *
+   * Before that instant nothing may be sent or delivered anyway — `send` refuses
+   * an unaccepted channel and `#receiveData` rejects data on one — so starting
+   * here costs nothing and buys the one property that matters: the ONLY way out
+   * of this state is `#applyModeLock`, on every path, with a provider or
+   * without one.
+   */
+  #mode: RelayEngineMode = "negotiating";
+  /** A `lockMode` a provider issued from inside its own factory (§4.4). */
+  #pendingLock: RelayE2eeMode | null = null;
+  /**
+   * §4.4: the plaintext an E2EE-capable client holds while `negotiating` — the
+   * RPC keepalive `Ping` included — and the ONLY sink `send` has in that state.
+   *
+   * The buffer sits ABOVE the relay send queue precisely so that nothing is
+   * handed down to it, so it does not inherit the queue's accounting and is
+   * charged explicitly against `E2EE_NEGOTIATION_BUFFER_MAX_BYTES`. §4.4 makes
+   * that charge PER RELAY CONNECTION rather than per channel; this engine drives
+   * one channel per connection, so the two coincide here and the field is the
+   * connection-wide total by construction rather than by an accident that a
+   * second channel would break silently.
+   */
+  #negotiationBuffer: Uint8Array[] = [];
+  #negotiationBufferedBytes = 0;
   /** §9.3: capacity held by admitted records that have not yet been queued. */
   #outboundReservedBytes = 0;
   /** §9.2 requires envelopes to reach `unprotect` in arrival order. */
@@ -316,28 +409,50 @@ export class HostedRelayEngine {
 
   get bufferedAmount(): number {
     return (
-      this.options.socket.bufferedAmount + this.#outboundQueuedBytes + this.#outboundReservedBytes
+      this.options.socket.bufferedAmount +
+      this.#outboundQueuedBytes +
+      this.#outboundReservedBytes +
+      this.#negotiationBufferedBytes
     );
   }
 
+  /**
+   * One outbound RPC message, dispatched by the channel's §4.4 mode.
+   *
+   * THE `negotiating` BRANCH RETURNS BEFORE ANY OTHER STATEMENT RUNS, and that
+   * is the structural guarantee rather than an ordering preference: §4.4 forbids
+   * transmitting ANY plaintext while `negotiating`, including the RPC keepalive
+   * `Ping` that Effect's connection hooks write several layers above this seam
+   * and that nothing here can otherwise decline. With the buffer as the only
+   * reachable sink, a caller that ignores the mode cannot put a plaintext byte
+   * on the wire — there is no path from this state to `#enqueueOutbound`.
+   */
   send(payload: Uint8Array): void {
     // Outbound RPC is only permitted after the authorization handshake fully
     // completes (channel.accept); a channel that is merely open is not enough.
     if (this.#closed || !this.#accepted || !this.#channel || !this.#limits)
       throw new Error("Relay channel is not open.");
-    if (this.#e2ee) {
-      // §4.2: the E2EE layer owns the whole send pipeline from the ceiling
-      // check to the reservation, so nothing is chunked or queued here. A
-      // record it refuses is §11.4 sender-local — no pair consumed, no wire
-      // record, channel unaffected — and §10.2 discards rather than buffers a
-      // keepalive `Ping` the close phase stalls, so a refusal is not an error
-      // this seam may raise.
-      void this.#e2ee
-        .emit(Uint8Array.from(payload))
-        .catch(() => this.#failE2ee(relayE2eeFailure("fatal_post_key")));
-      return;
-    }
-    const prepared = prepareRelayMessage(payload, this.#messageLimits(this.#limits));
+    if (this.#mode === "negotiating") return this.#bufferNegotiating(payload, this.#limits);
+    if (this.#mode === "e2ee" && this.#e2ee) return this.#emitE2ee(payload);
+    this.#sendPlaintext(payload);
+  }
+
+  /**
+   * §4.2: the E2EE layer owns the whole send pipeline from the ceiling check to
+   * the reservation, so nothing is chunked or queued here. A record it refuses
+   * is §11.4 sender-local — no pair consumed, no wire record, channel unaffected
+   * — and §10.2 discards rather than buffers a keepalive `Ping` the close phase
+   * stalls, so a refusal is not an error this seam may raise.
+   */
+  #emitE2ee(payload: Uint8Array): void {
+    void this.#e2ee
+      ?.emit(Uint8Array.from(payload))
+      .catch(() => this.#failE2ee(relayE2eeFailure("fatal_post_key")));
+  }
+
+  /** The unchanged legacy send path: the chunk layer, then the relay send queue. */
+  #sendPlaintext(payload: Uint8Array): void {
+    const prepared = prepareRelayMessage(payload, this.#messageLimits(this.#limits!));
     if (prepared.kind === "error") {
       payload.fill(0);
       this.#fail(failure("transfer_limit"));
@@ -352,9 +467,35 @@ export class HostedRelayEngine {
     }
   }
 
+  /**
+   * §4.4: hold one plaintext submission until the channel locks a mode.
+   *
+   * The overflow is §11.4 `e2ee_send_unavailable` and nothing else: no wire
+   * record of any kind is produced, the channel is UNAFFECTED and remains
+   * usable, and the caller is told rather than having its message silently
+   * dropped or the buffer grown without bound. It deliberately does not zero the
+   * caller's payload and does not fail the channel — both of which the
+   * already-full relay send queue does, because that refusal is a slow-consumer
+   * condition and this one is not.
+   */
+  #bufferNegotiating(payload: Uint8Array, limits: RelayLimits): void {
+    if (
+      this.#negotiationBufferedBytes + payload.byteLength >
+      e2eeNegotiationBufferMaxBytes(limits)
+    ) {
+      throw new Error(RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE);
+    }
+    const owned = Uint8Array.from(payload);
+    this.#negotiationBuffer.push(owned);
+    this.#negotiationBufferedBytes += owned.byteLength;
+  }
+
   close(code = 1000, reason = "closed"): void {
     if (this.#closed) return;
-    if (this.#e2ee) {
+    // §10 exists only inside `e2ee`. A `negotiating` channel holds no session
+    // keys and owes no authenticated close: it takes the outer close below, and
+    // `#finish` discards its buffered plaintext on the way out.
+    if (this.#mode === "e2ee" && this.#e2ee) {
       // §10.3 lower bound: the outer `channel.close` MUST NOT be emitted until
       // the authenticated exchange has produced the encrypted peer proof this
       // endpoint's role requires, or `T_CLOSE` expires. Enqueueing one's own
@@ -493,10 +634,16 @@ export class HostedRelayEngine {
       if (this.#accepted || frame.channelId !== this.#channel || !this.#role)
         return this.#fail(failure("channel_rejected"));
       this.#accepted = true;
-      if (this.options.e2ee && !this.#openE2eeChannel(this.#limits)) return;
-      this.options.callbacks.onTransportStatus("online");
-      this.options.callbacks.onSessionStatus("synchronizing");
-      this.options.events.onOpen();
+      if (this.options.e2ee) {
+        // §4.4: the channel is `negotiating` from this instant, BEFORE the
+        // provider runs. The machine — not this branch — owns the release valve
+        // from here, and a provider that throws leaves no window in which a
+        // plaintext byte could reach the wire.
+        this.#mode = "negotiating";
+        this.#openE2eeChannel(this.#limits);
+        return;
+      }
+      this.#applyModeLock("legacy");
       return;
     }
     if (
@@ -536,11 +683,21 @@ export class HostedRelayEngine {
    * shrunk one — so a provider that refuses these limits fails the channel here
    * and the application never sees it open.
    */
-  #openE2eeChannel(limits: RelayLimits): boolean {
+  #openE2eeChannel(limits: RelayLimits): void {
     try {
       this.#e2ee = this.options.e2ee!({
         limits,
+        channel: {
+          channelId: this.#channel!,
+          // The engine admits exactly one `channel.open`, and only with this
+          // capability; the role is whatever that frame presented.
+          capability: "ryco.rpc",
+          effectiveRole: this.#role!,
+          relayProtocolMajor: VERSION.protocolMajor,
+          relayProtocolMinor: VERSION.protocolMinor,
+        },
         admit: (messageBytes) => this.#reserveOutbound(messageBytes),
+        lockMode: (mode) => this.#lockMode(mode),
         close: (value) => {
           if (value) return this.#failE2ee(value);
           // §10.3: after a clean exchange the endpoint sends `channel.close`
@@ -551,11 +708,91 @@ export class HostedRelayEngine {
         setTimeout: (callback, ms) => this.options.timers.setTimeout(callback, ms),
         clearTimeout: (id) => this.options.timers.clearTimeout(id),
       });
-      return true;
     } catch {
       this.#failE2ee(relayE2eeFailure("fatal_pre_key"));
-      return false;
+      return;
     }
+    const pending = this.#pendingLock;
+    this.#pendingLock = null;
+    if (pending) this.#applyModeLock(pending);
+  }
+
+  /**
+   * §4.4's release valve, from the machine's side.
+   *
+   * A lock issued from inside the provider's own factory is held rather than
+   * applied: the machine object does not exist yet, so an `e2ee` flush would
+   * have nothing to encrypt through. It is applied the moment the factory
+   * returns, which keeps the valve's single-owner property exact instead of
+   * making it depend on when a provider happens to call.
+   */
+  #lockMode(mode: RelayE2eeMode): void {
+    if (this.#closed || this.#mode !== "negotiating") return;
+    if (!this.#e2ee) {
+      this.#pendingLock = mode;
+      return;
+    }
+    this.#applyModeLock(mode);
+  }
+
+  /**
+   * Lock the mode, flush what §4.4 held, and release the channel — in that
+   * order, because the buffered sends are the ones the application submitted
+   * FIRST and §8.9 makes the first envelope after an `e2ee` lock the client's
+   * implicit finish.
+   *
+   * One-way and once: `negotiating` is the only state this leaves, so a second
+   * call is ignored (§4.4 mode transitions are one-way).
+   */
+  #applyModeLock(mode: RelayE2eeMode): void {
+    if (this.#closed || this.#mode !== "negotiating") return;
+    this.#mode = mode;
+    this.#flushNegotiationBuffer(mode);
+    this.options.callbacks.onTransportStatus("online");
+    this.options.callbacks.onSessionStatus("synchronizing");
+    this.options.events.onOpen();
+  }
+
+  /**
+   * §4.4: flush the held plaintext as envelopes on an `e2ee` lock and as
+   * plaintext on a `legacy` lock, in submission order.
+   *
+   * The buffer is emptied BEFORE the first send, so the bytes are charged
+   * against the relay send queue exactly once rather than against both budgets
+   * at the same time. A throw from the plaintext path has already failed the
+   * channel and has no caller here to receive it.
+   */
+  #flushNegotiationBuffer(mode: RelayE2eeMode): void {
+    const buffered = this.#negotiationBuffer;
+    this.#negotiationBuffer = [];
+    this.#negotiationBufferedBytes = 0;
+    for (const payload of buffered) {
+      try {
+        if (mode === "e2ee") this.#emitE2ee(payload);
+        else this.#sendPlaintext(payload);
+      } catch {
+        // The send path reports its own failure through `#fail`; the remaining
+        // entries are zeroed by the loop and dropped with the channel.
+      }
+      payload.fill(0);
+    }
+  }
+
+  /**
+   * THE ONE EXIT that drops buffered plaintext without sending it, and it
+   * zeroizes before dropping (§4.4, §11.2).
+   *
+   * Every client FATAL-PRE row of `negotiating` — K2, K4, K6, K7, K8, K10, K11,
+   * K12, K14, K15, K23, K24 — reaches it through `#finish`, and so does every
+   * transport failure underneath the channel. There is deliberately no second
+   * path: "no buffered byte is ever flushed as plaintext on a channel that
+   * closed rather than locking `legacy`" is a property of there being nowhere
+   * else for the bytes to go.
+   */
+  #discardNegotiationBuffer(): void {
+    for (const payload of this.#negotiationBuffer) payload.fill(0);
+    this.#negotiationBuffer = [];
+    this.#negotiationBufferedBytes = 0;
   }
 
   /**
@@ -726,11 +963,14 @@ export class HostedRelayEngine {
    * One reassembled, prelude-stripped payload (§4.3 step 1).
    *
    * With no E2EE channel this is the application's message and reaches it on
-   * the same turn it always did. With one, the payload is the E2EE layer's:
-   * §4.3 puts discrimination behind the assembler, and unauthenticated bytes
-   * never reach the RPC parser. The interceptions are chained rather than
-   * launched, because §9.2 compares each envelope against a single expected
-   * pair and two overlapping `unprotect` calls would race that comparison.
+   * the same turn it always did. With one, the payload is the mode machine's in
+   * EVERY mode — §4.4's rows are defined over `negotiating`, `e2ee`, and
+   * `legacy` alike, and a payload the engine routed around the machine after a
+   * `legacy` lock would be rows K19–K22 with nobody to decide them. §4.3 puts
+   * discrimination behind the assembler, and unauthenticated bytes never reach
+   * the RPC parser. The interceptions are chained rather than launched, because
+   * §9.2 compares each envelope against a single expected pair and two
+   * overlapping `unprotect` calls would race that comparison.
    */
   #deliver(message: Uint8Array): void {
     const channel = this.#e2ee;
@@ -848,6 +1088,10 @@ export class HostedRelayEngine {
     this.#flushTimer = null;
     this.#auth?.fill(0);
     this.#auth = null;
+    // §4.4: the buffer's single discard path. It runs before anything else is
+    // torn down so a channel that closed rather than locking `legacy` cannot
+    // reach a flush from any later step.
+    this.#discardNegotiationBuffer();
     for (const item of this.#outboundQueue) item.bytes.fill(0);
     for (const item of this.#inboundQueue) item.fill(0);
     // §10.4: a partial reassembly held when the channel ends IS truncation, and

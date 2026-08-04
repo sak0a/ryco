@@ -269,6 +269,27 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
     expect((thrown as DOMException).message).toBe("Relay channel is not open.");
   });
 
+  it("keeps every pre-existing send refusal on its own DOMException name", () => {
+    // The engine's send errors are mapped BY MESSAGE at this boundary, and the
+    // §4.4 negotiation-buffer refusal was added to the backpressure branch — so
+    // this pins that the two pre-existing messages did not move with it. Web
+    // passes no E2EE provider and never enters `negotiating`, so the new message
+    // is unreachable from here; the engine's own suite drives it.
+    const { facade, socket } = create();
+    authenticate(socket);
+    socket.bufferedAmount = RELAY_INITIAL_LIMITS.maxQueuedBytes;
+
+    let thrown: unknown;
+    try {
+      facade.send(new Uint8Array(1_024));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(DOMException);
+    expect((thrown as DOMException).name).toBe("QuotaExceededError");
+    expect((thrown as DOMException).message).toBe("Relay send queue is full.");
+  });
+
   it("delivers ArrayBuffer and typed-array inbound messages", async () => {
     const { facade, socket } = create();
     const received: number[][] = [];

@@ -1,5 +1,6 @@
 import {
   HostedRelayEngine,
+  RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
   type HostedRelaySocketCallbacks,
   type RelaySocket,
 } from "@ryco/client-runtime/relay";
@@ -52,7 +53,15 @@ function sendException(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof DOMException) return error;
   const name =
     error.message === "RPC payload exceeds the negotiated relay limit." ||
-    error.message === "Relay send queue is full."
+    error.message === "Relay send queue is full." ||
+    // docs/relay-e2ee-protocol.md §11.4 `e2ee_send_unavailable`: the §4.4
+    // negotiation buffer is full. It is backpressure like the queue above and
+    // takes the same name, NOT `InvalidStateError` — the channel is unaffected
+    // and the caller may submit the same message again. `apps/web` passes no
+    // provider and therefore never enters `negotiating` today; the mapping is
+    // here because the facade maps the engine's contract and not its current
+    // caller.
+    error.message === RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE
       ? "QuotaExceededError"
       : "InvalidStateError";
   return new DOMException(error.message, name);

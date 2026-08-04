@@ -1,3 +1,5 @@
+import { p256 } from "@noble/curves/nist";
+import { sha256 } from "@noble/hashes/sha2";
 import { decode } from "cborg";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
@@ -60,6 +62,7 @@ import {
   type E2eeKeyFamily,
 } from "./relayE2eeKeys.ts";
 import {
+  E2eeClientHandshake,
   decodeE2eeClientHello,
   decodeE2eeServerAccept,
   e2eeAuthorizationKeysEqual,
@@ -78,6 +81,7 @@ import {
   E2EE_STRICT_DECODE_OPTIONS,
   e2eeAuthorizationContextCommitment,
   e2eeEffectiveAdmittedPatterns,
+  encodeClientE2eePrekeyTranscript,
   encodeNodeE2eeCapabilitySigningEnvelope,
   validateNodeE2eeContinuityChain,
   type E2eeNoisePattern,
@@ -2220,6 +2224,93 @@ describe("§16.3 F16 authorization context and Branch A enforcement (§8.3, §13
     expect(maxChain.element15EntryCount as number).toBeGreaterThan(1);
   });
 
+  it("breaks the confirmation when the suite list is stripped after the hello was hashed", () => {
+    // §8.7 hashes the EXACT hello wire bytes precisely so this is detectable:
+    // every node-side check passes — the stripped list still contains the
+    // selected suite — so the node's `confirmationTranscript` covers the
+    // stripped bytes while the client's covers the original.
+    //
+    // The client is rebuilt from this family's own §16.1 material, so the hello
+    // it emits is compared BYTE FOR BYTE against the one the case carries before
+    // the case's own `E2EEServerAccept` is fed to it. Without that equality the
+    // verdict below would be a property of some other handshake.
+    const entry = caseByName(F16, "suite-list-strip-after-the-hello-was-hashed");
+    const material = F16.testKeyMaterial;
+    const identifiers = material.identifiers as JsonRecord;
+    const timestamps = material.timestamps as JsonRecord;
+    const channel = material.channel as JsonRecord;
+    const prekeyTranscript = encodeClientE2eePrekeyTranscript({
+      hubOrigin: identifiers.hubOrigin as string,
+      accountId: identifiers.accountId as string,
+      identityPublicKey: fixtureBytes(material.clientIdentityPublicKey),
+      agreementPublicKey: fixtureBytes(material.clientAgreementPublicKey),
+      createdAt: timestamps.createdAt as number,
+      expiresAt: timestamps.expiresAt as number,
+    });
+    const client = new E2eeClientHandshake({
+      channel: {
+        hubOrigin: identifiers.hubOrigin as string,
+        channelId: channel.channelId as string,
+        relayProtocolMajor: channel.relayProtocolMajor as number,
+        relayProtocolMinor: channel.relayProtocolMinor as number,
+        channelOpenCapability: channel.channelOpenCapability as string,
+        channelOpenEffectiveRole: channel.channelOpenEffectiveRole as string,
+      },
+      advertised: {
+        nodeId: identifiers.nodeId as string,
+        nodeIdentityFingerprint: fixtureBytes(material.nodeIdentityFingerprint),
+        prekeyId: identifiers.prekeyId as string,
+        agreementPublicKey: fixtureBytes(material.nodeAgreementPublicKey),
+        continuityChainTranscripts: [],
+        continuityId: identifiers.continuityId as string,
+      },
+      selectedSuite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      offeredSuites: entry.inputs.offeredSuitesAsSent as readonly number[],
+      credentials: {
+        tier: "native",
+        accountId: identifiers.accountId as string,
+        identityPublicKey: fixtureBytes(material.clientIdentityPublicKey),
+        agreementPublicKey: fixtureBytes(material.clientAgreementPublicKey),
+        agreementSecretKey: fixtureBytes(material.testOnlyClientAgreementSecretKey),
+        prekeyTranscript,
+        prekeySignature: p256
+          .sign(sha256(prekeyTranscript), fixtureBytes(material.testOnlyClientIdentitySecretKey), {
+            prehash: false,
+          })
+          .toBytes("compact"),
+      },
+      intendedCapability: channel.channelOpenCapability as string,
+      intendedRole: channel.channelOpenEffectiveRole as string,
+      testOnlyClientNonce: fixtureBytes(material.testOnlyClientNonce),
+      testOnlyEphemeralSecretKey: fixtureBytes(material.testOnlyClientEphemeralSecretKey),
+    });
+    const hello = client.createHello(timestamps.now as number);
+    expect(hello.kind).toBe("hello");
+    if (hello.kind !== "hello") throw new Error("expected a hello");
+    expect(hex(hello.record)).toBe(hex(fixtureBytes(entry.inputs.clientHelloAsSent)));
+    // The mutation is confined to the clear wrapper: `noiseMessage1` is
+    // untouched, which is why every node-side check passes.
+    expect((entry.inputs.offeredSuitesAsDelivered as readonly number[]).length).toBe(
+      (entry.inputs.offeredSuitesAsSent as readonly number[]).length - 1,
+    );
+    expect(hex(fixtureBytes(entry.inputs.clientHelloAsDelivered))).not.toBe(hex(hello.record));
+    expect(entry.expected.nodeAccepted).toBe(true);
+
+    const verdict = client.receiveServerAccept(
+      fixtureBytes(entry.expected.serverAccept),
+      timestamps.now as number,
+    );
+    const expectedVerdict = entry.expected.clientVerdict as JsonRecord;
+    expect(verdict.kind).toBe(expectedVerdict.kind);
+    if (verdict.kind !== "fatal") throw new Error("expected the confirmation to fail");
+    expect(verdict.row).toBe(expectedVerdict.row);
+    expect(verdict.reason).toBe(expectedVerdict.reason);
+    // §11.2: a client executing FATAL-PRE sends nothing and closes.
+    expect(entry.expected.disposition).toBe("FATAL-PRE");
+    expect(entry.expected.clientEmitsNoRecord).toBe(true);
+    expect(entry.expected.closeReason).toBe("channel_rejected");
+  });
+
   it("builds the node's own elements from the advertised snapshot, never its current state", () => {
     for (const name of [
       "identity-rotation-between-advertisement-and-hello",
@@ -3306,7 +3397,7 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 //     committed cases its matcher claims — EXACTLY, in both directions, so a
 //     member cannot disappear and one cannot be added without the entry moving;
 //   • every obligation whose every matching case is read by NO suite carries
-//     `unasserted`, naming what is missing and who owns it. FOURTEEN do. That
+//     `unasserted`, naming what is missing and who owns it. THIRTEEN do. That
 //     check runs against the measured union, not against a declaration, and it
 //     runs in both directions — the field must come off when a case goes live.
 //
@@ -3340,24 +3431,24 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 // corpus manifest under `livenessCensus`; the tests at the bottom of this file
 // hold the manifest to the corpus and to itself.
 //
-//   2,061 of 3,287 committed expectation leaves are read by some suite: 62.7%.
-//   1,226 are read by nothing. 33 of the 290 committed cases carry no live
+//   2,069 of 3,287 committed expectation leaves are read by some suite: 62.9%.
+//   1,218 are read by nothing. 32 of the 290 committed cases carry no live
 //   leaf at all — they are named one by one in `E2EE_CORPUS_CASE_LIVENESS`,
 //   each with the reason and the owner of the missing work.
 //
 //   Per family, live/total: F1 161/161 · F2 16/30 · F3 80/190 · F4 44/81 ·
 //   F5 52/66 · F6 26/62 · F7 31/73 · F8 117/148 · F9 182/589 · F10 361/361 ·
-//   F11 198/396 · F12 42/120 · F13 8/8 · F14 30/46 · F15 22/22 · F16 136/332 ·
+//   F11 198/396 · F12 42/120 · F13 8/8 · F14 30/46 · F15 22/22 · F16 144/332 ·
 //   F17 150/197 · F18 405/405.
 //
-// "33 OF 290" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
-// one-leaf threshold it invites the reading that the other 257 assert something
+// "32 OF 290" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
+// one-leaf threshold it invites the reading that the other 258 assert something
 // substantial. The distribution is what shows the shape, and the manifest
 // publishes it as `casesByLiveLeafCount`:
 //
-//   live leaves per case:  0 → 33 · 1 → 16 · 2 → 64 · 3–5 → 72 · 6–10 → 51 ·
-//   11–25 → 38 · 26+ → 16.   113 of 290 cases have at most TWO live leaves;
-//   185 have at most five.
+//   live leaves per case:  0 → 32 · 1 → 16 · 2 → 64 · 3–5 → 72 · 6–10 → 52 ·
+//   11–25 → 38 · 26+ → 16.   112 of 290 cases have at most TWO live leaves;
+//   184 have at most five.
 //
 // READ-LIVENESS IS AN UPPER BOUND ON ASSERTION, AND NO CURRENT ASSERTION FIGURE
 // EXISTS. A suite that reads a value and never compares it marks it live here.
@@ -3487,7 +3578,7 @@ interface CoverageObligation {
    * SET WHEN THE CORPUS CARRIES THE CASE AND NOTHING ASSERTS IT.
    *
    * `generated` means "a committed case matches", which is a statement about
-   * EXISTENCE. Fourteen obligations resolved that way while every case backing
+   * EXISTENCE. Thirteen obligations resolve that way while every case backing
    * them was decorative — read by no suite at all — so the ledger read as
    * covering them and the census, one file over, recorded the opposite. The two
    * statements disagreed and no test compared them.
@@ -4598,8 +4689,6 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F16 (§8.7)",
     spec: "a suite-list strip: `offeredSuites` mutated after the hello wire bytes were hashed, expecting confirmation failure (§8.7 hashes exact hello wire bytes), surfaced as `P16` at the client",
     generated: /^suite-list-strip-after-the-hello-was-hashed$/,
-    unasserted:
-      "The corpus carries the suite-list strip and nothing asserts it: `nodeAccepted`, `serverAccept`, `clientVerdict`, `disposition`, `clientEmitsNoRecord` and `closeReason` are read by no suite. Owned by the client-phase handshake harness. The verdict is the CLIENT's §8.8 step-4 decision over a stripped suite list, and no client handshake exists in this repository to drive it.",
   },
   {
     id: "f16-advertised-snapshot",
@@ -5202,7 +5291,7 @@ describe("§16.3 corpus liveness", () => {
     // The two totals a reader compares against the manifest, pinned so that
     // growing either is a deliberate edit rather than a line that slips in.
     expect(E2EE_CORPUS_CASE_LIVENESS.filter((claim) => claim.reader === "decorative").length).toBe(
-      33,
+      32,
     );
     expect(E2EE_CORPUS_CASE_LIVENESS.filter((claim) => claim.reader === "noise").length).toBe(4);
   });
@@ -5496,15 +5585,15 @@ describe("§16.3 corpus liveness", () => {
         `${obligation.id}: marked unasserted, and ${String(matched.filter((entry) => liveUnion(file, entry.name) > 0).length)} of its cases are read — remove the field`,
       ).toBeUndefined();
     }
-    // Pinned, so the number moves only as a deliberate edit. It is FOURTEEN, and
-    // it was described as one before the ledger and the census were compared.
-    expect(unasserted, "the count of generated-but-unasserted obligations").toBe(14);
-    expect(SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined).length).toBe(14);
+    // Pinned, so the number moves only as a deliberate edit. It was FOURTEEN
+    // until the client mode machine gave `f16-suite-list-strip` a driver.
+    expect(unasserted, "the count of generated-but-unasserted obligations").toBe(13);
+    expect(SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined).length).toBe(13);
     // …and the manifest carries the same list, so the number reaches a reader of
     // the FIXTURES and not only a reader of this file. Ids, not just a count: a
     // count alone cannot be checked against anything.
     const declared = MANIFEST.ledgerFidelity.unassertedObligations;
-    expect(declared.count).toBe(14);
+    expect(declared.count).toBe(13);
     expect([...declared.ids].toSorted()).toEqual(
       SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined)
         .map((entry) => entry.id)

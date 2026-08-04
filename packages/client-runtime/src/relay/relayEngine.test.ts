@@ -20,6 +20,7 @@ import {
   type HostedRelaySocketCallbacks,
   type RelayE2eeChannel,
   type RelayE2eeHost,
+  type RelayE2eeMode,
   type RelayE2eeProvider,
   type RelaySocket,
   type RelayTimers,
@@ -160,8 +161,15 @@ function create(
  * the whole point of the seam: everything the protocol decides is the channel's,
  * and the engine's contribution is the reservation, the limits, the assembler
  * verdict, and the outer close.
+ *
+ * It locks `e2ee` from inside its own factory so these tests exercise the
+ * ESTABLISHED seam, which is what they are about. §4.4's `negotiating` state and
+ * its K rows are the mode machine's and are driven in `relayE2eeInitiator.test.ts`.
  */
-function stubProvider(overrides: Partial<RelayE2eeChannel> = {}) {
+function stubProvider(
+  overrides: Partial<RelayE2eeChannel> = {},
+  lock: RelayE2eeMode | null = "e2ee",
+) {
   const calls = {
     hosts: [] as RelayE2eeHost[],
     emitted: [] as Uint8Array[],
@@ -171,6 +179,7 @@ function stubProvider(overrides: Partial<RelayE2eeChannel> = {}) {
   };
   const provider: RelayE2eeProvider = (host) => {
     calls.hosts.push(host);
+    if (lock !== null) host.lockMode(lock);
     return {
       intercept: async (payload) => {
         calls.intercepted.push(Uint8Array.from(payload));
@@ -676,8 +685,39 @@ describe("HostedRelayEngine E2EE seams", () => {
     // The limits are the Hub-asserted ones, adopted verbatim: the engine holds
     // no ceiling of its own and no tier constant of its own.
     expect(host().limits).toEqual(limits);
+    // §8.3 elements 2, 13, 14 come from the `channel.open` this endpoint
+    // received, so the machine cannot commit to authority the Hub did not
+    // present on this channel.
+    expect(host().channel).toEqual({
+      channelId: CHANNEL_ID,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
+      relayProtocolMajor: 1,
+      relayProtocolMinor: 2,
+    });
     expect(calls.hosts).toHaveLength(1);
+    // §4.4: the valve opened because THE MACHINE locked a mode, not because the
+    // channel was accepted.
     expect(events.onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("releases nothing at channel.accept until the machine locks a mode", () => {
+    // §4.4: `channel.accept` decides nothing. A channel that is `negotiating`
+    // may still lock `e2ee`, lock `legacy`, or close FATAL-PRE without ever
+    // releasing anything, so the open event, the status callbacks, and every
+    // buffered outbound byte wait for the lock.
+    const { provider } = stubProvider({}, null);
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(handlers.onTransportStatus).not.toHaveBeenCalledWith("online");
+    expect(handlers.onSessionStatus).not.toHaveBeenCalledWith("synchronizing");
+
+    engine.send(new TextEncoder().encode('{"_tag":"Ping"}'));
+    expect(sentFrames(socket).some((frame) => frame.type === "data")).toBe(false);
+    expect(engine.bufferedAmount).toBeGreaterThan(0);
   });
 
   it("fails the channel and never opens it when the provider refuses these limits", () => {

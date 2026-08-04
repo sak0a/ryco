@@ -23,6 +23,29 @@ describe("HostedReconnectPolicy", () => {
     expect(policy.nextDelay()).toBe(1_000);
   });
 
+  it("escalates rather than resets when a FATAL-PRE lands seconds after channel accept", () => {
+    // docs/relay-e2ee-protocol.md §15: "A client MUST NOT hot-retry after
+    // FATAL-PRE." The client-side lever is this policy, which resets its attempt
+    // counter only after a SUSTAINED stable connection — so a channel that
+    // failed a cryptographic check within a second of `channel.accept` cannot
+    // reconnect into the same failure at the base delay.
+    let now = 0;
+    const policy = new HostedReconnectPolicy({ random: () => 0.5, now: () => now });
+    expect(policy.nextDelay()).toBe(1_000);
+
+    policy.opened();
+    now = 1_000;
+    policy.closed();
+
+    expect(policy.nextDelay()).toBe(2_000);
+
+    // §4.4 moved the release valve behind the mode lock, so a FATAL-PRE before
+    // one is reached never calls `opened` at all — the escalation holds a
+    // fortiori, and this is the weaker of the two cases.
+    policy.closed();
+    expect(policy.nextDelay()).toBe(4_000);
+  });
+
   it("injects randomness without exceeding the configured window", () => {
     const low = new HostedReconnectPolicy({ random: () => 0 });
     const high = new HostedReconnectPolicy({ random: () => 1 });
