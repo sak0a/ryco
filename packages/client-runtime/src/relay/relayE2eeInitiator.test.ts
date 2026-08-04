@@ -1640,6 +1640,61 @@ describe("§13.5 WebSAS — the web tier's advisory code, and only the web tier'
     expect(codes).toEqual([]);
   });
 
+  it("publishes nothing on the two FATAL-PRE rows that follow an established accept", async () => {
+    // THE ROWS ABOVE HAVE NO SESSION MATERIAL AT ALL, which is why they cannot
+    // observe where the publish sits. §4.5's P14 and §11.2's P21 are the only
+    // FATAL-PRE rows reached AFTER `receiveServerAccept` returned an established
+    // result — an ephemeral, a session binding, and secrets all exist — so they
+    // are the only rows on which a `WebSAS` could actually be drawn for a channel
+    // that never opened. On the web tier that string is the whole of the owner's
+    // handshake evidence (§13.5), and the node's own rule is that a value the
+    // owner can read must describe a session that exists.
+
+    // Row P14 / §4.5: CONFORMING limits whose plaintext ceiling is not positive,
+    // so the channel fails during establishment. The hand-built host is what
+    // reaches it — the engine's admission bound preempts the row on the real
+    // path.
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 2_048,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 2_048,
+    });
+    expect(e2eeChannelSizeBudget(limits).establishable).toBe(false);
+    const p14Codes: unknown[] = [];
+    const p14 = standalone(
+      {
+        credentials: WEB_CREDENTIALS,
+        onWebVerificationCode: (code) => p14Codes.push(code),
+      },
+      limits,
+    );
+    expect(await p14.machine.intercept(CARRIER)).toEqual({ kind: "claimed" });
+    expect(await p14.machine.intercept(respond(p14.emitted.at(-1)!).record)).toEqual({
+      kind: "rejected",
+    });
+    expect(p14.machine.mode()).toBe("closed");
+    expect(p14.events).toEqual(["diagnostic:P14", "close:channel_rejected"]);
+    expect(p14Codes).toEqual([]);
+
+    // Row P21 / §13.2 step 2: a pairing-only attempt releases nothing at all
+    // regardless of outcome, and a code is a release the owner reads.
+    const p21Codes: unknown[] = [];
+    const p21 = harness({
+      credentials: WEB_CREDENTIALS,
+      pairingOnly: true,
+      onWebVerificationCode: (code) => p21Codes.push(code),
+    });
+    deliver(p21.socket, CARRIER);
+    await flush();
+    deliver(p21.socket, respond(Uint8Array.from(outbound(p21.socket).at(-1)!)).record, 1);
+    await flush();
+    expect(p21.machine().mode()).toBe("closed");
+    expect(p21.diagnostics).toEqual(["P21"]);
+    expect(p21.events.onOpen).not.toHaveBeenCalled();
+    expect(p21Codes).toEqual([]);
+  });
+
   it("locks the channel whether or not a caller asked for the code", async () => {
     // §11.2 admits no channel outcome that varies with a display duty: omitting
     // the callback reaches the same mode, the same release, and the same one
