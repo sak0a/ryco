@@ -25,6 +25,7 @@ import {
   type RelaySocket,
   type RelayTimers,
   relayE2eeFailure,
+  relayE2eeUnresolvedAttemptFailure,
 } from "./relayEngine";
 
 const CHANNEL_ID = "ch_cccccccccccccccccccccc" as RelayChannelId;
@@ -1335,4 +1336,35 @@ describe("HostedRelayEngine E2EE seams", () => {
       reason: "channel_rejected",
     });
   });
+
+  it("gives an unresolved §4.4 attempt the same wire close and a retryable disposition", () => {
+    const { provider, host } = stubProvider();
+    const handlers = callbacks();
+    const { socket } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    host().close(relayE2eeUnresolvedAttemptFailure());
+
+    // §11.5's uniform observable: byte-identical on the wire to every other
+    // pre-key close, so nothing about the local cause is measurable.
+    expect(sentFrames(socket).find((frame) => frame.type === "channel.close")).toMatchObject({
+      reason: "channel_rejected",
+    });
+    expect(closeReason(relayE2eeFailure("fatal_pre_key"))).toBe(
+      closeReason(relayE2eeUnresolvedAttemptFailure()),
+    );
+    // …and the local disposition differs, because nothing failed a check here.
+    // A non-retryable close drives `transportStatus` to `terminal-failure`,
+    // which stops reconnection entirely; a warm-up race must cost one channel.
+    expect(relayE2eeFailure("fatal_pre_key").retryable).toBe(false);
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "protocol",
+      retryable: true,
+      closeReason: "channel_rejected",
+    });
+  });
 });
+
+function closeReason(failure: { readonly closeReason?: string }): string | undefined {
+  return failure.closeReason;
+}

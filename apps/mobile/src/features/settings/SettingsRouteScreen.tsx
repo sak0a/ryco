@@ -45,6 +45,14 @@ export function SettingsRouteScreen() {
         />
       </SettingsSection>
 
+      <SettingsSection title="Security">
+        <SettingsRow
+          first
+          label="Node security"
+          onPress={() => navigation.navigate("SettingsNodeSecurity" as never)}
+        />
+      </SettingsSection>
+
       <SettingsSection title="Workspace">
         <SettingsRow
           first

@@ -1,3 +1,8 @@
+// The app's `tsconfig` is the react-native one, which resolves no Node builtins;
+// this test runs under Node, so it pulls the types in for itself.
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -131,6 +136,8 @@ describe("MVP route config", () => {
         "SettingsAppearance",
         "SettingsClientStorage",
         "SettingsHub",
+        "SettingsNodeSecurity",
+        "SettingsNodeVerification",
         "SettingsWorkspace",
       ].toSorted(),
     );
@@ -142,5 +149,88 @@ describe("MVP route config", () => {
     expect(MVP_SETTINGS_SHEET_ROUTES.SettingsAccount.linking).toBe("account");
     expect("HostedSignIn" in MVP_ROOT_ROUTES).toBe(false);
     expect("SettingsAccount" in MVP_ROOT_ROUTES).toBe(false);
+  });
+
+  it("nests the relay-E2EE trust routes and gives each an explicit presentation", () => {
+    // docs/relay-e2ee-protocol.md §13.1.1 / §13.2: the security surface and the
+    // ceremony. Both are NESTED, so the root route set is unchanged by E2EE, and
+    // both are pushes on both platforms — §13.1.1 forbids an indication that
+    // "dismisses into a verified-looking state", and a swipe-away sheet is the
+    // closest thing this navigator has to one.
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeSecurity.linking).toBe("node-security");
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeVerification.linking).toBe("node-verification");
+    expect("SettingsNodeSecurity" in MVP_ROOT_ROUTES).toBe(false);
+    expect("SettingsNodeVerification" in MVP_ROOT_ROUTES).toBe(false);
+    for (const name of ["SettingsNodeSecurity", "SettingsNodeVerification"] as const) {
+      expect(MVP_SETTINGS_SHEET_ROUTES[name].ios.presentation).toBe("card");
+      expect(MVP_SETTINGS_SHEET_ROUTES[name].android.presentation).toBe("card");
+    }
+  });
+
+  it("gives every nested settings route both platform decisions", () => {
+    for (const [name, descriptor] of Object.entries(MVP_SETTINGS_SHEET_ROUTES)) {
+      expect(descriptor.ios.presentation, `ios presentation for ${name}`).toBeDefined();
+      expect(descriptor.android.presentation, `android presentation for ${name}`).toBeDefined();
+    }
+  });
+
+  it("keeps every nested settings linking path distinct", () => {
+    const paths = Object.values(MVP_SETTINGS_SHEET_ROUTES).map((route) => route.linking);
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+});
+
+/**
+ * The table above is data; the navigator is what ships.
+ *
+ * Nothing tied the two together, so deleting a screen block from `Stack.tsx`
+ * left every assertion above passing while `navigate("SettingsNodeSecurity")`
+ * became a silent no-op — the §13.1.1 persistent indication and the §13.2
+ * ceremony unreachable in the built app. The `as never` casts on the navigate
+ * calls mean the type checker does not close the gap either, so it is closed
+ * here, over the source.
+ */
+describe("the settings navigator matches the settings route table", () => {
+  const SRC = join(import.meta.dirname, "..");
+  const stack = readFileSync(join(SRC, "Stack.tsx"), "utf8");
+
+  function registeredSettingsScreens(): readonly string[] {
+    const block = stack.slice(
+      stack.indexOf("const SettingsSheetStack = createNativeStackNavigator({"),
+      stack.indexOf("export const WORKSPACE_OVERLAY_ROUTES"),
+    );
+    return [...block.matchAll(/^ {4}(\w+): createNativeStackScreen\(\{$/gmu)].map(
+      (match) => match[1]!,
+    );
+  }
+
+  it("registers exactly the routes the table declares", () => {
+    expect(registeredSettingsScreens().toSorted()).toEqual(
+      Object.keys(MVP_SETTINGS_SHEET_ROUTES).toSorted(),
+    );
+  });
+
+  it("applies each descriptor's platform presentation rather than a hand-written option", () => {
+    // Otherwise the `ios`/`android` fields are a constant the tests above assert
+    // about and the navigator ignores, and §13.1.1's "no sheet that dismisses
+    // into a verified-looking state" holds only by accident.
+    for (const name of Object.keys(MVP_SETTINGS_SHEET_ROUTES)) {
+      expect(stack, name).toContain(`settingsRouteOptions("${name}",`);
+      expect(stack, name).toContain(`MVP_SETTINGS_SHEET_ROUTES.${name}.linking`);
+    }
+  });
+
+  it("reaches the §13.1.1 security surface from the settings screen", () => {
+    const settings = readFileSync(
+      join(SRC, "features", "settings", "SettingsRouteScreen.tsx"),
+      "utf8",
+    );
+    expect(settings).toContain('navigate("SettingsNodeSecurity"');
+    // …and the ceremony is reached from the security surface itself.
+    const security = readFileSync(
+      join(SRC, "features", "e2ee", "E2eeNodeSecurityRouteScreen.tsx"),
+      "utf8",
+    );
+    expect(security).toContain('navigate("SettingsNodeVerification"');
   });
 });

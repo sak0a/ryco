@@ -1,4 +1,4 @@
-import { decodeBase64Url } from "@ryco/client-runtime/relay";
+import { decodeBase64Url, encodeBase64Url } from "@ryco/client-runtime/relay";
 import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
 import { e2eeKeyFingerprint, formatE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
@@ -56,6 +56,12 @@ const CLIENT_PUBLIC_KEY = bytes(
     "b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650",
 );
 
+/** The stored form of `NODE_PUBLIC_KEY` — §13.1's record keeps the key, not the number. */
+const NODE_PUBLIC_KEY_B64 = encodeBase64Url(NODE_PUBLIC_KEY);
+const ROTATED_NODE_PUBLIC_KEY = bytes(
+  "5866666666666666666666666666666666666666666666666666666666666666",
+);
+
 function safetyNumber(hubOrigin: string, accountId: string): string {
   return deriveE2eeSafetyNumber({
     nodeIdentityPublicKey: NODE_PUBLIC_KEY,
@@ -89,6 +95,7 @@ function verifiedDocument(): string {
         state: "verified",
         nodeIdHints: [],
         verifiedFingerprint: NODE_FINGERPRINT,
+        verifiedIdentityPublicKey: NODE_PUBLIC_KEY_B64,
         recordedContinuityId: "continuity-1",
         acceptedPolicyGeneration: 4,
         approvedClientFingerprint: CLIENT_FINGERPRINT,
@@ -340,6 +347,7 @@ describe("§13.1 marker reconciliation", () => {
             state: "verified",
             nodeIdHints: [],
             verifiedFingerprint: "SHA256:aaaa",
+            verifiedIdentityPublicKey: NODE_PUBLIC_KEY_B64,
             recordedContinuityId: "continuity-1",
             acceptedPolicyGeneration: 4,
             approvedClientFingerprint: "SHA256:cccc",
@@ -530,6 +538,7 @@ describe("§12.1 latch set condition", () => {
     await restored.recordAuthenticatedStatement({
       index: SEEDED_INDEX,
       anchor: "pin-unchanged",
+      identityPublicKey: NODE_PUBLIC_KEY,
       identityFingerprint: NODE_FINGERPRINT,
       policyGeneration: 4,
       observedAt: 2_000,
@@ -552,6 +561,7 @@ describe("§12.1 latch set condition", () => {
       store.recordAuthenticatedStatement({
         index,
         anchor: "pin-unchanged",
+        identityPublicKey: NODE_PUBLIC_KEY,
         identityFingerprint: "SHA256:aaaa",
         policyGeneration: 4,
         observedAt: 2_000,
@@ -628,6 +638,7 @@ describe("§13.3 rotation and re-verification", () => {
     await store.recordAuthenticatedStatement({
       index,
       anchor: "pin-updated",
+      identityPublicKey: ROTATED_NODE_PUBLIC_KEY,
       identityFingerprint: ROTATED_NODE_FINGERPRINT,
       policyGeneration: 6,
       observedAt: 3_000,
@@ -658,6 +669,7 @@ describe("§13.3 rotation and re-verification", () => {
     await store.recordAuthenticatedStatement({
       index,
       anchor: "pin-unchanged",
+      identityPublicKey: NODE_PUBLIC_KEY,
       identityFingerprint: NODE_FINGERPRINT,
       policyGeneration: 2,
       observedAt: 3_000,
@@ -678,6 +690,7 @@ describe("§13.3 rotation and re-verification", () => {
     await store.recordAuthenticatedStatement({
       index,
       anchor: "pin-unchanged",
+      identityPublicKey: NODE_PUBLIC_KEY,
       identityFingerprint: ROTATED_NODE_FINGERPRINT,
       policyGeneration: 5,
       observedAt: 3_000,
@@ -723,6 +736,7 @@ describe("§13.3 rotation and re-verification", () => {
         await store.recordAuthenticatedStatement({
           index,
           anchor: outcome.kind === "pin-rotated" ? "pin-updated" : "pin-unchanged",
+          identityPublicKey: ROTATED_NODE_PUBLIC_KEY,
           identityFingerprint: ROTATED_NODE_FINGERPRINT,
           policyGeneration: 1,
           observedAt: 4_000,
@@ -1206,6 +1220,7 @@ describe("§13.1 the durable document's own bounds", () => {
         store.recordAuthenticatedStatement({
           index: kept,
           anchor: "pin-unchanged",
+          identityPublicKey: NODE_PUBLIC_KEY,
           identityFingerprint: NODE_FINGERPRINT,
           policyGeneration,
           observedAt: 5,
@@ -1216,6 +1231,7 @@ describe("§13.1 the durable document's own bounds", () => {
       store.recordAuthenticatedStatement({
         index: kept,
         anchor: "pin-updated",
+        identityPublicKey: ROTATED_NODE_PUBLIC_KEY,
         identityFingerprint: "f".repeat(513),
         policyGeneration: 5,
         observedAt: 5,

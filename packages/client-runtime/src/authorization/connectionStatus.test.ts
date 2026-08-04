@@ -11,6 +11,7 @@ import {
 import {
   everyHostedConnectionStatusInput,
   hostedConnectionConnectedByGateOrder,
+  hostedConnectionGuaranteeByGateOrder,
 } from "../../test/hostedConnectionVocabulary";
 
 function input(overrides: Partial<HostedConnectionStatusInput>): HostedConnectionStatusInput {
@@ -188,5 +189,94 @@ describe("the collapsed connection indicator", () => {
         expect(value.browserStatus).toBe("current");
       }
     }
+  });
+});
+
+/**
+ * `docs/relay-e2ee-protocol.md` §2.2 / §12.2, folded into the one derivation.
+ *
+ * The sweep is the point. §2.2's rule — "implementations and user-facing
+ * documentation MUST NOT present a stronger claim for a weaker configuration" —
+ * is a statement about EVERY combination, and the reason the E2EE state was
+ * folded in here rather than derived beside the pill is that a second derivation
+ * once shipped a contradictory one.
+ */
+describe("the §4.4 channel state folded into the indicator", () => {
+  it("leaves a caller that reports no channel state byte-identical", () => {
+    for (const value of everyHostedConnectionStatusInput()) {
+      if (value.e2eeStatus !== "unavailable") continue;
+      const { e2eeStatus: _dropped, ...withoutE2ee } = value;
+      expect(deriveHostedConnectionStatusText(withoutE2ee)).toBe(
+        deriveHostedConnectionStatusText(value),
+      );
+    }
+  });
+
+  it("names a usable session for the mode its channel locked", () => {
+    const ready = { browserStatus: "current", sessionStatus: "ready" } as const;
+    const online = { selectionStatus: "online", transportStatus: "online" } as const;
+    expect(deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "verified" })).toBe(
+      "Encrypted",
+    );
+    expect(deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "legacy" })).toBe(
+      "Legacy",
+    );
+    expect(
+      deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "unverified" }),
+    ).toBe("Not verified");
+    expect(
+      deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "negotiating" }),
+    ).toBe("Securing");
+    expect(
+      deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus: "unavailable" }),
+    ).toBe("Online");
+  });
+
+  it("never lets a channel state outrank a browser, session, or selection problem", () => {
+    for (const value of everyHostedConnectionStatusInput()) {
+      if (value.e2eeStatus === "unavailable") continue;
+      const text = deriveHostedConnectionStatusText(value);
+      if (!(["Encrypted", "Legacy", "Not verified", "Securing"] as string[]).includes(text)) {
+        continue;
+      }
+      // Reached only through the one branch that used to say `Online`.
+      expect(value.browserStatus).toBe("current");
+      expect(value.sessionStatus).toBe("ready");
+      expect(value.transportStatus).toBe("online");
+      expect((["online", "none", "offline"] as string[]).includes(value.selectionStatus)).toBe(
+        true,
+      );
+    }
+  });
+
+  it("claims E2EE for a verified session and for nothing else", () => {
+    let claimed = 0;
+    for (const value of everyHostedConnectionStatusInput()) {
+      const { guarantee } = deriveHostedConnectionStatusIndicator(value);
+      expect(guarantee, `guarantee for ${JSON.stringify(value)}`).toBe(
+        hostedConnectionGuaranteeByGateOrder(value),
+      );
+      if (guarantee === "e2ee") {
+        claimed += 1;
+        expect(value.e2eeStatus).toBe("verified");
+      }
+      // The §13.1 release gate and §12.2's honest labeling, as a property of
+      // every combination rather than of the four spot checks above.
+      if (value.e2eeStatus === "unverified" || value.e2eeStatus === "negotiating") {
+        expect(guarantee).toBe("none");
+        expect(deriveHostedConnectionStatusIndicator(value).connected).toBe(false);
+      }
+      if (value.e2eeStatus === "legacy") expect(guarantee).not.toBe("e2ee");
+    }
+    expect(claimed).toBeGreaterThan(0);
+  });
+
+  it("gives the E2EE-bearing status a label that says so, and no other status one", () => {
+    expect(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted.guarantee).toBe("e2ee");
+    expect(HOSTED_CONNECTION_STATUS_INDICATORS.Legacy.guarantee).toBe("legacy");
+    const claiming = HOSTED_CONNECTION_STATUS_TEXTS.filter(
+      (text) => HOSTED_CONNECTION_STATUS_INDICATORS[text].guarantee === "e2ee",
+    );
+    expect(claiming).toEqual(["Encrypted"]);
   });
 });

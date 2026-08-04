@@ -260,13 +260,194 @@ under the origin being left, and `removeSavedEnvironment` in
 forgot. Both registrations have their own tests, since nothing else would catch
 one going missing.
 
-Not in this slice: the §4.4 mode machine that consults the classification, the
-§13.2 pairing screen that mints the owner decision, the §13.2.1 surface that
-presents the situation and takes one of its two resolutions, and the §13.1.1
-security-UI surface for a device holding no verified pin on a connected Hub
-origin. The last of those is where `destroyUnreadableTrustState` belongs: until it
-has a screen, a device whose document will not parse stays `unobtainable` — every
-classification UNEXPECTED — and the Hub-domain change refuses rather than wiping.
+Since S7 the record also keeps the **verified node identity public key** beside
+its fingerprint. §13.2.1 situation 2 requires "the previously verified fingerprint
+and safety number" beside the newly presented pair, and a safety number is not
+recomputable from a fingerprint; §13.4 says the value itself "never travels in any
+protocol message, log, or analytics surface" and that only the node's §13.2
+pending-record copy is persisted. Keeping the public key — which the statement
+carries in the clear, and which the fingerprint is a digest of — is what lets the
+client recompute the display value on demand without persisting it. The field is
+**required** on a `verified` record, on the same fail-closed reading as every
+other promoted field: a document written by a build that lacked it does not parse,
+and no build before this one ever wrote a `verified` record, because nothing
+injected the §4.4 machine.
+
+## Relay E2EE, on (§4.4 injection)
+
+Native E2EE is on from S7. `src/hostedHub/runtime.ts` builds every hosted relay
+socket with `resolveMobileRelayE2eeProvider()`, so every channel this app opens
+runs the §4.4 mode machine. The timing problem is worth stating, because the
+answer to it is a security decision rather than an optimisation:
+`createRelaySocket` is **synchronous** and §4.4 requires the pin, the §12.1.1
+classification, the device marker, and the owner's recorded consent to be
+evaluable "before it has received any payload" — so `src/hostedHub/e2eeAttempt.ts`
+resolves the attempt ahead of the socket, keyed by the exact `(hubOrigin,
+accountId, nodeId)` it was resolved for, and re-primes on every selection change.
+
+There are exactly three outcomes and only one of them is legacy:
+
+- a resolved attempt for this selection gets the machine;
+- a device that cannot build §8.5 credentials gets **no provider** — §6.3 admits
+  "no software-key fallback and no degraded mode", so it has no E2EE, and §12.2's
+  `legacy` label is applied to the channel in every surface;
+- an attempt that is not ready yet gets a channel that closes **FATAL-PRE**
+  without releasing anything. That is deliberately not a legacy channel: the thing
+  that has not been read _is_ the classification, and §12.1.1 admits nothing into
+  the legacy-eligible class on absent evidence.
+
+The `undefined` case is asserted to be reachable only from a custody failure, and
+the not-ready case is asserted to release nothing, in
+`src/hostedHub/e2eeAttempt.test.ts`.
+
+## Relay E2EE trust UI (§13.1.1, §13.2, §13.2.1, §13.3, §13.4)
+
+`src/features/e2ee/e2eeTrustUiModel.ts` owns every decision and every string;
+`src/hostedHub/e2eeSession.ts` is the projection of one channel's §13 state. Both
+are free of `react-native` and of React, for the reason
+`src/features/hostedHub/hostedAuthModel.ts` documents — the RN packages ship
+untranspiled Flow the vp/node runner cannot parse, so anything decided inside a
+`.tsx` is untestable. Two nested settings routes render them:
+`SettingsNodeSecurity` (`settings/node-security`) and `SettingsNodeVerification`
+(`settings/node-verification`), both pushes on both platforms.
+
+Four properties are structural rather than documented:
+
+- **One construction site for a §13.2 step 5 decision.**
+  `mintE2eeOwnerVerificationDecision` is branded and re-derives §13.4 from both
+  identity keys, which stops a token being forged; what stops a second screen
+  minting one without an owner act is a scan —
+  `e2eeTrustUiSurface.test.ts` fails the build if the identifier, or `.promote(`,
+  appears anywhere under `src/` but the store and the one model. The action that
+  reaches it is **absent, not disabled**, until the owner has said on that screen
+  that they compared the number.
+- **The status vocabulary is derived, never hand-written.** The §4.4 channel state
+  is folded into `packages/client-runtime`'s
+  `deriveHostedConnectionStatusText`/`…Indicator`, which gained a fifth bounded
+  input and a `guarantee` member. `Encrypted` is the only status that carries
+  `guarantee: "e2ee"`, and it is produced only by a channel that locked `e2ee`
+  **and** resolved to a verified pin. The mobile side adds only the tone mapper,
+  which reads that member and withholds the success token from a `legacy`
+  channel — a green pill reading `Legacy` is §12.2's label wearing the verified
+  session's colour. The input is **required** on every mobile status derivation
+  (`deriveHostedSignInView`, `deriveHostedAccountView`,
+  `deriveHubNodeSectionModel`) and supplied from `useMobileE2eeChannelStatus()`:
+  an optional field with a benign default is how the whole vocabulary stayed
+  unreachable in the shipped app while its unit tests passed.
+- **Every guard is re-resolved on every owner decision.** The prepared §4.4
+  attempt is keyed on the selection **and** on `mobileE2eeTrustStore.revision()`,
+  which the store bumps on every commit. §13.2 step 5's promotion, §13.3's
+  re-pair and §12.1.1's consent change the pin, the latch, the class and the
+  marker without touching the account or the node, so a slot keyed on the
+  selection alone kept serving pre-decision state for the rest of the session.
+- **§13.1's release gate lives in the mode machine, not in the caller.**
+  `relayE2eeInitiator` refuses the `e2ee` lock to any **native** attempt that
+  resolved to no verified pin (§11.2 P21), so a node that still holds an approval
+  for a device whose pin was never verified — or was cleared — cannot open an
+  application session. It is deliberately not folded into `pairingOnly`, which
+  closes the plaintext valve too: §12.1.1 branch (a) still lets genuine first
+  contact reach a non-E2EE node through rows K9/K13.
+- **Four messages, never one.** §13.2.1's three situations and §13.3's identity
+  change are four distinct strings, asserted distinct; situation 3 is asserted not
+  to be worded as an identity change, and situation 2 is the only one that renders
+  the previously verified pair beside the newly presented one.
+- **The §13.1.1 indication has no dismissal.** It is an `accessibilityRole="alert"`
+  card with no dismiss affordance and no timeout, modelled on
+  `HostedDeliveryUnknownNotice`, and it is shown whenever the marker is unset
+  **or unobtainable** after reconciliation.
+
+Still not in the app: `destroyUnreadableTrustState` has a model action and a
+confirmation, but no screen passes `trustStateUnreadable: true` — the store
+reports an unreadable document only by refusing mutations, and there is no
+synchronous probe. A device whose document will not parse therefore still stays
+`unobtainable` (every classification UNEXPECTED) until the owner leaves the Hub
+domain, which is the existing scoped-forget path.
+
+## Relay E2EE Phase 3 acceptance (owner, on a physical device)
+
+This is the run that decides whether the native tier's §13 behaviour is real. It
+needs a **physical device** and a **real node** on the LAN/tailnet; nothing in
+this repository can execute it, and no Node test substitutes for it. Record the
+outcome of every row.
+
+Prerequisites: the development variant installed per the runbook above, a Ryco
+node you control with its enrollment/pending-client CLI reachable, and a Hub
+account with that node enrolled.
+
+1. **Fresh device, unverified Hub (§13.1.1).** With no node yet verified, open
+   **Settings → Security → Node security**. Expect the persistent
+   _No verified node on this Hub_ card, with no dismiss control, and the channel
+   labelled either `Legacy` or `Not verified` — never `Encrypted`. Confirm the
+   card does not disappear when you navigate away and back.
+2. **Enrollment-fingerprint-first pairing (§13.2).** Run the node's enrollment
+   command and read its identity fingerprint. In the app, tap **Verify this node**
+   and type it. Expect: a wrong value never advances and never shows a safety
+   number; the correct value advances to the comparison.
+3. **Safety number (§13.4).** Compare the twelve five-digit groups on screen with
+   the number the node CLI shows for this client record. They must be **identical
+   and in the same order**. Tick the acknowledgement, approve this device on the
+   node with an explicit role and capability, then confirm on the device.
+4. **A fresh channel is required (§13.2 step 6).** Do **not** expect traffic to
+   start on the pairing channel. Background and foreground the app (or toggle the
+   node selection) so a fresh ticket, channel, and handshake are made. Only then
+   should the session indicator read **Encrypted**. Backgrounding alone re-opens
+   the channel; the attempt behind it is re-resolved by the trust-store revision
+   the promotion bumped, so no selection toggle is required for the new pin to
+   take effect.
+5. **Session indicator, on every surface.** Confirm the pill reads `Encrypted`
+   and is the success colour on the **Hub node section**, the **hosted account
+   screen**, and the sign-in surface, and that no surface reads `Legacy` for this
+   connection. Then withhold E2EE (point the app at a node that runs no §4
+   channel) and confirm every one of those surfaces reads `Legacy` in the warning
+   colour rather than a green `Online`.
+6. **Substituted node (§13.2.1 situation 2).** With one node verified under this
+   account, point the app at a _different_ node under the same account (enroll a
+   second node, or re-key the first so it presents a first-contact statement).
+   Expect the situation-2 copy and the **side-by-side** fingerprints and safety
+   numbers, _before_ any pairing step. Confirm no payload flows.
+7. **Account-scope change (§13.2.1 situation 3).** Sign in under a second account
+   on the same Hub. Expect the situation-3 copy, and confirm it does **not** say
+   an identity changed and shows **no** previously verified fingerprint.
+8. **Chain break (§13.3).** Rotate the node's identity by a mechanism that issues
+   **no** continuity certificate. Expect the re-verification copy, the new
+   fingerprint and safety number, and no payload to the new identity until a fresh
+   §13.2 ceremony completes. Then rotate _with_ a valid chain and confirm that
+   this one raises **no** prompt at all.
+9. **Legacy consent (§13.2.1).** On an unexpected selection, confirm exactly two
+   resolutions are offered, that neither is preselected, that dismissing the
+   screen records nothing, and that the consent one carries its own confirmation.
+10. **Reinstall (§6.3, §13.1.1).** Delete the app and reinstall it. Expect
+    re-pairing to be required and the §13.1.1 card to be back. This is the check
+    that the disclosure text is true. Leave the node's approval for the old
+    client key in place: the device now has no pin, so §13.1's release gate must
+    close the channel (`Not verified`, no project/conversation/terminal data)
+    rather than opening a session against the surviving approval.
+11. **Forget this node (§13.3).** With a node verified, tap **Forget this node's
+    identity** and confirm. Expect the security screen to stop reading
+    `Encrypted` **without leaving and re-entering it**, the §13.1.1 card to come
+    back if that was the last verified pin, and the next channel to be release-
+    gated rather than continuing under the pin that was just deleted.
+12. **Vectors, both platforms.** Re-run the S1 `__rycoRunE2eeVectors()` procedure
+    above on iOS **and** Android hardware and record `globals` for each.
+
+**What this run does and does not prove.** It proves that a real node and this app
+agree on the §13.4 value, that the §13.2 ceremony completes and gates payload,
+that the four §13.2.1/§13.3 situations are distinguishable to an owner in
+practice, and that the §6.3 custody class behaves on the two platforms. It does
+**not** prove §16.4's complete-corpus device gate (still open, see above), does
+not exercise a hostile Hub — every substitution above is one you staged yourself,
+so it demonstrates the _presentation_, not the _detection_, of an attack — and
+does not prove anything about the production binary beyond the code it shares with
+the development one.
+
+**What the app cannot tell you, and the copy does not pretend to.** Every §11.2
+pre-key failure is byte-identical on the wire: one fixed-length reject plus
+`channel.close(channel_rejected)`, with no cause and no code. So when a pairing
+attempt ends, this app cannot distinguish _not approved_ from _revoked_, _rate
+limited_, _my tier is forbidden_, _my clock is wrong_, or _my prekey expired_. If
+step 4 does not reach `Encrypted`, the app will not say why — check the node's own
+logs. The only causes the app names are ones it concluded about itself (§11.4),
+and they are listed on the Node security screen under _On this device_.
 
 ## Relay E2EE key custody (owner, on a physical device)
 

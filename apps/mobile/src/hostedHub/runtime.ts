@@ -1,4 +1,8 @@
-import { configureHostedRuntime, hostedHubController } from "@ryco/client-runtime/authorization";
+import {
+  configureHostedRuntime,
+  hostedHubController,
+  hostedHubStore,
+} from "@ryco/client-runtime/authorization";
 import {
   hasHostedRelayPendingRequests,
   resetHostedRelayAttemptFactory,
@@ -14,6 +18,12 @@ import {
   hydrateMobileHostedSessionToken,
   mobileSessionCredentials,
 } from "../platform/sessionCredentials";
+import {
+  disposeMobileRelayE2eeAttempt,
+  prepareMobileRelayE2eeAttempt,
+  resolveMobileRelayE2eeProvider,
+} from "./e2eeAttempt";
+import { resetMobileE2eeSession } from "./e2eeSession";
 import { hydrateMobileHubProfile } from "./hubProfile";
 import { mobileHostedNodeLifecycle } from "./nodeLifecycle";
 import { MobileHostedRelaySocket, mobileHostedRelayUrl } from "./relaySocket";
@@ -37,6 +47,7 @@ import {
 let configured = false;
 let available = false;
 let session: Promise<void> | undefined;
+let selectionWatch: (() => void) | undefined;
 const availabilityListeners = new Set<() => void>();
 
 function setAvailable(next: boolean): void {
@@ -126,11 +137,75 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
     hasPendingRelayRequests: hasHostedRelayPendingRequests,
     resetRelayAttemptFactory: resetHostedRelayAttemptFactory,
     relayUrl: mobileHostedRelayUrl,
-    createRelaySocket: (input) => new MobileHostedRelaySocket(input),
+    // docs/relay-e2ee-protocol.md §4: THIS IS WHERE NATIVE E2EE IS ON.
+    //
+    // Every relay channel this app opens is built with the §4.4 mode machine,
+    // and the guards it consults were resolved before this call — §4.4 requires
+    // them "before it has received any payload", and this call is synchronous.
+    // `resolveMobileRelayE2eeProvider` returns `undefined` in exactly one case,
+    // a device that cannot hold the §6.3 agreement key, which §6.3 says simply
+    // has no E2EE; everything else is either the machine or a channel that fails
+    // closed. It is never a legacy channel because the attempt was late.
+    createRelaySocket: (input) =>
+      new MobileHostedRelaySocket({ ...input, e2ee: resolveMobileRelayE2eeProvider() }),
   });
   configured = true;
   setAvailable(true);
+  watchSelectionForE2ee();
   return true;
+}
+
+/**
+ * Keep the §4.4 attempt warm for whatever selection is current, and for whatever
+ * the owner has since decided about it.
+ *
+ * The relay transport creates its socket the instant a ticket resolves, and
+ * resolving an attempt reads a keychain and a secure store. Priming on every
+ * change of the `(account, node)` pair is what makes the synchronous read at
+ * `createRelaySocket` find a complete attempt rather than fail the channel
+ * closed — and the failure IS closed, never a silent fallback, so a miss costs
+ * one channel rather than the guarantee.
+ *
+ * THE TRUST DOCUMENT IS THE SECOND INPUT, and it is the one the selection cannot
+ * stand in for. §13.2 step 5's promotion, §13.3's re-pair and §12.1.1's consent
+ * change the pin, the latch, the class and the marker without touching the
+ * account or the node, so the store's own revision is subscribed to as well. The
+ * attempt slot is keyed on it too, so a decision that lands between this
+ * notification and the re-preparation completing still cannot be used.
+ */
+function watchSelectionForE2ee(): void {
+  if (selectionWatch !== undefined) return;
+  let last = "";
+  const evaluate = () => {
+    const state = hostedHubStore.getState();
+    // NUL-joined: `accountId` and `nodeId` are Hub-issued (§12.1.1), so a
+    // separator either could contain would let one selection's key be spelled
+    // by another's fields.
+    const next = [
+      state.accountStatus,
+      state.account?.id ?? "",
+      state.selectedNode?.id ?? "",
+      String(mobileE2eeTrustStore.revision()),
+    ].join("\u0000");
+    if (next === last) return;
+    last = next;
+    if (state.accountStatus !== "authenticated" || state.selectedNode === null) {
+      disposeMobileRelayE2eeAttempt();
+      // The projection describes a channel for a selection that no longer
+      // exists. Leaving it standing kept a sign-out — and a node deselect —
+      // looking like a live, possibly verified, connection on every §13 surface.
+      resetMobileE2eeSession();
+      return;
+    }
+    void prepareMobileRelayE2eeAttempt();
+  };
+  const unsubscribeStore = hostedHubStore.subscribe(evaluate);
+  const unsubscribeTrust = mobileE2eeTrustStore.subscribe(evaluate);
+  selectionWatch = () => {
+    unsubscribeStore();
+    unsubscribeTrust();
+  };
+  evaluate();
 }
 
 /**
@@ -175,6 +250,13 @@ export function invalidateMobileHostedRuntime(): void {
   configured = false;
   setAvailable(false);
   session = undefined;
+  selectionWatch?.();
+  selectionWatch = undefined;
+  // The attempt holds this device's agreement scalar. A Hub-profile change is
+  // exactly when it stops being the right one, so it is zeroized here rather
+  // than left for the next selection to overwrite.
+  disposeMobileRelayE2eeAttempt();
+  resetMobileE2eeSession();
   invalidateMobileHostedRuntimeConfig();
 }
 

@@ -138,19 +138,60 @@ export const MVP_ROOT_ROUTES = {
 
 export type MvpRootRouteName = keyof typeof MVP_ROOT_ROUTES;
 
+/**
+ * A nested settings route.
+ *
+ * The per-platform presentation is REQUIRED rather than inferred. Every route in
+ * this stack is a push today, and writing that down is what makes the next route
+ * that should not be one an explicit decision instead of a default nobody
+ * noticed — the same reason `MvpRouteDescriptor` carries both platforms.
+ */
+export interface MvpSettingsRouteDescriptor {
+  readonly linking: string;
+  readonly ios: RoutePlatformPresentation;
+  readonly android: RoutePlatformPresentation;
+}
+
+/** A push inside the settings stack, which is what every route here is. */
+const SETTINGS_PUSH = {
+  ios: { presentation: "card" },
+  android: { presentation: "card" },
+} as const satisfies Pick<MvpSettingsRouteDescriptor, "ios" | "android">;
+
 // Nested routes inside the full-screen Settings stack.
 export const MVP_SETTINGS_SHEET_ROUTES = {
-  Settings: { linking: "" },
-  SettingsHub: { linking: "hub" },
-  SettingsWorkspace: { linking: "workspace" },
+  Settings: { linking: "", ...SETTINGS_PUSH },
+  SettingsHub: { linking: "hub", ...SETTINGS_PUSH },
+  SettingsWorkspace: { linking: "workspace", ...SETTINGS_PUSH },
   // Hosted Hub account. Nested rather than a root route so the hosted plane
   // adds no root-route churn: sign-in lives inside the existing `Onboarding`
   // sheet, and this is the only route the hosted surfaces add anywhere.
-  SettingsAccount: { linking: "account" },
-  SettingsAppearance: { linking: "appearance" },
-  SettingsClientStorage: { linking: "client-storage" },
-  SettingsAbout: { linking: "about" },
-} as const satisfies Record<string, { readonly linking: string }>;
+  SettingsAccount: { linking: "account", ...SETTINGS_PUSH },
+  /**
+   * The `docs/relay-e2ee-protocol.md` §13.1.1 security surface: the persistent
+   * indication that this device has verified no node on this Hub, the channel's
+   * §12.2 label, the §13.2.1 resolutions, and the §11.4 local diagnostics.
+   *
+   * Nested for the same reason `SettingsAccount` is, and a PUSH on both
+   * platforms deliberately: §13.1.1 requires an indication that "MUST NOT be
+   * presented as a transient banner that dismisses into a verified-looking
+   * state", and a sheet the owner swipes away is the closest thing this
+   * navigator has to one.
+   */
+  SettingsNodeSecurity: { linking: "node-security", ...SETTINGS_PUSH },
+  /**
+   * The §13.2 ceremony and §13.3's re-verification UI: the enrollment
+   * fingerprint, the §13.4 safety number, and the one action that mints an owner
+   * verification decision. A push on both platforms so the comparison cannot be
+   * dismissed by a downward swipe mid-ceremony.
+   */
+  SettingsNodeVerification: { linking: "node-verification", ...SETTINGS_PUSH },
+  SettingsAppearance: { linking: "appearance", ...SETTINGS_PUSH },
+  SettingsClientStorage: { linking: "client-storage", ...SETTINGS_PUSH },
+  SettingsAbout: { linking: "about", ...SETTINGS_PUSH },
+} as const satisfies Record<string, MvpSettingsRouteDescriptor>;
+
+export type MvpSettingsRouteName = keyof typeof MVP_SETTINGS_SHEET_ROUTES;
 
 export const WORKSPACE_OVERLAY_ROUTE_NAMES: readonly MvpRootRouteName[] = (
   Object.keys(MVP_ROOT_ROUTES) as MvpRootRouteName[]

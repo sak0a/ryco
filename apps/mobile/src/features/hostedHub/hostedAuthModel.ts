@@ -6,6 +6,7 @@ import {
   type HostedAccountActionStatus,
   type HostedConnectionStatusIndicator,
   type HostedConnectionStatusText,
+  type HostedE2eeChannelStatus,
   type HostedHubState,
   type HostedRpcCapability,
 } from "@ryco/client-runtime/authorization";
@@ -163,6 +164,18 @@ export interface HostedSignInViewInput {
   readonly state: HostedHubState;
   /** `isMobileHostedModeAvailable()` — hosted config plus a usable hardware key. */
   readonly hostedModeAvailable: boolean;
+  /**
+   * `useMobileE2eeChannelStatus()` — what `docs/relay-e2ee-protocol.md` §4.4
+   * locked on the channel behind this session.
+   *
+   * REQUIRED, not optional with a benign default. §12.2 makes the legacy label
+   * mandatory "in every user-facing surface", and a surface that omitted this
+   * would render a fallen-back channel with the same word and the same success
+   * colour as a verified one — which is the §2.2 overclaim, arrived at by
+   * forgetting rather than by deciding. A required field makes forgetting a type
+   * error.
+   */
+  readonly e2eeStatus: HostedE2eeChannelStatus;
   /** The direct-plane escape hatch offered whenever hosted mode cannot run. */
   readonly onPairDevice: () => void;
   /** Dismiss the sheet once the hosted session is established. */
@@ -172,6 +185,8 @@ export interface HostedSignInViewInput {
 export interface HostedAccountViewInput {
   readonly state: HostedHubState;
   readonly hostedModeAvailable: boolean;
+  /** §4.4's locked mode, for the same reason {@link HostedSignInViewInput} takes it. */
+  readonly e2eeStatus: HostedE2eeChannelStatus;
   /** Open the sign-in sheet (the `Onboarding` route). */
   readonly onSignIn: () => void;
   /**
@@ -210,7 +225,10 @@ function action(
 const signInAction = (label: string): HostedAuthAction =>
   action("sign-in", label, () => void hostedHubController.signIn());
 
-function statusOf(state: HostedHubState): {
+function statusOf(
+  state: HostedHubState,
+  e2eeStatus: HostedE2eeChannelStatus,
+): {
   readonly text: HostedConnectionStatusText;
   readonly indicator: HostedConnectionStatusIndicator;
 } {
@@ -219,6 +237,7 @@ function statusOf(state: HostedHubState): {
     sessionStatus: state.sessionStatus,
     selectionStatus: state.selectionStatus,
     transportStatus: state.transportStatus,
+    e2eeStatus,
   };
   return {
     text: deriveHostedConnectionStatusText(input),
@@ -237,14 +256,34 @@ const HOSTED_ATTENTION_LABELS: ReadonlySet<string> = new Set([
   "Revoked",
   "Incompatible",
   "Failed",
+  // docs/relay-e2ee-protocol.md §13.1's release gate: an E2EE channel with no
+  // verified pin carries the §13.2 ceremony and no application payload. That is
+  // a state the owner has to act on, not a step on the way to one.
+  "Not verified",
 ]);
 
 /**
  * Token-class tone for one bounded status, mirroring `connectionTone.ts` for
  * the direct plane. The label is the runtime's own short label — the tone
  * chooses colour only, so a pill can never contradict the word inside it.
+ *
+ * THERE IS EXACTLY ONE OF THESE, AND IT READS `guarantee`. A second mapper
+ * beside it — "the E2EE one" — would be a second opinion about the property
+ * `docs/relay-e2ee-protocol.md` §2.2 forbids overstating, and the two would
+ * disagree the first time one of them was extended. The success token is
+ * therefore withheld from `legacy` here rather than at a call site: §12.2
+ * requires a fallen-back channel to be labeled legacy "in every user-facing
+ * surface", and a green pill reading `Legacy` is that label wearing the
+ * verified session's colour.
  */
 export function hostedStatusTone(indicator: HostedConnectionStatusIndicator): StatusTone {
+  if (indicator.guarantee === "legacy") {
+    return {
+      label: indicator.shortLabel,
+      pillClassName: "bg-warning-bg border border-warning-border",
+      textClassName: "text-warning",
+    };
+  }
   if (indicator.connected) {
     return {
       label: indicator.shortLabel,
@@ -382,7 +421,7 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
         ),
       };
     case "authenticated": {
-      const status = statusOf(state);
+      const status = statusOf(state, input.e2eeStatus);
       return {
         ...base,
         title: "Connected to your Hub",
@@ -504,7 +543,7 @@ export function deriveHostedAccountView(input: HostedAccountViewInput): HostedAc
     };
   }
 
-  const status = statusOf(state);
+  const status = statusOf(state, input.e2eeStatus);
   return {
     ...base,
     signedIn: true,

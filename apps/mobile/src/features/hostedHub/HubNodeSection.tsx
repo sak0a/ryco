@@ -5,6 +5,7 @@ import type { RelayEffectiveRole } from "@ryco/contracts";
 import {
   deriveHostedConnectionStatusIndicator,
   deriveHostedConnectionStatusText,
+  type HostedE2eeChannelStatus,
   type HostedHubNode,
   type HostedHubState,
 } from "@ryco/client-runtime/authorization";
@@ -13,6 +14,7 @@ import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import { StatusPill, type StatusTone } from "../../components/StatusPill";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
 import { NodeRow } from "../nodes/NodeRow";
 import { hostedStatusTone } from "./hostedAuthModel";
 import { useHostedModeAvailable } from "./useHostedMode";
@@ -123,6 +125,12 @@ export function deriveHubNodeSectionModel(input: {
   readonly state: HostedHubState;
   /** `useHostedModeAvailable()` — hosted config plus a usable hardware key. */
   readonly available: boolean;
+  /**
+   * `useMobileE2eeChannelStatus()` — §4.4's locked mode for the selected node's
+   * channel. Required for the reason `HostedSignInViewInput` documents: §12.2's
+   * legacy label is mandatory on every surface, and this is one of them.
+   */
+  readonly e2eeStatus: HostedE2eeChannelStatus;
   readonly actions: HubNodeSectionActions;
   readonly onSignIn: () => void;
   readonly query?: string;
@@ -133,6 +141,7 @@ export function deriveHubNodeSectionModel(input: {
     sessionStatus: state.sessionStatus,
     selectionStatus: state.selectionStatus,
     transportStatus: state.transportStatus,
+    e2eeStatus: input.e2eeStatus,
   };
   const indicator = deriveHostedConnectionStatusIndicator(statusInput);
   const statusText = deriveHostedConnectionStatusText(statusInput);
@@ -313,10 +322,14 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
   // flag, so a direct-only build (or a device with no usable hardware key)
   // renders the disabled state instead of a tappable-but-broken row.
   const available = useHostedModeAvailable();
+  // docs/relay-e2ee-protocol.md §12.2: the pill beside a node says what §4.4
+  // locked, so a fallen-back channel reads `Legacy` here and not `Online`.
+  const e2eeStatus = useMobileE2eeChannelStatus();
 
   const model = deriveHubNodeSectionModel({
     state,
     available,
+    e2eeStatus,
     actions: hostedHubController,
     // Sign-in lives on the Onboarding sheet (the hosted sign-in surface); this
     // section never runs a ceremony itself.

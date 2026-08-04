@@ -1,4 +1,4 @@
-import { encodeBase64Url } from "@ryco/client-runtime/relay";
+import { decodeBase64Url, encodeBase64Url } from "@ryco/client-runtime/relay";
 import { E2EE_PIN_NODE_ID_HINTS_MAX } from "@ryco/shared/relayE2eeConstants";
 import {
   e2eeKeyFingerprint,
@@ -130,6 +130,8 @@ interface StoredTrustRecord {
   readonly environmentId?: string;
   readonly legacyConsentAt?: number;
   readonly verifiedFingerprint?: string;
+  /** Unpadded base64url of the raw Ed25519 key the fingerprint was taken over. */
+  readonly verifiedIdentityPublicKey?: string;
   readonly recordedContinuityId?: string;
   readonly acceptedPolicyGeneration?: number;
   readonly latchedAt?: number;
@@ -232,11 +234,25 @@ function parseRecord(value: unknown): E2eeTrustRecord | null {
   if (stored.state !== "verified") return null;
 
   const verifiedFingerprint = boundedString(stored.verifiedFingerprint);
+  const storedIdentityPublicKey = boundedString(stored.verifiedIdentityPublicKey);
   const recordedContinuityId = boundedString(stored.recordedContinuityId);
   const approvedClientFingerprint = boundedString(stored.approvedClientFingerprint);
   const acceptedPolicyGeneration = boundedCount(stored.acceptedPolicyGeneration);
   const approvedAt = boundedCount(stored.approvedAt);
   if (verifiedFingerprint === null || recordedContinuityId === null) return null;
+  if (storedIdentityPublicKey === null) return null;
+  // The stored key has to still BE a §7.1 node identity key. A record whose key
+  // no longer decodes or no longer validates is not a verified record — the same
+  // fail-closed reading every other promoted field gets — because the §13.2.1
+  // comparison and the §13.4 recomputation both rest on it.
+  let verifiedIdentityPublicKey: Uint8Array;
+  try {
+    verifiedIdentityPublicKey = validateE2eeNodeIdentityPublicKey(
+      decodeBase64Url(storedIdentityPublicKey),
+    );
+  } catch {
+    return null;
+  }
   if (approvedClientFingerprint === null || acceptedPolicyGeneration === null) return null;
   if (approvedAt === null) return null;
 
@@ -251,6 +267,7 @@ function parseRecord(value: unknown): E2eeTrustRecord | null {
     ...base,
     state: "verified",
     verifiedFingerprint,
+    verifiedIdentityPublicKey,
     recordedContinuityId,
     acceptedPolicyGeneration,
     latch,
@@ -315,6 +332,7 @@ function serializeRecord(record: E2eeTrustRecord): StoredTrustRecord {
     ...base,
     state: "verified",
     verifiedFingerprint: record.verifiedFingerprint,
+    verifiedIdentityPublicKey: encodeBase64Url(record.verifiedIdentityPublicKey),
     recordedContinuityId: record.recordedContinuityId,
     acceptedPolicyGeneration: record.acceptedPolicyGeneration,
     approvedClientFingerprint: record.approval.clientIdentityFingerprint,
@@ -356,6 +374,8 @@ export interface E2eeOwnerVerificationDecision {
   readonly [ownerDecisionBrand]: "verification";
   readonly index: E2eeTrustRecordIndex;
   readonly verifiedFingerprint: string;
+  /** The validated key the fingerprint and the compared safety number came from. */
+  readonly verifiedIdentityPublicKey: Uint8Array;
   readonly clientIdentityFingerprint: string;
   readonly continuityId: string;
   readonly acceptedPolicyGeneration: number;
@@ -420,10 +440,12 @@ export function mintE2eeOwnerVerificationDecision(
     trustError("trust_store_decision_invalid");
   }
   let verifiedFingerprint: string;
+  let verifiedIdentityPublicKey: Uint8Array;
   let clientIdentityFingerprint: string;
   let derived: string;
   try {
     const nodeIdentityPublicKey = validateE2eeNodeIdentityPublicKey(input.nodeIdentityPublicKey);
+    verifiedIdentityPublicKey = nodeIdentityPublicKey;
     const clientIdentityPublicKey = validateE2eeClientIdentityPublicKey(
       input.clientIdentityPublicKey,
     );
@@ -448,6 +470,7 @@ export function mintE2eeOwnerVerificationDecision(
   return {
     index: input.index,
     verifiedFingerprint,
+    verifiedIdentityPublicKey,
     clientIdentityFingerprint,
     continuityId,
     acceptedPolicyGeneration,
@@ -494,6 +517,13 @@ export interface E2eeAuthenticatedStatementInput {
   readonly anchor: "pin-unchanged" | "pin-updated";
   /** §7.1 display form of the statement's CURRENT node identity fingerprint. */
   readonly identityFingerprint: string;
+  /**
+   * The statement's CURRENT raw identity key. §13.3's silent rotation moves the
+   * pin to the new fingerprint, and the key has to move with it: a record whose
+   * key and fingerprint disagree would show the owner a §13.4 safety number for
+   * an identity the pin no longer names.
+   */
+  readonly identityPublicKey: Uint8Array;
   /** §5.7's generation carried by the statement that authenticated. */
   readonly policyGeneration: number;
   readonly observedAt: number;
@@ -502,6 +532,21 @@ export interface E2eeAuthenticatedStatementInput {
 export interface MobileE2eeTrustStore {
   /** Load the durable document once. Never throws: a failure stays unobtainable. */
   readonly hydrate: () => Promise<void>;
+  /**
+   * A monotonic counter of every change to the document this device is reading
+   * from — every commit, and the hydration that first produces one.
+   *
+   * IT EXISTS SO NOTHING DERIVED FROM THIS STORE CAN OUTLIVE THE DECISION THAT
+   * CHANGED IT. §4.4 requires the §12.1.1 class, §12.1's latch and §13.1's pin to
+   * be resolved before a channel receives any payload, which means they are
+   * resolved AHEAD of the channel and cached; §13.2 step 5 and §13.3's re-pair
+   * then change exactly those inputs. A cache keyed on the selection alone
+   * cannot see that, so the key carries this too and a committed decision
+   * invalidates it by construction rather than by every mutator remembering to.
+   */
+  readonly revision: () => number;
+  /** Observe {@link MobileE2eeTrustStore.revision}. Never carries the document. */
+  readonly subscribe: (listener: () => void) => () => void;
   /**
    * §12.1.1 for one selection, with §13.1's marker reconciliation run FIRST.
    *
@@ -535,6 +580,18 @@ export interface MobileE2eeTrustStore {
    * reachable through the accessor alone, so the accessor is gone.
    */
   readonly resolve: (selection: E2eeTrustSelection) => E2eeTrustRecord | null;
+  /**
+   * The verified pins under one `(hubOrigin, accountId)` pair. DISPLAY ONLY, and
+   * for one display: §13.2.1 situation 2 requires "the previously verified
+   * fingerprint and safety number" beside the newly presented pair, and the
+   * safety number is recomputed from the pinned key rather than persisted
+   * (§13.4). No guard reads a record through this — `classify` is the only
+   * classification path, for the reason `resolve` documents.
+   */
+  readonly verifiedRecordsForAccount: (
+    hubOrigin: string,
+    accountId: string,
+  ) => readonly E2eeVerifiedPinRecord[];
   readonly marker: (hubOrigin: string) => E2eeVerificationMarker;
   readonly strictLegacyPolicy: (hubOrigin: string) => E2eeStrictLegacyPolicy;
   /** §13.2 step 2: mint the client-side handle and open the pairing flow. */
@@ -613,6 +670,22 @@ export function makeMobileE2eeTrustStore(
    */
   let failure: "unparseable" | "unavailable" | null = null;
 
+  /**
+   * Bumped wherever `loaded` is replaced, and nowhere else.
+   *
+   * The listeners are notified synchronously after the swap, so an observer that
+   * re-derives from the store reads the document the decision produced. It
+   * carries no payload at all: everything about the document stays behind the
+   * accessors that already bound what they answer.
+   */
+  let revision = 0;
+  const listeners = new Set<() => void>();
+  const adopt = (next: TrustState): void => {
+    loaded = next;
+    revision += 1;
+    for (const listener of listeners) listener();
+  };
+
   const hydrate = (): Promise<void> =>
     (hydration ??= (async () => {
       let raw: string | null;
@@ -637,7 +710,7 @@ export function makeMobileE2eeTrustStore(
         return;
       }
       failure = null;
-      loaded = state;
+      adopt(state);
     })());
 
   /**
@@ -678,7 +751,7 @@ export function makeMobileE2eeTrustStore(
     } catch {
       trustError("trust_store_unavailable");
     }
-    loaded = next;
+    adopt(next);
   };
 
   /**
@@ -765,7 +838,7 @@ export function makeMobileE2eeTrustStore(
       trustError("trust_store_unavailable");
     }
     failure = null;
-    loaded = EMPTY_STATE;
+    adopt(EMPTY_STATE);
   };
 
   /**
@@ -821,6 +894,13 @@ export function makeMobileE2eeTrustStore(
   return {
     hydrate,
 
+    revision: () => revision,
+
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+
     classify: (selection) =>
       exclusive(async () => {
         await reconcileMarker(selection.hubOrigin);
@@ -837,6 +917,16 @@ export function makeMobileE2eeTrustStore(
     reconcileMarker: (hubOrigin) => exclusive(() => reconcileMarker(hubOrigin)),
 
     resolve: (selection) => (loaded === null ? null : resolveE2eeTrustRecord(loaded, selection)),
+
+    verifiedRecordsForAccount: (hubOrigin, accountId) =>
+      loaded === null
+        ? []
+        : loaded.records.filter(
+            (record): record is E2eeVerifiedPinRecord =>
+              isE2eeVerifiedPinRecord(record) &&
+              record.index.hubOrigin === hubOrigin &&
+              record.index.accountId === accountId,
+          ),
 
     marker: (hubOrigin) => {
       const state = loaded;
@@ -884,6 +974,7 @@ export function makeMobileE2eeTrustStore(
           environmentId: existing.environmentId,
           state: "verified",
           verifiedFingerprint: decision.verifiedFingerprint,
+          verifiedIdentityPublicKey: decision.verifiedIdentityPublicKey,
           recordedContinuityId: decision.continuityId,
           acceptedPolicyGeneration: decision.acceptedPolicyGeneration,
           latch: { kind: "set", setAt: decision.decidedAt },
@@ -913,6 +1004,12 @@ export function makeMobileE2eeTrustStore(
         if (identityFingerprint === null || policyGeneration === null || observedAt === null) {
           trustError("trust_store_input_invalid");
         }
+        let identityPublicKey: Uint8Array;
+        try {
+          identityPublicKey = validateE2eeNodeIdentityPublicKey(input.identityPublicKey);
+        } catch {
+          trustError("trust_store_input_invalid");
+        }
         const state = await mutable();
         const existing = findRecord(state, input.index);
         // §12.1's set condition is "authenticated a capability statement to an
@@ -927,6 +1024,8 @@ export function makeMobileE2eeTrustStore(
           // continuity id is unchanged by construction.
           verifiedFingerprint:
             input.anchor === "pin-updated" ? identityFingerprint : existing.verifiedFingerprint,
+          verifiedIdentityPublicKey:
+            input.anchor === "pin-updated" ? identityPublicKey : existing.verifiedIdentityPublicKey,
           // §5.7 remembers the HIGHEST accepted generation, so a replayed older
           // statement cannot lower it.
           acceptedPolicyGeneration: Math.max(existing.acceptedPolicyGeneration, policyGeneration),

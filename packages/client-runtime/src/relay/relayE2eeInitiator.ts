@@ -306,6 +306,30 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
   }
 
   /**
+   * §13.1's release gate, which is the SECOND valve and not the same one.
+   *
+   * `pairingOnly` closes both valves — a ceremony channel releases nothing at
+   * all, plaintext included — and §13.2 step 2 sets it. This one closes the
+   * E2EE valve alone: "A native client MUST NOT release application payload
+   * under the active-Hub guarantee until the pin is `verified` (§2.2). With an
+   * `unverified` pin the client is restricted to the pairing ceremony."
+   *
+   * IT CANNOT BE FOLDED INTO `pairingOnly`. Genuine first contact classifies
+   * legacy-eligible (§12.1.1 branch (a)) and rows K9/K13 are exactly how a
+   * native client reaches a node that runs no §4 channel at all; marking every
+   * pin-less attempt pairing-only would make `lockLegacy` fatal and take that
+   * away. So the two are separate, and only the E2EE lock consults this.
+   *
+   * The rule is native-only by its own words — web holds no durable pin of any
+   * kind (§6.3, §13.1) and its §2.2 row is the passive-Hub one, which a pin
+   * neither strengthens nor gates — so the tier the credentials already carry
+   * selects it, rather than a flag a caller could forget to set.
+   */
+  function releaseGatedWithoutVerifiedPin(): boolean {
+    return attempt.credentials.tier === "native" && attempt.verifiedPin === undefined;
+  }
+
+  /**
    * Row K5's second half: §8.8 step 6 has produced `sessionBindingHash`, so the
    * record layer can exist and the buffered sends may flush AS ENVELOPES.
    *
@@ -530,7 +554,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     const client = handshake!;
     const result = client.receiveServerAccept(payload, now());
     if (result.kind === "fatal") return fatalPre(result.row); // Row K6.
-    if (attempt.pairingOnly) {
+    if (attempt.pairingOnly || releaseGatedWithoutVerifiedPin()) {
       // §13.2: "the pairing attempt always ends without application
       // authorization", and the client "marks the attempt pairing-only:
       // buffered application sends are never flushed, and no application payload
@@ -541,6 +565,16 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       // cryptographically sound one. §11.2 P21 is its row: a usable validated
       // statement is present and this client cannot proceed to an application
       // session.
+      //
+      // THE PIN CLAUSE IS THE SAME ROW FOR A DIFFERENT REASON, and it is the one
+      // a node that DOES hold an approval reaches: the owner approved this
+      // device at the node CLI (§13.2 step 5's node half) and has not yet marked
+      // the pin `verified` on the device, or the device lost its trust document
+      // while the node kept the approval (§13.1.1 partial loss). The node then
+      // answers a sound `E2EEServerAccept`, and §13.1's release gate forbids
+      // this client from carrying application payload over it. §13.2 step 6 says
+      // the same thing from the other side: "Application traffic starts only on
+      // a fresh ticket, channel, and handshake after both decisions are durable."
       eraseE2eeSessionSecrets(result.secrets);
       return fatalPre("P21");
     }

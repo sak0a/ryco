@@ -359,6 +359,25 @@ export function relayE2eeFailure(kind: RelayE2eeFailureKind): HostedRelayFailure
   return failure(RELAY_E2EE_CLOSE_REASONS[kind]);
 }
 
+/**
+ * The client declining to open a channel because it had no resolved §4.4
+ * attempt to build the machine from. LOCAL, and not a cryptographic verdict.
+ *
+ * The WIRE observable is §11.5's uniform one — the same `channel_rejected` every
+ * other pre-key close carries, so this is indistinguishable from any other
+ * refusal — but the LOCAL disposition is retryable, and that difference is the
+ * whole point. `relayE2eeFailure` is non-retryable because "a channel that
+ * failed a cryptographic check must not be reconnected into the same failure";
+ * nothing here failed a check. The attempt reads a keychain and a secure store,
+ * and the next ticket resolves into a warm slot, so borrowing the non-retryable
+ * disposition would take the whole hosted session to `terminal-failure` — no
+ * automatic recovery, until the owner reselects the node — for a launch race
+ * that costs one channel.
+ */
+export function relayE2eeUnresolvedAttemptFailure(): HostedRelayFailure {
+  return { kind: "protocol", retryable: true, closeReason: "channel_rejected" };
+}
+
 export class HostedRelayEngine {
   readonly options: RelayEngineOptions;
   #limits: RelayLimits | null = null;
