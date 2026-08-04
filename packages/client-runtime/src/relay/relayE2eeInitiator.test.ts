@@ -1359,6 +1359,45 @@ describe("NEGATIVE — a pairing-only attempt releases no application payload", 
     expect(test.diagnostics).toEqual(["P17"]);
   });
 
+  it("never flushes at row K13, the ordinary first-contact configuration", () => {
+    // §13.2 pairing runs against the selection §12.1.1 branch (a) classifies
+    // LEGACY-ELIGIBLE — genuine first contact — so this pair of guards is the
+    // ceremony's ordinary case and not a corner of it. A Hub that simply
+    // withholds the carrier past `T_ADV` reaches row K13, whose action is to
+    // flush the buffer as plaintext and open the channel; §13.2 step 2 fixes the
+    // outcome first: "buffered application sends are never flushed, and no
+    // application payload is released regardless of outcome".
+    const test = harness({ pairingOnly: true, selectionClass: "legacy-eligible" });
+    test.engine.send(utf8('{"_tag":"Request","id":1}'));
+
+    test.advance(T_ADV);
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.engine.bufferedAmount).toBe(0);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("never flushes or delivers at row K9 either", async () => {
+    // The same guards on the input the node controls directly: one plaintext
+    // frame would otherwise lock legacy, flush the ceremony's buffered sends,
+    // and hand the frame to the RPC parser.
+    const test = harness({ pairingOnly: true, selectionClass: "legacy-eligible" });
+    test.engine.send(utf8('{"_tag":"Request","id":1}'));
+
+    deliver(test.socket, LEGACY_RPC);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.engine.bufferedAmount).toBe(0);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.events.onData).not.toHaveBeenCalled();
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+    expect(test.diagnostics).toEqual(["local"]);
+  });
+
   it("releases nothing on a hypothetical accept path either", async () => {
     const test = harness({ pairingOnly: true, selectionClass: "unexpected" });
     test.engine.send(utf8('{"_tag":"Request","id":1}'));

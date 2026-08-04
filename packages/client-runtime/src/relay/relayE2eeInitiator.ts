@@ -197,6 +197,14 @@ if (T_ADV + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN > RPC_KEEPALIVE_INTERVAL) {
  * §13.3), so a resolved pin supplies it in both anchored cases. Only genuine
  * first contact — where no verified pin resolves — takes either from the
  * statement, and agreement there is agreed material and never evidence.
+ *
+ * WHERE THE TWO SOURCES CAN DIFFER AT ALL is `pin-updated` alone. §5.2 step 2
+ * recomputes the statement's fingerprint from its own key and the §7.5 walk
+ * reports `pin-unchanged` only when the pin equals that value; step 6 refuses a
+ * statement whose continuity id differs from the pin's. On every other verified
+ * path the two are byte-equal by construction, so a rotation is the one
+ * configuration in which reading the wrong one is observable — and it is the
+ * configuration the suite drives.
  */
 function advertisedMaterial(
   statement: NodeE2eeCapabilityStatement,
@@ -269,12 +277,32 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     return REJECTED;
   }
 
-  /** Rows K9 and K13: the only two rows in this table that release plaintext. */
-  function lockLegacy(): void {
-    if (mode !== "negotiating") return;
+  /**
+   * Rows K9 and K13: the only two rows in this table that release plaintext.
+   *
+   * §13.2 step 2 is a property OF THE ATTEMPT and not of the accept path it is
+   * read on: "the client marks the attempt pairing-only: buffered application
+   * sends are never flushed, and no application payload is released regardless
+   * of outcome", and §4.4's send-buffer rule closes with the same sentence —
+   * "a pairing-only attempt never flushes". The lock IS the release valve, so
+   * the flag has to guard it: genuine first contact classifies legacy-eligible
+   * (§12.1.1 branch (a)), which is exactly the selection a pairing ceremony runs
+   * under, and a Hub that then withholds the carrier past `T_ADV` would
+   * otherwise take row K13 straight through the valve — flushing the ceremony's
+   * buffered application sends as plaintext and opening a session on a channel
+   * that is supposed to carry no application payload in either direction. §11.2
+   * enumerates no row for it, because the condition is the client's own.
+   *
+   * A refusal is returned rather than swallowed so row K9's caller cannot
+   * deliver the payload it was about to hand the RPC parser.
+   */
+  function lockLegacy(): RelayE2eeInboundDisposition | undefined {
+    if (mode !== "negotiating") return undefined;
+    if (attempt.pairingOnly) return fatalPre("local");
     mode = "legacy";
     clearTimers();
     host.lockMode("legacy");
+    return undefined;
   }
 
   /**
@@ -554,8 +582,8 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
         // plaintext — which the engine does inside `lockMode`, before this
         // payload reaches the parser, so the application's own earlier
         // submissions precede the node's first delivery.
-        lockLegacy();
-        return { kind: "rpc", message: payload };
+        const refused = lockLegacy();
+        return refused ?? { kind: "rpc", message: payload };
       }
       case "negotiation":
         return receiveNegotiation(payload);
