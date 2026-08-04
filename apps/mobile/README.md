@@ -329,7 +329,24 @@ Four properties are structural rather than documented:
   **and** resolved to a verified pin. The mobile side adds only the tone mapper,
   which reads that member and withholds the success token from a `legacy`
   channel — a green pill reading `Legacy` is §12.2's label wearing the verified
-  session's colour.
+  session's colour. The input is **required** on every mobile status derivation
+  (`deriveHostedSignInView`, `deriveHostedAccountView`,
+  `deriveHubNodeSectionModel`) and supplied from `useMobileE2eeChannelStatus()`:
+  an optional field with a benign default is how the whole vocabulary stayed
+  unreachable in the shipped app while its unit tests passed.
+- **Every guard is re-resolved on every owner decision.** The prepared §4.4
+  attempt is keyed on the selection **and** on `mobileE2eeTrustStore.revision()`,
+  which the store bumps on every commit. §13.2 step 5's promotion, §13.3's
+  re-pair and §12.1.1's consent change the pin, the latch, the class and the
+  marker without touching the account or the node, so a slot keyed on the
+  selection alone kept serving pre-decision state for the rest of the session.
+- **§13.1's release gate lives in the mode machine, not in the caller.**
+  `relayE2eeInitiator` refuses the `e2ee` lock to any **native** attempt that
+  resolved to no verified pin (§11.2 P21), so a node that still holds an approval
+  for a device whose pin was never verified — or was cleared — cannot open an
+  application session. It is deliberately not folded into `pairingOnly`, which
+  closes the plaintext valve too: §12.1.1 branch (a) still lets genuine first
+  contact reach a non-E2EE node through rows K9/K13.
 - **Four messages, never one.** §13.2.1's three situations and §13.3's identity
   change are four distinct strings, asserted distinct; situation 3 is asserted not
   to be worded as an identity change, and situation 2 is the only one that renders
@@ -373,9 +390,16 @@ account with that node enrolled.
 4. **A fresh channel is required (§13.2 step 6).** Do **not** expect traffic to
    start on the pairing channel. Background and foreground the app (or toggle the
    node selection) so a fresh ticket, channel, and handshake are made. Only then
-   should the session indicator read **Encrypted**.
-5. **Session indicator.** Confirm the pill reads `Encrypted` and is the success
-   colour, and that no surface reads `Legacy` for this connection.
+   should the session indicator read **Encrypted**. Backgrounding alone re-opens
+   the channel; the attempt behind it is re-resolved by the trust-store revision
+   the promotion bumped, so no selection toggle is required for the new pin to
+   take effect.
+5. **Session indicator, on every surface.** Confirm the pill reads `Encrypted`
+   and is the success colour on the **Hub node section**, the **hosted account
+   screen**, and the sign-in surface, and that no surface reads `Legacy` for this
+   connection. Then withhold E2EE (point the app at a node that runs no §4
+   channel) and confirm every one of those surfaces reads `Legacy` in the warning
+   colour rather than a green `Online`.
 6. **Substituted node (§13.2.1 situation 2).** With one node verified under this
    account, point the app at a _different_ node under the same account (enroll a
    second node, or re-key the first so it presents a first-contact statement).
@@ -394,8 +418,16 @@ account with that node enrolled.
    screen records nothing, and that the consent one carries its own confirmation.
 10. **Reinstall (§6.3, §13.1.1).** Delete the app and reinstall it. Expect
     re-pairing to be required and the §13.1.1 card to be back. This is the check
-    that the disclosure text is true.
-11. **Vectors, both platforms.** Re-run the S1 `__rycoRunE2eeVectors()` procedure
+    that the disclosure text is true. Leave the node's approval for the old
+    client key in place: the device now has no pin, so §13.1's release gate must
+    close the channel (`Not verified`, no project/conversation/terminal data)
+    rather than opening a session against the surviving approval.
+11. **Forget this node (§13.3).** With a node verified, tap **Forget this node's
+    identity** and confirm. Expect the security screen to stop reading
+    `Encrypted` **without leaving and re-entering it**, the §13.1.1 card to come
+    back if that was the last verified pin, and the next channel to be release-
+    gated rather than continuing under the pin that was just deleted.
+12. **Vectors, both platforms.** Re-run the S1 `__rycoRunE2eeVectors()` procedure
     above on iOS **and** Android hardware and record `globals` for each.
 
 **What this run does and does not prove.** It proves that a real node and this app
