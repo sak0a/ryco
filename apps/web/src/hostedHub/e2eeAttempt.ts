@@ -1,0 +1,284 @@
+import { hostedHubStore } from "@ryco/client-runtime/authorization";
+import {
+  makeRelayE2eeInitiator,
+  relayE2eeUnresolvedAttemptFailure,
+  type RelayE2eeChannel,
+  type RelayE2eeHost,
+  type RelayE2eeInitiatorAttempt,
+  type RelayE2eeProvider,
+} from "@ryco/client-runtime/relay";
+import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
+
+import {
+  clearWebE2eeLatches,
+  isWebE2eeSelectionLatched,
+  latchWebE2eeSelection,
+  type WebE2eeSelection,
+} from "./e2eeLatch";
+import {
+  beginWebE2eeChannelAttempt,
+  lockWebE2eeChannelMode,
+  publishWebE2eeVerificationCode,
+  resetWebE2eeSession,
+} from "./e2eeSession";
+
+// Where the WEB tier's §4.4 attempt is resolved — docs/relay-e2ee-protocol.md
+// §4.4 (every selection guard evaluable before the channel receives any
+// payload), §12.1/§12.1.1 (the in-memory latch and the degenerate web mapping),
+// §8.1/§8.5 (NX, and the credentials the hello carries), §14.5 (the CSPRNG check
+// that gates E2EE at all).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY THIS TIER'S RESOLUTION IS SYNCHRONOUS AND THE NATIVE ONE IS NOT
+// ─────────────────────────────────────────────────────────────────────────────
+// `createRelaySocket` is synchronous — the shared transport calls it the instant
+// a ticket resolves — and §4.4 requires the latch guard to be answerable "before
+// it has received any payload". `apps/mobile` cannot meet that inline: its
+// guards live in a keychain and a secure store, so it resolves an attempt AHEAD
+// of the socket and reads it from a slot. This tier has nothing to read. §12.1's
+// latch is a bit in this process's memory, §12.1.1's web mapping is latched-or-
+// legacy-eligible and nothing else, §8.5's NX credentials are the single literal
+// `{ tier: "web" }`, and §13.1 gives web no pin. Every guard is therefore
+// resolvable in the call itself, and there is no warm-up path, no slot, and no
+// race between a decision and the channel it governs.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// WHAT IS DELIBERATELY ABSENT, AND WHY EACH ABSENCE IS THE CORRECT ANSWER
+// ─────────────────────────────────────────────────────────────────────────────
+//   * `verifiedPin` — §13.1: web holds no durable pin of any kind. Passing one
+//     would be inventing a trust anchor for §8.3 elements 9 and 17.
+//   * `onUnexpectedNode` — §12.1.1: "Web never produces an _unexpected_
+//     selection, and consequently never raises §13.2.1." Rows K23/K24 are
+//     unreachable here, so a handler for them would be a surface with no
+//     reachable cause.
+//   * `accountId` — §8.3 and §12.1.1: the account scope is a NATIVE resolution
+//     input; "the web tier has none". It is still read here, because §12.1 keys
+//     the latch on it — but the latch key is client-local state and element 10 of
+//     the statement context is not, and conflating them would put a Hub-issued
+//     value into the handshake context on a tier §8.3 defines without one.
+//   * `acceptedPolicyGeneration` — §5.7 reads it "from the application-session
+//     memory on web"; nothing in this slice records one, so there is none to
+//     pass, and passing zero would assert an acceptance that never happened.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// `legacyPermitted` IS TRUE, AND IT IS NOT A CONVENIENCE
+// ─────────────────────────────────────────────────────────────────────────────
+// §12.1.1: "Strict mode is an opt-in, never automatic, and it is recorded per
+// Hub origin… It MUST be recorded and evaluated under `hubOrigin` alone." Web has
+// no durable store to record one in (§6.3, §13.1), so no opt-in can exist, so
+// the policy this tier evaluates is the default — legacy permitted. `false` would
+// not be a stricter reading of the same rule; it would be a strict mode nobody
+// opted into, and the §11.2 P18/P19 guards would then make every genuinely
+// un-upgraded node unreachable during exactly the compatibility window §12.3's
+// default-`false` `requireE2EE` exists to protect.
+
+/** §8.2: this client's fixed local suite-preference order. One suite is defined. */
+const LOCAL_SUITE_PREFERENCE: readonly number[] = [E2EE_SUITE_25519_CHACHAPOLY_SHA256];
+
+/**
+ * §14.5, verified ONCE at module load — which on this tier is startup, because
+ * the hosted runtime wiring is what imports this module.
+ *
+ * "A conforming implementation verifies the source at startup and refuses E2EE,
+ * rather than discovering the absence mid-handshake." So the check gates the
+ * PROVIDER, not a handshake step: with no CSPRNG or outside a secure context the
+ * channel gets no §4.4 machine at all and runs the unchanged legacy path, which
+ * every surface then labels legacy (§12.2). It is deliberately not a half-E2EE
+ * mode, because a mode that negotiates without a trustworthy random source is
+ * the one outcome §14.5 forbids naming as protected.
+ */
+function detectWebE2eeRandomness(): boolean {
+  const scope = globalThis as {
+    isSecureContext?: boolean;
+    crypto?: { getRandomValues?: unknown };
+  };
+  if (scope.isSecureContext !== true) return false;
+  return typeof scope.crypto?.getRandomValues === "function";
+}
+
+let randomnessUsable = detectWebE2eeRandomness();
+
+/**
+ * The attempt this module last built, for the suite that asserts what it carries.
+ *
+ * Every field is a §4.4 guard or a §12.1.1 classification, and none of them is
+ * observable through the provider the engine receives. It is the WHOLE attempt
+ * rather than the bounded projection `apps/mobile` exposes, and that is the
+ * point: this tier's credentials are `{ tier: "web" }` — there is no key, no
+ * scalar, no transcript and no signature in it to withhold, and a test that can
+ * read the entire value is what proves so.
+ */
+let lastAttempt: RelayE2eeInitiatorAttempt | null = null;
+
+/**
+ * The hosted selection this channel is opened against, or `null`.
+ *
+ * `hubOrigin` is read from the document's own origin rather than from anything
+ * the Hub sends: §12.1.1 calls it "the origin the client configured and is
+ * actually connected to", and on this tier the page IS that origin. §5.2 step 4
+ * checks every statement against it.
+ */
+function currentSelection(): WebE2eeSelection | null {
+  const origin = globalThis.window?.location.origin;
+  if (typeof origin !== "string" || origin.length === 0) return null;
+  const state = hostedHubStore.getState();
+  const node = state.selectedNode;
+  if (state.accountStatus !== "authenticated" || state.account === null || node === null) {
+    return null;
+  }
+  return { hubOrigin: origin, accountId: state.account.id, nodeId: node.id };
+}
+
+/**
+ * The §4.4 attempt for one selection, resolved entirely from local state.
+ *
+ * Exported so the browser suite drives the REAL attempt — the real latch rule,
+ * the real classification, the real absences — against a §16.3 fixture's Hub
+ * origin, which is not the origin the test page is served from. §16.4 requires
+ * the web-facing families to run in Chromium, and a suite that rebuilt this
+ * shape by hand would be asserting its own copy.
+ */
+export function webRelayE2eeAttempt(selection: WebE2eeSelection): RelayE2eeInitiatorAttempt {
+  return {
+    hubOrigin: selection.hubOrigin,
+    // §12.1.1's web mapping, and the ONLY place a web selection is classified:
+    // latched when §12.1's in-memory bit is set for this triple, legacy-eligible
+    // otherwise. `unexpected` is unreachable and is not spelled anywhere here.
+    selectionClass: isWebE2eeSelectionLatched(selection) ? "latched" : "legacy-eligible",
+    legacyPermitted: true,
+    // §13.2's ceremony is native-only: it pins a node identity, and web has
+    // nowhere to keep one. A web attempt is never a pairing attempt.
+    pairingOnly: false,
+    localSuitePreference: LOCAL_SUITE_PREFERENCE,
+    // §8.5: the NX tier carries no client identity, no prekey, and no signature.
+    // The literal IS the credential set.
+    credentials: { tier: "web" },
+    // §12.1's set condition, and the single most consequential line in this file.
+    //
+    // IT IS THE VALIDATION VERDICT AND NOT THE HANDSHAKE LOCK. §5.2 steps 0–7 are
+    // what "validates" means, and every verdict that reached them carries the
+    // decoded statement — including `unusable`, which §12.1 names explicitly:
+    // "A statement that is valid but **unusable** under §5.2 step 8, §5.2 step 9,
+    // or §8.2 has validated and therefore sets the latch, so such a channel takes
+    // K2 (`P15`) rather than K3 and no buffered plaintext is flushed at
+    // `T_ADV`." Latching from the lock instead would leave exactly that channel
+    // unlatched, and a Hub that validates the statement and then stalls the
+    // handshake would get the retry channel to flush plaintext at `T_ADV`.
+    onStatement: (verification) => {
+      if (!("statement" in verification)) return;
+      latchWebE2eeSelection(selection);
+    },
+    // §13.5, published only at the `e2ee` lock and only on this tier. The
+    // machine derives it; this hands it to the projection and nothing else.
+    onWebVerificationCode: publishWebE2eeVerificationCode,
+  };
+}
+
+/**
+ * A channel that closes without releasing anything (§11.2: "a client executing
+ * FATAL-PRE sends nothing and closes").
+ *
+ * Reached when the selection cannot be read at all — a sign-out or a node
+ * deselect that lands between the ticket mint and this synchronous construction.
+ * It is deliberately NOT a legacy channel: what is missing IS the latch key, and
+ * §12.1.1 forbids treating unobtainable evidence as an unset latch.
+ *
+ * The close is the RETRYABLE one, so a store that moved under a reconnect costs
+ * one channel rather than the whole hosted session.
+ */
+function unresolvedAttemptChannel(host: RelayE2eeHost): RelayE2eeChannel {
+  host.close(relayE2eeUnresolvedAttemptFailure());
+  return {
+    intercept: async () => ({ kind: "rejected" }),
+    emit: async () => false,
+    beginClose: async () => "refused",
+    dispose: () => undefined,
+  };
+}
+
+/**
+ * The `RelayE2eeProvider` the hosted socket is built with, resolved
+ * synchronously at `createRelaySocket`.
+ *
+ * `undefined` is the §14.5 answer and nothing else: no CSPRNG, or no secure
+ * context, so this client has no E2EE at all and the engine runs the unchanged
+ * legacy channel. Every other unresolved state closes.
+ */
+export function resolveWebRelayE2eeProvider(): RelayE2eeProvider | undefined {
+  if (!randomnessUsable) return undefined;
+  const selection = currentSelection();
+  if (selection === null) return unresolvedAttemptChannel;
+  const attempt = webRelayE2eeAttempt(selection);
+  lastAttempt = attempt;
+  return (host) => {
+    // §13's projection is PER CHANNEL, not per selection: a state earned by one
+    // channel may not describe the next one, and §13.5's code is bound to a
+    // single session by construction. Publishing `negotiating` here — which
+    // claims nothing — is what keeps either from surviving the socket that
+    // produced it.
+    beginWebE2eeChannelAttempt();
+    // THE LOCK IS OBSERVED AT `host.lockMode` AND NOT AFTER AN OPERATION, and
+    // the difference is row K13. §4.4's mode lock is a state the machine holds
+    // rather than a callback, so a projection synced after `intercept`/`emit`
+    // learns about a lock only when the next payload arrives — and K13 locks
+    // from the `T_ADV` TIMER, on a channel the node has said nothing on. Such a
+    // channel is plaintext and stayed labelled `negotiating` forever, which is
+    // exactly the honest-labeling duty of §12.2 going unmet. `lockMode` is the
+    // release valve itself, so wrapping it catches every lock — K1/K5, K9 and
+    // K13 alike — at the instant it happens.
+    return makeRelayE2eeInitiator({
+      host: {
+        ...host,
+        lockMode: (mode) => {
+          host.lockMode(mode);
+          lockWebE2eeChannelMode(mode);
+        },
+      },
+      attempt,
+    });
+  };
+}
+
+export function readWebRelayE2eeAttemptForTests(): RelayE2eeInitiatorAttempt | null {
+  return lastAttempt;
+}
+
+let sessionWatch: (() => void) | undefined;
+
+/**
+ * §12.1: the web latch "MUST NOT persist beyond the application session", and a
+ * sign-out ends it.
+ *
+ * The account scope is half of §12.1's key, so a session that ends takes its
+ * latches and its §13 projection with it — a standing `web-unsigned` would
+ * otherwise describe a channel for an account that is no longer signed in.
+ *
+ * NODE SELECTION IS DELIBERATELY NOT A TRIGGER. The latch is already keyed per
+ * node within one session, so switching nodes needs no clearing — and clearing
+ * would RELAX a guard rather than tighten one, since an unlatched selection is
+ * legacy-eligible. The only transition that clears is authenticated → not.
+ */
+export function watchWebHostedSessionForE2ee(): () => void {
+  if (sessionWatch !== undefined) return sessionWatch;
+  let authenticated = hostedHubStore.getState().accountStatus === "authenticated";
+  const unsubscribe = hostedHubStore.subscribe(() => {
+    const next = hostedHubStore.getState().accountStatus === "authenticated";
+    if (next === authenticated) return;
+    authenticated = next;
+    if (next) return;
+    clearWebE2eeLatches();
+    resetWebE2eeSession();
+  });
+  sessionWatch = () => {
+    sessionWatch = undefined;
+    unsubscribe();
+  };
+  return sessionWatch;
+}
+
+/** Test seam: re-run the §14.5 startup check and drop the recorded attempt. */
+export function resetWebRelayE2eeForTests(): void {
+  randomnessUsable = detectWebE2eeRandomness();
+  lastAttempt = null;
+  sessionWatch?.();
+}

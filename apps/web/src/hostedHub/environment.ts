@@ -23,9 +23,18 @@ import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useUiStateStore } from "../uiStateStore";
+import { clearWebE2eeLatches } from "./e2eeLatch";
+import { resetWebE2eeSession } from "./e2eeSession";
 
 /** Browser/UI clearing catalog only. Core lifecycle owns the call ordering. */
 export function clearWebHostedNodeScopedState(environmentId: EnvironmentId): void {
+  // docs/relay-e2ee-protocol.md §12.1: the web latch is in-memory application-
+  // session state and nothing more, so it is cleared with the rest of the
+  // node-scoped state rather than kept alive across a teardown — and §13's
+  // per-channel projection goes with it, because a status that outlives the
+  // channel that earned it describes a connection that no longer exists.
+  clearWebE2eeLatches();
+  resetWebE2eeSession();
   clearKeyedQueriesForEnvironment(environmentId);
   clearProjectAtomState();
   clearGitAtomState();

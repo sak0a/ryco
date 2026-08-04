@@ -1,15 +1,25 @@
-import { RELAY_INITIAL_LIMITS, type RelayChannelId, type RelayFrame } from "@ryco/contracts";
+import { RELAY_INITIAL_LIMITS, type RelayChannelId } from "@ryco/contracts";
 import {
   encodeBase64Url,
   RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
   RELAY_MESSAGE_TOO_LARGE_MESSAGE,
   RELAY_PEER_UNSUPPORTED_MESSAGE,
   RELAY_SEND_QUEUE_FULL_MESSAGE,
+  type RelayE2eeChannel,
+  type RelayE2eeHost,
 } from "@ryco/client-runtime/relay";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import {
+  authenticateRelay,
+  createRelayHarness,
+  MockWebSocket,
+  relayCallbacks,
+  RELAY_CHANNEL_ID,
+  RELAY_VERSION,
+} from "../../test/maliciousRelay";
 import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl, sendException } from "./relaySocket";
 
 /**
@@ -17,86 +27,30 @@ import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl, sendException } from
  * package engine cannot cover): destination/expiry validation before a socket
  * is opened, wire coercion of every browser message type, and the
  * draining/closed status transitions.
+ *
+ * The mock socket and the connect sequence come from `test/maliciousRelay.ts`
+ * so this suite and the Chromium suites of §16.4 drive ONE implementation of
+ * the wire boundary. A second copy here would let the two runtimes disagree
+ * about what reached the socket, which is the only thing either suite asserts.
  */
 
-const CHANNEL_ID = "ch_cccccccccccccccccccccc" as RelayChannelId;
-const VERSION = { protocolMajor: 1, protocolMinor: 2 } as const;
+const CHANNEL_ID: RelayChannelId = RELAY_CHANNEL_ID;
+const VERSION = RELAY_VERSION;
 const originalWindow = globalThis.window;
 
-class MockWebSocket extends EventTarget {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-  readyState = MockWebSocket.CONNECTING;
-  bufferedAmount = 0;
-  binaryType: BinaryType = "blob";
-  closeCalls = 0;
-  readonly sent: ArrayBuffer[] = [];
+const callbacks = relayCallbacks;
 
-  send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
-    this.sent.push(
-      data instanceof ArrayBuffer
-        ? data.slice(0)
-        : ArrayBuffer.isView(data)
-          ? Uint8Array.from(new Uint8Array(data.buffer, data.byteOffset, data.byteLength)).buffer
-          : new ArrayBuffer(0),
-    );
-  }
-  close(): void {
-    this.closeCalls += 1;
-    this.readyState = MockWebSocket.CLOSED;
-  }
-  open(): void {
-    this.readyState = MockWebSocket.OPEN;
-    this.dispatchEvent(new Event("open"));
-  }
-  deliver(data: unknown): void {
-    this.dispatchEvent(new MessageEvent("message", { data }));
-  }
-  frame(frame: RelayFrame): void {
-    const encoded = encodeRelayFrame(frame);
-    if (!encoded.ok) throw new Error("test frame encoding failed");
-    this.deliver(Uint8Array.from(encoded.value).buffer);
-  }
-}
-
-function callbacks() {
-  return {
-    onTransportStatus: vi.fn(),
-    onSessionStatus: vi.fn(),
-    onRole: vi.fn(),
-    onFailure: vi.fn(),
-  };
-}
-
+/**
+ * The facade as `apps/web` built it BEFORE this tier had a provider, and as it
+ * still builds it whenever §14.5's startup check refuses one: no `e2ee`, so the
+ * engine runs the unchanged legacy channel.
+ */
 function create(handlers = callbacks()) {
-  const sockets: MockWebSocket[] = [];
-  const facade = new BrowserHostedRelaySocket({
-    url: hostedRelayWebSocketUrl(),
-    ticket: encodeBase64Url(new Uint8Array(32).fill(7)),
-    ticketExpiresAt: Date.now() + 60_000,
-    callbacks: handlers,
-    createSocket: () => {
-      const socket = new MockWebSocket();
-      sockets.push(socket);
-      return socket as unknown as WebSocket;
-    },
-  });
-  return { facade, socket: sockets[0]!, handlers };
+  return createRelayHarness({ handlers });
 }
 
 function authenticate(socket: MockWebSocket) {
-  socket.open();
-  socket.frame({ type: "ready", ...VERSION, limits: RELAY_INITIAL_LIMITS });
-  socket.frame({
-    type: "channel.open",
-    ...VERSION,
-    channelId: CHANNEL_ID,
-    capability: "ryco.rpc",
-    effectiveRole: "operator",
-  });
-  socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
+  authenticateRelay(socket);
 }
 
 /**
@@ -201,7 +155,7 @@ describe("BrowserHostedRelaySocket destination validation", () => {
 });
 
 describe("BrowserHostedRelaySocket wire compatibility", () => {
-  it("emits the pre-E2EE frame sequence byte for byte", async () => {
+  it("emits the pre-E2EE frame sequence byte for byte when constructed with no E2EE provider", async () => {
     const { facade, socket } = create();
     const received: number[][] = [];
     facade.addEventListener("message", (event) =>
@@ -222,14 +176,53 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
     facade.close();
 
     // The facade owns no framing — it instantiates the same engine
-    // `apps/mobile` does — so the E2EE seams inside that engine are a no-op
-    // here exactly as long as this sequence is unchanged. It is pinned as bytes
-    // for the reason the package-level copy is: an extra frame or a reordered
-    // map key would still satisfy a structural assertion.
+    // `apps/mobile` does — so the E2EE seams inside that engine are a no-op on a
+    // PROVIDER-LESS construction exactly as long as this sequence is unchanged.
+    // It is pinned as bytes for the reason the package-level copy is: an extra
+    // frame or a reordered map key would still satisfy a structural assertion.
+    //
+    // This is not the shape `runtime.ts` builds any more — that one injects
+    // `resolveWebRelayE2eeProvider()` — and it is deliberately still pinned,
+    // because it is exactly what docs/relay-e2ee-protocol.md §14.5's startup
+    // refusal falls back to.
     expect(socket.sent.map((bytes) => hex(new Uint8Array(bytes)))).toEqual([
       ...LEGACY_FRAME_SEQUENCE,
     ]);
     expect(received).toEqual([[...new TextEncoder().encode('{"inbound":1}')]]);
+  });
+
+  it("hands a supplied E2EE provider to the engine, which builds it at channel.accept", () => {
+    // The twin of the case above: the ONE structural difference between a
+    // provider-less facade and a wired one is that the engine builds a §4.4 mode
+    // machine, and §4.4 fixes when — "created at `channel.accept`", before any
+    // payload. A provider that is merely accepted as an option and never reached
+    // would leave every K row unreachable while this suite stayed green.
+    const built: RelayE2eeHost[] = [];
+    const channel: RelayE2eeChannel = {
+      intercept: async () => ({ kind: "claimed" }),
+      emit: async () => false,
+      beginClose: async () => "refused",
+      dispose: () => undefined,
+    };
+    const { socket } = createRelayHarness({
+      e2ee: (host) => {
+        built.push(host);
+        return channel;
+      },
+    });
+    socket.open();
+    socket.frame({ type: "ready", ...VERSION, limits: RELAY_INITIAL_LIMITS });
+    socket.frame({
+      type: "channel.open",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
+    });
+    expect(built).toHaveLength(0);
+    socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
+    expect(built).toHaveLength(1);
+    expect(built[0]!.channel.channelId).toBe(CHANNEL_ID);
   });
 
   it("coerces string, ArrayBuffer, typed-array, and SharedArrayBuffer send inputs", () => {
@@ -278,9 +271,10 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
   it("keeps every send refusal on its own DOMException name", () => {
     // The engine's send errors are mapped BY MESSAGE at this boundary, so the
     // mapping is asserted against the engine's own exported strings rather than
-    // through one caller: the §4.4 negotiation-buffer refusal is unreachable
-    // from a facade that injects no E2EE provider, and a test that could only
-    // reach it through `send` would pin the caller instead of the contract.
+    // through one caller: the §4.4 negotiation-buffer refusal is reachable only
+    // inside a single channel's `negotiating` window and never at all on a
+    // provider-less construction, and a test that could only reach it through
+    // `send` would pin one caller's timing instead of the contract.
     for (const message of [
       RELAY_SEND_QUEUE_FULL_MESSAGE,
       RELAY_MESSAGE_TOO_LARGE_MESSAGE,
