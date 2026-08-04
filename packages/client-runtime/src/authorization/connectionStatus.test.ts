@@ -5,6 +5,7 @@ import {
   deriveHostedConnectionStatusText,
   HOSTED_CONNECTION_STATUS_INDICATORS,
   HOSTED_CONNECTION_STATUS_TEXTS,
+  HOSTED_E2EE_CHANNEL_STATUSES,
   type HostedConnectionStatusInput,
   type HostedConnectionStatusText,
 } from "./connectionStatus";
@@ -241,16 +242,22 @@ describe("the §4.4 channel state folded into the indicator", () => {
   });
 
   it("never lets a channel state outrank a browser, session, or selection problem", () => {
+    // The texts the §4.4 dimension can name, DERIVED from the exhaustive
+    // enumeration rather than listed: a hand-written list silently skips the
+    // rows a new channel member introduces, and skipping is indistinguishable
+    // from passing in a loop whose body is the assertion.
+    const ready = { browserStatus: "current", sessionStatus: "ready" } as const;
+    const online = { selectionStatus: "online", transportStatus: "online" } as const;
+    const channelNamed = new Set<string>(
+      HOSTED_E2EE_CHANNEL_STATUSES.filter((status) => status !== "unavailable").map((e2eeStatus) =>
+        deriveHostedConnectionStatusText({ ...ready, ...online, e2eeStatus }),
+      ),
+    );
+    expect(channelNamed.size).toBe(HOSTED_E2EE_CHANNEL_STATUSES.length - 1);
     for (const value of everyHostedConnectionStatusInput()) {
       if (value.e2eeStatus === "unavailable") continue;
       const text = deriveHostedConnectionStatusText(value);
-      if (
-        !(
-          ["Encrypted", "Browser encrypted", "Legacy", "Not verified", "Securing"] as string[]
-        ).includes(text)
-      ) {
-        continue;
-      }
+      if (!channelNamed.has(text)) continue;
       // Reached only through the one branch that used to say `Online`.
       expect(value.browserStatus).toBe("current");
       expect(value.sessionStatus).toBe("ready");
