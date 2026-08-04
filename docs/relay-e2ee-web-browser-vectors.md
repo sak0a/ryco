@@ -50,6 +50,27 @@ genuine handshake, draw a genuine §13.5 `WebSAS`, and exfiltrate the plaintext 
 vectors pass in which runtime. The families above are correctness parity, and the correctness they
 pin is already gated under Node.
 
+## The web §13 surfaces: what is wired, and what is still owed
+
+The web tier now runs a §4.4 machine on every relay socket, publishes what that machine locked
+(`apps/web/src/hostedHub/e2eeSession.ts`), and all three hosted connection surfaces — the desktop
+node menu, the phone connection sheet, and the pill — read it. §12.2's "MUST label the channel
+**legacy** in every user-facing surface" is therefore met in shipped code, and the browser render
+sweeps draw `Legacy`, `Unsigned web`, and `Securing` like every other bounded status
+(`apps/web/test/hostedConnectionVocabulary.ts` carries the §4.4 dimension).
+
+Two §13.5 duties are **not** discharged and are owed to the copy slice that follows:
+
+| Owed                             | What is missing                                                                                                                                                                                                                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §13.5 "Shown in the web UI"      | The `WebSAS` is derived client-side and held in the §13 projection, and nothing renders it. Until it is drawn — with §13.5's advisory-only disclosure text beside it, which MUST say the comparison cannot protect against the Hub operator — the owner has no string to compare against the node CLI's.      |
+| The relay trust notice's wording | `HOSTED_RELAY_TRUST_DISCLOSURE` is channel-independent and says the same thing whether the channel locked `e2ee` or `legacy`. Its "not application-level end-to-end encrypted / the trusted relay can observe forwarded bytes" sentence is stale for a `web-unsigned` channel and is an UNDERSTATEMENT there. |
+
+The second is deliberately left understated rather than rewritten in passing. §2.2 and §2.3 forbid
+this tier from presenting a stronger claim for a weaker configuration, and a notice that starts
+describing NX protection is exactly where that rule is violated by accident; the replacement text is
+security copy and belongs with the `WebSAS` surface that has to state the same caveat.
+
 ## Still outstanding beyond this document
 
 §16.4 also requires the COMPLETE corpus to pass on physical devices on both mobile platforms before

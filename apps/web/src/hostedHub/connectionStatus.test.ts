@@ -3,12 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   deriveHostedConnectionStatusIndicator,
   deriveHostedConnectionStatusText,
-  HOSTED_E2EE_CHANNEL_STATUSES,
   type HostedE2eeChannelStatus,
-  type WebHostedConnectionStatusInput,
-  type WebHostedE2eeChannelStatus,
 } from "./connectionStatus";
-import { everyHostedConnectionStatusInput } from "../../test/hostedConnectionVocabulary";
+import {
+  everyHostedConnectionStatusInput,
+  WEB_HOSTED_E2EE_CHANNEL_STATUSES,
+} from "../../test/hostedConnectionVocabulary";
 
 /**
  * The web tier's half of `docs/relay-e2ee-protocol.md` §2.2, asserted where the
@@ -24,28 +24,8 @@ import { everyHostedConnectionStatusInput } from "../../test/hostedConnectionVoc
  * verified row from here is the one outcome §2.2, §2.3, and §2.4 forbid.
  */
 describe("the web tier's connection status boundary (§2.2, §2.4)", () => {
-  /** Every input the shipped app builds, crossed with every state it may report. */
-  function everyWebInput(): ReadonlyArray<WebHostedConnectionStatusInput> {
-    const inputs: WebHostedConnectionStatusInput[] = [];
-    for (const base of everyHostedConnectionStatusInput()) {
-      inputs.push(base);
-      for (const e2eeStatus of WEB_E2EE_CHANNEL_STATUSES) inputs.push({ ...base, e2eeStatus });
-    }
-    return inputs;
-  }
-
-  /**
-   * This tier's admissible channel states, derived from the runtime's exhaustive
-   * enumeration rather than written out: a member added to the shared union is a
-   * compile error here until someone decides which tier it belongs to.
-   */
-  const WEB_E2EE_CHANNEL_STATUSES = HOSTED_E2EE_CHANNEL_STATUSES.filter(
-    (status): status is WebHostedE2eeChannelStatus =>
-      status !== "verified" && status !== "unverified",
-  );
-
   it("admits every channel state this tier can be in, and only those", () => {
-    expect([...WEB_E2EE_CHANNEL_STATUSES].toSorted()).toEqual([
+    expect([...WEB_HOSTED_E2EE_CHANNEL_STATUSES].toSorted()).toEqual([
       "legacy",
       "negotiating",
       "unavailable",
@@ -55,13 +35,13 @@ describe("the web tier's connection status boundary (§2.2, §2.4)", () => {
     // holds none of (§6.3, §13.1).
     const native: ReadonlyArray<HostedE2eeChannelStatus> = ["verified", "unverified"];
     for (const status of native) {
-      expect(WEB_E2EE_CHANNEL_STATUSES).not.toContain(status);
+      expect(WEB_HOSTED_E2EE_CHANNEL_STATUSES).not.toContain(status);
     }
   });
 
   it("never produces the native verified row, on any input this tier can build", () => {
     let webRows = 0;
-    for (const input of everyWebInput()) {
+    for (const input of everyHostedConnectionStatusInput()) {
       const text = deriveHostedConnectionStatusText(input);
       const { guarantee } = deriveHostedConnectionStatusIndicator(input);
       expect(text, `text for ${JSON.stringify(input)}`).not.toBe("Encrypted");
@@ -94,15 +74,21 @@ describe("the web tier's connection status boundary (§2.2, §2.4)", () => {
     );
   });
 
-  it("leaves the shipped app byte-identical while it reports no channel state", () => {
-    // apps/web supplies no `e2eeStatus` today, and the fence changed nothing
-    // about that: the documented `unavailable` default still applies.
+  it("treats an omitted channel state exactly as the documented `unavailable` default", () => {
+    // The shipped app now always supplies one — every relay socket runs a §4.4
+    // machine and all three surfaces read what it locked — so this is no longer
+    // a statement about apps/web. It is the contract for the OPTIONAL field: a
+    // caller that omits it makes no claim either way, and never accidentally
+    // asserts §12.2's `legacy`, which is a claim about a channel that could have
+    // been encrypted.
     for (const input of everyHostedConnectionStatusInput()) {
-      expect(deriveHostedConnectionStatusText({ ...input, e2eeStatus: "unavailable" })).toBe(
+      const { e2eeStatus, ...omitted } = input;
+      if (e2eeStatus !== "unavailable") continue;
+      expect(deriveHostedConnectionStatusText(omitted)).toBe(
         deriveHostedConnectionStatusText(input),
       );
-      expect(deriveHostedConnectionStatusIndicator(input).guarantee).toBe(
-        deriveHostedConnectionStatusIndicator({ ...input, e2eeStatus: "unavailable" }).guarantee,
+      expect(deriveHostedConnectionStatusIndicator(omitted).guarantee).toBe(
+        deriveHostedConnectionStatusIndicator(input).guarantee,
       );
     }
   });

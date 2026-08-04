@@ -31,6 +31,7 @@ import {
 } from "../../hostedHub/nodeRouteOrchestrator";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
+import { useWebE2eeChannelStatus } from "../../hostedHub/useWebE2eeSession";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { HostedPwaControls } from "./HostedPwaControls";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
@@ -115,6 +116,9 @@ export function HostedNodeMenu() {
   const role = useHostedHubStore((state) => state.effectiveRole);
   const error = useHostedHubStore((state) => state.errorMessage);
   const browserStatus = useHostedHubStore((state) => state.browserStatus);
+  // docs/relay-e2ee-protocol.md §12.2: every user-facing surface, and this is
+  // one of the three.
+  const e2eeStatus = useWebE2eeChannelStatus();
   const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
   const disclosureRef = useRef<HTMLDetailsElement>(null);
@@ -125,6 +129,7 @@ export function HostedNodeMenu() {
     sessionStatus: session,
     selectionStatus: selection,
     transportStatus: transport,
+    e2eeStatus,
   });
 
   return (
@@ -245,6 +250,7 @@ export function HostedConnectionSheet({
   const role = useHostedHubStore((state) => state.effectiveRole);
   const error = useHostedHubStore((state) => state.errorMessage);
   const browserStatus = useHostedHubStore((state) => state.browserStatus);
+  const e2eeStatus = useWebE2eeChannelStatus();
   const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
   if (!node) return null;
@@ -254,6 +260,7 @@ export function HostedConnectionSheet({
     sessionStatus: session,
     selectionStatus: selection,
     transportStatus: transport,
+    e2eeStatus,
   };
   const statusText = deriveHostedConnectionStatusText(statusInput);
   const { connected } = deriveHostedConnectionStatusIndicator(statusInput);
@@ -375,6 +382,7 @@ export function HostedConnectionPill() {
   const session = useHostedHubStore((state) => state.sessionStatus);
   const selection = useHostedHubStore((state) => state.selectionStatus);
   const browserStatus = useHostedHubStore((state) => state.browserStatus);
+  const e2eeStatus = useWebE2eeChannelStatus();
   const [open, setOpen] = useState(false);
   if (!node) return null;
 
@@ -383,6 +391,7 @@ export function HostedConnectionPill() {
     sessionStatus: session,
     selectionStatus: selection,
     transportStatus: transport,
+    e2eeStatus,
   };
   const statusText = deriveHostedConnectionStatusText(statusInput);
   const { shortLabel, connected } = deriveHostedConnectionStatusIndicator(statusInput);
