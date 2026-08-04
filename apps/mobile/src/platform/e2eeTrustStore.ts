@@ -533,6 +533,21 @@ export interface MobileE2eeTrustStore {
   /** Load the durable document once. Never throws: a failure stays unobtainable. */
   readonly hydrate: () => Promise<void>;
   /**
+   * A monotonic counter of every change to the document this device is reading
+   * from — every commit, and the hydration that first produces one.
+   *
+   * IT EXISTS SO NOTHING DERIVED FROM THIS STORE CAN OUTLIVE THE DECISION THAT
+   * CHANGED IT. §4.4 requires the §12.1.1 class, §12.1's latch and §13.1's pin to
+   * be resolved before a channel receives any payload, which means they are
+   * resolved AHEAD of the channel and cached; §13.2 step 5 and §13.3's re-pair
+   * then change exactly those inputs. A cache keyed on the selection alone
+   * cannot see that, so the key carries this too and a committed decision
+   * invalidates it by construction rather than by every mutator remembering to.
+   */
+  readonly revision: () => number;
+  /** Observe {@link MobileE2eeTrustStore.revision}. Never carries the document. */
+  readonly subscribe: (listener: () => void) => () => void;
+  /**
    * §12.1.1 for one selection, with §13.1's marker reconciliation run FIRST.
    *
    * The reconciliation is here, and not at a call site, because §13.1 requires it
@@ -655,6 +670,22 @@ export function makeMobileE2eeTrustStore(
    */
   let failure: "unparseable" | "unavailable" | null = null;
 
+  /**
+   * Bumped wherever `loaded` is replaced, and nowhere else.
+   *
+   * The listeners are notified synchronously after the swap, so an observer that
+   * re-derives from the store reads the document the decision produced. It
+   * carries no payload at all: everything about the document stays behind the
+   * accessors that already bound what they answer.
+   */
+  let revision = 0;
+  const listeners = new Set<() => void>();
+  const adopt = (next: TrustState): void => {
+    loaded = next;
+    revision += 1;
+    for (const listener of listeners) listener();
+  };
+
   const hydrate = (): Promise<void> =>
     (hydration ??= (async () => {
       let raw: string | null;
@@ -679,7 +710,7 @@ export function makeMobileE2eeTrustStore(
         return;
       }
       failure = null;
-      loaded = state;
+      adopt(state);
     })());
 
   /**
@@ -720,7 +751,7 @@ export function makeMobileE2eeTrustStore(
     } catch {
       trustError("trust_store_unavailable");
     }
-    loaded = next;
+    adopt(next);
   };
 
   /**
@@ -807,7 +838,7 @@ export function makeMobileE2eeTrustStore(
       trustError("trust_store_unavailable");
     }
     failure = null;
-    loaded = EMPTY_STATE;
+    adopt(EMPTY_STATE);
   };
 
   /**
@@ -862,6 +893,13 @@ export function makeMobileE2eeTrustStore(
 
   return {
     hydrate,
+
+    revision: () => revision,
+
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
 
     classify: (selection) =>
       exclusive(async () => {

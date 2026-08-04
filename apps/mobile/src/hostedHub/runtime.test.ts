@@ -50,6 +50,10 @@ vi.mock("../platform/e2eeTrustStore", () => ({
     hydrate: async () => {
       hoisted.calls.push("trust-hydrate");
     },
+    // The §4.4 attempt is re-resolved on every committed trust decision, so the
+    // runtime subscribes to the document as well as to the selection.
+    revision: () => 0,
+    subscribe: () => () => undefined,
   },
 }));
 vi.mock("../platform/sessionCredentials", () => ({

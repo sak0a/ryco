@@ -147,11 +147,31 @@ export interface MobileE2eeSessionState {
    * same owner-visible fact: this device can show no verified node on this Hub.
    */
   readonly markerSet: boolean | null;
+  /**
+   * §13.1: whether this selection resolved to a VERIFIED pin.
+   *
+   * It is the release gate's own input and the second half of §2.2's bottom row,
+   * so it is state rather than a flag a call site carries: `e2ee` alone is not
+   * the verified row, and a lock that had to be told which row it was in could
+   * be told the wrong one — where this cannot, because the same value the
+   * §12.1.1 guards were resolved from decides it.
+   */
+  readonly pinVerified: boolean;
   /** The identity this channel advertised, when a statement validated. */
   readonly presented: MobileE2eePresentedNode | null;
   /** §13.2.1 situation 2's other half: the pin this account already holds. */
   readonly previouslyVerified: MobileE2eeIdentityDisplay | null;
   readonly event: MobileE2eeTrustEvent | null;
+  /**
+   * §6.3's "a device that cannot hold the key simply has no E2EE", as the fact it
+   * is rather than as the fallback it looks like.
+   *
+   * A §12.2 fallback and this produce the same plaintext channel, but they are
+   * not the same thing to the owner: pairing the node removes the first and can
+   * never remove the second, so a surface that offered the same remedy for both
+   * would be pointing at an action that cannot deliver what it implies.
+   */
+  readonly keyCustodyUnavailable: boolean;
   readonly diagnostics: readonly MobileE2eeLocalDiagnostic[];
 }
 
@@ -161,9 +181,11 @@ const INITIAL: MobileE2eeSessionState = {
   classification: null,
   legacyPermitted: false,
   markerSet: null,
+  pinVerified: false,
   presented: null,
   previouslyVerified: null,
   event: null,
+  keyCustodyUnavailable: false,
   diagnostics: [],
 };
 
@@ -220,6 +242,7 @@ export function beginMobileE2eeChannel(input: {
   readonly classification: E2eeTrustClassification;
   readonly legacyPermitted: boolean;
   readonly markerSet: boolean | null;
+  readonly pinVerified: boolean;
   readonly previouslyVerified: MobileE2eeIdentityDisplay | null;
 }): void {
   publish({
@@ -229,6 +252,7 @@ export function beginMobileE2eeChannel(input: {
     classification: input.classification,
     legacyPermitted: input.legacyPermitted,
     markerSet: input.markerSet,
+    pinVerified: input.pinVerified,
     previouslyVerified: input.previouslyVerified,
   });
 }
@@ -236,10 +260,28 @@ export function beginMobileE2eeChannel(input: {
 /**
  * This device could not build handshake credentials at all (§6.3: "a device that
  * cannot hold the key simply has no E2EE"). The channel is legacy from the
- * start, and §12.2 requires it to be labeled so everywhere.
+ * start, and §12.2 requires it to be labeled so everywhere — with the copy that
+ * says which of the two legacy channels this is.
  */
-export function markMobileE2eeUnavailable(): void {
-  publish({ ...INITIAL, channel: "legacy" });
+export function markMobileE2eeKeyCustodyUnavailable(): void {
+  publish({ ...INITIAL, channel: "legacy", keyCustodyUnavailable: true });
+}
+
+/**
+ * A CHANNEL is starting, on a context this device already resolved.
+ *
+ * §4.4's mode lock is a property of one channel, so the claim it produces is
+ * too: publishing it per preparation left a `verified` label standing over every
+ * later channel of the same selection — including one closing FATAL-PRE under a
+ * §13.3 substitution attempt, which is the exact moment the label is worst. The
+ * §13.2.1 and §13.3 EVENT is deliberately not cleared here, nor is the identity
+ * the last channel presented: both are the owner's to resolve on the ceremony
+ * surface (§13.1.1's dismissal rule), and a reconnect must not silently empty
+ * the comparison they are standing in front of.
+ */
+export function beginMobileE2eeChannelAttempt(): void {
+  if (state.selection === null) return;
+  publish({ ...state, channel: "negotiating" });
 }
 
 /** No hosted channel at all — signed out, no node selected, or none open yet. */
@@ -255,10 +297,10 @@ export function resetMobileE2eeSession(): void {
  * release-gated pairing channel, and it is reported `unverified` so no surface
  * can spell it the way the verified row is spelled.
  */
-export function lockMobileE2eeChannelMode(mode: "e2ee" | "legacy", verified: boolean): void {
+export function lockMobileE2eeChannelMode(mode: "e2ee" | "legacy"): void {
   publish({
     ...state,
-    channel: mode === "legacy" ? "legacy" : verified ? "verified" : "unverified",
+    channel: mode === "legacy" ? "legacy" : state.pinVerified ? "verified" : "unverified",
   });
 }
 

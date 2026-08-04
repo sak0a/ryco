@@ -1,5 +1,7 @@
 import { hostedHubStore } from "@ryco/client-runtime/authorization";
 import type { RelayE2eeHost } from "@ryco/client-runtime/relay";
+import { e2eeKeyFingerprint, formatE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
+import { deriveE2eeSafetyNumber } from "@ryco/shared/relayE2eeVerificationDisplay";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const HUB = "https://hub.example.com";
@@ -23,6 +25,8 @@ const AGREEMENT_PUBLIC_KEY = bytes(
 const AGREEMENT_SECRET_KEY = bytes(
   "0200000000000000000000000000000000000000000000000000000000000000",
 );
+/** A §7.1-valid Ed25519 node identity key. §16.1-style material, TEST ONLY. */
+const NODE_PUBLIC_KEY = bytes("03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8");
 
 /**
  * The custody seams, all of which reach a keychain or the enclave. Each one can
@@ -85,10 +89,18 @@ vi.mock("./runtimeConfig", () => ({
   getMobileHostedConfig: () => ({ hubOrigin: HUB, appUrl: HUB, relyingParty: "hub.example.com" }),
 }));
 
-import { mobileE2eeTrustStore } from "../platform/e2eeTrustStore";
-import { getMobileE2eeSessionState, resetMobileE2eeSessionForTests } from "./e2eeSession";
+import {
+  mintE2eeOwnerVerificationDecision,
+  mobileE2eeTrustStore,
+} from "../platform/e2eeTrustStore";
+import {
+  getMobileE2eeSessionState,
+  lockMobileE2eeChannelMode,
+  resetMobileE2eeSessionForTests,
+} from "./e2eeSession";
 import {
   disposeMobileRelayE2eeAttempt,
+  inspectMobileRelayE2eeAttemptForTests,
   prepareMobileRelayE2eeAttempt,
   resetMobileRelayE2eeAttemptForTests,
   resolveMobileRelayE2eeProvider,
@@ -196,7 +208,11 @@ describe("an attempt that is not ready fails the channel closed", () => {
     // §11.2: "a client executing FATAL-PRE sends nothing and closes." The host's
     // `lockMode` throws above, so a channel that released anything fails here.
     expect(context.closes.length).toBe(1);
-    expect(context.closes[0]).toMatchObject({ retryable: false });
+    // §11.5's uniform observable on the wire, and a RETRYABLE local disposition:
+    // nothing here failed a cryptographic check, and the non-retryable one drives
+    // the hosted transport to `terminal-failure` and stops reconnection — a
+    // warm-up race must cost one channel, not the session.
+    expect(context.closes[0]).toMatchObject({ retryable: true, closeReason: "channel_rejected" });
     await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({ kind: "rejected" });
     await expect(channel.emit(new Uint8Array([1]))).resolves.toBe(false);
     await expect(channel.beginClose()).resolves.toBe("refused");
@@ -213,6 +229,38 @@ describe("an attempt that is not ready fails the channel closed", () => {
     const context = host();
     provider!(context.host);
     expect(context.closes.length).toBe(1);
+  });
+});
+
+describe("a selection change while a preparation is in flight", () => {
+  it("settles on the node that is current when the keychain read lands", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_a");
+    // Not awaited: the preparation for A is in flight when B is selected, which
+    // is the shape `preparing` de-duplicates into a single promise. Settling A
+    // into the slot would leave B's channel with a stale key and fail it closed.
+    const inFlight = prepareMobileRelayE2eeAttempt();
+    selectNode("node_b");
+    await inFlight;
+
+    expect(getMobileE2eeSessionState().selection?.nodeId).toBe("node_b");
+    expect(typeof resolveMobileRelayE2eeProvider()).toBe("function");
+    const context = host();
+    resolveMobileRelayE2eeProvider()!(context.host);
+    expect(context.closes.length).toBe(0);
+  });
+
+  it("zeroizes and abandons a preparation that lands after a sign-out", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_signed_out");
+    const inFlight = prepareMobileRelayE2eeAttempt();
+    signOut();
+    await inFlight;
+
+    // The scalar copy must not be left live in the module slot, and the §13
+    // projection must not describe a channel for the account that just left.
+    expect(getMobileE2eeSessionState().selection).toBeNull();
+    expect(getMobileE2eeSessionState().channel).toBe("unavailable");
   });
 });
 
@@ -235,10 +283,58 @@ describe("§6.3: a device that cannot hold the key simply has no E2EE", () => {
   });
 });
 
-describe("there is no channel to secure", () => {
-  it("supplies no provider while signed out or with no node selected", async () => {
+describe("§4.4: absence of evidence is never a legacy channel", () => {
+  it("closes rather than falling back when the trust document cannot be read", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_unreadable");
+    // §4.4: "MUST NOT treat unobtainable evidence as an unset latch or an unset
+    // marker." A classification this device could not compute is not a §6.3
+    // custody failure and must not borrow its legacy answer.
+    const classify = vi
+      .spyOn(mobileE2eeTrustStore, "classify")
+      .mockRejectedValue(new Error("store unavailable"));
     await prepareMobileRelayE2eeAttempt();
-    expect(resolveMobileRelayE2eeProvider()).toBeUndefined();
+    classify.mockRestore();
+
+    const provider = resolveMobileRelayE2eeProvider();
+    expect(provider).not.toBeUndefined();
+    const context = host();
+    provider!(context.host);
+    expect(context.closes.length).toBe(1);
+    expect(getMobileE2eeSessionState().channel).not.toBe("legacy");
+  });
+
+  it("withholds the §6.3 legacy answer from a latched selection", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_latched");
+    const classify = vi
+      .spyOn(mobileE2eeTrustStore, "classify")
+      .mockResolvedValue({ class: "latched" });
+    custody.agreementFails = true;
+    await prepareMobileRelayE2eeAttempt();
+    classify.mockRestore();
+
+    // §12.1's latch is not something a local custody failure may talk this
+    // client out of: the channel closes instead of running plaintext.
+    expect(resolveMobileRelayE2eeProvider()).not.toBeUndefined();
+    const context = host();
+    resolveMobileRelayE2eeProvider()!(context.host);
+    expect(context.closes.length).toBe(1);
+  });
+});
+
+describe("there is no channel to secure", () => {
+  it("closes rather than running plaintext while signed out or with no node selected", async () => {
+    await prepareMobileRelayE2eeAttempt();
+    const provider = resolveMobileRelayE2eeProvider();
+    // NOT `undefined`. §6.3's no-custody device is the only thing that answers a
+    // legacy channel; a store that moved between the transport's reconnect gate
+    // and this synchronous construction is absent evidence like any other, and
+    // §12.1.1 admits nothing into the legacy-eligible class on absence.
+    expect(provider).not.toBeUndefined();
+    const context = host();
+    provider!(context.host);
+    expect(context.closes.length).toBe(1);
   });
 
   it("still resolves an attempt after a preparation that had nothing to do", async () => {
@@ -256,6 +352,149 @@ describe("there is no channel to secure", () => {
     await prepareMobileRelayE2eeAttempt();
     await prepareMobileRelayE2eeAttempt();
     expect(typeof resolveMobileRelayE2eeProvider()).toBe("function");
+  });
+});
+
+describe("what the resolved §4.4 attempt actually carries", () => {
+  /**
+   * The attempt is the whole security surface of this module and NONE of it is
+   * observable through the provider the engine receives, which is how five
+   * separate mutations of it once survived the entire suite: `pairingOnly`
+   * forced false (§13.1's release gate off), the verified flag forced true
+   * (§2.2's claim on an uncompared key), the pin spread dropped (§8.3 elements 9
+   * and 17 gone), the class forced `latched` and `legacyPermitted` forced true.
+   * Every field below is asserted against the trust document it was derived
+   * from.
+   */
+  it("reports first contact as legacy-eligible, with no pin and no pairing flag", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_first_contact");
+    await prepareMobileRelayE2eeAttempt();
+
+    const attempt = inspectMobileRelayE2eeAttemptForTests();
+    // §12.1.1 branch (a): genuine first contact, which is the selection a §13.2
+    // ceremony runs under and the one rows K9/K13 may still fall back from.
+    expect(attempt?.selectionClass).toBe("legacy-eligible");
+    expect(attempt?.legacyPermitted).toBe(true);
+    // §13.1: "an `unverified` record anchors nothing" — and there is no record
+    // at all here, so neither §8.3 element travels.
+    expect(attempt?.verifiedPinFingerprint).toBeNull();
+    expect(attempt?.acceptedPolicyGeneration).toBeUndefined();
+    // §13.2 step 2's flag is for the ceremony's own channel, which this is not.
+    expect(attempt?.pairingOnly).toBe(false);
+  });
+
+  it("marks a selection mid-ceremony pairing-only", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    const index = await mobileE2eeTrustStore.beginPairing({
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      nodeId: "node_pairing",
+    });
+    expect(index.localNodeHandle.length).toBeGreaterThan(0);
+    selectNode("node_pairing");
+    await prepareMobileRelayE2eeAttempt();
+
+    const attempt = inspectMobileRelayE2eeAttemptForTests();
+    // §13.2 step 2: "buffered application sends are never flushed, and no
+    // application payload is released regardless of outcome".
+    expect(attempt?.pairingOnly).toBe(true);
+    expect(attempt?.verifiedPinFingerprint).toBeNull();
+  });
+
+  it("carries the §8.3 pin material of a promoted record, and re-resolves for it", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_promoted");
+    await prepareMobileRelayE2eeAttempt();
+    expect(inspectMobileRelayE2eeAttemptForTests()?.verifiedPinFingerprint).toBeNull();
+    expect(getMobileE2eeSessionState().markerSet).toBe(false);
+
+    const index = await mobileE2eeTrustStore.beginPairing({
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      nodeId: "node_promoted",
+    });
+    const decision = mintE2eeOwnerVerificationDecision({
+      index,
+      nodeIdentityPublicKey: NODE_PUBLIC_KEY,
+      clientIdentityPublicKey: CLIENT_PUBLIC_KEY,
+      comparedSafetyNumber: deriveE2eeSafetyNumber({
+        nodeIdentityPublicKey: NODE_PUBLIC_KEY,
+        clientIdentityPublicKey: CLIENT_PUBLIC_KEY,
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+      }).display,
+      continuityId: "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      acceptedPolicyGeneration: 7,
+      decidedAt: 1_000,
+    });
+    await mobileE2eeTrustStore.promote(decision);
+
+    // §13.2 step 5 changed the pin, the latch, the class and the marker without
+    // touching the account or the node. Nothing may still be evaluated against
+    // the document that existed before the owner decided.
+    await prepareMobileRelayE2eeAttempt();
+    const attempt = inspectMobileRelayE2eeAttemptForTests();
+    expect(attempt?.selectionClass).toBe("latched");
+    expect(attempt?.verifiedPinFingerprint).toBe(
+      formatE2eeKeyFingerprint(e2eeKeyFingerprint("node-identity", NODE_PUBLIC_KEY)),
+    );
+    expect(attempt?.acceptedPolicyGeneration).toBe(7);
+    expect(attempt?.pairingOnly).toBe(false);
+    // …and §13.1.1's persistent indication is gone from the projection too.
+    expect(getMobileE2eeSessionState().markerSet).toBe(true);
+
+    // §13.3's owner-initiated re-pair, from the other direction.
+    await mobileE2eeTrustStore.clearSelection(index);
+    await prepareMobileRelayE2eeAttempt();
+    const forgotten = inspectMobileRelayE2eeAttemptForTests();
+    expect(forgotten?.verifiedPinFingerprint).toBeNull();
+    expect(forgotten?.selectionClass).not.toBe("latched");
+    expect(getMobileE2eeSessionState().markerSet).toBe(false);
+  });
+
+  it("refuses the slot resolved before a trust decision even without a re-preparation", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_stale");
+    await prepareMobileRelayE2eeAttempt();
+    expect(typeof resolveMobileRelayE2eeProvider()).toBe("function");
+
+    // A committed decision, and NO chance to re-prepare before the next channel.
+    await mobileE2eeTrustStore.beginPairing({
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      nodeId: "node_stale",
+    });
+    const context = host();
+    const provider = resolveMobileRelayE2eeProvider();
+    provider!(context.host);
+    expect(context.closes.length).toBe(1);
+  });
+});
+
+describe("§12.2: the channel claim is per channel, not per preparation", () => {
+  it("returns to negotiating for every channel the provider builds", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_per_channel");
+    await prepareMobileRelayE2eeAttempt();
+    // A previous channel's lock, as the projection would hold it.
+    lockMobileE2eeChannelMode("e2ee");
+    expect(getMobileE2eeSessionState().channel).toBe("unverified");
+
+    const provider = resolveMobileRelayE2eeProvider();
+    provider!(host().host);
+    // §2.2: the claim belongs to the channel that earned it. A new one claims
+    // nothing until it locks a mode of its own.
+    expect(getMobileE2eeSessionState().channel).toBe("negotiating");
+  });
+
+  it("never reports a first-contact channel as verified", () => {
+    // §2.2's bottom row needs BOTH halves: an `e2ee` lock and a pin the owner
+    // compared. The pin half is published with the guards it was resolved
+    // beside, so no call site can hand the lock the wrong row.
+    expect(getMobileE2eeSessionState().pinVerified).toBe(false);
+    lockMobileE2eeChannelMode("e2ee");
+    expect(getMobileE2eeSessionState().channel).toBe("unverified");
   });
 });
 

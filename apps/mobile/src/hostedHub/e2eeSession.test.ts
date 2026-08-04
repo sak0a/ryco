@@ -7,10 +7,11 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 import type { E2eeTrustClassification } from "../platform/e2eeTrustModel";
 import {
   beginMobileE2eeChannel,
+  beginMobileE2eeChannelAttempt,
   clearMobileE2eeTrustEvent,
   getMobileE2eeSessionState,
   lockMobileE2eeChannelMode,
-  markMobileE2eeUnavailable,
+  markMobileE2eeKeyCustodyUnavailable,
   observeMobileE2eeStatement,
   raiseMobileE2eeUnexpectedNode,
   recordMobileE2eeInitiatorDiagnostic,
@@ -58,7 +59,12 @@ const UNEXPECTED_FRESH: E2eeTrustClassification = {
   scope: { kind: "fresh" },
 };
 
-function begin(overrides: { readonly classification?: E2eeTrustClassification } = {}): void {
+function begin(
+  overrides: {
+    readonly classification?: E2eeTrustClassification;
+    readonly pinVerified?: boolean;
+  } = {},
+): void {
   beginMobileE2eeChannel({
     selection: {
       hubOrigin: HUB,
@@ -72,6 +78,7 @@ function begin(overrides: { readonly classification?: E2eeTrustClassification } 
     classification: overrides.classification ?? UNEXPECTED_FRESH,
     legacyPermitted: true,
     markerSet: false,
+    pinVerified: overrides.pinVerified ?? false,
     previouslyVerified: null,
   });
 }
@@ -87,28 +94,45 @@ describe("the channel's claim", () => {
   });
 
   it("separates an e2ee channel with a verified pin from one without", () => {
-    begin();
-    lockMobileE2eeChannelMode("e2ee", true);
+    begin({ pinVerified: true });
+    lockMobileE2eeChannelMode("e2ee");
     expect(getMobileE2eeSessionState().channel).toBe("verified");
     resetMobileE2eeSessionForTests();
-    begin();
+    begin({ pinVerified: false });
     // docs/relay-e2ee-protocol.md §13.1's release gate: an `e2ee` channel with no
     // verified pin is the ceremony, and is never spelled the way §2.2's bottom
     // row is spelled.
-    lockMobileE2eeChannelMode("e2ee", false);
+    lockMobileE2eeChannelMode("e2ee");
     expect(getMobileE2eeSessionState().channel).toBe("unverified");
   });
 
-  it("labels a fallback legacy", () => {
-    begin();
-    lockMobileE2eeChannelMode("legacy", true);
-    expect(getMobileE2eeSessionState().channel).toBe("legacy");
+  it("labels a fallback legacy whether or not a pin resolved", () => {
+    for (const pinVerified of [true, false]) {
+      resetMobileE2eeSessionForTests();
+      begin({ pinVerified });
+      lockMobileE2eeChannelMode("legacy");
+      expect(getMobileE2eeSessionState().channel).toBe("legacy");
+    }
+  });
+
+  it("returns every later channel of the same selection to negotiating", () => {
+    // §2.2: the claim belongs to the channel that earned it. Publishing it per
+    // PREPARATION left a verified label standing over every later channel of the
+    // same selection, including one closing FATAL-PRE under a §13.3 substitution.
+    begin({ pinVerified: true });
+    lockMobileE2eeChannelMode("e2ee");
+    expect(getMobileE2eeSessionState().channel).toBe("verified");
+    beginMobileE2eeChannelAttempt();
+    expect(getMobileE2eeSessionState().channel).toBe("negotiating");
+    // …and the context the ceremony needs is not thrown away with the claim.
+    expect(getMobileE2eeSessionState().selection?.nodeId).toBe("node_1");
+    expect(getMobileE2eeSessionState().pinVerified).toBe(true);
   });
 
   it("labels a device with no key material legacy from the start", () => {
     // §6.3: "a device that cannot hold the key simply has no E2EE". The channel
     // runs, unencrypted, and §12.2 requires it to be labeled so.
-    markMobileE2eeUnavailable();
+    markMobileE2eeKeyCustodyUnavailable();
     expect(getMobileE2eeSessionState().channel).toBe("legacy");
     expect(getMobileE2eeSessionState().selection).toBeNull();
   });
@@ -221,7 +245,7 @@ describe("§13.2.1: which situation the surface raises", () => {
 
   it("clears the event without changing the channel's label or claim", () => {
     begin();
-    lockMobileE2eeChannelMode("legacy", false);
+    lockMobileE2eeChannelMode("legacy");
     raiseMobileE2eeUnexpectedNode("none");
     const before = getMobileE2eeSessionState();
     clearMobileE2eeTrustEvent();
