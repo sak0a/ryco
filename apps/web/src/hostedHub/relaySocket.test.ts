@@ -1,10 +1,16 @@
 import { RELAY_INITIAL_LIMITS, type RelayChannelId, type RelayFrame } from "@ryco/contracts";
-import { encodeBase64Url } from "@ryco/client-runtime/relay";
+import {
+  encodeBase64Url,
+  RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+  RELAY_MESSAGE_TOO_LARGE_MESSAGE,
+  RELAY_PEER_UNSUPPORTED_MESSAGE,
+  RELAY_SEND_QUEUE_FULL_MESSAGE,
+} from "@ryco/client-runtime/relay";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl } from "./relaySocket";
+import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl, sendException } from "./relaySocket";
 
 /**
  * Facade-level tests for the browser relay adapter (the DOM boundary the
@@ -269,12 +275,31 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
     expect((thrown as DOMException).message).toBe("Relay channel is not open.");
   });
 
-  it("keeps every pre-existing send refusal on its own DOMException name", () => {
-    // The engine's send errors are mapped BY MESSAGE at this boundary, and the
-    // §4.4 negotiation-buffer refusal was added to the backpressure branch — so
-    // this pins that the two pre-existing messages did not move with it. Web
-    // passes no E2EE provider and never enters `negotiating`, so the new message
-    // is unreachable from here; the engine's own suite drives it.
+  it("keeps every send refusal on its own DOMException name", () => {
+    // The engine's send errors are mapped BY MESSAGE at this boundary, so the
+    // mapping is asserted against the engine's own exported strings rather than
+    // through one caller: the §4.4 negotiation-buffer refusal is unreachable
+    // from a facade that injects no E2EE provider, and a test that could only
+    // reach it through `send` would pin the caller instead of the contract.
+    for (const message of [
+      RELAY_SEND_QUEUE_FULL_MESSAGE,
+      RELAY_MESSAGE_TOO_LARGE_MESSAGE,
+      RELAY_PEER_UNSUPPORTED_MESSAGE,
+      RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+    ]) {
+      const mapped = sendException(new Error(message));
+      expect(mapped).toBeInstanceOf(DOMException);
+      expect((mapped as DOMException).name).toBe("QuotaExceededError");
+      expect((mapped as DOMException).message).toBe(message);
+    }
+    // Everything else is a state error, and a DOMException is passed through.
+    const state = sendException(new Error("Relay channel is not open."));
+    expect((state as DOMException).name).toBe("InvalidStateError");
+    const original = new DOMException("already mapped", "QuotaExceededError");
+    expect(sendException(original)).toBe(original);
+  });
+
+  it("raises the queue-full refusal through the facade with that name", () => {
     const { facade, socket } = create();
     authenticate(socket);
     socket.bufferedAmount = RELAY_INITIAL_LIMITS.maxQueuedBytes;
@@ -287,7 +312,24 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
     }
     expect(thrown).toBeInstanceOf(DOMException);
     expect((thrown as DOMException).name).toBe("QuotaExceededError");
-    expect((thrown as DOMException).message).toBe("Relay send queue is full.");
+    expect((thrown as DOMException).message).toBe(RELAY_SEND_QUEUE_FULL_MESSAGE);
+  });
+
+  it("raises an over-ceiling submission as a quota refusal, not an invalid state", () => {
+    // The mapping's first arm matched a message the engine stopped throwing when
+    // the oversized-RPC framing landed, so this one had been falling through to
+    // `InvalidStateError` — a size refusal reported as a state error.
+    const { facade, socket } = create();
+    authenticate(socket);
+
+    let thrown: unknown;
+    try {
+      facade.send(new Uint8Array(RELAY_INITIAL_LIMITS.maxQueuedBytes * 4));
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as DOMException).name).toBe("QuotaExceededError");
+    expect((thrown as DOMException).message).toBe(RELAY_MESSAGE_TOO_LARGE_MESSAGE);
   });
 
   it("delivers ArrayBuffer and typed-array inbound messages", async () => {
