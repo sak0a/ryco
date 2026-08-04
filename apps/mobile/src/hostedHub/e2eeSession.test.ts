@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import type { E2eeTrustClassification } from "../platform/e2eeTrustModel";
 import {
+  attachMobileE2eeLocalNodeHandle,
   beginMobileE2eeChannel,
   beginMobileE2eeChannelAttempt,
   clearMobileE2eeTrustEvent,
@@ -15,6 +16,7 @@ import {
   observeMobileE2eeStatement,
   raiseMobileE2eeUnexpectedNode,
   recordMobileE2eeInitiatorDiagnostic,
+  resetMobileE2eeSession,
   resetMobileE2eeSessionForTests,
   subscribeMobileE2eeSession,
 } from "./e2eeSession";
@@ -106,24 +108,63 @@ describe("the channel's claim", () => {
     expect(getMobileE2eeSessionState().channel).toBe("unverified");
   });
 
-  it("never reports the shared vocabulary's web row, on any input", () => {
+  it("never reports the shared vocabulary's web row, from any publisher", () => {
     // §8.1's role/tier matrix gives this app a static agreement key and the IK
     // pattern, so `web-unsigned` — §2.2's *Web, unsigned ephemeral* row — is a
     // state it cannot occupy. The shared union carries the member because the
     // web tier needs a word that is not `Encrypted`; this asserts that adding it
     // there left the native projection alone, rather than opening a path by
     // which a signed channel could be labelled the unsigned way.
+    //
+    // EVERY EXPORTED PUBLISHER, NOT THE TWO A LOCK NEEDS. `channel` is written
+    // by five of them and preserved by the rest, and a property proved over
+    // `beginMobileE2eeChannel` and `lockMobileE2eeChannelMode` alone would say
+    // nothing about the key-custody path, the per-channel restart, or the reset
+    // state — which is also the only place `unavailable` is sampled.
     const reported = new Set<string>();
+    const sample = () => reported.add(getMobileE2eeSessionState().channel);
     for (const pinVerified of [true, false]) {
       for (const mode of ["e2ee", "legacy"] as const) {
         resetMobileE2eeSessionForTests();
+        sample();
         begin({ pinVerified });
-        reported.add(getMobileE2eeSessionState().channel);
+        sample();
+        // Everything that publishes without owning `channel`: each one spreads
+        // the current state, so a value introduced here would be one carried in
+        // rather than one written.
+        observeMobileE2eeStatement({
+          kind: "verified",
+          statement: statement(NODE_PUBLIC_KEY),
+          selectedSuite: 1,
+          anchor: "pin-unchanged",
+        });
+        sample();
+        attachMobileE2eeLocalNodeHandle("node-handle-1");
+        sample();
+        recordMobileE2eeInitiatorDiagnostic({ phase: "pre_key", row: "P14" });
+        sample();
+        raiseMobileE2eeUnexpectedNode("none");
+        sample();
+        clearMobileE2eeTrustEvent();
+        sample();
+        // …and every publisher that does own it.
+        beginMobileE2eeChannelAttempt();
+        sample();
         lockMobileE2eeChannelMode(mode);
-        reported.add(getMobileE2eeSessionState().channel);
+        sample();
+        markMobileE2eeKeyCustodyUnavailable();
+        sample();
+        resetMobileE2eeSession();
+        sample();
       }
     }
-    expect([...reported].toSorted()).toEqual(["legacy", "negotiating", "unverified", "verified"]);
+    expect([...reported].toSorted()).toEqual([
+      "legacy",
+      "negotiating",
+      "unavailable",
+      "unverified",
+      "verified",
+    ]);
   });
 
   it("labels a fallback legacy whether or not a pin resolved", () => {
