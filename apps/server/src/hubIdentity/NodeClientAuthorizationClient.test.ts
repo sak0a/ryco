@@ -30,6 +30,7 @@ import {
   makeNodeClientAuthorizationStore,
   type NodeClientAuthorizationRecordFile,
   type NodeClientAuthorizationStore,
+  NodeClientAuthorizationStoreError,
   type StoredClientAuthorizationEntry,
 } from "./NodeClientAuthorizationStore.ts";
 
@@ -1340,5 +1341,98 @@ describe("node client authorization handshake contract", () => {
     );
     await test.client.setDisplayLabel({ key: key(1), displayLabel: undefined });
     expect((await test.client.list()).records[0]?.displayLabel).toBeUndefined();
+  });
+});
+
+describe("node client authorization commit failure containment", () => {
+  /**
+   * A store that serves one snapshot and then fails everything.
+   *
+   * BOTH HALVES FAIL, which is the condition that matters: `read` takes the same
+   * single-writer lock `update` does, so a CLI in another process holding it
+   * past the lock deadline — or a state directory that has become unreadable —
+   * fails the write AND the re-read that follows it.
+   */
+  function failingStore(seed: NodeClientAuthorizationRecordFile): {
+    readonly store: NodeClientAuthorizationStore;
+    readonly fail: () => void;
+  } {
+    let failing = false;
+    const refuse = (): never => {
+      throw new NodeClientAuthorizationStoreError("client_authorization_state_locked");
+    };
+    return {
+      fail: () => {
+        failing = true;
+      },
+      store: {
+        read: async () => (failing ? refuse() : seed),
+        update: async () => refuse(),
+        reset: async () => refuse(),
+      },
+    };
+  }
+
+  const approvedSeed = (): NodeClientAuthorizationRecordFile => ({
+    version: 1,
+    revision: 1,
+    pending: [],
+    approved: [
+      pendingEntry(1, { maxRole: "operator", capabilitySet: [CAPABILITY], approvedAt: START }),
+    ],
+    revoked: [],
+    pairingWindow: null,
+  });
+
+  it("keeps every approved client readable when a pairing commit cannot be written", async () => {
+    // §13.2 step 3 put this commit on a path an UNAUTHENTICATED peer's hello
+    // reaches, and one whose failure §13.2 makes best-effort and the caller
+    // therefore swallows. A pending-class change appends a record that grants
+    // nothing, spends the owner's window, or drops a pending entry, so no
+    // failure of it can leave memory granting more than disk — and publishing
+    // the empty record instead would refuse every approved client with the same
+    // generic reject a revocation takes, silently, until an owner command
+    // republished disk state.
+    const failing = failingStore(approvedSeed());
+    const client = await makeNodeClientAuthorizationClient({
+      store: failing.store,
+      now: () => START,
+    });
+    const decision = client.evaluatePairingAdmission({
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      clientIdentityFingerprint: fingerprintBytes(900),
+      safetyNumber: SAFETY_NUMBER,
+    });
+    expect(decision.kind).toBe("admit");
+    failing.fail();
+
+    await expect(client.commitPairingAdmission(decision)).rejects.toMatchObject({
+      code: "client_authorization_state_failed",
+    });
+    expect(client.lookupClientAuthorization(key(1))).toMatchObject({
+      status: "approved",
+      maxRole: "operator",
+      capabilitySet: [CAPABILITY],
+    });
+  });
+
+  it("still fails an owner change closed when neither the write nor the re-read lands", async () => {
+    // The other direction, unchanged: an owner change CAN widen authority and a
+    // durable write can land while the operation still rejects, so a failure
+    // that cannot even re-read publishes the empty record — no record is no
+    // authority, the direction §8.6 step 6 already takes for an absent key.
+    const failing = failingStore(approvedSeed());
+    const client = await makeNodeClientAuthorizationClient({
+      store: failing.store,
+      now: () => START,
+    });
+    expect(client.lookupClientAuthorization(key(1))).toMatchObject({ status: "approved" });
+    failing.fail();
+
+    await expect(client.revoke(key(1))).rejects.toMatchObject({
+      code: "client_authorization_state_failed",
+    });
+    expect(client.lookupClientAuthorization(key(1))).toBeUndefined();
   });
 });

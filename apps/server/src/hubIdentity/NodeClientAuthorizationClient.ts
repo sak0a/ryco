@@ -846,6 +846,26 @@ export async function makeNodeClientAuthorizationClient(options: {
     change: (
       current: NodeClientAuthorizationRecordFile,
     ) => NodeClientAuthorizationRecordFile | null,
+    /**
+     * Whether a FAILED commit must fail closed by re-reading, and — if that read
+     * also fails — by publishing the empty record.
+     *
+     * TRUE FOR EVERY CHANGE THAT CAN WIDEN AUTHORITY, which is every owner
+     * change: the durable write can land while the operation still rejects, and
+     * a stale published index would then let §8.6 step 6 grant an authority the
+     * record on disk no longer holds.
+     *
+     * FALSE IS FOR §13.2 STEP 3's PENDING CLASS ALONE. That change only appends
+     * a pending record — which grants nothing, because step 6 refuses on
+     * `status` before it reads a role or a capability — spends the owner's
+     * window, or drops a pending entry, so no failure of it can leave memory
+     * granting more than disk, and the fail-closed direction buys nothing there.
+     * What it would cost is severe and silent: an empty publish refuses every
+     * APPROVED client until an owner command republishes disk state, and this
+     * path is reached from an unauthenticated peer's hello with its failures
+     * deliberately swallowed (§13.2 makes the commit best-effort).
+     */
+    options: { readonly resyncOnFailure: boolean } = { resyncOnFailure: true },
   ): Promise<NodeClientAuthorizationRecordFile> =>
     asStateFailure(async () => {
       let next: NodeClientAuthorizationRecordFile;
@@ -862,7 +882,7 @@ export async function makeNodeClientAuthorizationClient(options: {
         // reporting the failure, and if that also fails publish the empty
         // record: no record is no authority, which is the fail-closed direction
         // §8.6 step 6 already takes for an absent key.
-        await resyncIndex();
+        if (options.resyncOnFailure) await resyncIndex();
         throw error;
       }
       publish(next);
@@ -1041,68 +1061,77 @@ export async function makeNodeClientAuthorizationClient(options: {
     // at all — §13.2 step 3's refusal path must stay free of durable writes.
     if (admission.kind !== "admit" && admission.spentPairingWindow === undefined) return;
     const at = now();
-    await commit((current) => {
-      let next = current;
-      if (admission.spentPairingWindow !== undefined) {
-        const window = openWindow(next, at);
-        // THE WINDOW THIS DECISION MATCHED, and never merely the one open now.
-        // The owner may have opened a new window between the §8.6 step 6
-        // decision and this commit, and stamping `spentAt` on that one would
-        // report §13.6's "some other attempt consumed the window" for an attempt
-        // that never named its device — and strip that device of the
-        // reservation, which is the owner's only way past a saturated pending
-        // cap. A window that expired, closed, or was re-opened in the gap
-        // therefore loses the durable spend, which §13.2 already makes a benign
-        // best-effort loss.
-        if (
-          window !== undefined &&
-          window.spentAt === undefined &&
-          windowLatch(window) === admission.spentPairingWindow
-        ) {
-          next = { ...next, pairingWindow: { ...window, spentAt: at } };
+    await commit(
+      (current) => {
+        let next = current;
+        if (admission.spentPairingWindow !== undefined) {
+          const window = openWindow(next, at);
+          // THE WINDOW THIS DECISION MATCHED, and never merely the one open now.
+          // The owner may have opened a new window between the §8.6 step 6
+          // decision and this commit, and stamping `spentAt` on that one would
+          // report §13.6's "some other attempt consumed the window" for an attempt
+          // that never named its device — and strip that device of the
+          // reservation, which is the owner's only way past a saturated pending
+          // cap. A window that expired, closed, or was re-opened in the gap
+          // therefore loses the durable spend, which §13.2 already makes a benign
+          // best-effort loss.
+          if (
+            window !== undefined &&
+            window.spentAt === undefined &&
+            windowLatch(window) === admission.spentPairingWindow
+          ) {
+            next = { ...next, pairingWindow: { ...window, spentAt: at } };
+          }
         }
-      }
-      if (admission.kind !== "admit") return next === current ? null : next;
-      const indexKey = clientAuthorizationIndexKey(admission.entry);
-      // Re-evaluated against the state actually on disk, which another writer
-      // may have moved since the in-memory decision. §13.2 makes this commit
-      // best-effort — a pending-class mutation lost here is a benign
-      // availability event and the client re-pairs — but it may never breach a
-      // cap, so the caps are re-checked rather than assumed.
-      if (findEntry(next, indexKey, at) !== undefined) return next;
-      let pending = next.pending;
-      const partition = clientAuthorizationPartitionKey(admission.entry);
-      const inPartition = pending.filter(
-        (entry) => clientAuthorizationPartitionKey(entry) === partition,
-      );
-      const overPartition = inPartition.length >= E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT;
-      if (overPartition || pending.length >= E2EE_PENDING_CLIENTS_MAX_GLOBAL) {
-        // An eviction is licensed by the owner's window and by nothing else, and
-        // only while a cap is still breached: a slot freed between the decision
-        // and here means the selected victim is simply not evicted. The license
-        // is the RESERVATION this decision was granted, not the window's present
-        // state — §13.2 selects the victim before emission, so a window re-opened
-        // in the gap neither grants nor withdraws it.
-        const scope = overPartition ? inPartition : pending;
-        const selected =
-          admission.evictIndexKey === undefined
-            ? undefined
-            : scope.find(
-                (entry) =>
-                  clientAuthorizationIndexKey(entry) === admission.evictIndexKey &&
-                  !holdsReservation(entry, at),
-              );
-        const victim =
-          selected ??
-          (admission.spentPairingWindow === undefined
-            ? undefined
-            : selectPendingEviction(scope, at));
-        if (victim === undefined) return next;
-        const victimKey = clientAuthorizationIndexKey(victim);
-        pending = pending.filter((entry) => clientAuthorizationIndexKey(entry) !== victimKey);
-      }
-      return { ...next, pending: [...pending, admission.entry] };
-    });
+        if (admission.kind !== "admit") return next === current ? null : next;
+        const indexKey = clientAuthorizationIndexKey(admission.entry);
+        // Re-evaluated against the state actually on disk, which another writer
+        // may have moved since the in-memory decision. §13.2 makes this commit
+        // best-effort — a pending-class mutation lost here is a benign
+        // availability event and the client re-pairs — but it may never breach a
+        // cap, so the caps are re-checked rather than assumed.
+        if (findEntry(next, indexKey, at) !== undefined) return next;
+        let pending = next.pending;
+        const partition = clientAuthorizationPartitionKey(admission.entry);
+        const inPartition = pending.filter(
+          (entry) => clientAuthorizationPartitionKey(entry) === partition,
+        );
+        const overPartition = inPartition.length >= E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT;
+        if (overPartition || pending.length >= E2EE_PENDING_CLIENTS_MAX_GLOBAL) {
+          // An eviction is licensed by the owner's window and by nothing else, and
+          // only while a cap is still breached: a slot freed between the decision
+          // and here means the selected victim is simply not evicted. The license
+          // is the RESERVATION this decision was granted, not the window's present
+          // state — §13.2 selects the victim before emission, so a window re-opened
+          // in the gap neither grants nor withdraws it.
+          const scope = overPartition ? inPartition : pending;
+          const selected =
+            admission.evictIndexKey === undefined
+              ? undefined
+              : scope.find(
+                  (entry) =>
+                    clientAuthorizationIndexKey(entry) === admission.evictIndexKey &&
+                    !holdsReservation(entry, at),
+                );
+          const victim =
+            selected ??
+            (admission.spentPairingWindow === undefined
+              ? undefined
+              : selectPendingEviction(scope, at));
+          if (victim === undefined) return next;
+          const victimKey = clientAuthorizationIndexKey(victim);
+          pending = pending.filter((entry) => clientAuthorizationIndexKey(entry) !== victimKey);
+        }
+        return { ...next, pending: [...pending, admission.entry] };
+      },
+      // §13.2 step 3's pending class never widens authority, so it opts out of
+      // the fail-closed resync `commit` performs for owner changes — see that
+      // option's note. This path is reached from an unauthenticated peer's hello
+      // and its failure is deliberately swallowed, so an empty publish here
+      // would refuse every approved client until an owner command republished
+      // disk state, with nothing at all to report it.
+      { resyncOnFailure: false },
+    );
   };
 
   const list: NodeClientAuthorizationClient["list"] = async () => {
