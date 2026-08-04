@@ -29,7 +29,10 @@ import {
   type E2eeSyntheticDirectionState,
 } from "@ryco/shared/relayE2eeSession";
 import type { E2eeTier } from "@ryco/shared/relayE2eeTranscripts";
-import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
+import {
+  deriveE2eeSafetyNumber,
+  deriveE2eeWebSas,
+} from "@ryco/shared/relayE2eeVerificationDisplay";
 import {
   classifyPostStripPayload,
   decodeE2eeNegotiationRecord,
@@ -43,7 +46,10 @@ import {
   type PostStripPayloadClass,
 } from "@ryco/shared/relayE2eeWire";
 
-import type { NodeClientAuthorizationClient } from "../hubIdentity/NodeClientAuthorizationClient.ts";
+import type {
+  NodeClientAuthorizationClient,
+  NodeClientPendingAdmission,
+} from "../hubIdentity/NodeClientAuthorizationClient.ts";
 import type { NodeE2eeChannelRegistration } from "../hubIdentity/NodeE2eePolicyClient.ts";
 import type { EffectiveNodeE2eePolicy } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import {
@@ -172,10 +178,25 @@ export function makeNodeE2eeHandshakeRateLimiter(
   };
 }
 
-/** The §13.6 surface this module needs, and no more of it. */
+/**
+ * The §13.6 surface this module needs, and no more of it.
+ *
+ * The two pairing calls belong on the relay path and the owner commands do not,
+ * which is not a contradiction: §13.2 step 3 defines the pending record as the
+ * node's response to unauthenticated peer input, and a `pending` record grants
+ * NOTHING — §8.6 step 6 refuses on `status` before it reads a role or a
+ * capability, so no peer can widen its own authority through this seam. What a
+ * relay path still may not reach is `approve`, `narrow`, `revoke`, `purge`, and
+ * `openPairingWindow`, each of which decides authority and each of which stays
+ * on the owner-authenticated surface.
+ */
 export type NodeE2eeChannelAuthorization = Pick<
   NodeClientAuthorizationClient,
-  "lookupClientAuthorization" | "reReadAuthorization" | "registerInFlightHandshake"
+  | "lookupClientAuthorization"
+  | "reReadAuthorization"
+  | "registerInFlightHandshake"
+  | "evaluatePairingAdmission"
+  | "commitPairingAdmission"
 >;
 
 /**
@@ -794,6 +815,44 @@ export function makeNodeE2eeChannelSession(
     if (advertised === undefined || helloConsumed) return fatalPreKey("P4");
     helloConsumed = true;
     const at = now();
+    /**
+     * §13.2 step 3's decision, taken in memory at §8.6 step 6 by the callback
+     * below and spent by `commitPairing` on the far side of the reject and the
+     * close. At most one per channel, because §4.4 admits one handshake.
+     */
+    let pairing: NodeClientPendingAdmission | undefined;
+    /**
+     * The durable half of §13.2 step 3, and the ordering rule that governs it.
+     *
+     * DEFERRED A TURN AND NEVER AWAITED. §11.2 forbids delaying the
+     * `E2EEHandshakeReject` or the `channel.close` on the durability of ANY
+     * pending-class mutation reachable from a pre-key path — this is the only
+     * pre-key failure class that carries an fsync, and an fsync on the response
+     * path dwarfs every cryptographic step above it, so leaving it there would
+     * make "this key is not on file", and "the owner has a pairing window open",
+     * measurable from the wire by latency alone. The relay registry queues the
+     * outer close as a microtask of its own, and this one is queued after it, so
+     * "after the reject and the close" is true of the wire and not merely of the
+     * order of statements in this function.
+     *
+     * A FAILURE IS SWALLOWED, and a synchronous throw is a failure like any
+     * other. §13.2 makes the commit best-effort: a pending-class mutation lost to
+     * a crash — or to a store that would not take it — is a benign availability
+     * event and the client re-pairs. There is nothing left to report it to
+     * either, because the channel is closed by the time this runs, and an escaped
+     * rejection on a node's event loop is a worse outcome than a lost record. The
+     * call is therefore made inside a chain that catches both.
+     */
+    const commitPairing = (): void => {
+      const admission = pairing;
+      pairing = undefined;
+      if (admission === undefined) return;
+      queueMicrotask(() => {
+        void Promise.resolve(admission)
+          .then((decision) => sources.authorization.commitPairingAdmission(decision))
+          .catch(() => undefined);
+      });
+    };
     try {
       // The secret half of the prekey THIS CHANNEL advertised (§6.4), borrowed
       // for exactly the span that needs it. `receiveHello` is synchronous, which
@@ -841,6 +900,40 @@ export function makeNodeE2eeChannelSession(
             admitAttempt: () => sources.rateLimiter.admit(sources.channel.hubOrigin),
             lookupClientAuthorization: (key) =>
               sources.authorization.lookupClientAuthorization(key),
+            // §13.2 step 3, at step 6 and before anything is emitted: the §15
+            // caps and the §13.6 window reservation, entirely in memory.
+            //
+            // The §13.4 safety number is derived HERE, exactly as §13.5's
+            // `WebSAS` is: the node identity key is this channel's advertised
+            // material and the client identity key is the one step 5 just
+            // authenticated, and only the display string leaves — so nothing
+            // above this module ever holds either key, which is what §13.6's
+            // "never either raw key" asks of the record it ends up on.
+            //
+            // A THROW COSTS THE PENDING RECORD AND NOTHING ELSE. §11.2's
+            // anti-oracle rule governs the WIRE; the pending record and the
+            // operator listing are the operator's side of the same event and
+            // MUST NOT alter it. A bookkeeping failure may therefore neither
+            // turn an admitted handshake into a fatal one nor vary the reject an
+            // unapproved one already takes — the same reason the `WebSAS`
+            // derivation below is allowed to fail without a channel outcome.
+            evaluatePairingAdmission: (client) => {
+              try {
+                pairing = sources.authorization.evaluatePairingAdmission({
+                  hubOrigin: client.hubOrigin,
+                  accountId: client.accountId,
+                  clientIdentityFingerprint: client.clientIdentityFingerprint,
+                  safetyNumber: deriveE2eeSafetyNumber({
+                    nodeIdentityPublicKey: advertised.nodeIdentityPublicKey,
+                    clientIdentityPublicKey: client.clientIdentityPublicKey,
+                    hubOrigin: client.hubOrigin,
+                    accountId: client.accountId,
+                  }).display,
+                });
+              } catch {
+                pairing = undefined;
+              }
+            },
             enterE2eeMode,
           });
           handshake = responder;
@@ -915,14 +1008,27 @@ export function makeNodeE2eeChannelSession(
           return { kind: "entered" };
         },
       );
-      if (outcome.kind === "fatal") return fatalPreKey(outcome.row);
+      // The reject and the close FIRST, on every exit, and the pending-class
+      // commit strictly afterwards (§13.2 step 3, §11.2).
+      if (outcome.kind === "fatal") {
+        const rejected = fatalPreKey(outcome.row);
+        commitPairing();
+        return rejected;
+      }
+      // The success path owes the same commit and takes it in the same place:
+      // §13.6 spends an owner-opened window's reservation on the first attempt
+      // that matches its discriminator whatever the outcome, and by here the
+      // accept is already on the send path.
+      commitPairing();
       return CLAIMED;
     } catch {
       // A local failure: key custody refusing the borrow, an encoder rejecting
       // material this node holds, the §4.5 ceiling. §11.2's table enumerates
       // peer-input conditions only, so none of them names a row — and the wire
       // surface is the identical generic reject either way.
-      return fatalPreKey("local");
+      const rejected = fatalPreKey("local");
+      commitPairing();
+      return rejected;
     }
   }
 

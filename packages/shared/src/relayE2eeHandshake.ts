@@ -1740,6 +1740,39 @@ export interface E2eeNodeHandshakeOptions {
     | ((key: E2eeClientAuthorizationKey) => E2eeClientAuthorization | undefined)
     | undefined;
   /**
+   * §13.2 step 3 (IK only): the pending-class DECISION — the §15 caps and the
+   * §13.6 pairing-window reservation — taken here and entirely in memory.
+   *
+   * HERE and not one step earlier, because §13.6 grants the reservation only to
+   * an attempt whose **authenticated** `clientIdentityFingerprint` matches the
+   * owner-named discriminator: step 5 has bound that fingerprint to a
+   * certificate self-signed by the client identity key, so this runs against a
+   * value the node has proven rather than one the peer asserted.
+   *
+   * CALLED ON EVERY NATIVE STEP-6 READ, not only on the refusal below. §13.6
+   * spends the window's single reservation on "the first attempt that matches
+   * the discriminator, whatever that attempt's outcome" — an owner's device that
+   * the node already holds a record for is such an attempt, and a window left
+   * open after it arrived tells the owner their device has not reached the node.
+   *
+   * RETURNS NOTHING, and this module holds no result: §13.2 step 3 forbids the
+   * durable half from running before the reject and the close (§11.2), and every
+   * caller of `receiveHello` is still inside the response path. The decision
+   * belongs to the caller, which commits it after both.
+   *
+   * The client identity key is passed because §13.4's safety number is derived
+   * from it and no other step-6 value can stand in for it. The record persists
+   * the derived display string only, never either raw key (§13.6).
+   */
+  readonly evaluatePairingAdmission?:
+    | ((client: {
+        readonly hubOrigin: string;
+        readonly accountId: string;
+        readonly clientIdentityFingerprint: Uint8Array;
+        readonly clientIdentityPublicKey: Uint8Array;
+      }) => void)
+    | undefined;
+  /**
    * Row N3 (§8.6 step 8). The caller performs the transition into `e2ee` here,
    * inside whatever serialization makes the step-2 and step-6 reads atomic with
    * respect to the §12.6 and §13.6 commits, and refuses when a withdrawal
@@ -1984,6 +2017,15 @@ export class E2eeNodeHandshake {
           readonly accountId: string;
           readonly identityFingerprint: Uint8Array;
           readonly agreementFingerprint: Uint8Array;
+          /**
+           * §13.4's client half, carried only as far as step 6.
+           *
+           * The context block (§8.3 element 10) commits to the FINGERPRINT and
+           * nothing here changes that; the key is kept because §13.2 step 3
+           * derives the safety number from both identity keys and step 6 is the
+           * last point at which this side of the pair is in hand.
+           */
+          readonly identityPublicKey: Uint8Array;
         }
       | { readonly tier: "web" };
     let claims: E2eeIkHelloPayload | undefined;
@@ -2022,6 +2064,7 @@ export class E2eeNodeHandshake {
           certificate.certificate.identityPublicKey,
         ),
         agreementFingerprint: certificate.certificate.agreementFingerprint,
+        identityPublicKey: certificate.certificate.identityPublicKey,
       };
     } else {
       // §8.5: a nonempty NX message-1 payload is a handshake failure. The NX
@@ -2053,6 +2096,19 @@ export class E2eeNodeHandshake {
         clientIdentityFingerprint: clientContext.identityFingerprint,
       };
       const record = options.lookupClientAuthorization?.(key);
+      // §13.2 step 3, between the read and the refusal: the caps and the window
+      // reservation, in memory, with nothing emitted yet. It is deliberately not
+      // conditioned on `record` — see the option's own note for why the window
+      // is spent by a matching attempt whatever this read returned — and it
+      // deliberately changes nothing below it, because §11.2 requires the wire
+      // surface of a pairing attempt to be the one every other pre-key cause
+      // takes.
+      options.evaluatePairingAdmission?.({
+        hubOrigin: key.hubOrigin,
+        accountId: key.accountId,
+        clientIdentityFingerprint: key.clientIdentityFingerprint,
+        clientIdentityPublicKey: clientContext.identityPublicKey,
+      });
       if (
         record === undefined ||
         record.status !== "approved" ||

@@ -300,6 +300,16 @@ export function authorizationFor(
       }),
       release: () => undefined,
     }),
+    // §13.2 step 3 against a stub that holds ONE record rather than a record
+    // set: an existing record is not first-seen and creates nothing, and an
+    // absent one has no slot here to be created in. Either way the commit owes
+    // nothing. The ceremony itself is driven against the real client, in
+    // `NodeE2eePairingAdmission.test.ts`.
+    evaluatePairingAdmission: () =>
+      record === undefined
+        ? { kind: "refused", reason: "pending_cap_global", spentPairingWindow: undefined }
+        : { kind: "existing", status: record.status, spentPairingWindow: undefined },
+    commitPairingAdmission: async () => undefined,
   };
 }
 

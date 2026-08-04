@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import {
   E2EE_APPROVED_CLIENTS_MAX,
+  E2EE_KEY_FINGERPRINT_BYTES,
   E2EE_PAIRING_RESERVATION_LIFETIME,
   E2EE_PAIRING_WINDOW,
   E2EE_PENDING_CLIENT_RETENTION,
@@ -29,6 +30,7 @@ import {
   makeNodeClientAuthorizationStore,
   type NodeClientAuthorizationRecordFile,
   type NodeClientAuthorizationStore,
+  NodeClientAuthorizationStoreError,
   type StoredClientAuthorizationEntry,
 } from "./NodeClientAuthorizationStore.ts";
 
@@ -499,6 +501,81 @@ describe("node client authorization pairing window", () => {
     expect(await test.pair(key(901))).toMatchObject({ kind: "existing" });
     expect((await test.client.list()).pairingWindow).toMatchObject({ spent: false });
     expect((await test.stored()).pairingWindow?.spentAt).toBeUndefined();
+  });
+
+  it("never spends a window the decision did not match, however the gap is filled", async () => {
+    // §13.2 step 3 defers the durable spend past the reject and the close, and
+    // the owner can open a NEW window in that gap — the two halves of the
+    // decision are therefore separated here exactly as the relay path separates
+    // them, rather than through `pair`.
+    const test = await harness();
+    await test.client.openPairingWindow(fingerprintBytes(900));
+    const decision = test.client.evaluatePairingAdmission({
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      clientIdentityFingerprint: fingerprintBytes(900),
+      safetyNumber: SAFETY_NUMBER,
+    });
+    expect(decision.kind).toBe("admit");
+
+    // The owner names a SECOND device before the commit lands.
+    await test.client.openPairingWindow(fingerprintBytes(901));
+    await test.client.commitPairingAdmission(decision);
+
+    // §13.6's `spent` is "some other attempt consumed the window — impossible
+    // without the owner's own client key". An attempt that never named device
+    // 901 may not raise it, durably or in the listing.
+    const stored = await test.stored();
+    expect(stored.pairingWindow?.clientIdentityFingerprint).toBe(fingerprint(901));
+    expect(stored.pairingWindow?.spentAt).toBeUndefined();
+    expect((await test.client.list()).pairingWindow).toMatchObject({ spent: false });
+    // And the reservation — the owner's only way past a saturated pending cap —
+    // is still there for the device they just named.
+    expect(await test.pair(key(901))).toMatchObject({ kind: "admit" });
+    expect((await test.stored()).pairingWindow?.spentAt).toBe(START);
+  });
+
+  it("still spends the matched window when the gap changed nothing", async () => {
+    // The other side of the identity check: a commit that lands with the SAME
+    // window still open owes the durable spend, so the check above cannot be
+    // satisfied by never spending anything.
+    const test = await harness();
+    await test.client.openPairingWindow(fingerprintBytes(900));
+    const decision = test.client.evaluatePairingAdmission({
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      clientIdentityFingerprint: fingerprintBytes(900),
+      safetyNumber: SAFETY_NUMBER,
+    });
+    await test.client.commitPairingAdmission(decision);
+    expect((await test.stored()).pairingWindow?.spentAt).toBe(START);
+  });
+
+  it("matches the discriminator on the whole digest and never a prefix of it", async () => {
+    // §11.2 names key and fingerprint equality (§7.1) among the comparisons that
+    // MUST be constant-time, and §13.2 step 3 now reaches this one from an
+    // unauthenticated peer's hello. Whatever primitive carries it, the property
+    // it has to keep is this: the digests differ only in their LAST byte, and
+    // the owner's window is not spent on a device they never named.
+    const test = await harness();
+    const named = fingerprintBytes(900);
+    const nearMiss = Uint8Array.from(named);
+    nearMiss[E2EE_KEY_FINGERPRINT_BYTES - 1] = 1;
+    await test.client.openPairingWindow(named);
+
+    await test.client.commitPairingAdmission(
+      test.client.evaluatePairingAdmission({
+        hubOrigin: HUB_ORIGIN,
+        accountId: ACCOUNT_ID,
+        clientIdentityFingerprint: nearMiss,
+        safetyNumber: SAFETY_NUMBER,
+      }),
+    );
+    expect((await test.client.list()).pairingWindow).toMatchObject({ spent: false });
+    expect((await test.stored()).pairingWindow?.spentAt).toBeUndefined();
+    // And the device the owner DID name still has its reservation.
+    expect(await test.pair(key(900))).toMatchObject({ kind: "admit" });
+    expect((await test.stored()).pairingWindow?.spentAt).toBe(START);
   });
 
   it("requires a fingerprint to open a window", async () => {
@@ -1264,5 +1341,98 @@ describe("node client authorization handshake contract", () => {
     );
     await test.client.setDisplayLabel({ key: key(1), displayLabel: undefined });
     expect((await test.client.list()).records[0]?.displayLabel).toBeUndefined();
+  });
+});
+
+describe("node client authorization commit failure containment", () => {
+  /**
+   * A store that serves one snapshot and then fails everything.
+   *
+   * BOTH HALVES FAIL, which is the condition that matters: `read` takes the same
+   * single-writer lock `update` does, so a CLI in another process holding it
+   * past the lock deadline — or a state directory that has become unreadable —
+   * fails the write AND the re-read that follows it.
+   */
+  function failingStore(seed: NodeClientAuthorizationRecordFile): {
+    readonly store: NodeClientAuthorizationStore;
+    readonly fail: () => void;
+  } {
+    let failing = false;
+    const refuse = (): never => {
+      throw new NodeClientAuthorizationStoreError("client_authorization_state_locked");
+    };
+    return {
+      fail: () => {
+        failing = true;
+      },
+      store: {
+        read: async () => (failing ? refuse() : seed),
+        update: async () => refuse(),
+        reset: async () => refuse(),
+      },
+    };
+  }
+
+  const approvedSeed = (): NodeClientAuthorizationRecordFile => ({
+    version: 1,
+    revision: 1,
+    pending: [],
+    approved: [
+      pendingEntry(1, { maxRole: "operator", capabilitySet: [CAPABILITY], approvedAt: START }),
+    ],
+    revoked: [],
+    pairingWindow: null,
+  });
+
+  it("keeps every approved client readable when a pairing commit cannot be written", async () => {
+    // §13.2 step 3 put this commit on a path an UNAUTHENTICATED peer's hello
+    // reaches, and one whose failure §13.2 makes best-effort and the caller
+    // therefore swallows. A pending-class change appends a record that grants
+    // nothing, spends the owner's window, or drops a pending entry, so no
+    // failure of it can leave memory granting more than disk — and publishing
+    // the empty record instead would refuse every approved client with the same
+    // generic reject a revocation takes, silently, until an owner command
+    // republished disk state.
+    const failing = failingStore(approvedSeed());
+    const client = await makeNodeClientAuthorizationClient({
+      store: failing.store,
+      now: () => START,
+    });
+    const decision = client.evaluatePairingAdmission({
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      clientIdentityFingerprint: fingerprintBytes(900),
+      safetyNumber: SAFETY_NUMBER,
+    });
+    expect(decision.kind).toBe("admit");
+    failing.fail();
+
+    await expect(client.commitPairingAdmission(decision)).rejects.toMatchObject({
+      code: "client_authorization_state_failed",
+    });
+    expect(client.lookupClientAuthorization(key(1))).toMatchObject({
+      status: "approved",
+      maxRole: "operator",
+      capabilitySet: [CAPABILITY],
+    });
+  });
+
+  it("still fails an owner change closed when neither the write nor the re-read lands", async () => {
+    // The other direction, unchanged: an owner change CAN widen authority and a
+    // durable write can land while the operation still rejects, so a failure
+    // that cannot even re-read publishes the empty record — no record is no
+    // authority, the direction §8.6 step 6 already takes for an absent key.
+    const failing = failingStore(approvedSeed());
+    const client = await makeNodeClientAuthorizationClient({
+      store: failing.store,
+      now: () => START,
+    });
+    expect(client.lookupClientAuthorization(key(1))).toMatchObject({ status: "approved" });
+    failing.fail();
+
+    await expect(client.revoke(key(1))).rejects.toMatchObject({
+      code: "client_authorization_state_failed",
+    });
+    expect(client.lookupClientAuthorization(key(1))).toBeUndefined();
   });
 });

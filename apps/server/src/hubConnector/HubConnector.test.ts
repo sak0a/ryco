@@ -167,6 +167,13 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
         establish: () => ({ kind: "refused" as const, reason: "authorization_withdrawn" as const }),
         release: () => undefined,
       }),
+      // No record set, so §13.2 step 3 has no slot to admit one into.
+      evaluatePairingAdmission: () => ({
+        kind: "refused" as const,
+        reason: "pending_cap_global" as const,
+        spentPairingWindow: undefined,
+      }),
+      commitPairingAdmission: async () => undefined,
     },
     ...overrides,
   };
