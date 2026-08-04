@@ -342,6 +342,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * The pin a native client that reaches an APPLICATION session holds.
+ *
+ * §13.1's release gate is part of the shape rather than a decoration: "A native
+ * client MUST NOT release application payload under the active-Hub guarantee
+ * until the pin is `verified` (§2.2). With an `unverified` pin the client is
+ * restricted to the pairing ceremony." An attempt with no pin therefore never
+ * locks `e2ee` at all, so every case that establishes a channel carries this,
+ * and the cases that assert the gate deliberately do not.
+ */
+const VERIFIED_PIN = {
+  identityFingerprint: NODE_IDENTITY_FINGERPRINT,
+  continuityId: CONTINUITY_ID,
+} as const;
+
 function attemptOf(overrides: Partial<RelayE2eeInitiatorAttempt> = {}): RelayE2eeInitiatorAttempt {
   return {
     hubOrigin: HUB_ORIGIN,
@@ -596,7 +611,9 @@ async function nodeEnvelope(
 
 /** Drive rows K1 and K5 to completion and hand back the node's session material. */
 async function establish(overrides: Partial<RelayE2eeInitiatorAttempt> = {}) {
-  const test = harness(overrides);
+  // The pin is part of establishing, not an option of it: §13.1's release gate
+  // refuses the `e2ee` lock to a native attempt that resolved to none.
+  const test = harness({ verifiedPin: VERIFIED_PIN, ...overrides });
   deliver(test.socket, CARRIER);
   await flush();
   const hello = outbound(test.socket).at(-1)!;
@@ -1038,7 +1055,7 @@ describe("§4.4 send buffering — no plaintext byte reaches the wire while nego
   });
 
   it("flushes as envelopes only after §8.8 step 6, in submission order", async () => {
-    const test = harness();
+    const test = harness({ verifiedPin: VERIFIED_PIN });
     test.engine.send(utf8('{"_tag":"Request","id":1}'));
     test.engine.send(LEGACY_PING);
     deliver(test.socket, CARRIER);
@@ -1071,7 +1088,7 @@ describe("§4.4 send buffering — no plaintext byte reaches the wire while nego
   });
 
   it("makes the buffered keepalive Ping the §8.9 implicit finish when nothing else is pending", async () => {
-    const test = harness();
+    const test = harness({ verifiedPin: VERIFIED_PIN });
     test.engine.send(LEGACY_PING);
     deliver(test.socket, CARRIER);
     await flush();
@@ -1209,7 +1226,7 @@ describe("§4.4 send buffering — no plaintext byte reaches the wire while nego
     // body as §11.4 `e2ee_message_too_large` and the flush has no caller to tell,
     // so a message admitted here would be dropped in silence on a channel the
     // application has just been told is open.
-    const test = harness();
+    const test = harness({ verifiedPin: VERIFIED_PIN });
     const overCeiling = e2eeChannelSizeBudget(RELAY_INITIAL_LIMITS).plaintextCeiling + 1;
     expect(() => test.engine.send(new Uint8Array(overCeiling))).toThrow(
       RELAY_MESSAGE_TOO_LARGE_MESSAGE,
@@ -1447,6 +1464,67 @@ describe("§4.4 no legacy after validated evidence", () => {
 
     expect(test.diagnostics).toEqual(["P21"]);
     expect(test.machine().mode()).toBe("closed");
+  });
+});
+
+// ─── §13.1's release gate ────────────────────────────────────────────────────
+
+describe("§13.1 release gate — a native channel with no verified pin never opens", () => {
+  /**
+   * The state this exists for is NOT the ceremony's own channel.
+   *
+   * The owner approved this device at the node CLI (§13.2 step 5's node half)
+   * and has not yet marked the pin `verified` here, or this device lost its
+   * durable trust document while the node kept the approval (§13.1.1 partial
+   * loss). The node then holds an approved record and answers a
+   * cryptographically sound `E2EEServerAccept` — which is exactly the input a
+   * `pairingOnly` flag keyed on a local pairing record does not see, because on
+   * this path no such record exists.
+   */
+  it("closes FATAL-PRE with P21 on a sound accept and releases nothing", async () => {
+    const test = harness({ selectionClass: "legacy-eligible" });
+    test.engine.send(utf8('{"_tag":"Request","id":1}'));
+    deliver(test.socket, CARRIER);
+    await flush();
+    const accept = respond(Uint8Array.from(outbound(test.socket).at(-1)!));
+
+    deliver(test.socket, accept.record, 1);
+    await flush();
+
+    // §13.1: "A native client MUST NOT release application payload under the
+    // active-Hub guarantee until the pin is `verified`." The hello is the only
+    // thing on the wire, the buffered application send was discarded unflushed,
+    // and no session was opened.
+    expect(test.machine().mode()).toBe("closed");
+    expect(outbound(test.socket)).toHaveLength(1);
+    expect(test.engine.bufferedAmount).toBe(0);
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+    expect(test.events.onData).not.toHaveBeenCalled();
+    expect(test.diagnostics).toEqual(["P21"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("leaves rows K9 and K13 alone — first contact may still fall back to legacy", async () => {
+    // The gate closes the E2EE valve ALONE. §12.1.1 branch (a) classifies
+    // genuine first contact legacy-eligible, and a node running no §4 channel is
+    // reached through exactly these two rows; folding the gate into
+    // `pairingOnly` would make both of them fatal.
+    const k13 = harness({ selectionClass: "legacy-eligible" });
+    k13.advance(T_ADV);
+    expect(k13.machine().mode()).toBe("legacy");
+
+    const k9 = harness({ selectionClass: "legacy-eligible" });
+    deliver(k9.socket, LEGACY_RPC);
+    await flush();
+    expect(k9.machine().mode()).toBe("legacy");
+  });
+
+  it("locks e2ee for the same channel once the selection resolves to a pin", async () => {
+    // The positive direction, so the gate cannot be satisfied by never
+    // establishing at all.
+    const { test } = await establish();
+    expect(test.machine().mode()).toBe("e2ee");
+    expect(test.diagnostics).toEqual([]);
   });
 });
 
@@ -1823,7 +1901,7 @@ describe("§4.5 — a channel with no positive plaintext ceiling never establish
     expect(e2eeChannelSizeBudget(limits).establishable).toBe(false);
 
     const received = vi.spyOn(E2eeClientHandshake.prototype, "receiveServerAccept");
-    const test = standalone({}, limits);
+    const test = standalone({ verifiedPin: VERIFIED_PIN }, limits);
     expect(await test.machine.intercept(CARRIER)).toEqual({ kind: "claimed" });
     const accept = respond(test.emitted.at(-1)!);
     expect(await test.machine.intercept(accept.record)).toEqual({ kind: "rejected" });
