@@ -11,6 +11,7 @@ import {
   E2EE_ERROR_CODE_PROTOCOL_VIOLATION,
   decodeE2eeCloseRecordBody,
   decodeE2eeErrorRecordBody,
+  encodeE2eeErrorRecordBody,
 } from "@ryco/shared/relayE2eeClose";
 import { E2eeClientHandshake } from "@ryco/shared/relayE2eeHandshake";
 import { deriveE2eeAgreementPublicKey } from "@ryco/shared/relayE2eeKeys";
@@ -352,6 +353,252 @@ describe("NodeE2eeChannelSession", () => {
     session.dispose();
   });
 
+  it("declares the pair the close record is actually protected at, under a same-turn send", async () => {
+    // §10.1 fields 0–1 MUST byte-equal the carrying envelope's header. `emit` and
+    // `beginClose` have independent drivers on the node — the RPC runtime's
+    // output fiber and the registry's channel teardown — and neither orders
+    // itself against the other, so a driver that read its next-send position
+    // outside the record session's own send serialization would build the close
+    // body against a pair the RPC record takes first, and would seal that
+    // nonconforming record onto the relay before `noteTransmitted` could object.
+    // The peer rejects such a close as §11.3 Q7 and records **Failed** against a
+    // CONFORMING endpoint.
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const sending = session.emit(utf8('{"_tag":"Pong"}'));
+    const closing = session.beginClose();
+    expect(await sending).toBe(true);
+    await settle();
+    node.flush();
+
+    const emitted = node.dataPayloads().slice(before);
+    expect(emitted).toHaveLength(2);
+    const rpc = clientReceive(client, emitted[0]!);
+    expect(rpc.innerType).toBe(E2EE_INNER_TYPE_RPC);
+    const close = clientReceive(client, emitted[1]!);
+    expect(close.innerType).toBe(E2EE_INNER_TYPE_CLOSE);
+    // The RPC record took the pair the close would otherwise have declared, so
+    // the close is carried one further on and MUST declare that one instead.
+    expect([rpc.counter, close.counter]).toEqual([0n, 1n]);
+
+    // THE PEER'S OWN §10.1 VALIDATION, not this side's bookkeeping: the record is
+    // conforming, rather than merely accepted here.
+    expect(
+      client.close.receive({
+        innerType: close.innerType,
+        body: close.body,
+        envelope: { epoch: close.epoch, counter: close.counter },
+        epochCompleted: close.epochCompleted,
+        currentNextSend: positionOf(client.record.sendState),
+        at: NOW,
+      }).kind,
+    ).toBe("close");
+
+    // And the exchange completes: §10.1.1's anchor is the advance of the pair the
+    // close was actually protected at, so the peer's ack validates under the
+    // strict rule and the verdict is **Clean** (§10.4).
+    await clientSendCloseRecord(
+      node,
+      client,
+      client.close.buildCloseAck({
+        sendPosition: positionOf(client.record.sendState),
+        expectedRecv: client.close.ackExpectedRecv ?? positionOf(client.record.receiveState),
+      }),
+    );
+    await closing;
+    expect(session.verdict()).toBe("clean");
+    session.dispose();
+  });
+
+  it("settles every §10 waiter when two drivers race for the close phase", async () => {
+    // §10 has no single driver on the node: `NodeE2eeRelayChannel.close` enters
+    // it on the registry's channel teardown and `emit` enters it on §9.6's
+    // `close_required`, and neither orders itself against the other. Both can
+    // pass the phase check before either has transmitted, and exactly one of them
+    // then puts the `E2EEClose` on the wire while the other re-plans inside the
+    // send section and builds nothing.
+    //
+    // BOTH ARE OWED AN ANSWER. The one that did not transmit is still
+    // `RelayRpcChannelSession.close`'s await, and a promise left pending there
+    // strands §10.4's channel-ended input, §9.5's erasure, and the RPC scope
+    // release behind them — and `closeAll` waits on all of it.
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const first = session.beginClose();
+    const second = session.beginClose();
+    await settle();
+    node.flush();
+
+    // §10.2 admits ONE `E2EEClose` from this endpoint however many callers asked
+    // for it, and the peer validates it as a conforming close.
+    const emitted = node.dataPayloads().slice(before);
+    expect(emitted).toHaveLength(1);
+    const close = clientReceive(client, emitted[0]!);
+    expect(close.innerType).toBe(E2EE_INNER_TYPE_CLOSE);
+    expect(
+      client.close.receive({
+        innerType: close.innerType,
+        body: close.body,
+        envelope: { epoch: close.epoch, counter: close.counter },
+        epochCompleted: close.epochCompleted,
+        currentNextSend: positionOf(client.record.sendState),
+        at: NOW,
+      }).kind,
+    ).toBe("close");
+
+    await clientSendCloseRecord(
+      node,
+      client,
+      client.close.buildCloseAck({
+        sendPosition: positionOf(client.record.sendState),
+        expectedRecv: client.close.ackExpectedRecv ?? positionOf(client.record.receiveState),
+      }),
+    );
+    // The assertion IS the await: a waiter another attempt displaced never
+    // settles, and this test times out rather than passing on a discarded
+    // promise.
+    await Promise.all([first, second]);
+    expect(session.verdict()).toBe("clean");
+    session.dispose();
+  });
+
+  it("owes the peer an ack when its close authenticates inside the send section", async () => {
+    // The §10.2 role is decided by what has been PROTECTED, and this endpoint's
+    // attempt learns that only inside the section: an `emit` ahead of it holds
+    // the section open, and the peer's own `E2EEClose` authenticates on the
+    // receive path while the attempt waits. The pre-section state check is stale
+    // by the time the record would be built, so the plan is re-run against the
+    // state the section actually hands it — a close built here is a record the
+    // machine has already left the state for, and building one throws out of
+    // `beginClose` into `NodeE2eeRelayChannel.close`, past §10.4's channel-ended
+    // input and the RPC scope release behind it.
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const sending = session.emit(utf8('{"_tag":"Pong"}'));
+    const closing = session.beginClose();
+    await clientSendCloseRecord(
+      node,
+      client,
+      client.close.buildClose({
+        sendPosition: positionOf(client.record.sendState),
+        expectedRecv: positionOf(client.record.receiveState),
+      }),
+    );
+    expect(await sending).toBe(true);
+    await settle();
+    node.flush();
+
+    // §10.2 step 2: this endpoint is the RESPONDER, so what follows the
+    // application record is an `E2EECloseAck` and never a second `E2EEClose`.
+    const emitted = node.dataPayloads().slice(before);
+    expect(emitted).toHaveLength(2);
+    expect(clientReceive(client, emitted[0]!).innerType).toBe(E2EE_INNER_TYPE_RPC);
+    const ack = clientReceive(client, emitted[1]!);
+    expect(ack.innerType).toBe(E2EE_INNER_TYPE_CLOSE_ACK);
+    expect(
+      client.close.receive({
+        innerType: ack.innerType,
+        body: ack.body,
+        envelope: { epoch: ack.epoch, counter: ack.counter },
+        epochCompleted: ack.epochCompleted,
+        currentNextSend: positionOf(client.record.sendState),
+        at: NOW,
+      }).kind,
+    ).toBe("close_ack");
+
+    // §10.2 step 3: the initiator's final confirmation completes the exchange,
+    // and the attempt that never transmitted resolves with it rather than
+    // rejecting out of it.
+    await clientSendCloseRecord(
+      node,
+      client,
+      client.close.buildCloseAck({
+        sendPosition: positionOf(client.record.sendState),
+        expectedRecv: client.close.ackExpectedRecv ?? positionOf(client.record.receiveState),
+      }),
+    );
+    await closing;
+    expect(session.verdict()).toBe("clean");
+    expect(node.rows()).toEqual([]);
+  });
+
+  it("refuses an application record whose §9.5 erasure ran while it held the section", async () => {
+    // The section a send waits for is exactly the window in which the channel can
+    // end: §9.5's erasure is synchronous on every terminal path, and the record
+    // session asserts on an erased session before its own funnel can answer. The
+    // send path answers it instead — `emit` is owed the `false` its contract
+    // promises, and the same section carries `beginClose`, where a throw would
+    // escape into `NodeE2eeRelayChannel.close`.
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const sending = session.emit(utf8('{"_tag":"Pong"}'));
+    session.dispose();
+    expect(await sending).toBe(false);
+    node.flush();
+    // §11.4: no pair was consumed and no wire record of any kind was produced.
+    expect(node.dataPayloads()).toHaveLength(before);
+  });
+
+  it("answers a peer close whose ack the channel's end overtook", async () => {
+    // The drain owes an `E2EECloseAck` and waits for the section to send it, and
+    // the channel ends in that window. §4.3 requires the inbound interceptor to
+    // reach a DECISION here: the obligation is re-read against the state the
+    // section hands back, so the ack is dropped rather than built onto an erased
+    // session, and the loop stops rather than re-reading an obligation nothing
+    // can now discharge.
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const sending = session.emit(utf8('{"_tag":"Pong"}'));
+    const delivering = clientSendCloseRecord(
+      node,
+      client,
+      client.close.buildClose({
+        sendPosition: positionOf(client.record.sendState),
+        expectedRecv: positionOf(client.record.receiveState),
+      }),
+    );
+    session.dispose();
+    // A drain that kept re-reading a standing obligation would spin as an
+    // unbounded microtask chain and never resolve this — starving every channel
+    // on the connection, not just this one.
+    await delivering;
+    expect(await sending).toBe(false);
+    node.flush();
+
+    // §9.6, §10.4: no wire record of any kind for the close, and the channel's
+    // end is what fixed the verdict.
+    expect(node.dataPayloads().slice(before)).toHaveLength(0);
+    expect(session.verdict()).toBe("unclean_abrupt");
+    // Nothing was armed on a released session: the §10.2 wait belongs to a phase
+    // that is over, and its timer would outlive the secrets it guards.
+    expect(await node.expireHandshakeDeadline()).toBe(false);
+  });
+
   it("gives every pre-key failure the same observable", async () => {
     const causes: readonly Uint8Array[] = [
       // §11.2 P5 (row N6): an envelope before establishment.
@@ -663,7 +910,12 @@ describe("NodeE2eeChannelSession", () => {
     await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
     expect(node.deliveredToParser).toHaveLength(1);
 
-    void node.session().beginClose();
+    // HELD, not discarded. §10.2 arms this endpoint's own `T_CLOSE` wait on the
+    // transmitted close, so the promise is still pending here and the channel's
+    // end below is what settles it — awaited at the end of this test, because a
+    // `beginClose` nothing can ever release is a stalled channel teardown and
+    // has to fail rather than go unobserved.
+    const closing = node.session().beginClose();
     await settle();
     node.flush();
     // §9.6, §10.4: the close spent the direction's last position, so no anchor
@@ -680,6 +932,97 @@ describe("NodeE2eeChannelSession", () => {
     expect(node.deliveredToParser).toHaveLength(1);
     expect(node.session().mode()).toBe("closed");
     expect(node.session().verdict()).toBe("unclean_abrupt");
+    await closing;
+  });
+
+  it("takes §9.6's degenerate outcome when no expected-next is left to declare", async () => {
+    // The other half of §9.6, reached at PLAN time rather than after the record:
+    // the peer's `E2EECloseAck` was carried at the last position ITS direction
+    // had, so this endpoint's §9.2 expected-next is gone and §10.1 field 3 of the
+    // final confirmation has no value to declare. §9.6 gives that state an
+    // outcome — **Unclean — abrupt**, no wire record — and a driver that merely
+    // declined to build would leave the record owed and the phase standing open.
+    //
+    // §16.3 F9's synthetic state goes on BOTH sides of the same direction: §9.2
+    // advances the receiver's expectation by exactly the sender's §9.4 rule. And
+    // it is the CLIENT's send direction that is spent, never the node's — §9.6's
+    // reserve is what keeps this endpoint able to protect the close at all.
+    const spent = { epoch: E2EE_EPOCH_MAX, epochRecords: E2EE_REKEY_MAX_RECORDS - 1 };
+    const node = await harness({ syntheticReceiveState: spent });
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement, undefined, spent);
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const closing = session.beginClose();
+    await settle();
+    node.flush();
+    const emitted = node.dataPayloads().slice(before);
+    expect(emitted).toHaveLength(1);
+    const close = clientReceive(client, emitted[0]!);
+    expect(close.innerType).toBe(E2EE_INNER_TYPE_CLOSE);
+    expect(
+      client.close.receive({
+        innerType: close.innerType,
+        body: close.body,
+        envelope: { epoch: close.epoch, counter: close.counter },
+        epochCompleted: close.epochCompleted,
+        currentNextSend: positionOf(client.record.sendState),
+        at: NOW,
+      }).kind,
+    ).toBe("close");
+
+    // The ack completes epoch `E2EE_EPOCH_MAX` on the client-to-node direction
+    // and exhausts it (§9.6), so the node's expected-next is gone with it.
+    await clientSendCloseRecord(
+      node,
+      client,
+      client.close.buildCloseAck({
+        sendPosition: positionOf(client.record.sendState),
+        expectedRecv: client.close.ackExpectedRecv ?? positionOf(client.record.receiveState),
+      }),
+    );
+    await closing;
+    node.flush();
+    // §9.6, §10.4: the final confirmation §10.2 step 3 would owe is never built
+    // and no wire record is emitted for it, and the verdict is fixed without one.
+    expect(node.dataPayloads().slice(before)).toHaveLength(1);
+    expect(session.verdict()).toBe("unclean_abrupt");
+  });
+
+  it("initiates §10's close when an application record would spend the §9.6 reserve", async () => {
+    // §9.6: an endpoint MUST initiate the close no later than the point at which
+    // exactly the post-application reserve remains. `emit` is where the node
+    // learns it — the record session refuses the RPC rather than protecting it —
+    // and the obligation is to CLOSE, not merely to refuse.
+    const node = await harness({
+      // Three records short of the end: the RPC plus the reserve no longer fit,
+      // while the close-machine records protected out of that reserve still do.
+      syntheticSendState: { epoch: E2EE_EPOCH_MAX, epochRecords: E2EE_REKEY_MAX_RECORDS - 3 },
+    });
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    // §11.4: a sender-local refusal, and never a channel-fatal one.
+    expect(await session.emit(utf8('{"_tag":"Pong"}'))).toBe(false);
+    await settle();
+    node.flush();
+
+    // §10.2 step 1 reached the wire, out of the reserve §9.6 kept for it.
+    expect(node.dataPayloads().slice(before)).toHaveLength(1);
+    expect(session.mode()).toBe("e2ee");
+    // Not a §11 condition: no diagnostic row, no verdict yet, no close reason.
+    expect(node.rows()).toEqual([]);
+    expect(session.verdict()).toBeUndefined();
+    expect(node.closeReasons()).toEqual([]);
+    // §10.2: the application phase is over from this endpoint's first
+    // close-machine record, so a further `emit` protects nothing at all.
+    expect(await session.emit(utf8('{"_tag":"Pong"}'))).toBe(false);
+    node.flush();
+    expect(node.dataPayloads().slice(before)).toHaveLength(1);
   });
 
   it("runs §10's close when the channel session itself is closed", async () => {
@@ -806,6 +1149,68 @@ describe("NodeE2eeChannelSession", () => {
     expect(node.releases()).toBe(1);
     // The peer is gone, so §10's exchange put nothing further on the wire.
     expect(node.dataPayloads().slice(before)).toHaveLength(0);
+  });
+
+  it("names no §11.3 row for the peer's terminal E2EEError, which §10.2 excludes", async () => {
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const before = node.dataPayloads().length;
+    await clientSend(
+      node,
+      client,
+      E2EE_INNER_TYPE_ERROR,
+      encodeE2eeErrorRecordBody(E2EE_ERROR_CODE_PROTOCOL_VIOLATION),
+    );
+    // §11.3: this endpoint erases, closes, and MUST NOT reply — the wire surface
+    // of a peer-terminated channel is no record of any kind.
+    expect(node.dataPayloads().slice(before)).toHaveLength(0);
+    expect(node.deliveredToParser).toHaveLength(1);
+    expect(node.session().mode()).toBe("closed");
+    expect(node.session().verdict()).toBe("failed");
+    expect(node.closeReasons()).toEqual(["channel_rejected"]);
+    // AND THE OPERATOR RECORD AGREES WITH THAT WIRE SURFACE. §10.2 and §11.3's
+    // Q7 row both carve this event out of Q7 in the same words, and Q7's
+    // obligation is one `E2EEError` with code `protocol_violation` — which this
+    // path did not and may not send. A Q7 here would report a close-machine
+    // violation the node never detected and would be indistinguishable from a
+    // commitment mismatch it did.
+    expect(node.rows()).toEqual(["local"]);
+    expect(node.rows()).not.toContain("Q7");
+  });
+
+  it("protects nothing after §11.3's terminal record, under a same-turn send", async () => {
+    // §10.2 permits exactly one terminal `E2EEError` and nothing after it, and
+    // §11.5 decides whether one is emitted at all from the send path's state.
+    // Both are properties of the moment the record would be protected: an
+    // application record already admitted ahead of the error moves the peer's
+    // expected-receive, and the error MUST land behind it rather than beside it.
+    const node = await harness();
+    const advertisement = await node.open();
+    const client = await establish(node, "native", advertisement);
+    await clientSend(node, client, E2EE_INNER_TYPE_RPC, utf8('{"_tag":"Ping"}'));
+
+    const session = node.session();
+    const before = node.dataPayloads().length;
+    const sending = session.emit(utf8('{"_tag":"Pong"}'));
+    // Row N11 / §11.3 Q6, raised while the application record is still in flight.
+    await node.deliver(utf8('{"_tag":"Ping"}'));
+    expect(await sending).toBe(true);
+    node.flush();
+
+    const emitted = node.dataPayloads().slice(before);
+    expect(emitted).toHaveLength(2);
+    const rpc = clientReceive(client, emitted[0]!);
+    expect(rpc.innerType).toBe(E2EE_INNER_TYPE_RPC);
+    const error = clientReceive(client, emitted[1]!);
+    expect(error.innerType).toBe(E2EE_INNER_TYPE_ERROR);
+    // The peer's §9.2 expectation is the assertion: the error is the record
+    // AFTER the application one, at the pair that follows it and no other.
+    expect([rpc.counter, error.counter]).toEqual([0n, 1n]);
+    expect(node.rows()).toEqual(["Q6"]);
+    expect(node.closeReasons()).toEqual(["channel_rejected"]);
   });
 
   it("maps every receive-fatal condition to the §11.3 row that defines it", () => {

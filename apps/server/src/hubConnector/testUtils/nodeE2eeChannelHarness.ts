@@ -370,6 +370,15 @@ export async function harness(
     readonly afterPrekeyBorrow?: () => Promise<void>;
     /** §16.3 F9: place the node's send direction at §9.6's exhaustion boundary. */
     readonly syntheticSendState?: E2eeSyntheticDirectionState;
+    /**
+     * §16.3 F9, for the node's RECEIVE direction.
+     *
+     * The client's own send state MUST be given the same value — `establish`'s
+     * last argument — because §9.2 advances the receiver's expectation by exactly
+     * the sender's §9.4 rule: a synthetic state on one side only is a sequence
+     * mismatch and tests row Q2 rather than §9.6's exhaustion.
+     */
+    readonly syntheticReceiveState?: E2eeSyntheticDirectionState;
     /** §13.5: the operator directory this channel publishes itself to. */
     readonly registerSession?: NodeE2eeChannelSessionSources["registerSession"];
   } = {},
@@ -469,6 +478,9 @@ export async function harness(
           ...(options.syntheticSendState === undefined
             ? {}
             : { testOnlySyntheticSendState: options.syntheticSendState }),
+          ...(options.syntheticReceiveState === undefined
+            ? {}
+            : { testOnlySyntheticReceiveState: options.syntheticReceiveState }),
         });
         channelSession = e2ee;
         // The binding `HubConnectorLive` uses, over the same pipeline
@@ -646,6 +658,11 @@ export async function establish(
    * `WebSAS` the node should have derived, rather than only checking its shape.
    */
   clientEphemeralSecretKey?: Uint8Array,
+  /**
+   * §16.3 F9: the client's send direction, which the node's `syntheticReceiveState`
+   * must mirror exactly. See that option for why one side alone is not enough.
+   */
+  clientSyntheticSendState?: E2eeSyntheticDirectionState,
 ): Promise<EstablishedClient> {
   const client = new E2eeClientHandshake({
     channel: clientChannel,
@@ -679,6 +696,9 @@ export async function establish(
       sessionBindingHash: established.sessionBindingHash,
       sendDirection: "c2n",
       plaintextCeiling: 512 * 1_024,
+      ...(clientSyntheticSendState === undefined
+        ? {}
+        : { testOnlySyntheticSendState: clientSyntheticSendState }),
     }),
     close: new E2eeCloseMachine({
       sessionBindingHash: established.sessionBindingHash,
