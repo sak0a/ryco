@@ -111,6 +111,19 @@ let randomnessUsable = detectWebE2eeRandomness();
 let lastAttempt: RelayE2eeInitiatorAttempt | null = null;
 
 /**
+ * The channel whose §13 projection is currently published, as an identity.
+ *
+ * A stale channel's teardown MUST NOT clear a live channel's projection. The
+ * engine ends a channel from `#finish`, and nothing orders that against the
+ * successor socket's `channel.accept`: a reconnect can build the next machine —
+ * which publishes `negotiating` — before the previous engine finishes tearing
+ * down, and an unconditional reset in the loser's `dispose` would then erase the
+ * winner's state. Comparing identities makes the clear apply to the channel that
+ * earned the state and to no other.
+ */
+let publishedChannel: object | null = null;
+
+/**
  * The hosted selection this channel is opened against, or `null`.
  *
  * `hubOrigin` is read from the document's own origin rather than from anything
@@ -205,7 +218,16 @@ function unresolvedAttemptChannel(host: RelayE2eeHost): RelayE2eeChannel {
  * legacy channel. Every other unresolved state closes.
  */
 export function resolveWebRelayE2eeProvider(): RelayE2eeProvider | undefined {
-  if (!randomnessUsable) return undefined;
+  if (!randomnessUsable) {
+    // §14.5 refused E2EE, so the engine locks `legacy` at `channel.accept` with
+    // no machine in between — and §12.2 labels that channel like any other
+    // fallback. It is published HERE because there is no §4.4 machine to publish
+    // it from: a projection left at `unavailable` would render this channel
+    // `Online` with no claim either way, which is the state that has no channel
+    // rather than the one that locked plaintext.
+    lockWebE2eeChannelMode("legacy");
+    return undefined;
+  }
   const selection = currentSelection();
   if (selection === null) return unresolvedAttemptChannel;
   const attempt = webRelayE2eeAttempt(selection);
@@ -216,6 +238,8 @@ export function resolveWebRelayE2eeProvider(): RelayE2eeProvider | undefined {
     // single session by construction. Publishing `negotiating` here — which
     // claims nothing — is what keeps either from surviving the socket that
     // produced it.
+    const channelIdentity = {};
+    publishedChannel = channelIdentity;
     beginWebE2eeChannelAttempt();
     // THE LOCK IS OBSERVED AT `host.lockMode` AND NOT AFTER AN OPERATION, and
     // the difference is row K13. §4.4's mode lock is a state the machine holds
@@ -226,7 +250,7 @@ export function resolveWebRelayE2eeProvider(): RelayE2eeProvider | undefined {
     // exactly the honest-labeling duty of §12.2 going unmet. `lockMode` is the
     // release valve itself, so wrapping it catches every lock — K1/K5, K9 and
     // K13 alike — at the instant it happens.
-    return makeRelayE2eeInitiator({
+    const channel = makeRelayE2eeInitiator({
       host: {
         ...host,
         lockMode: (mode) => {
@@ -236,6 +260,25 @@ export function resolveWebRelayE2eeProvider(): RelayE2eeProvider | undefined {
       },
       attempt,
     });
+    // …AND THE END OF THE CHANNEL IS OBSERVED THE SAME WAY. §4.4's machine is
+    // "created when the channel is accepted and destroyed when it closes", and
+    // `dispose` is the destruction. Relying on the SUCCESSOR channel's
+    // `beginWebE2eeChannelAttempt` instead left `web-unsigned` and §13.5's code
+    // standing for the whole of a reconnect backoff — seconds to minutes in
+    // which the projection reports a live encrypted session, and a `WebSAS` for
+    // a session that no longer exists. §13.5's entire security property is that
+    // the string is session-bound, so an owner comparing a dead channel's value
+    // against the node CLI's live one is comparing the one thing it may not be
+    // compared against.
+    return {
+      ...channel,
+      dispose: (options) => {
+        channel.dispose(options);
+        if (publishedChannel !== channelIdentity) return;
+        publishedChannel = null;
+        resetWebE2eeSession();
+      },
+    };
   };
 }
 
@@ -280,5 +323,6 @@ export function watchWebHostedSessionForE2ee(): () => void {
 export function resetWebRelayE2eeForTests(): void {
   randomnessUsable = detectWebE2eeRandomness();
   lastAttempt = null;
+  publishedChannel = null;
   sessionWatch?.();
 }

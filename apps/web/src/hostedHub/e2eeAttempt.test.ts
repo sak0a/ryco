@@ -210,6 +210,7 @@ describe("§14.5 the startup randomness check gates the provider, not a handshak
   it("falls back to a provider-less engine that runs the unchanged legacy channel", async () => {
     defineGlobal("isSecureContext", false);
     resetWebRelayE2eeForTests();
+    resetWebE2eeSession();
     const harness = createRelayHarness({ e2ee: resolveWebRelayE2eeProvider() });
     authenticateRelay(harness.socket);
     harness.facade.send(new TextEncoder().encode('{"first":1}'));
@@ -223,6 +224,13 @@ describe("§14.5 the startup randomness check gates the provider, not a handshak
     expect(payloads).toHaveLength(1);
     expect(new TextDecoder().decode(payloads[0]!)).toBe('{"first":1}');
     expect(relayCloseReasons(harness.socket)).toEqual([]);
+
+    // …and the projection SAYS legacy, because §12.2 applies to this channel as
+    // much as to row K13's. There is no §4.4 machine here to publish it, so a
+    // projection left at `unavailable` would render it `Online` with no claim —
+    // the state that has no channel, not the one that locked plaintext.
+    expect(webE2eeSessionState()).toEqual({ status: "legacy", verificationCode: null });
+    resetWebE2eeSession();
   });
 });
 
@@ -290,6 +298,16 @@ describe("§4 the production wiring establishes an NX session end to end", () =>
     for (const payload of outboundRelayPayloads(harness.socket).slice(1)) {
       expect(classifyPostStripPayload(payload).kind).toBe("envelope");
     }
+
+    // …AND IT ENDS WITH THE CHANNEL. §13.5's string is session-bound — "it
+    // changes on every channel" — so a socket drop that left it standing would
+    // give the owner a dead session's value to compare against the node CLI's
+    // live one, for the whole of a reconnect backoff. Nothing else observes the
+    // close: relying on the SUCCESSOR channel's `beginWebE2eeChannelAttempt` is
+    // what left `web-unsigned` and the code standing until one arrived.
+    harness.socket.drop();
+    await settleRelay();
+    expect(webE2eeSessionState()).toEqual({ status: "unavailable", verificationCode: null });
     resetWebE2eeSession();
   });
 

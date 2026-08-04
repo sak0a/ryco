@@ -67,6 +67,16 @@ export class MockWebSocket extends EventTarget {
     this.closeCalls += 1;
     this.readyState = MockWebSocket.CLOSED;
   }
+  /**
+   * The transport vanishing underneath a live channel — a network blip, a relay
+   * drain, a ticket expiry. The engine reads it as a `network` failure and tears
+   * the §4.4 machine down, which is a different path from `facade.close()`: that
+   * one asks an `e2ee` channel for §10's authenticated close first.
+   */
+  drop(): void {
+    this.readyState = MockWebSocket.CLOSED;
+    this.dispatchEvent(new Event("close"));
+  }
   open(): void {
     this.readyState = MockWebSocket.OPEN;
     this.dispatchEvent(new Event("open"));
