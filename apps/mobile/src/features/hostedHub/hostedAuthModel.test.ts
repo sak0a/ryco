@@ -491,13 +491,26 @@ describe("hosted status tone", () => {
   });
 
   it("uses only design tokens — no hardcoded colours and no `dark:` prefixes", () => {
-    for (const label of HOSTED_CONNECTION_STATUS_TEXTS) {
-      const tone = hostedStatusTone({ shortLabel: label, connected: false, guarantee: "none" });
+    // The REAL indicators as well as the synthetic disconnected ones: keyed on
+    // `guarantee: "none"` alone this walked two of the mapper's branches and
+    // never saw the tokens a claim chooses.
+    const tones = [
+      ...HOSTED_CONNECTION_STATUS_TEXTS.map((label) =>
+        hostedStatusTone({ shortLabel: label, connected: false, guarantee: "none" }),
+      ),
+      ...HOSTED_CONNECTION_STATUS_TEXTS.map((text) =>
+        hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS[text]),
+      ),
+    ];
+    for (const tone of tones) {
       const classNames = `${tone.pillClassName} ${tone.textClassName}`;
       expect(classNames).not.toMatch(/#[0-9a-f]{3,8}\b/i);
       expect(classNames).not.toMatch(/\bdark:/);
       expect(classNames).not.toMatch(/\brgba?\(/);
     }
+    // Every branch of the mapper is actually exercised above, so the scan cannot
+    // pass by visiting one of them.
+    expect(new Set(tones.map((tone) => tone.pillClassName)).size).toBe(5);
   });
 });
 
