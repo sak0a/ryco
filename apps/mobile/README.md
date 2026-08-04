@@ -344,9 +344,14 @@ Four properties are structural rather than documented:
   `verified`, and `unverified` — asserted in `e2eeSession.test.ts` across every
   exported publisher, so no path through this store reaches the member. Two
   native edits the member forced: an arm in `e2eeTrustUiModel`'s `claimFor`,
-  which the exhaustive switch would not compile without and which answers `none`
-  — the claim that asserts nothing, because a state this tier does not have has
-  no honest label — and a `web` arm in `hostedStatusTone`. The tone mapper is
+  which the exhaustive switch would not compile without and which answers
+  `none` — **not** a neutral value: `none` renders "No connection", "There is no
+  node connection to describe yet.", and a closed padlock, so it asserts
+  disconnection. It is chosen because an unreachable row has no owner-visible
+  rendering and understating connectedness is the safe direction for whatever
+  inherits it; a tier that ever gains a real web channel here gets its own
+  `E2eeChannelClaim` member the way `legacy-no-custody` did — and a `web` arm in
+  `hostedStatusTone`. The tone mapper is
   the one that matters: it is the repository's ONLY reader of `guarantee`, and
   an `if (guarantee === "legacy")` chain silently absorbed the new member into
   the connected branch and handed §2.2's web row the verified session's success

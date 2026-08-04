@@ -712,17 +712,35 @@ function claimFor(session: MobileE2eeSessionState): E2eeChannelClaim {
       // §2.2's web NX row, which THIS app cannot occupy: §8.1's role/tier matrix
       // gives the native client a static agreement key and the IK pattern, and
       // `lockMobileE2eeChannelMode` emits only `legacy`, `verified`, and
-      // `unverified`. The arm exists because the shared union is exhaustive —
-      // the point of adding the member there was to make "what does this tier
-      // call the web row?" a compile error rather than a silent fall-through —
-      // and it answers with the claim that carries no E2EE and no active-Hub
-      // assertion, which is the only honest answer for a state this tier does
-      // not have.
+      // `unverified` — asserted across every publisher in `e2eeSession.test.ts`.
+      // The arm exists because the shared union is exhaustive: the point of
+      // adding the member there was to make "what does this tier call the web
+      // row?" a compile error rather than a silent fall-through.
+      //
+      // `none` IS NOT A NEUTRAL VALUE AND IS NOT PICKED AS ONE. It renders
+      // `CHANNEL_LABELS.none` — "No connection" — with
+      // `CHANNEL_MESSAGES.none`'s "There is no node connection to describe yet."
+      // and `CLAIM_SYMBOLS.none`'s closed padlock, so it asserts DISCONNECTION,
+      // which a live web NX channel is not. That is exactly why the shared
+      // vocabulary refused to fold the web row into `unverified`
+      // (`connectionStatus.ts`: it "reports the session unusable, which would be
+      // a lie about connectedness"), and the two modules would answer the same
+      // row inconsistently if this app could ever reach it.
+      //
+      // It is correct here for one reason and one only: an unreachable row has
+      // no owner-visible rendering, so the choice is about what a FUTURE caller
+      // inherits. Given that, "no connection" is the safe direction — it claims
+      // nothing about confidentiality and understates connectedness — while
+      // `verified` or a new claim of its own would be a native-strength word
+      // sitting in the native app for §2.2's weakest row. A tier that ever gains
+      // a real web channel here gets its own `E2eeChannelClaim` member, the way
+      // `legacy-no-custody` did, and does not silently adopt this one.
       //
       // ITS OWN RETURN, NOT A FALL-THROUGH INTO THE ONE BELOW. Sharing a body
       // left the answer to this row unstated: a case inserted between the two
       // would have silently changed what the web row claims, and the value was
-      // pinned by nothing. `e2eeTrustUiModel.test.ts` now asserts it directly.
+      // pinned by nothing. `e2eeTrustUiModel.test.ts` now asserts the claim AND
+      // the three strings it renders.
       return "none";
     case "negotiating":
     case "unavailable":
