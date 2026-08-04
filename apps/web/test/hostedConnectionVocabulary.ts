@@ -4,8 +4,8 @@ import {
   HOSTED_RELAY_TRANSPORT_STATUSES,
   HOSTED_RYCO_SESSION_STATUSES,
   HOSTED_SELECTION_STATUSES,
-  type HostedConnectionStatusInput,
   type HostedConnectionStatusText,
+  type WebHostedConnectionStatusInput,
 } from "../src/hostedHub/connectionStatus";
 
 /**
@@ -20,16 +20,20 @@ import {
  * yet, so `deriveHostedConnectionStatusText` takes its documented `unavailable`
  * default and the five statuses that input alone can reach — `Encrypted`,
  * `Browser encrypted`, `Legacy`, `Not verified`, and `Securing` — are outside
- * this sweep rather than skipped by it. `packages/client-runtime`'s copy of
- * these helpers walks all five and is the authority for those rows; this file
- * gains the dimension in the same change that gives the web app an
- * `e2eeStatus` to report, and not before, because a browser suite that rendered
- * a status the shipped app cannot produce would be asserting nothing.
+ * this sweep rather than skipped by it. These helpers feed BROWSER suites, and
+ * a browser suite that rendered a status the shipped app cannot produce would
+ * be asserting nothing; they gain the dimension in the same change that gives
+ * the web app an `e2eeStatus` to report.
+ *
+ * That deferral is not the fence, and it was never load-bearing. The fence is
+ * `src/hostedHub/connectionStatus.ts`, which narrows the dimension to the states
+ * this tier can be in, and `src/hostedHub/connectionStatus.test.ts`, which sweeps
+ * all five of them purely and asserts the native rows stay unreachable from here.
  */
 
 /** Every combination of the four bounded inputs. Pure — nothing is rendered. */
-export function everyHostedConnectionStatusInput(): ReadonlyArray<HostedConnectionStatusInput> {
-  const combinations: HostedConnectionStatusInput[] = [];
+export function everyHostedConnectionStatusInput(): ReadonlyArray<WebHostedConnectionStatusInput> {
+  const combinations: WebHostedConnectionStatusInput[] = [];
   for (const browserStatus of HOSTED_BROWSER_STATUSES) {
     for (const sessionStatus of HOSTED_RYCO_SESSION_STATUSES) {
       for (const selectionStatus of HOSTED_SELECTION_STATUSES) {
@@ -58,9 +62,9 @@ export function everyHostedConnectionStatusInput(): ReadonlyArray<HostedConnecti
  */
 export function hostedConnectionStatusRepresentatives(): ReadonlyMap<
   HostedConnectionStatusText,
-  HostedConnectionStatusInput
+  WebHostedConnectionStatusInput
 > {
-  const representatives = new Map<HostedConnectionStatusText, HostedConnectionStatusInput>();
+  const representatives = new Map<HostedConnectionStatusText, WebHostedConnectionStatusInput>();
   for (const input of everyHostedConnectionStatusInput()) {
     const text = deriveHostedConnectionStatusText(input);
     const held = representatives.get(text);
@@ -78,7 +82,9 @@ export function hostedConnectionStatusRepresentatives(): ReadonlyMap<
  * second opinion the indicator's glyph is checked against, and it is what
  * fails when the glyph is chosen from `transportStatus` alone.
  */
-export function hostedConnectionConnectedByGateOrder(value: HostedConnectionStatusInput): boolean {
+export function hostedConnectionConnectedByGateOrder(
+  value: WebHostedConnectionStatusInput,
+): boolean {
   if (value.browserStatus !== "current") return false;
   if (value.sessionStatus === "delivery-unknown") return false;
   if (value.selectionStatus === "authorization-removed") return false;
