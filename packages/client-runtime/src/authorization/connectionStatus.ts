@@ -327,10 +327,15 @@ export const HOSTED_CONNECTION_STATUS_INDICATORS = {
   // by `HostedE2eeChannelStatus.verified`.
   Encrypted: { shortLabel: "Encrypted", connected: true, guarantee: "e2ee" },
   // §2.2's web NX row: a usable session, encrypted against a passive Hub while
-  // the served code is honest, and NOT the row above. The collapsed label is the
-  // qualifier alone rather than a prefix of `Encrypted` — a chip is read at a
-  // glance and `Encrypted…` at a glance is the native claim.
-  "Browser encrypted": { shortLabel: "Browser", connected: true, guarantee: "web" },
+  // the served code is honest, and NOT the row above. The collapsed label is
+  // neither a prefix of `Encrypted` — a chip is read at a glance, and
+  // `Encrypted…` at a glance is the native claim — nor the tier noun the full
+  // text leads with. `Browser` was both the leading token this map exists to
+  // abolish and, on a chip, a neutral word in the same register as `Online` and
+  // `Opening`: it names a client type, not a protection level, and this is the
+  // one row whose message IS its caveat. `Unsigned web` carries §2.2's own
+  // qualifier for the row, which is the part the owner has to read.
+  "Browser encrypted": { shortLabel: "Unsigned web", connected: true, guarantee: "web" },
   // §12.2: a channel that fell back is labeled legacy in EVERY user-facing
   // surface. It is a usable connection and says so; it makes no E2EE claim.
   Legacy: { shortLabel: "Legacy", connected: true, guarantee: "legacy" },

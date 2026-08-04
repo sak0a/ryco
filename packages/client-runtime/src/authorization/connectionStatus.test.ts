@@ -152,11 +152,16 @@ describe("the collapsed connection indicator", () => {
     expect(HOSTED_CONNECTION_STATUS_INDICATORS["terminal failure"].shortLabel).toBe("Failed");
     expect(HOSTED_CONNECTION_STATUS_INDICATORS.online.shortLabel).toBe("Not ready");
 
-    // …and none of them may regress to that mechanism.
+    // …and none of them may regress to that mechanism. `Browser encrypted` is
+    // here for the same reason and not as a fourth example: §2.2's web row is
+    // the one row whose message is its caveat, and its leading token is the
+    // tier noun — a chip reading `Browser` sits in the same neutral register as
+    // `Online` and names a client type rather than a protection level.
     for (const text of [
       "Authorization removed",
       "Delivery unknown",
       "terminal failure",
+      "Browser encrypted",
     ] satisfies ReadonlyArray<HostedConnectionStatusText>) {
       expect(
         HOSTED_CONNECTION_STATUS_INDICATORS[text].shortLabel,
@@ -317,9 +322,13 @@ describe("the web NX row (§2.2, §2.3, §13.1)", () => {
       deriveHostedConnectionStatusText({ ...webReady, e2eeStatus: "unverified" }),
     );
     // The COLLAPSED label is what a chip shows, and it is where a glance-level
-    // confusion would live: it must not be `Encrypted`, nor a prefix of it.
+    // confusion would live: it must not be `Encrypted`, nor a prefix of it, and
+    // it must not be the neutral tier noun either — at collapsed size that word
+    // is the whole security signal, so on the one row that requires a caveat it
+    // has to carry one.
     const { shortLabel } = HOSTED_CONNECTION_STATUS_INDICATORS["Browser encrypted"];
-    expect(shortLabel).toBe("Browser");
+    expect(shortLabel).toBe("Unsigned web");
+    expect(shortLabel).not.toBe("Browser encrypted".split(" ")[0]);
     expect(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted.shortLabel.startsWith(shortLabel)).toBe(
       false,
     );
