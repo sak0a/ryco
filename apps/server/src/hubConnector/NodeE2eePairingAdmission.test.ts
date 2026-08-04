@@ -161,11 +161,31 @@ async function pairingNode(
 }
 
 type CommitBehavior = "real" | "throws" | "hangs";
+/**
+ * §13.2 step 3's IN-MEMORY half, made to fail.
+ *
+ * `evaluatePairingAdmission` can genuinely throw — `requireKey`,
+ * `canonicalizeE2eeHubOrigin`, and `assertE2eeAccountId` all raise
+ * `client_authorization_invalid`, and the §13.4 derivation beside it raises on
+ * key material of unexpected length — so the containment around it is a real
+ * path and not a defensive gesture.
+ */
+type EvaluateBehavior = "real" | "throws";
 
 interface RelaySurface {
   readonly authorization: NodeE2eeChannelAuthorization;
   /** Let the deferred commit run, and wait for the durable write it starts. */
   readonly settled: () => Promise<void>;
+  /**
+   * What was ALREADY on the socket at the instant each commit was invoked.
+   *
+   * The point of the whole deferral: `orderedSession` below can only observe the
+   * order of statements inside `runHandshake`, because binding `send` and
+   * `close` directly strips the relay registry's own close deferral. This reads
+   * the frames the real `RelayChannelRegistry` has flushed, so "after the reject
+   * and the close" is asserted of the WIRE.
+   */
+  readonly commitWire: () => readonly string[];
 }
 
 /**
@@ -178,20 +198,37 @@ interface RelaySurface {
 function relaySurface(
   client: NodeClientAuthorizationClient,
   log: string[],
-  commit: CommitBehavior = "real",
+  behavior: {
+    readonly commit?: CommitBehavior;
+    readonly evaluate?: EvaluateBehavior;
+    /** The channel this surface serves, once the harness has built it. */
+    readonly channel?: () => Harness | undefined;
+  } = {},
 ): RelaySurface {
+  const commit = behavior.commit ?? "real";
   const started: Promise<unknown>[] = [];
+  const commitWire: string[] = [];
   return {
     authorization: {
       lookupClientAuthorization: (key) => client.lookupClientAuthorization(key),
       reReadAuthorization: (key) => client.reReadAuthorization(key),
       registerInFlightHandshake: (input) => client.registerInFlightHandshake(input),
       evaluatePairingAdmission: (input) => {
+        if (behavior.evaluate === "throws") {
+          log.push("evaluate:throw");
+          throw new Error("evaluate refused");
+        }
         const decision = client.evaluatePairingAdmission(input);
         log.push(`evaluate:${decision.kind}`);
         return decision;
       },
       commitPairingAdmission: (admission) => {
+        const channel = behavior.channel?.();
+        if (channel !== undefined) {
+          commitWire.push(
+            `payloads=${channel.dataPayloads().length},closes=${channel.closeReasons().length}`,
+          );
+        }
         log.push("commit");
         if (commit === "throws") throw new Error("commit refused");
         if (commit === "hangs") return new Promise<void>(() => undefined);
@@ -205,6 +242,7 @@ function relaySurface(
       await Promise.allSettled(started);
       await settle();
     },
+    commitWire: () => commitWire,
   };
 }
 
@@ -263,6 +301,8 @@ interface PairingRun {
   readonly advertisement: NodeE2eeAdvertisement;
   readonly log: readonly string[];
   readonly wire: Wire;
+  /** See `RelaySurface.commitWire`: the socket as the commit found it. */
+  readonly commitWire: readonly string[];
 }
 
 /** Open a window or not, saturate the partition or not, then pair exactly once. */
@@ -270,16 +310,43 @@ async function runPairing(input: {
   readonly seed?: Partial<NodeClientAuthorizationRecordFile>;
   readonly openWindow?: boolean;
   readonly commit?: CommitBehavior;
+  /**
+   * A local failure raised inside the prekey borrow, AFTER §8.6 step 6 has taken
+   * the §13.2 step 3 decision: key custody refusing, an encoder failing, the
+   * §4.5 ceiling. §11.2's table names no row for it and the wire is the same
+   * generic reject.
+   */
+  readonly failLocally?: boolean;
 }): Promise<PairingRun> {
   const node = await pairingNode(input.seed ?? {});
   if (input.openWindow === true) await node.client.openPairingWindow(CLIENT_FINGERPRINT);
   const log: string[] = [];
-  const surface = relaySurface(node.client, log, input.commit ?? "real");
-  const channel = await harness({ authorization: surface.authorization });
+  let channel: Harness | undefined;
+  const surface = relaySurface(node.client, log, {
+    ...(input.commit === undefined ? {} : { commit: input.commit }),
+    channel: () => channel,
+  });
+  channel = await harness({
+    authorization: surface.authorization,
+    ...(input.failLocally === true
+      ? {
+          afterPrekeyBorrow: async () => {
+            throw new Error("key custody refused the borrow");
+          },
+        }
+      : {}),
+  });
   const advertisement = await channel.open();
   await channel.deliver(pairingHello(advertisement));
   await surface.settled();
-  return { node, channel, advertisement, log, wire: wireOf(channel) };
+  return {
+    node,
+    channel,
+    advertisement,
+    log,
+    wire: wireOf(channel),
+    commitWire: surface.commitWire(),
+  };
 }
 
 interface OrderedSession {
@@ -419,9 +486,11 @@ describe("§13.2 pairing admission on the relay path", () => {
       wires.push(run.wire);
     }
 
-    // THE EQUALITY THIS SUITE EXISTS FOR, asserted directly rather than left to
-    // four assertions that merely happen to agree: an open window and a closed
-    // one are the same bytes, in the same count, with the same close.
+    // The equality this suite exists for, restated directly so it is legible as
+    // a claim: an open window and a closed one are the same bytes, in the same
+    // count, with the same close. It CANNOT fail on its own — the four literals
+    // above pin every field of `Wire`, and `expect` throws — so it is
+    // documentation of the invariant and the literals are what enforce it.
     expect(wires[0]).toEqual(wires[1]);
     expect(wires[2]).toEqual(wires[3]);
     expect(wires[0]).toEqual(wires[2]);
@@ -465,7 +534,7 @@ describe("§13.2 pairing admission on the relay path", () => {
     const node = await pairingNode();
     await node.client.openPairingWindow(CLIENT_FINGERPRINT);
     const log: string[] = [];
-    const surface = relaySurface(node.client, log);
+    const surface = relaySurface(node.client, log, {});
     const ordered = await orderedSession(surface.authorization, log);
 
     await ordered.session.intercept(pairingHello(ordered.advertisement));
@@ -482,6 +551,26 @@ describe("§13.2 pairing admission on the relay path", () => {
       "commit",
     ]);
     expect((await node.client.list()).records).toHaveLength(1);
+  });
+
+  it("has both frames on the SOCKET before the durable commit begins", async () => {
+    // The statement order above is necessary and not sufficient. `RelayChannelRegistry`
+    // queues the close it schedules as a microtask of its own, so a commit made
+    // in `runHandshake`'s own turn — after the `close` CALL and before the frame
+    // — would satisfy every assertion in the test above while putting the
+    // pending-class fsync back on the response path ahead of the close. That is
+    // exactly the latency oracle §11.2 forbids: the fsync dwarfs the X25519 and
+    // Ed25519 work above it, so "this key is not on file" and "the owner has a
+    // window open" would be measurable from the wire. This reads the frames the
+    // REAL registry has flushed at the instant the commit is invoked.
+    const admitted = await runPairing({ openWindow: true });
+    expect(admitted.commitWire).toEqual(["payloads=2,closes=1"]);
+    // And on the cap refusal, which owes no durable write at all: §11.2 makes
+    // the two indistinguishable, so the point at which the commit is reached
+    // may not distinguish them either.
+    const refused = await runPairing({ seed: { pending: [...SATURATED_PENDING] } });
+    expect(refused.log).toEqual(["evaluate:refused", "commit"]);
+    expect(refused.commitWire).toEqual(admitted.commitWire);
   });
 
   it("puts the same bytes at the same point when the commit throws or hangs", async () => {
@@ -582,14 +671,130 @@ describe("§13.2 pairing admission on the relay path", () => {
     // §13.6: the reservation is spent by the first attempt that matches the
     // discriminator whatever that attempt's outcome, so the CLI can tell "my
     // device has not reached the node" from "it did, and nothing came of it".
+    //
+    // BOTH HALVES, because the listing's `spent` is satisfied by the in-memory
+    // latch alone — which `evaluatePairingAdmission` sets before any commit
+    // runs. Only the durable stamp survives a restart, and without it the next
+    // matching attempt is handed the reservation a second time.
     expect(listing.pairingWindow?.spent).toBe(true);
+    expect((await run.node.stored()).pairingWindow?.spentAt).toBe(NOW);
+  });
+
+  it("spends the window on an APPROVED device's successful handshake too", async () => {
+    // §13.6 spends the reservation on "the first attempt that matches the
+    // discriminator, whatever that attempt's outcome" — and an accept is such an
+    // outcome. Nothing about the success path is refused, so this is the only
+    // §13.2 step 3 commit whose whole occasion is the window: without it the
+    // durable window stays open for the rest of `E2EE_PAIRING_WINDOW`, and after
+    // a restart — or from a CLI in another process, which does not see this
+    // process's latch — the next matching attempt is granted the reservation
+    // again. That reservation is the token that licenses evicting a pending
+    // record.
+    const node = await pairingNode({
+      approved: [
+        seededEntry(0, {
+          clientIdentityFingerprint: CLIENT_FINGERPRINT_STORED,
+          maxRole: ROLE,
+          capabilitySet: [CAPABILITY],
+          approvedAt: NOW - 5_000,
+        }),
+      ],
+    });
+    await node.client.openPairingWindow(CLIENT_FINGERPRINT);
+    const log: string[] = [];
+    const surface = relaySurface(node.client, log, {});
+    const channel = await harness({ authorization: surface.authorization });
+
+    await establish(channel, "native", await channel.open());
+    await surface.settled();
+
+    expect(channel.session().mode()).toBe("e2ee");
+    expect(log).toEqual(["evaluate:existing", "commit"]);
+    expect((await node.stored()).pairingWindow?.spentAt).toBe(NOW);
+    // And the record set is otherwise untouched: an approved key is not
+    // first-seen, so §13.2 creates nothing for it.
+    expect((await node.stored()).pending).toEqual([]);
+  });
+
+  it("keeps a local failure's pending record, still after the reject and the close", async () => {
+    // The §4.5 ceiling, an encoder refusing material this node holds, key
+    // custody refusing the borrow: all land after §8.6 step 6 has already taken
+    // the §13.2 step 3 decision, and §11.2's table names no row for any of them.
+    // The decision is still owed to the owner — §13.2 makes the commit
+    // best-effort, so dropping it costs the owner both the attempt and the
+    // window spend, and their `ryco e2ee clients` listing shows neither.
+    const run = await runPairing({ openWindow: true, failLocally: true });
+
+    expect(run.log).toEqual(["evaluate:admit", "commit"]);
+    expect(run.channel.rows()).toEqual(["local"]);
+    // The wire is the same generic reject every other pre-key cause takes, and
+    // the commit still starts only once both frames are on the socket.
+    expect(run.wire.response).toEqual([REJECT_HEX]);
+    expect(run.wire.closes).toEqual(["channel_rejected"]);
+    expect(run.commitWire).toEqual(["payloads=2,closes=1"]);
+    const stored = await run.node.stored();
+    expect(stored.pending.map((entry) => entry.clientIdentityFingerprint)).toEqual([
+      CLIENT_FINGERPRINT_STORED,
+    ]);
+    expect(stored.pairingWindow?.spentAt).toBe(NOW);
+  });
+
+  it("lets the §13.2 step 3 decision throw without touching either wire outcome", async () => {
+    // §11.2's anti-oracle rule governs the WIRE. The pending record and the
+    // operator listing are the owner's side of the same event and MUST NOT
+    // alter it, so a bookkeeping failure may neither turn an admitted handshake
+    // into a fatal one nor vary the reject an unapproved one already takes.
+    const approvedNode = await pairingNode({
+      approved: [
+        seededEntry(0, {
+          clientIdentityFingerprint: CLIENT_FINGERPRINT_STORED,
+          maxRole: ROLE,
+          capabilitySet: [CAPABILITY],
+          approvedAt: NOW - 5_000,
+        }),
+      ],
+    });
+    const approvedLog: string[] = [];
+    const approvedSurface = relaySurface(approvedNode.client, approvedLog, {
+      evaluate: "throws",
+    });
+    const approvedChannel = await harness({ authorization: approvedSurface.authorization });
+    await establish(approvedChannel, "native", await approvedChannel.open());
+    await approvedSurface.settled();
+
+    // The accept is unchanged, and no commit was reached — the throw cost the
+    // decision, which is the whole of what it may cost.
+    expect(approvedChannel.session().mode()).toBe("e2ee");
+    expect(approvedLog).toEqual(["evaluate:throw"]);
+
+    const unapprovedNode = await pairingNode();
+    await unapprovedNode.client.openPairingWindow(CLIENT_FINGERPRINT);
+    const unapprovedLog: string[] = [];
+    const unapprovedSurface = relaySurface(unapprovedNode.client, unapprovedLog, {
+      evaluate: "throws",
+    });
+    const unapprovedChannel = await harness({ authorization: unapprovedSurface.authorization });
+    await unapprovedChannel.deliver(pairingHello(await unapprovedChannel.open()));
+    await unapprovedSurface.settled();
+
+    // Byte for byte the reject §11.2 row P12 already required, and the owner's
+    // side simply gained nothing.
+    expect(wireOf(unapprovedChannel)).toEqual({
+      payloadCount: 2,
+      response: [REJECT_HEX],
+      closes: ["channel_rejected"],
+      toParser: 0,
+    });
+    expect(unapprovedChannel.rows()).toEqual(["P12"]);
+    expect(unapprovedLog).toEqual(["evaluate:throw"]);
+    expect((await unapprovedNode.stored()).pending).toEqual([]);
   });
 
   it("lets an approval take effect on a fresh handshake and never on the paired channel", async () => {
     const node = await pairingNode();
     await node.client.openPairingWindow(CLIENT_FINGERPRINT);
     const log: string[] = [];
-    const surface = relaySurface(node.client, log);
+    const surface = relaySurface(node.client, log, {});
 
     const paired = await harness({ authorization: surface.authorization });
     await paired.deliver(pairingHello(await paired.open()));
