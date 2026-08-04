@@ -6,10 +6,13 @@ import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { E2eeActionButton, E2eeIdentityColumn, E2eeSafetyNumberCard } from "./E2eeTrustParts";
+import { E2EE_ACKNOWLEDGEMENT_SYMBOLS } from "./e2eeTrustSymbols";
 import {
   createE2eeVerificationDraft,
   deriveE2eeVerificationView,
-  E2EE_ENROLLMENT_FINGERPRINT_MISMATCH,
+  E2EE_COMPARISON_AFFIRMATION,
+  E2EE_PRESENTED_COLUMN_TITLE,
+  E2EE_PREVIOUSLY_VERIFIED_COLUMN_TITLE,
 } from "./e2eeTrustUiModel";
 import { useMobileE2eeSession } from "./useMobileE2eeSession";
 
@@ -54,8 +57,11 @@ export function E2eeNodeVerificationRouteScreen() {
           presented one, before any pairing step proceeds. */}
       {view.previouslyVerified && view.presented ? (
         <View className="mx-5 mt-4 flex-row gap-3">
-          <E2eeIdentityColumn title="Verified before" identity={view.previouslyVerified} />
-          <E2eeIdentityColumn title="Presented now" identity={view.presented} />
+          <E2eeIdentityColumn
+            title={E2EE_PREVIOUSLY_VERIFIED_COLUMN_TITLE}
+            identity={view.previouslyVerified}
+          />
+          <E2eeIdentityColumn title={E2EE_PRESENTED_COLUMN_TITLE} identity={view.presented} />
         </View>
       ) : null}
 
@@ -71,9 +77,9 @@ export function E2eeNodeVerificationRouteScreen() {
             onChangeText={view.onChangeFingerprint}
             className="rounded-2xl border border-border bg-card px-4 py-3 font-mono text-sm text-foreground"
           />
-          {view.fingerprintValue.length > 0 ? (
+          {view.fingerprintError ? (
             <Text className="mt-2 font-sans text-xs leading-relaxed text-danger-foreground">
-              {E2EE_ENROLLMENT_FINGERPRINT_MISMATCH}
+              {view.fingerprintError}
             </Text>
           ) : null}
         </View>
@@ -93,13 +99,17 @@ export function E2eeNodeVerificationRouteScreen() {
             className="mx-5 mt-4 flex-row items-start gap-3 rounded-2xl border border-border bg-card p-4 active:opacity-80"
           >
             <SymbolView
-              name={view.comparisonAcknowledged ? "checkmark.circle" : "questionmark.circle"}
+              name={
+                view.comparisonAcknowledged
+                  ? E2EE_ACKNOWLEDGEMENT_SYMBOLS.checked
+                  : E2EE_ACKNOWLEDGEMENT_SYMBOLS.unchecked
+              }
               size={18}
               tintColor={iconColor}
               type="monochrome"
             />
             <Text className="flex-1 font-sans text-sm leading-relaxed text-foreground">
-              I compared every group with the number my node shows, and they are the same.
+              {E2EE_COMPARISON_AFFIRMATION}
             </Text>
           </Pressable>
         </>

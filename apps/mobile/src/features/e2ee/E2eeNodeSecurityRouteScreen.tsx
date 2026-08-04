@@ -3,7 +3,7 @@ import { ScrollView, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { showConfirmDialog } from "../../components/ConfirmDialogHost";
-import { isMobileHostedModeAvailable } from "../../hostedHub/state";
+import { useHostedModeAvailable } from "../hostedHub/useHostedMode";
 import { E2eeActionButton, E2eeChannelCard, E2eeUnverifiedHubNotice } from "./E2eeTrustParts";
 import { deriveE2eeSecurityView, type E2eeTrustAction } from "./e2eeTrustUiModel";
 import { useMobileE2eeSession } from "./useMobileE2eeSession";
@@ -19,9 +19,15 @@ import { useMobileE2eeSession } from "./useMobileE2eeSession";
 export function E2eeNodeSecurityRouteScreen() {
   const navigation = useNavigation();
   const session = useMobileE2eeSession();
+  // The hook, not the bare accessor: availability is false until the async
+  // runtime configuration completes, and nothing about the §13 projection
+  // changes when it flips — so a screen reached cold (a deep link, or Settings
+  // opened before any other hosted surface has mounted) would have rendered the
+  // "no Hub" copy for a fully hosted build and never re-rendered out of it.
+  const hostedModeAvailable = useHostedModeAvailable();
   const view = deriveE2eeSecurityView({
     session,
-    hostedModeAvailable: isMobileHostedModeAvailable(),
+    hostedModeAvailable,
     // The unreadable-document case has no synchronous probe: the store reports
     // it by refusing every mutation. Surfacing the owner action for it is left
     // to the Hub-domain screen that already owns the scoped forgets, so this
@@ -49,7 +55,7 @@ export function E2eeNodeSecurityRouteScreen() {
     return (
       <ScrollView contentInsetAdjustmentBehavior="automatic" className="flex-1 bg-screen">
         <Text className="mx-5 mt-6 font-sans text-sm leading-relaxed text-foreground-muted">
-          This build has no Ryco Hub, so there is no relay connection to secure.
+          {view.unavailableMessage}
         </Text>
       </ScrollView>
     );
@@ -62,6 +68,24 @@ export function E2eeNodeSecurityRouteScreen() {
       contentContainerStyle={{ paddingTop: 4, paddingBottom: 40 }}
     >
       <E2eeChannelCard claim={view.claim} label={view.channelLabel} message={view.channelMessage} />
+
+      {/* §13.2.1: the surface names the selection and says which of the three
+          situations occurred, ABOVE the two resolutions — neither may be taken
+          without the copy that distinguishes them on screen. */}
+      {view.situationTitle && view.situationMessage ? (
+        <View
+          accessibilityRole="alert"
+          className="mx-5 mt-4 rounded-2xl border border-warning-border bg-warning-bg p-4"
+        >
+          <Text className="text-sm font-ryco-bold text-foreground">{view.situationTitle}</Text>
+          {view.nodeLabel ? (
+            <Text className="mt-1 font-sans text-xs text-foreground-muted">{view.nodeLabel}</Text>
+          ) : null}
+          <Text className="mt-1.5 font-sans text-sm leading-relaxed text-foreground">
+            {view.situationMessage}
+          </Text>
+        </View>
+      ) : null}
 
       {view.unverifiedHub ? (
         <E2eeUnverifiedHubNotice

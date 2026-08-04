@@ -134,6 +134,23 @@ export const E2EE_UNEXPECTED_NODE_MESSAGES = {
 export const E2EE_IDENTITY_CHANGE_MESSAGE =
   "The node you previously verified is presenting a different identity, and it did not prove that the change was a legitimate rotation. This device is sending nothing to it. Verify the new fingerprint and number against your node before pairing again.";
 
+/**
+ * The heading each of those four carries, one per situation.
+ *
+ * §13.2.1 requires the surface to "distinguish the three underlying situations
+ * in its copy", and a shared heading over three different bodies is the
+ * conflation it forbids. Situation 3 in particular is NOT worded as an identity
+ * change, in the heading as well as in the body.
+ */
+export const E2EE_UNEXPECTED_NODE_TITLES = {
+  1: "A node this device has not paired",
+  2: "This connection is presenting a different identity",
+  3: "No verified node for this account",
+} as const satisfies Record<1 | 2 | 3, string>;
+
+/** §13.3's heading, and the only one of the four that reports a contradiction. */
+export const E2EE_IDENTITY_CHANGE_TITLE = "The node you verified changed identity";
+
 /** All four, for the surface and for the test that asserts they differ. */
 export const E2EE_TRUST_SITUATION_MESSAGES: readonly string[] = [
   E2EE_UNEXPECTED_NODE_MESSAGES[1],
@@ -160,6 +177,18 @@ export const E2EE_NO_VERIFIED_NODE_MESSAGE =
 export const E2EE_LEGACY_CHANNEL_LABEL = "legacy";
 export const E2EE_LEGACY_CHANNEL_MESSAGE =
   "This connection is legacy: Ryco is not encrypting it end to end, and your Hub can read what crosses it. Pair the node to change that.";
+
+/**
+ * §6.3's other legacy channel, which is NOT the one pairing fixes.
+ *
+ * "A device that cannot hold the key simply has no E2EE" — there is no software
+ * fallback and no degraded mode — so on such a device no ceremony can produce an
+ * encrypted channel. Offering the §12.2 sentence here would point the owner at an
+ * action that cannot deliver what it implies, which is the same overclaim §2.2
+ * forbids wearing different clothes.
+ */
+export const E2EE_NO_KEY_CUSTODY_MESSAGE =
+  "This connection is legacy: Ryco is not encrypting it end to end, and your Hub can read what crosses it. This device cannot hold the key end-to-end encryption needs, so pairing a node will not change that here.";
 
 /** §13.1's release gate, stated as the reason nothing is flowing. */
 export const E2EE_PAIRING_ONLY_MESSAGE =
@@ -195,6 +224,24 @@ export const E2EE_ENROLLMENT_FINGERPRINT_MESSAGE =
 export const E2EE_ENROLLMENT_FINGERPRINT_MISMATCH =
   "That is not the fingerprint this connection advertised. Nothing was sent. Check that you read it from the node you meant to reach.";
 export const E2EE_ENROLLMENT_FINGERPRINT_PLACEHOLDER = "SHA256:…";
+
+/**
+ * §13.2 step 4's affirmation, and the two column titles it is read against.
+ *
+ * The affirmation is the sentence whose acknowledgement is the ONLY precondition
+ * for the action that mints a §13.2 step 5 decision, so it is the one string in
+ * the ceremony that carries the security meaning of the whole flow. It lives here
+ * with the rest of the copy — a `.tsx` cannot be loaded by the node runner, so a
+ * future edit weakening it there would be invisible to every test.
+ */
+export const E2EE_COMPARISON_AFFIRMATION =
+  "I compared every group with the number my node shows, and they are the same.";
+export const E2EE_PREVIOUSLY_VERIFIED_COLUMN_TITLE = "Verified before";
+export const E2EE_PRESENTED_COLUMN_TITLE = "Presented now";
+
+/** What a build with no hosted plane says instead of a security surface. */
+export const E2EE_NO_HOSTED_PLANE_MESSAGE =
+  "This build has no Ryco Hub, so there is no relay connection to secure.";
 
 /** The approve-on-node alternative, offered second rather than instead. */
 export const E2EE_NODE_APPROVAL_MESSAGE =
@@ -313,6 +360,18 @@ export interface E2eeVerificationView {
   readonly safetyNumberCaption: string;
   readonly fingerprintPlaceholder: string;
   readonly fingerprintValue: string;
+  /**
+   * §13.2's mismatch warning, or `null`.
+   *
+   * WHEN it appears is a decision, not a layout detail, which is why it is a
+   * value here rather than a `length > 0` test in the screen. The sentence means
+   * "you may be looking at a node you did not mean to reach"; rendering it from
+   * the first keystroke of a CORRECT fingerprint shows it on every successful
+   * entry too, and training the owner to read past it is precisely what §13.2
+   * and §13.3 spend their warnings trying to avoid. It appears only once the
+   * entry is long enough to be a complete fingerprint and still does not match.
+   */
+  readonly fingerprintError: string | null;
   readonly onChangeFingerprint: (value: string) => void;
   readonly comparisonAcknowledged: boolean;
   readonly onAcknowledgeComparison: (value: boolean) => void;
@@ -338,10 +397,22 @@ export interface E2eeVerificationInput {
 }
 
 /** Whitespace-insensitive, case-sensitive: a §7.1 fingerprint is base64 material. */
+function normalizeFingerprint(value: string): string {
+  return value.replaceAll(/\s+/gu, "");
+}
+
 function fingerprintMatches(entered: string, advertised: string): boolean {
-  const normalize = (value: string) => value.replaceAll(/\s+/gu, "");
-  const left = normalize(entered);
-  return left.length > 0 && left === normalize(advertised);
+  const left = normalizeFingerprint(entered);
+  return left.length > 0 && left === normalizeFingerprint(advertised);
+}
+
+/**
+ * Whether a non-matching entry is long enough to be an ANSWER rather than a
+ * prefix. §7.1 fixes the display form's length, so an entry that has reached it
+ * and still disagrees is a mismatch; anything shorter is still being typed.
+ */
+function fingerprintEntryComplete(entered: string, advertised: string): boolean {
+  return normalizeFingerprint(entered).length >= normalizeFingerprint(advertised).length;
 }
 
 /**
@@ -376,6 +447,7 @@ export function deriveE2eeVerificationView(input: E2eeVerificationInput): E2eeVe
     safetyNumberCaption: E2EE_SAFETY_NUMBER_CAPTION,
     fingerprintPlaceholder: E2EE_ENROLLMENT_FINGERPRINT_PLACEHOLDER,
     fingerprintValue: draft.enteredFingerprint,
+    fingerprintError: null,
     onChangeFingerprint: (value: string) => set({ enteredFingerprint: value, errorMessage: null }),
     comparisonAcknowledged: draft.comparisonAcknowledged,
     onAcknowledgeComparison: (value: boolean) => set({ comparisonAcknowledged: value }),
@@ -414,6 +486,12 @@ export function deriveE2eeVerificationView(input: E2eeVerificationInput): E2eeVe
       stage: "enrollment-fingerprint",
       title: E2EE_ENROLLMENT_FINGERPRINT_TITLE,
       message: headline,
+      fingerprintError: fingerprintEntryComplete(
+        draft.enteredFingerprint,
+        presented.display.fingerprint,
+      )
+        ? E2EE_ENROLLMENT_FINGERPRINT_MISMATCH
+        : null,
       presented: presented.display,
       // Nothing of §13.4 is shown before the anchor matches: the number is only
       // meaningful once the owner has established which node they are looking at.
@@ -522,8 +600,10 @@ export type E2eeChannelClaim =
   | "verified"
   /** §13.1's release gate: the ceremony, and nothing else. */
   | "pairing-only"
-  /** §12.2's honest label. */
+  /** §12.2's honest label for a channel that FELL BACK and could pair out of it. */
   | "legacy"
+  /** §6.3: this device holds no key, so no ceremony can produce E2EE here. */
+  | "legacy-no-custody"
   /** No channel to describe. */
   | "none";
 
@@ -535,9 +615,25 @@ export interface E2eeDiagnosticRow {
 export interface E2eeSecurityView {
   /** False for a build with no hosted plane: the surface must not render at all. */
   readonly available: boolean;
+  /** What a build with no hosted plane renders instead of everything below. */
+  readonly unavailableMessage: string;
   readonly claim: E2eeChannelClaim;
   readonly channelLabel: string;
   readonly channelMessage: string;
+  /**
+   * §13.2.1's "explicit surface naming the selection", as the two strings that
+   * have to be on screen before either resolution can be taken.
+   *
+   * They are `null` only when no §13.2.1 or §13.3 surface was raised. With one
+   * raised they are never null and never shared between situations: the copy is
+   * what tells the owner which of the three happened, and taking the consent
+   * resolution without it is exactly the click-through §13.2.1 exists to
+   * prevent. {@link E2eeSecurityView.nodeLabel} names the selection beside them.
+   */
+  readonly situationTitle: string | null;
+  readonly situationMessage: string | null;
+  /** The node's Hub-supplied display label. Bounded, and display-only. */
+  readonly nodeLabel: string | null;
   /**
    * §13.1.1's persistent indication. It is `true` whenever this device holds no
    * verified pin on the connected Hub origin — including when the marker is
@@ -572,19 +668,21 @@ export interface E2eeSecurityInput {
   readonly now: () => number;
 }
 
-const CHANNEL_LABELS: Record<E2eeChannelClaim, string> = {
+export const CHANNEL_LABELS: Record<E2eeChannelClaim, string> = {
   verified: "Encrypted",
   "pairing-only": "Not verified",
   // §12.2: "MUST label the channel legacy in every user-facing surface and
-  // diagnostic". One word, and it is this one.
+  // diagnostic". One word, and both legacy claims carry it.
   legacy: "Legacy",
+  "legacy-no-custody": "Legacy",
   none: "No connection",
 };
 
-const CHANNEL_MESSAGES: Record<E2eeChannelClaim, string> = {
+export const CHANNEL_MESSAGES: Record<E2eeChannelClaim, string> = {
   verified: E2EE_VERIFIED_CHANNEL_MESSAGE,
   "pairing-only": E2EE_PAIRING_ONLY_MESSAGE,
   legacy: E2EE_LEGACY_CHANNEL_MESSAGE,
+  "legacy-no-custody": E2EE_NO_KEY_CUSTODY_MESSAGE,
   none: "There is no node connection to describe yet.",
 };
 
@@ -600,11 +698,16 @@ const DIAGNOSTIC_LABELS: Record<string, string> = {
 function claimFor(session: MobileE2eeSessionState): E2eeChannelClaim {
   switch (session.channel) {
     case "verified":
-      return "verified";
+      // §13.3: an unresolved identity-change or §13.2.1 surface means the pin
+      // this claim rests on is exactly what is in question, and the channel that
+      // earned the claim is closed. The claim is withheld rather than repainted:
+      // a green "Encrypted" over an open substitution warning is the strongest
+      // form of §2.2's forbidden overclaim.
+      return session.event === null ? "verified" : "none";
     case "unverified":
       return "pairing-only";
     case "legacy":
-      return "legacy";
+      return session.keyCustodyUnavailable ? "legacy-no-custody" : "legacy";
     case "negotiating":
     case "unavailable":
       return "none";
@@ -628,11 +731,29 @@ export function deriveE2eeSecurityView(input: E2eeSecurityInput): E2eeSecurityVi
   const classification = session.classification;
   const latched = classification?.class === "latched";
 
+  const event = session.event;
   const base = {
     available: input.hostedModeAvailable,
+    unavailableMessage: E2EE_NO_HOSTED_PLANE_MESSAGE,
     claim,
     channelLabel: CHANNEL_LABELS[claim],
     channelMessage: CHANNEL_MESSAGES[claim],
+    // §13.2.1 / §13.3: the surface names the selection and says which situation
+    // it is, on the same screen as the resolutions and never only on the other
+    // one. The situation is chosen in `e2eeSession`, from client-anchored state.
+    situationTitle:
+      event === null
+        ? null
+        : event.kind === "identity-change"
+          ? E2EE_IDENTITY_CHANGE_TITLE
+          : E2EE_UNEXPECTED_NODE_TITLES[event.situation],
+    situationMessage:
+      event === null
+        ? null
+        : event.kind === "identity-change"
+          ? E2EE_IDENTITY_CHANGE_MESSAGE
+          : E2EE_UNEXPECTED_NODE_MESSAGES[event.situation],
+    nodeLabel: selection?.nodeLabel ?? null,
     unverifiedHubTitle: E2EE_NO_VERIFIED_NODE_TITLE,
     unverifiedHubMessage: E2EE_NO_VERIFIED_NODE_MESSAGE,
     diagnostics: diagnosticRows(session.diagnostics),
@@ -645,6 +766,9 @@ export function deriveE2eeSecurityView(input: E2eeSecurityInput): E2eeSecurityVi
       claim: "none",
       channelLabel: CHANNEL_LABELS.none,
       channelMessage: CHANNEL_MESSAGES.none,
+      situationTitle: null,
+      situationMessage: null,
+      nodeLabel: null,
       unverifiedHub: false,
       pair: null,
       resolutions: [],
@@ -666,7 +790,7 @@ export function deriveE2eeSecurityView(input: E2eeSecurityInput): E2eeSecurityVi
     session.legacyPermitted ? { kind: "permitted" } : { kind: "unobtainable" },
   );
   const resolutions: E2eeTrustAction[] = [];
-  if (session.event !== null && selection !== null) {
+  if (event !== null && selection !== null) {
     for (const resolution of offered) {
       if (resolution === "pair") {
         resolutions.push(action("start-pairing", "Pair this node", input.onOpenVerification));

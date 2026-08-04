@@ -25,17 +25,31 @@ import type {
 } from "../../hostedHub/e2eeSession";
 import type { E2eeTrustClassification } from "../../platform/e2eeTrustModel";
 import {
+  CHANNEL_LABELS,
+  CHANNEL_MESSAGES,
   createE2eeVerificationDraft,
   deriveE2eeSecurityView,
   deriveE2eeVerificationView,
   e2eeSafetyNumberGroups,
   isE2eeSafetyNumberDisplay,
+  E2EE_COMPARISON_AFFIRMATION,
+  E2EE_ENROLLMENT_FINGERPRINT_MISMATCH,
   E2EE_IDENTITY_CHANGE_MESSAGE,
+  E2EE_IDENTITY_CHANGE_TITLE,
+  E2EE_LEGACY_CONSENT_MESSAGE,
+  E2EE_LEGACY_CONSENT_TITLE,
+  E2EE_NO_KEY_CUSTODY_MESSAGE,
+  E2EE_REPAIR_MESSAGE,
+  E2EE_REPAIR_TITLE,
   E2EE_SAFETY_NUMBER_CAPTION,
   E2EE_TRUST_SITUATION_MESSAGES,
   E2EE_UNEXPECTED_NODE_MESSAGES,
+  E2EE_UNEXPECTED_NODE_TITLES,
+  E2EE_VERIFICATION_UNAVAILABLE,
+  type E2eeTrustAction,
   type E2eeVerificationDraft,
 } from "./e2eeTrustUiModel";
+import { mobileE2eeTrustStore } from "../../platform/e2eeTrustStore";
 
 const HUB = "https://hub.example.com";
 const ACCOUNT = "acct_0123456789";
@@ -95,6 +109,7 @@ function session(overrides: Partial<MobileE2eeSessionState> = {}): MobileE2eeSes
     classification: UNEXPECTED_FRESH,
     legacyPermitted: true,
     markerSet: false,
+    pinVerified: false,
     presented: {
       nodeIdentityPublicKey: NODE_PUBLIC_KEY,
       display: PRESENTED,
@@ -103,6 +118,7 @@ function session(overrides: Partial<MobileE2eeSessionState> = {}): MobileE2eeSes
     },
     previouslyVerified: null,
     event: null,
+    keyCustodyUnavailable: false,
     diagnostics: [],
     ...overrides,
   };
@@ -487,7 +503,52 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
         expect(view.claim).toBe("verified");
       }
     }
-    expect(securityView(session({ channel: "verified" })).claim).toBe("verified");
+    // The POSITIVE direction too: the guard above is a conditional whose
+    // antecedent is the very sentence it protects, so deleting the sentence
+    // satisfied it vacuously.
+    const verified = securityView(session({ channel: "verified" }));
+    expect(verified.claim).toBe("verified");
+    expect(verified.channelLabel).toBe("Encrypted");
+    expect(verified.channelMessage).toContain("encrypted end to end");
+    expect(verified.channelMessage).toContain("cannot read");
+  });
+
+  it("gives every claim its own word and its own sentence", () => {
+    // §2.2 forbids "a stronger claim for a weaker configuration"; two claims
+    // sharing a message is that, and two sharing a label is `Encrypted` beside a
+    // plaintext channel. The two legacy claims deliberately share the §12.2 WORD
+    // — "legacy" is the label §12.2 mandates for both — and nothing else.
+    const claims = Object.keys(CHANNEL_MESSAGES) as (keyof typeof CHANNEL_MESSAGES)[];
+    expect(new Set(Object.values(CHANNEL_MESSAGES)).size).toBe(claims.length);
+    expect(new Set(Object.values(CHANNEL_LABELS)).size).toBe(claims.length - 1);
+    expect(CHANNEL_LABELS.legacy).toBe(CHANNEL_LABELS["legacy-no-custody"]);
+    for (const claim of claims) {
+      expect(CHANNEL_LABELS[claim].length).toBeGreaterThan(0);
+      expect(CHANNEL_MESSAGES[claim].length).toBeGreaterThan(0);
+    }
+  });
+
+  it("withholds the E2EE claim while a §13.2.1 or §13.3 surface is unresolved", () => {
+    // The channel that earned the claim is closed and its pin is exactly what is
+    // in question. A green "Encrypted" over an open substitution warning is the
+    // strongest form of the §2.2 overclaim.
+    for (const event of [
+      { kind: "identity-change" },
+      { kind: "unexpected-node", situation: 2, evidence: "first-contact-statement" },
+    ] as const) {
+      expect(securityView(session({ channel: "verified", event })).claim).not.toBe("verified");
+    }
+  });
+
+  it("does not promise pairing to a device that cannot hold the §6.3 key", () => {
+    const view = securityView(session({ channel: "legacy", keyCustodyUnavailable: true }));
+    expect(view.claim).toBe("legacy-no-custody");
+    // §12.2's word is still there…
+    expect(view.channelLabel).toBe("Legacy");
+    expect(view.channelMessage.toLowerCase()).toContain("not encrypting");
+    // …and the remedy that cannot work is not.
+    expect(view.channelMessage).toBe(E2EE_NO_KEY_CUSTODY_MESSAGE);
+    expect(view.channelMessage).not.toContain("Pair the node to change that");
   });
 });
 
@@ -561,12 +622,237 @@ describe("§11.4 diagnostics", () => {
   });
 
   it("renders an unknown diagnostic id as the neutral line, never as the id", () => {
+    // A genuinely UNRECOGNISED id, so the `??` arm runs. `pre_key_local` is a
+    // key of the table, so feeding it exercised the lookup and left the fallback
+    // — the arm §11.4's bounded-copy rule exists for — unreached.
     const view = securityView(
       session({
-        diagnostics: [{ id: "pre_key_local", row: "K23" }],
+        diagnostics: [{ id: "e2ee_unknown_future_code" as never, row: "K23" }],
       }),
     );
+    const label = view.diagnostics[0]?.label ?? "";
+    expect(label).toBe("This device ended a connection attempt before any key was agreed.");
+    expect(label).not.toContain("e2ee_unknown_future_code");
+    expect(label).not.toContain("K23");
+  });
+
+  it("maps a recognised id to its own line", () => {
+    const view = securityView(session({ diagnostics: [{ id: "pre_key_local", row: "K23" }] }));
     expect(view.diagnostics[0]?.label).not.toContain("K23");
+    expect(view.diagnostics[0]?.id).toContain("pre_key_local");
+  });
+});
+
+describe("§13.2 step 5 actually promotes the pin", () => {
+  /**
+   * The only sanctioned call site of `mintE2eeOwnerVerificationDecision`, DRIVEN.
+   *
+   * Asserting the action object's presence proves the gate; it does not prove
+   * the action does anything. `return null;` as the first statement of
+   * `confirmE2eeVerification` left the whole suite green: the draft reset, the
+   * event cleared and the screen popped as if the ceremony had succeeded, while
+   * no pin was ever recorded and every later channel stayed release-gated.
+   */
+  function ceremony(promote: (decision: unknown) => Promise<void>) {
+    const completed = vi.fn();
+    let draft: E2eeVerificationDraft = {
+      ...createE2eeVerificationDraft(),
+      enteredFingerprint: PRESENTED.fingerprint,
+      comparisonAcknowledged: true,
+    };
+    const beginPairing = vi
+      .spyOn(mobileE2eeTrustStore, "beginPairing")
+      .mockResolvedValue({ hubOrigin: HUB, accountId: ACCOUNT, localNodeHandle: "handle-1" });
+    const promoteSpy = vi.spyOn(mobileE2eeTrustStore, "promote").mockImplementation(promote);
+    const render = () =>
+      deriveE2eeVerificationView({
+        session: session(),
+        draft,
+        onDraftChange: (next) => {
+          draft = next;
+        },
+        onCompleted: completed,
+        now: () => 5_000,
+      });
+    return {
+      completed,
+      beginPairing,
+      promote: promoteSpy,
+      run: () => render().confirm?.run(),
+      draft: () => draft,
+    };
+  }
+
+  it("mints a decision for the presented identity and records it", async () => {
+    const test = ceremony(async () => undefined);
+    test.run();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(test.promote).toHaveBeenCalledTimes(1);
+    const decision = test.promote.mock.calls[0]?.[0] as {
+      readonly verifiedFingerprint: string;
+      readonly verifiedIdentityPublicKey: Uint8Array;
+      readonly acceptedPolicyGeneration: number;
+      readonly continuityId: string;
+    };
+    // The key the owner compared, and the §7.1 fingerprint DERIVED from it —
+    // never a value copied out of a statement field.
+    expect([...decision.verifiedIdentityPublicKey]).toEqual([...NODE_PUBLIC_KEY]);
+    expect(decision.verifiedFingerprint).toBe(PRESENTED.fingerprint);
+    expect(decision.acceptedPolicyGeneration).toBe(4);
+    expect(decision.continuityId).toBe("continuity-1");
+    expect(test.completed).toHaveBeenCalledTimes(1);
+    // The draft is reset, so a second press cannot re-run a completed ceremony.
+    expect(test.draft().comparisonAcknowledged).toBe(false);
+    vi.restoreAllMocks();
+  });
+
+  it("reports one bounded failure and completes nothing when the store refuses", async () => {
+    const test = ceremony(async () => {
+      throw new Error("refused");
+    });
+    test.run();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(test.draft().errorMessage).toBe(E2EE_VERIFICATION_UNAVAILABLE);
+    expect(test.draft().busy).toBe(false);
+    expect(test.completed).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+});
+
+describe("the owner-facing confirmations say what they are confirming", () => {
+  function confirmations(): readonly E2eeTrustAction[] {
+    const state = session({
+      selection: { ...session().selection!, localNodeHandle: "handle-1" },
+      event: { kind: "unexpected-node", situation: 1, evidence: "none" },
+    });
+    const view = securityView(state, { unreadable: true });
+    return [...view.resolutions, view.rePair, view.destroyUnreadable].filter(
+      (action): action is E2eeTrustAction => action !== null && action?.confirm !== undefined,
+    );
+  }
+
+  it("gives each destructive action its own non-empty dialog", () => {
+    const actions = confirmations();
+    expect(actions.length).toBe(3);
+    const titles = actions.map((action) => action.confirm!.title);
+    const messages = actions.map((action) => action.confirm!.message);
+    const confirmTexts = actions.map((action) => action.confirm!.confirmText);
+    // Swapping one dialog for its sibling — "Forget this node's identity?" over
+    // the button that consents to permanent plaintext — survived a presence
+    // check. Distinctness and content are what catch it.
+    expect(new Set(titles).size).toBe(3);
+    expect(new Set(messages).size).toBe(3);
+    for (const value of [...titles, ...messages, ...confirmTexts]) {
+      expect(value.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("names unencrypted sending, and the Hub reading it, on the consent dialog", () => {
+    const consent = confirmations().find((action) => action.id === "record-legacy-consent");
+    expect(consent?.confirm?.title).toBe(E2EE_LEGACY_CONSENT_TITLE);
+    expect(consent?.confirm?.message).toBe(E2EE_LEGACY_CONSENT_MESSAGE);
+    // §12.1.1's consent is per selection and remembered; the dialog says both,
+    // plus what it costs.
+    expect(E2EE_LEGACY_CONSENT_MESSAGE).toContain("unencrypted");
+    expect(E2EE_LEGACY_CONSENT_MESSAGE).toContain("Hub can read it");
+    expect(E2EE_LEGACY_CONSENT_MESSAGE).toContain("this node only");
+  });
+
+  it("names clearing the pin on the §13.3 re-pair dialog", () => {
+    const rePair = confirmations().find((action) => action.id === "re-pair");
+    expect(rePair?.confirm?.title).toBe(E2EE_REPAIR_TITLE);
+    expect(rePair?.confirm?.message).toBe(E2EE_REPAIR_MESSAGE);
+    expect(E2EE_REPAIR_MESSAGE).toContain("pinned identity");
+    expect(E2EE_REPAIR_MESSAGE).toContain("pair it again");
+  });
+});
+
+describe("§13.2.1: the resolutions are never offered without the copy that distinguishes them", () => {
+  it("names the selection and the situation on the same surface as the resolutions", () => {
+    for (const situation of [1, 2, 3] as const) {
+      const view = securityView(
+        session({ event: { kind: "unexpected-node", situation, evidence: "none" } }),
+      );
+      expect(view.resolutions.length).toBeGreaterThan(0);
+      // §13.2.1: "MUST then show the owner an explicit surface naming the
+      // selection", and "the presentation MUST distinguish the three underlying
+      // situations in its copy".
+      expect(view.situationTitle).toBe(E2EE_UNEXPECTED_NODE_TITLES[situation]);
+      expect(view.situationMessage).toBe(E2EE_UNEXPECTED_NODE_MESSAGES[situation]);
+      expect(view.nodeLabel).toBe("Studio");
+    }
+    const changed = securityView(session({ event: { kind: "identity-change" } }));
+    expect(changed.situationTitle).toBe(E2EE_IDENTITY_CHANGE_TITLE);
+    expect(changed.situationMessage).toBe(E2EE_IDENTITY_CHANGE_MESSAGE);
+  });
+
+  it("gives the four situations four headings, and never words situation 3 as a change", () => {
+    const titles = [
+      E2EE_UNEXPECTED_NODE_TITLES[1],
+      E2EE_UNEXPECTED_NODE_TITLES[2],
+      E2EE_UNEXPECTED_NODE_TITLES[3],
+      E2EE_IDENTITY_CHANGE_TITLE,
+    ];
+    expect(new Set(titles).size).toBe(4);
+    for (const title of titles) expect(title.trim().length).toBeGreaterThan(0);
+    expect(E2EE_UNEXPECTED_NODE_TITLES[3].toLowerCase()).not.toContain("changed");
+    expect(E2EE_UNEXPECTED_NODE_TITLES[3].toLowerCase()).not.toContain("different identity");
+  });
+
+  it("says nothing about a situation where no surface was raised", () => {
+    const quiet = securityView(session({ event: null }));
+    expect(quiet.situationTitle).toBeNull();
+    expect(quiet.situationMessage).toBeNull();
+  });
+});
+
+describe("§13.2's enrollment fingerprint, mid-entry", () => {
+  it("stays silent while a correct fingerprint is still being typed", () => {
+    // The mismatch sentence means "you may be talking to a node you did not mean
+    // to reach". Showing it from the first keystroke of a CORRECT entry shows it
+    // on every successful ceremony too, which trains reading past it.
+    for (let length = 1; length < PRESENTED.fingerprint.length; length += 1) {
+      const { view } = verificationView(session(), {
+        ...createE2eeVerificationDraft(),
+        enteredFingerprint: PRESENTED.fingerprint.slice(0, length),
+      });
+      expect(view.fingerprintError, `prefix of length ${length}`).toBeNull();
+    }
+  });
+
+  it("says so once a complete entry disagrees", () => {
+    const { view } = verificationView(session(), {
+      ...createE2eeVerificationDraft(),
+      enteredFingerprint: PREVIOUS.fingerprint,
+    });
+    expect(view.stage).toBe("enrollment-fingerprint");
+    expect(view.fingerprintError).toBe(E2EE_ENROLLMENT_FINGERPRINT_MISMATCH);
+  });
+
+  it("carries no mismatch once the entry matches", () => {
+    const { view } = verificationView(session(), {
+      ...createE2eeVerificationDraft(),
+      enteredFingerprint: PRESENTED.fingerprint,
+    });
+    expect(view.stage).toBe("compare");
+    expect(view.fingerprintError).toBeNull();
+  });
+});
+
+describe("the ceremony's own affirmation", () => {
+  it("says the owner compared every group against the node's own surface", () => {
+    // The sentence whose acknowledgement is the ONLY precondition for the action
+    // that mints a §13.2 step 5 decision. It lived in a `.tsx` the node runner
+    // cannot load, so a future edit weakening it was invisible to every test.
+    expect(E2EE_COMPARISON_AFFIRMATION).toContain("every group");
+    expect(E2EE_COMPARISON_AFFIRMATION.toLowerCase()).toContain("my node shows");
+    expect(E2EE_COMPARISON_AFFIRMATION.toLowerCase()).toContain("the same");
   });
 });
 

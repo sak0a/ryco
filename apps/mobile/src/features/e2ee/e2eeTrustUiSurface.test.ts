@@ -24,6 +24,12 @@ import { describe, expect, it } from "vite-plus/test";
  *    error, so a trust surface's icon can silently disappear on one platform.
  */
 
+import {
+  CLAIM_SYMBOLS,
+  E2EE_ACKNOWLEDGEMENT_SYMBOLS,
+  E2EE_TRUST_SYMBOLS,
+} from "./e2eeTrustSymbols";
+
 const SRC = join(import.meta.dirname, "..", "..");
 
 function sourceFiles(directory: string): readonly string[] {
@@ -95,7 +101,14 @@ describe("§13.4: the safety number is display-only", () => {
   });
 
   it("never reaches a console, an observability call, or a persisted value", () => {
-    const carriers = ["safetyNumber", "comparedSafetyNumber", "safetyNumberGroups"];
+    // WHOLE-FILE, not per line. A per-line match only kills the same-line form:
+    // `const leaked = display.safetyNumber;` followed by `console.warn(leaked)`
+    // on the next line survived it, and so did any helper that took the value as
+    // an argument. A file that names the value at all may not name a sink.
+    // Word-delimited, so `comparedSafetyNumber` — the minter's INPUT, which the
+    // trust store compares and never stores — is covered by its own assertion
+    // below rather than making the whole store a carrier of the display value.
+    const carriers = [/\bsafetyNumber\b/u, /\bsafetyNumberGroups\b/u];
     const sinks = [
       /console\.\w+\(/u,
       /\breportError\(/u,
@@ -103,17 +116,49 @@ describe("§13.4: the safety number is display-only", () => {
       /\bcapture\w*\(/u,
       /\bsetItemAsync\(/u,
       /\bJSON\.stringify\(/u,
+      // This repository's only telemetry seam, which the list above did not name
+      // at all — `recordPerformance` takes an arbitrary `unknown` payload.
+      /\brecordPerformance\(/u,
+      /\bperformanceEnabled\(/u,
+      /\bmobileObservability\b/u,
+      /\btracingLayer\b/u,
+      /\bwithSpan\(/u,
+      /\bannotateCurrentSpan\(/u,
     ];
     for (const path of NON_TEST_SOURCES) {
       const source = read(path);
-      if (!carriers.some((carrier) => source.includes(carrier))) continue;
-      for (const line of source.split("\n")) {
-        if (!carriers.some((carrier) => line.includes(carrier))) continue;
-        for (const sink of sinks) {
-          expect(sink.test(line), `${path.slice(SRC.length + 1)}: ${line.trim()}`).toBe(false);
-        }
+      if (!carriers.some((carrier) => carrier.test(source))) continue;
+      for (const sink of sinks) {
+        expect(sink.test(source), `${path.slice(SRC.length + 1)}: ${String(sink)}`).toBe(false);
       }
     }
+  });
+
+  it("is compared by the trust store and never written into its document", () => {
+    // §13.4: the client persists no copy at all. The minter re-derives the value
+    // and compares it, which is why the store names it; the stored shape and the
+    // serializer must not, or the comparison input would become durable state.
+    const store = read(join(SRC, "platform", "e2eeTrustStore.ts"));
+    const stored = store.slice(
+      store.indexOf("interface StoredTrustRecord"),
+      store.indexOf("function serializeDocument"),
+    );
+    expect(stored.length).toBeGreaterThan(0);
+    expect(/safetynumber/iu.test(stored)).toBe(false);
+  });
+
+  it("keeps the trust surfaces out of the observability adapter's import graph", () => {
+    // The importer allowlist, which is the shape that actually works — the check
+    // below reads `observability.ts` itself and says nothing about its CALLERS.
+    // §13.4's "never travels in any … analytics surface" is a property of who
+    // can reach the seam, so no §13 module may reach it at all.
+    const importers = NON_TEST_SOURCES.filter(
+      (path) =>
+        (path.startsWith(join(SRC, "features", "e2ee")) ||
+          path.startsWith(join(SRC, "hostedHub"))) &&
+        /from "[^"]*platform\/observability"/u.test(read(path)),
+    );
+    expect(importers.map((path) => path.slice(SRC.length + 1))).toEqual([]);
   });
 
   it("never enters a §4 attempt, a handshake, or anything the wire path reads", () => {
@@ -134,43 +179,59 @@ describe("§13.4: the safety number is display-only", () => {
 });
 
 describe("every SF Symbol a trust surface renders is mapped for Android", () => {
-  it("resolves each name in ANDROID_ICON_BY_SF_SYMBOL", () => {
+  const androidMap = (): string => {
     const symbols = read(join(SRC, "components", "AppSymbol.tsx"));
-    const mapped = symbols.slice(
+    return symbols.slice(
       symbols.indexOf("ANDROID_ICON_BY_SF_SYMBOL"),
       symbols.indexOf("ANDROID_ICON_BY_MATERIAL_NAME"),
     );
-    for (const name of [
-      "lock",
-      "lock.open",
-      "checkmark.shield",
-      "exclamationmark.triangle",
-      "checkmark.circle",
-      "questionmark.circle",
-      "qrcode.viewfinder",
-    ]) {
-      expect(mapped.includes(`"${name}"`) || mapped.includes(`${name}:`), name).toBe(true);
-    }
+  };
+  const isMapped = (mapped: string, name: string): boolean =>
+    mapped.includes(`"${name}"`) || mapped.includes(`${name}:`);
+
+  it("resolves every name in the surfaces' own symbol tables", () => {
+    // The TABLES, imported, rather than a hardcoded list restating them: a
+    // symbol added to `CLAIM_SYMBOLS` or renamed in `E2EE_TRUST_SYMBOLS` is
+    // covered by construction, where a restated list silently is not.
+    const mapped = androidMap();
+    const names = new Set<string>([
+      ...E2EE_TRUST_SYMBOLS,
+      ...Object.values(CLAIM_SYMBOLS),
+      ...Object.values(E2EE_ACKNOWLEDGEMENT_SYMBOLS),
+    ]);
+    expect(names.size).toBeGreaterThan(0);
+    for (const name of names) expect(isMapped(mapped, name), name).toBe(true);
   });
 
-  it("uses no SF name in the trust screens that the map does not carry", () => {
-    const symbols = read(join(SRC, "components", "AppSymbol.tsx"));
-    const mapped = symbols.slice(
-      symbols.indexOf("ANDROID_ICON_BY_SF_SYMBOL"),
-      symbols.indexOf("ANDROID_ICON_BY_MATERIAL_NAME"),
-    );
-    for (const path of ALL_SOURCES.filter((candidate) =>
-      candidate.startsWith(join(SRC, "features", "e2ee")),
+  it("names no SF symbol in a trust screen that the tables do not carry", () => {
+    // NOT `name="…"`. Every glyph in this slice is chosen through a ternary or a
+    // table lookup, so an attribute-shaped scan saw exactly one of them:
+    // `name={view.x ? "checkmark.seal" : "questionmark.diamond"}` — which spans
+    // three lines after formatting — and `name={CLAIM_SYMBOLS[props.claim]}`
+    // were both invisible to it. On Android an unmapped name renders NOTHING,
+    // with no error, so the acknowledgement checkbox the §13.2 step 5 action is
+    // gated on would silently disappear on one platform.
+    //
+    // So the shape is matched instead of the attribute: any string literal that
+    // LOOKS like an SF name has to be one of the tables' own, which forces a new
+    // glyph through the tables and therefore through the check above.
+    const declared = new Set<string>([
+      ...E2EE_TRUST_SYMBOLS,
+      ...Object.values(CLAIM_SYMBOLS),
+      ...Object.values(E2EE_ACKNOWLEDGEMENT_SYMBOLS),
+    ]);
+    let seen = 0;
+    for (const path of NON_TEST_SOURCES.filter(
+      (candidate) =>
+        candidate.startsWith(join(SRC, "features", "e2ee")) && candidate.endsWith(".tsx"),
     )) {
-      const source = read(path);
-      for (const match of source.matchAll(/name=\{?"([a-z][a-z0-9.]*)"/gu)) {
+      for (const match of read(path).matchAll(/"([a-z][a-z0-9]*(?:\.[a-z0-9]+)+)"/gu)) {
         const name = match[1]!;
-        expect(
-          mapped.includes(`"${name}"`) || mapped.includes(`${name}:`),
-          `${path}: ${name}`,
-        ).toBe(true);
+        seen += 1;
+        expect(declared.has(name), `${path.slice(SRC.length + 1)}: ${name}`).toBe(true);
       }
     }
+    expect(seen).toBeGreaterThan(0);
   });
 });
 

@@ -6,33 +6,20 @@ import { CopyTextButton } from "../../components/CopyTextButton";
 import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import type { MobileE2eeIdentityDisplay } from "../../hostedHub/e2eeSession";
+import { CLAIM_SYMBOLS } from "./e2eeTrustSymbols";
 import type { E2eeChannelClaim, E2eeTrustAction } from "./e2eeTrustUiModel";
 
 /**
  * Presentational atoms for the §13 trust surfaces.
  *
- * Every decision, string, and action lives in `e2eeTrustUiModel.ts`; these are
- * layout. Only SF Symbols that already have an Android mapping in
- * `AppSymbol.tsx` appear here — `lock`, `lock.open`, `checkmark.shield`,
- * `exclamationmark.triangle` — because an unmapped name renders nothing at all
- * on Android, with no error. `E2eeTrustParts.test.ts` asserts the four are
- * mapped, since nothing else would catch a rename.
+ * Every decision, string, and action lives in `e2eeTrustUiModel.ts`, and every
+ * SF Symbol name in `e2eeTrustSymbols.ts`; these are layout. The names live
+ * outside this file because an unmapped SF name renders nothing at all on
+ * Android — no glyph, no error — and only a module the node runner can load is
+ * assertable: `e2eeTrustUiSurface.test.ts` checks every name in those tables
+ * against `AppSymbol.tsx`'s Android map, and refuses an SF-shaped literal in
+ * this file that the tables do not carry.
  */
-
-/** The SF names this file uses. Asserted against the Android map by a test. */
-export const E2EE_TRUST_SYMBOLS = [
-  "lock",
-  "lock.open",
-  "checkmark.shield",
-  "exclamationmark.triangle",
-] as const;
-
-const CLAIM_SYMBOLS: Record<E2eeChannelClaim, (typeof E2EE_TRUST_SYMBOLS)[number]> = {
-  verified: "checkmark.shield",
-  "pairing-only": "exclamationmark.triangle",
-  legacy: "lock.open",
-  none: "lock",
-};
 
 /**
  * The channel's §12.2 label, its icon, and the sentence that goes with it.
