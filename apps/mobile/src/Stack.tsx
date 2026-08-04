@@ -17,6 +17,8 @@ import { AppText as Text } from "./components/AppText";
 import { HardwareKeyboardCommandProvider } from "./features/keyboard/HardwareKeyboardCommandProvider";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
+import { E2eeNodeSecurityRouteScreen } from "./features/e2ee/E2eeNodeSecurityRouteScreen";
+import { E2eeNodeVerificationRouteScreen } from "./features/e2ee/E2eeNodeVerificationRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
 import { NewTaskRouteScreen } from "./features/newTask/NewTaskRouteScreen";
@@ -34,6 +36,7 @@ import { SettingsWorkspaceRouteScreen } from "./features/settings/SettingsWorksp
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
 import {
   MVP_ROOT_ROUTES,
+  MVP_SETTINGS_SHEET_ROUTES,
   WORKSPACE_OVERLAY_ROUTE_NAMES,
   type HeaderPreset,
   type MvpRouteDescriptor,
@@ -123,8 +126,22 @@ const SettingsSheetStack = createNativeStackNavigator({
     }),
     SettingsAccount: createNativeStackScreen({
       screen: HostedAccountRouteScreen,
-      linking: "account",
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsAccount.linking,
       options: { title: "Hub Account" },
+    }),
+    // docs/relay-e2ee-protocol.md §13.1.1's security UI and §13.2's ceremony.
+    // Both are pushes on both platforms (see `mvpRouteConfig.ts`): §13.1.1
+    // forbids an indication that dismisses into a verified-looking state, and a
+    // swipe-away sheet is the nearest thing this navigator has to one.
+    SettingsNodeSecurity: createNativeStackScreen({
+      screen: E2eeNodeSecurityRouteScreen,
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsNodeSecurity.linking,
+      options: { title: "Node security" },
+    }),
+    SettingsNodeVerification: createNativeStackScreen({
+      screen: E2eeNodeVerificationRouteScreen,
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsNodeVerification.linking,
+      options: { title: "Verify node" },
     }),
     SettingsAppearance: createNativeStackScreen({
       screen: SettingsAppearanceRouteScreen,

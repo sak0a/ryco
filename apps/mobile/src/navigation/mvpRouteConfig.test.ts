@@ -131,6 +131,8 @@ describe("MVP route config", () => {
         "SettingsAppearance",
         "SettingsClientStorage",
         "SettingsHub",
+        "SettingsNodeSecurity",
+        "SettingsNodeVerification",
         "SettingsWorkspace",
       ].toSorted(),
     );
@@ -142,5 +144,33 @@ describe("MVP route config", () => {
     expect(MVP_SETTINGS_SHEET_ROUTES.SettingsAccount.linking).toBe("account");
     expect("HostedSignIn" in MVP_ROOT_ROUTES).toBe(false);
     expect("SettingsAccount" in MVP_ROOT_ROUTES).toBe(false);
+  });
+
+  it("nests the relay-E2EE trust routes and gives each an explicit presentation", () => {
+    // docs/relay-e2ee-protocol.md §13.1.1 / §13.2: the security surface and the
+    // ceremony. Both are NESTED, so the root route set is unchanged by E2EE, and
+    // both are pushes on both platforms — §13.1.1 forbids an indication that
+    // "dismisses into a verified-looking state", and a swipe-away sheet is the
+    // closest thing this navigator has to one.
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeSecurity.linking).toBe("node-security");
+    expect(MVP_SETTINGS_SHEET_ROUTES.SettingsNodeVerification.linking).toBe("node-verification");
+    expect("SettingsNodeSecurity" in MVP_ROOT_ROUTES).toBe(false);
+    expect("SettingsNodeVerification" in MVP_ROOT_ROUTES).toBe(false);
+    for (const name of ["SettingsNodeSecurity", "SettingsNodeVerification"] as const) {
+      expect(MVP_SETTINGS_SHEET_ROUTES[name].ios.presentation).toBe("card");
+      expect(MVP_SETTINGS_SHEET_ROUTES[name].android.presentation).toBe("card");
+    }
+  });
+
+  it("gives every nested settings route both platform decisions", () => {
+    for (const [name, descriptor] of Object.entries(MVP_SETTINGS_SHEET_ROUTES)) {
+      expect(descriptor.ios.presentation, `ios presentation for ${name}`).toBeDefined();
+      expect(descriptor.android.presentation, `android presentation for ${name}`).toBeDefined();
+    }
+  });
+
+  it("keeps every nested settings linking path distinct", () => {
+    const paths = Object.values(MVP_SETTINGS_SHEET_ROUTES).map((route) => route.linking);
+    expect(new Set(paths).size).toBe(paths.length);
   });
 });

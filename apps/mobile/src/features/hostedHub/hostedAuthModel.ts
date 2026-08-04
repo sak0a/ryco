@@ -237,14 +237,34 @@ const HOSTED_ATTENTION_LABELS: ReadonlySet<string> = new Set([
   "Revoked",
   "Incompatible",
   "Failed",
+  // docs/relay-e2ee-protocol.md §13.1's release gate: an E2EE channel with no
+  // verified pin carries the §13.2 ceremony and no application payload. That is
+  // a state the owner has to act on, not a step on the way to one.
+  "Not verified",
 ]);
 
 /**
  * Token-class tone for one bounded status, mirroring `connectionTone.ts` for
  * the direct plane. The label is the runtime's own short label — the tone
  * chooses colour only, so a pill can never contradict the word inside it.
+ *
+ * THERE IS EXACTLY ONE OF THESE, AND IT READS `guarantee`. A second mapper
+ * beside it — "the E2EE one" — would be a second opinion about the property
+ * `docs/relay-e2ee-protocol.md` §2.2 forbids overstating, and the two would
+ * disagree the first time one of them was extended. The success token is
+ * therefore withheld from `legacy` here rather than at a call site: §12.2
+ * requires a fallen-back channel to be labeled legacy "in every user-facing
+ * surface", and a green pill reading `Legacy` is that label wearing the
+ * verified session's colour.
  */
 export function hostedStatusTone(indicator: HostedConnectionStatusIndicator): StatusTone {
+  if (indicator.guarantee === "legacy") {
+    return {
+      label: indicator.shortLabel,
+      pillClassName: "bg-warning-bg border border-warning-border",
+      textClassName: "text-warning",
+    };
+  }
   if (indicator.connected) {
     return {
       label: indicator.shortLabel,

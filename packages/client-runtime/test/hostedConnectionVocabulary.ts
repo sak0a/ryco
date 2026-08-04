@@ -1,6 +1,7 @@
 import {
   deriveHostedConnectionStatusText,
   HOSTED_BROWSER_STATUSES,
+  HOSTED_E2EE_CHANNEL_STATUSES,
   HOSTED_RELAY_TRANSPORT_STATUSES,
   HOSTED_RYCO_SESSION_STATUSES,
   HOSTED_SELECTION_STATUSES,
@@ -16,14 +17,22 @@ import {
  * exhaustive enumerations `connectionStatus.ts` exports.
  */
 
-/** Every combination of the four bounded inputs. Pure — nothing is rendered. */
+/** Every combination of the five bounded inputs. Pure — nothing is rendered. */
 export function everyHostedConnectionStatusInput(): ReadonlyArray<HostedConnectionStatusInput> {
   const combinations: HostedConnectionStatusInput[] = [];
   for (const browserStatus of HOSTED_BROWSER_STATUSES) {
     for (const sessionStatus of HOSTED_RYCO_SESSION_STATUSES) {
       for (const selectionStatus of HOSTED_SELECTION_STATUSES) {
         for (const transportStatus of HOSTED_RELAY_TRANSPORT_STATUSES) {
-          combinations.push({ browserStatus, sessionStatus, selectionStatus, transportStatus });
+          for (const e2eeStatus of HOSTED_E2EE_CHANNEL_STATUSES) {
+            combinations.push({
+              browserStatus,
+              sessionStatus,
+              selectionStatus,
+              transportStatus,
+              e2eeStatus,
+            });
+          }
         }
       }
     }
@@ -73,5 +82,28 @@ export function hostedConnectionConnectedByGateOrder(value: HostedConnectionStat
   if (value.selectionStatus === "authorization-removed") return false;
   if (value.selectionStatus === "revoked") return false;
   if (value.selectionStatus === "incompatible") return false;
-  return value.transportStatus === "online" && value.sessionStatus === "ready";
+  if (value.transportStatus !== "online" || value.sessionStatus !== "ready") return false;
+  // §4.4's channel state, restated from the input rather than read off the
+  // indicator: a `negotiating` channel has released nothing and a §13.1
+  // release-gated `unverified` one carries the pairing ceremony alone, so
+  // neither is a session the owner can use. `legacy` is usable and says so.
+  const e2eeStatus = value.e2eeStatus ?? "unavailable";
+  return e2eeStatus !== "negotiating" && e2eeStatus !== "unverified";
+}
+
+/**
+ * The §2.2 claim the state is entitled to, restated from the raw inputs.
+ *
+ * The second opinion for `HostedConnectionStatusIndicator.guarantee`: only a
+ * usable session on a channel that locked `e2ee` AND resolved to a verified pin
+ * may claim `e2ee`, and only a usable session on a fallen-back channel is
+ * labeled `legacy` (§12.2).
+ */
+export function hostedConnectionGuaranteeByGateOrder(
+  value: HostedConnectionStatusInput,
+): "none" | "legacy" | "e2ee" {
+  if (!hostedConnectionConnectedByGateOrder(value)) return "none";
+  if (value.e2eeStatus === "verified") return "e2ee";
+  if (value.e2eeStatus === "legacy") return "legacy";
+  return "none";
 }

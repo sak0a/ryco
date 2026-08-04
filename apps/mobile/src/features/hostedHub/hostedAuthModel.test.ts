@@ -1,5 +1,6 @@
 import type { EnvironmentId } from "@ryco/contracts";
 import {
+  HOSTED_CONNECTION_STATUS_INDICATORS,
   HOSTED_CONNECTION_STATUS_TEXTS,
   type HostedAccountActionStatus,
   type HostedHubState,
@@ -212,7 +213,11 @@ describe("hosted sign-in surface", () => {
     const view = signInView({ ...AUTHENTICATED, ...ONLINE_NODE });
     expect(view.surface).toBe("authenticated");
     expect(view.statusText).toBe("Online");
-    expect(view.statusIndicator).toEqual({ shortLabel: "Online", connected: true });
+    expect(view.statusIndicator).toEqual({
+      shortLabel: "Online",
+      connected: true,
+      guarantee: "none",
+    });
     expect(HOSTED_CONNECTION_STATUS_TEXTS).toContain(view.statusText);
     expect(view.detail).toBe("Signed in as Ada Lovelace.");
   });
@@ -403,22 +408,55 @@ describe("hosted account surface", () => {
 
 describe("hosted status tone", () => {
   it("colours only from the runtime's indicator and never relabels it", () => {
-    expect(hostedStatusTone({ shortLabel: "Online", connected: true })).toEqual({
+    expect(hostedStatusTone({ shortLabel: "Online", connected: true, guarantee: "none" })).toEqual({
       label: "Online",
       pillClassName: "bg-success-bg border border-success-border",
       textClassName: "text-success",
     });
-    expect(hostedStatusTone({ shortLabel: "Revoked", connected: false }).textClassName).toBe(
-      "text-danger-foreground",
-    );
-    expect(hostedStatusTone({ shortLabel: "Connecting", connected: false }).textClassName).toBe(
-      "text-foreground-muted",
-    );
+    expect(
+      hostedStatusTone({ shortLabel: "Revoked", connected: false, guarantee: "none" })
+        .textClassName,
+    ).toBe("text-danger-foreground");
+    expect(
+      hostedStatusTone({ shortLabel: "Connecting", connected: false, guarantee: "none" })
+        .textClassName,
+    ).toBe("text-foreground-muted");
+  });
+
+  it("withholds the connected token from a legacy channel and never relabels it", () => {
+    // docs/relay-e2ee-protocol.md §12.2: a channel that fell back is labeled
+    // legacy in every user-facing surface and displays no E2EE claim. A green
+    // pill reading `Legacy` is that label wearing the verified session's colour.
+    const legacy = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Legacy);
+    expect(legacy.label).toBe("Legacy");
+    expect(legacy.textClassName).not.toBe("text-success");
+    const encrypted = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted);
+    expect(encrypted.label).toBe("Encrypted");
+    expect(encrypted.textClassName).toBe("text-success");
+    // §13.1's release gate: an unverified E2EE channel is not a usable session.
+    expect(
+      hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS["Not verified"]).textClassName,
+    ).toBe("text-danger-foreground");
+  });
+
+  it("cannot contradict its own label, for any status in the vocabulary", () => {
+    for (const text of HOSTED_CONNECTION_STATUS_TEXTS) {
+      const indicator = HOSTED_CONNECTION_STATUS_INDICATORS[text];
+      const tone = hostedStatusTone(indicator);
+      // The label is the runtime's, never the mapper's.
+      expect(tone.label).toBe(indicator.shortLabel);
+      // And the success token is reachable only where §2.2 permits a claim:
+      // a usable connection that is not a labeled fallback.
+      if (tone.textClassName === "text-success") {
+        expect(indicator.connected).toBe(true);
+        expect(indicator.guarantee).not.toBe("legacy");
+      }
+    }
   });
 
   it("uses only design tokens — no hardcoded colours and no `dark:` prefixes", () => {
     for (const label of HOSTED_CONNECTION_STATUS_TEXTS) {
-      const tone = hostedStatusTone({ shortLabel: label, connected: false });
+      const tone = hostedStatusTone({ shortLabel: label, connected: false, guarantee: "none" });
       const classNames = `${tone.pillClassName} ${tone.textClassName}`;
       expect(classNames).not.toMatch(/#[0-9a-f]{3,8}\b/i);
       expect(classNames).not.toMatch(/\bdark:/);

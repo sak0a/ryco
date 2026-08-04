@@ -1,0 +1,114 @@
+import { useNavigation } from "@react-navigation/native";
+import { ScrollView, View } from "react-native";
+
+import { AppText as Text } from "../../components/AppText";
+import { showConfirmDialog } from "../../components/ConfirmDialogHost";
+import { isMobileHostedModeAvailable } from "../../hostedHub/state";
+import { E2eeActionButton, E2eeChannelCard, E2eeUnverifiedHubNotice } from "./E2eeTrustParts";
+import { deriveE2eeSecurityView, type E2eeTrustAction } from "./e2eeTrustUiModel";
+import { useMobileE2eeSession } from "./useMobileE2eeSession";
+
+/**
+ * The `docs/relay-e2ee-protocol.md` §13.1.1 security surface.
+ *
+ * Layout only. Which sections exist, what they say, which actions are offered
+ * and what each one calls are all `e2eeTrustUiModel.ts`'s, and are asserted by a
+ * node test — react-native ships untranspiled Flow, so a decision made in this
+ * file could not be.
+ */
+export function E2eeNodeSecurityRouteScreen() {
+  const navigation = useNavigation();
+  const session = useMobileE2eeSession();
+  const view = deriveE2eeSecurityView({
+    session,
+    hostedModeAvailable: isMobileHostedModeAvailable(),
+    // The unreadable-document case has no synchronous probe: the store reports
+    // it by refusing every mutation. Surfacing the owner action for it is left
+    // to the Hub-domain screen that already owns the scoped forgets, so this
+    // screen never offers a whole-namespace wipe it cannot justify.
+    trustStateUnreadable: false,
+    onOpenVerification: () => navigation.navigate("SettingsNodeVerification" as never),
+    now: () => Date.now(),
+  });
+
+  const confirm = (action: E2eeTrustAction) => {
+    if (!action.confirm) {
+      action.run();
+      return;
+    }
+    showConfirmDialog({
+      title: action.confirm.title,
+      message: action.confirm.message,
+      confirmText: action.confirm.confirmText,
+      destructive: action.confirm.destructive,
+      onConfirm: action.run,
+    });
+  };
+
+  if (!view.available) {
+    return (
+      <ScrollView contentInsetAdjustmentBehavior="automatic" className="flex-1 bg-screen">
+        <Text className="mx-5 mt-6 font-sans text-sm leading-relaxed text-foreground-muted">
+          This build has no Ryco Hub, so there is no relay connection to secure.
+        </Text>
+      </ScrollView>
+    );
+  }
+
+  return (
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      className="flex-1 bg-screen"
+      contentContainerStyle={{ paddingTop: 4, paddingBottom: 40 }}
+    >
+      <E2eeChannelCard claim={view.claim} label={view.channelLabel} message={view.channelMessage} />
+
+      {view.unverifiedHub ? (
+        <E2eeUnverifiedHubNotice
+          title={view.unverifiedHubTitle}
+          message={view.unverifiedHubMessage}
+          pair={view.pair}
+        />
+      ) : view.pair ? (
+        <E2eeActionButton action={view.pair} onConfirm={confirm} variant="quiet" />
+      ) : null}
+
+      {view.resolutions.map((action) => (
+        <E2eeActionButton
+          key={action.id}
+          action={action}
+          onConfirm={confirm}
+          variant={action.id === "start-pairing" ? "primary" : "quiet"}
+        />
+      ))}
+
+      {view.rePair ? <E2eeActionButton action={view.rePair} onConfirm={confirm} /> : null}
+      {view.destroyUnreadable ? (
+        <E2eeActionButton action={view.destroyUnreadable} onConfirm={confirm} />
+      ) : null}
+
+      {view.diagnostics.length > 0 ? (
+        <View className="mx-5 mt-8">
+          <Text className="pb-2.5 text-sm font-ryco-medium text-foreground-muted">
+            On this device
+          </Text>
+          <View className="overflow-hidden rounded-2xl border border-border bg-card">
+            {view.diagnostics.map((row, index) => (
+              <View
+                key={row.id}
+                className={`px-4 py-3 ${index > 0 ? "border-t border-border-subtle" : ""}`}
+              >
+                <Text className="font-sans text-sm leading-relaxed text-foreground-muted">
+                  {row.label}
+                </Text>
+              </View>
+            ))}
+          </View>
+          <Text className="mt-2.5 font-sans text-xs leading-relaxed text-foreground-muted">
+            {view.diagnosticsCaption}
+          </Text>
+        </View>
+      ) : null}
+    </ScrollView>
+  );
+}

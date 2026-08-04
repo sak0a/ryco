@@ -123,6 +123,20 @@ export interface E2eeVerifiedPinRecord extends E2eeTrustRecordBase {
   readonly state: "verified";
   /** §7.1 `ryco.node-key.v1` display form of the owner-verified identity key. */
   readonly verifiedFingerprint: string;
+  /**
+   * The raw Ed25519 identity key that fingerprint was computed from (§7.1).
+   *
+   * THE KEY, NOT THE SAFETY NUMBER. §13.2.1 situation 2 requires the previously
+   * verified fingerprint AND its §13.4 safety number to be displayed beside the
+   * newly presented pair, and the safety number is not recomputable from a
+   * fingerprint. §13.4 nevertheless says the value "never travels in any
+   * protocol message, log, or analytics surface" and that "only the
+   * pending-record copy of §13.2 is persisted" — the node's — so this record
+   * keeps the public key the value is derived FROM and recomputes the display
+   * form on demand. The key is not a secret; it is the same one the statement
+   * carries in the clear.
+   */
+  readonly verifiedIdentityPublicKey: Uint8Array;
   /** §7.5, recorded at promotion. An anchor for classification, never a proof. */
   readonly recordedContinuityId: string;
   /** §5.7's highest accepted generation, which §13.3 carries across a rotation. */

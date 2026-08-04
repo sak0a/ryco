@@ -45,6 +45,7 @@ function verified(overrides: {
     environmentId: null,
     state: "verified",
     verifiedFingerprint: "SHA256:aaaa",
+    verifiedIdentityPublicKey: new Uint8Array(32).fill(7),
     recordedContinuityId: overrides.continuityId ?? "continuity-1",
     acceptedPolicyGeneration: 3,
     latch: overrides.latched === "set" ? { kind: "set", setAt: 1 } : { kind: "unset" },
