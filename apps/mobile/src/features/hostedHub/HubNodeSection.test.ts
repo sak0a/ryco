@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   deriveHostedConnectionStatusIndicator,
   type HostedHubNode,
+  type HostedE2eeChannelStatus,
   type HostedHubState,
 } from "@ryco/client-runtime/authorization";
 import type { EnvironmentId } from "@ryco/contracts";
@@ -14,6 +15,7 @@ import type { EnvironmentId } from "@ryco/contracts";
 
 const hostedMock = vi.hoisted(() => ({
   available: true,
+  e2eeStatus: "unavailable" as HostedE2eeChannelStatus,
   state: undefined as HostedHubState | undefined,
   controller: {
     selectNode: vi.fn(),
@@ -67,6 +69,11 @@ vi.mock("../../hostedHub/state", () => ({
 // `ensureMobileHostedSession()` call and its own state, so it is mocked here
 // rather than re-implemented.
 vi.mock("./useHostedMode", () => ({ useHostedModeAvailable: () => hostedMock.available }));
+// The §13 projection seam, for the same reason: this renderer invokes function
+// components directly, so a `useSyncExternalStore` hook has no dispatcher.
+vi.mock("../e2ee/useMobileE2eeSession", () => ({
+  useMobileE2eeChannelStatus: () => hostedMock.e2eeStatus,
+}));
 
 vi.mock("../../connection/catalog", () => {
   const guard = tripwire.trap("connection/catalog");
@@ -145,11 +152,12 @@ function state(overrides: Partial<HostedHubState> = {}): HostedHubState {
 
 function model(
   overrides: Partial<HostedHubState> = {},
-  options: { readonly available?: boolean } = {},
+  options: { readonly available?: boolean; readonly e2eeStatus?: HostedE2eeChannelStatus } = {},
 ): HubNodeSectionModel {
   return deriveHubNodeSectionModel({
     state: state(overrides),
     available: options.available ?? true,
+    e2eeStatus: options.e2eeStatus ?? "unavailable",
     actions: hostedMock.controller,
     onSignIn: navigationMock.navigate,
   });
@@ -259,6 +267,7 @@ describe("Hub node actions", () => {
         nodes: [node(), node({ id: "node-2", label: "Build Linux", platformOs: "linux" })],
       }),
       available: true,
+      e2eeStatus: "unavailable",
       actions: hostedMock.controller,
       onSignIn: navigationMock.navigate,
       query: "build",

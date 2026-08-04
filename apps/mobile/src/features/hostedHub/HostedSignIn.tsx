@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { useHostedHubStore } from "../../hostedHub/state";
+import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
 import { deriveHostedSignInView } from "./hostedAuthModel";
 import { HostedRecoveryCodes } from "./HostedRecoveryCodes";
 import {
@@ -33,11 +34,15 @@ import { useHostedModeAvailable } from "./useHostedMode";
 export function HostedSignIn() {
   const navigation = useNavigation();
   const hostedModeAvailable = useHostedModeAvailable();
+  // §12.2 / §2.2: the connection pill names §4.4's locked mode, so a legacy
+  // channel never wears the verified session's word or its colour.
+  const e2eeStatus = useMobileE2eeChannelStatus();
   const state = useHostedHubStore((value) => value);
 
   const view = deriveHostedSignInView({
     state,
     hostedModeAvailable,
+    e2eeStatus,
     // The direct plane is always reachable, hosted mode or not: pairing a node
     // over the local network is a different plane with its own transport.
     onPairDevice: () => navigation.navigate("ConnectionsNew"),

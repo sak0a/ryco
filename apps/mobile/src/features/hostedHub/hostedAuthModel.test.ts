@@ -3,6 +3,7 @@ import {
   HOSTED_CONNECTION_STATUS_INDICATORS,
   HOSTED_CONNECTION_STATUS_TEXTS,
   type HostedAccountActionStatus,
+  type HostedE2eeChannelStatus,
   type HostedHubState,
 } from "@ryco/client-runtime/authorization";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -107,11 +108,15 @@ const ONLINE_NODE: Partial<HostedHubState> = {
 
 function signInView(
   overrides: Partial<HostedHubState> = {},
-  options: { readonly hostedModeAvailable?: boolean } = {},
+  options: {
+    readonly hostedModeAvailable?: boolean;
+    readonly e2eeStatus?: HostedE2eeChannelStatus;
+  } = {},
 ): HostedSignInView {
   return deriveHostedSignInView({
     state: hostedState(overrides),
     hostedModeAvailable: options.hostedModeAvailable ?? true,
+    e2eeStatus: options.e2eeStatus ?? "unavailable",
     onPairDevice: vi.fn(),
     onDone: vi.fn(),
   });
@@ -122,11 +127,13 @@ function accountView(
   options: {
     readonly hostedModeAvailable?: boolean;
     readonly actionStatus?: HostedAccountActionStatus;
+    readonly e2eeStatus?: HostedE2eeChannelStatus;
   } = {},
 ): HostedAccountView {
   return deriveHostedAccountView({
     state: hostedState(overrides),
     hostedModeAvailable: options.hostedModeAvailable ?? true,
+    e2eeStatus: options.e2eeStatus ?? "unavailable",
     onSignIn: vi.fn(),
     actionStatus: options.actionStatus ?? "idle",
   });
@@ -187,6 +194,7 @@ describe("hosted sign-in surface", () => {
     const view = deriveHostedSignInView({
       state: hostedState({ accountStatus: "authenticated", ...AUTHENTICATED }),
       hostedModeAvailable: false,
+      e2eeStatus: "unavailable",
       onPairDevice,
       onDone: vi.fn(),
     });
@@ -279,6 +287,7 @@ describe("hosted account surface", () => {
     const view = deriveHostedAccountView({
       state: hostedState(),
       hostedModeAvailable: true,
+      e2eeStatus: "unavailable",
       onSignIn,
       actionStatus: "idle",
     });

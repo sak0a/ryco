@@ -52,6 +52,9 @@ vi.mock("react", async (importOriginal) => {
     useState: <T>(initial: T | (() => T)) =>
       [typeof initial === "function" ? (initial as () => T)() : initial, () => undefined] as const,
     useEffect: (effect: () => void) => mountEffects.push(effect),
+    // The §13 channel-status projection the hosted pill reads. There is no
+    // dispatcher in this renderer, and the snapshot is all a render needs.
+    useSyncExternalStore: <T>(_subscribe: unknown, getSnapshot: () => T) => getSnapshot(),
   };
 });
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => navigationMock }));

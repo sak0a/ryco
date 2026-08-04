@@ -1,3 +1,4 @@
+import type { HostedE2eeChannelStatus } from "@ryco/client-runtime/authorization";
 import { useSyncExternalStore } from "react";
 
 import {
@@ -19,4 +20,20 @@ export function useMobileE2eeSession(): MobileE2eeSessionState {
     getMobileE2eeSessionState,
     getMobileE2eeSessionState,
   );
+}
+
+const channelStatus = (): HostedE2eeChannelStatus => getMobileE2eeSessionState().channel;
+
+/**
+ * What §4.4 locked on the channel behind this session, for the hosted status
+ * derivation.
+ *
+ * Every hosted pill takes it: §12.2 requires a fallen-back channel to be labeled
+ * legacy "in every user-facing surface", and a pill that reads its state from the
+ * transport alone renders a fallback and a verified session identically. It is
+ * narrowed to the one field so a change to any other part of the projection does
+ * not re-render a connection pill.
+ */
+export function useMobileE2eeChannelStatus(): HostedE2eeChannelStatus {
+  return useSyncExternalStore(subscribeMobileE2eeSession, channelStatus, channelStatus);
 }
