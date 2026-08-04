@@ -4,6 +4,7 @@ import {
   deriveHostedConnectionStatusText,
   resolveHostedRpcCapability,
   type HostedAccountActionStatus,
+  type HostedConnectionGuarantee,
   type HostedConnectionStatusIndicator,
   type HostedConnectionStatusText,
   type HostedE2eeChannelStatus,
@@ -263,6 +264,53 @@ const HOSTED_ATTENTION_LABELS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The tone a §2.2 claim carries on its own, before connectedness is consulted.
+ *
+ * EXHAUSTIVE OVER THE GUARANTEE, NOT A CHAIN OF COMPARISONS, and that is the
+ * whole point: `guarantee` is the one property §2.2 forbids overstating, so
+ * adding a member to it has to force a colour decision rather than fall through
+ * to whatever the previous `if` did not claim. An `if (guarantee === "legacy")`
+ * chain absorbed `web` silently into the connected branch and handed §2.2's web
+ * NX row the verified session's token; the `satisfies never` below is what makes
+ * the next member a compile error instead.
+ *
+ * `undefined` means "this claim does not decide the tone" — `none` is the
+ * absence of a claim and `e2ee` is the one claim the success token is for, so
+ * both are left to connectedness.
+ */
+function hostedClaimTone(
+  guarantee: HostedConnectionGuarantee,
+): Omit<StatusTone, "label"> | undefined {
+  switch (guarantee) {
+    case "legacy":
+      // §12.2 requires a fallen-back channel to be labeled legacy "in every
+      // user-facing surface", and a green pill reading `Legacy` is that label
+      // wearing the verified session's colour.
+      return {
+        pillClassName: "bg-warning-bg border border-warning-border",
+        textClassName: "text-warning",
+      };
+    case "web":
+      // §2.2's *Web, unsigned ephemeral* row and §2.4's web ceiling: a usable,
+      // encrypted channel whose code the Hub serves, so it is neither the
+      // fallback amber marks nor the row the success token means. It gets the
+      // one remaining connected tone — informational — so the scale reads
+      // legacy, then web, then verified, rather than grouping web with the row
+      // §2.2 forbids it from claiming.
+      return {
+        pillClassName: "bg-accent-bg border border-accent-border",
+        textClassName: "text-accent-strong",
+      };
+    case "none":
+    case "e2ee":
+      return undefined;
+    default:
+      guarantee satisfies never;
+      return undefined;
+  }
+}
+
+/**
  * Token-class tone for one bounded status, mirroring `connectionTone.ts` for
  * the direct plane. The label is the runtime's own short label — the tone
  * chooses colour only, so a pill can never contradict the word inside it.
@@ -270,20 +318,13 @@ const HOSTED_ATTENTION_LABELS: ReadonlySet<string> = new Set([
  * THERE IS EXACTLY ONE OF THESE, AND IT READS `guarantee`. A second mapper
  * beside it — "the E2EE one" — would be a second opinion about the property
  * `docs/relay-e2ee-protocol.md` §2.2 forbids overstating, and the two would
- * disagree the first time one of them was extended. The success token is
- * therefore withheld from `legacy` here rather than at a call site: §12.2
- * requires a fallen-back channel to be labeled legacy "in every user-facing
- * surface", and a green pill reading `Legacy` is that label wearing the
- * verified session's colour.
+ * disagree the first time one of them was extended. The rule is stated
+ * positively: the success token is reachable only from a CONNECTED session
+ * whose guarantee is `none` or `e2ee`. Every other claim is answered above.
  */
 export function hostedStatusTone(indicator: HostedConnectionStatusIndicator): StatusTone {
-  if (indicator.guarantee === "legacy") {
-    return {
-      label: indicator.shortLabel,
-      pillClassName: "bg-warning-bg border border-warning-border",
-      textClassName: "text-warning",
-    };
-  }
+  const claimed = hostedClaimTone(indicator.guarantee);
+  if (claimed !== undefined) return { label: indicator.shortLabel, ...claimed };
   if (indicator.connected) {
     return {
       label: indicator.shortLabel,
