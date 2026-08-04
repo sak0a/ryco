@@ -261,6 +261,12 @@ describe("a selection change while a preparation is in flight", () => {
     // projection must not describe a channel for the account that just left.
     expect(getMobileE2eeSessionState().selection).toBeNull();
     expect(getMobileE2eeSessionState().channel).toBe("unavailable");
+    // Nothing was assigned: re-selecting the same node finds an empty slot and
+    // fails the channel closed rather than handing out the abandoned attempt.
+    selectNode("node_signed_out");
+    const context = host();
+    resolveMobileRelayE2eeProvider()!(context.host);
+    expect(context.closes.length).toBe(1);
   });
 });
 
