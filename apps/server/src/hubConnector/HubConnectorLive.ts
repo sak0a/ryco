@@ -201,6 +201,16 @@ const offlineE2eeSurface = {
       establish: () => ({ kind: "refused" as const, reason: "authorization_withdrawn" as const }),
       release: () => undefined,
     }),
+    // §13.2 step 3 for a runtime that holds no record set at all: there is no
+    // pending slot for a record to be created in, so the decision is the one
+    // that creates nothing and the commit owes nothing. The refusal reason is
+    // §13.6 instrumentation for a listing this surface also cannot serve.
+    evaluatePairingAdmission: () => ({
+      kind: "refused" as const,
+      reason: "pending_cap_global" as const,
+      spentPairingWindow: false,
+    }),
+    commitPairingAdmission: async () => undefined,
   },
   // The owner commands are the one part of the E2EE surface that is NOT
   // answerable offline. A withdrawal's acknowledgement means "no channel
