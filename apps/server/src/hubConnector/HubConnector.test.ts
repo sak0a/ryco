@@ -171,7 +171,7 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
       evaluatePairingAdmission: () => ({
         kind: "refused" as const,
         reason: "pending_cap_global" as const,
-        spentPairingWindow: false,
+        spentPairingWindow: undefined,
       }),
       commitPairingAdmission: async () => undefined,
     },

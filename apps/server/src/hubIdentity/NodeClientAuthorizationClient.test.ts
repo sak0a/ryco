@@ -502,6 +502,54 @@ describe("node client authorization pairing window", () => {
     expect((await test.stored()).pairingWindow?.spentAt).toBeUndefined();
   });
 
+  it("never spends a window the decision did not match, however the gap is filled", async () => {
+    // §13.2 step 3 defers the durable spend past the reject and the close, and
+    // the owner can open a NEW window in that gap — the two halves of the
+    // decision are therefore separated here exactly as the relay path separates
+    // them, rather than through `pair`.
+    const test = await harness();
+    await test.client.openPairingWindow(fingerprintBytes(900));
+    const decision = test.client.evaluatePairingAdmission({
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      clientIdentityFingerprint: fingerprintBytes(900),
+      safetyNumber: SAFETY_NUMBER,
+    });
+    expect(decision.kind).toBe("admit");
+
+    // The owner names a SECOND device before the commit lands.
+    await test.client.openPairingWindow(fingerprintBytes(901));
+    await test.client.commitPairingAdmission(decision);
+
+    // §13.6's `spent` is "some other attempt consumed the window — impossible
+    // without the owner's own client key". An attempt that never named device
+    // 901 may not raise it, durably or in the listing.
+    const stored = await test.stored();
+    expect(stored.pairingWindow?.clientIdentityFingerprint).toBe(fingerprint(901));
+    expect(stored.pairingWindow?.spentAt).toBeUndefined();
+    expect((await test.client.list()).pairingWindow).toMatchObject({ spent: false });
+    // And the reservation — the owner's only way past a saturated pending cap —
+    // is still there for the device they just named.
+    expect(await test.pair(key(901))).toMatchObject({ kind: "admit" });
+    expect((await test.stored()).pairingWindow?.spentAt).toBe(START);
+  });
+
+  it("still spends the matched window when the gap changed nothing", async () => {
+    // The other side of the identity check: a commit that lands with the SAME
+    // window still open owes the durable spend, so the check above cannot be
+    // satisfied by never spending anything.
+    const test = await harness();
+    await test.client.openPairingWindow(fingerprintBytes(900));
+    const decision = test.client.evaluatePairingAdmission({
+      hubOrigin: HUB_ORIGIN,
+      accountId: ACCOUNT_ID,
+      clientIdentityFingerprint: fingerprintBytes(900),
+      safetyNumber: SAFETY_NUMBER,
+    });
+    await test.client.commitPairingAdmission(decision);
+    expect((await test.stored()).pairingWindow?.spentAt).toBe(START);
+  });
+
   it("matches the discriminator on the whole digest and never a prefix of it", async () => {
     // §11.2 names key and fingerprint equality (§7.1) among the comparisons that
     // MUST be constant-time, and §13.2 step 3 now reaches this one from an

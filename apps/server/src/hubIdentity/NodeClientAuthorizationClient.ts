@@ -186,25 +186,44 @@ export interface NodeClientAuthorizationListing {
   readonly pairingWindow: NodeClientPairingWindowState | undefined;
 }
 
+/**
+ * WHICH window this decision spent its reservation on, or `undefined` for none.
+ *
+ * AN IDENTITY AND NOT A FLAG, because the durable spend rides a commit that
+ * §13.2 step 3 defers past the reject and the close, and the owner can open a
+ * NEW window in that gap — from the CLI in this process or in another one. A
+ * bare boolean tells the commit only that SOME window was spent, so it stamps
+ * `spentAt` on whichever window is open when it lands: a window this attempt
+ * never matched is marked spent, which is precisely §13.6's "some other attempt
+ * consumed the window — impossible without the owner's own client key" signal
+ * raised falsely, and the device the owner just named silently loses the
+ * reservation that is its only way past a saturated pending cap.
+ *
+ * The value is `windowLatch`'s, so a window that expired, was closed, or was
+ * re-opened in the gap simply loses the durable spend — which §13.2 already
+ * classifies as a benign best-effort loss.
+ */
+export type SpentPairingWindow = string | undefined;
+
 /** The §13.2 step 3 decision, taken entirely in memory before anything is emitted. */
 export type NodeClientPendingAdmission =
   /** A record already exists under this key; §13.2 creates and refreshes nothing. */
   | {
       readonly kind: "existing";
       readonly status: E2eeClientAuthorizationStatus;
-      readonly spentPairingWindow: boolean;
+      readonly spentPairingWindow: SpentPairingWindow;
     }
   | {
       readonly kind: "refused";
       readonly reason: "pending_cap_global" | "pending_cap_per_account";
-      readonly spentPairingWindow: boolean;
+      readonly spentPairingWindow: SpentPairingWindow;
     }
   | {
       readonly kind: "admit";
       readonly entry: StoredClientAuthorizationEntry;
       /** The eviction target SELECTED here and removed only at commit (§13.2 step 3). */
       readonly evictIndexKey: string | undefined;
-      readonly spentPairingWindow: boolean;
+      readonly spentPairingWindow: SpentPairingWindow;
     };
 
 /** What a §13.6 withdrawal actually terminated, for the operator acknowledgement. */
@@ -935,10 +954,11 @@ export async function makeNodeClientAuthorizationClient(options: {
     // and the CLI would show the owner a window still waiting for a device that
     // is already on file.
     const window = openWindow(file, at);
+    const latch = window === undefined ? undefined : windowLatch(window);
     const reserved =
       window !== undefined &&
       window.spentAt === undefined &&
-      spentWindowLatch !== windowLatch(window) &&
+      spentWindowLatch !== latch &&
       // §11.2 names key and fingerprint equality (§7.1) among the comparisons
       // that MUST be constant-time, and §13.2 step 3 now reaches this one from
       // an unauthenticated peer's hello: it is the same digest equality
@@ -952,15 +972,17 @@ export async function makeNodeClientAuthorizationClient(options: {
     // Spent the moment it is granted, whatever this attempt's outcome (§13.6),
     // and spent in memory because §13.2 step 3 keeps every durable write off the
     // response path. Two attempts cannot both receive it; the durable spend
-    // rides the post-close commit.
-    if (reserved) spentWindowLatch = windowLatch(window);
+    // rides the post-close commit, and carries the window's identity so that it
+    // can only ever land on the window this decision actually matched.
+    const spentPairingWindow: SpentPairingWindow = reserved ? latch : undefined;
+    if (spentPairingWindow !== undefined) spentWindowLatch = spentPairingWindow;
 
     const existing = lookupClassified(indexKey, at);
     // §13.6: a first-seen key produces a pending record. A key that already has
     // one — in ANY class — is not first-seen, and re-creating it would both
     // reset its retention and resurrect a record the owner revoked.
     if (existing !== undefined) {
-      return { kind: "existing", status: existing.status, spentPairingWindow: reserved };
+      return { kind: "existing", status: existing.status, spentPairingWindow };
     }
 
     const partition = clientAuthorizationPartitionKey({ hubOrigin, accountId });
@@ -973,7 +995,7 @@ export async function makeNodeClientAuthorizationClient(options: {
       reason: "pending_cap_global" | "pending_cap_per_account",
     ): NodeClientPendingAdmission => {
       refusedPairingAttempts = Math.min(refusedPairingAttempts + 1, MAX_REFUSED_PAIRING_ATTEMPTS);
-      return { kind: "refused", reason, spentPairingWindow: reserved };
+      return { kind: "refused", reason, spentPairingWindow };
     };
 
     let evict: StoredClientAuthorizationEntry | undefined;
@@ -1007,7 +1029,7 @@ export async function makeNodeClientAuthorizationClient(options: {
         ...(reserved ? { pairingReservedAt: at } : {}),
       },
       evictIndexKey: evict === undefined ? undefined : clientAuthorizationIndexKey(evict),
-      spentPairingWindow: reserved,
+      spentPairingWindow,
     };
   };
 
@@ -1017,13 +1039,26 @@ export async function makeNodeClientAuthorizationClient(options: {
     // Only the durable spend is owed for an outcome that creates nothing, and
     // an attempt that neither spent the window nor was admitted writes nothing
     // at all — §13.2 step 3's refusal path must stay free of durable writes.
-    if (admission.kind !== "admit" && !admission.spentPairingWindow) return;
+    if (admission.kind !== "admit" && admission.spentPairingWindow === undefined) return;
     const at = now();
     await commit((current) => {
       let next = current;
-      if (admission.spentPairingWindow) {
+      if (admission.spentPairingWindow !== undefined) {
         const window = openWindow(next, at);
-        if (window !== undefined && window.spentAt === undefined) {
+        // THE WINDOW THIS DECISION MATCHED, and never merely the one open now.
+        // The owner may have opened a new window between the §8.6 step 6
+        // decision and this commit, and stamping `spentAt` on that one would
+        // report §13.6's "some other attempt consumed the window" for an attempt
+        // that never named its device — and strip that device of the
+        // reservation, which is the owner's only way past a saturated pending
+        // cap. A window that expired, closed, or was re-opened in the gap
+        // therefore loses the durable spend, which §13.2 already makes a benign
+        // best-effort loss.
+        if (
+          window !== undefined &&
+          window.spentAt === undefined &&
+          windowLatch(window) === admission.spentPairingWindow
+        ) {
           next = { ...next, pairingWindow: { ...window, spentAt: at } };
         }
       }
@@ -1044,7 +1079,10 @@ export async function makeNodeClientAuthorizationClient(options: {
       if (overPartition || pending.length >= E2EE_PENDING_CLIENTS_MAX_GLOBAL) {
         // An eviction is licensed by the owner's window and by nothing else, and
         // only while a cap is still breached: a slot freed between the decision
-        // and here means the selected victim is simply not evicted.
+        // and here means the selected victim is simply not evicted. The license
+        // is the RESERVATION this decision was granted, not the window's present
+        // state — §13.2 selects the victim before emission, so a window re-opened
+        // in the gap neither grants nor withdraws it.
         const scope = overPartition ? inPartition : pending;
         const selected =
           admission.evictIndexKey === undefined
@@ -1055,7 +1093,10 @@ export async function makeNodeClientAuthorizationClient(options: {
                   !holdsReservation(entry, at),
               );
         const victim =
-          selected ?? (admission.spentPairingWindow ? selectPendingEviction(scope, at) : undefined);
+          selected ??
+          (admission.spentPairingWindow === undefined
+            ? undefined
+            : selectPendingEviction(scope, at));
         if (victim === undefined) return next;
         const victimKey = clientAuthorizationIndexKey(victim);
         pending = pending.filter((entry) => clientAuthorizationIndexKey(entry) !== victimKey);

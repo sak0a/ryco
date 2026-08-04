@@ -307,8 +307,8 @@ export function authorizationFor(
     // `NodeE2eePairingAdmission.test.ts`.
     evaluatePairingAdmission: () =>
       record === undefined
-        ? { kind: "refused", reason: "pending_cap_global", spentPairingWindow: false }
-        : { kind: "existing", status: record.status, spentPairingWindow: false },
+        ? { kind: "refused", reason: "pending_cap_global", spentPairingWindow: undefined }
+        : { kind: "existing", status: record.status, spentPairingWindow: undefined },
     commitPairingAdmission: async () => undefined,
   };
 }
