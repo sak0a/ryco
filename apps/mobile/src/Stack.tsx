@@ -40,6 +40,7 @@ import {
   WORKSPACE_OVERLAY_ROUTE_NAMES,
   type HeaderPreset,
   type MvpRouteDescriptor,
+  type MvpSettingsRouteDescriptor,
 } from "./navigation/mvpRouteConfig";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "./native/native-glass";
 import { nativeHeaderScrollEdgeEffects } from "./native/StackHeader";
@@ -99,6 +100,37 @@ const SHEET_SOLID_HEADER_OPTIONS: AppScreenOptions = {
   unstable_navigationItemStyle: undefined,
 };
 
+/**
+ * Map a nested settings descriptor to the active platform's native-stack
+ * options, exactly as `platformPresentationOptions` does for the root routes.
+ *
+ * It exists because the descriptors did not reach the navigator: every screen
+ * below hand-wrote its `options`, so `MVP_SETTINGS_SHEET_ROUTES`'s per-platform
+ * presentation was a constant two tests asserted about and nothing consumed.
+ * `docs/relay-e2ee-protocol.md` §13.1.1 forbids an indication that "dismisses
+ * into a verified-looking state", and a swipe-away sheet is the nearest thing
+ * this navigator has to one — a property worth more than the fact that nobody
+ * has set a presentation yet.
+ */
+function settingsRouteOptions(
+  name: keyof typeof MVP_SETTINGS_SHEET_ROUTES,
+  title: string,
+): AppScreenOptions {
+  // Widened to the declared descriptor: the table is `as const`, so the literal
+  // type of a route that is a plain push carries no sheet fields at all and the
+  // shape below would stop compiling the moment one of them is set.
+  const descriptor: MvpSettingsRouteDescriptor = MVP_SETTINGS_SHEET_ROUTES[name];
+  const platform = Platform.OS === "android" ? descriptor.android : descriptor.ios;
+  const options: AppScreenOptions = { title };
+  if (platform.presentation !== "card") options.presentation = platform.presentation;
+  if (platform.sheetAllowedDetents) options.sheetAllowedDetents = [...platform.sheetAllowedDetents];
+  if (platform.sheetGrabberVisible !== undefined) {
+    options.sheetGrabberVisible = platform.sheetGrabberVisible;
+  }
+  if (platform.headerShown !== undefined) options.headerShown = platform.headerShown;
+  return options;
+}
+
 // Full-screen Settings stack. Routine node switching and pairing live in the
 // Nodes Home mode; Settings owns account, defaults, appearance, storage, and
 // About without duplicating the connection browser.
@@ -111,23 +143,23 @@ const SettingsSheetStack = createNativeStackNavigator({
   screens: {
     Settings: createNativeStackScreen({
       screen: SettingsRouteScreen,
-      linking: "",
-      options: { title: "Settings" },
+      linking: MVP_SETTINGS_SHEET_ROUTES.Settings.linking,
+      options: settingsRouteOptions("Settings", "Settings"),
     }),
     SettingsHub: createNativeStackScreen({
       screen: SettingsHubRouteScreen,
-      linking: "hub",
-      options: { title: "Hub" },
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsHub.linking,
+      options: settingsRouteOptions("SettingsHub", "Hub"),
     }),
     SettingsWorkspace: createNativeStackScreen({
       screen: SettingsWorkspaceRouteScreen,
-      linking: "workspace",
-      options: { title: "Workspace defaults" },
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsWorkspace.linking,
+      options: settingsRouteOptions("SettingsWorkspace", "Workspace defaults"),
     }),
     SettingsAccount: createNativeStackScreen({
       screen: HostedAccountRouteScreen,
       linking: MVP_SETTINGS_SHEET_ROUTES.SettingsAccount.linking,
-      options: { title: "Hub Account" },
+      options: settingsRouteOptions("SettingsAccount", "Hub Account"),
     }),
     // docs/relay-e2ee-protocol.md §13.1.1's security UI and §13.2's ceremony.
     // Both are pushes on both platforms (see `mvpRouteConfig.ts`): §13.1.1
@@ -136,27 +168,27 @@ const SettingsSheetStack = createNativeStackNavigator({
     SettingsNodeSecurity: createNativeStackScreen({
       screen: E2eeNodeSecurityRouteScreen,
       linking: MVP_SETTINGS_SHEET_ROUTES.SettingsNodeSecurity.linking,
-      options: { title: "Node security" },
+      options: settingsRouteOptions("SettingsNodeSecurity", "Node security"),
     }),
     SettingsNodeVerification: createNativeStackScreen({
       screen: E2eeNodeVerificationRouteScreen,
       linking: MVP_SETTINGS_SHEET_ROUTES.SettingsNodeVerification.linking,
-      options: { title: "Verify node" },
+      options: settingsRouteOptions("SettingsNodeVerification", "Verify node"),
     }),
     SettingsAppearance: createNativeStackScreen({
       screen: SettingsAppearanceRouteScreen,
-      linking: "appearance",
-      options: { title: "Appearance" },
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsAppearance.linking,
+      options: settingsRouteOptions("SettingsAppearance", "Appearance"),
     }),
     SettingsClientStorage: createNativeStackScreen({
       screen: SettingsClientStorageRouteScreen,
-      linking: "client-storage",
-      options: { title: "Client Storage" },
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsClientStorage.linking,
+      options: settingsRouteOptions("SettingsClientStorage", "Client Storage"),
     }),
     SettingsAbout: createNativeStackScreen({
       screen: SettingsAboutRouteScreen,
-      linking: "about",
-      options: { title: "About" },
+      linking: MVP_SETTINGS_SHEET_ROUTES.SettingsAbout.linking,
+      options: settingsRouteOptions("SettingsAbout", "About"),
     }),
   },
 });

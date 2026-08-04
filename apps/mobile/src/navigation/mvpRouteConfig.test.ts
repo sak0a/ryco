@@ -1,3 +1,8 @@
+// The app's `tsconfig` is the react-native one, which resolves no Node builtins;
+// this test runs under Node, so it pulls the types in for itself.
+/// <reference types="node" />
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -172,5 +177,60 @@ describe("MVP route config", () => {
   it("keeps every nested settings linking path distinct", () => {
     const paths = Object.values(MVP_SETTINGS_SHEET_ROUTES).map((route) => route.linking);
     expect(new Set(paths).size).toBe(paths.length);
+  });
+});
+
+/**
+ * The table above is data; the navigator is what ships.
+ *
+ * Nothing tied the two together, so deleting a screen block from `Stack.tsx`
+ * left every assertion above passing while `navigate("SettingsNodeSecurity")`
+ * became a silent no-op — the §13.1.1 persistent indication and the §13.2
+ * ceremony unreachable in the built app. The `as never` casts on the navigate
+ * calls mean the type checker does not close the gap either, so it is closed
+ * here, over the source.
+ */
+describe("the settings navigator matches the settings route table", () => {
+  const SRC = join(import.meta.dirname, "..");
+  const stack = readFileSync(join(SRC, "Stack.tsx"), "utf8");
+
+  function registeredSettingsScreens(): readonly string[] {
+    const block = stack.slice(
+      stack.indexOf("const SettingsSheetStack = createNativeStackNavigator({"),
+      stack.indexOf("export const WORKSPACE_OVERLAY_ROUTES"),
+    );
+    return [...block.matchAll(/^ {4}(\w+): createNativeStackScreen\(\{$/gmu)].map(
+      (match) => match[1]!,
+    );
+  }
+
+  it("registers exactly the routes the table declares", () => {
+    expect(registeredSettingsScreens().toSorted()).toEqual(
+      Object.keys(MVP_SETTINGS_SHEET_ROUTES).toSorted(),
+    );
+  });
+
+  it("applies each descriptor's platform presentation rather than a hand-written option", () => {
+    // Otherwise the `ios`/`android` fields are a constant the tests above assert
+    // about and the navigator ignores, and §13.1.1's "no sheet that dismisses
+    // into a verified-looking state" holds only by accident.
+    for (const name of Object.keys(MVP_SETTINGS_SHEET_ROUTES)) {
+      expect(stack, name).toContain(`settingsRouteOptions("${name}",`);
+      expect(stack, name).toContain(`MVP_SETTINGS_SHEET_ROUTES.${name}.linking`);
+    }
+  });
+
+  it("reaches the §13.1.1 security surface from the settings screen", () => {
+    const settings = readFileSync(
+      join(SRC, "features", "settings", "SettingsRouteScreen.tsx"),
+      "utf8",
+    );
+    expect(settings).toContain('navigate("SettingsNodeSecurity"');
+    // …and the ceremony is reached from the security surface itself.
+    const security = readFileSync(
+      join(SRC, "features", "e2ee", "E2eeNodeSecurityRouteScreen.tsx"),
+      "utf8",
+    );
+    expect(security).toContain('navigate("SettingsNodeVerification"');
   });
 });
