@@ -19,8 +19,8 @@ Framework at the revision named in [section 3](#3-protocol-names-spec-revision-a
 
 | Path                                         | Lines | Role                                     |
 | -------------------------------------------- | ----- | ---------------------------------------- |
-| `packages/shared/src/relayE2eeNoise.ts`      | 818   | The state machine. The audit target.     |
-| `packages/shared/src/relayE2eeNoise.test.ts` | 916   | Its colocated suite, 41 cases. Evidence. |
+| `packages/shared/src/relayE2eeNoise.ts`      | 946   | The state machine. The audit target.     |
+| `packages/shared/src/relayE2eeNoise.test.ts` | 1,039 | Its colocated suite, 44 cases. Evidence. |
 
 The module is heavily commented; the executable surface is roughly half its line count. It
 is a single file by protocol obligation, not by accident: §14.1 permits **exactly one** first-party
@@ -218,7 +218,7 @@ Timing and memory-residue observations are welcome as context; they are known an
 | Evidence                                       | Status                                                                   |
 | ---------------------------------------------- | ------------------------------------------------------------------------ |
 | The specification                              | Landed: `docs/relay-e2ee-protocol.md`, normative, ~6,200 lines           |
-| Colocated unit and golden-transcript suite     | Landed: `packages/shared/src/relayE2eeNoise.test.ts`, 41 cases           |
+| Colocated unit and golden-transcript suite     | Landed: `packages/shared/src/relayE2eeNoise.test.ts`, 44 cases           |
 | Official Noise vectors (§16.3 family F15)      | Landed: `packages/shared/fixtures/e2ee/v1/f15-noise-core-vectors.json`   |
 | Cross-implementation vectors                   | Partly landed by F15; see below                                          |
 | Property-based state-machine suite             | Required by §14.1 before the audit closes; framework already in the repo |
@@ -310,3 +310,22 @@ the same mechanism the §16.1 fixture generator uses.
 
 **Reporting.** Findings anchored to specification section numbers are the most useful form, since
 every rule this module implements has one.
+
+## 8. Readiness
+
+**The module is stable and the audit can be commissioned.** The state machine was written before the
+implementation phases that exercise it, and it has now been driven from both directions: the node
+responder (`apps/server/src/hubConnector/NodeE2eeChannelSession.ts`) and the client initiator
+(`packages/client-runtime/src/relay/relayE2eeInitiator.ts`) both complete real IK handshakes against
+it, and the §16.3 corpus is generated through it. That was the point of auditing after those phases
+rather than before: the file has not changed since the client and node work landed, so an audit
+commissioned now is auditing the code that ships.
+
+Two §14.1 evidence obligations in the section 6 table remain outstanding — the property-based
+state-machine suite and the adversarial hostile-relay suite. Both are independent of the audit and
+neither is a deliverable the auditor is asked to produce; they are scheduled for the hardening phase.
+An auditor should be told they are pending rather than discover it.
+
+What the audit gates, precisely: §14.1 makes it a precondition for flipping the `requireE2EE` default
+(§12.3), and nothing else. Every tier below that default ships without it. §17.1 carries the
+unaudited state machine as the protocol's largest open risk until the audit closes.
