@@ -41,6 +41,11 @@ import {
   isWebE2eeSelectionLatched,
   latchWebE2eeSelection,
 } from "../../hostedHub/e2eeLatch";
+import {
+  beginWebE2eeChannelAttempt,
+  resetWebE2eeSession,
+  webE2eeSessionState,
+} from "../../hostedHub/e2eeSession";
 
 // docs/relay-e2ee-protocol.md §16.4: the web-facing families "MUST also run in
 // the web browser test suite". This file carries the WEB-TIER-SPECIFIC half of
@@ -87,10 +92,13 @@ function negotiationRecordTypes(socket: MockWebSocket): number[] {
 beforeEach(() => {
   vi.spyOn(Date, "now").mockReturnValue(FIXTURE_NOW);
   clearWebE2eeLatches();
+  resetWebE2eeSession();
 });
 
 afterEach(() => {
   clearWebE2eeLatches();
+  // §13's projection is module state and outlives a case that locked it.
+  resetWebE2eeSession();
   vi.restoreAllMocks();
 });
 
@@ -279,6 +287,80 @@ describe("§12.1.1 the degenerate web mapping, evaluated at channel.accept", () 
   });
 });
 
+/** One logged argument, flattened as far as it can be, for a string scan. */
+function serializedForLeakScan(argument: unknown): string {
+  if (typeof argument === "string") return argument;
+  let serialized = "";
+  try {
+    serialized = JSON.stringify(argument) ?? "";
+  } catch {
+    // Cyclic or non-serializable; `String()` below is the whole scan for it.
+  }
+  return `${String(argument)} ${serialized}`;
+}
+
+/**
+ * One complete NX session against the real §8.6 node half, to the `e2ee` lock.
+ *
+ * Shared by the two cases below because the second one — §13.5's storage and
+ * logging prohibition — is only worth anything if the spies are installed while
+ * the code is actually published, and that is the instant this function reaches.
+ *
+ * THE PRODUCTION SINK IS CALLED, NOT REPLACED. `webRelayE2eeAttempt` wires
+ * `onWebVerificationCode` to `publishWebE2eeVerificationCode`, and a case that
+ * substituted its own collector would run the handshake with the real publish
+ * path switched off — so a write or a log added inside that function would be
+ * unobserved by the very spies installed to catch it. The collector wraps the
+ * production callback instead of standing in for it.
+ *
+ * `beginWebE2eeChannelAttempt` is what `resolveWebRelayE2eeProvider` does at
+ * factory time, and it is done by hand here for the same reason
+ * `webRelayE2eeAttempt` is exported: §12.1.1 reads `hubOrigin` off the document,
+ * and the §16.3 fixture's origin is not the one this page is served from, so the
+ * real provider cannot resolve a selection in this suite. Without it the §13.5
+ * publish would hit the module's `unavailable` refusal and never land.
+ */
+async function completeNxSession() {
+  const statement = fixtureStatement(USABLE_STATEMENT_CASE);
+  const decoded = decodeNodeE2eeCapabilityStatement(statement);
+  if (decoded.kind !== "ok") throw new Error("the committed statement no longer decodes");
+
+  const codes: string[] = [];
+  const attempt = webRelayE2eeAttempt(SELECTION);
+  beginWebE2eeChannelAttempt();
+  const harness = createRelayHarness({
+    e2ee: (host: RelayE2eeHost) =>
+      makeRelayE2eeInitiator({
+        host,
+        attempt: {
+          ...attempt,
+          onWebVerificationCode: (code) => {
+            codes.push(code);
+            attempt.onWebVerificationCode?.(code);
+          },
+        },
+      }),
+  });
+  authenticateRelay(harness.socket);
+
+  // A submission made while `negotiating` is buffered, never written in the
+  // clear — and it is the byte that proves the flush went out ENCRYPTED.
+  harness.facade.send(new TextEncoder().encode('{"buffered":1}'));
+  expect(outboundRelayPayloads(harness.socket)).toEqual([]);
+
+  deliverRelayPayload(harness.socket, encodeE2eeCapabilityCarrier(statement));
+  await settleRelay();
+  const hello = outboundRelayPayloads(harness.socket).at(-1);
+  expect(hello).toBeDefined();
+
+  const accept = respondAsNode(Uint8Array.from(hello!));
+  if (accept.kind !== "accepted") throw new Error("the node half refused the hello");
+  deliverRelayPayload(harness.socket, accept.record, 1);
+  await settleRelay();
+
+  return { harness, codes, accept, nodeIdentityPublicKey: decoded.value.identityPublicKey };
+}
+
 describe("§8 the NX handshake completes in Chromium and yields §13.5's code", () => {
   it("locks e2ee, renders the WebSAS the node would show, and stops writing plaintext", async () => {
     // The one case that proves this tier is actually ON: a real NX handshake
@@ -288,47 +370,21 @@ describe("§8 the NX handshake completes in Chromium and yields §13.5's code", 
     // shows the string, the owner compares them out of band — so the assertion
     // is that the client's rendered code equals the one derived from the NODE's
     // view of the same ephemeral (`peerEphemeralPublicKey`, read off message 1).
-    const statement = fixtureStatement(USABLE_STATEMENT_CASE);
-    const decoded = decodeNodeE2eeCapabilityStatement(statement);
-    expect(decoded.kind).toBe("ok");
-    if (decoded.kind !== "ok") return;
-
-    const codes: string[] = [];
-    const attempt = webRelayE2eeAttempt(SELECTION);
-    const harness = createRelayHarness({
-      e2ee: (host: RelayE2eeHost) =>
-        makeRelayE2eeInitiator({
-          host,
-          attempt: { ...attempt, onWebVerificationCode: (code) => void codes.push(code) },
-        }),
-    });
-    authenticateRelay(harness.socket);
-
-    // A submission made while `negotiating` is buffered, never written in the
-    // clear — and it is the byte that proves the flush went out ENCRYPTED.
-    harness.facade.send(new TextEncoder().encode('{"buffered":1}'));
-    expect(outboundRelayPayloads(harness.socket)).toEqual([]);
-
-    deliverRelayPayload(harness.socket, encodeE2eeCapabilityCarrier(statement));
-    await settleRelay();
-    const hello = outboundRelayPayloads(harness.socket).at(-1);
-    expect(hello).toBeDefined();
-
-    const accept = respondAsNode(Uint8Array.from(hello!));
-    expect(accept.kind).toBe("accepted");
-    if (accept.kind !== "accepted") return;
-    deliverRelayPayload(harness.socket, accept.record, 1);
-    await settleRelay();
+    const { harness, codes, accept, nodeIdentityPublicKey } = await completeNxSession();
 
     // §13.5: once, and only at the `e2ee` lock.
     expect(codes).toHaveLength(1);
     expect(codes[0]).toBe(
       deriveE2eeWebSas({
-        nodeIdentityPublicKey: decoded.value.identityPublicKey,
+        nodeIdentityPublicKey,
         webEphemeralPublicKey: accept.peerEphemeralPublicKey,
         sessionBindingHash: accept.sessionBindingHash,
       }).display,
     );
+    // …and it reached the §13 projection, which is the only thing a surface can
+    // read. The production `onWebVerificationCode` is the sink, so this is the
+    // whole path from the Noise ephemeral to the value a UI would render.
+    expect(webE2eeSessionState().verificationCode).toBe(codes[0]);
 
     // Everything after the hello is an envelope: the buffered submission was
     // flushed protected, and no plaintext RPC ever reached the relay.
@@ -338,6 +394,44 @@ describe("§8 the NX handshake completes in Chromium and yields §13.5's code", 
       expect(classifyPostStripPayload(payload).kind).toBe("envelope");
     }
     expect(relayCloseReasons(harness.socket)).toEqual([]);
+  });
+
+  it("writes and logs nothing while §13.5's code is published", async () => {
+    // §13.5: the `WebSAS` "is ephemeral display state: never logged, never
+    // persisted, never sent to analytics". The latch case above installs the
+    // same storage spies but never reaches the `e2ee` lock, so no code is ever
+    // published while they are watching — a `sessionStorage.setItem` or a
+    // `console.info` on the publish path was unobserved by every suite.
+    //
+    // The console sinks are spied ALONGSIDE storage because a display string
+    // leaks through either, and §13.5 names both.
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const removeItem = vi.spyOn(Storage.prototype, "removeItem");
+    const clearStorage = vi.spyOn(Storage.prototype, "clear");
+    const openDatabase = vi.spyOn(IDBFactory.prototype, "open");
+    const sinks = (["debug", "error", "info", "log", "trace", "warn"] as const).map((name) =>
+      vi.spyOn(console, name).mockImplementation(() => undefined),
+    );
+
+    const { codes } = await completeNxSession();
+
+    // The sweep is not vacuous: a code WAS published through the production sink
+    // inside the spied window, and the projection is holding it.
+    expect(codes).toHaveLength(1);
+    const code = codes[0]!;
+    expect(webE2eeSessionState().verificationCode).toBe(code);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(clearStorage).not.toHaveBeenCalled();
+    expect(openDatabase).not.toHaveBeenCalled();
+    for (const sink of sinks) {
+      for (const call of sink.mock.calls) {
+        // Every argument, SERIALIZED and not merely `String()`-ed: the code
+        // reaching a sink nested in an object is the same disclosure as passing
+        // it bare, and `String({ code })` is `[object Object]`.
+        expect(call.map(serializedForLeakScan).join(" ")).not.toContain(code);
+      }
+    }
   });
 });
 
