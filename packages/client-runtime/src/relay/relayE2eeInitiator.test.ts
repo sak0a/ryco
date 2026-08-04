@@ -19,12 +19,14 @@ import {
 } from "@ryco/shared/relayE2eeConstants";
 import {
   decodeE2eeClientHello,
+  E2eeClientHandshake,
   E2eeNodeHandshake,
   type E2eeAdvertisedChannelMaterial,
   type E2eeClientAuthorization,
   type E2eeClientHandshakeCredentials,
   type E2eeHandshakeChannel,
 } from "@ryco/shared/relayE2eeHandshake";
+import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
 import { e2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import { E2eeRecordSession, type E2eeSessionSecrets } from "@ryco/shared/relayE2eeSession";
 import {
@@ -35,6 +37,7 @@ import {
   encodeNodeE2eeCapabilitySigningEnvelope,
   encodeNodeE2eeCapabilityTranscript,
   encodeNodeE2eePrekeyTranscript,
+  encodeNodeIdentityContinuityTranscript,
   type NodeE2eeCapabilityTranscriptInput,
 } from "@ryco/shared/relayE2eeTranscripts";
 import {
@@ -46,7 +49,7 @@ import {
   encodeE2eeNegotiationRecord,
 } from "@ryco/shared/relayE2eeWire";
 import { RELAY_CHUNK_CAPABILITY_PRELUDE } from "@ryco/shared/relayMessageChunks";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { encodeBase64Url } from "./base64url";
 import {
@@ -57,6 +60,8 @@ import {
 import {
   HostedRelayEngine,
   RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+  RELAY_MESSAGE_TOO_LARGE_MESSAGE,
+  RELAY_PEER_UNSUPPORTED_MESSAGE,
   type HostedRelaySocketCallbacks,
   type RelaySocket,
   type RelayTimers,
@@ -184,6 +189,34 @@ const STATEMENT = statement();
 /** A well-formed, correctly signed statement that is UNUSABLE: §5.2 step 8. */
 const UNUSABLE_STATEMENT = statement({ e2eeVersionMin: 2, e2eeVersionMax: 2 });
 
+// ─── §7.5: the identity this node rotated AWAY from ──────────────────────────
+//
+// The pin records the outgoing key; the statement presents the current one and
+// carries the certificate that authenticates the step between them. This is the
+// only configuration in which §8.3 elements 9 and 17 have two distinguishable
+// sources, because §5.2 proves them byte-equal in every other one.
+
+const PREVIOUS_SEED = bytes("101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f");
+const PREVIOUS_PUBLIC = ed25519.getPublicKey(PREVIOUS_SEED);
+const PREVIOUS_IDENTITY_FINGERPRINT = e2eeKeyFingerprint("node-identity", PREVIOUS_PUBLIC);
+const PREVIOUS_KEY_ID = "nkey_DDDDDDDDDDDDDDDDDDDDDD";
+const ROTATION_TRANSCRIPT = encodeNodeIdentityContinuityTranscript({
+  hubOrigin: HUB_ORIGIN,
+  continuityId: CONTINUITY_ID,
+  generation: 1,
+  oldKeyId: PREVIOUS_KEY_ID,
+  oldPublicKey: PREVIOUS_PUBLIC,
+  newKeyId: IDENTITY_KEY_ID,
+  newPublicKey: NODE_IDENTITY_PUBLIC,
+  createdAt: CREATED_AT,
+});
+/** §7.5: signed by the OUTGOING key, which is what authenticates the step. */
+const ROTATION = {
+  transcript: ROTATION_TRANSCRIPT,
+  signature: ed25519.sign(ROTATION_TRANSCRIPT, PREVIOUS_SEED),
+};
+const ROTATED_STATEMENT = statement({ continuityChain: [ROTATION] });
+
 const NODE_CHANNEL: E2eeHandshakeChannel = {
   hubOrigin: HUB_ORIGIN,
   channelId: CHANNEL_ID,
@@ -199,6 +232,11 @@ const NODE_ADVERTISED: E2eeAdvertisedChannelMaterial = {
   agreementPublicKey: NODE_AGREEMENT_PUBLIC,
   continuityChainTranscripts: [],
   continuityId: CONTINUITY_ID,
+};
+/** The same node after the §7.5 rotation above: same identity, one chain entry. */
+const ROTATED_ADVERTISED: E2eeAdvertisedChannelMaterial = {
+  ...NODE_ADVERTISED,
+  continuityChainTranscripts: [ROTATION_TRANSCRIPT],
 };
 const APPROVED: E2eeClientAuthorization = {
   status: "approved",
@@ -273,6 +311,14 @@ function manualTimers() {
   };
   return {
     timers,
+    /**
+     * How many timers are still armed. Exposed because §4.4's "`T_ADV` is
+     * cancelled when a hello is sent or a mode is locked" is a statement about
+     * the CANCELLATION and not only about what the callback does when it fires:
+     * the callbacks' state re-reads make a leaked timer harmless to the protocol
+     * and invisible to every other assertion, while React Native still holds it.
+     */
+    armed: (): number => pending.size,
     advance(ms: number): void {
       clock += ms;
       // Snapshotted: a fired callback may arm or cancel another timer, and
@@ -289,6 +335,12 @@ function manualTimers() {
 const flush = async (): Promise<void> => {
   await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 };
+
+// Several cases below spy on shared prototypes to observe steps §11.2 requires
+// and the wire cannot show; none of them may leak into the next case.
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function attemptOf(overrides: Partial<RelayE2eeInitiatorAttempt> = {}): RelayE2eeInitiatorAttempt {
   return {
@@ -315,8 +367,11 @@ interface Harness {
   readonly callbacks: HostedRelaySocketCallbacks;
   readonly diagnostics: string[];
   readonly unexpected: string[];
+  readonly statements: NodeE2eeCapabilityVerification[];
   readonly machine: () => RelayE2eeInitiator;
   readonly advance: (ms: number) => void;
+  /** Timers still armed on this channel's machine (§4.4's cancellation rule). */
+  readonly armed: () => number;
 }
 
 function harness(
@@ -327,6 +382,7 @@ function harness(
   const clock = manualTimers();
   const diagnostics: string[] = [];
   const unexpected: string[] = [];
+  const statements: NodeE2eeCapabilityVerification[] = [];
   const events = {
     onOpen: vi.fn(),
     onData: vi.fn(),
@@ -353,6 +409,7 @@ function harness(
         attempt: attemptOf({
           onDiagnostic: (diagnostic) => diagnostics.push(diagnostic.row),
           onUnexpectedNode: (evidence) => unexpected.push(evidence),
+          onStatement: (verification) => statements.push(verification),
           ...overrides,
         }),
       });
@@ -376,9 +433,73 @@ function harness(
     callbacks,
     diagnostics,
     unexpected,
+    statements,
     machine: () => machine!,
     advance: clock.advance,
+    armed: clock.armed,
   };
+}
+
+/** `E2eeClientHandshake.prototype.destroy`, captured before any case spies on it. */
+const HANDSHAKE_DESTROY = E2eeClientHandshake.prototype.destroy;
+
+/**
+ * The machine on a HAND-BUILT host.
+ *
+ * Two properties need one. §11.2's procedure has an ORDER — erase the partial
+ * handshake state, then close — and the engine's own teardown hides it by
+ * destroying the handshake a second time from `dispose`, so a count taken
+ * through the engine cannot tell the step from its cleanup. And the §4.5 row
+ * below is preempted on the real path by the engine's admission bound, which is
+ * the same quantity §4.5 derives the ceiling from.
+ */
+function standalone(
+  overrides: Partial<RelayE2eeInitiatorAttempt> = {},
+  limits: RelayLimits = RELAY_INITIAL_LIMITS,
+) {
+  const emitted: Uint8Array[] = [];
+  const events: string[] = [];
+  const machine = makeRelayE2eeInitiator({
+    host: {
+      limits,
+      channel: {
+        channelId: CHANNEL_ID,
+        capability: "ryco.rpc",
+        effectiveRole: "operator",
+        relayProtocolMajor: 1,
+        relayProtocolMinor: 2,
+      },
+      admit: () => ({
+        release: () => undefined,
+        send: (message: Uint8Array) => {
+          emitted.push(Uint8Array.from(message));
+          return true;
+        },
+      }),
+      lockMode: (mode) => void events.push(`lock:${mode}`),
+      close: (value) =>
+        void events.push(`close:${value === undefined ? "clean" : value.closeReason}`),
+      now: () => NOW,
+      setTimeout: () => 1,
+      clearTimeout: () => undefined,
+    },
+    attempt: attemptOf({
+      onDiagnostic: (diagnostic) => events.push(`diagnostic:${diagnostic.row}`),
+      ...overrides,
+    }),
+  });
+  /** Record `destroy` in the same sequence, so §11.2's order is observable. */
+  const watchDestroy = (): void => {
+    vi.spyOn(E2eeClientHandshake.prototype, "destroy").mockImplementation(
+      function (this: E2eeClientHandshake) {
+        events.push("destroy");
+        // The pristine method, captured before any spy: re-reading the prototype
+        // here would find the previous case's spy and call it forever.
+        HANDSHAKE_DESTROY.call(this);
+      },
+    );
+  };
+  return { machine, emitted, events, watchDestroy };
 }
 
 /** One node-to-client `data` frame carrying a post-strip payload at `sequence`. */
@@ -417,14 +538,15 @@ function closeReasons(socket: MockRelaySocket): (string | undefined)[] {
 
 const CARRIER = encodeE2eeCapabilityCarrier(STATEMENT);
 const UNUSABLE_CARRIER = encodeE2eeCapabilityCarrier(UNUSABLE_STATEMENT);
+const ROTATED_CARRIER = encodeE2eeCapabilityCarrier(ROTATED_STATEMENT);
 const LEGACY_PING = utf8('{"_tag":"Ping"}');
 const LEGACY_RPC = utf8('{"_tag":"Request","id":1}');
 
 /** The node half of one handshake, from the hello this client emitted. */
-function respond(hello: Uint8Array, now = NOW) {
+function respond(hello: Uint8Array, now = NOW, advertised = NODE_ADVERTISED) {
   const node = new E2eeNodeHandshake({
     channel: NODE_CHANNEL,
-    advertised: NODE_ADVERTISED,
+    advertised,
     advertisedVersionMin: 1,
     advertisedVersionMax: 1,
     agreementSecretKey: NODE_AGREEMENT_SECRET,
@@ -608,6 +730,20 @@ describe("§4.4 client transition table — rows K5–K8 (negotiation records)",
     expect(test.machine().mode()).toBe("closed");
   });
 
+  it("K8: closes FATAL-PRE with P3 on a reject that no hello asked for", async () => {
+    // §4.4: "a reject with no hello matches no guard of K7 and falls to K8". The
+    // wire observable is the same generic close either way, so the row is the
+    // whole of the difference — and an operator reading P17 would be told a
+    // handshake failed on a channel that never started one.
+    const test = harness();
+    deliver(test.socket, encodeE2eeHandshakeReject());
+    await flush();
+
+    expect(test.diagnostics).toEqual(["P3"]);
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+  });
+
   it("K8: closes FATAL-PRE on a misdirected negotiation record", async () => {
     const test = harness();
     // `E2EEClientHello` is a client-to-node record (§3.4).
@@ -650,6 +786,28 @@ describe("§4.4 client transition table — rows K9–K12 (plaintext and stray c
     await flush();
 
     expect(test.diagnostics).toEqual(["P18"]);
+  });
+
+  it("K10: closes FATAL-PRE on non-carrier legacy JSON while local policy forbids legacy", async () => {
+    // The strict-legacy half of the row, on the path a hostile Hub actually
+    // controls: §12.1.1's "never legacy on this Hub" policy is what row K10
+    // enforces against one unsolicited plaintext frame, and it is the guard that
+    // decides the channel here — the selection is legacy-eligible and no hello
+    // has been sent, so every other clause of the row is false.
+    const test = harness({ selectionClass: "legacy-eligible", legacyPermitted: false });
+    test.engine.send(utf8('{"_tag":"Request","id":1}'));
+
+    deliver(test.socket, LEGACY_PING);
+    await flush();
+
+    expect(test.diagnostics).toEqual(["P18"]);
+    expect(test.machine().mode()).toBe("closed");
+    // The buffered send is discarded unflushed and the frame never reaches the
+    // parser: a policy that forbids legacy forbids the release valve with it.
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.events.onData).not.toHaveBeenCalled();
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
   });
 
   it("K11: closes FATAL-PRE on an envelope before establishment", async () => {
@@ -929,22 +1087,29 @@ describe("§4.4 send buffering — no plaintext byte reaches the wire while nego
     expect(emitted[1]![0]).toBe(0x01);
   });
 
-  it("refuses a submission past E2EE_NEGOTIATION_BUFFER_MAX_BYTES without failing the channel", () => {
-    const limits = RelayLimits.make({
-      ...RELAY_INITIAL_LIMITS,
-      maxControlFrameBytes: 4_096,
-      maxDataChunkBytes: 8_192,
-      maxQueuedBytes: 12_288,
-    });
-    // `maxQueuedBytes − maxControlFrameBytes`, and one buffered message fits in
-    // a single data chunk — the flush below is not what this case is bounding.
-    const bound = e2eeNegotiationBufferMaxBytes(limits);
-    const test = harness({}, limits);
+  /**
+   * Small enough to fill by hand, and every buffered message below fits in a
+   * single data chunk — what the flush does with a multi-chunk message is the
+   * next case's subject, not this one's.
+   */
+  const SMALL_LIMITS = RelayLimits.make({
+    ...RELAY_INITIAL_LIMITS,
+    maxControlFrameBytes: 4_096,
+    maxDataChunkBytes: 8_192,
+    maxQueuedBytes: 32_768,
+  });
 
-    // The charge is the buffer's own running total against the same aggregate
-    // budget the relay send queue enforces, per relay connection.
-    test.engine.send(new Uint8Array(bound - 2_048).fill(0x7b));
-    expect(() => test.engine.send(new Uint8Array(2_049).fill(0x7b))).toThrow(
+  it("refuses a submission past E2EE_NEGOTIATION_BUFFER_MAX_BYTES without failing the channel", () => {
+    const test = harness({}, SMALL_LIMITS);
+
+    // The charge is the queue's own — every planned payload plus its per-entry
+    // overhead — against the same aggregate budget the relay send queue
+    // enforces, per relay connection.
+    for (let index = 0; index < 4; index += 1) test.engine.send(new Uint8Array(6_000).fill(0x7b));
+    expect(test.engine.bufferedAmount).toBeLessThanOrEqual(
+      e2eeNegotiationBufferMaxBytes(SMALL_LIMITS),
+    );
+    expect(() => test.engine.send(new Uint8Array(6_000).fill(0x7b))).toThrow(
       RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
     );
 
@@ -959,15 +1124,119 @@ describe("§4.4 send buffering — no plaintext byte reaches the wire while nego
     expect(() => test.engine.send(new Uint8Array(32).fill(0x7b))).not.toThrow();
   });
 
-  it("does not change the shape of any pre-existing refusal", () => {
-    const test = harness();
+  it("keeps a buffer filled to its bound flushable in full", () => {
+    // §4.4 charges the buffer "as though the bytes had already been enqueued",
+    // so everything the engine accepted must fit in the queue it is drained
+    // into. Charging the raw byte lengths leaves the queue's per-entry and
+    // per-chunk overhead unfunded, and the flush of a full buffer then trips the
+    // queue's own bound — turning a submission-time, non-fatal §11.4 refusal into
+    // the channel-fatal `slow_consumer` §11.4 forbids.
+    const test = harness({}, SMALL_LIMITS);
+    let held = 0;
+    for (;;) {
+      try {
+        test.engine.send(new Uint8Array(64).fill(0x7b));
+      } catch {
+        break;
+      }
+      held += 1;
+    }
+    expect(held).toBeGreaterThan(0);
+
     test.advance(T_ADV);
 
-    // Every legacy refusal still throws synchronously, with its own message,
-    // which both facades map by string.
-    expect(() => test.engine.send(new Uint8Array(RELAY_INITIAL_LIMITS.maxQueuedBytes * 4))).toThrow(
-      "RPC payload exceeds the maximum relay message size.",
+    expect(test.callbacks.onFailure).not.toHaveBeenCalled();
+    expect(test.machine().mode()).toBe("legacy");
+    expect(outbound(test.socket)).toHaveLength(held);
+    expect(test.engine.bufferedAmount).toBe(0);
+  });
+
+  it("keeps the one hello a negotiating channel may still owe admissible", () => {
+    // §11.4: ordinary backpressure MUST NOT be escalated to a channel-fatal
+    // condition. The buffer and the handshake draw on ONE aggregate budget, so a
+    // buffer entitled to all of it would leave `host.admit` unable to take the
+    // hello — and §4.4's no-legacy-after-validated-evidence rule leaves a client
+    // that cannot send it only FATAL-PRE. The buffer is bounded below the
+    // aggregate by exactly that record instead.
+    const test = harness({}, SMALL_LIMITS);
+    // Filled to the last byte it will take, coarsely and then finely, so the
+    // only headroom left is whatever the bound deliberately holds back.
+    for (const size of [6_000, 64]) {
+      for (;;) {
+        try {
+          test.engine.send(new Uint8Array(size).fill(0x7b));
+        } catch {
+          break;
+        }
+      }
+    }
+
+    deliver(test.socket, CARRIER);
+
+    return flush().then(() => {
+      const emitted = outbound(test.socket);
+      expect(emitted).toHaveLength(1);
+      expect(emitted[0]![0]).toBe(0x02);
+      expect(test.diagnostics).toEqual([]);
+      expect(test.machine().mode()).toBe("negotiating");
+    });
+  });
+
+  it("does not change the shape of any pre-existing refusal", () => {
+    // Every legacy refusal still throws synchronously with its own message,
+    // which both facades map by string — AND the `negotiating` buffer raises the
+    // same one for the same submission, because §4.4 requires the §4.5
+    // per-message bound at submission and a caller cannot observe the mode it
+    // would otherwise have to branch on.
+    const negotiating = harness();
+    expect(() =>
+      negotiating.engine.send(new Uint8Array(RELAY_INITIAL_LIMITS.maxQueuedBytes * 4)),
+    ).toThrow(RELAY_MESSAGE_TOO_LARGE_MESSAGE);
+    // §11.4: sender-local, so the channel is untouched and still usable.
+    expect(negotiating.callbacks.onFailure).not.toHaveBeenCalled();
+    expect(negotiating.machine().mode()).toBe("negotiating");
+    expect(() => negotiating.engine.send(LEGACY_PING)).not.toThrow();
+
+    const legacy = harness();
+    legacy.advance(T_ADV);
+    expect(() =>
+      legacy.engine.send(new Uint8Array(RELAY_INITIAL_LIMITS.maxQueuedBytes * 4)),
+    ).toThrow(RELAY_MESSAGE_TOO_LARGE_MESSAGE);
+  });
+
+  it("refuses an over-ceiling submission at submission on the e2ee sink too", async () => {
+    // The other sink, and the worse disposition: `emit` refuses an over-ceiling
+    // body as §11.4 `e2ee_message_too_large` and the flush has no caller to tell,
+    // so a message admitted here would be dropped in silence on a channel the
+    // application has just been told is open.
+    const test = harness();
+    const overCeiling = e2eeChannelSizeBudget(RELAY_INITIAL_LIMITS).plaintextCeiling + 1;
+    expect(() => test.engine.send(new Uint8Array(overCeiling))).toThrow(
+      RELAY_MESSAGE_TOO_LARGE_MESSAGE,
     );
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    const accept = respond(Uint8Array.from(outbound(test.socket).at(-1)!));
+    deliver(test.socket, accept.record, 1);
+    await flush();
+
+    // The refusal left the channel usable: it still establishes.
+    expect(test.machine().mode()).toBe("e2ee");
+    expect(outbound(test.socket)).toHaveLength(1);
+  });
+
+  it("refuses a submission the peer's framing cannot carry, with the legacy message", () => {
+    // A peer that has not advertised chunk support bounds every message at
+    // `maxDataChunkBytes`, far below the §4.5 ceiling. Row K13 against a node
+    // that never advertises is exactly that channel, and the flush is where the
+    // refusal would otherwise land — with `transfer_limit` and no caller.
+    const test = harness();
+    expect(() =>
+      test.engine.send(new Uint8Array(RELAY_INITIAL_LIMITS.maxDataChunkBytes + 1)),
+    ).toThrow(RELAY_PEER_UNSUPPORTED_MESSAGE);
+    expect(test.callbacks.onFailure).not.toHaveBeenCalled();
+    expect(test.machine().mode()).toBe("negotiating");
   });
 });
 
@@ -1190,6 +1459,64 @@ describe("§8.3 provenance — elements 9 and 17 come from the resolved verified
     );
   });
 
+  it("takes the ROTATED fingerprint, not the pinned one, once the chain authenticates", async () => {
+    // The only direction in which elements 9 and 17 can be told apart. Under
+    // `pin-unchanged` §5.2 has already proved the two sources byte-equal — step
+    // 2 recomputes the statement's fingerprint from its own key and the chain
+    // walk compares the pin against it — so a rotation is what shows whose value
+    // the hello carries. §8.3 wants the CURRENT identity, authenticated back to
+    // the pin by the §7.5 chain; committing the pin's outgoing fingerprint would
+    // build a context the node cannot reconstruct.
+    const test = harness({
+      selectionClass: "latched",
+      verifiedPin: {
+        identityFingerprint: PREVIOUS_IDENTITY_FINGERPRINT,
+        continuityId: CONTINUITY_ID,
+      },
+    });
+    deliver(test.socket, ROTATED_CARRIER);
+    await flush();
+
+    const hello = decodeE2eeClientHello(Uint8Array.from(outbound(test.socket).at(-1)!));
+    if (hello.kind !== "ok") throw new Error("expected a decodable hello");
+    const context = (nodeIdentityFingerprint: Uint8Array): Uint8Array =>
+      e2eeAuthorizationContextCommitment(
+        encodeE2eeAuthorizationContext({
+          hubOrigin: HUB_ORIGIN,
+          channelId: CHANNEL_ID,
+          relayProtocolMajor: 1,
+          relayProtocolMinor: 2,
+          e2eeVersion: 1,
+          suiteId: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+          nodeId: NODE_ID,
+          nodeIdentityFingerprint,
+          clientIntendedCapability: "ryco.rpc",
+          clientIntendedRole: "operator",
+          channelOpenCapability: "ryco.rpc",
+          channelOpenEffectiveRole: "operator",
+          nodeAgreementFingerprint: e2eeKeyFingerprint("agreement", NODE_AGREEMENT_PUBLIC),
+          nodeContinuityChainTranscripts: [ROTATION.transcript],
+          nodeContinuityId: CONTINUITY_ID,
+          client: {
+            tier: "native",
+            accountId: ACCOUNT_ID,
+            identityFingerprint: e2eeKeyFingerprint("client-identity", CLIENT_IDENTITY_PUBLIC),
+            agreementFingerprint: e2eeKeyFingerprint("agreement", CLIENT_AGREEMENT_PUBLIC),
+          },
+        }),
+      );
+    const committed = Buffer.from(hello.value.contextCommitment).toString("hex");
+    expect(committed).toBe(Buffer.from(context(NODE_IDENTITY_FINGERPRINT)).toString("hex"));
+    expect(committed).not.toBe(Buffer.from(context(PREVIOUS_IDENTITY_FINGERPRINT)).toString("hex"));
+
+    // And the node — which reconstructs the same context from ITS OWN current
+    // identity — accepts it, which is the check this provenance exists to pass.
+    const accept = respond(Uint8Array.from(outbound(test.socket).at(-1)!), NOW, ROTATED_ADVERTISED);
+    deliver(test.socket, accept.record, 1);
+    await flush();
+    expect(test.machine().mode()).toBe("e2ee");
+  });
+
   it("closes FATAL-PRE when the statement cannot authenticate to the pin", async () => {
     const test = harness({
       selectionClass: "latched",
@@ -1256,6 +1583,224 @@ describe("§8.8 wiring — the client hashes its OWN hello wire bytes", () => {
     expect(test.machine().mode()).toBe("closed");
     expect(outbound(test.socket)).toHaveLength(1);
     expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+});
+
+// ─── §5.2's verdict, §11.2's erasure, §4.4's timers ──────────────────────────
+
+describe("§5.2 — the verdict reaches the caller's durable trust state", () => {
+  it("hands every validated statement to the trust store and nothing else", async () => {
+    // The §13.1 pin the NEXT connection classifies against is written from this
+    // callback. A client that established `e2ee` and recorded nothing would
+    // re-classify as first contact every time and never latch (§13.2.1), with
+    // no wire symptom at all — which is why the delivery is asserted here and
+    // not left to the caller's own suite.
+    const verified = harness();
+    deliver(verified.socket, CARRIER);
+    await flush();
+    expect(verified.statements.map((verification) => verification.kind)).toEqual(["verified"]);
+
+    // Rows K3 and K2 alike: the row decides the CHANNEL, and the store still
+    // learns what this channel presented.
+    const eligible = harness({ selectionClass: "legacy-eligible" });
+    deliver(eligible.socket, UNUSABLE_CARRIER);
+    await flush();
+    expect(eligible.statements.map((verification) => verification.kind)).toEqual(["unusable"]);
+    expect(eligible.diagnostics).toEqual(["K3"]);
+
+    const latched = harness({ selectionClass: "latched" });
+    deliver(latched.socket, UNUSABLE_CARRIER);
+    await flush();
+    expect(latched.statements.map((verification) => verification.kind)).toEqual(["unusable"]);
+    expect(latched.diagnostics).toEqual(["P15"]);
+  });
+
+  it("records nothing on the rows that never reach §5.2", async () => {
+    for (const payload of [
+      encodeE2eeNegotiationRecord(E2EE_NEGOTIATION_TYPE_CLIENT_HELLO, new Uint8Array([0x80])), // K8
+      new Uint8Array([0x01, 0x01, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), // K11
+      new Uint8Array([0xff]), // K12
+    ]) {
+      const test = harness();
+      deliver(test.socket, payload);
+      await flush();
+      expect(test.statements).toEqual([]);
+    }
+  });
+});
+
+describe("§11.2 — the FATAL-PRE procedure erases what it built", () => {
+  it("zeroizes the buffered plaintext rather than only dropping it", async () => {
+    // The rows above assert that no buffered byte reached the wire; §4.4's
+    // discard path also has to leave none of it resident. The engine holds its
+    // OWN copy — the caller's payload is deliberately untouched — so the wipe is
+    // observed through the one operation that can perform it.
+    const wiped: Uint8Array[] = [];
+    const fill = Uint8Array.prototype.fill;
+    const spy = vi.spyOn(Uint8Array.prototype, "fill").mockImplementation(function (
+      this: Uint8Array,
+      ...args: Parameters<typeof fill>
+    ) {
+      if (args[0] === 0) wiped.push(this);
+      return fill.apply(this, args);
+    });
+
+    const test = harness({ selectionClass: "latched" });
+    // A length nothing else in this channel shares, so the copy is identifiable.
+    const submitted = new Uint8Array(4_099).fill(0x7b);
+    test.engine.send(submitted);
+    deliver(test.socket, LEGACY_PING); // K10 / P18.
+    await flush();
+    spy.mockRestore();
+
+    const copies = wiped.filter((value) => value.byteLength === submitted.byteLength);
+    expect(copies.length).toBeGreaterThan(0);
+    for (const copy of copies) expect(copy.some((byte) => byte !== 0)).toBe(false);
+    expect(test.diagnostics).toEqual(["P18"]);
+    // The caller's own buffer is not the engine's to erase.
+    expect(submitted.every((byte) => byte === 0x7b)).toBe(true);
+  });
+
+  it("destroys the partial handshake BEFORE it closes, on every path that ends one", async () => {
+    // §11.2 step 2, in the order the procedure states it. Each of these paths
+    // holds a live `E2eeClientHandshake` — an ephemeral agreement secret and a
+    // Noise state — and none of it is observable from the wire, so the sequence
+    // is what pins the step apart from the teardown that would follow anyway.
+    const fatal = standalone();
+    fatal.watchDestroy();
+    await fatal.machine.intercept(CARRIER);
+    expect(fatal.events).toEqual([]);
+    // Row K4, chosen because the handshake it ends is one nothing else has
+    // touched: a failing accept destroys itself inside `receiveServerAccept`, so
+    // that row cannot show whether the procedure's own step ran.
+    await fatal.machine.intercept(CARRIER); // K4 / P4.
+    expect(fatal.events).toEqual(["destroy", "diagnostic:P4", "close:channel_rejected"]);
+
+    const closing = standalone();
+    closing.watchDestroy();
+    await closing.machine.intercept(CARRIER);
+    expect(await closing.machine.beginClose()).toBe("opened");
+    expect(closing.events).toEqual(["destroy", "close:clean"]);
+
+    const disposed = standalone();
+    disposed.watchDestroy();
+    await disposed.machine.intercept(CARRIER);
+    disposed.machine.dispose();
+    expect(disposed.events).toEqual(["destroy"]);
+  });
+
+  it("erases the §6.5 secrets a pairing-only attempt was handed", async () => {
+    // §13.2 P21: the accept verified, so this client derived the same session
+    // material the node did — and then refused to use it. The node's copy is not
+    // a substitute for erasing this one.
+    const received = vi.spyOn(E2eeClientHandshake.prototype, "receiveServerAccept");
+    const test = harness({ pairingOnly: true });
+    deliver(test.socket, CARRIER);
+    await flush();
+    const accept = respond(Uint8Array.from(outbound(test.socket).at(-1)!));
+    deliver(test.socket, accept.record, 1);
+    await flush();
+
+    expect(test.diagnostics).toEqual(["P21"]);
+    const established = received.mock.results.at(-1);
+    if (established?.type !== "return" || established.value.kind !== "established") {
+      throw new Error("expected the pairing attempt to have established secrets");
+    }
+    const { secrets } = established.value;
+    for (const key of [
+      secrets.epochSecretC2N,
+      secrets.epochSecretN2C,
+      secrets.exporterSecret,
+      secrets.serverConfirmationKey,
+    ]) {
+      expect(key.byteLength).toBeGreaterThan(0);
+      expect(key.some((byte) => byte !== 0)).toBe(false);
+    }
+  });
+});
+
+describe("§4.4 timers — a cancelled deadline is cancelled, not merely ignored", () => {
+  it("holds exactly the deadline the state is subject to", async () => {
+    // The callbacks re-read the state, so a leaked timer changes no protocol
+    // outcome and no other assertion in this file moves when one is left armed.
+    // What it does change is what a suspended React Native app is holding.
+    const test = harness();
+    expect(test.armed()).toBe(1); // `T_ADV`, from `channel.accept`.
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    // `T_ADV` is cancelled at the hello emit and `T_HANDSHAKE` armed in its
+    // place — one deadline, not two.
+    expect(test.armed()).toBe(1);
+
+    test.advance(T_ADV + T_HANDSHAKE); // K15 / P20.
+    expect(test.armed()).toBe(0);
+  });
+
+  it("clears both deadlines on every exit from negotiating", async () => {
+    const legacy = harness();
+    deliver(legacy.socket, LEGACY_RPC); // K9.
+    await flush();
+    expect(legacy.machine().mode()).toBe("legacy");
+    expect(legacy.armed()).toBe(0);
+
+    const { test: established } = await establish();
+    expect(established.machine().mode()).toBe("e2ee"); // K5.
+    expect(established.armed()).toBe(0);
+
+    const fatal = harness({ selectionClass: "latched" });
+    deliver(fatal.socket, LEGACY_PING); // K10 / P18.
+    await flush();
+    expect(fatal.armed()).toBe(0);
+
+    const aborted = harness();
+    aborted.machine().abort();
+    expect(aborted.armed()).toBe(0);
+
+    const disposed = harness();
+    disposed.machine().dispose();
+    expect(disposed.armed()).toBe(0);
+
+    const closing = harness();
+    await closing.machine().beginClose();
+    expect(closing.armed()).toBe(0);
+  });
+});
+
+// ─── §4.5 / §11.2 P14 ────────────────────────────────────────────────────────
+
+describe("§4.5 — a channel with no positive plaintext ceiling never establishes", () => {
+  it("closes FATAL-PRE with P14 at the accept, and erases what it was handed", async () => {
+    // CONFORMING relay limits: `maxQueuedBytes` at its floor and
+    // `maxControlFrameBytes` equal to it. §4.5 adopts whatever the Hub asserts
+    // verbatim, so `plaintextCeiling` is negative here and the channel MUST fail
+    // during establishment rather than be released with a silently shrunk one.
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 2_048,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 2_048,
+    });
+    expect(e2eeChannelSizeBudget(limits).establishable).toBe(false);
+
+    const received = vi.spyOn(E2eeClientHandshake.prototype, "receiveServerAccept");
+    const test = standalone({}, limits);
+    expect(await test.machine.intercept(CARRIER)).toEqual({ kind: "claimed" });
+    const accept = respond(test.emitted.at(-1)!);
+    expect(await test.machine.intercept(accept.record)).toEqual({ kind: "rejected" });
+
+    // The valve was never touched, so nothing was released to the application.
+    expect(test.events).toEqual(["diagnostic:P14", "close:channel_rejected"]);
+    expect(test.machine.mode()).toBe("closed");
+
+    // §6.5 ownership transferred with `receiveServerAccept`, and this row is
+    // the one that ends the channel holding it.
+    const established = received.mock.results.at(-1);
+    if (established?.type !== "return" || established.value.kind !== "established") {
+      throw new Error("expected the accept to have produced session secrets");
+    }
+    expect(established.value.secrets.epochSecretC2N.some((byte) => byte !== 0)).toBe(false);
+    expect(established.value.secrets.epochSecretN2C.some((byte) => byte !== 0)).toBe(false);
   });
 });
 

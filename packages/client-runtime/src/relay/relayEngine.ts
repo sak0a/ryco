@@ -14,10 +14,15 @@ import {
   type RelayLimits,
 } from "@ryco/contracts";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
-import { e2eeNegotiationBufferMaxBytes } from "@ryco/shared/relayE2eeConstants";
+import {
+  e2eeChannelSizeBudget,
+  e2eeNegotiationBufferMaxBytes,
+  E2EE_CLIENT_HELLO_MAX_BYTES,
+} from "@ryco/shared/relayE2eeConstants";
 import {
   planRelayMessage,
   prepareRelayMessage,
+  RELAY_CHUNK_CAPABILITY_PRELUDE,
   RelayMessageAssembler,
 } from "@ryco/shared/relayMessageChunks";
 
@@ -35,6 +40,24 @@ const VERSION = {
 const OPEN = 1;
 /** Per-entry bookkeeping headroom so the send bound accounts for queue overhead. */
 const QUEUE_ENTRY_OVERHEAD_BYTES = 32;
+/**
+ * Send-queue capacity the §4.4 buffer never takes: the one bounded
+ * `E2EEClientHello` a `negotiating` channel may still have to emit (§8.5) and
+ * the payload overhead the queue charges for it.
+ *
+ * `E2EE_NEGOTIATION_BUFFER_MAX_BYTES` is the same aggregate the send queue
+ * enforces, so without this reserve buffered application bytes are entitled to
+ * all of it — and then `host.admit` refuses the hello, while §4.4's
+ * no-legacy-after-validated-evidence rule leaves the client only FATAL-PRE.
+ * That is ordinary backpressure escalated into a non-retryable close, which
+ * §11.4 forbids; refusing the submission that would have taken the last of the
+ * budget is the disposition §11.4 asks for instead. §4.4's bound is a ceiling,
+ * so holding the buffer below it conforms.
+ */
+const E2EE_NEGOTIATION_HANDSHAKE_RESERVE_BYTES =
+  E2EE_CLIENT_HELLO_MAX_BYTES +
+  RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength +
+  QUEUE_ENTRY_OVERHEAD_BYTES;
 
 /**
  * Platform socket seam. Implementations must not copy, retain, or re-send any
@@ -208,6 +231,22 @@ export type RelayE2eeProvider = (host: RelayE2eeHost) => RelayE2eeChannel;
  */
 export const RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE =
   "Relay E2EE negotiation send buffer is full.";
+
+/**
+ * The other three send refusals, named for the same reason.
+ *
+ * Both facades classify this engine's send errors BY MESSAGE, so the strings
+ * are part of the engine's contract rather than of its prose: a renamed message
+ * silently re-routes a refusal at every boundary that maps it. They are
+ * exported so the mapping and the throw read from one definition — the web
+ * facade matched a fourth string for a while that nothing here had thrown since
+ * the oversized-RPC framing change renamed it.
+ */
+export const RELAY_MESSAGE_TOO_LARGE_MESSAGE =
+  "RPC payload exceeds the maximum relay message size.";
+export const RELAY_PEER_UNSUPPORTED_MESSAGE =
+  "Relay peer does not support multi-frame RPC messages.";
+export const RELAY_SEND_QUEUE_FULL_MESSAGE = "Relay send queue is full.";
 
 /** The engine's view of §4.4's three channel states. */
 type RelayEngineMode = "negotiating" | RelayE2eeMode;
@@ -433,7 +472,12 @@ export class HostedRelayEngine {
     if (this.#closed || !this.#accepted || !this.#channel || !this.#limits)
       throw new Error("Relay channel is not open.");
     if (this.#mode === "negotiating") return this.#bufferNegotiating(payload, this.#limits);
-    if (this.#mode === "e2ee" && this.#e2ee) return this.#emitE2ee(payload);
+    // `legacy` is the ONLY mode that may reach the plaintext path. The dispatch
+    // is exhaustive on the mode rather than conditional on the channel being
+    // present, because the failure direction of a missing channel is the one
+    // this seam must never take: a mode machine that locked `e2ee` putting
+    // application plaintext on the wire.
+    if (this.#mode === "e2ee") return this.#emitE2ee(payload);
     this.#sendPlaintext(payload);
   }
 
@@ -445,8 +489,14 @@ export class HostedRelayEngine {
    * stalls, so a refusal is not an error this seam may raise.
    */
   #emitE2ee(payload: Uint8Array): void {
-    void this.#e2ee
-      ?.emit(Uint8Array.from(payload))
+    const channel = this.#e2ee;
+    // Unreachable by construction — `#e2ee` is cleared only by `#finish`, which
+    // sets `#closed` first, and every caller here refuses a closed engine — and
+    // fatal rather than silent if it ever stops being: §11.3 Q10 is a local send
+    // failure no byte of which reached the relay.
+    if (!channel) return this.#failE2ee(relayE2eeFailure("send_path_unusable"));
+    void channel
+      .emit(Uint8Array.from(payload))
       .catch(() => this.#failE2ee(relayE2eeFailure("fatal_post_key")));
   }
 
@@ -458,8 +508,8 @@ export class HostedRelayEngine {
       this.#fail(failure("transfer_limit"));
       throw new Error(
         prepared.reason === "peer_unsupported"
-          ? "Relay peer does not support multi-frame RPC messages."
-          : "RPC payload exceeds the maximum relay message size.",
+          ? RELAY_PEER_UNSUPPORTED_MESSAGE
+          : RELAY_MESSAGE_TOO_LARGE_MESSAGE,
       );
     }
     for (const chunk of prepared.payloads) {
@@ -470,24 +520,57 @@ export class HostedRelayEngine {
   /**
    * §4.4: hold one plaintext submission until the channel locks a mode.
    *
+   * BOTH HALVES OF §4.4'S BOUND ARE APPLIED HERE, AT SUBMISSION, because the
+   * only other moment either could be applied is the flush — where there is no
+   * caller left to refuse and the disposition degenerates into the two things
+   * §4.4 and §11.4 forbid outright: a silent drop on the `e2ee` sink, whose
+   * `emit` refuses an over-ceiling body, and a channel-fatal `transfer_limit` or
+   * `slow_consumer` on the plaintext one.
+   *
+   * 1. "Each buffered send MUST satisfy the §4.5 per-message bounds at
+   *    submission time." The mode is undecided here, so the bound is the tighter
+   *    of the two sinks — §4.5's `plaintextCeiling`, the legacy ceiling less the
+   *    envelope overhead — and the layout is the one the plaintext flush would
+   *    produce. A submission is therefore refused at exactly the moment an
+   *    unbuffered legacy channel would have refused it, with that channel's own
+   *    message, so a caller sees one refusal shape rather than one per mode.
+   * 2. The total is charged "as though the bytes had already been enqueued"
+   *    against "the same aggregate budget the relay send queue enforces" — so
+   *    the charge is the queue's own, every planned payload plus its per-entry
+   *    overhead, tested against the same aggregate `#reserveOutbound` admits
+   *    against, less the one record this state may still owe. A buffer at its
+   *    bound is then always flushable AND always leaves the hello admissible.
+   *
    * The overflow is §11.4 `e2ee_send_unavailable` and nothing else: no wire
    * record of any kind is produced, the channel is UNAFFECTED and remains
    * usable, and the caller is told rather than having its message silently
    * dropped or the buffer grown without bound. It deliberately does not zero the
    * caller's payload and does not fail the channel — both of which the
    * already-full relay send queue does, because that refusal is a slow-consumer
-   * condition and this one is not.
+   * condition and this one is not. Neither does the size refusal above: §11.4's
+   * `e2ee_message_too_large` is sender-local and leaves the channel usable.
    */
   #bufferNegotiating(payload: Uint8Array, limits: RelayLimits): void {
-    if (
-      this.#negotiationBufferedBytes + payload.byteLength >
-      e2eeNegotiationBufferMaxBytes(limits)
-    ) {
+    if (payload.byteLength > e2eeChannelSizeBudget(limits).plaintextCeiling)
+      throw new Error(RELAY_MESSAGE_TOO_LARGE_MESSAGE);
+    const plan = planRelayMessage(payload.byteLength, this.#messageLimits(limits));
+    if (plan.kind === "error")
+      throw new Error(
+        plan.reason === "peer_unsupported"
+          ? RELAY_PEER_UNSUPPORTED_MESSAGE
+          : RELAY_MESSAGE_TOO_LARGE_MESSAGE,
+      );
+    let charge = 0;
+    for (const payloadBytes of plan.payloadBytes)
+      charge += payloadBytes + QUEUE_ENTRY_OVERHEAD_BYTES;
+    const budget = Math.max(
+      0,
+      e2eeNegotiationBufferMaxBytes(limits) - E2EE_NEGOTIATION_HANDSHAKE_RESERVE_BYTES,
+    );
+    if (this.bufferedAmount + charge > budget)
       throw new Error(RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE);
-    }
-    const owned = Uint8Array.from(payload);
-    this.#negotiationBuffer.push(owned);
-    this.#negotiationBufferedBytes += owned.byteLength;
+    this.#negotiationBuffer.push(Uint8Array.from(payload));
+    this.#negotiationBufferedBytes += charge;
   }
 
   close(code = 1000, reason = "closed"): void {
@@ -748,6 +831,15 @@ export class HostedRelayEngine {
     if (this.#closed || this.#mode !== "negotiating") return;
     this.#mode = mode;
     this.#flushNegotiationBuffer(mode);
+    // THE VALVE OPENS ONLY FOR A CHANNEL THAT IS STILL THERE. The flush swallows
+    // its own failure by design — the send path reported it through `#fail` and
+    // has no caller here — so `#closed` is the only remaining evidence that the
+    // channel died between the lock and this line: a socket that failed
+    // underneath it, or a queue that refused a payload. Releasing anyway emits
+    // `onOpen` after `onClose`, and both facades set their readyState from those
+    // two events, so a WebSocket-shaped consumer is left holding a dead
+    // transport that says it is live.
+    if (this.#closed) return;
     this.options.callbacks.onTransportStatus("online");
     this.options.callbacks.onSessionStatus("synchronizing");
     this.options.events.onOpen();
@@ -761,18 +853,27 @@ export class HostedRelayEngine {
    * against the relay send queue exactly once rather than against both budgets
    * at the same time. A throw from the plaintext path has already failed the
    * channel and has no caller here to receive it.
+   *
+   * IT STOPS AT THE FIRST FAILURE. `#fail` has by then discarded the send queue
+   * and zeroized it, so re-entering the send path would build fresh plaintext
+   * chunk copies and push them onto a queue nothing zeroizes a second time —
+   * leaving the very bytes this path exists to bound resident on a channel that
+   * is already torn down. The remainder is wiped here instead, which is the same
+   * disposition `#discardNegotiationBuffer` gives every FATAL-PRE row.
    */
   #flushNegotiationBuffer(mode: RelayE2eeMode): void {
     const buffered = this.#negotiationBuffer;
     this.#negotiationBuffer = [];
     this.#negotiationBufferedBytes = 0;
     for (const payload of buffered) {
-      try {
-        if (mode === "e2ee") this.#emitE2ee(payload);
-        else this.#sendPlaintext(payload);
-      } catch {
-        // The send path reports its own failure through `#fail`; the remaining
-        // entries are zeroed by the loop and dropped with the channel.
+      if (!this.#closed) {
+        try {
+          if (mode === "e2ee") this.#emitE2ee(payload);
+          else this.#sendPlaintext(payload);
+        } catch {
+          // The send path reports its own failure through `#fail`; the entries
+          // it did not reach are zeroed by the loop and dropped with the channel.
+        }
       }
       payload.fill(0);
     }
@@ -998,7 +1099,7 @@ export class HostedRelayEngine {
     if (this.bufferedAmount + reservedBytes > limits.maxQueuedBytes - limits.maxControlFrameBytes) {
       payload.fill(0);
       this.#fail(failure("slow_consumer"));
-      throw new Error("Relay send queue is full.");
+      throw new Error(RELAY_SEND_QUEUE_FULL_MESSAGE);
     }
     this.#outboundQueue.push({ bytes: payload, reservedBytes });
     this.#outboundQueuedBytes += reservedBytes;
