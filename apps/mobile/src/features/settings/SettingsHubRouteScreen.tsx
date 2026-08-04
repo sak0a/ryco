@@ -23,6 +23,7 @@ import {
 } from "../../hostedHub/state";
 import { invalidateMobileHostedRuntime } from "../../hostedHub/runtime";
 import { isMobileDevelopmentBuild, readMobileHostedConfig } from "../../platform/config";
+import { mobileE2eeTrustStore } from "../../platform/e2eeTrustStore";
 import {
   openHostedSignInPreview,
   resolveHostedSignInPreviewUrl,
@@ -139,6 +140,15 @@ export function SettingsHubRouteScreen() {
               // The origin is about to change. Clear the native token even when
               // the old Hub was unreachable and its controller could not run.
               await clearMobileHostedSessionToken();
+              // And the §13 trust state recorded under the origin being left:
+              // pins, latches, owner legacy consents, the strict-legacy policy,
+              // and the `anyNodeVerified` marker. There is no generic secret-wipe
+              // path this could ride on, so the registration is by hand, and
+              // `plan.fromOrigin` is the origin the records were taken under —
+              // `profile` has not been replaced yet at this point.
+              if (plan.fromOrigin !== null) {
+                await mobileE2eeTrustStore.forgetHubOrigin(plan.fromOrigin);
+              }
             },
             replaceProfile: () => persistReplacement(nextProfile),
           });

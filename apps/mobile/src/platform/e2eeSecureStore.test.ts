@@ -35,6 +35,8 @@ import {
   E2EE_AGREEMENT_SECRET_KEY,
   E2EE_INSTALL_MARKER_KEY,
   E2EE_KEYCHAIN_SERVICE,
+  E2EE_SECURE_STORE_KEYS,
+  E2EE_TRUST_DOCUMENT_KEY,
   E2eeSecureStoreError,
   type E2eeSecureStoreLike,
 } from "./e2eeSecureStore";
@@ -201,7 +203,7 @@ describe("E2EE keychain namespace (§6.3 storage class)", () => {
     // `sanitizeSecretKey` escapes everything outside `[A-Za-z0-9.-]`, including
     // `_` as `_005f`. A name that needed escaping would still work, but the
     // stored name would stop matching the constant, so both are pinned here.
-    for (const key of [E2EE_AGREEMENT_SECRET_KEY, E2EE_INSTALL_MARKER_KEY]) {
+    for (const key of [...E2EE_SECURE_STORE_KEYS, E2EE_INSTALL_MARKER_KEY]) {
       expect(sanitizeSecretKey(key)).toBe(key);
       expect(key).toMatch(/^[A-Za-z0-9.-]+$/);
     }
@@ -251,8 +253,13 @@ describe("device custody (§6.3 clone and restore prohibition)", () => {
 
     const value = await store.get(E2EE_AGREEMENT_SECRET_KEY);
 
-    expect(calls.map((call) => call.operation)).toEqual(["delete", "get"]);
-    expect(calls[0]?.key).toBe(E2EE_AGREEMENT_SECRET_KEY);
+    expect(calls.map((call) => call.operation)).toEqual([
+      ...E2EE_SECURE_STORE_KEYS.map(() => "delete"),
+      "get",
+    ]);
+    expect(calls.slice(0, E2EE_SECURE_STORE_KEYS.length).map((call) => call.key)).toEqual([
+      ...E2EE_SECURE_STORE_KEYS,
+    ]);
     // The only read is the caller's own, and it lands on an empty namespace:
     // nothing of the resurrected material was read, parsed, or returned.
     expect(value).toBeNull();
@@ -286,7 +293,9 @@ describe("device custody (§6.3 clone and restore prohibition)", () => {
     await store.set(E2EE_AGREEMENT_SECRET_KEY, "fresh");
     await store.get(E2EE_AGREEMENT_SECRET_KEY);
 
-    expect(calls.filter((call) => call.operation === "delete")).toHaveLength(1);
+    expect(calls.filter((call) => call.operation === "delete")).toHaveLength(
+      E2EE_SECURE_STORE_KEYS.length,
+    );
     expect(calls[0]?.operation).toBe("delete");
   });
 
@@ -298,7 +307,9 @@ describe("device custody (§6.3 clone and restore prohibition)", () => {
       store.get(E2EE_AGREEMENT_SECRET_KEY),
     ]);
 
-    expect(calls.filter((call) => call.operation === "delete")).toHaveLength(1);
+    expect(calls.filter((call) => call.operation === "delete")).toHaveLength(
+      E2EE_SECURE_STORE_KEYS.length,
+    );
     expect(calls[0]?.operation).toBe("delete");
     expect([first, second]).toEqual([null, null]);
   });
@@ -353,7 +364,9 @@ describe("device custody (§6.3 clone and restore prohibition)", () => {
     failing = false;
     await expect(store.get(E2EE_AGREEMENT_SECRET_KEY)).resolves.toBeNull();
 
-    expect(calls.filter((call) => call.operation === "delete")).toHaveLength(2);
+    expect(calls.filter((call) => call.operation === "delete")).toHaveLength(
+      E2EE_SECURE_STORE_KEYS.length + 1,
+    );
     expect(calls.filter((call) => call.operation === "get")).toHaveLength(1);
   });
 });
@@ -367,8 +380,11 @@ describe("namespace destruction (§6.3, §13 re-pairing)", () => {
     await store.destroy();
 
     expect(entries.size).toBe(0);
-    expect(calls.map((call) => call.operation)).toEqual(["delete"]);
-    expect(calls[0]?.key).toBe(E2EE_AGREEMENT_SECRET_KEY);
+    // Every name, not just the one this case seeded: the key set is closed
+    // precisely so a destroy is complete rather than best-effort, and a name
+    // added to the union without joining it would show up here.
+    expect(calls.map((call) => call.key)).toEqual([...E2EE_SECURE_STORE_KEYS]);
+    expect([...E2EE_SECURE_STORE_KEYS]).toContain(E2EE_TRUST_DOCUMENT_KEY);
     await expect(store.get(E2EE_AGREEMENT_SECRET_KEY)).resolves.toBeNull();
   });
 

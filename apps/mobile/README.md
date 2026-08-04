@@ -186,23 +186,87 @@ E2EE is refused on. The handshake that reaches this custody path — and the scr
 state that surfaces the refusal — lands with the mobile E2EE client; until then
 no launch calls it.
 
-Two obligations this slice creates and does **not** discharge:
+**§13.1.1's partial-loss surface is closed**, by the second of the two remedies
+§13.1.1 offers rather than the first. The §7.4 certificate record no longer lives
+in the plain KV: `src/platform/e2eeSecureStore.ts` holds it in the §6.3 namespace
+beside the agreement key it names, so iOS iCloud backup and Android Auto Backup
+carry neither and an OS migration to a new handset destroys both together. There
+is then no "non-secret application state recording a prior E2EE association" to
+survive the secure store, and §13.1.1's own rule applies instead — "a conforming
+client that keeps none is a fresh install by the rule above". The record is not a
+secret and never was; the class governs survival, not confidentiality. An entry an
+earlier build left in the plain KV is removed once per process and never read.
 
-- **§13.1.1's partial-loss surface.** The §7.4 certificate record lives in the
-  plain KV (`src/platform/e2eeClientPrekey.ts`), which iOS iCloud backup and
-  Android Auto Backup carry while the §6.3 namespace is excluded from both. On an
-  OS migration to a new handset the record therefore survives and the agreement
-  key it names does not — which is exactly the "non-secret application state
-  recording a prior E2EE association" §13.1.1 names, and it requires the missing
-  E2EE state to be treated as **unexpected** (rows K23/K24, the §13.2.1 surface),
-  not as legacy-eligible. Today a restored-but-unmatched record is silently
-  re-signed, which is the correct custody answer and is not that surface. **The
-  §13 slice MUST route that case to it** (or move the record into the §6.3
-  storage class, which makes the device a genuine fresh install and removes the
-  obligation).
+One obligation the agreement-key slice created remains open:
+
 - **The screen state for a refused runtime.** `agreement_key_runtime_unavailable`
   and `e2ee_prekey_custody_failed` have no owner-visible surface yet, because no
   launch calls this path.
+
+## Relay E2EE client trust state (§12.1, §12.1.1, §13.1)
+
+`src/platform/e2eeTrustModel.ts` is the §13.1 record model and the §12.1.1
+classifier; `src/platform/e2eeTrustStore.ts` is their durable custody. Four
+properties are structural rather than documented, because each of them is a
+downgrade if it is only documented:
+
+- **`verified` and `unverified` are separate types.** §13.1 states what an
+  `unverified` record holds and that it holds "**no** verified fingerprint, **no**
+  recorded continuity id, no accepted policy generation, no latch, and no approval
+  state". Those fields are absent from the type, so a guard has no field to read
+  first-contact display material out of, and the only constructor of a `verified`
+  record is `promote`, which takes an owner decision whose minting re-derives the
+  §13.4 safety number from **both** identity keys. A capability statement carries
+  only the node's key, so "silently promote a self-signed first-contact key" has
+  no code path.
+- **A store that has not loaded cannot look like unset state.** The classifier
+  consumes a four-variant snapshot — `latched`, `pinned-unlatched`, `none`,
+  `unobtainable` — that is branded and constructible only from a completed load,
+  and `unobtainable` classifies UNEXPECTED. There is no boolean anywhere in the
+  classifier. This is §4.4's "MUST NOT treat unobtainable evidence as an unset
+  latch or an unset marker", and the case it protects is the first channel after
+  every cold start.
+- **The §13.2 step 5 marker write is in the same durable write as the promotion.**
+  The whole trust document is one secure-store entry, because neither platform
+  store has a transaction across entries and §13.1 requires the two to be
+  crash-atomic. The write is adopted in memory only after it lands.
+- **Reconciliation runs from the classifier's own entry point.** §13.1 requires
+  the marker to be reconciled against the pin set "before it evaluates any
+  classification on that Hub origin", including for an install whose pins predate
+  the marker, so `classify` does it rather than leaving it to a call site — and it
+  is the only classification the store exposes. A synchronous snapshot accessor
+  beside it skipped the reconciliation, and on the install §13.1's migration names
+  it answered legacy-eligible branch (a) where `classify` answers `unexpected`.
+- **The writer cannot produce a document the reader refuses.** `parseDocument`
+  fails the whole document on one out-of-bounds field, which would take every pin,
+  latch, consent and marker on the device to `unobtainable` permanently — and
+  `accountId` and `nodeId` are Hub-issued (§12.1.1). Every write boundary bounds
+  its own inputs against the reader's bound, an unbounded node id is dropped rather
+  than refused because §13.1 makes it an untrusted hint, and `commit` re-parses what
+  it is about to write as the backstop for a boundary anyone adds later.
+- **A scoped forget never widens into a whole-namespace wipe.** Forgetting one node
+  or leaving one Hub origin refuses over a document that will not parse, rather
+  than removing it: the wipe clears `anyNodeVerified` for origins the owner never
+  named, and §13.1 clears that marker only by "the explicit owner action that
+  removes the last verified pin under that `hubOrigin`". Destroying an unreadable
+  document is its own owner action.
+
+Hydration slots into the ordered bootstrap in `src/hostedHub/runtime.ts`, before
+the call that installs the relay socket factory. Cleanup is registered by hand in
+two places, because no generic secret-wipe path exists: the Hub-domain change in
+`src/features/settings/SettingsHubRouteScreen.tsx` clears everything recorded
+under the origin being left, and `removeSavedEnvironment` in
+`src/connection/environmentActions.ts` clears the records for the node the owner
+forgot. Both registrations have their own tests, since nothing else would catch
+one going missing.
+
+Not in this slice: the §4.4 mode machine that consults the classification, the
+§13.2 pairing screen that mints the owner decision, the §13.2.1 surface that
+presents the situation and takes one of its two resolutions, and the §13.1.1
+security-UI surface for a device holding no verified pin on a connected Hub
+origin. The last of those is where `destroyUnreadableTrustState` belongs: until it
+has a screen, a device whose document will not parse stays `unobtainable` — every
+classification UNEXPECTED — and the Hub-domain change refuses rather than wiping.
 
 ## Relay E2EE key custody (owner, on a physical device)
 

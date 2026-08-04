@@ -45,6 +45,13 @@ vi.mock("../platform/dpopSigner", () => ({
 vi.mock("../platform/nativeAuthorization", () => ({
   mobileNativeAuthorization: hoisted.nativeAuthorization,
 }));
+vi.mock("../platform/e2eeTrustStore", () => ({
+  mobileE2eeTrustStore: {
+    hydrate: async () => {
+      hoisted.calls.push("trust-hydrate");
+    },
+  },
+}));
 vi.mock("../platform/sessionCredentials", () => ({
   hydrateMobileHostedSessionToken: async () => {
     hoisted.calls.push("hydrate");
@@ -108,7 +115,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   hoisted.hydrate.mockResolvedValue(undefined);
   hoisted.readMobileHostedConfig.mockReturnValue(HOSTED_CONFIG);
-  hoisted.createMobileDpopSigner.mockResolvedValue(signer);
+  // The signer is resolved inside `configureMobileHostedRuntime`, which is what
+  // installs the relay socket factory, so this marker is where a channel first
+  // becomes possible.
+  hoisted.createMobileDpopSigner.mockImplementation(async () => {
+    hoisted.calls.push("configure");
+    return signer;
+  });
   vi.spyOn(hostedHubController, "bootstrap").mockImplementation(async () => {
     hoisted.calls.push("bootstrap");
   });
@@ -210,7 +223,7 @@ describe("fail-closed configuration", () => {
 
     expect(isMobileHostedModeAvailable()).toBe(true);
     expect(hoisted.createMobileDpopSigner).toHaveBeenCalledTimes(1);
-    expect(hoisted.calls).toEqual(["hydrate", "bootstrap"]);
+    expect(hoisted.calls).toEqual(["hydrate", "trust-hydrate", "configure", "bootstrap"]);
     expect(getHostedRuntimeConfiguration().endpoint.origin()).toBe("https://self-hosted.ryco.dev");
   });
 
@@ -235,7 +248,20 @@ describe("session bootstrap ordering", () => {
     // user to the bootstrap-availability probe.
     await ensureMobileHostedSession();
 
-    expect(hoisted.calls).toEqual(["hydrate", "bootstrap"]);
+    expect(hoisted.calls).toEqual(["hydrate", "trust-hydrate", "configure", "bootstrap"]);
+  });
+
+  it("hydrates the §13 trust store before any channel can exist", async () => {
+    // docs/relay-e2ee-protocol.md §4.4 requires every latch and pin guard to be
+    // evaluable at `channel.accept` from client-anchored state alone, and §13.1.1
+    // makes an unread store UNEXPECTED rather than legacy-eligible. The load must
+    // therefore precede `configureMobileHostedRuntime`, which is what installs
+    // the relay socket factory.
+    await ensureMobileHostedSession();
+
+    expect(hoisted.calls.indexOf("trust-hydrate")).toBeGreaterThanOrEqual(0);
+    expect(hoisted.calls.indexOf("trust-hydrate")).toBeLessThan(hoisted.calls.indexOf("configure"));
+    expect(hoisted.calls.indexOf("trust-hydrate")).toBeLessThan(hoisted.calls.indexOf("bootstrap"));
   });
 
   it("runs the session bootstrap once across repeated calls", async () => {
