@@ -183,14 +183,25 @@ describe("§12.1 the latch never leaves memory", () => {
   });
 });
 
-describe("§12.1 the latch ends with the application session", () => {
-  it("is cleared by the node-scoped clearing catalog", () => {
+describe("§12.1 the latch ends with the application session and not before", () => {
+  it("survives the node-scoped clearing catalog, which runs on every node change", () => {
+    // THE DIRECTION IS THE WHOLE POINT. `clearWebHostedNodeScopedState` is what
+    // `deactivateCurrentHostedNode` calls, and `activateHostedNode` calls that
+    // on the node being left whenever the selection moves A→B. Clearing the
+    // latch there returns every already-latched selection to `legacy-eligible`,
+    // and an unlatched selection is the one that takes row K13 and flushes its
+    // buffered sends as plaintext when the Hub withholds the §5.3 carrier past
+    // `T_ADV`. §12.1 scopes the latch to the APPLICATION SESSION; a node
+    // teardown is not one.
     latchWebE2eeSelection(SELECTION);
     clearWebHostedNodeScopedState(EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa"));
-    expect(isWebE2eeSelectionLatched(SELECTION)).toBe(false);
+    expect(isWebE2eeSelectionLatched(SELECTION)).toBe(true);
+    // …and the second selection of an A→B→A round trip is still classified
+    // `latched` by the real rule, read off the real attempt.
+    expect(webRelayE2eeAttempt(SELECTION).selectionClass).toBe("latched");
   });
 
-  it("is cleared on sign-out and survives a node change within the session", () => {
+  it("is cleared on sign-out and survives a node deselect within the session", () => {
     const stop = watchWebHostedSessionForE2ee();
     try {
       hostedHubStore.setState({ accountStatus: "authenticated" });
