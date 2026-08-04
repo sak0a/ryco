@@ -20,6 +20,7 @@ import {
   type HostedRelaySocketCallbacks,
   type RelayE2eeChannel,
   type RelayE2eeHost,
+  type RelayE2eeMode,
   type RelayE2eeProvider,
   type RelaySocket,
   type RelayTimers,
@@ -42,6 +43,8 @@ class MockRelaySocket implements RelaySocket {
   bufferedAmount = 0;
   readonly sent: Uint8Array[] = [];
   readonly sentRefs: Uint8Array[] = [];
+  /** A socket that died under the engine: the write is attempted and throws. */
+  throwOnSend = false;
   #open: Array<() => void> = [];
   #message: Array<(bytes: Uint8Array) => void> = [];
   #close: Array<() => void> = [];
@@ -50,6 +53,7 @@ class MockRelaySocket implements RelaySocket {
   send(bytes: Uint8Array): void {
     this.sentRefs.push(bytes);
     this.sent.push(Uint8Array.from(bytes));
+    if (this.throwOnSend) throw new Error("socket is gone");
   }
   close(): void {
     this.readyState = 3;
@@ -160,8 +164,15 @@ function create(
  * the whole point of the seam: everything the protocol decides is the channel's,
  * and the engine's contribution is the reservation, the limits, the assembler
  * verdict, and the outer close.
+ *
+ * It locks `e2ee` from inside its own factory so these tests exercise the
+ * ESTABLISHED seam, which is what they are about. §4.4's `negotiating` state and
+ * its K rows are the mode machine's and are driven in `relayE2eeInitiator.test.ts`.
  */
-function stubProvider(overrides: Partial<RelayE2eeChannel> = {}) {
+function stubProvider(
+  overrides: Partial<RelayE2eeChannel> = {},
+  lock: RelayE2eeMode | null = "e2ee",
+) {
   const calls = {
     hosts: [] as RelayE2eeHost[],
     emitted: [] as Uint8Array[],
@@ -171,6 +182,7 @@ function stubProvider(overrides: Partial<RelayE2eeChannel> = {}) {
   };
   const provider: RelayE2eeProvider = (host) => {
     calls.hosts.push(host);
+    if (lock !== null) host.lockMode(lock);
     return {
       intercept: async (payload) => {
         calls.intercepted.push(Uint8Array.from(payload));
@@ -676,8 +688,219 @@ describe("HostedRelayEngine E2EE seams", () => {
     // The limits are the Hub-asserted ones, adopted verbatim: the engine holds
     // no ceiling of its own and no tier constant of its own.
     expect(host().limits).toEqual(limits);
+    // §8.3 elements 2, 13, 14 come from the `channel.open` this endpoint
+    // received, so the machine cannot commit to authority the Hub did not
+    // present on this channel.
+    expect(host().channel).toEqual({
+      channelId: CHANNEL_ID,
+      capability: "ryco.rpc",
+      effectiveRole: "operator",
+      relayProtocolMajor: 1,
+      relayProtocolMinor: 2,
+    });
     expect(calls.hosts).toHaveLength(1);
+    // §4.4: the valve opened because THE MACHINE locked a mode, not because the
+    // channel was accepted.
     expect(events.onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("releases nothing at channel.accept until the machine locks a mode", () => {
+    // §4.4: `channel.accept` decides nothing. A channel that is `negotiating`
+    // may still lock `e2ee`, lock `legacy`, or close FATAL-PRE without ever
+    // releasing anything, so the open event, the status callbacks, and every
+    // buffered outbound byte wait for the lock.
+    const { provider } = stubProvider({}, null);
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(handlers.onTransportStatus).not.toHaveBeenCalledWith("online");
+    expect(handlers.onSessionStatus).not.toHaveBeenCalledWith("synchronizing");
+
+    engine.send(new TextEncoder().encode('{"_tag":"Ping"}'));
+    expect(sentFrames(socket).some((frame) => frame.type === "data")).toBe(false);
+    expect(engine.bufferedAmount).toBeGreaterThan(0);
+  });
+
+  it("charges a buffered send exactly what the send queue would charge it", () => {
+    // §4.4: the buffer is charged "as though the bytes had already been
+    // enqueued", against the same aggregate the queue enforces. `admit` IS that
+    // charge for a message of this length, so the two must agree to the byte —
+    // a buffer charged less than the queue will charge is a buffer that can be
+    // accepted at its bound and then fail to drain into the queue it was
+    // measured against.
+    const { provider, host } = stubProvider({}, null);
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+    const message = new Uint8Array(4_000).fill(0x7b);
+
+    const reservation = host().admit(message.byteLength);
+    const reserved = engine.bufferedAmount;
+    reservation?.release();
+    expect(engine.bufferedAmount).toBe(0);
+
+    engine.send(message);
+
+    expect(reserved).toBeGreaterThan(message.byteLength);
+    expect(engine.bufferedAmount).toBe(reserved);
+  });
+
+  it("keeps the valve shut when the flush itself failed the channel", () => {
+    // §4.4's flush runs BEFORE the release, and it can end the channel: the
+    // socket may have died between the mode lock and it. The flush swallows that
+    // failure by design — the send path already reported it through `#fail` and
+    // has no caller here — so releasing regardless emits `onOpen` after
+    // `onClose`, and both facades set their readyState from those two events.
+    const { provider, host } = stubProvider({}, null);
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+    engine.send(new TextEncoder().encode('{"first":1}'));
+    engine.send(new TextEncoder().encode('{"second":2}'));
+    socket.throwOnSend = true;
+
+    host().lockMode("legacy");
+
+    expect(handlers.onFailure).toHaveBeenCalledWith({ kind: "network", retryable: true });
+    expect(events.onClose).toHaveBeenCalledOnce();
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(handlers.onTransportStatus).not.toHaveBeenCalledWith("online");
+    expect(handlers.onSessionStatus).not.toHaveBeenCalledWith("synchronizing");
+  });
+
+  it("stops the flush at the first failure instead of re-queueing the rest", () => {
+    // `#fail` has already discarded and zeroized the send queue by this point.
+    // Feeding the remaining buffered messages back into the send path builds
+    // fresh plaintext chunk copies and pushes them onto a queue nothing zeroizes
+    // again — the one thing the §4.4 discard path exists to prevent.
+    const { provider, host } = stubProvider({}, null);
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+    for (const message of ['{"first":1}', '{"second":2}', '{"third":3}']) {
+      engine.send(new TextEncoder().encode(message));
+    }
+    const before = socket.sent.length;
+    socket.throwOnSend = true;
+
+    host().lockMode("legacy");
+
+    // One attempt, not three, and nothing is left charged against the queue.
+    expect(socket.sent.length - before).toBe(1);
+    expect(engine.bufferedAmount).toBe(0);
+  });
+
+  it("ignores a second lockMode, and one issued after the channel closed", () => {
+    // §4.4's transitions are one-way, and `RelayE2eeProvider` is a public seam:
+    // a provider that locks twice would otherwise open the valve twice and could
+    // re-decide a `legacy` channel as `e2ee`.
+    const { provider, host } = stubProvider({}, null);
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    host().lockMode("legacy");
+    host().lockMode("e2ee");
+
+    expect(events.onOpen).toHaveBeenCalledOnce();
+    expect(
+      handlers.onTransportStatus.mock.calls.filter(([status]) => status === "online"),
+    ).toHaveLength(1);
+    expect(
+      handlers.onSessionStatus.mock.calls.filter(([status]) => status === "synchronizing"),
+    ).toHaveLength(1);
+    // Still `legacy`: the second lock did not move the mode, so this send is
+    // framed rather than handed to the channel.
+    engine.send(new TextEncoder().encode('{"after":1}'));
+    expect(sentFrames(socket).filter((frame) => frame.type === "data")).toHaveLength(1);
+
+    engine.close();
+    host().lockMode("e2ee");
+    expect(events.onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("flushes the §4.4 buffer ahead of everything the application submits at onOpen", () => {
+    // §4.4 flushes first BECAUSE the buffered sends are the ones the application
+    // submitted first — and §8.9 makes the first envelope after an `e2ee` lock
+    // the client's implicit finish, so a submission from an `onOpen` handler
+    // must not be able to overtake them.
+    const { provider, host } = stubProvider({}, null);
+    const { engine, socket, events } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+    engine.send(new TextEncoder().encode('{"buffered":1}'));
+    events.onOpen.mockImplementation(() => engine.send(new TextEncoder().encode('{"onopen":1}')));
+
+    host().lockMode("legacy");
+
+    const payloads = sentFrames(socket).flatMap((frame) =>
+      frame.type === "data"
+        ? [new TextDecoder().decode(stripRelayChunkCapabilityPrelude(frame.payload).message)]
+        : [],
+    );
+    expect(payloads).toEqual(['{"buffered":1}', '{"onopen":1}']);
+  });
+
+  it("fails the channel when a record the channel refused to protect was buffered", async () => {
+    // §11.4 forbids a silent drop as firmly as it forbids escalating
+    // backpressure, and the flush has no caller to hand a rejection to — so a
+    // rejected `emit` must reach `#failE2ee` from the flush exactly as it does
+    // from a direct send.
+    const { provider, host } = stubProvider(
+      { emit: async () => Promise.reject(new Error("protect failed")) },
+      null,
+    );
+    const handlers = callbacks();
+    const { engine, socket } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+    engine.send(new TextEncoder().encode('{"buffered":1}'));
+
+    host().lockMode("e2ee");
+    await flush();
+
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "protocol",
+      retryable: false,
+      closeReason: "channel_rejected",
+    });
+  });
+
+  it("fails the channel when a directly submitted record cannot be protected", async () => {
+    const { provider } = stubProvider({
+      emit: async () => Promise.reject(new Error("protect failed")),
+    });
+    const handlers = callbacks();
+    const { engine, socket } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    engine.send(new TextEncoder().encode('{"direct":1}'));
+    await flush();
+
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "protocol",
+      retryable: false,
+      closeReason: "channel_rejected",
+    });
+  });
+
+  it("hands the machine the effective role the channel.open actually presented", () => {
+    // §8.3 element 14 is the received `channel.open`'s, and the node
+    // reconstructs elements 11–12 from ITS OWN frame: a client that committed to
+    // a role the Hub did not grant on this channel would be a context mismatch
+    // at best, and a silently escalated commitment at worst.
+    const { provider, host } = stubProvider();
+    const { socket } = create(callbacks(), realTimers(), provider);
+    socket.open();
+    socket.frame({ type: "ready", ...VERSION, limits: RELAY_INITIAL_LIMITS });
+    socket.frame({
+      type: "channel.open",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      capability: "ryco.rpc",
+      effectiveRole: "viewer",
+    });
+    socket.frame({ type: "channel.accept", ...VERSION, channelId: CHANNEL_ID });
+
+    expect(host().channel.effectiveRole).toBe("viewer");
   });
 
   it("fails the channel and never opens it when the provider refuses these limits", () => {

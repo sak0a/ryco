@@ -22,7 +22,7 @@
  * ledger's own partition rule was added to close, one level down: the ledger
  * reads as covering the corpus while half the corpus asserts nothing.
  *
- * Thirty-three of those cases remain contentless and are listed at the bottom of
+ * Thirty-two of those cases remain contentless and are listed at the bottom of
  * this file, one by one, with the reason and the owner of the missing work. The
  * corpus manifest's `livenessCensus` carries the per-family numbers.
  *
@@ -474,13 +474,6 @@ export const E2EE_CORPUS_CASE_LIVENESS: readonly E2eeCorpusLivenessClaim[] = [
     reader: "decorative",
     reason:
       "States `transcript`, `transcriptBytes`, `directSigningTranscriptMaxBytes`, `satisfiesS9`, `signingInputMaxBytes`, `satisfiesS2`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f16-authorization-context.json",
-    case: "suite-list-strip-after-the-hello-was-hashed",
-    reader: "decorative",
-    reason:
-      "States `nodeAccepted`, `serverAccept`, `clientVerdict`, `disposition`, `clientEmitsNoRecord`, `closeReason`; no consuming suite reads any of it. Owned by the client-phase handshake harness: the verdict is the CLIENT's §8.8 step-4 decision over a stripped suite list, and no client handshake exists in this repository to drive it.",
   },
   {
     file: "f17-key-material-validation.json",

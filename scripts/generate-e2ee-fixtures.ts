@@ -9535,13 +9535,13 @@ const LIVENESS_CENSUS_FAMILIES: readonly JsonValue[] = [
     file: "f16-authorization-context.json",
     cases: 34,
     expectedLeaves: 332,
-    liveLeaves: 136,
-    inertLeaves: 196,
-    livePercent: 41.0,
-    casesWithNoLiveLeaf: 1,
+    liveLeaves: 144,
+    inertLeaves: 188,
+    livePercent: 43.4,
+    casesWithNoLiveLeaf: 0,
     residual:
-      "196 leaves inert and one case with no live leaf. The context commitment, the §8.7 confirmation transcript and the withdrawal verdicts are derived; the per-case `elements` blocks (65 leaves) that restate each §8.3 context element and the §11.5 `observable` blocks (65) are not read.",
-    residualOwner: "the F16 context harness, and the client phase for the client-side verdicts",
+      "188 leaves inert. The context commitment, the §8.7 confirmation transcript, the client-side suite-strip verdict and the withdrawal verdicts are derived; the per-case `elements` blocks (65 leaves) that restate each §8.3 context element and the §11.5 `observable` blocks (65) are not read.",
+    residualOwner: "the F16 context harness",
   },
   {
     family: 17,
@@ -9778,24 +9778,24 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       totals: {
         cases: 290,
         expectedLeaves: 3287,
-        liveLeaves: 2061,
-        inertLeaves: 1226,
-        livePercent: 62.7,
-        casesWithNoLiveLeaf: 33,
+        liveLeaves: 2069,
+        inertLeaves: 1218,
+        livePercent: 62.9,
+        casesWithNoLiveLeaf: 32,
       },
       casesByLiveLeafCount: {
-        note: "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 33 of 290` reads, against a one-leaf threshold, as though the other 257 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
+        note: "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 32 of 290` reads, against a one-leaf threshold, as though the other 258 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
         buckets: [
-          { liveLeaves: "0", cases: 33 },
+          { liveLeaves: "0", cases: 32 },
           { liveLeaves: "1", cases: 16 },
           { liveLeaves: "2", cases: 64 },
           { liveLeaves: "3-5", cases: 72 },
-          { liveLeaves: "6-10", cases: 51 },
+          { liveLeaves: "6-10", cases: 52 },
           { liveLeaves: "11-25", cases: 38 },
           { liveLeaves: "26+", cases: 16 },
         ],
-        atMostTwoLiveLeaves: 113,
-        atMostFiveLiveLeaves: 185,
+        atMostTwoLiveLeaves: 112,
+        atMostFiveLiveLeaves: 184,
       },
       families: LIVENESS_CENSUS_FAMILIES,
     },
@@ -9815,9 +9815,9 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       ledger: "packages/shared/src/relayE2eeCorpus.test.ts — SECTION_16_3_LEDGER",
       status: "hand-maintained-transcription",
       proves:
-        "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. FOURTEEN obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live.",
+        "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. THIRTEEN obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live.",
       doesNotProve:
-        "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 33 of the 290 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+        "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 32 of the 290 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
       reviewObligation:
         "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
       whyNotAutomated:
@@ -9832,10 +9832,9 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
        * reader of the fixtures, with the owner of each piece of missing work.
        */
       unassertedObligations: {
-        count: 14,
-        note: "Fourteen §16.3 obligations resolve as generated — the corpus carries a case for each — and every case backing them is read by no consuming suite. Each carries an `unasserted` field in SECTION_16_3_LEDGER stating what is unread and who owns it, checked against the measured read-liveness union in both directions: the field must be present while the cases are inert and must come off when one goes live.",
+        count: 13,
+        note: "Thirteen §16.3 obligations resolve as generated — the corpus carries a case for each — and every case backing them is read by no consuming suite. Each carries an `unasserted` field in SECTION_16_3_LEDGER stating what is unread and who owns it, checked against the measured read-liveness union in both directions: the field must be present while the cases are inert and must come off when one goes live.",
         ids: [
-          "f16-suite-list-strip",
           "f17-ed25519-canonicality",
           "f3-continuity-id-unresolved",
           "f3-cross-signature-reconstruction",
@@ -9853,7 +9852,6 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
         ownedBy: [
           "the F3 statement harness — 9 obligations (16 cases): the §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work",
           "the F4 certificate harness — 3 obligations (8 cases): reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side",
-          "the client-phase handshake harness — 1 obligation (1 case): the §8.8 step-4 client verdict, which no client handshake in this repository can drive",
           "the F17 key-material harness — 1 obligation (6 cases): driving each Ed25519 encoding through the validators and `verifyE2eeSignature`",
         ],
       },

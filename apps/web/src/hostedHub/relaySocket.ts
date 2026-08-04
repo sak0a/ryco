@@ -1,5 +1,9 @@
 import {
   HostedRelayEngine,
+  RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+  RELAY_MESSAGE_TOO_LARGE_MESSAGE,
+  RELAY_PEER_UNSUPPORTED_MESSAGE,
+  RELAY_SEND_QUEUE_FULL_MESSAGE,
   type HostedRelaySocketCallbacks,
   type RelaySocket,
 } from "@ryco/client-runtime/relay";
@@ -46,16 +50,44 @@ function classifyInboundMessage(data: unknown): InboundMessage {
   return { fail: "frame_too_large" };
 }
 
-/** Map the DOM-free engine's send errors back to the original WebSocket-API
- *  DOMException names at the façade boundary. */
-function sendException(error: unknown): unknown {
+/**
+ * Every engine send refusal that is about CAPACITY rather than about state.
+ *
+ * The set is the engine's own exported strings and not four literals, because
+ * this mapping is BY MESSAGE: a renamed message silently re-routes a refusal
+ * here, and one already had. This arm used to match "RPC payload exceeds the
+ * negotiated relay limit.", which the oversized-RPC framing change renamed —
+ * after which every over-ceiling submission fell through to `InvalidStateError`
+ * and a caller branching on the name read a size refusal as an invalid state.
+ *
+ * `RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE` is
+ * docs/relay-e2ee-protocol.md §11.4 `e2ee_send_unavailable`: backpressure like
+ * the queue, the channel unaffected, and the caller may submit the same message
+ * again. `apps/web` passes no E2EE provider and therefore never enters
+ * `negotiating` today; the mapping is here because the facade maps the engine's
+ * contract and not its current caller.
+ */
+const QUOTA_EXCEEDED_MESSAGES: ReadonlySet<string> = new Set([
+  RELAY_SEND_QUEUE_FULL_MESSAGE,
+  RELAY_MESSAGE_TOO_LARGE_MESSAGE,
+  RELAY_PEER_UNSUPPORTED_MESSAGE,
+  RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+]);
+
+/**
+ * Map the DOM-free engine's send errors back to the original WebSocket-API
+ * DOMException names at the façade boundary.
+ *
+ * Exported for the mapping's own test: the §4.4 refusal above is unreachable
+ * from a facade that injects no provider, and a test that could only reach it
+ * through `send` would be pinning the caller rather than the contract.
+ */
+export function sendException(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof DOMException) return error;
-  const name =
-    error.message === "RPC payload exceeds the negotiated relay limit." ||
-    error.message === "Relay send queue is full."
-      ? "QuotaExceededError"
-      : "InvalidStateError";
-  return new DOMException(error.message, name);
+  return new DOMException(
+    error.message,
+    QUOTA_EXCEEDED_MESSAGES.has(error.message) ? "QuotaExceededError" : "InvalidStateError",
+  );
 }
 
 /** Browser-only EventTarget facade over the package-owned relay engine. */
