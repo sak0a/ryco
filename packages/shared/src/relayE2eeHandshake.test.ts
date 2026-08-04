@@ -952,10 +952,17 @@ describe("§8 full handshakes between two in-process endpoints", () => {
     // key exists.
     expect(hex(native.accept.peerEphemeralPublicKey)).toBe(CLIENT_EPHEMERAL_PUBLIC);
 
-    // It is a copy: mutating what the caller was handed cannot reach back into
-    // anything, and both ends still agree.
-    web.established.webEphemeralPublicKey!.fill(0);
-    expect(hex(web.accept.peerEphemeralPublicKey)).toBe(CLIENT_EPHEMERAL_PUBLIC);
+    // THE COPY-PER-READ PROPERTY IS NOT ASSERTABLE HERE, AND IS NOT ASSERTED
+    // HERE. An earlier revision mutated `web.established.webEphemeralPublicKey`
+    // and then read `web.accept.peerEphemeralPublicKey` — two arrays produced by
+    // two different handshake objects, which no implementation aliases — so the
+    // block could not fail: changing `E2eeNoiseHandshake.localEphemeralPublicKey`
+    // to hand out its retained buffer directly left this suite at 81/81. The
+    // property belongs to the accessor and is owned by
+    // `relayE2eeNoise.test.ts` ("A copy per read, like the two remote accessors
+    // beside it"), which reads the SAME accessor twice and is what actually
+    // fails. This level owns the field's presence, its tier selection, and its
+    // agreement with the responder's view, which are the three assertions above.
   });
 
   it("gives the two tiers different sessions over identical channel state", () => {
