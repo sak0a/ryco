@@ -36,6 +36,8 @@ import {
 } from "../ui/sheet";
 import { NodePresence } from "./HostedConnectionControls";
 import { HostedNodeRenameDialog } from "./HostedNodeRenameDialog";
+import { HostedNodeRevokeDialog } from "./HostedNodeRevokeDialog";
+import { HOSTED_NODE_REVOKE_ACTION_LABEL } from "./HostedNodeRevoke.logic";
 import {
   formatEpoch,
   nodeMetaLine,
@@ -59,9 +61,26 @@ export interface HostedNodeDetailProps {
   readonly directoryStatus: string;
   readonly browserStatus: string;
   readonly canRename: boolean;
+  /**
+   * Whether this account may revoke the node. Owner-only, exactly like rename —
+   * the Hub answers `node_forbidden` to anyone else, so rendering a control that
+   * can only ever be refused would be an offer this Hub does not make.
+   */
+  readonly canRevoke: boolean;
   readonly onOpenChange: (open: boolean) => void;
   readonly onConnect: (node: HostedHubNode) => void;
   readonly onRename: (node: HostedHubNode, label: string) => Promise<void>;
+  /**
+   * Performs the revocation and resolves only once the Hub has confirmed it.
+   *
+   * Deliberately NOT presence-gated. Revocation is Hub-side state and reaches
+   * nothing on the machine, so an offline, unreachable, or permanently gone node
+   * is revoked by the same call — and that is precisely the node an owner is
+   * trying to get rid of. Gating this on presence would disable the control in
+   * exactly the case it exists for, which is the mistake `Connect` is allowed to
+   * make and this is not.
+   */
+  readonly onRevoke: (node: HostedHubNode) => Promise<void>;
 }
 
 function NodeDetailBody({ node }: { readonly node: HostedHubNode }) {
@@ -146,12 +165,15 @@ export function HostedNodeDetail({
   directoryStatus,
   browserStatus,
   canRename,
+  canRevoke,
   onOpenChange,
   onConnect,
   onRename,
+  onRevoke,
 }: HostedNodeDetailProps) {
   const isPhoneTier = usePresentationTier() === "phone";
   const [renameOpen, setRenameOpen] = useState(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
   const open = node !== null;
   if (!node) return null;
 
@@ -183,12 +205,21 @@ export function HostedNodeDetail({
     );
   }
 
+  // Already revoked is the one state where the action is not offered: the Hub's
+  // update is conditioned on the node not already being revoked, so a second
+  // attempt is a 404 and nothing else. The sheet itself still opens — that is
+  // what it is for — and the `Revoked` row above already says so.
+  const revocable = canRevoke && node.revokedAt === null;
+
   return (
     <>
       <Sheet
         open={open}
         onOpenChange={(next) => {
-          if (!next) setRenameOpen(false);
+          if (!next) {
+            setRenameOpen(false);
+            setRevokeOpen(false);
+          }
           onOpenChange(next);
         }}
       >
@@ -202,6 +233,19 @@ export function HostedNodeDetail({
             {reason ? <p className="mt-4 text-xs text-muted-foreground">{reason}</p> : null}
           </SheetPanel>
           <SheetFooter>
+            {/* `sm:mr-auto` puts the irreversible control at the opposite end of
+                the footer from the primary one. It is never disabled for a node
+                that is merely offline or unreachable: that node is the reason
+                this exists, and revocation does not need it to answer. */}
+            {revocable ? (
+              <Button
+                variant="destructive-outline"
+                className="sm:mr-auto"
+                onClick={() => setRevokeOpen(true)}
+              >
+                {HOSTED_NODE_REVOKE_ACTION_LABEL}
+              </Button>
+            ) : null}
             {canRename ? (
               <Button variant="outline" onClick={() => setRenameOpen(true)}>
                 Rename
@@ -219,6 +263,14 @@ export function HostedNodeDetail({
           open={renameOpen}
           onOpenChange={setRenameOpen}
           onRename={(label) => onRename(node, label)}
+        />
+      ) : null}
+      {revocable ? (
+        <HostedNodeRevokeDialog
+          node={node}
+          open={revokeOpen}
+          onOpenChange={setRevokeOpen}
+          onRevoke={() => onRevoke(node)}
         />
       ) : null}
     </>

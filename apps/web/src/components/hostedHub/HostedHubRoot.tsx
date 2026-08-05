@@ -69,6 +69,7 @@ import {
   sortNodes,
 } from "./HostedNodeDisplay.logic";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
+import { HOSTED_NODE_REVOKE_REASON_CODE } from "./HostedNodeRevoke.logic";
 import { HostedPwaControls } from "./HostedPwaControls";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
@@ -1315,6 +1316,7 @@ function HostedNodeDirectory() {
         directoryStatus={status}
         browserStatus={browserStatus}
         canRename={isOwner}
+        canRevoke={isOwner}
         onOpenChange={(open) => {
           if (!open) setDetailNodeId(null);
         }}
@@ -1322,6 +1324,23 @@ function HostedNodeDirectory() {
         onRename={async (node, label) => {
           await hostedHubApi.renameNode(node.id, label);
           await hostedHubController.refreshDirectory();
+        }}
+        onRevoke={async (node) => {
+          // The Hub answers first, and only then is the list re-read. Nothing
+          // here removes the row ahead of that answer: an optimistic removal
+          // that has to be undone is a worse report of a refused revocation than
+          // a control that stayed busy, and this is the one action in the
+          // directory that cannot be taken back if it did land.
+          //
+          // The row goes away because the node stops being in the directory at
+          // all — `authorizedDirectoryEntry` resolves to nothing once `revokedAt`
+          // is set — so this needs no removal of its own and leaves no revoked
+          // tombstone behind. `refreshDirectory` settles its own failures into
+          // `directoryStatus`, so only the mutation above can reject here, and
+          // only its failure reaches the confirmation.
+          await hostedHubApi.revokeNode(node.id, HOSTED_NODE_REVOKE_REASON_CODE);
+          await hostedHubController.refreshDirectory();
+          setDetailNodeId(null);
         }}
       />
     </Surface>

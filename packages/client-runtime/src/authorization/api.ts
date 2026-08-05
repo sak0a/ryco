@@ -55,6 +55,16 @@ const MAX_PASSKEY_LABEL_LENGTH = 256;
 const MAX_PASSKEYS = 256;
 const MAX_HUB_NODE_LABEL_LENGTH = 100;
 const HUB_NODE_ID_PATTERN = /^node_[A-Za-z0-9_-]{22,43}$/;
+/**
+ * The reason code shape the Hub's node-revoke route accepts.
+ *
+ * Its body schema is strict and `reasonCode` is REQUIRED, not optional — a call
+ * that omits it, or sends a human sentence, comes back 400 with nothing said
+ * about which field was wrong. Refusing it here keeps that failure off the wire
+ * and out of the owner's face, exactly as {@link HostedHubApi.renameNode}'s
+ * label bounds do.
+ */
+const HUB_REVOCATION_REASON_PATTERN = /^[a-z0-9._-]{1,64}$/;
 
 /**
  * Bounds for the *newly added* recovery-code route only, set well clear of any
@@ -1492,6 +1502,42 @@ export class HostedHubApi {
     const result = await this.#request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/rename`, {
       method: "POST",
       body: { label: normalizedLabel },
+      csrf: true,
+      ...(signal ? { signal } : {}),
+    });
+    if (Object.keys(result).length !== 1 || result.ok !== true) {
+      throw new HostedHubApiError("invalid_response", 502);
+    }
+  }
+
+  /**
+   * Revoke a node, Hub-side and permanently.
+   *
+   * IT REACHES NOTHING BUT THE HUB. The route commits the revocation in the
+   * Hub's own transaction and emits an in-process signal that closes whatever
+   * relay channels are open for that node; there is no leg that contacts the
+   * machine. A node that is offline, unreachable, or physically gone is revoked
+   * by exactly this call and by the same code path — which is the reason the
+   * action exists.
+   *
+   * REVOKING A NODE IS NOT REVOKING ONE GRANT. `/api/admin/node-grants/…/revoke`
+   * removes one account's access; this removes the node, so every grant on it
+   * stops resolving and it leaves every authorized account's directory at once.
+   * Callers must not present it as a change to the caller's own access alone.
+   *
+   * A second call for the same node answers 404: the underlying update is
+   * conditioned on the node not already being revoked, so `node_not_found`
+   * here means "already gone" as often as it means "never existed", and a
+   * caller may not report it as a lookup failure.
+   */
+  async revokeNode(nodeId: string, reasonCode: string, signal?: AbortSignal): Promise<void> {
+    if (!HUB_NODE_ID_PATTERN.test(nodeId) || !HUB_REVOCATION_REASON_PATTERN.test(reasonCode)) {
+      throw new HostedHubApiError("invalid_request", 400);
+    }
+
+    const result = await this.#request(`/api/admin/nodes/${encodeURIComponent(nodeId)}/revoke`, {
+      method: "POST",
+      body: { reasonCode },
       csrf: true,
       ...(signal ? { signal } : {}),
     });

@@ -338,6 +338,74 @@ describe("HostedHubApi", () => {
     expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ label: "Release node" });
   });
 
+  it("revokes a node with the reason code the Hub's strict body schema requires", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      return requests.length === 1 ? response(session) : response({ ok: true });
+    });
+    const api = createApi();
+    await api.restoreSession();
+
+    await expect(
+      api.revokeNode("node_aaaaaaaaaaaaaaaaaaaaaa", "owner_revoked"),
+    ).resolves.toBeUndefined();
+
+    expect(requests[1]?.input).toBe("/api/admin/nodes/node_aaaaaaaaaaaaaaaaaaaaaa/revoke");
+    expect(requests[1]?.init).toMatchObject({
+      method: "POST",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+    expect(headersOf(requests[1]?.init).get("X-Ryco-CSRF")).toBe("csrf-canary");
+    // `reasonCode` is REQUIRED and the schema is strict, so neither omitting it
+    // nor adding a field alongside it is a request the Hub will accept.
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({ reasonCode: "owner_revoked" });
+  });
+
+  it("rejects invalid node revoke input before any I/O", async () => {
+    const fetchSpy = vi.fn(async () => response({ ok: true }));
+    globalThis.fetch = fetchSpy;
+    const api = createApi();
+
+    await expect(api.revokeNode("node_bad", "owner_revoked")).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    // The Hub's `REASON` is `/^[a-z0-9._-]{1,64}$/`. A sentence, an empty value,
+    // or an over-long one is a 400 that names no field.
+    for (const reason of ["", "Owner revoked", "a".repeat(65)]) {
+      await expect(api.revokeNode("node_aaaaaaaaaaaaaaaaaaaaaa", reason)).rejects.toMatchObject({
+        code: "invalid_request",
+      });
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on malformed and refused node revoke responses", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+
+    globalThis.fetch = vi.fn(async () => response({ ok: true, detail: "revoke-sensitive-canary" }));
+    const malformed = await api
+      .revokeNode("node_aaaaaaaaaaaaaaaaaaaaaa", "owner_revoked")
+      .catch((cause) => cause);
+    expect(malformed).toMatchObject({ code: "invalid_response" });
+    expect((malformed as Error).message).not.toContain("revoke-sensitive-canary");
+
+    // A second revoke of the same node: the Hub's update is conditioned on the
+    // node not already being revoked, so it answers `node_not_found`.
+    globalThis.fetch = vi.fn(async () => response({ error: "node_not_found" }, 404));
+    await expect(
+      api.revokeNode("node_aaaaaaaaaaaaaaaaaaaaaa", "owner_revoked"),
+    ).rejects.toMatchObject({ status: 404 });
+
+    globalThis.fetch = vi.fn(async () => response({ error: "node_forbidden" }, 403));
+    await expect(
+      api.revokeNode("node_aaaaaaaaaaaaaaaaaaaaaa", "owner_revoked"),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
   it("rejects invalid node rename input before any I/O", async () => {
     const fetchSpy = vi.fn(async () => response({ ok: true }));
     globalThis.fetch = fetchSpy;
