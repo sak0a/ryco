@@ -1,0 +1,2204 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ryco · Liquid Glass Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* ============================================================
+         RYCO BASE TOKENS (mirrored from apps/web/src/index.css)
+         ============================================================ */
+      :root {
+        color-scheme: dark;
+        --radius: 10px;
+        --font-sans:
+          "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        --font-mono: "SF Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas, monospace;
+
+        --background: #131315;
+        --chrome-bg: #0e0e10;
+        --foreground: #f2f2f3;
+        --card: #19191c;
+        --popover: #1a1a1e;
+        --primary: oklch(0.588 0.217 264);
+        --primary-soft: oklch(0.588 0.15 264 / 0.35);
+        --primary-foreground: #fff;
+        --muted: rgba(255, 255, 255, 0.045);
+        --muted-foreground: #929296;
+        --accent: rgba(255, 255, 255, 0.06);
+        --border: rgba(255, 255, 255, 0.07);
+        --border-strong: rgba(255, 255, 255, 0.13);
+        --success: #34d399;
+        --warning: #fbbf24;
+        --destructive: #f87171;
+
+        /* ============================================================
+           PROPOSED LIQUID-GLASS TOKEN SET (the deliverable)
+           Three size tiers per Apple guidance; plate = tint floor.
+           --material slides 0 (Tinted/frosted) … 1 (Clear).
+           ============================================================ */
+        --material: 0.45;
+
+        --glass-blur-sm: 14px;
+        --glass-blur-md: 22px;
+        --glass-blur-lg: 30px;
+        --glass-saturate: 165%;
+
+        /* Plate (tint floor): worst-case-contrast guarantee under blur.
+           Never below 0.50 dark / 0.55 light even at "Clear". */
+        --glass-plate-lg: calc(0.92 - var(--material) * 0.34); /* 0.92 → 0.58 */
+        --glass-plate-md: calc(0.88 - var(--material) * 0.36);
+        --glass-plate-sm: calc(0.84 - var(--material) * 0.34);
+        --glass-plate-rgb: 21 21 24;
+
+        --glass-ink: #f4f4f5;
+        --glass-ink-2: rgba(244, 244, 245, 0.72);
+        --glass-ink-3: rgba(244, 244, 245, 0.5);
+        --glass-separator: rgba(255, 255, 255, 0.08);
+
+        --bezel-screen: rgba(255, 255, 255, 0.38);
+        --bezel-overlay: rgba(255, 255, 255, 0.16);
+        --glass-top-light: rgba(255, 255, 255, 0.12);
+
+        --shadow-glass-sm: 0 2px 8px rgba(0, 0, 0, 0.22), 0 6px 24px rgba(0, 0, 0, 0.22);
+        --shadow-glass-md: 0 4px 14px rgba(0, 0, 0, 0.26), 0 14px 44px rgba(0, 0, 0, 0.3);
+        --shadow-glass-lg: 0 8px 22px rgba(0, 0, 0, 0.3), 0 28px 80px rgba(0, 0, 0, 0.38);
+
+        /* Motion */
+        --spring-snappy: cubic-bezier(0.3, 1.36, 0.44, 1);
+        --spring-gentle: cubic-bezier(0.22, 1, 0.36, 1);
+        --dur-chip: 140ms;
+        --dur-pop: 240ms;
+        --dur-sheet: 320ms;
+
+        /* Concentric radius chain: outer − inset = inner */
+        --r-outer: 18px;
+        --r-pad: 6px;
+        --r-inner: calc(var(--r-outer) - var(--r-pad));
+        --r-inner2: max(calc(var(--r-inner) - var(--r-pad)), 4px);
+      }
+
+      [data-theme="light"] {
+        color-scheme: light;
+        --background: #fbfbfc;
+        --chrome-bg: #f2f2f4;
+        --foreground: #232326;
+        --card: #ffffff;
+        --popover: #ffffff;
+        --primary: oklch(0.488 0.217 264);
+        --primary-soft: oklch(0.488 0.15 264 / 0.22);
+        --muted: rgba(0, 0, 0, 0.04);
+        --muted-foreground: #67676c;
+        --accent: rgba(0, 0, 0, 0.05);
+        --border: rgba(0, 0, 0, 0.08);
+        --border-strong: rgba(0, 0, 0, 0.14);
+
+        --glass-plate-rgb: 250 250 252;
+        --glass-plate-lg: calc(0.94 - var(--material) * 0.3); /* 0.94 → 0.64 */
+        --glass-plate-md: calc(0.9 - var(--material) * 0.3);
+        --glass-plate-sm: calc(0.86 - var(--material) * 0.28);
+        --glass-ink: #202024;
+        --glass-ink-2: rgba(32, 32, 36, 0.72);
+        --glass-ink-3: rgba(32, 32, 36, 0.5);
+        --glass-separator: rgba(0, 0, 0, 0.08);
+        --bezel-screen: rgba(255, 255, 255, 0.85);
+        --bezel-overlay: rgba(0, 0, 0, 0.1);
+        --glass-top-light: rgba(255, 255, 255, 0.85);
+        --shadow-glass-sm: 0 2px 8px rgba(20, 24, 40, 0.1), 0 6px 24px rgba(20, 24, 40, 0.1);
+        --shadow-glass-md: 0 4px 14px rgba(20, 24, 40, 0.12), 0 14px 44px rgba(20, 24, 40, 0.14);
+        --shadow-glass-lg: 0 8px 22px rgba(20, 24, 40, 0.14), 0 28px 80px rgba(20, 24, 40, 0.2);
+      }
+
+      /* ============================================================
+         GLASS MATERIAL — the recipe every direction shares.
+         .glass-sm / .glass-md / .glass-lg  (size tiers)
+         Structure: element = plate + blur; ::before = bezel ring
+         (screen); ::after = bezel ring (overlay). Content sits in a
+         child .glass-content to stay off the filtered layer.
+         ============================================================ */
+      .glass {
+        position: relative;
+        isolation: isolate;
+        color: var(--glass-ink);
+        background-color: rgb(var(--glass-plate-rgb) / var(--glass-plate, var(--glass-plate-md)));
+        -webkit-backdrop-filter: blur(var(--glass-blur, var(--glass-blur-md)))
+          saturate(var(--glass-saturate));
+        backdrop-filter: blur(var(--glass-blur, var(--glass-blur-md)))
+          saturate(var(--glass-saturate));
+        box-shadow:
+          inset 0 1px 0 var(--glass-top-light),
+          var(--glass-shadow, var(--shadow-glass-md));
+      }
+      .glass-sm {
+        --glass-plate: var(--glass-plate-sm);
+        --glass-blur: var(--glass-blur-sm);
+        --glass-shadow: var(--shadow-glass-sm);
+      }
+      .glass-md {
+        --glass-plate: var(--glass-plate-md);
+        --glass-blur: var(--glass-blur-md);
+        --glass-shadow: var(--shadow-glass-md);
+      }
+      .glass-lg {
+        --glass-plate: var(--glass-plate-lg);
+        --glass-blur: var(--glass-blur-lg);
+        --glass-shadow: var(--shadow-glass-lg);
+      }
+      /* Double bezel: 1px gradient rim, mask-composite exclude trick */
+      .glass::before,
+      .glass::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 1px;
+        background: linear-gradient(
+          var(--bezel-angle, 135deg),
+          transparent 8%,
+          var(--bezel-screen) 38%,
+          transparent 62%,
+          var(--bezel-screen) 92%
+        );
+        -webkit-mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        -webkit-mask-composite: xor;
+        mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        mask-composite: exclude;
+        mix-blend-mode: screen;
+        opacity: 0.55;
+        pointer-events: none;
+        z-index: 2;
+      }
+      .glass::after {
+        background: linear-gradient(
+          calc(var(--bezel-angle, 135deg) + 180deg),
+          transparent 20%,
+          var(--bezel-overlay) 60%,
+          transparent 95%
+        );
+        mix-blend-mode: overlay;
+        opacity: 0.8;
+      }
+      .glass > .glass-content {
+        position: relative;
+        z-index: 1;
+      }
+      /* Refraction (garnish tier): the displacement filter must live on an
+         EMPTY warp layer so content never distorts — only the backdrop. */
+      .glass > .warp {
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        z-index: 0;
+        pointer-events: none;
+      }
+      body.refract :is(.popover, .palette).glass {
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+      }
+      body.refract :is(.popover, .palette).glass > .warp {
+        -webkit-backdrop-filter: blur(var(--glass-blur, var(--glass-blur-lg)))
+          saturate(var(--glass-saturate));
+        backdrop-filter: blur(var(--glass-blur, var(--glass-blur-lg)))
+          saturate(var(--glass-saturate));
+        filter: url(#lg-refract);
+      }
+
+      /* Reduced-transparency preview: frost everything, keep hierarchy */
+      [data-reduced="1"] .glass {
+        background-color: rgb(var(--glass-plate-rgb) / 0.985);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+      }
+
+      /* ============================================================
+         LAB CHROME (the page itself — quiet, typographic)
+         ============================================================ */
+      * {
+        box-sizing: border-box;
+        margin: 0;
+      }
+      html {
+        background: var(--chrome-bg);
+      }
+      body {
+        font-family: var(--font-sans);
+        color: var(--foreground);
+        background: var(--chrome-bg);
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      .lab-top {
+        position: sticky;
+        top: 0;
+        z-index: 60;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 18px;
+        padding: 14px 26px;
+        border-bottom: 1px solid var(--border);
+        background: color-mix(in srgb, var(--chrome-bg) 86%, transparent);
+        -webkit-backdrop-filter: blur(18px) saturate(150%);
+        backdrop-filter: blur(18px) saturate(150%);
+      }
+      .lab-title {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        margin-right: 6px;
+        white-space: nowrap;
+      }
+      .lab-title span {
+        color: var(--muted-foreground);
+        font-weight: 500;
+      }
+      .seg {
+        display: flex;
+        gap: 2px;
+        padding: 3px;
+        border-radius: 9px;
+        background: var(--muted);
+        border: 1px solid var(--border);
+      }
+      .seg button {
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: var(--muted-foreground);
+        font: inherit;
+        font-size: 12.5px;
+        font-weight: 600;
+        padding: 5px 12px;
+        border-radius: 7px;
+        cursor: pointer;
+        transition:
+          background var(--dur-chip) var(--spring-gentle),
+          color var(--dur-chip) var(--spring-gentle),
+          transform var(--dur-chip) var(--spring-snappy);
+      }
+      .seg button:active {
+        transform: scale(0.96);
+      }
+      .seg button[aria-pressed="true"] {
+        background: var(--card);
+        color: var(--foreground);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+      }
+      .lab-control {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted-foreground);
+        font-weight: 600;
+      }
+      .lab-control input[type="range"] {
+        width: 130px;
+        accent-color: oklch(0.588 0.217 264);
+      }
+      .lab-toggle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .lab-toggle input {
+        accent-color: oklch(0.588 0.217 264);
+      }
+      .kbd {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        padding: 1px 5px;
+        border-radius: 4px;
+        border: 1px solid var(--border-strong);
+        color: var(--muted-foreground);
+        background: var(--muted);
+      }
+
+      main {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 34px 26px 120px;
+      }
+      section {
+        margin-bottom: 72px;
+      }
+      .sec-label {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        margin-bottom: 6px;
+      }
+      .sec-title {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 10px;
+      }
+      .sec-intro {
+        color: var(--muted-foreground);
+        max-width: 74ch;
+        font-size: 14px;
+        margin-bottom: 26px;
+      }
+      .sec-intro b {
+        color: var(--foreground);
+        font-weight: 600;
+      }
+
+      /* ============================================================
+         STAGE — the mini-Ryco shell
+         ============================================================ */
+      .stage {
+        position: relative;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        overflow: hidden;
+        height: 660px;
+        background: var(--chrome-bg);
+        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.25);
+      }
+      /* Direction B wallpaper (muted, macOS-like — not neon) */
+      .stage .wallpaper {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        transition: opacity 500ms var(--spring-gentle);
+        background:
+          radial-gradient(120% 90% at 15% 8%, #37415f 0%, transparent 55%),
+          radial-gradient(110% 90% at 88% 18%, #4a3a55 0%, transparent 58%),
+          radial-gradient(130% 110% at 50% 108%, #23303d 0%, transparent 60%),
+          linear-gradient(#191a22, #14151b);
+      }
+      [data-theme="light"] .stage .wallpaper {
+        background:
+          radial-gradient(120% 90% at 15% 8%, #cfd8ec 0%, transparent 55%),
+          radial-gradient(110% 90% at 88% 18%, #e4d6e4 0%, transparent 58%),
+          radial-gradient(130% 110% at 50% 108%, #d1dde4 0%, transparent 60%),
+          linear-gradient(#eef0f6, #e8eaf1);
+      }
+      [data-direction="b"] .stage .wallpaper {
+        opacity: 1;
+      }
+      /* Ambient content glow used by direction A/D behind chrome */
+      .stage .ambient {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        transition: opacity 500ms var(--spring-gentle);
+        background:
+          radial-gradient(60% 50% at 68% 30%, oklch(0.588 0.13 264 / 0.1) 0%, transparent 70%),
+          radial-gradient(50% 45% at 30% 80%, oklch(0.65 0.1 190 / 0.07) 0%, transparent 70%);
+      }
+      :is([data-direction="a"], [data-direction="d"]) .stage .ambient {
+        opacity: 1;
+      }
+
+      .shell {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        grid-template-columns: 236px 1fr;
+      }
+      [data-direction="b"] .shell {
+        inset: 14px;
+        border-radius: 14px;
+        overflow: hidden;
+      }
+
+      /* ---- Sidebar ---- */
+      .side {
+        position: relative;
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        padding: 14px 10px 12px;
+        gap: 2px;
+        font-size: 13px;
+        border-right: 1px solid var(--border);
+        background: var(--chrome-bg);
+        transition: background 400ms var(--spring-gentle);
+      }
+      /* A/D: sidebar becomes chrome-layer glass */
+      :is([data-direction="a"], [data-direction="d"]) .side {
+        background: rgb(var(--glass-plate-rgb) / calc(var(--glass-plate-lg) * 0.82));
+        -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+        backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+        border-right: 1px solid var(--glass-separator);
+      }
+      [data-direction="b"] .side {
+        background: transparent;
+        border-right: 1px solid var(--glass-separator);
+      }
+      [data-reduced="1"] .side {
+        background: var(--chrome-bg) !important;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+      }
+      .side .brand {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 2px 8px 12px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        font-size: 13.5px;
+      }
+      .side .brand .dev {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        color: var(--muted-foreground);
+        border: 1px solid var(--border-strong);
+        border-radius: 5px;
+        padding: 1px 5px;
+      }
+      .side .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px;
+        border-radius: var(--r-inner2);
+        color: var(--foreground);
+        cursor: pointer;
+        transition:
+          background var(--dur-chip) var(--spring-gentle),
+          transform var(--dur-chip) var(--spring-snappy);
+      }
+      .side .row:hover {
+        background: var(--accent);
+      }
+      .side .row:active {
+        transform: scale(0.985);
+      }
+      .side .row .hint {
+        margin-left: auto;
+        font-size: 10.5px;
+        color: var(--muted-foreground);
+        font-family: var(--font-mono);
+      }
+      .side .group {
+        margin-top: 14px;
+        padding: 0 8px 6px;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: var(--muted-foreground);
+      }
+      .side .thread {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        padding: 6px 8px 7px;
+        border-radius: var(--r-inner2);
+        cursor: pointer;
+      }
+      .side .thread:hover {
+        background: var(--accent);
+      }
+      .side .thread.active {
+        background: var(--accent);
+      }
+      .side .thread .t {
+        font-size: 12.5px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .side .thread .s {
+        font-size: 11px;
+        color: var(--success);
+      }
+      .side .thread .s.working {
+        color: var(--muted-foreground);
+        background: linear-gradient(
+          90deg,
+          var(--muted-foreground) 40%,
+          #7dd3fc 50%,
+          var(--muted-foreground) 60%
+        );
+        background-size: 220% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: shimmer 2.2s linear infinite;
+      }
+      @keyframes shimmer {
+        from {
+          background-position: 120% center;
+        }
+        to {
+          background-position: -20% center;
+        }
+      }
+
+      /* ---- Main column ---- */
+      .maincol {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        background: var(--background);
+        transition: background 400ms var(--spring-gentle);
+      }
+      [data-direction="b"] .maincol {
+        background: transparent;
+      }
+
+      /* Top bar: floats over scrolling transcript in a/b/d */
+      .topbar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 16px;
+        font-size: 13px;
+        color: var(--glass-ink-2);
+        border-bottom: 1px solid var(--border);
+        background: var(--background);
+        transition: background 400ms var(--spring-gentle);
+      }
+      :is([data-direction="a"], [data-direction="d"], [data-direction="b"]) .topbar {
+        border-bottom: 1px solid var(--glass-separator);
+        background: rgb(var(--glass-plate-rgb) / var(--glass-plate-md));
+        -webkit-backdrop-filter: blur(var(--glass-blur-md)) saturate(var(--glass-saturate));
+        backdrop-filter: blur(var(--glass-blur-md)) saturate(var(--glass-saturate));
+      }
+      [data-reduced="1"] .topbar {
+        background: var(--background) !important;
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+      }
+      /* Hard scroll-edge scrim below the bar (IDE default per HIG research) */
+      .topbar .scrim {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 100%;
+        height: 26px;
+        pointer-events: none;
+        background: linear-gradient(rgb(var(--glass-plate-rgb) / 0.5), transparent);
+        opacity: 0;
+        transition: opacity 220ms var(--spring-gentle);
+      }
+      .stage.scrolled :is([data-direction] .topbar .scrim),
+      .stage.scrolled .topbar .scrim {
+        opacity: 1;
+      }
+      .topbar .crumb b {
+        color: var(--foreground);
+        font-weight: 600;
+      }
+      .topbar .crumb .sep {
+        opacity: 0.4;
+        margin: 0 6px;
+      }
+      .topbar .actions {
+        margin-left: auto;
+        display: flex;
+        gap: 6px;
+      }
+      .chipbtn {
+        appearance: none;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--glass-ink-2);
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: var(--r-inner2);
+        padding: 4px 10px;
+        cursor: pointer;
+        transition:
+          background var(--dur-chip) var(--spring-gentle),
+          border-color var(--dur-chip) var(--spring-gentle),
+          transform var(--dur-chip) var(--spring-snappy);
+      }
+      .chipbtn:hover {
+        background: var(--accent);
+      }
+      .chipbtn:active {
+        transform: scale(0.95);
+      }
+      .chipbtn.primary {
+        color: var(--glass-ink);
+        border-color: var(--border-strong);
+      }
+
+      /* ---- Transcript ---- */
+      .transcript {
+        position: absolute;
+        inset: 0;
+        overflow-y: auto;
+        padding: 66px 0 190px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(128, 128, 140, 0.35) transparent;
+      }
+      .tcol {
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 0 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        font-size: 14px;
+      }
+      .bubble {
+        align-self: flex-end;
+        max-width: 78%;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: 16px 16px 6px 16px;
+        padding: 10px 14px;
+      }
+      [data-direction="b"] .bubble,
+      [data-direction="b"] .worked,
+      [data-direction="b"] .md {
+        --plate: 1;
+      }
+      .meta {
+        align-self: flex-end;
+        font-size: 10.5px;
+        color: var(--muted-foreground);
+      }
+      .worked {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted-foreground);
+        font-size: 12.5px;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 8px;
+        cursor: pointer;
+      }
+      .worked .chev {
+        transition: transform 200ms var(--spring-snappy);
+      }
+      .worked.open .chev {
+        transform: rotate(90deg);
+      }
+      .toolrow {
+        display: none;
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--muted-foreground);
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: var(--r-inner);
+        padding: 8px 12px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .worked.open + .toolrow {
+        display: block;
+      }
+      .md h2 {
+        font-size: 17px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        margin: 4px 0 2px;
+      }
+      .md p {
+        color: color-mix(in srgb, var(--foreground) 92%, transparent);
+      }
+      .md ul {
+        padding-left: 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .md pre {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        line-height: 1.6;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: var(--r-inner);
+        padding: 12px 14px;
+        overflow-x: auto;
+      }
+      [data-theme="light"] .md pre {
+        background: #f7f7f8;
+      }
+      .md .tk-kw {
+        color: #c792ea;
+      }
+      .md .tk-fn {
+        color: #82aaff;
+      }
+      .md .tk-str {
+        color: #c3e88d;
+      }
+      [data-theme="light"] .md .tk-kw {
+        color: #9333ea;
+      }
+      [data-theme="light"] .md .tk-fn {
+        color: #2563eb;
+      }
+      [data-theme="light"] .md .tk-str {
+        color: #16a34a;
+      }
+      .filechip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-mono);
+        font-size: 11.5px;
+        border: 1px solid var(--border);
+        background: var(--muted);
+        padding: 2px 8px;
+        border-radius: 6px;
+      }
+      .filechip .plus {
+        color: var(--success);
+      }
+
+      /* ---- Composer: floating glass capsule, content scrolls under ---- */
+      .composer-wrap {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 12;
+        display: flex;
+        justify-content: center;
+        padding: 0 24px 18px;
+        pointer-events: none;
+      }
+      /* soft scroll-edge scrim under the composer */
+      .composer-wrap::before {
+        content: "";
+        position: absolute;
+        inset: -34px 0 0;
+        background: linear-gradient(transparent, rgb(var(--glass-plate-rgb) / 0.42));
+        opacity: 0;
+        transition: opacity 300ms var(--spring-gentle);
+        pointer-events: none;
+      }
+      :is([data-direction="a"], [data-direction="b"], [data-direction="d"]) .composer-wrap::before {
+        opacity: 1;
+      }
+      .composer {
+        pointer-events: auto;
+        width: 100%;
+        max-width: 640px;
+        border-radius: var(--r-outer);
+        padding: 12px 14px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        transition:
+          transform 160ms var(--spring-gentle),
+          box-shadow 300ms var(--spring-gentle);
+      }
+      :is([data-direction="a"], [data-direction="b"], [data-direction="d"]) .composer {
+        border: 0;
+      }
+      [data-direction="c"] .composer.glass {
+        background: var(--card);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        box-shadow: var(--shadow-glass-sm);
+      }
+      [data-direction="c"] .composer.glass::before,
+      [data-direction="c"] .composer.glass::after {
+        display: none;
+      }
+      .composer .ph {
+        font-size: 14px;
+        color: var(--glass-ink-3);
+      }
+      .composer .bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .composer .send {
+        margin-left: auto;
+        width: 30px;
+        height: 30px;
+        border-radius: var(--r-inner);
+        border: 0;
+        cursor: pointer;
+        background: var(--primary);
+        color: #fff;
+        font-size: 14px;
+        display: grid;
+        place-items: center;
+        transition:
+          transform var(--dur-chip) var(--spring-snappy),
+          filter var(--dur-chip) linear;
+      }
+      .composer .send:hover {
+        filter: brightness(1.1);
+      }
+      .composer .send:active {
+        transform: scale(0.9);
+      }
+      .modechip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--glass-ink-2);
+        border: 1px solid var(--glass-separator);
+        background: rgb(var(--glass-plate-rgb) / 0.3);
+        border-radius: var(--r-inner);
+        padding: 4px 10px;
+        cursor: pointer;
+        transition:
+          background var(--dur-chip) var(--spring-gentle),
+          transform var(--dur-chip) var(--spring-snappy);
+      }
+      [data-direction="c"] .modechip {
+        background: var(--muted);
+        border-color: var(--border);
+      }
+      .modechip:hover {
+        background: var(--accent);
+      }
+      .modechip:active {
+        transform: scale(0.95);
+      }
+      .modechip .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--success);
+      }
+
+      /* ---- Popover (model picker) — chrome layer, morphs from chip ---- */
+      .popover {
+        position: absolute;
+        z-index: 30;
+        bottom: 118px;
+        width: 320px;
+        border-radius: var(--r-outer);
+        overflow: hidden;
+        transform-origin: bottom left;
+        opacity: 0;
+        transform: translateY(10px) scale(0.9);
+        pointer-events: none;
+        transition:
+          opacity var(--dur-pop) var(--spring-gentle),
+          transform var(--dur-pop) var(--spring-snappy);
+      }
+      .popover.open {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+        pointer-events: auto;
+      }
+      .popover .glass-content {
+        display: flex;
+        flex-direction: column;
+        max-height: 320px;
+      }
+      .popover .search {
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--glass-separator);
+        font-size: 13px;
+        color: var(--glass-ink-3);
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .popover .list {
+        overflow-y: auto;
+        padding: 6px;
+      }
+      .popover .item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 7px 10px;
+        border-radius: var(--r-inner);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--glass-ink);
+        transition: background 90ms linear;
+      }
+      .popover .item:hover {
+        background: color-mix(in srgb, var(--glass-ink) 8%, transparent);
+      }
+      .popover .item .prov {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--glass-ink-3);
+      }
+      .popover .item .kbd {
+        margin-left: auto;
+      }
+      .popover .item.sel {
+        background: var(--primary-soft);
+      }
+
+      /* ---- Command palette overlay ---- */
+      .palette-backdrop {
+        position: absolute;
+        inset: 0;
+        z-index: 40;
+        background: rgb(0 0 0 / 0.2);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--dur-pop) linear;
+      }
+      .palette-backdrop.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .palette {
+        position: absolute;
+        z-index: 41;
+        left: 50%;
+        top: 12%;
+        width: min(560px, 86%);
+        translate: -50% 0;
+        border-radius: var(--r-outer);
+        overflow: hidden;
+        opacity: 0;
+        transform: scale(0.94) translateY(-8px);
+        pointer-events: none;
+        transition:
+          opacity var(--dur-pop) var(--spring-gentle),
+          transform var(--dur-pop) var(--spring-snappy);
+      }
+      .palette.open {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        pointer-events: auto;
+      }
+      .palette .search {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 14px 16px;
+        font-size: 14px;
+        color: var(--glass-ink-3);
+        border-bottom: 1px solid var(--glass-separator);
+      }
+      .palette .results {
+        max-height: 260px;
+        overflow: auto;
+        padding: 6px;
+      }
+      .palette .r {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        font-size: 13px;
+        padding: 8px 10px;
+        border-radius: var(--r-inner);
+        color: var(--glass-ink);
+      }
+      .palette .r.sel {
+        background: color-mix(in srgb, var(--glass-ink) 8%, transparent);
+      }
+      .palette .r .k {
+        margin-left: auto;
+      }
+      .palette .foot {
+        display: flex;
+        gap: 14px;
+        padding: 8px 14px;
+        font-size: 11px;
+        color: var(--glass-ink-3);
+        border-top: 1px solid var(--glass-separator);
+      }
+
+      /* Direction C: popover + palette solid (today's look, systematized) */
+      [data-direction="c"] :is(.popover, .palette).glass {
+        background: var(--popover);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-glass-md);
+      }
+      [data-direction="c"] :is(.popover, .palette).glass::before,
+      [data-direction="c"] :is(.popover, .palette).glass::after {
+        display: none;
+      }
+
+      /* ============================================================
+         INGREDIENTS GRID
+         ============================================================ */
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 18px;
+      }
+      .ing {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--card);
+        overflow: hidden;
+      }
+      .ing .demo {
+        position: relative;
+        height: 190px;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(80% 70% at 20% 20%, oklch(0.55 0.16 264 / 0.35), transparent 60%),
+          radial-gradient(70% 60% at 85% 40%, oklch(0.62 0.14 30 / 0.3), transparent 60%),
+          radial-gradient(70% 80% at 55% 95%, oklch(0.6 0.12 190 / 0.3), transparent 60%),
+          var(--background);
+      }
+      .ing .demo .busy {
+        position: absolute;
+        inset: 0;
+        padding: 12px 14px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        line-height: 1.7;
+        color: color-mix(in srgb, var(--foreground) 80%, transparent);
+        user-select: none;
+        animation: drift 14s linear infinite alternate;
+      }
+      @keyframes drift {
+        from {
+          transform: translateY(0);
+        }
+        to {
+          transform: translateY(-56px);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ing .demo .busy,
+        .side .thread .s.working {
+          animation: none;
+        }
+      }
+      .ing .body {
+        padding: 14px 16px 16px;
+      }
+      .ing h4 {
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+      .ing p {
+        font-size: 12.5px;
+        color: var(--muted-foreground);
+      }
+      .ing code {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: color-mix(in srgb, var(--foreground) 85%, transparent);
+        background: var(--muted);
+        border-radius: 4px;
+        padding: 1px 5px;
+      }
+      .tile {
+        width: 150px;
+        padding: 14px;
+        border-radius: 16px;
+        font-size: 12.5px;
+        font-weight: 600;
+        text-align: center;
+      }
+      .pill {
+        border-radius: 999px;
+        padding: 8px 18px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      /* ============================================================
+         DIRECTIONS / AUDIT TABLES
+         ============================================================ */
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+      }
+      .dcard {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 18px;
+        background: var(--card);
+        cursor: pointer;
+        transition:
+          border-color 200ms var(--spring-gentle),
+          transform 200ms var(--spring-snappy),
+          box-shadow 200ms var(--spring-gentle);
+      }
+      .dcard:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-glass-sm);
+      }
+      .dcard.sel {
+        border-color: oklch(0.588 0.217 264 / 0.55);
+        box-shadow: 0 0 0 3px oklch(0.588 0.217 264 / 0.14);
+      }
+      .dcard .tag {
+        display: inline-block;
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        color: var(--muted-foreground);
+        margin-bottom: 10px;
+      }
+      .dcard.sel .tag {
+        color: oklch(0.72 0.15 264);
+        border-color: oklch(0.588 0.217 264 / 0.5);
+      }
+      .dcard h3 {
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        margin-bottom: 6px;
+      }
+      .dcard p {
+        font-size: 13px;
+        color: var(--muted-foreground);
+        margin-bottom: 12px;
+      }
+      .dcard ul {
+        list-style: none;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 12px;
+      }
+      .dcard li {
+        display: flex;
+        gap: 7px;
+      }
+      .dcard li::before {
+        content: "·";
+        color: var(--muted-foreground);
+      }
+      .dcard .risk {
+        margin-top: 12px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted-foreground);
+      }
+      .reco {
+        margin-top: 22px;
+        border: 1px solid oklch(0.588 0.217 264 / 0.35);
+        background: oklch(0.588 0.217 264 / 0.07);
+        border-radius: 14px;
+        padding: 18px 20px;
+        font-size: 13.5px;
+      }
+      .reco b {
+        font-weight: 700;
+      }
+
+      table.audit {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      table.audit th {
+        text-align: left;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted-foreground);
+        font-weight: 700;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--border-strong);
+      }
+      table.audit td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      table.audit td.sev {
+        font-weight: 700;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .sev-high {
+        color: var(--destructive);
+      }
+      .sev-med {
+        color: var(--warning);
+      }
+      table.audit td.file {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--muted-foreground);
+        white-space: nowrap;
+      }
+      .countrow {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin: 18px 0 26px;
+      }
+      .count {
+        border: 1px solid var(--border);
+        background: var(--card);
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 12px;
+        color: var(--muted-foreground);
+      }
+      .count b {
+        display: block;
+        font-size: 18px;
+        color: var(--foreground);
+        letter-spacing: -0.02em;
+      }
+
+      .phase {
+        display: grid;
+        grid-template-columns: 92px 1fr;
+        gap: 16px;
+        padding: 16px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 13.5px;
+      }
+      .phase .n {
+        font-weight: 700;
+        color: var(--muted-foreground);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+      }
+      .phase h4 {
+        font-size: 14px;
+        margin-bottom: 4px;
+      }
+      .phase p {
+        color: var(--muted-foreground);
+      }
+      footer {
+        margin-top: 60px;
+        color: var(--muted-foreground);
+        font-size: 12px;
+      }
+      footer code {
+        font-family: var(--font-mono);
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body data-theme="dark" data-direction="a" data-reduced="0">
+    <header class="lab-top">
+      <div class="lab-title">Ryco <span>· Liquid Glass Lab</span></div>
+      <div class="seg" id="dirSeg" role="tablist" aria-label="Design direction">
+        <button data-dir="a" aria-pressed="true">A · Layered Chrome</button>
+        <button data-dir="b" aria-pressed="false">B · Full Vibrancy</button>
+        <button data-dir="c" aria-pressed="false">C · Quiet Glass</button>
+        <button data-dir="d" aria-pressed="false">D · Liquid</button>
+      </div>
+      <div class="seg" id="themeSeg" aria-label="Theme">
+        <button data-th="dark" aria-pressed="true">Dark</button>
+        <button data-th="light" aria-pressed="false">Light</button>
+      </div>
+      <label class="lab-control"
+        >Tinted <input id="material" type="range" min="0" max="100" value="45" /> Clear</label
+      >
+      <label class="lab-control lab-toggle"
+        ><input id="reduced" type="checkbox" /> Reduced transparency</label
+      >
+      <label class="lab-control lab-toggle"
+        ><input id="refract" type="checkbox" /> Refraction <span class="kbd">Chromium</span></label
+      >
+      <span class="lab-control"
+        ><span class="kbd">1–4</span> direction · <span class="kbd">K</span> palette</span
+      >
+    </header>
+
+    <main>
+      <!-- ==================== STAGE ==================== -->
+      <section>
+        <div class="sec-label">Stage</div>
+        <h2 class="sec-title">The shell, four ways</h2>
+        <p class="sec-intro">
+          A faithful mock of the Ryco shell with real session content.
+          <b>Scroll the transcript</b> to see content travel under the chrome, open the
+          <b>model picker</b> from the composer chip, hit <b>K</b> for the palette. The Material
+          slider is the proposed user setting — note the plate never drops below the legibility
+          floor, unlike today's Glass step. Direction D adds pointer-reactive bezels and (behind the
+          toggle) Chromium-only edge refraction.
+        </p>
+        <div class="stage" id="stage">
+          <div class="wallpaper"></div>
+          <div class="ambient"></div>
+          <div class="shell">
+            <aside class="side">
+              <div class="brand">ryco <span class="dev">DEV</span></div>
+              <div class="row">✎&nbsp; New thread <span class="hint">⇧⌘N</span></div>
+              <div class="row">⌕&nbsp; Search <span class="hint">⌘K</span></div>
+              <div class="group">PROJECTS</div>
+              <div class="row">▾ server</div>
+              <div class="thread active">
+                <span class="t">Identify project from root</span>
+                <span class="s">Done · +20 −0</span>
+              </div>
+              <div class="thread">
+                <span class="t">Redesign liquid glass tokens</span>
+                <span class="s working">Working · 2m 14s</span>
+              </div>
+              <div class="thread">
+                <span class="t">Fix sidebar token family</span>
+                <span class="s" style="color: var(--warning)">Needs review</span>
+              </div>
+            </aside>
+            <div class="maincol">
+              <div class="topbar">
+                <span class="crumb"
+                  ><b>server</b><span class="sep">›</span>feat/redesign-liquid-glass<span
+                    class="sep"
+                    >›</span
+                  ><b>Identify project from root</b></span
+                >
+                <div class="actions">
+                  <button class="chipbtn">Overview</button>
+                  <button class="chipbtn">Workspace</button>
+                  <button class="chipbtn primary">⌥ Open</button>
+                </div>
+                <div class="scrim"></div>
+              </div>
+
+              <div class="transcript" id="transcript">
+                <div class="tcol">
+                  <div class="bubble">
+                    Run ls in the project root and tell me in one sentence what kind of project this
+                    is.
+                  </div>
+                  <div class="meta">13:20:44</div>
+                  <div class="worked" id="worked"><span class="chev">›</span> Worked for 14s</div>
+                  <div class="toolrow">
+                    $ ls · apps packages scripts docs marketing turbo.json …
+                  </div>
+                  <div class="md">
+                    <p>
+                      This is a monorepo for <b>Ryco</b>, an AI agent orchestration platform with
+                      multiple apps (web, mobile, CLI), packages, and a TypeScript/Bun-based stack.
+                    </p>
+                  </div>
+                  <div class="bubble">
+                    Create DESIGN_AUDIT_SCRATCH.md with varied sample markdown, then summarize the
+                    design takeaways.
+                  </div>
+                  <div class="meta">13:21:46</div>
+                  <div class="worked open"><span class="chev">›</span> Worked for 16s</div>
+                  <div class="toolrow">
+                    ✏ Write · DESIGN_AUDIT_SCRATCH.md
+                    <span class="filechip"><span class="plus">+20</span> new file</span>
+                  </div>
+                  <div class="md">
+                    <h2>Design takeaways</h2>
+                    <p>
+                      Headings now render as headings — the transcript is the primary reading
+                      surface, so hierarchy in assistant prose is not optional.
+                    </p>
+                    <ul>
+                      <li>Content layer stays opaque; chrome floats above it as glass.</li>
+                      <li>One material recipe, three size tiers, one motion vocabulary.</li>
+                      <li>Every translucent surface carries a worst-case legibility plate.</li>
+                    </ul>
+                    <pre><span class="tk-kw">const</span> <span class="tk-fn">glass</span> = tier(<span class="tk-str">"chrome"</span>, { plate: <span class="tk-str">"≥ 0.58"</span>, blur: <span class="tk-str">"22px"</span> });</pre>
+                    <p>
+                      The composer floats and the transcript scrolls beneath it — the scroll-edge
+                      scrim keeps the last line readable instead of clipping the layout above a
+                      slab.
+                    </p>
+                    <p>
+                      Glass lives on this popover, the palette, the bars and the sidebar — never on
+                      the prose you are reading right now, which is why it stays legible at every
+                      Material step.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="composer-wrap">
+                <div class="composer glass glass-md" id="composer">
+                  <div class="glass-content">
+                    <div class="ph">Ask anything, @tag files, or use / for commands</div>
+                    <div class="bar">
+                      <button class="modechip" id="modelChip">
+                        <span class="dot"></span> Haiku 4.5
+                      </button>
+                      <button class="modechip">Build</button>
+                      <button class="modechip">MCP</button>
+                      <button class="send" title="Send">↑</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                class="popover glass glass-lg"
+                id="popover"
+                style="left: calc(50% - 320px + 20px)"
+              >
+                <div class="warp"></div>
+                <div class="glass-content">
+                  <div class="search">⌕ Search models…</div>
+                  <div class="list">
+                    <div class="item sel">
+                      Fable 5 <span class="prov">Claude</span><span class="kbd">⌘1</span>
+                    </div>
+                    <div class="item">
+                      Opus 5 <span class="prov">Claude</span><span class="kbd">⌘2</span>
+                    </div>
+                    <div class="item">
+                      Haiku 4.5 <span class="prov">Claude</span><span class="kbd">⌘3</span>
+                    </div>
+                    <div class="item">
+                      GPT-5.6-Sol <span class="prov">Codex</span><span class="kbd">⌘4</span>
+                    </div>
+                    <div class="item">
+                      GPT-5.4 <span class="prov">Codex</span><span class="kbd">⌘5</span>
+                    </div>
+                    <div class="item">
+                      Gemini 3 Pro <span class="prov">Gemini</span><span class="kbd">⌘6</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="palette-backdrop" id="paletteBackdrop"></div>
+              <div class="palette glass glass-lg" id="palette">
+                <div class="warp"></div>
+                <div class="glass-content">
+                  <div class="search">⌕ Type a command or search threads…</div>
+                  <div class="results">
+                    <div class="r sel">✎ New thread <span class="k kbd">⇧⌘N</span></div>
+                    <div class="r">◧ Toggle workspace panel <span class="k kbd">⌘.</span></div>
+                    <div class="r">◐ Switch theme: Dark → Light</div>
+                    <div class="r">✦ Change material: Tinted ↔ Clear</div>
+                    <div class="r">⌁ Open terminal <span class="k kbd">⌃`</span></div>
+                  </div>
+                  <div class="foot">
+                    <span>↑↓ Navigate</span><span>↵ Select</span><span>esc Close</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== INGREDIENTS ==================== -->
+      <section>
+        <div class="sec-label">Ingredients</div>
+        <h2 class="sec-title">The material, decomposed</h2>
+        <p class="sec-intro">
+          Every demo below runs the same tokens the implementation will ship. The busy backdrop is
+          deliberate — glass is only honest over content that moves. These are the pieces worth
+          taking from <code>liquid-glass-react</code> (MIT) and Apple's HIG; refraction is treated
+          strictly as Chromium garnish on top of a design that reads complete without it.
+        </p>
+        <div class="grid">
+          <div class="ing">
+            <div class="demo">
+              <div class="busy">
+                const audit = await runWorkflow(areas)<br />→ 160 findings · 8 areas<br />plate ≥
+                0.58 · blur 22px<br />backdrop-filter: blur() saturate()<br />inset 0 1px 0
+                highlight<br />mask-composite: exclude<br />feDisplacementMap scale −70<br />spring
+                cubic-bezier(.3,1.36,.44,1)<br />scroll-edge scrim: hard<br />vibrancy:
+                primary/secondary/tertiary
+              </div>
+              <div class="tile glass glass-sm" style="border-radius: 16px">
+                <div class="glass-content">
+                  glass-sm<br /><span style="opacity: 0.6">controls</span>
+                </div>
+              </div>
+            </div>
+            <div class="body">
+              <h4>Size tiers</h4>
+              <p>
+                Small surfaces run thinner plates and stronger bezels; large panes go calmer and
+                more opaque. <code>glass-sm/md/lg</code> map to chips, popovers, and panes.
+              </p>
+            </div>
+          </div>
+          <div class="ing">
+            <div class="demo">
+              <div class="busy">
+                What should we do in server?<br />Run ls in the project root…<br />This is a
+                monorepo for Ryco,<br />an AI agent orchestration<br />platform with multiple
+                apps<br />(web, mobile, CLI), packages,<br />and a TypeScript/Bun stack.<br />Worked
+                for 14s · Command run<br />$ ls apps packages scripts
+              </div>
+              <div class="tile glass glass-md" id="bezelTile" style="border-radius: 18px">
+                <div class="glass-content">
+                  Pointer bezel<br /><span style="opacity: 0.6">move the mouse</span>
+                </div>
+              </div>
+            </div>
+            <div class="body">
+              <h4>Double bezel ring</h4>
+              <p>
+                Two 1px gradient rims via <code>mask-composite: exclude</code> — one
+                <code>screen</code> glint, one <code>overlay</code> contrast ring — so the edge
+                reads on any backdrop. Direction D drives the gradient angle from the pointer.
+              </p>
+            </div>
+          </div>
+          <div class="ing">
+            <div class="demo">
+              <div class="busy" style="color: var(--foreground)">
+                ## Legibility floor<br />Text behind glass is the enemy.<br />The plate guarantees
+                ≥4.5:1<br />for body text over the worst<br />case backdrop — this line —<br />before
+                blur even helps.<br />Today's Glass step has no floor,<br />which is why menus
+                bleed.<br />26.1 shipped a user toggle.
+              </div>
+              <div style="display: flex; gap: 12px">
+                <div
+                  class="tile"
+                  style="
+                    background: rgb(var(--glass-plate-rgb) / 0.22);
+                    -webkit-backdrop-filter: blur(4px);
+                    backdrop-filter: blur(4px);
+                    border: 1px solid var(--glass-separator);
+                  "
+                >
+                  today<br /><span style="opacity: 0.6">no floor</span>
+                </div>
+                <div class="tile glass glass-md" style="border-radius: 16px">
+                  <div class="glass-content">
+                    proposed<br /><span style="opacity: 0.6">plate ≥ .58</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="body">
+              <h4>Tint floor</h4>
+              <p>
+                The current Glass step composites 72% popover over anything — headings read straight
+                through menus. The proposed plate slides with Material but is clamped to a
+                worst-case AA floor, exactly the machinery Apple retrofitted in beta 3.
+              </p>
+            </div>
+          </div>
+          <div class="ing">
+            <div class="demo" style="place-items: stretch">
+              <div class="busy">
+                function resolvePlate(tier) {<br />&nbsp;&nbsp;return clamp(base - m*δ, floor)<br />}<br />const
+                scrim = "hard" // IDE default<br />content scrolls under chrome —<br />the bar stays
+                readable without<br />reserving layout for it.<br />soft = gradient fade for
+                sparse<br />hard = uniform band for code
+              </div>
+              <div
+                style="
+                  position: relative;
+                  margin: 0;
+                  display: flex;
+                  flex-direction: column;
+                  justify-content: space-between;
+                "
+              >
+                <div
+                  class="glass glass-md"
+                  style="
+                    border-radius: 0;
+                    box-shadow: none;
+                    padding: 10px 14px;
+                    font-size: 12.5px;
+                    font-weight: 700;
+                  "
+                >
+                  Toolbar over scroll
+                  <div
+                    style="
+                      position: absolute;
+                      left: 0;
+                      right: 0;
+                      top: 100%;
+                      height: 22px;
+                      background: linear-gradient(rgb(var(--glass-plate-rgb) / 0.5), transparent);
+                    "
+                  ></div>
+                </div>
+                <div
+                  class="glass glass-sm"
+                  style="
+                    border-radius: 999px;
+                    margin: 0 auto 12px;
+                    padding: 8px 18px;
+                    font-size: 12.5px;
+                    font-weight: 600;
+                  "
+                >
+                  <div class="glass-content">Floating composer</div>
+                </div>
+              </div>
+            </div>
+            <div class="body">
+              <h4>Scroll-edge scrims</h4>
+              <p>
+                Any glass bar with content scrolling beneath gets a scrim token —
+                <code>soft</code> gradient for sparse content, <code>hard</code> band for dense
+                text. Never raw code under unscrimmed glass.
+              </p>
+            </div>
+          </div>
+          <div class="ing">
+            <div class="demo">
+              <div class="busy">
+                r-outer: 18px<br />r-inner = outer − pad = 12px<br />r-inner2 = max(inner − pad,
+                4)<br />corners share centers —<br />no more hand-picked radii<br />per component.
+                The window,<br />panel, control chain derives<br />from one outer value.
+              </div>
+              <div
+                class="glass glass-md"
+                style="border-radius: var(--r-outer); padding: var(--r-pad)"
+              >
+                <div
+                  class="glass-content"
+                  style="
+                    border: 1px dashed var(--glass-separator);
+                    border-radius: var(--r-inner);
+                    padding: var(--r-pad);
+                  "
+                >
+                  <div
+                    style="
+                      background: var(--primary-soft);
+                      border-radius: var(--r-inner2);
+                      padding: 10px 18px;
+                      font-size: 12.5px;
+                      font-weight: 600;
+                    "
+                  >
+                    concentric
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="body">
+              <h4>Concentric radii</h4>
+              <p>
+                <code>inner = outer − inset</code>, clamped. One outer radius drives window → panel
+                → control, replacing today's per-component <code>rounded-*</code> drift.
+              </p>
+            </div>
+          </div>
+          <div class="ing">
+            <div class="demo">
+              <div class="busy">
+                press: scale .96 + glow<br />open: morph from source<br />spring-snappy:
+                .3,1.36,.44,1<br />spring-gentle: .22,1,.36,1<br />reduced-motion: crossfade
+                ≤150ms<br />no elastic, no parallax<br />dialogs currently hardcode<br />duration-200
+                and ignore both<br />OS and app motion settings.
+              </div>
+              <button class="pill glass glass-sm" id="springBtn" style="cursor: pointer; border: 0">
+                <span class="glass-content">Press me</span>
+              </button>
+            </div>
+            <div class="body">
+              <h4>Spring motion</h4>
+              <p>
+                Two curves, three durations, all tokens — replacing 13 ad-hoc durations and 5 easing
+                families found in the audit. Everything gated by <code>prefers-reduced-motion</code>
+                and the app Motion axis (which desktop currently ignores).
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== DIRECTIONS ==================== -->
+      <section>
+        <div class="sec-label">Decision</div>
+        <h2 class="sec-title">Four directions</h2>
+        <p class="sec-intro">
+          All four share the same Phase-1 foundation (bug fixes, token unification, motion system —
+          none of it optional). They differ in how far the material goes. Click a card to preview it
+          on the stage.
+        </p>
+        <div class="cards" id="dirCards">
+          <div class="dcard sel" data-dir="a">
+            <span class="tag">RECOMMENDED</span>
+            <h3>A · Layered Chrome</h3>
+            <p>
+              Apple's two-tier discipline: content panes stay opaque; sidebar, bars, composer,
+              popovers and palette float above as regular glass with tint floors and scroll-edge
+              scrims.
+            </p>
+            <ul>
+              <li>Transcript scrolls under floating composer + topbar</li>
+              <li>Sidebar becomes chrome-layer glass over ambient tint</li>
+              <li>Popovers morph from their trigger, springy</li>
+              <li>Material axis finally means one thing everywhere</li>
+            </ul>
+            <div class="risk">Risk: low–medium · Perf: bounded (≤4 glass regions)</div>
+          </div>
+          <div class="dcard" data-dir="b">
+            <span class="tag">AMBITIOUS</span>
+            <h3>B · Full Vibrancy</h3>
+            <p>
+              The whole window is material — desktop shows through the shell (Electron vibrancy),
+              content floats as opaque plates on glass. The most striking, the most costly.
+            </p>
+            <ul>
+              <li>Window-level translucency, wallpaper-lit chrome</li>
+              <li>Content cards keep full opacity for text</li>
+              <li>Requires Electron vibrancy + browser fallback story</li>
+              <li>Terminal/xterm needs an opaque-plate carve-out</li>
+            </ul>
+            <div class="risk">Risk: high · Perf: window-wide blur, GPU-heavy</div>
+          </div>
+          <div class="dcard" data-dir="c">
+            <span class="tag">CONSERVATIVE</span>
+            <h3>C · Quiet Glass</h3>
+            <p>
+              Today's layout, systematized: one glass recipe on transient surfaces only (menus,
+              palette, toasts, dialogs). Fixes everything, changes little.
+            </p>
+            <ul>
+              <li>All 160 audit findings addressed</li>
+              <li>Chrome stays opaque slabs, borders soften</li>
+              <li>Fastest to ship, least visual payoff</li>
+            </ul>
+            <div class="risk">Risk: minimal · Perf: unchanged</div>
+          </div>
+          <div class="dcard" data-dir="d">
+            <span class="tag">SHOWPIECE</span>
+            <h3>D · Liquid</h3>
+            <p>
+              Direction A plus the garnish tier: Chromium-only edge refraction on hero surfaces,
+              pointer-tracked bezels, elastic micro-physics on the composer.
+            </p>
+            <ul>
+              <li>SVG displacement (SDF maps) on popover + palette only</li>
+              <li>Pointer bezel + press illumination via CSS vars</li>
+              <li>Safari/reduced-motion tier is Direction A exactly</li>
+              <li>Ships behind a "Refraction" appearance setting</li>
+            </ul>
+            <div class="risk">Risk: medium · Perf: budgeted, 2 refracting surfaces max</div>
+          </div>
+        </div>
+        <div class="reco">
+          <b>Recommendation: A now, D's garnish behind a setting once A lands.</b> A is the
+          direction a senior designer ships: it fixes the legibility failures the current Glass step
+          has, gives the app a real material identity in both themes, keeps code/diff/terminal
+          surfaces sacred, and its perf ceiling is known. B reads as a wallpaper demo in an IDE and
+          puts the terminal at war with its own background; C leaves the product looking the way it
+          does today. D is A with dessert — worth building, not worth blocking on.
+        </div>
+      </section>
+
+      <!-- ==================== AUDIT ==================== -->
+      <section>
+        <div class="sec-label">Evidence</div>
+        <h2 class="sec-title">Audit digest — 160 findings, 18 agents</h2>
+        <p class="sec-intro">
+          Eight parallel auditors swept the design system; every bug-level claim below survived an
+          adversarial verification pass against the code. Full data:
+          <code>.docs/glass-lab/audit-full.json</code>.
+        </p>
+        <div class="countrow">
+          <div class="count"><b>23</b> tokens/theming</div>
+          <div class="count"><b>27</b> ui primitives</div>
+          <div class="count"><b>18</b> app shell</div>
+          <div class="count"><b>23</b> chat surface</div>
+          <div class="count"><b>22</b> workbench</div>
+          <div class="count"><b>17</b> settings/dialogs</div>
+          <div class="count"><b>14</b> motion</div>
+          <div class="count"><b>16</b> glass foundation</div>
+        </div>
+        <table class="audit">
+          <thead>
+            <tr>
+              <th style="width: 70px">Sev</th>
+              <th>Finding (verified)</th>
+              <th style="width: 300px">Where</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                Entire <b>sidebar token family is undefined</b> — <code>bg-sidebar</code>,
+                <code>sidebar-border</code> etc. compile to nothing; the app's largest chrome region
+                has no material of its own and the resize-rail hover paints nothing.
+              </td>
+              <td class="file">ui/sidebar.tsx:214</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>Markdown headings in assistant replies render as plain body text</b> — the
+                primary reading surface has no hierarchy.
+              </td>
+              <td class="file">ChatMarkdown.tsx</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>12+ ad-hoc translucency recipes</b> bypass the Material axis; the axis itself
+                adds transparency <b>without blur</b> on app-surface popovers — the text-bleed you
+                can reproduce today at the Glass step.
+              </td>
+              <td class="file">index.css · 39 files</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>Desktop ignores reduced-motion almost everywhere</b>;
+                dialogs/menus/popovers/toasts hardcode durations; house motion tokens are consumed
+                by the phone tier only. Dead <code>animate-in</code> classes mean several entrances
+                render as instant pops.
+              </td>
+              <td class="file">ui/* · motion audit</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>Glass AA guarantee is void under themes</b> — theme registry has no material
+                tokens, so any custom palette can silently break every translucent surface.
+              </td>
+              <td class="file">themes/registry.ts</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>Toasts join the transparency axis without a blur tier</b> — unreadable at
+                High/Glass; modal scrim model splinters into four behaviors and glass dialogs get no
+                scrim at all.
+              </td>
+              <td class="file">ui/toast.tsx · dialog.tsx</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>Theme palette radio-group is not keyboard operable</b>; resize handles are
+                pointer-only; terminal tabs aren't real tabs.
+              </td>
+              <td class="file">AppearanceSettings.tsx</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>Four different header-chrome treatments</b> across chat/workspace/diff/terminal;
+                chrome is opaque, triple-painted, border-separated — headers are layout siblings so
+                nothing can ever scroll under them.
+              </td>
+              <td class="file">workbench panels</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>WCO/drag-region gaps</b>: workspace panel's top strip sits in the titlebar zone
+                with no drag region; boot surfaces leave the frameless window undraggable; a stale
+                drag region rides the wrong row.
+              </td>
+              <td class="file">app shell · Electron</td>
+            </tr>
+            <tr>
+              <td class="sev sev-high">HIGH</td>
+              <td>
+                <b>ComboboxPopup paints an opaque layer over its own glass shell</b>; select
+                scroll-arrows fade with an opaque gradient outside the glass; stash picker's
+                material is dead code.
+              </td>
+              <td class="file">ui/combobox.tsx</td>
+            </tr>
+            <tr>
+              <td class="sev sev-med">MED</td>
+              <td>
+                No elevation scale (12+ shadow literals), no duration/easing scale (13 durations, 5
+                easing families), ad-hoc z-index registers up to 9999, offset focus rings assume
+                opaque backdrops.
+              </td>
+              <td class="file">system-wide</td>
+            </tr>
+            <tr>
+              <td class="sev sev-med">MED</td>
+              <td>
+                Terminal hardcodes its ANSI palette from a scraped computed background and requires
+                opacity — the one surface that genuinely must stay an opaque plate in every
+                direction.
+              </td>
+              <td class="file">Terminal/xterm</td>
+            </tr>
+            <tr>
+              <td class="sev sev-med">MED</td>
+              <td>
+                Light mode has near-zero surface hierarchy (background = card = popover); chrome
+                hierarchy is borders-only; NoActiveThreadState is nearly invisible.
+              </td>
+              <td class="file">tokens · shell</td>
+            </tr>
+            <tr>
+              <td class="sev sev-med">MED</td>
+              <td>
+                Walkthrough: Review tab shows “No completed turns yet” after completed turns;
+                Overview DIFF card and Uncommitted row look clickable but are inert; new-file diff
+                reads “+0 −0”.
+              </td>
+              <td class="file">live session</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- ==================== PLAN ==================== -->
+      <section>
+        <div class="sec-label">Execution</div>
+        <h2 class="sec-title">Phased plan</h2>
+        <div class="phase">
+          <div class="n">PHASE 1</div>
+          <div>
+            <h4>Foundation (direction-agnostic, starts immediately)</h4>
+            <p>
+              Define the material/elevation/motion token set (incl. sidebar family, added to
+              THEME_TOKEN_NAMES); unify the 12+ ad-hoc recipes onto it; give the Material axis real
+              blur tiers + tint floors; wire reduced-motion/transparency through desktop primitives;
+              fix verified bugs (markdown headings, dead animate-in, combobox double-paint, scrim
+              snap, WCO gaps, keyboard a11y).
+            </p>
+          </div>
+        </div>
+        <div class="phase">
+          <div class="n">PHASE 2</div>
+          <div>
+            <h4>Direction build-out</h4>
+            <p>
+              Chrome layering per the chosen direction: floating composer + topbar with scroll-under
+              transcript and scrims, glass sidebar, popover/palette morph motion, concentric radii,
+              settings IA update (Material relabel, Motion axis on desktop, Refraction toggle
+              placeholder).
+            </p>
+          </div>
+        </div>
+        <div class="phase">
+          <div class="n">PHASE 3</div>
+          <div>
+            <h4>Garnish + hardening</h4>
+            <p>
+              Chromium-only refraction on popover/palette (SDF displacement, engine-gated,
+              budgeted), pointer bezel, elastic press physics; perf pass (blur region audit,
+              will-change discipline); browser-suite + typecheck + visual QA in both themes at every
+              Material step.
+            </p>
+          </div>
+        </div>
+        <footer>
+          Built from <code>wf_12956b94-3a9</code> (18 agents · 160 verified findings) + live
+          walkthrough of the dev build + <code>rdev/liquid-glass-react</code> (MIT) + Apple HIG
+          Liquid Glass guidance. Recipes on this page are the implementation spec:
+          <code>--glass-plate-*</code>, <code>--glass-blur-*</code>, bezel rings, scrims,
+          <code>--spring-*</code>, concentric radii.
+        </footer>
+      </section>
+    </main>
+
+    <!-- Chromium-only refraction filter (garnish tier) -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <filter
+          id="lg-refract"
+          x="-35%"
+          y="-35%"
+          width="170%"
+          height="170%"
+          color-interpolation-filters="sRGB"
+        >
+          <feImage
+            id="refractMap"
+            result="MAP"
+            x="0"
+            y="0"
+            width="100%"
+            height="100%"
+            preserveAspectRatio="none"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="MAP"
+            id="refractDisp"
+            scale="-46"
+            xChannelSelector="R"
+            yChannelSelector="B"
+          />
+        </filter>
+      </defs>
+    </svg>
+
+    <script>
+      const body = document.body;
+      const stage = document.getElementById("stage");
+
+      /* Direction switching (tabs, cards, keys 1-4) */
+      const dirButtons = [...document.querySelectorAll("#dirSeg button")];
+      const dirCards = [...document.querySelectorAll("#dirCards .dcard")];
+      function setDirection(d) {
+        body.dataset.direction = d;
+        dirButtons.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.dir === d)));
+        dirCards.forEach((c) => c.classList.toggle("sel", c.dataset.dir === d));
+        applyRefraction();
+      }
+      dirButtons.forEach((b) => b.addEventListener("click", () => setDirection(b.dataset.dir)));
+      dirCards.forEach((c) =>
+        c.addEventListener("click", () => {
+          setDirection(c.dataset.dir);
+          document.getElementById("stage").scrollIntoView({ behavior: "smooth", block: "center" });
+        }),
+      );
+
+      /* Theme */
+      document.querySelectorAll("#themeSeg button").forEach((b) =>
+        b.addEventListener("click", () => {
+          body.dataset.theme = b.dataset.th;
+          document
+            .querySelectorAll("#themeSeg button")
+            .forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+          makeDisplacementMap();
+        }),
+      );
+
+      /* Material slider */
+      document.getElementById("material").addEventListener("input", (e) => {
+        document.documentElement.style.setProperty("--material", String(e.target.value / 100));
+      });
+
+      /* Reduced transparency preview */
+      document.getElementById("reduced").addEventListener("change", (e) => {
+        body.dataset.reduced = e.target.checked ? "1" : "0";
+      });
+
+      /* Popover + palette */
+      const popover = document.getElementById("popover");
+      const palette = document.getElementById("palette");
+      const paletteBackdrop = document.getElementById("paletteBackdrop");
+      document.getElementById("modelChip").addEventListener("click", (e) => {
+        e.stopPropagation();
+        popover.classList.toggle("open");
+      });
+      document.addEventListener("click", (e) => {
+        if (!popover.contains(e.target)) popover.classList.remove("open");
+      });
+      function togglePalette(force) {
+        const open = force ?? !palette.classList.contains("open");
+        palette.classList.toggle("open", open);
+        paletteBackdrop.classList.toggle("open", open);
+      }
+      paletteBackdrop.addEventListener("click", () => togglePalette(false));
+      document.addEventListener("keydown", (e) => {
+        if (e.target.matches("input")) return;
+        if (e.key === "k" || e.key === "K") togglePalette();
+        if (e.key === "Escape") {
+          togglePalette(false);
+          popover.classList.remove("open");
+        }
+        if (["1", "2", "3", "4"].includes(e.key)) setDirection("abcd"[Number(e.key) - 1]);
+      });
+
+      /* Worked-row disclosure */
+      document
+        .getElementById("worked")
+        .addEventListener("click", (e) => e.currentTarget.classList.toggle("open"));
+
+      /* Scroll-edge scrim trigger */
+      const transcript = document.getElementById("transcript");
+      transcript.addEventListener("scroll", () => {
+        stage.classList.toggle("scrolled", transcript.scrollTop > 8);
+      });
+
+      /* Spring press demo */
+      const springBtn = document.getElementById("springBtn");
+      springBtn.addEventListener("pointerdown", () => (springBtn.style.transform = "scale(0.93)"));
+      window.addEventListener("pointerup", () => (springBtn.style.transform = ""));
+      springBtn.style.transition = "transform 320ms var(--spring-snappy)";
+
+      /* Pointer-driven bezel angle (Direction D + bezel tile demo) */
+      const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const bezelTile = document.getElementById("bezelTile");
+      const composer = document.getElementById("composer");
+      let raf = 0;
+      document.addEventListener("pointermove", (e) => {
+        if (reduceMotion || raf) return;
+        raf = requestAnimationFrame(() => {
+          raf = 0;
+          for (const el of [bezelTile, body.dataset.direction === "d" ? composer : null]) {
+            if (!el) continue;
+            const r = el.getBoundingClientRect();
+            const dx = e.clientX - (r.left + r.width / 2);
+            const dy = e.clientY - (r.top + r.height / 2);
+            el.style.setProperty("--bezel-angle", `${135 + dx * 0.06 + dy * 0.04}deg`);
+            if (el === composer) {
+              const dist = Math.hypot(dx, dy);
+              const fade = Math.max(0, 1 - dist / 420);
+              el.style.transform = `translate(${dx * 0.012 * fade}px, ${dy * 0.012 * fade}px)`;
+            }
+          }
+        });
+      });
+
+      /* Refraction: SDF displacement map (X in R, Y in B around 128) */
+      const refractToggle = document.getElementById("refract");
+      function makeDisplacementMap() {
+        const w = 320,
+          h = 320,
+          r = 24,
+          edge = 42;
+        const cv = document.createElement("canvas");
+        cv.width = w;
+        cv.height = h;
+        const ctx = cv.getContext("2d");
+        const img = ctx.createImageData(w, h);
+        const hw = w / 2 - 1,
+          hh = h / 2 - 1;
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const px = x - w / 2,
+              py = y - h / 2;
+            const qx = Math.abs(px) - hw + r,
+              qy = Math.abs(py) - hh + r;
+            const d =
+              Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r;
+            let t = Math.min(Math.max((d + edge) / edge, 0), 1);
+            t = t * t * (3 - 2 * t); // 0 center → 1 at rim
+            const len = Math.hypot(px, py) || 1;
+            const i = (y * w + x) * 4;
+            img.data[i] = 128 + (px / len) * 127 * t;
+            img.data[i + 1] = 128;
+            img.data[i + 2] = 128 + (py / len) * 127 * t;
+            img.data[i + 3] = 255;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+        document.getElementById("refractMap").setAttribute("href", cv.toDataURL());
+      }
+      function applyRefraction() {
+        const on = refractToggle.checked && body.dataset.direction === "d";
+        body.classList.toggle("refract", on);
+      }
+      refractToggle.addEventListener("change", () => {
+        if (refractToggle.checked && body.dataset.direction !== "d") setDirection("d");
+        applyRefraction();
+      });
+      makeDisplacementMap();
+    </script>
+  </body>
+</html>
