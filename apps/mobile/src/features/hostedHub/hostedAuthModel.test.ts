@@ -599,7 +599,7 @@ describe("no secret or identifying material reaches a hosted view model", () => 
     for (const { name, view } of everySurface()) {
       const strings: string[] = [];
       walk(view, [], strings);
-      const rendered = strings.join(" ");
+      const rendered = strings.join("\u0000");
       for (const identifier of IDENTIFIER_VALUES) {
         expect(rendered.includes(identifier), `surface ${name} leaked ${identifier}`).toBe(false);
       }
