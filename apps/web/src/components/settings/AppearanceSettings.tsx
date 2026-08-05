@@ -1,19 +1,15 @@
 import {
   BaselineIcon,
-  CircleOffIcon,
   ClipboardCopyIcon,
   Code2Icon,
   CopyIcon,
   DownloadIcon,
   GaugeIcon,
-  type LucideIcon,
-  Minimize2Icon,
   PaletteIcon,
   PanelRightIcon,
   PencilIcon,
   PlusIcon,
   RadiusIcon,
-  ScaleIcon,
   Trash2Icon,
   TypeIcon,
   UploadIcon,
@@ -48,7 +44,7 @@ import {
   type AppearancePreferenceKey,
   type AppearancePreferenceOption,
 } from "../../themes/appearancePreferences";
-import { type TokenModeControlStyle, useUiStateStore } from "../../uiStateStore";
+import { useUiStateStore } from "../../uiStateStore";
 import {
   addCustomTheme,
   applyThemeToDocument,
@@ -92,36 +88,6 @@ const VARIANT_OPTIONS = [
   { value: "dark", label: "Dark" },
 ] as const;
 
-const TOKEN_MODE_CONTROL_OPTIONS = [
-  {
-    value: "icon-text" as const,
-    label: "Icon + text",
-    description: "Show the mode icon and label",
-    preview: "Balanced",
-    icon: ScaleIcon,
-  },
-  {
-    value: "icon" as const,
-    label: "Icon only",
-    description: "Use the compact mode icon",
-    preview: "",
-    icon: Minimize2Icon,
-  },
-  {
-    value: "text" as const,
-    label: "Text label",
-    description: "Show labels without icons",
-    preview: "Tokens off",
-    icon: CircleOffIcon,
-  },
-] satisfies ReadonlyArray<{
-  value: TokenModeControlStyle;
-  label: string;
-  description: string;
-  preview: string;
-  icon: LucideIcon;
-}>;
-
 const TRANSPARENCY_PREVIEW_OPACITY: Record<string, number> = {
   default: 1,
   light: 0.92,
@@ -132,8 +98,6 @@ const TRANSPARENCY_PREVIEW_OPACITY: Record<string, number> = {
 
 export function AppearanceSettingsPanel() {
   const { theme, setTheme, resolvedTheme, activeThemeId, setActiveTheme } = useTheme();
-  const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
-  const setTokenModeControlStyle = useUiStateStore((state) => state.setTokenModeControlStyle);
   const wideComposerControlsAutoCollapse = useUiStateStore(
     (state) => state.wideComposerControlsAutoCollapse,
   );
@@ -734,58 +698,6 @@ export function AppearanceSettingsPanel() {
               onCheckedChange={(checked) => setAlwaysUseBuildMode(Boolean(checked))}
               aria-label="Always use Build mode"
             />
-          }
-        />
-        <SettingsRow
-          title="Token mode style"
-          description="How token efficiency appears when wide composer auto-collapse is off."
-          resetAction={
-            tokenModeControlStyle !== "icon-text" ? (
-              <SettingResetButton
-                label="token mode style"
-                onClick={() => setTokenModeControlStyle("icon-text")}
-              />
-            ) : null
-          }
-          control={
-            <div className="flex w-full flex-col gap-2 sm:w-80">
-              {TOKEN_MODE_CONTROL_OPTIONS.map((option) => {
-                const isSelected = tokenModeControlStyle === option.value;
-                const PreviewIcon = option.icon;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={isSelected}
-                    onClick={() => setTokenModeControlStyle(option.value)}
-                    className={cn(
-                      "flex items-center gap-3 rounded-md border px-3 py-2 text-left",
-                      isSelected
-                        ? "border-primary ring-1 ring-primary/40"
-                        : "border-border hover:border-foreground/30",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "size-3.5 rounded-full border",
-                        isSelected ? "border-primary bg-primary/80" : "border-foreground/30",
-                      )}
-                    />
-                    <span className="flex flex-grow flex-col">
-                      <span className="font-medium text-sm">{option.label}</span>
-                      <span className="text-muted-foreground text-xs">{option.description}</span>
-                    </span>
-                    <span className="inline-flex h-7 min-w-7 items-center justify-center gap-1.5 rounded-md bg-muted px-2 font-medium text-muted-foreground text-xs">
-                      {option.value !== "text" ? (
-                        <PreviewIcon aria-hidden="true" className="size-3.5" />
-                      ) : null}
-                      {option.preview ? <span>{option.preview}</span> : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           }
         />
       </SettingsSection>

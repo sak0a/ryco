@@ -57,7 +57,6 @@ describe("ComposerFooterModeControls", () => {
     mounted = null;
     document.body.innerHTML = "";
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
-    useUiStateStore.getState().setTokenModeControlStyle("icon-text");
   });
 
   it("collapses all wide mode labels by default", async () => {
@@ -79,25 +78,8 @@ describe("ComposerFooterModeControls", () => {
     expect(document.querySelector('[data-slot="separator"]')).toBeNull();
   });
 
-  it("overrides token mode style while auto-collapse is enabled", async () => {
-    useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
-    useUiStateStore.getState().setTokenModeControlStyle("text");
-
-    mounted = await render(<ComposerFooterModeControls {...baseProps} />);
-
-    await vi.waitFor(() => {
-      const tokenTrigger = document.querySelector('[aria-label="Token mode: Balanced"]');
-      const tokenControl = tokenTrigger?.querySelector(
-        '[data-composer-expandable-label-control="true"]',
-      );
-      expect(tokenControl?.getAttribute("data-collapsed")).toBe("true");
-      expect(tokenTrigger?.textContent).toContain("Balanced");
-    });
-  });
-
-  it("preserves token mode style when auto-collapse is disabled", async () => {
+  it("always renders the token mode control as icon + label when auto-collapse is off", async () => {
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(false);
-    useUiStateStore.getState().setTokenModeControlStyle("icon");
 
     mounted = await render(<ComposerFooterModeControls {...baseProps} />);
 
@@ -106,7 +88,8 @@ describe("ComposerFooterModeControls", () => {
       expect(
         tokenTrigger?.querySelector('[data-composer-expandable-label-control="true"]'),
       ).toBeNull();
-      expect(tokenTrigger?.textContent).not.toContain("Balanced");
+      expect(tokenTrigger?.querySelector("svg")).not.toBeNull();
+      expect(tokenTrigger?.textContent).toContain("Balanced");
     });
   });
 

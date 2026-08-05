@@ -44,7 +44,6 @@ describe("AppearanceSettingsPanel", () => {
       dispatchEvent: vi.fn(),
     }));
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
-    useUiStateStore.getState().setTokenModeControlStyle("icon-text");
     useUiStateStore.getState().setAlwaysUseBuildMode(false);
   });
 
@@ -61,7 +60,6 @@ describe("AppearanceSettingsPanel", () => {
     document.getElementById(THEME_STYLE_ELEMENT_ID)?.remove();
     document.getElementById(APPEARANCE_PREFERENCES_STYLE_ELEMENT_ID)?.remove();
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(true);
-    useUiStateStore.getState().setTokenModeControlStyle("icon-text");
     useUiStateStore.getState().setAlwaysUseBuildMode(false);
   });
 
@@ -214,7 +212,7 @@ describe("AppearanceSettingsPanel", () => {
       .toBeInTheDocument();
   });
 
-  it("omits reasoning style controls and updates token mode display style", async () => {
+  it("omits reasoning and token mode style controls", async () => {
     mounted = await render(<AppearanceSettingsPanel />);
 
     await expect
@@ -222,9 +220,9 @@ describe("AppearanceSettingsPanel", () => {
       .not.toBeInTheDocument();
     await expect.element(page.getByText("Dots only", { exact: true })).not.toBeInTheDocument();
     await expect.element(page.getByText("Icon + dots", { exact: true })).not.toBeInTheDocument();
-
-    await page.getByRole("radio", { name: /Icon only/ }).click();
-    expect(useUiStateStore.getState().tokenModeControlStyle).toBe("icon");
+    await expect
+      .element(page.getByText("Token mode style", { exact: true }))
+      .not.toBeInTheDocument();
   });
 
   it("toggles and resets always use Build mode", async () => {

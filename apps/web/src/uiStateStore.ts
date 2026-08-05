@@ -17,17 +17,8 @@ const LEGACY_PERSISTED_STATE_KEYS = [
   "codething:renderer-state:v1",
 ] as const;
 
-export type TokenModeControlStyle = "icon-text" | "icon" | "text";
-
-const DEFAULT_TOKEN_MODE_CONTROL_STYLE: TokenModeControlStyle = "icon-text";
 const DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE = true;
 const DEFAULT_ALWAYS_USE_BUILD_MODE = false;
-
-function sanitizeTokenModeControlStyle(value: unknown): TokenModeControlStyle {
-  return value === "icon" || value === "text" || value === "icon-text"
-    ? value
-    : DEFAULT_TOKEN_MODE_CONTROL_STYLE;
-}
 
 function sanitizeWideComposerControlsAutoCollapse(value: unknown): boolean {
   return typeof value === "boolean" ? value : DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE;
@@ -47,7 +38,6 @@ export interface PersistedUiState {
   defaultAdvertisedEndpointKey?: string | null;
   pinnedThreadKeys?: string[];
   threadChangedFilesExpandedById?: Record<string, Record<string, boolean>>;
-  tokenModeControlStyle?: TokenModeControlStyle;
   wideComposerControlsAutoCollapse?: boolean;
   alwaysUseBuildMode?: boolean;
 }
@@ -104,7 +94,6 @@ export interface UiEndpointState {
 }
 
 export interface UiState extends UiProjectState, UiThreadState, UiEndpointState {
-  tokenModeControlStyle: TokenModeControlStyle;
   wideComposerControlsAutoCollapse: boolean;
   alwaysUseBuildMode: boolean;
 }
@@ -135,7 +124,6 @@ const initialState: UiState = {
   threadWorkGroupExpandedById: {},
   threadWorkEntryExpandedById: {},
   defaultAdvertisedEndpointKey: null,
-  tokenModeControlStyle: DEFAULT_TOKEN_MODE_CONTROL_STYLE,
   wideComposerControlsAutoCollapse: DEFAULT_WIDE_COMPOSER_CONTROLS_AUTO_COLLAPSE,
   alwaysUseBuildMode: DEFAULT_ALWAYS_USE_BUILD_MODE,
 };
@@ -451,7 +439,6 @@ function readPersistedState(): UiState {
       threadChangedFilesExpandedById: sanitizePersistedThreadChangedFilesExpanded(
         parsed.threadChangedFilesExpandedById,
       ),
-      tokenModeControlStyle: sanitizeTokenModeControlStyle(parsed.tokenModeControlStyle),
       wideComposerControlsAutoCollapse: sanitizeWideComposerControlsAutoCollapse(
         parsed.wideComposerControlsAutoCollapse,
       ),
@@ -576,7 +563,6 @@ export function persistState(state: UiState): void {
         defaultAdvertisedEndpointKey: state.defaultAdvertisedEndpointKey,
         pinnedThreadKeys,
         threadChangedFilesExpandedById,
-        tokenModeControlStyle: state.tokenModeControlStyle,
         wideComposerControlsAutoCollapse: state.wideComposerControlsAutoCollapse,
         alwaysUseBuildMode: state.alwaysUseBuildMode,
       } satisfies PersistedUiState),
@@ -1157,16 +1143,6 @@ export function setDefaultAdvertisedEndpointKey(state: UiState, key: string | nu
   };
 }
 
-export function setTokenModeControlStyle(state: UiState, style: TokenModeControlStyle): UiState {
-  if (state.tokenModeControlStyle === style) {
-    return state;
-  }
-  return {
-    ...state,
-    tokenModeControlStyle: style,
-  };
-}
-
 export function setWideComposerControlsAutoCollapse(state: UiState, enabled: boolean): UiState {
   if (state.wideComposerControlsAutoCollapse === enabled) {
     return state;
@@ -1520,7 +1496,6 @@ interface UiStateStore extends UiState {
   setThreadWorkGroupExpanded: (threadId: string, groupId: string, expanded: boolean) => void;
   setThreadWorkEntryExpanded: (threadId: string, entryId: string, expanded: boolean) => void;
   setDefaultAdvertisedEndpointKey: (key: string | null) => void;
-  setTokenModeControlStyle: (style: TokenModeControlStyle) => void;
   setWideComposerControlsAutoCollapse: (enabled: boolean) => void;
   setAlwaysUseBuildMode: (enabled: boolean) => void;
   toggleProject: (projectId: string) => void;
@@ -1572,7 +1547,6 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
     set((state) => setThreadWorkEntryExpanded(state, threadId, entryId, expanded)),
   setDefaultAdvertisedEndpointKey: (key) =>
     set((state) => setDefaultAdvertisedEndpointKey(state, key)),
-  setTokenModeControlStyle: (style) => set((state) => setTokenModeControlStyle(state, style)),
   setWideComposerControlsAutoCollapse: (enabled) =>
     set((state) => setWideComposerControlsAutoCollapse(state, enabled)),
   setAlwaysUseBuildMode: (enabled) => set((state) => setAlwaysUseBuildMode(state, enabled)),
