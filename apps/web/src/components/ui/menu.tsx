@@ -62,7 +62,7 @@ function MenuPopup({
       >
         <MenuPrimitive.Popup
           className={cn(
-            "selection-glass-surface relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border text-popover-foreground outline-none transition-[scale,opacity] duration-200 ease-out will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 focus:outline-none",
+            "selection-glass-surface relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border text-popover-foreground outline-none transition-[scale,opacity] duration-(--app-motion-duration-pop) ease-(--app-motion-spring-gentle) will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 focus:outline-none",
             className,
           )}
           data-slot="menu-popup"
@@ -104,7 +104,7 @@ function ContextMenuPopup({
       >
         <ContextMenuPrimitive.Popup
           className={cn(
-            "selection-glass-surface relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border text-popover-foreground outline-none transition-[scale,opacity] duration-200 ease-out will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 focus:outline-none",
+            "selection-glass-surface relative flex not-[class*='w-']:min-w-32 origin-(--transform-origin) rounded-lg border text-popover-foreground outline-none transition-[scale,opacity] duration-(--app-motion-duration-pop) ease-(--app-motion-spring-gentle) will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 focus:outline-none",
             className,
           )}
           data-slot="context-menu-popup"

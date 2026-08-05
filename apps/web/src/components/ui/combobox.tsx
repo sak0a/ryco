@@ -167,12 +167,12 @@ function ComboboxPopup({
       >
         <span
           className={cn(
-            "selection-glass-surface relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) overflow-hidden rounded-lg border transition-[scale,opacity,translate] duration-200 ease-out will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
+            "selection-glass-surface relative flex max-h-full min-w-(--anchor-width) max-w-(--available-width) origin-(--transform-origin) overflow-hidden rounded-lg border transition-[scale,opacity,translate] duration-(--app-motion-duration-pop) ease-(--app-motion-spring-gentle) will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0",
             className,
           )}
         >
           <ComboboxPrimitive.Popup
-            className="app-surface flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground"
+            className="flex max-h-[min(var(--available-height),23rem)] flex-1 flex-col text-foreground"
             data-slot="combobox-popup"
             {...props}
           >
