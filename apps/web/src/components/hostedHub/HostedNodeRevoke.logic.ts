@@ -26,6 +26,25 @@
 // easiest thing to lie about: a node that is offline, unreachable, or gone for
 // good is revoked by exactly this call, on exactly this path. Nothing is sent to
 // it, nothing on it changes, and it is not asked to agree.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// AND WHAT IT DOES NOT REACH, WHICH IS THE SAME FACT READ FORWARDS
+// ─────────────────────────────────────────────────────────────────────────────
+// "There is no leg that contacts the machine" is what makes this safe, and it is
+// also why the copy may not describe it as a kill switch for the machine. The
+// node keeps serving the clients that paired with it DIRECTLY: `ryco serve`
+// hands out pairing credentials that `SessionCredentialService` exchanges for
+// node-local sessions in the node's own table, with no coupling to any Hub
+// revocation state, and `apps/server/src/server.ts` merges those auth routes and
+// `hubConnectorRoutesLayer` into one router unconditionally. Cutting those takes
+// `ryco auth` ON the machine.
+//
+// The node also keeps its local Hub identity, because the Hub wrote nothing to
+// it. `HubConnector.resume()` early-returns on `revoked` and `enroll()` throws
+// while an `activeNode` is on disk, so the only exit is `leave()` — surfaced to
+// an owner as "Leave this Hub". An owner told to "enroll it again" and nothing
+// else walks to the machine and hits a connector that refuses before a device
+// code is ever issued.
 
 /**
  * One node, as the confirmation must be able to name it.
@@ -53,38 +72,58 @@ export const HOSTED_NODE_REVOKE_REASON_CODE = "owner_revoked";
 
 /** A single line of the consequence list, in the order an owner reads them. */
 export interface HostedNodeRevokeConsequence {
-  readonly id: "access" | "directory" | "return" | "reach";
+  readonly id: "access" | "direct" | "directory" | "return" | "reach";
   readonly text: string;
 }
 
 /**
  * What the owner is agreeing to, in the consequence's own terms.
  *
- * The four lines are the four things that are true, and nothing else is claimed.
- * In particular the last one is written as a positive statement about where the
- * revocation lives rather than as a denial of the things it does not do: the
- * prohibited-phrase scan below is a bare substring match and cannot tell a claim
- * from its negation, so a sentence like "the node is not wiped" would trip it
- * while also planting the idea. The words simply do not appear.
+ * EVERY LINE IS SCOPED TO THE HUB, because that is the only thing this call
+ * changes. An owner reaches for a control named "Revoke" on a machine they have
+ * stopped trusting — a stolen laptop is the case — and the question they are
+ * actually asking is "is that machine locked down now?". The answer is no: the
+ * Hub door is shut and the machine's own door is untouched. A line that said
+ * "everyone authorized on it" would answer yes, and would talk an owner out of
+ * the one step that would help.
  *
- * "Everyone" in the second line is load-bearing and is not a flourish. This route
+ * `direct` states that boundary POSITIVELY rather than as a denial. The
+ * prohibited-phrase scan below is a bare substring match and cannot tell a claim
+ * from its negation, so "the node is not wiped" would trip it while also
+ * planting the idea. Saying what remains true — the machine keeps serving its
+ * own paired clients, and here is where those are managed — costs the owner
+ * nothing to read and does not require the scan to be weakened.
+ *
+ * "Everyone" in `access` is load-bearing and is not a flourish. This route
  * revokes the NODE; the separate grant route revokes one account's access. An
- * owner who reads this as "I lose my access to it" would be misinformed about a
- * change that reaches every account authorized on that machine.
+ * owner who read this as "I lose my access to it" would be misinformed about a
+ * change that reaches every account authorized through this Hub. `directory`
+ * carries the same scope in its own words rather than borrowing it from the line
+ * above: the two make different claims (grants, and the directory listing), and
+ * the Hub guarantees both for every account.
+ *
+ * `return` names the machine-side step. After a Hub revocation the node still
+ * holds its local Hub identity — `enroll()` throws while an `activeNode` exists
+ * — so "enroll it again" on its own sends an owner to a machine that refuses
+ * before it issues a device code, and reads as a Hub bug.
  */
 export const HOSTED_NODE_REVOKE_CONSEQUENCES: ReadonlyArray<HostedNodeRevokeConsequence> =
   Object.freeze([
     Object.freeze({
       id: "access" as const,
-      text: "Every grant on this node stops working immediately, for everyone authorized on it — not only for you — and any relay channel it has open right now closes.",
+      text: "Every Hub grant on this node stops working immediately, for everyone authorized through this Hub — not only for you — and any relay channel it has open right now closes.",
+    }),
+    Object.freeze({
+      id: "direct" as const,
+      text: "Clients paired directly with that machine are separate and keep working. Those are managed on the machine itself, with the ryco auth command.",
     }),
     Object.freeze({
       id: "directory" as const,
-      text: "It leaves this list and stays gone. There is no undo here and no state it can return to.",
+      text: "It leaves the directory for every account on this Hub, not only yours, and stays gone. There is no undo here and no state it can return to.",
     }),
     Object.freeze({
       id: "return" as const,
-      text: "Putting that machine back means enrolling it again from scratch, with a new device code and your approval. It is a new enrollment, not a reconnection.",
+      text: "Putting that machine back starts on the machine itself: use “Leave this Hub” there, then enroll it again with a new device code and your approval. It is a new enrollment, not a reconnection.",
     }),
     Object.freeze({
       id: "reach" as const,
@@ -100,6 +139,21 @@ export interface HostedNodeRevokeConfirmation {
    * alone cannot settle which machine this is about.
    */
   readonly subjectPrompt: string;
+  /**
+   * The identifier the dialog renders, carried by the confirmation rather than
+   * read off the node a second time in the `.tsx`.
+   *
+   * It is here so that "two machines named the same way get two different
+   * confirmations" is a claim a node test can make. While `subject.id` was
+   * accepted and never read, the only thing separating the twins lived in a
+   * `.tsx` and a test at this layer could asserts nothing about it — which is
+   * how a test named for the twin case came to assert that the two titles are
+   * IDENTICAL and compare two string literals to each other.
+   *
+   * NOT part of the prohibited-phrase scan: it is the caller's own data passing
+   * through, not a sentence this module wrote.
+   */
+  readonly subjectId: string;
   readonly confirmLabel: string;
   readonly pendingLabel: string;
   readonly cancelLabel: string;
@@ -144,6 +198,7 @@ export function hostedNodeRevokeConfirmation(
     title: `Revoke ${subject.label}?`,
     consequences: HOSTED_NODE_REVOKE_CONSEQUENCES,
     subjectPrompt: HOSTED_NODE_REVOKE_SUBJECT_PROMPT,
+    subjectId: subject.id,
     confirmLabel: "Revoke this node",
     pendingLabel: "Revoking…",
     cancelLabel: "Cancel",
@@ -155,14 +210,34 @@ export function hostedNodeRevokeConfirmation(
 export const HOSTED_NODE_REVOKE_ACTION_LABEL = "Revoke";
 
 /**
+ * What the directory says once a revocation has actually landed.
+ *
+ * THE ROW GOING AWAY IS NOT AN ACKNOWLEDGEMENT, because the row is not
+ * guaranteed to go away. The re-read that removes it is
+ * `hostedHubController.refreshDirectory()`, whose own failure path settles into
+ * `directoryStatus: "stale"` and leaves `nodes` exactly as it found them, then
+ * resolves — so a Hub restart or a network blip in the second after an
+ * irreversible write leaves the owner looking at an unchanged list with the row
+ * still on it and not one word saying the revocation happened. That is
+ * indistinguishable from a dismissed dialog.
+ *
+ * It names the node. "Node revoked" over a list of near-identical rows is the
+ * same failure the confirmation's own title exists to avoid.
+ */
+export function hostedNodeRevokedNotice(label: string): string {
+  return `${label} was revoked. It is gone from this Hub's directory for every account, and this cannot be undone.`;
+}
+
+/**
  * What a failure says about the node's state on the Hub afterwards.
  *
  * `unchanged` — the Hub refused before it changed anything, so the node is still
  * there and the row must keep standing.
  * `already-gone` — the Hub has no un-revoked node under this id. A second revoke
  * lands here, because the update is conditioned on `revoked_at IS NULL`.
- * `unknown` — the request was accepted and the answer could not be read. It is
- * NOT reported as a failure to revoke, because it may well have committed.
+ * `unknown` — the request left this browser and no answer came back that says
+ * what became of it. It is NOT reported as a failure to revoke, because it may
+ * well have committed.
  */
 export type HostedNodeRevokeOutcome = "unchanged" | "already-gone" | "unknown";
 
@@ -186,6 +261,21 @@ export function hostedNodeRevokeRetryable(failure: HostedNodeRevokeFailure | nul
 }
 
 /**
+ * One classified failure, with the input that reaches it.
+ *
+ * `probe` exists so the scan and the branch cannot drift apart: it is an error
+ * shape that must select this branch and nothing else, and it is what
+ * `everyHostedNodeRevokeString` feeds back through `hostedNodeRevokeFailure`. A
+ * branch added without one does not compile.
+ */
+interface HostedNodeRevokeFailureBranch {
+  readonly id: string;
+  readonly probe: unknown;
+  readonly selects: (status: number | null, code: string | null) => boolean;
+  readonly failure: HostedNodeRevokeFailure;
+}
+
+/**
  * The Hub's answer, as one bounded sentence and one claim about what happened.
  *
  * KEYED ON THE STATUS FIRST. The `code` on a `HostedHubApiError` is narrowed
@@ -194,78 +284,161 @@ export function hostedNodeRevokeRetryable(failure: HostedNodeRevokeFailure | nul
  * here (was anything changed?) is a status distinction. The code is consulted
  * only where the status cannot separate two meanings.
  *
- * NO BRANCH CLAIMS MORE THAN IT KNOWS. The 502 branch is the sharpest case: the
- * client throws `invalid_response` only after a request the Hub accepted, so
- * "nothing was revoked" would be a guess presented as a fact about an
- * irreversible action. It says the outcome is unread and sends the owner to the
- * list, which is the one place the answer actually is.
+ * NO BRANCH CLAIMS MORE THAN IT KNOWS, AND THAT IS DECIDED BY WHETHER THE
+ * REQUEST LEFT. `unchanged` is a statement of fact about an irreversible action
+ * and is only available to a refusal the Hub itself pronounced, or to a guard
+ * that ran before any I/O. Everything after `fetch` was invoked is `unknown`:
+ *
+ *   * `invalid_response` is thrown after a request the Hub accepted and
+ *     answered.
+ *   * `timeout` is this client's own 30-second deadline aborting an in-flight
+ *     request (`REQUEST_DEADLINE_MS`). The POST was written and the Hub had the
+ *     whole window to commit; only the answer was never read.
+ *   * `unavailable` is a bare `fetch` rejection, which covers a connection reset
+ *     while the response was being read exactly as much as it covers a DNS
+ *     failure. The transport cannot tell the two apart, so this module may not.
+ *
+ * Telling an owner "nothing was changed" there is the specific failure that
+ * ends with a revoked machine nobody warned and nobody re-enrolled. All three
+ * send the reader to the list and withdraw the retry, rather than offering a
+ * second irreversible write against a node that may have taken the first.
  *
  * Nor does any branch promise something this surface does not do. A message
  * saying the directory has been re-read is a claim about behaviour, and it is
  * the kind that rots quietly: nothing here re-reads anything.
  */
+/**
+ * One frozen branch, annotated.
+ *
+ * `Object.freeze` around an object literal infers its own type argument and
+ * swallows the contextual one, which leaves every `selects` parameter implicitly
+ * `any`. Going through a typed identity restores it, so a branch whose predicate
+ * misreads its inputs is a compile error rather than a hole.
+ */
+const branch = (value: HostedNodeRevokeFailureBranch): HostedNodeRevokeFailureBranch =>
+  Object.freeze(value);
+
+const HOSTED_NODE_REVOKE_FAILURE_BRANCHES: ReadonlyArray<HostedNodeRevokeFailureBranch> =
+  Object.freeze([
+    branch({
+      id: "invalidResponse",
+      probe: Object.freeze({ code: "invalid_response", status: 502 }),
+      selects: (_status, code) => code === "invalid_response",
+      failure: Object.freeze({
+        message:
+          "The Hub accepted the request and its answer could not be read, so whether this node was revoked is not known here. Refresh the list and check before trying again.",
+        outcome: "unknown" as const,
+      }),
+    }),
+    branch({
+      id: "transport",
+      probe: Object.freeze({ code: "unavailable", status: 0 }),
+      selects: (status, code) => status === 0 || code === "timeout" || code === "unavailable",
+      failure: Object.freeze({
+        // Deliberately not "nothing was changed": the request had already left
+        // this browser, and no answer came back to say what became of it.
+        message:
+          "The request left this browser and no answer came back, so whether this node was revoked is not known here. Check your connection, then refresh the list and look before trying again.",
+        outcome: "unknown" as const,
+      }),
+    }),
+    branch({
+      id: "csrf",
+      // Ahead of the 403 branch, and ahead of the session branch it used to be
+      // folded into: a stale token in a long-lived tab is not an expired
+      // session, and telling an owner to sign in costs them whatever else was
+      // unsaved in the app when a refresh was the actual fix. The vocabulary is
+      // the one the client already uses for this code.
+      probe: Object.freeze({ code: "csrf_rejected", status: 403 }),
+      selects: (_status, code) => code === "csrf_rejected",
+      failure: Object.freeze({
+        message:
+          "This request could not be verified, so nothing was changed. Refresh the page and try again.",
+        outcome: "unchanged" as const,
+      }),
+    }),
+    branch({
+      id: "unauthorized",
+      probe: Object.freeze({ code: "session_invalid", status: 401 }),
+      selects: (status, code) => status === 401 || code === "session_invalid",
+      failure: Object.freeze({
+        message:
+          "Your Hub session is no longer valid, so nothing was changed. Sign in and try again.",
+        outcome: "unchanged" as const,
+      }),
+    }),
+    branch({
+      id: "forbidden",
+      probe: Object.freeze({ code: "forbidden", status: 403 }),
+      selects: (status) => status === 403,
+      failure: Object.freeze({
+        message: "Only an owner of this Hub can revoke a node. Nothing was changed.",
+        outcome: "unchanged" as const,
+      }),
+    }),
+    branch({
+      id: "notFound",
+      probe: Object.freeze({ code: "not_found", status: 404 }),
+      selects: (status) => status === 404,
+      failure: Object.freeze({
+        message:
+          "The Hub has no active node under this identifier: it was already revoked, or it is not this Hub's. Either way there is nothing here left to revoke.",
+        outcome: "already-gone" as const,
+      }),
+    }),
+    branch({
+      id: "conflict",
+      probe: Object.freeze({ code: "conflict", status: 409 }),
+      selects: (status) => status === 409,
+      failure: Object.freeze({
+        message:
+          "The Hub reported a conflicting change on this node, so nothing was changed. Refresh and look at it again before retrying.",
+        outcome: "unchanged" as const,
+      }),
+    }),
+    branch({
+      id: "rateLimited",
+      probe: Object.freeze({ code: "node_rate_limited", status: 429 }),
+      selects: (status) => status === 429,
+      failure: Object.freeze({
+        message:
+          "The Hub is refusing further owner changes for now, so nothing was changed. Wait a little and try again.",
+        outcome: "unchanged" as const,
+      }),
+    }),
+    branch({
+      id: "badRequest",
+      // `revokeNode` raises this from its own id and reason-code guards BEFORE
+      // it calls `fetch`, so `unchanged` here is a fact rather than a guess.
+      probe: Object.freeze({ code: "invalid_request", status: 400 }),
+      selects: (status, code) => status === 400 || code === "invalid_request",
+      failure: Object.freeze({
+        message: "The Hub refused this request, so nothing was changed.",
+        outcome: "unchanged" as const,
+      }),
+    }),
+  ]);
+
+/**
+ * What an error this module does not recognise is reported as.
+ *
+ * `unchanged` is the safe reading for a shape that never reached the transport
+ * at all — a programming error, a rejected guard — which is what an
+ * unclassifiable throw from this call path is. Anything the transport itself
+ * raises is classified above.
+ */
+const HOSTED_NODE_REVOKE_FALLBACK_FAILURE: HostedNodeRevokeFailure = Object.freeze({
+  message: "This node could not be revoked. Nothing was changed. Try again in a moment.",
+  outcome: "unchanged" as const,
+});
+
 export function hostedNodeRevokeFailure(cause: unknown): HostedNodeRevokeFailure {
   const status = errorStatus(cause);
   const code = errorCode(cause);
-
-  if (code === "invalid_response") {
-    return {
-      message:
-        "The Hub accepted the request and its answer could not be read, so whether this node was revoked is not known here. Refresh the list and check before trying again.",
-      outcome: "unknown",
-    };
+  for (const branch of HOSTED_NODE_REVOKE_FAILURE_BRANCHES) {
+    if (branch.selects(status, code)) return branch.failure;
   }
-  if (status === 401 || code === "session_invalid" || code === "csrf_rejected") {
-    return {
-      message:
-        "Your Hub session is no longer valid, so nothing was changed. Sign in and try again.",
-      outcome: "unchanged",
-    };
-  }
-  if (status === 403) {
-    return {
-      message: "Only an owner of this Hub can revoke a node. Nothing was changed.",
-      outcome: "unchanged",
-    };
-  }
-  if (status === 404) {
-    return {
-      message:
-        "The Hub has no active node under this identifier: it was already revoked, or it is not this Hub's. Either way there is nothing here left to revoke.",
-      outcome: "already-gone",
-    };
-  }
-  if (status === 409) {
-    return {
-      message:
-        "The Hub reported a conflicting change on this node, so nothing was changed. Refresh and look at it again before retrying.",
-      outcome: "unchanged",
-    };
-  }
-  if (status === 429) {
-    return {
-      message:
-        "The Hub is refusing further owner changes for now, so nothing was changed. Wait a little and try again.",
-      outcome: "unchanged",
-    };
-  }
-  if (status === 0 || code === "timeout" || code === "unavailable") {
-    return {
-      message:
-        "The Hub could not be reached, so nothing was changed. Check your connection and try again.",
-      outcome: "unchanged",
-    };
-  }
-  if (status === 400 || code === "invalid_request") {
-    return {
-      message: "The Hub refused this request, so nothing was changed.",
-      outcome: "unchanged",
-    };
-  }
-  return {
-    message: "This node could not be revoked. Nothing was changed. Try again in a moment.",
-    outcome: "unchanged",
-  };
+  return HOSTED_NODE_REVOKE_FALLBACK_FAILURE;
 }
 
 /**
@@ -288,12 +461,33 @@ function errorCode(cause: unknown): string | null {
 }
 
 /**
+ * Every failure branch, as `(id, probe)` — the table the scan and the tests walk.
+ *
+ * The probe is fed back through `hostedNodeRevokeFailure`, so a branch that
+ * stops being selectable by its own probe is a test failure rather than a silent
+ * hole in the scan.
+ */
+export function everyHostedNodeRevokeFailureProbe(): ReadonlyArray<{
+  readonly id: string;
+  readonly probe: unknown;
+}> {
+  return HOSTED_NODE_REVOKE_FAILURE_BRANCHES.map((branch) => ({
+    id: branch.id,
+    probe: branch.probe,
+  }));
+}
+
+/**
  * Every owner-facing sentence this module produces, flattened for the scan.
  *
- * IT WALKS THE PRODUCERS. Enumerating constants by hand is how a banned phrase
- * ships inside a branch nobody listed — every failure branch above is reached
- * here through `hostedNodeRevokeFailure` with an input that selects it, so a
- * sentence added to one of them is covered without anyone remembering to add it.
+ * IT WALKS THE PRODUCERS, and now it actually does. This used to end in a
+ * hand-written array of causes, which enumerated the branches someone remembered
+ * — a `status === 423` branch could be added with copy claiming the machine's
+ * data was about to be wiped and every guard in the suite stayed green, because
+ * none of them ever called it. The list below is derived from
+ * `HOSTED_NODE_REVOKE_FAILURE_BRANCHES` itself, so a new branch is covered by
+ * the phrase scan, the length bound, and the wire-code check the moment it
+ * exists.
  */
 export function everyHostedNodeRevokeString(): ReadonlyArray<{
   readonly where: string;
@@ -318,21 +512,13 @@ export function everyHostedNodeRevokeString(): ReadonlyArray<{
     push(`confirmation.consequence(${consequence.id})`, consequence.text);
   }
   push("actionLabel", HOSTED_NODE_REVOKE_ACTION_LABEL);
+  push("revokedNotice", hostedNodeRevokedNotice("Studio"));
 
-  for (const [where, cause] of [
-    ["invalidResponse", { code: "invalid_response", status: 502 }],
-    ["unauthorized", { code: "session_invalid", status: 401 }],
-    ["csrf", { code: "csrf_rejected", status: 403 }],
-    ["forbidden", { code: "forbidden", status: 403 }],
-    ["notFound", { code: "not_found", status: 404 }],
-    ["conflict", { code: "conflict", status: 409 }],
-    ["rateLimited", { code: "node_rate_limited", status: 429 }],
-    ["offline", { code: "unavailable", status: 0 }],
-    ["timeout", { code: "timeout", status: 0 }],
-    ["badRequest", { code: "invalid_request", status: 400 }],
-    ["unknownShape", new Error("boom")],
-  ] as const) {
-    push(`failure(${where})`, hostedNodeRevokeFailure(cause).message);
+  for (const { id, probe } of everyHostedNodeRevokeFailureProbe()) {
+    push(`failure(${id})`, hostedNodeRevokeFailure(probe).message);
   }
+  // The one message with no branch of its own, so it cannot be reached by a
+  // probe: anything this module does not recognise lands here.
+  push("failure(fallback)", hostedNodeRevokeFailure(new Error("boom")).message);
   return strings;
 }
