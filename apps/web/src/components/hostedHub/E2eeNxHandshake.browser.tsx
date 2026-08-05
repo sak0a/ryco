@@ -20,6 +20,7 @@ import {
   deliverRelayPayload,
   fixtureBytes,
   fixtureCase,
+  fixtureCasesMatching,
   fixtureStatement,
   FIXTURE_ACCOUNT_ID,
   FIXTURE_HUB_ORIGIN,
@@ -51,10 +52,18 @@ import {
 // the web browser test suite". This file carries the WEB-TIER-SPECIFIC half of
 // that obligation — F3's admitted-pattern cases, F7's NX rules as this tier
 // reaches them, F10's web mapping, and the `WebSAS` half of F14 — driven through
-// the real `BrowserHostedRelaySocket` against real Chromium WebCrypto.
+// the real `BrowserHostedRelaySocket` under Chromium.
 //
-// The runtime-parity families (F1, F2, F8, F17) are DEFERRED to Phase 6; see
-// `docs/relay-e2ee-web-browser-vectors.md`.
+// NOT "against Chromium WebCrypto": no E2EE path in this repository calls
+// `crypto.subtle` at all. The `WebSAS` derivation is `@noble/hashes` HKDF over
+// SHA-256 (`packages/shared/src/relayE2eeVerificationDisplay.ts`), the record
+// AEAD is `@noble/ciphers`, and the curves are `@noble/curves` — the same JS on
+// both runtimes. The genuinely browser-supplied behaviour these files exercise
+// is the DOM, `WebSocket`, `JSON.parse`, and `TextDecoder`.
+//
+// The RUNTIME-PARITY half of the same obligation — F1, F2, F8, F16's NX cases
+// and F17's P-256 cases — lives in `E2eeCodecParity.browser.tsx` and
+// `E2eeRecordProtection.browser.tsx`; see `docs/relay-e2ee-web-browser-vectors.md`.
 //
 // WHAT THIS FILE MAY NOT BE READ AS SAYING. Every case below passes on a client
 // whose JavaScript a malicious Hub serves, because that Hub can complete a
@@ -440,10 +449,7 @@ describe("§16.3 F14 — the WebSAS derived in Chromium matches the committed co
     // §16.4: "A vector that produces different bytes on any supported runtime is
     // a release-blocking defect." The Node gate already runs these; this is the
     // browser half, and it is the runtime that actually draws the string.
-    const cases = F14.cases.filter((entry) => entry.name.startsWith("web-sas-session-"));
-    expect(cases.length).toBeGreaterThan(0);
-
-    for (const entry of cases) {
+    for (const entry of fixtureCasesMatching(F14, /^web-sas-session-/, 2)) {
       const derived = deriveE2eeWebSas({
         nodeIdentityPublicKey: fixtureBytes(entry.inputs.nodeIdentityPublicKey),
         webEphemeralPublicKey: fixtureBytes(entry.inputs.webEphemeralPublicKey),
@@ -466,9 +472,12 @@ describe("§16.3 F14 — the WebSAS derived in Chromium matches the committed co
   });
 
   it("changes with the session binding, which is why it is per session", () => {
-    const displays = F14.cases
-      .filter((entry) => entry.name.startsWith("web-sas-session-"))
-      .map((entry) => entry.expected.display);
+    // Pinned rather than filtered: `new Set(displays).size === displays.length`
+    // is TRUE of the empty set and of a single case, so an unpinned filter here
+    // would report distinctness over a corpus it had stopped reading.
+    const displays = fixtureCasesMatching(F14, /^web-sas-session-/, 2).map(
+      (entry) => entry.expected.display,
+    );
     expect(new Set(displays).size).toBe(displays.length);
     expect(fixtureCase(F14, "web-sas-changes-every-session").expected.differs).toBe(true);
   });

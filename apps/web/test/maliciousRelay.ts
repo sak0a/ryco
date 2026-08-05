@@ -16,9 +16,15 @@ import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 import { RELAY_CHUNK_CAPABILITY_PRELUDE } from "@ryco/shared/relayMessageChunks";
 import { vi, type Mock } from "vite-plus/test";
 
-import f03Raw from "../../../packages/shared/fixtures/e2ee/v1/f03-capability-statement.json?raw";
-import f07Raw from "../../../packages/shared/fixtures/e2ee/v1/f07-nx-handshake.json?raw";
-import f14Raw from "../../../packages/shared/fixtures/e2ee/v1/f14-verification-display.json?raw";
+import {
+  F03,
+  F07,
+  F14,
+  fixtureBytes,
+  fixtureCase,
+  fixtureCasesMatching,
+  hexOf,
+} from "./e2eeCorpus";
 
 import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl } from "../src/hostedHub/relaySocket";
 
@@ -213,52 +219,14 @@ export const settleRelay = async (): Promise<void> => {
 
 // ─── the committed §16.3 corpus, read the same way in both runtimes ──────────
 //
-// Imported as raw text rather than as a JSON module so the fixture stays a
-// data file of `packages/shared` that this app only reads: nothing here
-// regenerates it, and §16.4's "a vector that produces different bytes on any
-// supported runtime is a release-blocking defect" is checked against the
-// committed bytes and not against a copy.
+// The reader and the family loads live in `./e2eeCorpus`, which every browser
+// vector file in this app shares: the fixtures stay data files of
+// `packages/shared` that this app only reads, and §16.4's "a vector that
+// produces different bytes on any supported runtime is a release-blocking
+// defect" is checked against the committed bytes and not against a copy. They
+// are re-exported here because this harness's own callers read them beside it.
 
-interface FixtureCase {
-  readonly name: string;
-  readonly sections: readonly string[];
-  readonly note?: string;
-  readonly inputs: Readonly<Record<string, unknown>>;
-  readonly expected: Readonly<Record<string, unknown>>;
-}
-
-interface FixtureFamily {
-  readonly family: { readonly number: number; readonly title: string };
-  readonly testKeyMaterial: Readonly<Record<string, unknown>>;
-  readonly cases: readonly FixtureCase[];
-}
-
-export const F03: FixtureFamily = JSON.parse(f03Raw) as FixtureFamily;
-export const F07: FixtureFamily = JSON.parse(f07Raw) as FixtureFamily;
-export const F14: FixtureFamily = JSON.parse(f14Raw) as FixtureFamily;
-
-/** §16.2: byte strings are `{"$bytes": "<lowercase hex>"}` and nothing else. */
-export function fixtureBytes(value: unknown): Uint8Array {
-  const hex = (value as { readonly $bytes?: unknown }).$bytes;
-  if (typeof hex !== "string" || !/^(?:[0-9a-f]{2})*$/.test(hex)) {
-    throw new Error("fixture value is not a §16.2 byte string");
-  }
-  const out = new Uint8Array(hex.length / 2);
-  for (let index = 0; index < out.length; index += 1) {
-    out[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
-  }
-  return out;
-}
-
-export function hexOf(value: Uint8Array): string {
-  return [...value].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-export function fixtureCase(family: FixtureFamily, name: string): FixtureCase {
-  const found = family.cases.find((entry) => entry.name === name);
-  if (!found) throw new Error(`missing §16.3 fixture case ${name}`);
-  return found;
-}
+export { F03, F07, F14, fixtureBytes, fixtureCase, fixtureCasesMatching, hexOf };
 
 /** TEST ONLY (§16.1). None of this material may ever reach a real endpoint. */
 const KEY_MATERIAL = F03.testKeyMaterial;
