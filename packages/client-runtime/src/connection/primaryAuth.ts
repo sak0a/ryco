@@ -22,6 +22,19 @@ import type {
   PairingCredentialSourceService,
   SessionCredentialsService,
 } from "../platform/index.ts";
+import type {
+  NodeE2eeAuthorizationChange,
+  NodeE2eeAuthorizationRequest,
+  NodeE2eeClientListing,
+  NodeE2eeContinuity,
+  NodeE2eeContinuityChange,
+  NodeE2eeFallback,
+  NodeE2eePolicy,
+  NodeE2eePolicyChange,
+  NodeE2eePolicyProposal,
+  NodeE2eePrekey,
+  NodeE2eeSessionList,
+} from "./nodeE2eeOperator.ts";
 
 export class BootstrapHttpError extends Data.TaggedError("BootstrapHttpError")<{
   readonly message: string;
@@ -245,6 +258,61 @@ export function createPrimaryAuth(deps: PrimaryAuthDependencies) {
     cancelHubEnrollment: () => post<HubConnectorStatus>("/api/hub/enrollment/cancel"),
     resumeHubConnector: () => post<HubConnectorStatus>("/api/hub/resume"),
     leaveHub: () => post<HubConnectorStatus>("/api/hub/leave"),
+    // ─── the node's E2EE operator surface (§6.4, §7.5, §12.5, §12.6, §13.4–§13.6) ───
+    //
+    // The same sixteen routes the node CLI drives, reached the same way the Hub
+    // connector controls above are: through this factory, so they inherit the
+    // cookie-versus-bearer credential choice and the bounded error extraction
+    // rather than growing a second opinion about either.
+    //
+    // EVERY ONE OF THEM IS LOCAL-ONLY, AND NOT BY CONVENTION. `resolveHttpUrl`
+    // is the hosted HTTP boundary: in hosted mode it throws before a request is
+    // built, so a hosted browser cannot reach a node route even if a surface
+    // asked it to. That is the outer half of the `requireApprovedClientE2EE`
+    // block — the inner half is in the panel's own logic, which never offers the
+    // control there (`NodeSecuritySettings.logic.ts`).
+    fetchNodeE2eeClients: () =>
+      get<NodeE2eeClientListing>(
+        "/api/hub/e2ee/clients",
+        "Unable to read client authorization records.",
+      ),
+    applyNodeE2eeAuthorization: (request: NodeE2eeAuthorizationRequest) =>
+      post<NodeE2eeAuthorizationChange>("/api/hub/e2ee/clients/authorization", request),
+    setNodeE2eePairingWindow: (
+      request:
+        | { readonly action: "open"; readonly fingerprint: string }
+        | { readonly action: "close" },
+    ) => post<NodeE2eeClientListing>("/api/hub/e2ee/clients/pairing-window", request),
+    clearNodeE2eeRefusals: () =>
+      post<NodeE2eeClientListing>("/api/hub/e2ee/clients/refusals/clear"),
+    fetchNodeE2eeSessions: () =>
+      get<NodeE2eeSessionList>("/api/hub/e2ee/sessions", "Unable to read E2EE sessions."),
+    fetchNodeE2eePolicy: () =>
+      get<NodeE2eePolicy>("/api/hub/e2ee/policy", "Unable to read the node admission policy."),
+    // §12.6 keeps the preview a separate request that mutates nothing, so a
+    // surface can warn before anything commits. It stays separate here for the
+    // same reason: one function that could warn or sweep depending on a flag is
+    // the shape most likely to sweep when an operator meant to look.
+    previewNodeE2eePolicy: (proposal: NodeE2eePolicyProposal) =>
+      post<NodeE2eePolicyChange>("/api/hub/e2ee/policy/preview", proposal),
+    applyNodeE2eePolicy: (proposal: NodeE2eePolicyProposal) =>
+      post<NodeE2eePolicyChange>("/api/hub/e2ee/policy", proposal),
+    recoverNodeE2eePolicyGeneration: () =>
+      post<NodeE2eePolicyChange>("/api/hub/e2ee/policy/recover"),
+    fetchNodeE2eePrekey: () =>
+      get<NodeE2eePrekey>("/api/hub/e2ee/prekey", "Unable to read the agreement prekey."),
+    rotateNodeE2eePrekey: () => post<NodeE2eePrekey>("/api/hub/e2ee/prekey/rotate"),
+    fetchNodeE2eeContinuity: () =>
+      get<NodeE2eeContinuity>("/api/hub/e2ee/continuity", "Unable to read continuity state."),
+    applyNodeE2eeContinuity: (
+      request:
+        | { readonly action: "adopt"; readonly continuityId: string }
+        | { readonly action: "remint" }
+        | { readonly action: "break" },
+    ) => post<NodeE2eeContinuityChange>("/api/hub/e2ee/continuity", request),
+    fetchNodeE2eeFallback: () =>
+      get<NodeE2eeFallback>("/api/hub/e2ee/fallback", "Unable to read fallback diagnostics."),
+    resetNodeE2eeFallback: () => post<NodeE2eeFallback>("/api/hub/e2ee/fallback/reset"),
     retryTransientBootstrap,
     takePairingCredential: () => deps.pairingCredentialSource.take(),
     submitServerAuthCredential: async (credential: string) => {

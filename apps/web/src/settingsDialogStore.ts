@@ -10,6 +10,7 @@ export type SettingsSectionId =
   | "keybindings"
   | "source-control"
   | "connections"
+  | "security"
   | "diagnostics"
   | "statistics"
   | "archived";

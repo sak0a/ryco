@@ -54,6 +54,25 @@ export const startHubEnrollment = auth.startHubEnrollment;
 export const cancelHubEnrollment = auth.cancelHubEnrollment;
 export const resumeHubConnector = auth.resumeHubConnector;
 export const leaveHub = auth.leaveHub;
+
+// The node's E2EE operator surface. Local-only by construction: `webEndpoint`
+// resolves node HTTP through `resolvePrimaryEnvironmentHttpUrl`, which throws in
+// hosted Hub mode, so none of these can leave a hosted browser.
+export const fetchNodeE2eeClients = auth.fetchNodeE2eeClients;
+export const applyNodeE2eeAuthorization = auth.applyNodeE2eeAuthorization;
+export const setNodeE2eePairingWindow = auth.setNodeE2eePairingWindow;
+export const clearNodeE2eeRefusals = auth.clearNodeE2eeRefusals;
+export const fetchNodeE2eeSessions = auth.fetchNodeE2eeSessions;
+export const fetchNodeE2eePolicy = auth.fetchNodeE2eePolicy;
+export const previewNodeE2eePolicy = auth.previewNodeE2eePolicy;
+export const applyNodeE2eePolicy = auth.applyNodeE2eePolicy;
+export const recoverNodeE2eePolicyGeneration = auth.recoverNodeE2eePolicyGeneration;
+export const fetchNodeE2eePrekey = auth.fetchNodeE2eePrekey;
+export const rotateNodeE2eePrekey = auth.rotateNodeE2eePrekey;
+export const fetchNodeE2eeContinuity = auth.fetchNodeE2eeContinuity;
+export const applyNodeE2eeContinuity = auth.applyNodeE2eeContinuity;
+export const fetchNodeE2eeFallback = auth.fetchNodeE2eeFallback;
+export const resetNodeE2eeFallback = auth.resetNodeE2eeFallback;
 export const resolveInitialServerAuthGateState = auth.resolveInitialServerAuthGateState;
 export const __resetServerAuthBootstrapForTests = auth.resetForTests;
 
