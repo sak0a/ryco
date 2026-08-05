@@ -1,12 +1,17 @@
 import "../../index.css";
 
 import { page } from "vite-plus/test/browser";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
 import type { HostedPwaLifecycle, HostedPwaSnapshot } from "../../pwa/lifecycle";
+import {
+  applyWebE2eeChannelStatus,
+  RETIRED_HOSTED_RELAY_TRUST_SENTENCE,
+} from "../../../test/hostedConnectionVocabulary";
+import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { HostedPwaControls } from "./HostedPwaControls";
-import { HOSTED_RELAY_TRUST_DISCLOSURE } from "./HostedRelayTrustNotice";
+import { hostedRelayTrustDisclosure } from "./HostedRelayTrustNotice.logic";
 
 function lifecycle(snapshot: HostedPwaSnapshot): HostedPwaLifecycle {
   return {
@@ -29,14 +34,37 @@ const baseSnapshot: HostedPwaSnapshot = {
 };
 
 describe("HostedPwaControls", () => {
+  afterEach(() => {
+    resetWebE2eeSession();
+  });
+
   it("shows iOS installation steps and the relay trust boundary", async () => {
+    resetWebE2eeSession();
     render(<HostedPwaControls lifecycle={lifecycle(baseSnapshot)} />);
     await page.getByRole("button", { name: "How to install" }).click();
 
     await expect.element(page.getByText(/Add to Home Screen/)).toBeVisible();
-    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
+    await expect
+      .element(page.getByText(hostedRelayTrustDisclosure("unavailable").body))
+      .toBeVisible();
+    expect(document.body.textContent).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
     await page.getByRole("button", { name: "Close install instructions" }).click();
     await expect.element(page.getByText(/Add to Home Screen/)).not.toBeInTheDocument();
+  });
+
+  it("re-states the disclosure at the claim the live channel earns", async () => {
+    // The fifth mount site, and the one furthest from the connection surfaces —
+    // it is inside the install instructions. `docs/relay-e2ee-protocol.md`
+    // §12.2's duty is on EVERY user-facing surface, so this one tracks the
+    // channel like the other four rather than holding a constant.
+    render(<HostedPwaControls lifecycle={lifecycle(baseSnapshot)} />);
+    await page.getByRole("button", { name: "How to install" }).click();
+
+    for (const status of ["negotiating", "web-unsigned", "legacy"] as const) {
+      applyWebE2eeChannelStatus(status);
+      await expect.element(page.getByText(hostedRelayTrustDisclosure(status).body)).toBeVisible();
+      expect(document.body.textContent, status).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
+    }
   });
 
   it("invokes the browser-owned native prompt", async () => {

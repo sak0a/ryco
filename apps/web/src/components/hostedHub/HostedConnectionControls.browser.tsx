@@ -37,10 +37,14 @@ import { resetPointerEmulation, setCoarsePointerEmulation } from "../../../test/
 import { HOSTED_CONNECTION_STATUS_INDICATORS } from "../../hostedHub/connectionStatus";
 import {
   applyWebE2eeChannelStatus,
+  applyWebE2eeVerificationCode,
   hostedConnectionConnectedByGateOrder,
   hostedConnectionGuaranteeByGateOrder,
   hostedConnectionStatusRepresentatives,
+  RETIRED_HOSTED_RELAY_TRUST_SENTENCE,
 } from "../../../test/hostedConnectionVocabulary";
+import { hostedConnectionStatusPresentation } from "./HostedConnectionControls.logic";
+import { E2EE_WEB_SAS_ADVISORY } from "./HostedE2eeVerification.logic";
 import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
@@ -58,7 +62,7 @@ import {
   HostedConnectionSheet,
   HostedNodeMenu,
 } from "./HostedConnectionControls";
-import { HOSTED_RELAY_TRUST_DISCLOSURE } from "./HostedRelayTrustNotice";
+import { hostedRelayTrustDisclosure } from "./HostedRelayTrustNotice.logic";
 
 const account = {
   id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
@@ -98,6 +102,9 @@ function node(id: string, label: string, online = true): HostedHubNode {
 
 const selectedNode = node("node_aaaaaaaaaaaaaaaaaaaaaa", "Studio node");
 const otherNode = node("node_bbbbbbbbbbbbbbbbbbbbbb", "Second node");
+
+/** A well-formed §13.5 rendering (`E2EE_WEB_SAS_CHARS`: 8 Crockford, 4-4). */
+const MENU_WEB_SAS = "5TCV-8M2N";
 
 function seedConnectedState() {
   useHostedHubStore.setState({
@@ -345,7 +352,12 @@ describe("hosted connection controls", () => {
     await expect.element(page.getByRole("button", { name: /Second node/ })).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Refresh nodes" })).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Sign out" })).toBeVisible();
-    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
+    // No channel is open in this harness, so the disclosure is at the
+    // no-channel claim — and never the retired sentence (§2.2).
+    await expect
+      .element(page.getByText(hostedRelayTrustDisclosure("unavailable").body))
+      .toBeVisible();
+    expect(document.body.textContent).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
     // Focus is trapped inside the sheet while it is open.
     expect(sheet!.contains(document.activeElement)).toBe(true);
 
@@ -524,6 +536,14 @@ describe("hosted connection controls", () => {
       expect(guarantee, `§2.2 guarantee for "${text}"`).toBe(
         hostedConnectionGuaranteeByGateOrder(input),
       );
+      // …and the DRAWN glyph follows that claim rather than connectedness. Both
+      // `legacy` and `web-unsigned` are usable sessions, so keyed on `connected`
+      // this element was the identical green wifi for a §12.2 plaintext
+      // downgrade and for a locked channel.
+      expect(icon().getAttribute("data-guarantee"), `drawn claim for "${text}"`).toBe(guarantee);
+      expect(icon().getAttribute("data-glyph"), `glyph for "${text}"`).toBe(
+        hostedConnectionStatusPresentation(HOSTED_CONNECTION_STATUS_INDICATORS[text]).glyph,
+      );
 
       // The label is never truncated at the narrowest phone. This only means
       // something because the sweep reaches the long states — measured, the
@@ -595,6 +615,131 @@ describe("hosted connection controls", () => {
       expect(statusPart().textContent).toBe("Online");
     });
     expect(icon().getAttribute("data-connected")).toBe("true");
+  });
+
+  it("never draws a §12.2 fallback the way it draws a locked channel", async () => {
+    // The §2.2 defect this slice closes, on the shipped surface. Both states are
+    // usable sessions and both were `connected: true`, so with the glyph keyed
+    // on connectedness the plaintext downgrade and the NX channel rendered the
+    // identical green wifi — "a stronger claim for a weaker configuration",
+    // arrived at through an icon.
+    await page.viewport(320, 568);
+    seedConnectedState();
+    mounted = await render(<HostedConnectionPill />);
+
+    const icon = () =>
+      document.querySelector<HTMLElement>('[data-testid="hosted-connection-icon"]')!;
+    const drawn = async (status: "legacy" | "web-unsigned" | "unavailable") => {
+      applyWebE2eeChannelStatus(status);
+      await vi.waitFor(() => {
+        expect(icon().getAttribute("data-guarantee")).toBe(
+          status === "legacy" ? "legacy" : status === "web-unsigned" ? "web" : "none",
+        );
+      });
+      const element = icon();
+      return {
+        glyph: element.getAttribute("data-glyph"),
+        connected: element.getAttribute("data-connected"),
+        colour: getComputedStyle(element).color,
+        outline: element.querySelector("path,line,circle")?.getAttribute("d") ?? null,
+      };
+    };
+
+    const legacy = await drawn("legacy");
+    const web = await drawn("web-unsigned");
+    const plain = await drawn("unavailable");
+
+    // All three are usable sessions — which is exactly why connectedness cannot
+    // be what tells them apart.
+    expect([legacy.connected, web.connected, plain.connected]).toEqual(["true", "true", "true"]);
+    // Different glyph, different rendered colour, different drawn path.
+    expect(new Set([legacy.glyph, web.glyph, plain.glyph]).size).toBe(3);
+    expect(new Set([legacy.colour, web.colour, plain.colour]).size).toBe(3);
+    expect(new Set([legacy.outline, web.outline, plain.outline]).size).toBe(3);
+    // And the browser row is never the native verified presentation, which this
+    // tier cannot reach at all (`connectionStatus.ts` fences it out).
+    expect(web.glyph).not.toBe(
+      hostedConnectionStatusPresentation({
+        shortLabel: "Encrypted",
+        connected: true,
+        guarantee: "e2ee",
+      }).glyph,
+    );
+  });
+
+  it.each([
+    ["the desktop menu", "menu"],
+    ["the phone connection sheet", "sheet"],
+  ] as const)("states the claim the live channel earns in %s", async (_name, surface) => {
+    // §12.2's duty is on EVERY user-facing surface. The disclosure used to be
+    // one constant rendered at five mount sites; these are two of them, and
+    // neither may still be showing the retired sentence while an encrypted
+    // channel is live.
+    //
+    // Mounted one at a time: the sheet's viewport is `fixed inset-0` and
+    // covers the menu, so a single render would leave one of the two
+    // unreachable and only look like it was being checked.
+    seedConnectedState();
+    if (surface === "menu") {
+      mounted = await render(<HostedNodeMenu />);
+      // The menu keeps its disclosure inside a `<details>`; opened directly
+      // rather than by click, which is asserted by its own case above.
+      const disclosure = document.querySelector<HTMLDetailsElement>("details");
+      expect(disclosure, "no desktop menu rendered").not.toBeNull();
+      disclosure!.open = true;
+    } else {
+      await page.viewport(390, 844);
+      mounted = await render(<HostedConnectionSheet open onOpenChange={() => undefined} />);
+    }
+
+    for (const status of ["unavailable", "negotiating", "web-unsigned", "legacy"] as const) {
+      applyWebE2eeChannelStatus(status);
+      const expected = hostedRelayTrustDisclosure(status);
+      await vi.waitFor(() => {
+        const notices = [
+          ...document.querySelectorAll<HTMLElement>("[data-hosted-relay-trust-notice]"),
+        ];
+        expect(notices.length, `mounted notices for ${status}`).toBe(1);
+        const notice = notices[0]!;
+        expect(notice.getAttribute("data-e2ee-status"), status).toBe(status);
+        expect(notice.getAttribute("data-tone"), status).toBe(expected.tone);
+        expect(notice.textContent, status).toContain(expected.body);
+        expect(notice.getBoundingClientRect().height, status).toBeGreaterThan(0);
+      });
+      expect(document.body.textContent, status).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
+    }
+  });
+
+  it("shows §13.5's code and its advisory in the desktop menu, and only on a locked channel", async () => {
+    // §13.5: "Shown in the web UI for the active session … the owner compares
+    // the two out of band", and the accompanying text "MUST state that the
+    // comparison … cannot protect against the Hub operator".
+    seedConnectedState();
+    mounted = await render(<HostedNodeMenu />);
+    const disclosure = document.querySelector<HTMLDetailsElement>("details");
+    expect(disclosure, "no desktop menu rendered").not.toBeNull();
+    disclosure!.open = true;
+
+    const verification = () =>
+      document.querySelector<HTMLElement>('[data-testid="hosted-e2ee-verification"]');
+
+    // Nothing is drawn for a channel that has not locked, and nothing for one
+    // that fell back (§12.2 forbids any E2EE claim for it).
+    for (const status of ["unavailable", "negotiating", "legacy"] as const) {
+      applyWebE2eeChannelStatus(status);
+      await vi.waitFor(() => {
+        expect(verification(), status).toBeNull();
+      });
+    }
+
+    applyWebE2eeVerificationCode(MENU_WEB_SAS);
+    await vi.waitFor(() => {
+      expect(verification()).not.toBeNull();
+    });
+    expect(verification()!.textContent).toContain(MENU_WEB_SAS);
+    // The denial is in the same view as the characters, every time.
+    expect(verification()!.textContent).toContain(E2EE_WEB_SAS_ADVISORY);
+    expect(verification()!.querySelector("details")).toBeNull();
   });
 
   it("keeps both live regions mounted while the indicator is collapsed", async () => {

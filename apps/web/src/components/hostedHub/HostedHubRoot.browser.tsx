@@ -30,7 +30,9 @@ import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot, HostedNodeMenu } from "./HostedHubRoot";
-import { HOSTED_RELAY_TRUST_DISCLOSURE } from "./HostedRelayTrustNotice";
+import { hostedRelayTrustDisclosure } from "./HostedRelayTrustNotice.logic";
+import { RETIRED_HOSTED_RELAY_TRUST_SENTENCE } from "../../../test/hostedConnectionVocabulary";
+import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 
 const account = {
   id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
@@ -74,6 +76,9 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   hostedHubController.resetForTests();
+  // The §13 projection is module scope, so a channel left standing by another
+  // case would render this one's disclosure at the wrong claim.
+  resetWebE2eeSession();
   navigate.mockClear();
 });
 
@@ -81,6 +86,7 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = null;
   hostedHubController.resetForTests();
+  resetWebE2eeSession();
   vi.restoreAllMocks();
   document.body.innerHTML = "";
 });
@@ -247,7 +253,13 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       .element(page.getByRole("heading", { name: "Connect to your Ryco nodes" }))
       .toBeVisible();
     await expect.element(page.getByRole("button", { name: "Sign in with passkey" })).toBeVisible();
-    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
+    // No node is selected here, so no §4 channel exists: the disclosure states
+    // the no-channel claim and never the retired sentence, which asserts the
+    // opposite of what a locked NX channel makes true (§2.2).
+    await expect
+      .element(page.getByText(hostedRelayTrustDisclosure("unavailable").body))
+      .toBeVisible();
+    expect(document.body.textContent).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
 
     await page.getByRole("button", { name: "Redeem invitation" }).click();
     await expect.element(page.getByLabelText("Invitation code")).toBeVisible();
@@ -376,7 +388,12 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect.element(page.getByRole("button", { name: /^Travel offline/ })).toBeDisabled();
     await expect.element(page.getByText("Online", { exact: true })).toBeVisible();
     await expect.element(page.getByText("Offline", { exact: true })).toBeVisible();
-    await expect.element(page.getByText(HOSTED_RELAY_TRUST_DISCLOSURE)).toBeVisible();
+    // The directory is reached with no channel open — `returnToDirectory` resets
+    // the projection — so this mount site is the no-channel claim too.
+    await expect
+      .element(page.getByText(hostedRelayTrustDisclosure("unavailable").body))
+      .toBeVisible();
+    expect(document.body.textContent).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
   });
 
   it("takes the viewport over for codes nothing is displaying, and yields to a display that is", async () => {
