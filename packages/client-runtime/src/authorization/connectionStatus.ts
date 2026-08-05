@@ -19,12 +19,15 @@ export interface HostedConnectionStatusInput {
    * What `docs/relay-e2ee-protocol.md` §4.4 locked on the channel behind this
    * session, folded in here rather than derived beside it.
    *
-   * OPTIONAL, AND `unavailable` IS THE HONEST DEFAULT. A tier that runs no §4
-   * channel — `apps/web` supplies no `RelayE2eeProvider` — has no E2EE state to
-   * report, and a caller that omits the field gets byte-identical results to the
+   * OPTIONAL, AND `unavailable` IS THE HONEST DEFAULT. Both shipping tiers now
+   * run a §4 channel and supply this field, so the default is no longer a
+   * statement about either of them: it is what a caller with no channel to
+   * describe — a build with no hosted plane, a surface rendered before any
+   * socket exists — reports, and it gets byte-identical results to the
    * derivation before this input existed. It is deliberately not defaulted to
-   * `legacy`: web is not "an E2EE client that fell back", and §12.2's legacy
-   * label is a claim about a channel that could have been encrypted.
+   * `legacy`: an absent channel is not "an E2EE client that fell back", and
+   * §12.2's legacy label is a claim about a channel that could have been
+   * encrypted.
    */
   readonly e2eeStatus?: HostedE2eeChannelStatus;
 }

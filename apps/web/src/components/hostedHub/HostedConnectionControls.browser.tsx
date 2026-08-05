@@ -36,9 +36,12 @@ import {
 import { resetPointerEmulation, setCoarsePointerEmulation } from "../../../test/browserPointer";
 import { HOSTED_CONNECTION_STATUS_INDICATORS } from "../../hostedHub/connectionStatus";
 import {
+  applyWebE2eeChannelStatus,
   hostedConnectionConnectedByGateOrder,
+  hostedConnectionGuaranteeByGateOrder,
   hostedConnectionStatusRepresentatives,
 } from "../../../test/hostedConnectionVocabulary";
+import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
@@ -165,6 +168,10 @@ describe("hosted connection controls", () => {
     hostedHubController.resetForTests();
     useSettingsDialogStore.setState({ open: false, section: "general" });
     resetPrimaryEnvironmentDescriptorForTests();
+    // The §13 projection is module state, not store state, so
+    // `resetForTests()` does not reach it and a channel left locked would
+    // rename every later case's status.
+    resetWebE2eeSession();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
     await page.viewport(1_280, 720);
@@ -463,7 +470,17 @@ describe("hosted connection controls", () => {
     );
 
     const representatives = hostedConnectionStatusRepresentatives();
-    expect(representatives.size).toBeGreaterThanOrEqual(18);
+    // 18 before the §4.4 channel dimension, and the three states that dimension
+    // alone can reach: `Browser encrypted`, `Legacy`, and `Securing`. The exact
+    // count is asserted, not a floor, because the whole failure this sweep
+    // exists to catch is a status the shipped app can produce and no render
+    // suite ever draws.
+    expect(representatives.size).toBe(21);
+    for (const text of ["Browser encrypted", "Legacy", "Securing"] as const) {
+      expect([...representatives.keys()], `${text} is reachable in the shipped app`).toContain(
+        text,
+      );
+    }
 
     const chip = () =>
       document.querySelector<HTMLElement>('[data-testid="hosted-connection-pill"]')!;
@@ -474,13 +491,17 @@ describe("hosted connection controls", () => {
     const rendered = new Set<string>();
 
     for (const [text, input] of representatives) {
-      const { shortLabel, connected } = HOSTED_CONNECTION_STATUS_INDICATORS[text];
+      const { shortLabel, connected, guarantee } = HOSTED_CONNECTION_STATUS_INDICATORS[text];
       useHostedHubStore.setState({
         browserStatus: input.browserStatus,
         sessionStatus: input.sessionStatus,
         selectionStatus: input.selectionStatus,
         transportStatus: input.transportStatus,
       });
+      // §12.2's honest-labeling duty is only met if the pill READS the §13
+      // projection. It is driven through the real publishers, so a surface that
+      // stopped subscribing renders the previous state and fails below.
+      applyWebE2eeChannelStatus(input.e2eeStatus ?? "unavailable");
       await vi.waitFor(() => {
         expect(statusPart().textContent, `collapsed label for "${text}"`).toBe(shortLabel);
       });
@@ -495,6 +516,13 @@ describe("hosted connection controls", () => {
       );
       expect(connected, `indicator connectedness for "${text}"`).toBe(
         hostedConnectionConnectedByGateOrder(input),
+      );
+      // §2.2: the claim the state is entitled to, restated from the raw inputs.
+      // `e2ee` is unreachable from this tier by construction, so what this pins
+      // is that a fallen-back channel claims `legacy` and an NX one claims the
+      // weaker `web` row — never the native word.
+      expect(guarantee, `§2.2 guarantee for "${text}"`).toBe(
+        hostedConnectionGuaranteeByGateOrder(input),
       );
 
       // The label is never truncated at the narrowest phone. This only means

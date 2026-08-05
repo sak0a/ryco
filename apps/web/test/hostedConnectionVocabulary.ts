@@ -1,12 +1,20 @@
 import {
   deriveHostedConnectionStatusText,
   HOSTED_BROWSER_STATUSES,
+  HOSTED_E2EE_CHANNEL_STATUSES,
   HOSTED_RELAY_TRANSPORT_STATUSES,
   HOSTED_RYCO_SESSION_STATUSES,
   HOSTED_SELECTION_STATUSES,
+  type HostedConnectionGuarantee,
   type HostedConnectionStatusText,
   type WebHostedConnectionStatusInput,
+  type WebHostedE2eeChannelStatus,
 } from "../src/hostedHub/connectionStatus";
+import {
+  beginWebE2eeChannelAttempt,
+  lockWebE2eeChannelMode,
+  resetWebE2eeSession,
+} from "../src/hostedHub/e2eeSession";
 
 /**
  * Test-side helpers for sweeping the bounded hosted connection vocabulary.
@@ -15,30 +23,51 @@ import {
  * every consumer walks the same cross-product, built from the compile-time
  * exhaustive enumerations `connectionStatus.ts` exports.
  *
- * FOUR INPUTS, NOT FIVE, AND DELIBERATELY SO. The derivation's fifth input is
- * the §4.4 channel state, and `apps/web` supplies none: it runs no §4 channel
- * yet, so `deriveHostedConnectionStatusText` takes its documented `unavailable`
- * default and the five statuses that input alone can reach — `Encrypted`,
- * `Browser encrypted`, `Legacy`, `Not verified`, and `Securing` — are outside
- * this sweep rather than skipped by it. These helpers feed BROWSER suites, and
- * a browser suite that rendered a status the shipped app cannot produce would
- * be asserting nothing; they gain the dimension in the same change that gives
- * the web app an `e2eeStatus` to report.
+ * FIVE INPUTS, AND THE FIFTH IS THE ONE THE SHIPPED APP GAINED LAST. The
+ * derivation's fifth input is the §4.4 channel state, and `apps/web` now runs a
+ * §4.4 machine on every relay socket (`resolveWebRelayE2eeProvider`) and
+ * publishes what it locked (`e2eeSession.ts`), which all three connection
+ * surfaces read. While the sweep stopped at four, `Browser encrypted`, `Legacy`,
+ * and `Securing` were unreachable in every browser render suite — so a surface
+ * that dropped the dimension and rendered a §12.2 plaintext downgrade as a green
+ * `Online` was indistinguishable, in these suites, from one that did not.
  *
- * That deferral is not the fence, and it was never load-bearing. The fence is
- * `src/hostedHub/connectionStatus.ts`, which narrows the dimension to the states
- * this tier can be in, and `src/hostedHub/connectionStatus.test.ts`, which sweeps
- * all five of them purely and asserts the native rows stay unreachable from here.
+ * The fence is elsewhere and is unaffected by any of this:
+ * `src/hostedHub/connectionStatus.ts` narrows the dimension to the states this
+ * tier can be in, and `src/hostedHub/connectionStatus.test.ts` sweeps all four of
+ * them purely and asserts the native rows stay unreachable from here.
  */
 
-/** Every combination of the four bounded inputs. Pure — nothing is rendered. */
+/**
+ * This tier's admissible §4.4 channel states, derived from the runtime's
+ * exhaustive enumeration rather than written out.
+ *
+ * A member added to the shared union is a compile error here until someone
+ * decides which tier it belongs to — which is the whole reason
+ * `HOSTED_E2EE_CHANNEL_STATUSES` exists rather than a literal array. The two
+ * removed members mean a durable pin, which web holds none of (§6.3, §13.1).
+ */
+export const WEB_HOSTED_E2EE_CHANNEL_STATUSES = HOSTED_E2EE_CHANNEL_STATUSES.filter(
+  (status): status is WebHostedE2eeChannelStatus =>
+    status !== "verified" && status !== "unverified",
+);
+
+/** Every combination of the five bounded inputs. Pure — nothing is rendered. */
 export function everyHostedConnectionStatusInput(): ReadonlyArray<WebHostedConnectionStatusInput> {
   const combinations: WebHostedConnectionStatusInput[] = [];
   for (const browserStatus of HOSTED_BROWSER_STATUSES) {
     for (const sessionStatus of HOSTED_RYCO_SESSION_STATUSES) {
       for (const selectionStatus of HOSTED_SELECTION_STATUSES) {
         for (const transportStatus of HOSTED_RELAY_TRANSPORT_STATUSES) {
-          combinations.push({ browserStatus, sessionStatus, selectionStatus, transportStatus });
+          for (const e2eeStatus of WEB_HOSTED_E2EE_CHANNEL_STATUSES) {
+            combinations.push({
+              browserStatus,
+              sessionStatus,
+              selectionStatus,
+              transportStatus,
+              e2eeStatus,
+            });
+          }
         }
       }
     }
@@ -75,6 +104,23 @@ export function hostedConnectionStatusRepresentatives(): ReadonlyMap<
 }
 
 /**
+ * Put the REAL §13 projection into one channel state, for a render sweep.
+ *
+ * Through the module's own publishers and never by writing its state: the
+ * surfaces read `webE2eeSessionState()`, so a helper that set the field directly
+ * would render a state the §4.4 machine's own transitions cannot produce. The
+ * sequence here is the one `resolveWebRelayE2eeProvider` drives — a channel
+ * begins, and then it locks once.
+ */
+export function applyWebE2eeChannelStatus(status: WebHostedE2eeChannelStatus): void {
+  resetWebE2eeSession();
+  if (status === "unavailable") return;
+  beginWebE2eeChannelAttempt();
+  if (status === "negotiating") return;
+  lockWebE2eeChannelMode(status === "web-unsigned" ? "e2ee" : "legacy");
+}
+
+/**
  * "Connected" restated from the raw inputs in the derivation's gate order —
  * browser lifecycle, then session, then selection, and only then transport.
  *
@@ -90,5 +136,29 @@ export function hostedConnectionConnectedByGateOrder(
   if (value.selectionStatus === "authorization-removed") return false;
   if (value.selectionStatus === "revoked") return false;
   if (value.selectionStatus === "incompatible") return false;
-  return value.transportStatus === "online" && value.sessionStatus === "ready";
+  if (value.transportStatus !== "online" || value.sessionStatus !== "ready") return false;
+  // §4.4's channel state, restated from the input. A `negotiating` channel has
+  // released nothing, so it is not a session the owner can use. `legacy` is
+  // usable and says so (§12.2), and so is `web-unsigned` — §13.1's release gate
+  // is native-only by construction, so a web NX channel releases payload exactly
+  // as a locked native one does.
+  return (value.e2eeStatus ?? "unavailable") !== "negotiating";
+}
+
+/**
+ * The §2.2 claim the state is entitled to, restated from the raw inputs.
+ *
+ * The second opinion for `HostedConnectionStatusIndicator.guarantee`. On this
+ * tier `e2ee` is unreachable by construction — the fence removes `verified`
+ * before the derivation ever sees it — so the interesting rows are §12.2's
+ * mandatory `legacy` label and §2.2's `web` row, which is WEAKER than `e2ee`
+ * rather than a flavour of it: the Hub serves the code that draws it (§2.4).
+ */
+export function hostedConnectionGuaranteeByGateOrder(
+  value: WebHostedConnectionStatusInput,
+): HostedConnectionGuarantee {
+  if (!hostedConnectionConnectedByGateOrder(value)) return "none";
+  if (value.e2eeStatus === "web-unsigned") return "web";
+  if (value.e2eeStatus === "legacy") return "legacy";
+  return "none";
 }

@@ -342,11 +342,19 @@ Four properties are structural rather than documented:
   spelling its channel the way this one does. §8.1's role/tier matrix makes this
   app the IK initiator, and `lockMobileE2eeChannelMode` emits only `legacy`,
   `verified`, and `unverified` — asserted in `e2eeSession.test.ts` across every
-  exported publisher, so no path through this store reaches the member. Two
-  native edits the member forced: an arm in `e2eeTrustUiModel`'s `claimFor`,
-  which the exhaustive switch would not compile without and which answers `none`
-  — the claim that asserts nothing, because a state this tier does not have has
-  no honest label — and a `web` arm in `hostedStatusTone`. The tone mapper is
+  exported publisher, so no path through this store reaches the member. The
+  member forced two native edits, and the second is the one that matters.
+
+  The first is an arm in `e2eeTrustUiModel`'s `claimFor`, which the exhaustive
+  switch would not compile without. It answers `none`, which is **not** a
+  neutral value: `none` renders "No connection", "There is no node connection to
+  describe yet.", and a closed padlock, so it asserts disconnection. It is
+  chosen anyway because an unreachable row has no owner-visible rendering and
+  understating connectedness is the safe direction for whatever inherits it; a
+  tier that ever gains a real web channel here gets its own `E2eeChannelClaim`
+  member the way `legacy-no-custody` did.
+
+  The second is a `web` arm in `hostedStatusTone`. The tone mapper is
   the one that matters: it is the repository's ONLY reader of `guarantee`, and
   an `if (guarantee === "legacy")` chain silently absorbed the new member into
   the connected branch and handed §2.2's web row the verified session's success
@@ -354,6 +362,7 @@ Four properties are structural rather than documented:
   from `guarantee` exhaustively, `web` takes the informational token, and the
   success rule is stated positively — connected, and `none` or `e2ee` — so the
   next guarantee added is a compile error rather than a default.
+
 - **Every guard is re-resolved on every owner decision.** The prepared §4.4
   attempt is keyed on the selection **and** on `mobileE2eeTrustStore.revision()`,
   which the store bumps on every commit. §13.2 step 5's promotion, §13.3's
