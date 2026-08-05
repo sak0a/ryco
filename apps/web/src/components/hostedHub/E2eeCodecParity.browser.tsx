@@ -482,7 +482,12 @@ describe("§16.3 F16 authorization context — the NX cases (§8.3, §13.6)", ()
     expect(hexOf(fixtureBytes(ik.expected.contextBlock))).not.toBe(hexOf(block));
   });
 
-  it("makes a web hello carrying element 10 or 16 a P13 with the length-uniform observable", () => {
+  it("recomputes the mutated block's own §8.3 commitment and pins the case's P13 declaration", () => {
+    // NOT a claim that this run evaluates a web hello: nothing here constructs
+    // one and no node reads one. The recompute below is the derived half; the
+    // row, the reason, and the observable are the case's DECLARATION, restated
+    // so a regeneration that moves them has to move this file too.
+    //
     // §8.3's absence semantics violated: the two halves are inseparable by
     // construction, so one case covers both.
     const entry = fixtureCase(F16, "nx-absence-semantics-violated");

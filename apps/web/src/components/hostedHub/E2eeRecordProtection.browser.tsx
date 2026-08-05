@@ -82,7 +82,7 @@ const receiverSession = (overrides?: { readonly sessionBindingHash?: Uint8Array 
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
-describe("§16.3 F8 — the AAD and the nonce recomputed in Chromium", () => {
+describe("§16.3 F8 — the AAD and the nonce recomputed under Chromium's JS engine", () => {
   it("reproduces the header, the direction label, the nonce, and the AAD for both directions", () => {
     for (const entry of fixtureCasesMatching(F08, /^aad-(client-to-node|node-to-client)$/, 2)) {
       const direction = entry.inputs.direction as E2eeDirection;
@@ -126,7 +126,7 @@ describe("§16.3 F8 — the AAD and the nonce recomputed in Chromium", () => {
   });
 });
 
-describe("§16.3 F8 — every committed envelope re-protected in Chromium", () => {
+describe("§16.3 F8 — every committed envelope re-protected under Chromium", () => {
   it("reproduces both counter-zero-and-one traces byte for byte and lands both §9.2 states", async () => {
     for (const entry of fixtureCasesMatching(F08, /^envelopes-at-counters-zero-and-one-/, 2)) {
       const sendDirection = entry.inputs.sendDirection as E2eeDirection;
@@ -246,7 +246,12 @@ describe("§16.3 F8 — every committed envelope re-protected in Chromium", () =
 });
 
 describe("§16.3 F8 — every tampered envelope through the real §4.3 receive path", () => {
-  it("takes the §11.3 row each tamper belongs to, in Chromium's own AEAD", () => {
+  // NOT "in Chromium's own AEAD": there is no such thing here. The record layer
+  // seals and opens with `@noble/ciphers`' pure-JS ChaCha20-Poly1305
+  // (`packages/shared/src/relayE2eeSession.ts`), which Chromium's WebCrypto does
+  // not implement at all. What this run establishes is that the SAME JS produces
+  // the same bytes on this engine — not that a second implementation agrees.
+  it("takes the §11.3 row each tamper belongs to, under Chromium's JS engine", () => {
     for (const entry of fixtureCasesMatching(F08, /^tampered-/, 6)) {
       const clean = fixtureBytes(entry.inputs.envelope);
       const tampered = fixtureBytes(entry.inputs.tamperedEnvelope);

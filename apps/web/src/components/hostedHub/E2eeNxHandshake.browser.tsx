@@ -52,7 +52,14 @@ import {
 // the web browser test suite". This file carries the WEB-TIER-SPECIFIC half of
 // that obligation — F3's admitted-pattern cases, F7's NX rules as this tier
 // reaches them, F10's web mapping, and the `WebSAS` half of F14 — driven through
-// the real `BrowserHostedRelaySocket` against real Chromium WebCrypto.
+// the real `BrowserHostedRelaySocket` under Chromium.
+//
+// NOT "against Chromium WebCrypto": no E2EE path in this repository calls
+// `crypto.subtle` at all. The `WebSAS` derivation is `@noble/hashes` HKDF over
+// SHA-256 (`packages/shared/src/relayE2eeVerificationDisplay.ts`), the record
+// AEAD is `@noble/ciphers`, and the curves are `@noble/curves` — the same JS on
+// both runtimes. The genuinely browser-supplied behaviour these files exercise
+// is the DOM, `WebSocket`, `JSON.parse`, and `TextDecoder`.
 //
 // The RUNTIME-PARITY half of the same obligation — F1, F2, F8, F16's NX cases
 // and F17's P-256 cases — lives in `E2eeCodecParity.browser.tsx` and
