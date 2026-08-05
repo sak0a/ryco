@@ -55,6 +55,7 @@ import Migration0038 from "./Migrations/038_WorktreeWorkItems.ts";
 import Migration0039 from "./Migrations/039_WorktreeWorkItemStateNames.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadsProjectUpdatedAtIndex.ts";
 import Migration0041 from "./Migrations/041_ProjectionThreadsSubagentNesting.ts";
+import Migration0042 from "./Migrations/042_ContextHandoffRuntimeSessions.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -108,6 +109,7 @@ export const migrationEntries = [
   [39, "WorktreeWorkItemStateNames", Migration0039],
   [40, "ProjectionThreadsProjectUpdatedAtIndex", Migration0040],
   [41, "ProjectionThreadsSubagentNesting", Migration0041],
+  [42, "ContextHandoffRuntimeSessions", Migration0042],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -271,6 +273,17 @@ export const repairProjectionThreadSubagentNestingColumns = Effect.fn(
   }
 });
 
+// Development worktrees can share one local database while carrying divergent
+// migration 042 names. The Effect migrator keys progress by numeric id, so a
+// database that already recorded another 042 would otherwise skip this feature's
+// schema entirely. The migration is deliberately idempotent; run it as a repair
+// after the ledger-driven pass just like the older compatibility repairs above.
+export const repairContextHandoffRuntimeSessions = Effect.fn("repairContextHandoffRuntimeSessions")(
+  function* () {
+    yield* Migration0042;
+  },
+);
+
 /**
  * Run all pending migrations.
  *
@@ -301,6 +314,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   }
   if (toMigrationInclusive === undefined || toMigrationInclusive >= 41) {
     yield* repairProjectionThreadSubagentNestingColumns();
+  }
+  if (toMigrationInclusive === undefined || toMigrationInclusive >= 42) {
+    yield* repairContextHandoffRuntimeSessions();
   }
   yield* Effect.log("Migrations ran successfully").pipe(
     Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),

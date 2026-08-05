@@ -1,10 +1,11 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
   EventId,
   IsoDateTime,
   ProviderItemId,
+  RuntimeSessionId,
   ThreadId,
   TurnId,
 } from "./baseSchemas.ts";
@@ -42,6 +43,8 @@ export const ProviderSession = Schema.Struct({
   // populates it (post-slice-4), routing flips to instance-id-only and the
   // legacy `provider` field is removed.
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Runtime epoch. Optional only while decoding sessions produced before context handoffs. */
+  runtimeSessionId: Schema.optional(RuntimeSessionId),
   status: ProviderSessionStatus,
   runtimeMode: RuntimeMode,
   tokenMode: Schema.optionalKey(AgentTokenMode),
@@ -56,21 +59,36 @@ export const ProviderSession = Schema.Struct({
 });
 export type ProviderSession = typeof ProviderSession.Type;
 
+export const ProviderSessionResumePolicy = Schema.Literals(["compatible", "fresh"]);
+export type ProviderSessionResumePolicy = typeof ProviderSessionResumePolicy.Type;
+
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
+  /** Reserved by orchestration for new sessions; optional for historical callers during rollout. */
+  runtimeSessionId: Schema.optional(RuntimeSessionId),
   provider: Schema.optional(ProviderDriverKind),
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
   cwd: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
+  resumePolicy: ProviderSessionResumePolicy.pipe(
+    Schema.withDecodingDefault(Effect.succeed("compatible" as const)),
+  ),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
   sandboxMode: Schema.optional(ProviderSandboxMode),
   runtimeMode: RuntimeMode,
   tokenMode: Schema.optionalKey(AgentTokenMode),
   customSystemPrompt: Schema.optional(ProjectCustomSystemPrompt),
 });
-export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
+type DecodedProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
+/**
+ * Callers may omit the compatibility default. Schema decoding always materializes
+ * `resumePolicy` before the runtime uses the input.
+ */
+export type ProviderSessionStartInput = Omit<DecodedProviderSessionStartInput, "resumePolicy"> & {
+  readonly resumePolicy?: DecodedProviderSessionStartInput["resumePolicy"];
+};
 
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,

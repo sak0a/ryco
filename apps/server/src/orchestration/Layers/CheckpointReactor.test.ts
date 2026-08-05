@@ -19,7 +19,7 @@ import {
   TurnId,
 } from "@ryco/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Layer, ManagedRuntime, Option, PubSub, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { CheckpointStoreLive } from "../../checkpointing/Layers/CheckpointStore.ts";
@@ -101,6 +101,12 @@ function createProviderServiceHarness(
       : Effect.succeed([] as ReadonlyArray<ProviderSession>);
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
+    startFreshSession: () => unsupported(),
+    getSession: () => Effect.succeed(Option.none()),
+    restoreSessionBinding: () => Effect.succeed(false),
+    retireSessionBinding: () => Effect.succeed(false),
+    stopSessionBinding: () => Effect.succeed("not-found"),
+    listStaleSessionBindings: () => Effect.succeed([]),
     sendTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),

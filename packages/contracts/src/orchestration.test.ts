@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
 
 import {
+  ContextHandoffActivityPayload,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
@@ -36,6 +37,7 @@ const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
 const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLatestTurn);
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
+const decodeContextHandoffActivity = Schema.decodeUnknownEffect(ContextHandoffActivityPayload);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -666,6 +668,145 @@ it.effect("decodes thread.turn-start-requested title seed when present", () =>
   }),
 );
 
+it.effect("decodes historical and context-handoff turn-start requests", () =>
+  Effect.gen(function* () {
+    const historical = yield* decodeThreadTurnStartRequestedPayload({
+      threadId: "thread-1",
+      messageId: "msg-1",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(historical.contextHandoff, undefined);
+
+    const handoff = yield* decodeThreadTurnStartRequestedPayload({
+      threadId: "thread-1",
+      messageId: "msg-2",
+      contextHandoff: {
+        handoffId: "handoff-1",
+        activityId: "activity-1",
+        targetMessageId: "msg-2",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(handoff.contextHandoff?.handoffId, "handoff-1");
+  }),
+);
+
+it.effect("decodes every context handoff activity state", () =>
+  Effect.gen(function* () {
+    const base = {
+      schemaVersion: 1,
+      handoffId: "handoff-1",
+      mode: "full-context-fresh-session",
+      targetMessageId: "msg-2",
+      sourceSelection: { instanceId: "codex_work", model: "gpt-5.6" },
+      targetSelection: { instanceId: "claude_work", model: "claude-fable-5" },
+      sourceRuntimeSessionId: "runtime-source",
+    } as const;
+    const presentation = {
+      sources: [
+        {
+          providerInstanceId: "codex_work",
+          driverKind: "codex",
+          providerDisplayName: "Codex Work",
+          modelSlug: "gpt-5.6",
+          modelDisplayName: "GPT-5.6",
+        },
+      ],
+      target: {
+        providerInstanceId: "claude_work",
+        driverKind: "claudeAgent",
+        providerDisplayName: "Claude Work",
+        modelSlug: "claude-fable-5",
+        modelDisplayName: "Claude Fable 5",
+      },
+    } as const;
+    const context = {
+      contextVersion: 1,
+      contextDigest: "a".repeat(64),
+    } as const;
+
+    for (const status of ["requested", "preparing"] as const) {
+      const decoded = yield* decodeContextHandoffActivity({ ...base, status });
+      assert.strictEqual(decoded.status, status);
+    }
+    for (const status of ["dispatching", "consumed"] as const) {
+      const decoded = yield* decodeContextHandoffActivity({
+        ...base,
+        ...presentation,
+        ...context,
+        targetRuntimeSessionId: "runtime-target",
+        status,
+      });
+      assert.strictEqual(decoded.status, status);
+      if (decoded.status !== "dispatching" && decoded.status !== "consumed") {
+        throw new Error(`expected ${status} context handoff activity`);
+      }
+      assert.strictEqual(decoded.sources.length, 1);
+    }
+    const failed = yield* decodeContextHandoffActivity({
+      ...base,
+      ...presentation,
+      status: "failed",
+      error: "Target startup failed",
+    });
+    assert.strictEqual(failed.status, "failed");
+    const uncertain = yield* decodeContextHandoffActivity({
+      ...base,
+      ...presentation,
+      ...context,
+      targetRuntimeSessionId: "runtime-target",
+      status: "delivery-uncertain",
+      error: "Provider acceptance could not be proven after restart",
+    });
+    assert.strictEqual(uncertain.status, "delivery-uncertain");
+  }),
+);
+
+it.effect("rejects malformed context handoff activity metadata", () =>
+  Effect.gen(function* () {
+    const invalidSources = yield* Effect.exit(
+      decodeContextHandoffActivity({
+        schemaVersion: 1,
+        handoffId: "handoff-1",
+        mode: "full-context-fresh-session",
+        targetMessageId: "msg-2",
+        sourceSelection: { instanceId: "codex", model: "gpt-5.6" },
+        targetSelection: { instanceId: "claudeAgent", model: "claude-fable-5" },
+        sources: [],
+        target: {
+          providerInstanceId: "claudeAgent",
+          driverKind: "claudeAgent",
+          modelSlug: "claude-fable-5",
+        },
+        contextVersion: 1,
+        contextDigest: "a".repeat(64),
+        status: "consumed",
+      }),
+    );
+    assert.strictEqual(invalidSources._tag, "Failure");
+
+    const oversizedError = yield* Effect.exit(
+      decodeContextHandoffActivity({
+        schemaVersion: 1,
+        handoffId: "handoff-1",
+        mode: "full-context-fresh-session",
+        targetMessageId: "msg-2",
+        sourceSelection: { instanceId: "codex", model: "gpt-5.6" },
+        targetSelection: { instanceId: "claudeAgent", model: "claude-fable-5" },
+        sources: [{ providerInstanceId: "codex", driverKind: "codex", modelSlug: "gpt-5.6" }],
+        target: {
+          providerInstanceId: "claudeAgent",
+          driverKind: "claudeAgent",
+          modelSlug: "claude-fable-5",
+        },
+        status: "failed",
+        error: "x".repeat(2_001),
+      }),
+    );
+    assert.strictEqual(oversizedError._tag, "Failure");
+  }),
+);
+
 it.effect("decodes latest turn source proposed plan metadata when present", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeOrchestrationLatestTurn({
@@ -700,6 +841,23 @@ it.effect("decodes orchestration session runtime mode defaults", () =>
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
+    assert.strictEqual(parsed.runtimeSessionId, undefined);
+  }),
+);
+
+it.effect("decodes orchestration session runtime epochs", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationSession({
+      threadId: "thread-1",
+      status: "idle",
+      providerName: "codex",
+      providerInstanceId: "codex_work",
+      runtimeSessionId: "runtime-session-1",
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.runtimeSessionId, "runtime-session-1");
   }),
 );
 

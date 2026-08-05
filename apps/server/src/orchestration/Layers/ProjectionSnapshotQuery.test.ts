@@ -1263,6 +1263,8 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_thread_messages`;
+      yield* sql`DELETE FROM projection_thread_activities`;
       yield* sql`DELETE FROM projection_turns`;
       yield* sql`DELETE FROM projection_state`;
 
@@ -1383,6 +1385,77 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       `;
 
       yield* sql`
+        INSERT INTO projection_thread_messages (
+          message_id,
+          thread_id,
+          turn_id,
+          role,
+          text,
+          is_streaming,
+          created_at,
+          updated_at
+        )
+        VALUES
+          (
+            'message-user-first',
+            'thread-1',
+            'turn-completed',
+            'user',
+            'first user turn',
+            0,
+            '2026-04-03T00:00:04.000Z',
+            '2026-04-03T00:00:04.000Z'
+          ),
+          (
+            'message-user-second',
+            'thread-1',
+            'turn-running',
+            'user',
+            'second user turn',
+            0,
+            '2026-04-03T00:00:30.000Z',
+            '2026-04-03T00:00:30.000Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-approval-requested',
+            'thread-1',
+            'turn-running',
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-1"}',
+            4,
+            '2026-04-03T00:00:31.000Z'
+          ),
+          (
+            'activity-runtime-note',
+            'thread-1',
+            NULL,
+            'info',
+            'runtime.note',
+            'Not needed by command invariants',
+            '{}',
+            5,
+            '2026-04-03T00:00:32.000Z'
+          )
+      `;
+
+      yield* sql`
         INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
         VALUES
           (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 3, '2026-04-03T00:00:40.000Z'),
@@ -1397,6 +1470,14 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const commandReadModel = yield* snapshotQuery.getCommandReadModel();
       assert.equal(commandReadModel.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(commandReadModel.threads[0]?.latestTurn?.state, "running");
+      assert.deepEqual(
+        commandReadModel.threads[0]?.messages.map((message) => message.id),
+        [asMessageId("message-user-first")],
+      );
+      assert.deepEqual(
+        commandReadModel.threads[0]?.activities.map((activity) => activity.id),
+        [asEventId("activity-approval-requested")],
+      );
 
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));

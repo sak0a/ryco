@@ -19,6 +19,7 @@ import {
   type ProviderRequestKind,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
+  type RuntimeSessionId,
   RuntimeItemId,
   RuntimeRequestId,
   ProviderApprovalDecision,
@@ -61,6 +62,7 @@ import {
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
 
 const PROVIDER = ProviderDriverKind.make("codex");
 const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES =
@@ -82,6 +84,7 @@ export interface CodexAdapterLiveOptions {
 
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
+  readonly runtimeSessionId: RuntimeSessionId;
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
@@ -1409,10 +1412,32 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
           });
         }
+        if (
+          input.providerInstanceId !== undefined &&
+          input.providerInstanceId !== boundInstanceId
+        ) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: `Expected provider instance '${boundInstanceId}' but received '${input.providerInstanceId}'.`,
+          });
+        }
+        const runtimeSessionId = yield* requireRuntimeSessionId(PROVIDER, input);
 
         const existing = sessions.get(input.threadId);
         if (existing && !existing.stopped) {
-          yield* Effect.suspend(() => stopSessionInternal(existing));
+          if (existing.runtimeSessionId === runtimeSessionId) {
+            return {
+              ...(yield* existing.runtime.getSession),
+              providerInstanceId: boundInstanceId,
+              runtimeSessionId,
+            };
+          }
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: `Thread '${input.threadId}' still has runtime '${existing.runtimeSessionId}'; stop it before starting '${runtimeSessionId}'.`,
+          });
         }
 
         const tokenMode = input.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
@@ -1420,12 +1445,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
+          runtimeSessionId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
           ...(tokenReductionInstructions ? { tokenReductionInstructions } : {}),
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
-          ...(Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
+          ...(input.resumePolicy !== "fresh" &&
+          Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
           runtimeMode: input.runtimeMode,
@@ -1461,7 +1488,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
-            const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+            const runtimeEvents = mapToRuntimeEvents(event, event.threadId).map((runtimeEvent) =>
+              stampRuntimeEvent(runtimeEvent, {
+                providerInstanceId: boundInstanceId,
+                runtimeSessionId,
+              }),
+            );
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
@@ -1494,9 +1526,25 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ),
           ),
         );
+        if (
+          started.runtimeSessionId !== undefined &&
+          started.runtimeSessionId !== runtimeSessionId
+        ) {
+          yield* runtime.close.pipe(
+            Effect.andThen(Fiber.interrupt(eventFiber)),
+            Effect.andThen(Scope.close(sessionScope, Exit.void)),
+            Effect.ignore,
+          );
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: `Codex runtime returned epoch '${started.runtimeSessionId}' for requested epoch '${runtimeSessionId}'.`,
+          });
+        }
 
         sessions.set(input.threadId, {
           threadId: input.threadId,
+          runtimeSessionId,
           scope: sessionScope,
           runtime,
           eventFiber,
@@ -1504,7 +1552,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         });
         sessionScopeTransferred = true;
 
-        return started;
+        return {
+          ...started,
+          providerInstanceId: boundInstanceId,
+          runtimeSessionId,
+        };
       }),
     );
 

@@ -28,6 +28,7 @@ import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { ContextHandoffCoordinator } from "../Services/ContextHandoffCoordinator.ts";
 import {
   ProviderCommandReactor,
   type ProviderCommandReactorShape,
@@ -180,6 +181,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const contextHandoffCoordinator = yield* ContextHandoffCoordinator;
   const gitWorkflow = yield* GitWorkflowService;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
@@ -419,11 +421,11 @@ const make = Effect.gen(function* () {
 
     const bindSessionToThread = (session: ProviderSession) =>
       Effect.gen(function* () {
-        if (session.providerInstanceId === undefined) {
+        if (session.providerInstanceId === undefined || session.runtimeSessionId === undefined) {
           return yield* new ProviderAdapterRequestError({
             provider: providerErrorLabel(session.provider),
             method: "thread.turn.start",
-            detail: `Provider session '${session.threadId}' started without a provider instance id.`,
+            detail: `Provider session '${session.threadId}' started without a provider instance id or runtime session id.`,
           });
         }
         yield* setThreadSession({
@@ -433,6 +435,7 @@ const make = Effect.gen(function* () {
             status: mapProviderSessionStatusToOrchestrationStatus(session.status),
             providerName: session.provider,
             providerInstanceId: session.providerInstanceId,
+            runtimeSessionId: session.runtimeSessionId,
             runtimeMode: desiredRuntimeMode,
             tokenMode: desiredTokenMode,
             // Provider turn ids are not orchestration turn ids.
@@ -628,7 +631,11 @@ const make = Effect.gen(function* () {
       const targetBranch = buildGeneratedWorktreeBranchName(generated.branch);
       if (targetBranch === oldBranch) return;
 
-      const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
+      const renamed = yield* gitWorkflow.renameBranch({
+        cwd,
+        oldBranch,
+        newBranch: targetBranch,
+      });
       yield* orchestrationEngine.dispatch({
         type: "thread.meta.update",
         commandId: serverCommandId("worktree-branch-rename"),
@@ -740,6 +747,11 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    if (event.payload.contextHandoff !== undefined) {
+      yield* contextHandoffCoordinator.processTurnStart(event);
+      return;
+    }
+
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;
     if (isFirstUserMessageTurn) {
@@ -827,9 +839,22 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const commitAcceptedModelSelection =
+      event.payload.modelSelection !== undefined &&
+      !Equal.equals(thread.modelSelection, event.payload.modelSelection)
+        ? orchestrationEngine.dispatch({
+            type: "thread.meta.update",
+            commandId: serverCommandId("accepted-model-selection"),
+            threadId: event.payload.threadId,
+            modelSelection: event.payload.modelSelection,
+          })
+        : Effect.void;
+
+    yield* providerService.sendTurn(sendTurnRequest.value).pipe(
+      Effect.tap(() => commitAcceptedModelSelection),
+      Effect.catchCause(recoverTurnStartFailure),
+      Effect.forkScoped,
+    );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

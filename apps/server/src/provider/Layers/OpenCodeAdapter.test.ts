@@ -10,6 +10,7 @@ import {
   OpenCodeSettings,
   ProviderDriverKind,
   ProviderInstanceId,
+  RuntimeSessionId,
   ThreadId,
 } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";
@@ -229,6 +230,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const adapter = yield* OpenCodeAdapter;
 
       const session = yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-1"),
         provider: ProviderDriverKind.make("opencode"),
         threadId: asThreadId("thread-opencode"),
         runtimeMode: "full-access",
@@ -248,6 +250,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-1"),
         provider: ProviderDriverKind.make("opencode"),
         threadId: asThreadId("thread-opencode"),
         runtimeMode: "full-access",
@@ -275,6 +278,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       );
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-3"),
         provider: ProviderDriverKind.make("opencode"),
         threadId,
         runtimeMode: "full-access",
@@ -282,6 +286,14 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
 
       const events = Array.from(yield* Fiber.join(eventsFiber).pipe(Effect.timeout("1 second")));
+      assert.equal(
+        events.every(
+          (event) =>
+            event.providerInstanceId === ProviderInstanceId.make("opencode") &&
+            event.runtimeSessionId === RuntimeSessionId.make("test-opencodeadapter-3"),
+        ),
+        true,
+      );
       assert.deepEqual(
         events.map((event) => event.type),
         ["session.started", "thread.started", "session.exited"],
@@ -293,11 +305,13 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-4"),
         provider: ProviderDriverKind.make("opencode"),
         threadId: asThreadId("thread-stop-all-a"),
         runtimeMode: "full-access",
       });
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-5"),
         provider: ProviderDriverKind.make("opencode"),
         threadId: asThreadId("thread-stop-all-b"),
         runtimeMode: "full-access",
@@ -357,6 +371,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-6"),
         provider: ProviderDriverKind.make("opencode"),
         threadId: asThreadId("thread-send-turn-failure"),
         runtimeMode: "full-access",
@@ -409,6 +424,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
     return Effect.gen(function* () {
       const adapter = yield* OpenCodeAdapter;
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-7"),
         provider: ProviderDriverKind.make("opencode"),
         threadId: asThreadId("thread-custom-instance"),
         runtimeMode: "full-access",
@@ -459,6 +475,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const adapter = yield* OpenCodeAdapter;
       const threadId = asThreadId("thread-custom-instance-fallback-model");
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-8"),
         provider: ProviderDriverKind.make("opencode"),
         threadId,
         runtimeMode: "full-access",
@@ -503,6 +520,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const adapter = yield* OpenCodeAdapter;
       const threadId = asThreadId("thread-custom-instance-wrong-selection");
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-9"),
         provider: ProviderDriverKind.make("opencode"),
         threadId,
         runtimeMode: "full-access",
@@ -536,6 +554,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const adapter = yield* OpenCodeAdapter;
       const threadId = asThreadId("thread-rollback-all");
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-10"),
         provider: ProviderDriverKind.make("opencode"),
         threadId,
         runtimeMode: "full-access",
@@ -683,6 +702,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       );
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-11"),
         provider: ProviderDriverKind.make("opencode"),
         threadId,
         runtimeMode: "full-access",
@@ -800,6 +820,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const session = yield* Effect.gen(function* () {
         const adapter = yield* OpenCodeAdapter;
         const started = yield* adapter.startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-12"),
           provider: ProviderDriverKind.make("opencode"),
           threadId: asThreadId("thread-native-log"),
           runtimeMode: "full-access",
@@ -888,6 +909,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       const { sessions, closeCallsDuringRun } = yield* Effect.gen(function* () {
         const adapter = yield* OpenCodeAdapter;
         yield* adapter.startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-opencodeadapter-13"),
           provider: ProviderDriverKind.make("opencode"),
           threadId: asThreadId("thread-native-log-failure"),
           runtimeMode: "full-access",

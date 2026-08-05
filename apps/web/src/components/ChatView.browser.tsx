@@ -1980,6 +1980,53 @@ function enableComposerStashShortcut(nextFixture: TestFixture): void {
   };
 }
 
+function configureContextHandoffProviders(nextFixture: TestFixture): void {
+  const codex = nextFixture.serverConfig.providers[0];
+  if (!codex) throw new Error("Expected the default Codex provider fixture.");
+  nextFixture.serverConfig = {
+    ...nextFixture.serverConfig,
+    providers: [
+      {
+        ...codex,
+        continuation: { groupKey: "codex:default" },
+        supportsAskMode: true,
+        models: [
+          {
+            slug: "gpt-5",
+            name: "GPT-5",
+            isCustom: false,
+            capabilities: createModelCapabilities({ optionDescriptors: [] }),
+          },
+        ],
+      },
+      {
+        driver: ProviderDriverKind.make("claudeAgent"),
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        displayName: "Claude",
+        continuation: { groupKey: "claude:default" },
+        supportsAskMode: false,
+        enabled: true,
+        installed: true,
+        version: "2.1.117",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: NOW_ISO,
+        models: [
+          {
+            slug: "claude-sonnet-4-6",
+            name: "Claude Sonnet 4.6",
+            shortName: "Sonnet 4.6",
+            isCustom: false,
+            capabilities: createModelCapabilities({ optionDescriptors: [] }),
+          },
+        ],
+        slashCommands: [],
+        skills: [],
+      },
+    ],
+  };
+}
+
 async function openCommandPaletteFromTrigger(): Promise<void> {
   const trigger = page.getByTestId("command-palette-trigger");
   await expect.element(trigger).toBeInTheDocument();
@@ -7475,6 +7522,133 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         { timeout: 8_000, interval: 16 },
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("stages an idle provider target locally and sends it without an unsafe model meta update", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-context-handoff-stage" as MessageId,
+      targetText: "context handoff staging thread",
+    });
+    const thread = snapshot.threads.find((candidate) => candidate.id === THREAD_ID);
+    if (!thread) throw new Error("Expected context handoff thread fixture.");
+    Object.assign(thread, { interactionMode: "ask" as const });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      configureFixture: configureContextHandoffProviders,
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return { sequence: fixture.snapshot.snapshotSequence + 1 };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const picker = await waitForElement(
+        findComposerProviderModelPicker,
+        "Unable to find provider/model picker for context handoff.",
+      );
+      await picker.click();
+      await page.getByRole("button", { name: "Claude", exact: true }).click();
+      await page.getByText("Sonnet 4.6", { exact: true }).click();
+      await waitForLayout();
+
+      const pendingHandoff = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-pending-context-handoff="true"]'),
+        "Unable to find the staged context-handoff chip.",
+      );
+      expect(pendingHandoff.textContent).toContain("Next message hands off context");
+      expect(pendingHandoff.textContent).toContain("GPT-5");
+      expect(pendingHandoff.textContent).toContain("Sonnet 4.6");
+      expect(pendingHandoff.textContent).not.toContain("claude-sonnet-4-6");
+      expect(pendingHandoff.querySelector("button")).toBeNull();
+      expect(pendingHandoff.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        document
+          .querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="false"]')!
+          .getBoundingClientRect().top,
+      );
+
+      expect(
+        wsRequests.some((request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand),
+      ).toBe(false);
+      expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)).toMatchObject({
+        activeProvider: ProviderInstanceId.make("claudeAgent"),
+        modelSelectionByProvider: {
+          claudeAgent: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-sonnet-4-6",
+          },
+        },
+        interactionMode: "default",
+      });
+      expect(useComposerDraftStore.getState().stickyActiveProvider).not.toBe(
+        ProviderInstanceId.make("claudeAgent"),
+      );
+
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Continue on the staged target");
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const turnStart = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          );
+          expect(turnStart).toMatchObject({
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-sonnet-4-6",
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      expect(document.querySelector('[data-pending-context-handoff="true"]')).toBeNull();
+      expect(
+        wsRequests.some(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.type === "thread.meta.update" &&
+            "modelSelection" in request,
+        ),
+      ).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the frozen web phone picker on the current provider", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-context-handoff-phone" as MessageId,
+        targetText: "frozen phone provider thread",
+      }),
+      configureFixture: configureContextHandoffProviders,
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await expandPhoneComposerIfCollapsed();
+      const picker = await waitForElement(
+        findComposerProviderModelPicker,
+        "Unable to find frozen phone provider/model picker.",
+      );
+      await picker.click();
+      await waitForElement(
+        () => document.querySelector('[data-slot="mobile-select-sheet-list"]'),
+        "Unable to find phone model sheet.",
+      );
+
+      expect(document.body.textContent).toContain("GPT-5");
+      expect(document.body.textContent).not.toContain("Claude Sonnet 4.6");
     } finally {
       await mounted.cleanup();
     }

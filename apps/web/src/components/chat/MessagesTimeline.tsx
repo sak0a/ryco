@@ -71,6 +71,7 @@ import {
   TIMELINE_MINIMAP_MIN_ITEMS,
 } from "./MessagesTimeline.logic";
 import { MessageActionsSheet } from "./MessageActionsSheet";
+import { ContextHandoffMarkerRow } from "./ContextHandoffMarkerRow";
 import { useLongPress } from "~/hooks/useLongPress";
 import { usePresentationTier } from "~/hooks/usePresentationTier";
 import type { ThreadMessageSearchOccurrence } from "./ThreadMessageSearch.logic";
@@ -875,6 +876,8 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
       {row.kind === "context-compaction" && (
         <ContextCompactionMarkerRow createdAt={row.createdAt} label={row.marker.label} />
       )}
+
+      {row.kind === "context-handoff" && <ContextHandoffMarkerRow marker={row.marker} />}
 
       {row.kind === "message" &&
         row.message.role === "user" &&

@@ -6,6 +6,7 @@ import {
   ProviderDriverKind,
   ProviderItemId,
   type ProviderInstanceId,
+  type RuntimeSessionId,
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderInteractionMode,
@@ -80,6 +81,7 @@ type CodexThreadItem =
 export interface CodexSessionRuntimeOptions {
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
+  readonly runtimeSessionId: RuntimeSessionId;
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly environment?: NodeJS.ProcessEnv;
@@ -774,6 +776,7 @@ export const makeCodexSessionRuntime = (
     const initialSession = {
       provider: PROVIDER,
       ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
+      runtimeSessionId: options.runtimeSessionId,
       status: "connecting",
       runtimeMode: options.runtimeMode,
       tokenMode: options.tokenMode,

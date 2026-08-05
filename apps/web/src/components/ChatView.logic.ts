@@ -1,10 +1,11 @@
 import {
   type ComposerSourceControlContext,
   type EnvironmentId,
-  isProviderDriverKind,
+  type OrchestrationSessionStatus,
   ProjectId,
   type ModelSelection,
   type ProviderDriverKind,
+  type ProviderInteractionMode,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
@@ -329,39 +330,122 @@ export function threadIsPromotedAndPersisted(thread: Thread | null | undefined):
   return Boolean(thread && (thread.latestTurn !== null || thread.messages.length > 0));
 }
 
-// `threadProvider` is the open branded driver kind carried by the session.
-// Unknown driver kinds degrade to `null` (i.e. "unlocked"), which is the safe
-// rollback / fork behavior — the routing layer is the right place to surface
-// "driver not installed" errors, not the lock state.
-//
-// `selectedProvider` takes the same open-string shape because the composer
-// now tracks the picker selection as a `ProviderInstanceId` (e.g.
-// `codex_personal`). Custom instance ids that don't directly match a
-// registered driver resolve to `null` here, which matches the existing
-// "unknown driver -> unlocked" semantics. Callers that want the lock to track
-// a custom instance's underlying driver kind should resolve the instance id
-// upstream and pass the correlated kind.
-export function deriveLockedProvider(input: {
-  thread: Thread | null | undefined;
-  selectedProvider: string | null;
-  threadProvider: string | null;
-}): ProviderDriverKind | null {
-  if (!threadHasStarted(input.thread)) {
-    return null;
+export type ProviderSelectionPolicyReason =
+  | "phone-tier"
+  | "running"
+  | "starting"
+  | "connecting"
+  | "local-dispatch"
+  | "worktree-preparation"
+  | "pending-approval"
+  | "pending-input"
+  | "queued-message"
+  | "checkpoint-revert"
+  | "mutation-unavailable"
+  | "environment-unavailable";
+
+export interface ProviderSelectionPolicy {
+  readonly mode: "all-ready" | "continuation-only";
+  readonly lockedProvider: ProviderDriverKind | null;
+  readonly reason: ProviderSelectionPolicyReason | null;
+}
+
+/**
+ * Pure UI policy for provider/model selection. Empty threads remain freely
+ * configurable. A started thread exposes every ready provider only when it is
+ * genuinely idle; every transition, callback, queue, local send/undo window,
+ * unavailable mutation boundary, and the frozen web-phone tier constrains the
+ * picker to the current provider continuation.
+ */
+export function deriveProviderSelectionPolicy(input: {
+  readonly threadStarted: boolean;
+  readonly canonicalProvider: ProviderDriverKind | null;
+  readonly phase: SessionPhase;
+  readonly orchestrationStatus: OrchestrationSessionStatus | null;
+  readonly isConnecting: boolean;
+  readonly isSendBusy: boolean;
+  readonly isPreparingWorktree: boolean;
+  readonly hasPendingApproval: boolean;
+  readonly hasPendingUserInput: boolean;
+  readonly hasQueuedMessage: boolean;
+  readonly isRevertingCheckpoint: boolean;
+  readonly mutationAllowed: boolean;
+  readonly environmentAvailable: boolean;
+  readonly isPhoneTier: boolean;
+}): ProviderSelectionPolicy {
+  if (!input.threadStarted) {
+    return { mode: "all-ready", lockedProvider: null, reason: null };
   }
-  const sessionProvider = input.thread?.session?.provider ?? null;
-  if (sessionProvider) {
-    return sessionProvider;
-  }
-  const narrowedThreadProvider =
-    input.threadProvider && isProviderDriverKind(input.threadProvider)
-      ? input.threadProvider
-      : null;
-  const narrowedSelectedProvider =
-    input.selectedProvider && isProviderDriverKind(input.selectedProvider)
-      ? input.selectedProvider
-      : null;
-  return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
+
+  const reason: ProviderSelectionPolicyReason | null = input.isPhoneTier
+    ? "phone-tier"
+    : input.phase === "running" || input.orchestrationStatus === "running"
+      ? "running"
+      : input.orchestrationStatus === "starting"
+        ? "starting"
+        : input.phase === "connecting" || input.isConnecting
+          ? "connecting"
+          : input.isPreparingWorktree
+            ? "worktree-preparation"
+            : input.isSendBusy
+              ? "local-dispatch"
+              : input.hasPendingApproval
+                ? "pending-approval"
+                : input.hasPendingUserInput
+                  ? "pending-input"
+                  : input.hasQueuedMessage
+                    ? "queued-message"
+                    : input.isRevertingCheckpoint
+                      ? "checkpoint-revert"
+                      : !input.mutationAllowed
+                        ? "mutation-unavailable"
+                        : !input.environmentAvailable
+                          ? "environment-unavailable"
+                          : null;
+
+  return reason === null
+    ? { mode: "all-ready", lockedProvider: null, reason: null }
+    : {
+        mode: "continuation-only",
+        lockedProvider: input.canonicalProvider,
+        reason,
+      };
+}
+
+/** Options-only changes stay on the normal turn path and are allowed. */
+export function modelSelectionRequiresContextHandoff(input: {
+  readonly canonicalSelection: ModelSelection;
+  readonly targetSelection: ModelSelection;
+}): boolean {
+  return (
+    input.canonicalSelection.instanceId !== input.targetSelection.instanceId ||
+    input.canonicalSelection.model !== input.targetSelection.model
+  );
+}
+
+/**
+ * Recheck used at send time. The busy picker can retain its existing
+ * continuation-group affordances, but a newly staged instance/model may never
+ * become a queued or raced handoff after eligibility closes.
+ */
+export function selectionAllowedAtSendBoundary(input: {
+  readonly threadStarted: boolean;
+  readonly policy: ProviderSelectionPolicy;
+  readonly canonicalSelection: ModelSelection;
+  readonly targetSelection: ModelSelection;
+}): boolean {
+  return (
+    !input.threadStarted ||
+    input.policy.mode === "all-ready" ||
+    !modelSelectionRequiresContextHandoff(input)
+  );
+}
+
+export function normalizeInteractionModeForProviderTarget(
+  mode: ProviderInteractionMode,
+  supportsAskMode: boolean,
+): ProviderInteractionMode {
+  return mode === "ask" && !supportsAskMode ? "default" : mode;
 }
 
 export async function waitForStartedServerThread(

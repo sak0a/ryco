@@ -179,10 +179,10 @@ export interface CommitSendTurnDispatchInput {
   readonly messageId: MessageId;
   readonly outgoingMessageText: string;
   readonly turnAttachments: readonly SendTurnDispatchAttachment[];
-  /** The composer's model selection sent on the turn and persisted for the next one. */
+  /** The composer's staged target, committed atomically by `thread.turn.start`. */
   readonly modelSelection: ModelSelection;
-  /** Whether the composer had an explicit model (gates the persisted selection). */
-  readonly hasSelectedModel: boolean;
+  /** @deprecated Accepted for source compatibility; model persistence is intentionally ignored. */
+  readonly hasSelectedModel?: boolean;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly tokenMode: AgentTokenMode;
@@ -194,7 +194,6 @@ export interface CommitSendTurnDispatchInput {
   readonly persistThreadSettingsForNextTurn: (input: {
     threadId: ThreadId;
     createdAt: string;
-    modelSelection?: ModelSelection;
     runtimeMode: RuntimeMode;
     interactionMode: ProviderInteractionMode;
     tokenMode: AgentTokenMode;
@@ -224,7 +223,6 @@ export async function commitSendTurnDispatch(input: CommitSendTurnDispatchInput)
     await input.persistThreadSettingsForNextTurn({
       threadId: input.threadId,
       createdAt: input.createdAt,
-      ...(input.hasSelectedModel ? { modelSelection: input.modelSelection } : {}),
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       tokenMode: input.tokenMode,

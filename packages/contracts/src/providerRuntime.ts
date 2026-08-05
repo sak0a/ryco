@@ -7,6 +7,7 @@ import {
   PositiveInt,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeSessionId,
   RuntimeSubagentId,
   RuntimeTaskId,
   ThreadId,
@@ -263,6 +264,8 @@ const ProviderRuntimeEventBase = Schema.Struct({
   // for the routing-key-vs-driver-id distinction. Once every emitter
   // populates it (post-slice-4), routing flips to instance-id-only.
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Runtime epoch. Optional only for explicit legacy recovery compatibility. */
+  runtimeSessionId: Schema.optional(RuntimeSessionId),
   threadId: ThreadId,
   createdAt: IsoDateTime,
   turnId: Schema.optional(TurnId),

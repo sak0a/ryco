@@ -1,8 +1,16 @@
 import "../../index.css";
 
-import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
+import {
+  ContextHandoffId,
+  EnvironmentId,
+  MessageId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  TurnId,
+} from "@ryco/contracts";
 import { createRef } from "react";
 import type { LegendListRef } from "@legendapp/list/react";
+import type { ContextHandoffTimelineEntry } from "../../session-logic";
 import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
@@ -112,6 +120,43 @@ const THINKING_ENTRIES = [
   },
 ];
 
+function makeContextHandoffMarker(): ContextHandoffTimelineEntry {
+  return {
+    id: "context-handoff:activity-1",
+    activityId: "activity-1",
+    handoffId: ContextHandoffId.make("handoff-1"),
+    createdAt: "2026-04-13T12:00:00.000Z",
+    turnId: TurnId.make("turn-target"),
+    status: "delivery-uncertain",
+    targetMessageId: MessageId.make("message-target"),
+    targetTurnId: TurnId.make("turn-target"),
+    sources: [
+      {
+        providerInstanceId: ProviderInstanceId.make("codex_work"),
+        driverKind: ProviderDriverKind.make("codex"),
+        providerDisplayName: "Codex Work",
+        modelSlug: "gpt-5.6-sol",
+        modelDisplayName: "GPT-5.6 Sol",
+      },
+      {
+        providerInstanceId: ProviderInstanceId.make("local_provider"),
+        driverKind: ProviderDriverKind.make("localProvider"),
+        providerDisplayName: "Local Provider",
+        modelSlug: "a-very-long-local-model-label-for-overflow-testing",
+        modelDisplayName: "A Very Long Local Model Label For Overflow Testing",
+      },
+    ],
+    target: {
+      providerInstanceId: ProviderInstanceId.make("claude_work"),
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+      providerDisplayName: "Claude Work",
+      modelSlug: "claude-fable-5",
+      modelDisplayName: "Fable 5",
+    },
+    error: "Acceptance could not be proven after reconnect",
+  };
+}
+
 function buildProps() {
   return {
     isWorking: false,
@@ -150,6 +195,62 @@ describe("MessagesTimeline", () => {
       threadWorkGroupExpandedById: {},
     });
     document.body.innerHTML = "";
+  });
+
+  it("keeps a multi-source handoff accessible and contained across narrow light and dark layouts", async () => {
+    const marker = makeContextHandoffMarker();
+    const timelineEntries = [
+      {
+        id: marker.id,
+        kind: "context-handoff" as const,
+        createdAt: marker.createdAt,
+        marker,
+      },
+    ];
+    const screen = await render(
+      <div style={{ width: 320 }}>
+        <MessagesTimeline {...buildProps()} timelineEntries={timelineEntries} />
+      </div>,
+    );
+
+    try {
+      const status = page.getByRole("status", {
+        name: /Context handoff from Codex Work GPT-5.6 Sol, Local Provider .* to Claude Work Fable 5\. Delivery uncertain: Acceptance could not be proven after reconnect/,
+      });
+      await expect.element(status).toBeVisible();
+      await expect.element(page.getByText("Delivery uncertain")).toBeVisible();
+
+      const markerElement = status.element();
+      expect(markerElement.dataset.contextHandoffSourceCount).toBe("2");
+      expect(markerElement.scrollWidth).toBeLessThanOrEqual(markerElement.clientWidth);
+
+      document.documentElement.classList.add("dark");
+      await screen.rerender(
+        <div style={{ width: 320 }}>
+          <MessagesTimeline
+            {...buildProps()}
+            resolvedTheme="dark"
+            timelineEntries={timelineEntries}
+          />
+        </div>,
+      );
+      await expect.element(status).toBeVisible();
+
+      document.documentElement.classList.remove("dark");
+      await screen.rerender(
+        <div style={{ width: 320 }}>
+          <MessagesTimeline
+            {...buildProps()}
+            resolvedTheme="light"
+            timelineEntries={timelineEntries}
+          />
+        </div>,
+      );
+      await expect.element(status).toBeVisible();
+    } finally {
+      document.documentElement.classList.remove("dark");
+      await screen.unmount();
+    }
   });
 
   it("renders activity rows instead of the empty placeholder when a thread has non-message timeline data", async () => {
@@ -681,7 +782,7 @@ describe("MessagesTimeline", () => {
 
     try {
       await expect.element(page.getByText("Applying changes")).toBeVisible();
-      await expect.element(page.getByText("Changed files (1)")).not.toBeInTheDocument();
+      await expect.element(page.getByText("Edited 1 file")).not.toBeInTheDocument();
 
       await screen.rerender(
         <MessagesTimeline
@@ -699,7 +800,7 @@ describe("MessagesTimeline", () => {
         />,
       );
 
-      await expect.element(page.getByText("Changed files (1)")).toBeVisible();
+      await expect.element(page.getByText("Edited 1 file")).toBeVisible();
     } finally {
       await screen.unmount();
     }
@@ -741,7 +842,7 @@ describe("MessagesTimeline", () => {
 
     try {
       await expect.element(page.getByText("Still finishing the response")).toBeVisible();
-      await expect.element(page.getByText("Changed files (1)")).not.toBeInTheDocument();
+      await expect.element(page.getByText("Edited 1 file")).not.toBeInTheDocument();
 
       await screen.rerender(
         <MessagesTimeline
@@ -751,7 +852,7 @@ describe("MessagesTimeline", () => {
         />,
       );
 
-      await expect.element(page.getByText("Changed files (1)")).toBeVisible();
+      await expect.element(page.getByText("Edited 1 file")).toBeVisible();
     } finally {
       await screen.unmount();
     }

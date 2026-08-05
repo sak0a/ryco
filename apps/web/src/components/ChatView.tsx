@@ -194,14 +194,17 @@ import {
   cloneComposerImageForRetry,
   collectUserMessageBlobPreviewUrls,
   deriveComposerSendState,
+  deriveProviderSelectionPolicy,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
+  normalizeInteractionModeForProviderTarget,
   PullRequestDialogState,
-  deriveLockedProvider,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
   resolveChatSendWorktreePlan,
   shouldShowNewThreadSurface,
+  selectionAllowedAtSendBoundary,
+  threadHasStarted,
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
   waitForStartedServerThread,
@@ -1125,11 +1128,6 @@ export default function ChatView(props: ChatViewProps) {
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
     null;
-  const lockedProvider = deriveLockedProvider({
-    thread: activeThread,
-    selectedProvider: selectedProviderByThreadId,
-    threadProvider,
-  });
   const primaryServerConfig = useServerConfig();
   const activeEnvRuntimeState = useSavedEnvironmentRuntimeStore((s) =>
     activeThread?.environmentId ? s.byId[activeThread.environmentId] : null,
@@ -1278,11 +1276,6 @@ export default function ChatView(props: ChatViewProps) {
     [providerStatuses],
   );
   const activeThreadSessionProviderInstanceId = activeThread?.session?.providerInstanceId ?? null;
-  const unlockedSelectedProvider = resolveSelectableProvider(
-    providerStatuses,
-    selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
-  );
-  const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
 
   // Native desktop notification when a turn the user watched running completes
@@ -1339,6 +1332,7 @@ export default function ChatView(props: ChatViewProps) {
   const {
     workLogEntries,
     contextCompactionEntries,
+    contextHandoffEntries,
     pendingApprovals,
     pendingUserInputs,
     activePlan,
@@ -1405,6 +1399,61 @@ export default function ChatView(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError: activeThread?.error,
   });
+  const canonicalProvider = useMemo(
+    () =>
+      activeThread?.session?.provider ??
+      providerStatuses.find(
+        (provider) => provider.instanceId === activeThread?.modelSelection.instanceId,
+      )?.driver ??
+      null,
+    [activeThread?.modelSelection.instanceId, activeThread?.session?.provider, providerStatuses],
+  );
+  const activeThreadStarted = threadHasStarted(activeThread);
+  const orchestrationStatus = activeThread?.session?.orchestrationStatus ?? null;
+  const providerSelectionPolicy = useMemo(
+    () =>
+      deriveProviderSelectionPolicy({
+        threadStarted: activeThreadStarted,
+        canonicalProvider,
+        phase,
+        orchestrationStatus,
+        isConnecting,
+        isSendBusy,
+        isPreparingWorktree,
+        hasPendingApproval: pendingApprovals.length > 0,
+        hasPendingUserInput: pendingUserInputs.length > 0,
+        hasQueuedMessage: queuedMessages.length > 0,
+        isRevertingCheckpoint,
+        mutationAllowed: dispatchCapability.allowed,
+        environmentAvailable: !activeEnvironmentUnavailable,
+        isPhoneTier: presentationTier === "phone",
+      }),
+    [
+      activeEnvironmentUnavailable,
+      activeThreadStarted,
+      canonicalProvider,
+      dispatchCapability.allowed,
+      isConnecting,
+      isPreparingWorktree,
+      isRevertingCheckpoint,
+      isSendBusy,
+      pendingApprovals.length,
+      pendingUserInputs.length,
+      phase,
+      presentationTier,
+      queuedMessages.length,
+      orchestrationStatus,
+    ],
+  );
+  const lockedProvider = providerSelectionPolicy.lockedProvider;
+  const unlockedSelectedProvider =
+    providerStatuses.find((provider) => provider.instanceId === selectedProviderByThreadId)
+      ?.driver ??
+    resolveSelectableProvider(
+      providerStatuses,
+      selectedProviderByThreadId ?? threadProvider ?? ProviderDriverKind.make("codex"),
+    );
+  const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -1477,8 +1526,15 @@ export default function ChatView(props: ChatViewProps) {
         activeThread?.proposedPlans ?? [],
         workLogEntries,
         contextCompactionEntries,
+        contextHandoffEntries,
       ),
-    [activeThread?.proposedPlans, contextCompactionEntries, timelineMessages, workLogEntries],
+    [
+      activeThread?.proposedPlans,
+      contextCompactionEntries,
+      contextHandoffEntries,
+      timelineMessages,
+      workLogEntries,
+    ],
   );
   // "Empty" for the new-thread surface means nothing to show at all, not merely
   // no chat messages. A thread can already carry work-log rows, a proposed plan,
@@ -1958,7 +2014,6 @@ export default function ChatView(props: ChatViewProps) {
     async (input: {
       threadId: ThreadId;
       createdAt: string;
-      modelSelection?: ModelSelection;
       runtimeMode: RuntimeMode;
       interactionMode: ProviderInteractionMode;
       tokenMode: AgentTokenMode;
@@ -1969,21 +2024,6 @@ export default function ChatView(props: ChatViewProps) {
       const api = readEnvironmentApi(environmentId);
       if (!api) {
         return;
-      }
-
-      if (
-        input.modelSelection !== undefined &&
-        (input.modelSelection.model !== serverThread.modelSelection.model ||
-          input.modelSelection.instanceId !== serverThread.modelSelection.instanceId ||
-          JSON.stringify(input.modelSelection.options ?? null) !==
-            JSON.stringify(serverThread.modelSelection.options ?? null))
-      ) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
-          commandId: newCommandId(),
-          threadId: input.threadId,
-          modelSelection: input.modelSelection,
-        });
       }
 
       if (input.runtimeMode !== serverThread.runtimeMode) {
@@ -2412,6 +2452,31 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const canSendModelSelection = useCallback(
+    (targetSelection: ModelSelection): boolean => {
+      if (!activeThread) return false;
+      return selectionAllowedAtSendBoundary({
+        threadStarted: activeThreadStarted,
+        policy: providerSelectionPolicy,
+        canonicalSelection: activeThread.modelSelection,
+        targetSelection,
+      });
+    },
+    [activeThread, activeThreadStarted, providerSelectionPolicy],
+  );
+  const notifySelectionBecameIneligible = useCallback(() => {
+    toastManager.add(
+      stackedThreadToast({
+        type: "warning",
+        title: "Wait for the thread to become idle",
+        description:
+          providerSelectionPolicy.reason === "phone-tier"
+            ? "Provider switching stays on the current provider in the web phone view."
+            : "The staged provider or model was not sent. Try again when this thread is idle.",
+      }),
+    );
+  }, [providerSelectionPolicy.reason]);
+
   // Build the executeChatSendTurn input from a composer snapshot and dispatch it.
   // Shared by direct sends (with an undo window) and queue flushes (without one),
   // so a queued message replays exactly like a live send.
@@ -2425,6 +2490,10 @@ export default function ChatView(props: ChatViewProps) {
     if (!dispatchCapability.allowed) return false;
     const api = readEnvironmentApi(environmentId);
     if (!api || !activeThread || !activeProject) return false;
+    if (!canSendModelSelection(composerSnapshot.selectedModelSelection)) {
+      notifySelectionBecameIneligible();
+      return false;
+    }
     // Queued messages keep the settings snapshot from enqueue time; when the
     // Build-mode lock is on, every dispatched turn must still run in Build
     // mode even if it was queued as Plan/Ask before the setting flipped.
@@ -2487,7 +2556,11 @@ export default function ChatView(props: ChatViewProps) {
                 },
       });
       sourceThreadRef = scopeThreadRef(environmentId, created.sessionId);
-      return { threadId: created.sessionId, isServerThread: true, isFirstMessage: true };
+      return {
+        threadId: created.sessionId,
+        isServerThread: true,
+        isFirstMessage: true,
+      };
     };
 
     // In worktree mode, require an explicit base branch so we don't silently
@@ -2560,7 +2633,12 @@ export default function ChatView(props: ChatViewProps) {
         setOptimisticUserMessages,
         setThreadError,
       },
-      refs: { promptRef, composerImagesRef, composerTerminalContextsRef, sendInFlightRef },
+      refs: {
+        promptRef,
+        composerImagesRef,
+        composerTerminalContextsRef,
+        sendInFlightRef,
+      },
       sourceControl: {
         fetcher: async (ctx) => {
           const cwd = gitCwd;
@@ -2569,9 +2647,18 @@ export default function ChatView(props: ChatViewProps) {
           const staleAfterDate = DateTime.fromDateUnsafe(new Date(Date.now() + 5 * 60 * 1000));
           if (ctx.kind === "issue") {
             const detail = await queryClient.fetchQuery(
-              issueDetailQueryOptions({ environmentId, cwd, reference: String(ctx.detail.number) }),
+              issueDetailQueryOptions({
+                environmentId,
+                cwd,
+                reference: String(ctx.detail.number),
+              }),
             );
-            return { ...ctx, detail, fetchedAt: now, staleAfter: staleAfterDate };
+            return {
+              ...ctx,
+              detail,
+              fetchedAt: now,
+              staleAfter: staleAfterDate,
+            };
           }
           const detail = await queryClient.fetchQuery(
             changeRequestDetailQueryOptions({
@@ -2703,7 +2790,15 @@ export default function ChatView(props: ChatViewProps) {
       selectedModelSelection: ctxSelectedModelSelection,
       expiredTerminalContextCount,
     };
-    const settingsSnapshot: SendTurnSettings = { runtimeMode, interactionMode, tokenMode };
+    const settingsSnapshot: SendTurnSettings = {
+      runtimeMode,
+      interactionMode,
+      tokenMode,
+    };
+    if (!canSendModelSelection(composerSnapshot.selectedModelSelection)) {
+      notifySelectionBecameIneligible();
+      return;
+    }
 
     // A turn is already running: queue this message instead of sending it. Queued
     // messages auto-dispatch, in order, once the thread reaches quiescence.
@@ -2819,6 +2914,10 @@ export default function ChatView(props: ChatViewProps) {
         selectedPromptEffort: ctxSelectedPromptEffort,
         selectedModelSelection: ctxSelectedModelSelection,
       } = sendCtx;
+      if (!canSendModelSelection(ctxSelectedModelSelection)) {
+        notifySelectionBecameIneligible();
+        return;
+      }
 
       const threadIdForSend = activeThread.id;
       const messageIdForSend = newMessageId();
@@ -2856,7 +2955,6 @@ export default function ChatView(props: ChatViewProps) {
         await persistThreadSettingsForNextTurn({
           threadId: threadIdForSend,
           createdAt: messageCreatedAt,
-          modelSelection: ctxSelectedModelSelection,
           runtimeMode,
           interactionMode: nextInteractionMode,
           tokenMode,
@@ -2922,9 +3020,11 @@ export default function ChatView(props: ChatViewProps) {
       activeThread,
       activeProposedPlan,
       beginLocalDispatch,
+      canSendModelSelection,
       isConnecting,
       isSendBusy,
       isServerThread,
+      notifySelectionBecameIneligible,
       persistThreadSettingsForNextTurn,
       readComposer,
       resetLocalDispatch,
@@ -3085,7 +3185,21 @@ export default function ChatView(props: ChatViewProps) {
       // model lookup stay scoped to that exact instance. Unknown instance ids
       // are rejected by returning early; the server remains authoritative too.
       const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
+      if (
+        !entry ||
+        !entry.enabled ||
+        !entry.installed ||
+        entry.status !== "ready" ||
+        entry.availability === "unavailable"
+      ) {
+        scheduleComposerFocus();
+        return;
+      }
       const resolvedDriverKind = entry?.driver ?? null;
+      if (providerSelectionPolicy.mode === "continuation-only" && lockedProvider === null) {
+        scheduleComposerFocus();
+        return;
+      }
       if (
         lockedProvider !== null &&
         resolvedDriverKind !== null &&
@@ -3121,16 +3235,40 @@ export default function ChatView(props: ChatViewProps) {
         instanceId,
         model: resolvedModel,
       };
+      if (
+        !selectionAllowedAtSendBoundary({
+          threadStarted: activeThreadStarted,
+          policy: providerSelectionPolicy,
+          canonicalSelection: activeThread.modelSelection,
+          targetSelection: nextModelSelection,
+        })
+      ) {
+        scheduleComposerFocus();
+        return;
+      }
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,
       );
-      setStickyComposerModelSelection(nextModelSelection);
+      if (!threadHasStarted(activeThread)) {
+        setStickyComposerModelSelection(nextModelSelection);
+      }
+      const normalizedInteractionMode = normalizeInteractionModeForProviderTarget(
+        interactionMode,
+        entry.supportsAskMode ?? false,
+      );
+      if (normalizedInteractionMode !== interactionMode) {
+        handleInteractionModeChange(normalizedInteractionMode);
+      }
       scheduleComposerFocus();
     },
     [
       activeThread,
+      activeThreadStarted,
+      handleInteractionModeChange,
+      interactionMode,
       lockedProvider,
+      providerSelectionPolicy,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,
@@ -3526,6 +3664,7 @@ export default function ChatView(props: ChatViewProps) {
                   activeThreadId={activeThreadId}
                   activeThreadEnvironmentId={activeThread?.environmentId}
                   activeThreadSessionProviderInstanceId={activeThreadSessionProviderInstanceId}
+                  activeThreadStarted={activeThreadStarted}
                   isServerThread={isServerThread}
                   isLocalDraftThread={isLocalDraftThread}
                   phase={phase}

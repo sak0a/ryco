@@ -20,16 +20,32 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
+  RuntimeSessionId,
   ProviderStopSessionInput,
   ThreadId,
   ProviderTurnStartResult,
 } from "@ryco/contracts";
 import { Context } from "effect";
-import type { Effect, Stream } from "effect";
+import type { Effect, Option, Stream } from "effect";
 
 import type { ProviderServiceError } from "../Errors.ts";
 import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
+import type { ProviderRuntimeBinding } from "./ProviderSessionDirectory.ts";
+
+export type ProviderFreshSessionStartInput = Omit<
+  ProviderSessionStartInput,
+  "runtimeSessionId" | "resumeCursor" | "resumePolicy"
+> & {
+  readonly runtimeSessionId: RuntimeSessionId;
+};
+
+export interface ProviderFreshSessionStartResult {
+  readonly session: ProviderSession;
+  readonly previousBinding?: ProviderRuntimeBinding;
+}
+
+export type ProviderSessionBindingStopResult = "stopped" | "not-found" | "timed-out";
 
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
@@ -42,6 +58,38 @@ export interface ProviderServiceShape {
     threadId: ThreadId,
     input: ProviderSessionStartInput,
   ) => Effect.Effect<ProviderSession, ProviderServiceError>;
+
+  /** Start a fresh epoch and return the exact prior binding as a rollback token. */
+  readonly startFreshSession: (
+    threadId: ThreadId,
+    input: ProviderFreshSessionStartInput,
+  ) => Effect.Effect<ProviderFreshSessionStartResult, ProviderServiceError>;
+
+  /** Resolve only the adapter session matching the authoritative persisted binding. */
+  readonly getSession: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<ProviderSession>, ProviderServiceError>;
+
+  /** Restore a prior binding only while its exact instance/runtime is still live. */
+  readonly restoreSessionBinding: (
+    binding: ProviderRuntimeBinding,
+  ) => Effect.Effect<boolean, ProviderServiceError>;
+
+  /**
+   * Retire an exact failed target epoch if it is still authoritative.
+   * Clears provider-native resume state without reviving an exited source.
+   */
+  readonly retireSessionBinding: (
+    binding: ProviderRuntimeBinding,
+  ) => Effect.Effect<boolean, ProviderServiceError>;
+
+  /** Stop one exact binding with a bounded deadline and queue timed-out cleanup. */
+  readonly stopSessionBinding: (
+    binding: ProviderRuntimeBinding,
+  ) => Effect.Effect<ProviderSessionBindingStopResult, ProviderServiceError>;
+
+  /** In-memory stale bindings awaiting a later bounded reaper retry. */
+  readonly listStaleSessionBindings: () => Effect.Effect<ReadonlyArray<ProviderRuntimeBinding>>;
 
   /**
    * Send a provider turn.

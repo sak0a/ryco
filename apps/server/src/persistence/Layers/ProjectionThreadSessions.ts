@@ -24,6 +24,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           status,
           provider_name,
           provider_instance_id,
+          runtime_session_id,
           runtime_mode,
           token_mode,
           active_turn_id,
@@ -35,6 +36,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           ${row.status},
           ${row.providerName},
           ${row.providerInstanceId},
+          ${row.runtimeSessionId},
           ${row.runtimeMode},
           ${row.tokenMode},
           ${row.activeTurnId},
@@ -46,6 +48,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           status = excluded.status,
           provider_name = excluded.provider_name,
           provider_instance_id = excluded.provider_instance_id,
+          runtime_session_id = excluded.runtime_session_id,
           runtime_mode = excluded.runtime_mode,
           token_mode = excluded.token_mode,
           active_turn_id = excluded.active_turn_id,
@@ -64,6 +67,7 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
           status,
           provider_name AS "providerName",
           provider_instance_id AS "providerInstanceId",
+          runtime_session_id AS "runtimeSessionId",
           runtime_mode AS "runtimeMode",
           token_mode AS "tokenMode",
           active_turn_id AS "activeTurnId",
@@ -84,7 +88,10 @@ const makeProjectionThreadSessionRepository = Effect.gen(function* () {
   });
 
   const upsert: ProjectionThreadSessionRepositoryShape["upsert"] = (row) =>
-    upsertProjectionThreadSessionRow(row).pipe(
+    upsertProjectionThreadSessionRow({
+      ...row,
+      runtimeSessionId: row.runtimeSessionId ?? null,
+    }).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionThreadSessionRepository.upsert:query")),
     );
 

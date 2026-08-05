@@ -17,6 +17,39 @@ export interface SelectableModelOption {
   name: string;
 }
 
+export interface ModelPresentationOption {
+  readonly slug: string;
+  readonly name?: string | undefined;
+  readonly shortName?: string | undefined;
+  readonly subProvider?: string | undefined;
+}
+
+/**
+ * Resolve the human-readable model title used by picker surfaces and durable
+ * handoff presentation. Provider catalogs are authoritative when they carry a
+ * friendly name; the routing slug remains the deterministic final fallback.
+ */
+export function getModelDisplayName(
+  model: ModelPresentationOption,
+  options?: { readonly preferShortName?: boolean },
+): string {
+  const shortName = trimOrNull(model.shortName);
+  const name = trimOrNull(model.name);
+  const slug = trimOrNull(model.slug) ?? model.slug;
+
+  return options?.preferShortName ? (shortName ?? name ?? slug) : (name ?? shortName ?? slug);
+}
+
+/** Compose the optional sub-provider prefix exactly as the picker trigger does. */
+export function getModelDisplayLabel(
+  model: ModelPresentationOption,
+  options?: { readonly preferShortName?: boolean },
+): string {
+  const title = getModelDisplayName(model, options);
+  const subProvider = trimOrNull(model.subProvider);
+  return subProvider ? `${subProvider} · ${title}` : title;
+}
+
 export function createModelCapabilities(input: {
   optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
 }): ModelCapabilities {

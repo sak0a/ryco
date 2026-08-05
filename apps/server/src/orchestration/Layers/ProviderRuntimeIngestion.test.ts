@@ -8,6 +8,7 @@ import {
   ProviderRuntimeEvent,
   ProviderSession,
   ProviderInstanceId,
+  RuntimeSessionId,
 } from "@ryco/contracts";
 import {
   ApprovalRequestId,
@@ -21,7 +22,7 @@ import {
   ThreadId,
   TurnId,
 } from "@ryco/contracts";
-import { Effect, Exit, Layer, ManagedRuntime, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Layer, ManagedRuntime, Option, PubSub, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
@@ -92,6 +93,12 @@ function createProviderServiceHarness() {
   const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
   const service: ProviderServiceShape = {
     startSession: () => unsupported(),
+    startFreshSession: () => unsupported(),
+    getSession: () => Effect.succeed(Option.none()),
+    restoreSessionBinding: () => Effect.succeed(false),
+    retireSessionBinding: () => Effect.succeed(false),
+    stopSessionBinding: () => Effect.succeed("not-found"),
+    listStaleSessionBindings: () => Effect.succeed([]),
     sendTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
@@ -358,6 +365,120 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  it("fences late A1 lifecycle events after A1 -> B -> A2", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const codexInstanceId = ProviderInstanceId.make("codex");
+    const runtimeA1 = RuntimeSessionId.make("runtime-a1");
+    const runtimeB = RuntimeSessionId.make("runtime-b");
+    const runtimeA2 = RuntimeSessionId.make("runtime-a2");
+
+    for (const [commandId, providerName, providerInstanceId, runtimeSessionId] of [
+      ["cmd-session-a1", "codex", codexInstanceId, runtimeA1],
+      ["cmd-session-b", "claudeAgent", ProviderInstanceId.make("claudeAgent"), runtimeB],
+      ["cmd-session-a2", "codex", codexInstanceId, runtimeA2],
+    ] as const) {
+      const createdAt = new Date().toISOString();
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make(commandId),
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName,
+            providerInstanceId,
+            runtimeSessionId,
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            updatedAt: createdAt,
+            lastError: null,
+          },
+          createdAt,
+        }),
+      );
+    }
+    harness.setProviderSession({
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: codexInstanceId,
+      runtimeSessionId: runtimeA2,
+      status: "ready",
+      runtimeMode: "approval-required",
+      threadId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    harness.emit({
+      type: "session.exited",
+      eventId: asEventId("evt-late-a1-session-exited"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: codexInstanceId,
+      runtimeSessionId: runtimeA1,
+      threadId,
+      createdAt: new Date().toISOString(),
+      payload: { reason: "late source shutdown" },
+    });
+    for (const [type, eventId] of [
+      ["content.delta", "evt-late-a1-assistant-delta"],
+      ["item.started", "evt-late-a1-tool-started"],
+      ["request.opened", "evt-late-a1-request-opened"],
+      ["turn.plan.updated", "evt-late-a1-plan-updated"],
+      ["subagent.started", "evt-late-a1-subagent-started"],
+      ["runtime.error", "evt-late-a1-runtime-error"],
+    ] as const) {
+      // Deliberately minimal payloads prove the epoch guard runs before any
+      // event-specific decoding, buffering, or mutation.
+      harness.emit({
+        type,
+        eventId: asEventId(eventId),
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        runtimeSessionId: runtimeA1,
+        threadId,
+        turnId: asTurnId("turn-a1-late"),
+        createdAt: new Date().toISOString(),
+        payload: {},
+      });
+    }
+    await harness.drain();
+
+    let readModel = await harness.readModel();
+    let thread = readModel.threads.find((entry) => entry.id === threadId);
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.providerInstanceId).toBe(codexInstanceId);
+    expect(thread?.session?.runtimeSessionId).toBe(runtimeA2);
+    expect(thread?.activities.some((entry) => entry.id === "evt-late-a1-session-exited")).toBe(
+      false,
+    );
+    expect(thread?.messages).toHaveLength(0);
+    expect(thread?.activities).toHaveLength(0);
+    expect(thread?.proposedPlans).toHaveLength(0);
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-current-a2-turn-started"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: codexInstanceId,
+      runtimeSessionId: runtimeA2,
+      threadId,
+      turnId: asTurnId("turn-a2"),
+      createdAt: new Date().toISOString(),
+    });
+    thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.activeTurnId === "turn-a2",
+    );
+    expect(thread.session?.status).toBe("running");
+    expect(thread.session?.runtimeSessionId).toBe(runtimeA2);
+
+    readModel = await harness.readModel();
+    expect(
+      readModel.threads.find((entry) => entry.id === threadId)?.session?.runtimeSessionId,
+    ).toBe(runtimeA2);
   });
 
   it("deduplicates replayed provider turn.started events and does not reopen closed turns", async () => {

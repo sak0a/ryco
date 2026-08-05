@@ -1,14 +1,16 @@
 import {
   CommandId,
+  ContextHandoffActivityPayload,
   EventId,
   MessageId,
   type ProjectId,
   ThreadId,
   TurnId,
   type OrchestrationEvent,
+  type OrchestrationThread,
   type ProviderRuntimeEvent,
 } from "@ryco/contracts";
-import { Cause, Effect, Layer, Option, Stream } from "effect";
+import { Cause, Effect, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
 
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
@@ -61,6 +63,72 @@ function checkpointStatusFromRuntime(status: string | undefined): "ready" | "mis
     default:
       return "ready";
   }
+}
+
+export function providerRollbackEpochViolation(
+  thread: OrchestrationThread,
+  targetTurnCount: number,
+): string | null {
+  const currentTurnCount = thread.checkpoints.reduce(
+    (maximum, checkpoint) => Math.max(maximum, checkpoint.checkpointTurnCount),
+    0,
+  );
+  if (targetTurnCount >= currentTurnCount) {
+    return null;
+  }
+
+  const decodeHandoff = Schema.decodeUnknownOption(ContextHandoffActivityPayload);
+  const latestConsumedHandoff = thread.activities
+    .flatMap((activity) => {
+      if (activity.kind !== "context-handoff") return [];
+      return Option.match(decodeHandoff(activity.payload), {
+        onNone: () => [],
+        onSome: (payload) => (payload.status === "consumed" ? [{ activity, payload }] : []),
+      });
+    })
+    .toSorted(
+      (left, right) =>
+        (left.activity.sequence ?? 0) - (right.activity.sequence ?? 0) ||
+        left.activity.createdAt.localeCompare(right.activity.createdAt) ||
+        left.activity.id.localeCompare(right.activity.id),
+    )
+    .at(-1);
+  if (!latestConsumedHandoff) {
+    return null;
+  }
+
+  const activeRuntimeSessionId = thread.session?.runtimeSessionId;
+  const targetRuntimeSessionId = latestConsumedHandoff.payload.targetRuntimeSessionId;
+  if (
+    activeRuntimeSessionId === undefined ||
+    targetRuntimeSessionId === undefined ||
+    activeRuntimeSessionId !== targetRuntimeSessionId
+  ) {
+    return "Provider conversation rollback was not applied because the active runtime epoch could not be verified after a context handoff. Filesystem state was left unchanged.";
+  }
+
+  const targetMessage = thread.messages.find(
+    (message) => message.id === latestConsumedHandoff.payload.targetMessageId,
+  );
+  const firstEpochCheckpoint =
+    (latestConsumedHandoff.payload.targetTurnId !== undefined
+      ? thread.checkpoints.find(
+          (checkpoint) => checkpoint.turnId === latestConsumedHandoff.payload.targetTurnId,
+        )
+      : undefined) ??
+    (targetMessage
+      ? thread.checkpoints
+          .filter((checkpoint) => checkpoint.completedAt >= targetMessage.createdAt)
+          .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)[0]
+      : undefined);
+  if (!firstEpochCheckpoint) {
+    return "Provider conversation rollback was not applied because the active handoff boundary could not be mapped to a checkpoint. Filesystem state was left unchanged.";
+  }
+
+  const epochBaselineTurnCount = Math.max(0, firstEpochCheckpoint.checkpointTurnCount - 1);
+  return targetTurnCount < epochBaselineTurnCount
+    ? `Provider conversation rollback cannot cross the active context handoff boundary at checkpoint turn ${epochBaselineTurnCount}. Filesystem state was left unchanged.`
+    : null;
 }
 
 const serverCommandId = (tag: string): CommandId =>
@@ -639,6 +707,17 @@ const make = Effect.gen(function* () {
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
         detail: `Checkpoint turn count ${event.payload.turnCount} exceeds current turn count ${currentTurnCount}.`,
+        createdAt: now,
+      }).pipe(Effect.catch(() => Effect.void));
+      return;
+    }
+
+    const epochViolation = providerRollbackEpochViolation(thread, event.payload.turnCount);
+    if (epochViolation !== null) {
+      yield* appendRevertFailureActivity({
+        threadId: event.payload.threadId,
+        turnCount: event.payload.turnCount,
+        detail: epochViolation,
         createdAt: now,
       }).pipe(Effect.catch(() => Effect.void));
       return;

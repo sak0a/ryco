@@ -2,6 +2,7 @@ import { Effect, Exit, Layer, ManagedRuntime, Scope } from "effect";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
+import { ContextHandoffCoordinator } from "../Services/ContextHandoffCoordinator.ts";
 import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
@@ -23,6 +24,15 @@ describe("OrchestrationReactor", () => {
 
     runtime = ManagedRuntime.make(
       Layer.effect(OrchestrationReactor, makeOrchestrationReactor).pipe(
+        Layer.provideMerge(
+          Layer.succeed(ContextHandoffCoordinator, {
+            processTurnStart: () => Effect.void,
+            recover: () => {
+              started.push("context-handoff-recovery");
+              return Effect.void;
+            },
+          }),
+        ),
         Layer.provideMerge(
           Layer.succeed(ProviderRuntimeIngestionService, {
             start: () => {
@@ -66,13 +76,14 @@ describe("OrchestrationReactor", () => {
     const scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
 
-    expect(started).toHaveLength(4);
+    expect(started).toHaveLength(5);
     expect(new Set(started)).toEqual(
       new Set([
         "provider-runtime-ingestion",
         "provider-command-reactor",
         "checkpoint-reactor",
         "thread-deletion-reactor",
+        "context-handoff-recovery",
       ]),
     );
 

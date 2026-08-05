@@ -12,6 +12,7 @@ import {
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
   deriveContextCompactionTimelineEntries,
+  deriveContextHandoffTimelineEntries,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveThreadActivityViewModel,
@@ -44,6 +45,50 @@ function makeActivity(overrides: {
     payload,
     turnId: overrides.turnId ? TurnId.make(overrides.turnId) : null,
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
+  };
+}
+
+function contextHandoffPayload(
+  status: "consumed" | "failed" | "delivery-uncertain",
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    handoffId: "handoff-1",
+    mode: "full-context-fresh-session",
+    targetMessageId: "message-target",
+    targetTurnId: "turn-target",
+    sourceSelection: { instanceId: "codex_work", model: "gpt-5.6" },
+    targetSelection: { instanceId: "claude_work", model: "claude-fable-5" },
+    sources: [
+      {
+        providerInstanceId: "codex_work",
+        driverKind: "codex",
+        providerDisplayName: "Codex Work",
+        modelSlug: "gpt-5.6",
+        modelDisplayName: "GPT-5.6",
+      },
+      {
+        providerInstanceId: "grok_work",
+        driverKind: "grok",
+        providerDisplayName: "Grok Work",
+        modelSlug: "grok-4.5",
+        modelDisplayName: "Grok 4.5",
+      },
+    ],
+    target: {
+      providerInstanceId: "claude_work",
+      driverKind: "claudeAgent",
+      providerDisplayName: "Claude Work",
+      modelSlug: "claude-fable-5",
+      modelDisplayName: "Claude Fable 5",
+    },
+    ...(status === "failed" ? {} : { contextVersion: 1, contextDigest: "a".repeat(64) }),
+    status,
+    ...(status === "failed" || status === "delivery-uncertain"
+      ? { error: "Target delivery failed" }
+      : {}),
+    ...overrides,
   };
 }
 
@@ -1670,6 +1715,86 @@ describe("deriveTimelineEntries", () => {
       }),
     ).toBe("assistant-final");
   });
+
+  it("anchors repeated handoffs immediately before their target message even when timestamps tie", () => {
+    const targetMessage = {
+      id: MessageId.make("message-target"),
+      role: "user" as const,
+      text: "Continue here",
+      createdAt: "2026-02-23T00:00:02.000Z",
+      streaming: false,
+    };
+    const handoffs = deriveContextHandoffTimelineEntries([
+      makeActivity({
+        id: "handoff-activity-1",
+        createdAt: targetMessage.createdAt,
+        kind: "context-handoff",
+        summary: "Context handoff",
+        tone: "info",
+        payload: contextHandoffPayload("consumed"),
+      }),
+      makeActivity({
+        id: "handoff-activity-2",
+        createdAt: targetMessage.createdAt,
+        kind: "context-handoff",
+        summary: "Context handoff",
+        tone: "error",
+        payload: contextHandoffPayload("failed", { handoffId: "handoff-2" }),
+      }),
+    ]);
+
+    const entries = deriveTimelineEntries([targetMessage], [], [], [], handoffs);
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "context-handoff:handoff-activity-1",
+      "context-handoff:handoff-activity-2",
+      "message-target",
+    ]);
+  });
+
+  it("uses chronological fallback only when the target message is absent", () => {
+    const handoffs = deriveContextHandoffTimelineEntries([
+      makeActivity({
+        id: "handoff-pruned-anchor",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "context-handoff",
+        summary: "Context handoff",
+        tone: "info",
+        payload: contextHandoffPayload("consumed", {
+          targetMessageId: "message-pruned",
+        }),
+      }),
+    ]);
+
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("message-before"),
+          role: "assistant",
+          text: "Before",
+          createdAt: "2026-02-23T00:00:01.000Z",
+          streaming: false,
+        },
+        {
+          id: MessageId.make("message-after"),
+          role: "user",
+          text: "After",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          streaming: false,
+        },
+      ],
+      [],
+      [],
+      [],
+      handoffs,
+    );
+
+    expect(entries.map((entry) => entry.id)).toEqual([
+      "message-before",
+      "context-handoff:handoff-pruned-anchor",
+      "message-after",
+    ]);
+  });
 });
 
 describe("deriveWorkLogEntries context window handling", () => {
@@ -1752,6 +1877,120 @@ describe("deriveWorkLogEntries context window handling", () => {
         turnId: TurnId.make("turn-1"),
       },
     ]);
+  });
+
+  it("validates terminal handoff payloads, hides pending states, and skips malformed payloads", () => {
+    const entries = deriveContextHandoffTimelineEntries([
+      makeActivity({
+        id: "handoff-consumed",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        turnId: "turn-target",
+        kind: "context-handoff",
+        summary: "Context handoff",
+        tone: "info",
+        payload: contextHandoffPayload("consumed"),
+      }),
+      makeActivity({
+        id: "handoff-uncertain",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "context-handoff",
+        summary: "Context handoff delivery uncertain",
+        tone: "error",
+        payload: contextHandoffPayload("delivery-uncertain", {
+          handoffId: "handoff-uncertain",
+        }),
+      }),
+      makeActivity({
+        id: "handoff-pending",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "context-handoff",
+        summary: "Preparing context handoff",
+        tone: "info",
+        payload: {
+          schemaVersion: 1,
+          handoffId: "handoff-pending",
+          mode: "full-context-fresh-session",
+          targetMessageId: "message-target",
+          sourceSelection: { instanceId: "codex_work", model: "gpt-5.6" },
+          targetSelection: { instanceId: "claude_work", model: "claude-fable-5" },
+          status: "preparing",
+        },
+      }),
+      makeActivity({
+        id: "handoff-requested",
+        createdAt: "2026-02-23T00:00:01.100Z",
+        kind: "context-handoff",
+        summary: "Context handoff requested",
+        tone: "info",
+        payload: {
+          schemaVersion: 1,
+          handoffId: "handoff-requested",
+          mode: "full-context-fresh-session",
+          targetMessageId: "message-target",
+          sourceSelection: { instanceId: "codex_work", model: "gpt-5.6" },
+          targetSelection: { instanceId: "claude_work", model: "claude-fable-5" },
+          status: "requested",
+        },
+      }),
+      makeActivity({
+        id: "handoff-dispatching",
+        createdAt: "2026-02-23T00:00:01.200Z",
+        kind: "context-handoff",
+        summary: "Dispatching context handoff",
+        tone: "info",
+        payload: {
+          ...contextHandoffPayload("consumed"),
+          status: "dispatching",
+        },
+      }),
+      makeActivity({
+        id: "handoff-malformed",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "context-handoff",
+        summary: "Malformed context handoff",
+        tone: "error",
+        payload: { status: "consumed", contextBody: "must never be copied" },
+      }),
+    ]);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      id: "context-handoff:handoff-consumed",
+      activityId: "handoff-consumed",
+      handoffId: "handoff-1",
+      status: "consumed",
+      targetMessageId: "message-target",
+      targetTurnId: TurnId.make("turn-target"),
+      turnId: TurnId.make("turn-target"),
+      sources: [{ modelDisplayName: "GPT-5.6" }, { modelDisplayName: "Grok 4.5" }],
+      target: { modelDisplayName: "Claude Fable 5" },
+    });
+    expect(entries[1]).toMatchObject({
+      status: "delivery-uncertain",
+      error: "Target delivery failed",
+    });
+  });
+
+  it("keeps all handoff states out of the work log", () => {
+    const activities = [
+      makeActivity({
+        id: "handoff-consumed",
+        turnId: "turn-target",
+        kind: "context-handoff",
+        summary: "Context handoff",
+        tone: "info",
+        payload: contextHandoffPayload("consumed"),
+      }),
+      makeActivity({
+        id: "tool-1",
+        turnId: "turn-target",
+        kind: "tool.completed",
+        summary: "Ran command",
+        tone: "tool",
+      }),
+    ];
+
+    expect(deriveWorkLogEntries(activities, TurnId.make("turn-target"))).toHaveLength(1);
   });
 });
 
@@ -1862,6 +2101,9 @@ describe("deriveThreadActivityViewModel", () => {
     expect(viewModel.workLogEntries).toEqual(deriveWorkLogEntries(activities, latestTurnId));
     expect(viewModel.contextCompactionEntries).toEqual(
       deriveContextCompactionTimelineEntries(activities),
+    );
+    expect(viewModel.contextHandoffEntries).toEqual(
+      deriveContextHandoffTimelineEntries(activities),
     );
     expect(viewModel.latestTurnHasToolActivity).toBe(
       hasToolActivityForTurn(activities, latestTurnId),

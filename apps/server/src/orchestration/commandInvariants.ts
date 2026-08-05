@@ -8,7 +8,8 @@ import type {
   ThreadId,
   WorktreeId,
 } from "@ryco/contracts";
-import { Effect } from "effect";
+import { ContextHandoffActivityPayload } from "@ryco/contracts";
+import { Effect, Option, Schema } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 
@@ -17,6 +18,123 @@ function invariantError(commandType: string, detail: string): OrchestrationComma
     commandType,
     detail,
   });
+}
+
+function activityRequestId(payload: unknown): string | null {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return null;
+  }
+  const requestId = Reflect.get(payload, "requestId");
+  return typeof requestId === "string" && requestId.trim().length > 0 ? requestId : null;
+}
+
+function hasOpenActivityRequest(
+  thread: OrchestrationThread,
+  requestedKind: string,
+  resolvedKind: string,
+): boolean {
+  const open = new Set<string>();
+  let hasUncorrelatedRequest = false;
+  const ordered = [...thread.activities].toSorted(
+    (left, right) =>
+      (left.sequence ?? 0) - (right.sequence ?? 0) ||
+      left.createdAt.localeCompare(right.createdAt) ||
+      left.id.localeCompare(right.id),
+  );
+  for (const activity of ordered) {
+    if (activity.kind !== requestedKind && activity.kind !== resolvedKind) {
+      continue;
+    }
+    const requestId = activityRequestId(activity.payload);
+    if (activity.kind === requestedKind) {
+      if (requestId === null) {
+        hasUncorrelatedRequest = true;
+      } else {
+        open.add(requestId);
+      }
+    } else if (requestId === null) {
+      hasUncorrelatedRequest = false;
+    } else {
+      open.delete(requestId);
+    }
+  }
+  return hasUncorrelatedRequest || open.size > 0;
+}
+
+function hasActionableContextHandoff(thread: OrchestrationThread): boolean {
+  const decode = Schema.decodeUnknownOption(ContextHandoffActivityPayload);
+  return thread.activities.some((activity) => {
+    if (activity.kind !== "context-handoff") {
+      return false;
+    }
+    return Option.match(decode(activity.payload), {
+      onNone: () => true,
+      onSome: (payload) =>
+        payload.status === "requested" ||
+        payload.status === "preparing" ||
+        payload.status === "dispatching",
+    });
+  });
+}
+
+export function requireThreadIdleForContextHandoff(input: {
+  readonly thread: OrchestrationThread;
+  readonly command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const { thread, command } = input;
+  const sessionStatus = thread.session?.status;
+  if (sessionStatus === "starting" || sessionStatus === "running") {
+    return Effect.fail(
+      invariantError(
+        command.type,
+        `Thread '${thread.id}' is ${sessionStatus} and cannot hand off until it is idle.`,
+      ),
+    );
+  }
+  if (thread.latestTurn?.state === "running" && thread.latestTurn.completedAt === null) {
+    return Effect.fail(
+      invariantError(
+        command.type,
+        `Thread '${thread.id}' has an unsettled turn and cannot hand off until it is idle.`,
+      ),
+    );
+  }
+  if (hasOpenActivityRequest(thread, "approval.requested", "approval.resolved")) {
+    return Effect.fail(
+      invariantError(
+        command.type,
+        `Thread '${thread.id}' has a pending approval and cannot hand off.`,
+      ),
+    );
+  }
+  if (hasOpenActivityRequest(thread, "user-input.requested", "user-input.resolved")) {
+    return Effect.fail(
+      invariantError(
+        command.type,
+        `Thread '${thread.id}' has a pending user-input request and cannot hand off.`,
+      ),
+    );
+  }
+  if (hasActionableContextHandoff(thread)) {
+    return Effect.fail(
+      invariantError(
+        command.type,
+        `Thread '${thread.id}' already has an actionable context handoff.`,
+      ),
+    );
+  }
+  if (
+    command.bootstrap?.prepareWorktree !== undefined ||
+    command.bootstrap?.runSetupScript === true
+  ) {
+    return Effect.fail(
+      invariantError(
+        command.type,
+        `Thread '${thread.id}' cannot hand off while worktree preparation is requested.`,
+      ),
+    );
+  }
+  return Effect.void;
 }
 
 export function findThreadById(

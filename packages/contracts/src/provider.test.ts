@@ -21,6 +21,24 @@ function getOptionValue(
 }
 
 describe("ProviderSessionStartInput", () => {
+  it("defaults legacy callers to compatible resume and accepts an explicit fresh epoch", () => {
+    const legacy = decodeProviderSessionStartInput({
+      threadId: "thread-legacy",
+      runtimeMode: "full-access",
+    });
+    expect(legacy.resumePolicy).toBe("compatible");
+    expect(legacy.runtimeSessionId).toBeUndefined();
+
+    const fresh = decodeProviderSessionStartInput({
+      threadId: "thread-fresh",
+      runtimeSessionId: "runtime-fresh-1",
+      resumePolicy: "fresh",
+      runtimeMode: "full-access",
+    });
+    expect(fresh.resumePolicy).toBe("fresh");
+    expect(fresh.runtimeSessionId).toBe("runtime-fresh-1");
+  });
+
   it("accepts codex-compatible payloads", () => {
     const parsed = decodeProviderSessionStartInput({
       threadId: "thread-1",
@@ -258,6 +276,21 @@ describe("providerInstanceId routing key (slice-2 invariant)", () => {
       updatedAt: "2024-01-01T00:00:00Z",
     });
     expect(session.providerInstanceId).toBe("codex_work");
+  });
+
+  it("decodes historical and epoch-aware provider sessions", () => {
+    const base = {
+      provider: "codex",
+      status: "ready",
+      runtimeMode: "full-access",
+      threadId: "thread-1",
+      createdAt: "2024-01-01T00:00:00Z",
+      updatedAt: "2024-01-01T00:00:00Z",
+    } as const;
+    expect(decodeProviderSession(base).runtimeSessionId).toBeUndefined();
+    expect(
+      decodeProviderSession({ ...base, runtimeSessionId: "runtime-session-1" }).runtimeSessionId,
+    ).toBe("runtime-session-1");
   });
 
   it("decodes ProviderSession for fork-provided driver kinds", () => {

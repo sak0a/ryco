@@ -31,7 +31,10 @@ describe("send engine — bootstrap", () => {
         projectId: ProjectId.make("project-1"),
         projectCwd: "/workspace",
         title: "Title",
-        threadCreateModelSelection: { instanceId: "codex", model: "gpt-5" } as ModelSelection,
+        threadCreateModelSelection: {
+          instanceId: "codex",
+          model: "gpt-5",
+        } as ModelSelection,
         runtimeMode: "full-access",
         interactionMode: "default",
         tokenMode: "balanced",
@@ -115,7 +118,6 @@ function makeDispatchHarness(
     outgoingMessageText: "hello",
     turnAttachments: [],
     modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
-    hasSelectedModel: true,
     runtimeMode: "full-access" as RuntimeMode,
     interactionMode: "default" as ProviderInteractionMode,
     tokenMode: "balanced" as AgentTokenMode,
@@ -163,12 +165,25 @@ describe("send engine — dispatch assembly", () => {
     expect(harness.calls).toEqual(["beginLocalDispatch", "dispatch:thread.turn.start"]);
   });
 
-  it("omits the persisted model selection when the composer has no explicit model", async () => {
-    const harness = makeDispatchHarness({ hasSelectedModel: false });
+  it("never persists the staged target before turn.start", async () => {
+    const target = createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-sonnet");
+    const harness = makeDispatchHarness({ modelSelection: target });
     await commitSendTurnDispatch(harness.input);
 
     expect(harness.persisted[0]).toBeDefined();
     expect(harness.persisted[0]).not.toHaveProperty("modelSelection");
+    expect(harness.commands).not.toContainEqual(
+      expect.objectContaining({
+        type: "thread.meta.update",
+        modelSelection: expect.anything(),
+      }),
+    );
+    expect(harness.commands).toContainEqual(
+      expect.objectContaining({
+        type: "thread.turn.start",
+        modelSelection: target,
+      }),
+    );
   });
 
   it("attaches the bootstrap and source-control contexts to the turn.start command", async () => {

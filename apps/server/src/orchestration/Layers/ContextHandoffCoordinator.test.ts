@@ -1,0 +1,669 @@
+import {
+  CommandId,
+  ContextHandoffId,
+  EventId,
+  MessageId,
+  ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  RuntimeSessionId,
+  ThreadId,
+  TurnId,
+  type ContextHandoffEndpointSnapshot,
+  type OrchestrationCommand,
+  type OrchestrationEvent,
+  type OrchestrationThread,
+  type ProviderSendTurnInput,
+  type ProviderSession,
+  type ServerProvider,
+} from "@ryco/contracts";
+import { Effect, Layer, Option, Stream } from "effect";
+import { describe, expect, it, vi } from "vite-plus/test";
+
+import {
+  ContextHandoffRepository,
+  type ContextHandoffRecord,
+  type ContextHandoffRepositoryShape,
+  makeRequestedContextHandoffRecord,
+} from "../../persistence/Services/ContextHandoffs.ts";
+import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import type { ProviderRuntimeBinding } from "../../provider/Services/ProviderSessionDirectory.ts";
+import { ProviderAdapterRequestError, type ProviderServiceError } from "../../provider/Errors.ts";
+import type { ProviderFreshSessionStartInput } from "../../provider/Services/ProviderService.ts";
+import { ContextHandoffCoordinator } from "../Services/ContextHandoffCoordinator.ts";
+import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import {
+  ContextHandoffService,
+  type ContextHandoffServiceShape,
+  type PreparedContextHandoffArtifact,
+} from "../contextHandoff/ContextHandoffService.ts";
+import { ContextHandoffCoordinatorLive } from "./ContextHandoffCoordinator.ts";
+
+const createdAt = "2026-08-04T00:00:00.000Z";
+const handoffId = ContextHandoffId.make("handoff-coordinator");
+const activityId = EventId.make("handoff-activity");
+const targetMessageId = MessageId.make("target-message");
+const sourceRuntimeSessionId = RuntimeSessionId.make("runtime-a1");
+const targetRuntimeSessionId = RuntimeSessionId.make("runtime-b1");
+const targetTurnId = TurnId.make("provider-turn-b1");
+
+const sourceSelection = {
+  instanceId: ProviderInstanceId.make("codex_work"),
+  model: "gpt-5.6-sol",
+};
+const targetSelection = {
+  instanceId: ProviderInstanceId.make("claude_work"),
+  model: "claude-fable-5",
+};
+
+const sourceEndpoint: ContextHandoffEndpointSnapshot = {
+  providerInstanceId: sourceSelection.instanceId,
+  driverKind: ProviderDriverKind.make("codex"),
+  providerDisplayName: "Codex Work",
+  modelSlug: sourceSelection.model,
+  modelDisplayName: "GPT-5.6 Sol",
+};
+const targetEndpoint: ContextHandoffEndpointSnapshot = {
+  providerInstanceId: targetSelection.instanceId,
+  driverKind: ProviderDriverKind.make("claudeAgent"),
+  providerDisplayName: "Claude Work",
+  modelSlug: targetSelection.model,
+  modelDisplayName: "Fable 5",
+};
+const priorEndpoint: ContextHandoffEndpointSnapshot = {
+  providerInstanceId: ProviderInstanceId.make("grok_work"),
+  driverKind: ProviderDriverKind.make("grok"),
+  providerDisplayName: "Grok Work",
+  modelSlug: "grok-4.5",
+  modelDisplayName: "Grok 4.5",
+};
+
+function providerSnapshot(
+  endpoint: ContextHandoffEndpointSnapshot,
+  model: { readonly name: string; readonly shortName?: string },
+): ServerProvider {
+  return {
+    instanceId: endpoint.providerInstanceId,
+    driver: endpoint.driverKind,
+    ...(endpoint.providerDisplayName ? { displayName: endpoint.providerDisplayName } : {}),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: createdAt,
+    models: [
+      {
+        slug: endpoint.modelSlug,
+        name: model.name,
+        ...(model.shortName ? { shortName: model.shortName } : {}),
+        isCustom: false,
+        capabilities: null,
+      },
+    ],
+    slashCommands: [],
+    skills: [],
+  };
+}
+
+const providerSnapshots: ReadonlyArray<ServerProvider> = [
+  providerSnapshot(sourceEndpoint, { name: "GPT-5.6 Sol" }),
+  providerSnapshot(targetEndpoint, { name: "Claude Fable 5", shortName: "Fable 5" }),
+  providerSnapshot(priorEndpoint, { name: "Grok 4.5" }),
+];
+
+function makeThread(overrides: Partial<OrchestrationThread> = {}): OrchestrationThread {
+  return {
+    id: ThreadId.make("thread-handoff-coordinator"),
+    projectId: ProjectId.make("project-handoff-coordinator"),
+    title: "Context handoff coordinator",
+    modelSelection: sourceSelection,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    tokenMode: "balanced",
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt,
+    updatedAt: createdAt,
+    archivedAt: null,
+    deletedAt: null,
+    messages: [
+      {
+        id: MessageId.make("source-message"),
+        role: "assistant",
+        text: "Canonical source history",
+        turnId: TurnId.make("source-turn"),
+        streaming: false,
+        createdAt: "2026-08-03T23:59:59.000Z",
+        updatedAt: "2026-08-03T23:59:59.000Z",
+      },
+      {
+        id: targetMessageId,
+        role: "user",
+        text: "  Preserve this exact message 👩🏽‍💻  ",
+        turnId: null,
+        streaming: false,
+        createdAt,
+        updatedAt: createdAt,
+      },
+    ],
+    proposedPlans: [],
+    activities: [
+      {
+        id: activityId,
+        tone: "info",
+        kind: "context-handoff",
+        summary: "Context handoff requested",
+        payload: {
+          schemaVersion: 1,
+          handoffId,
+          mode: "full-context-fresh-session",
+          status: "requested",
+          targetMessageId,
+          sourceSelection,
+          targetSelection,
+          sourceRuntimeSessionId,
+        },
+        turnId: null,
+        createdAt,
+      },
+    ],
+    checkpoints: [],
+    session: {
+      threadId: ThreadId.make("thread-handoff-coordinator"),
+      status: "ready",
+      providerName: "codex",
+      providerInstanceId: sourceSelection.instanceId,
+      runtimeSessionId: sourceRuntimeSessionId,
+      runtimeMode: "full-access",
+      tokenMode: "balanced",
+      activeTurnId: null,
+      lastError: null,
+      updatedAt: createdAt,
+    },
+    ...overrides,
+  };
+}
+
+function requestedRecord(): ContextHandoffRecord {
+  return makeRequestedContextHandoffRecord({
+    handoffId,
+    threadId: ThreadId.make("thread-handoff-coordinator"),
+    sourceSelection,
+    targetSelection,
+    sourceRuntimeSessionId,
+    firstMessageId: targetMessageId,
+    createdAt,
+    updatedAt: createdAt,
+  });
+}
+
+function makeRepository(initial?: ContextHandoffRecord) {
+  let record = initial;
+  const service: ContextHandoffRepositoryShape = {
+    create: (input) =>
+      Effect.sync(() => {
+        if (record) return false;
+        record = input;
+        return true;
+      }),
+    getById: ({ handoffId: requestedId }) =>
+      Effect.succeed(record?.handoffId === requestedId ? Option.some(record) : Option.none()),
+    listByThread: () => Effect.succeed(record ? [record] : []),
+    listRecoverable: () =>
+      Effect.succeed(
+        record && (record.status === "preparing" || record.status === "dispatching")
+          ? [record]
+          : [],
+      ),
+    compareAndSetStatus: (input) =>
+      Effect.sync(() => {
+        if (!record || record.status !== input.expectedStatus) return false;
+        record = {
+          ...record,
+          status: input.nextStatus,
+          targetRuntimeSessionId: input.targetRuntimeSessionId,
+          acceptedProviderTurnId: input.acceptedProviderTurnId,
+          error: input.error,
+          updatedAt: input.updatedAt,
+        };
+        return true;
+      }),
+    storeContextIfEmpty: () => Effect.succeed(false),
+  };
+  return { service, get: () => record! };
+}
+
+const artifact: PreparedContextHandoffArtifact = {
+  origin: "stored",
+  document: {
+    version: 1,
+    mode: "full-context-fresh-session",
+    thread: {
+      id: ThreadId.make("thread-handoff-coordinator"),
+      title: "Context handoff coordinator",
+      branch: null,
+      worktreePath: null,
+    },
+    provenance: { sources: [sourceEndpoint], target: targetEndpoint },
+    messages: [],
+    plans: [],
+    tools: [],
+    checkpoints: [],
+    notices: [],
+    subagents: [],
+    priorHandoffs: [],
+  },
+  canonicalJson: "{}",
+  digest: "a".repeat(64),
+  entryCount: 0,
+};
+
+function sourceSession(): ProviderSession {
+  return {
+    provider: ProviderDriverKind.make("codex"),
+    providerInstanceId: sourceSelection.instanceId,
+    runtimeSessionId: sourceRuntimeSessionId,
+    status: "ready",
+    runtimeMode: "full-access",
+    tokenMode: "balanced",
+    model: sourceSelection.model,
+    threadId: ThreadId.make("thread-handoff-coordinator"),
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
+function turnStartEvent(): Extract<
+  OrchestrationEvent,
+  { readonly type: "thread.turn-start-requested" }
+> {
+  return {
+    sequence: 4,
+    eventId: EventId.make("turn-start-event"),
+    type: "thread.turn-start-requested" as const,
+    aggregateKind: "thread" as const,
+    aggregateId: ThreadId.make("thread-handoff-coordinator"),
+    commandId: CommandId.make("turn-start-command"),
+    causationEventId: EventId.make("message-event"),
+    correlationId: CommandId.make("turn-start-command"),
+    metadata: {},
+    occurredAt: createdAt,
+    payload: {
+      threadId: ThreadId.make("thread-handoff-coordinator"),
+      messageId: targetMessageId,
+      modelSelection: targetSelection,
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+      tokenMode: "balanced" as const,
+      contextHandoff: { handoffId, activityId, targetMessageId },
+      createdAt,
+    },
+  };
+}
+
+function makeHarness(input?: {
+  readonly initialRecord?: ContextHandoffRecord;
+  readonly thread?: OrchestrationThread;
+  readonly sendFailure?: ProviderServiceError;
+  readonly providerSnapshots?: ReadonlyArray<ServerProvider>;
+  readonly artifactSources?: ReadonlyArray<ContextHandoffEndpointSnapshot>;
+}) {
+  const repository = makeRepository(input?.initialRecord);
+  const thread = input?.thread ?? makeThread();
+  const commands: OrchestrationCommand[] = [];
+  const dispatch = vi.fn((command: OrchestrationCommand) =>
+    Effect.sync(() => {
+      commands.push(command);
+      return { sequence: commands.length };
+    }),
+  );
+  const startFreshSession = vi.fn(
+    (_threadId: ThreadId, freshInput: ProviderFreshSessionStartInput) =>
+      Effect.succeed({
+        session: {
+          provider: ProviderDriverKind.make("claudeAgent"),
+          providerInstanceId: targetSelection.instanceId,
+          runtimeSessionId: freshInput.runtimeSessionId,
+          status: "ready" as const,
+          runtimeMode: "full-access" as const,
+          tokenMode: "balanced" as const,
+          model: targetSelection.model,
+          threadId: thread.id,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        previousBinding: {
+          threadId: thread.id,
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: sourceSelection.instanceId,
+          runtimeSessionId: sourceRuntimeSessionId,
+          runtimeMode: "full-access" as const,
+          resumeCursor: { source: "resume-a1" },
+        },
+      }),
+  );
+  const sendTurn = vi.fn((_input: ProviderSendTurnInput) =>
+    input?.sendFailure
+      ? Effect.fail(input.sendFailure)
+      : Effect.succeed({ threadId: thread.id, turnId: targetTurnId }),
+  );
+  const stopSessionBinding = vi.fn(() => Effect.succeed("stopped" as const));
+  const retireSessionBinding = vi.fn(() => Effect.succeed(true));
+  const restoreSessionBinding = vi.fn((_binding: ProviderRuntimeBinding) => Effect.succeed(true));
+  const contextService: ContextHandoffServiceShape = {
+    buildAndStore: ({ source, target }) =>
+      Effect.succeed({
+        ...artifact,
+        origin: "built",
+        document: {
+          ...artifact.document,
+          provenance: { sources: input?.artifactSources ?? [source], target },
+        },
+      }),
+    loadStoredContext: () => Effect.succeed(artifact),
+    renderStoredContext: ({ currentMessage }) =>
+      Effect.succeed({
+        providerInput: `<context>${currentMessage}</context>`,
+        renderedContextJson: "{}",
+        contextChars: 2,
+        inputChars: currentMessage.length + 19,
+        includedEntryCount: 0,
+        totalEntryCount: 0,
+        truncated: false,
+      }),
+  };
+
+  const dependencies = Layer.mergeAll(
+    Layer.succeed(ContextHandoffRepository, repository.service),
+    Layer.succeed(ContextHandoffService, contextService),
+    Layer.mock(OrchestrationEngineService)({
+      dispatch,
+      streamDomainEvents: Stream.empty,
+    }),
+    Layer.mock(ProjectionSnapshotQuery)({
+      getThreadDetailById: () => Effect.succeed(Option.some(thread)),
+      getProjectShellById: () =>
+        Effect.succeed(
+          Option.some({
+            id: thread.projectId,
+            title: "Project",
+            workspaceRoot: "/tmp/project",
+            defaultModelSelection: sourceSelection,
+            customSystemPrompt: null,
+            customAvatarContentHash: null,
+            preferredRemoteName: null,
+            scripts: [],
+            createdAt,
+            updatedAt: createdAt,
+          }),
+        ),
+    }),
+    Layer.mock(ProviderService)({
+      getInstanceInfo: (instanceId) =>
+        Effect.succeed(
+          instanceId === sourceSelection.instanceId
+            ? {
+                instanceId,
+                driverKind: sourceEndpoint.driverKind,
+                displayName: sourceEndpoint.providerDisplayName,
+                enabled: true,
+                continuationIdentity: {
+                  driverKind: sourceEndpoint.driverKind,
+                  continuationKey: "source",
+                },
+              }
+            : {
+                instanceId,
+                driverKind: targetEndpoint.driverKind,
+                displayName: targetEndpoint.providerDisplayName,
+                enabled: true,
+                continuationIdentity: {
+                  driverKind: targetEndpoint.driverKind,
+                  continuationKey: "target",
+                },
+              },
+        ),
+      getSession: () => Effect.succeed(Option.some(sourceSession())),
+      startFreshSession,
+      sendTurn,
+      stopSessionBinding,
+      retireSessionBinding,
+      restoreSessionBinding,
+      streamEvents: Stream.empty,
+    }),
+    Layer.mock(ProviderRegistry)({
+      getProviders: Effect.succeed(input?.providerSnapshots ?? providerSnapshots),
+      streamChanges: Stream.empty,
+    }),
+  );
+  const layer = ContextHandoffCoordinatorLive.pipe(Layer.provide(dependencies));
+  return {
+    repository,
+    commands,
+    startFreshSession,
+    sendTurn,
+    stopSessionBinding,
+    retireSessionBinding,
+    restoreSessionBinding,
+    run: (effect: Effect.Effect<void, never, ContextHandoffCoordinator>) =>
+      Effect.runPromise(effect.pipe(Effect.provide(layer))),
+  };
+}
+
+describe("ContextHandoffCoordinator", () => {
+  it("starts and sends once, persists acceptance, then projects the boundary and target", async () => {
+    const harness = makeHarness();
+    const event = turnStartEvent();
+    await harness.run(
+      Effect.gen(function* () {
+        const coordinator = yield* ContextHandoffCoordinator;
+        yield* coordinator.processTurnStart(event);
+        yield* coordinator.processTurnStart(event);
+      }),
+    );
+
+    expect(harness.startFreshSession).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: "<context>  Preserve this exact message 👩🏽‍💻  </context>",
+      modelSelection: targetSelection,
+    });
+    expect(harness.repository.get()).toMatchObject({
+      status: "consumed",
+      targetRuntimeSessionId: harness.startFreshSession.mock.calls[0]?.[1].runtimeSessionId,
+      acceptedProviderTurnId: targetTurnId,
+      contextDigest: null,
+    });
+    const terminalActivity = harness.commands.find(
+      (command) =>
+        command.type === "thread.activity.append" &&
+        command.activity.kind === "context-handoff" &&
+        (command.activity.payload as { status?: string }).status === "consumed",
+    );
+    expect(terminalActivity).toBeDefined();
+    expect(
+      terminalActivity?.type === "thread.activity.append"
+        ? terminalActivity.activity.payload
+        : null,
+    ).toMatchObject({
+      sources: [{ modelSlug: "gpt-5.6-sol", modelDisplayName: "GPT-5.6 Sol" }],
+      target: { modelSlug: "claude-fable-5", modelDisplayName: "Fable 5" },
+    });
+    expect(harness.commands.some((command) => command.type === "thread.meta.update")).toBe(true);
+  });
+
+  it("falls back to model slugs when a provider catalog entry is unavailable", async () => {
+    const harness = makeHarness({ providerSnapshots: [] });
+    await harness.run(
+      Effect.gen(function* () {
+        const coordinator = yield* ContextHandoffCoordinator;
+        yield* coordinator.processTurnStart(turnStartEvent());
+      }),
+    );
+
+    const terminalActivity = harness.commands.find(
+      (command) =>
+        command.type === "thread.activity.append" &&
+        command.activity.kind === "context-handoff" &&
+        (command.activity.payload as { status?: string }).status === "consumed",
+    );
+    expect(
+      terminalActivity?.type === "thread.activity.append"
+        ? terminalActivity.activity.payload
+        : null,
+    ).toMatchObject({
+      sources: [{ modelSlug: "gpt-5.6-sol" }],
+      target: { modelSlug: "claude-fable-5" },
+    });
+    expect(
+      terminalActivity?.type === "thread.activity.append"
+        ? (terminalActivity.activity.payload as { target?: { modelDisplayName?: string } }).target
+            ?.modelDisplayName
+        : undefined,
+    ).toBeUndefined();
+  });
+
+  it("refreshes friendly labels for every source carried forward from prior handoffs", async () => {
+    const harness = makeHarness({
+      artifactSources: [
+        {
+          providerInstanceId: sourceEndpoint.providerInstanceId,
+          driverKind: sourceEndpoint.driverKind,
+          modelSlug: sourceEndpoint.modelSlug,
+        },
+        {
+          providerInstanceId: priorEndpoint.providerInstanceId,
+          driverKind: priorEndpoint.driverKind,
+          modelSlug: priorEndpoint.modelSlug,
+        },
+      ],
+    });
+    await harness.run(
+      Effect.gen(function* () {
+        const coordinator = yield* ContextHandoffCoordinator;
+        yield* coordinator.processTurnStart(turnStartEvent());
+      }),
+    );
+
+    const terminalActivity = harness.commands.find(
+      (command) =>
+        command.type === "thread.activity.append" &&
+        command.activity.kind === "context-handoff" &&
+        (command.activity.payload as { status?: string }).status === "consumed",
+    );
+    expect(
+      terminalActivity?.type === "thread.activity.append"
+        ? terminalActivity.activity.payload
+        : null,
+    ).toMatchObject({
+      sources: [
+        {
+          providerDisplayName: "Codex Work",
+          modelDisplayName: "GPT-5.6 Sol",
+        },
+        {
+          providerDisplayName: "Grok Work",
+          modelDisplayName: "Grok 4.5",
+        },
+      ],
+      target: {
+        providerDisplayName: "Claude Work",
+        modelDisplayName: "Fable 5",
+      },
+    });
+  });
+
+  it("marks an explicit failed boundary and restores the exact source on rejection", async () => {
+    const sendFailure = new ProviderAdapterRequestError({
+      provider: "claudeAgent",
+      method: "sendTurn",
+      detail: "target rejected the turn",
+    });
+    const harness = makeHarness({ sendFailure });
+    await harness.run(
+      Effect.gen(function* () {
+        const coordinator = yield* ContextHandoffCoordinator;
+        yield* coordinator.processTurnStart(turnStartEvent());
+      }),
+    );
+
+    expect(harness.repository.get()).toMatchObject({
+      status: "failed",
+      error: "target rejected the turn",
+    });
+    expect(harness.restoreSessionBinding).toHaveBeenCalledTimes(1);
+    expect(harness.stopSessionBinding).toHaveBeenCalledTimes(1);
+    expect(harness.retireSessionBinding).toHaveBeenCalledTimes(1);
+    expect(harness.restoreSessionBinding.mock.calls[0]?.[0]).toMatchObject({
+      runtimeSessionId: sourceRuntimeSessionId,
+      resumeCursor: { source: "resume-a1" },
+    });
+    expect(harness.commands.some((command) => command.type === "thread.meta.update")).toBe(false);
+    expect(
+      harness.commands.some(
+        (command) =>
+          command.type === "thread.activity.append" &&
+          (command.activity.payload as { status?: string }).status === "failed",
+      ),
+    ).toBe(true);
+  });
+
+  it("never resends an ambiguous dispatch during recovery", async () => {
+    const record: ContextHandoffRecord = {
+      ...requestedRecord(),
+      status: "dispatching",
+      targetRuntimeSessionId,
+      structuredContext: artifact.document,
+      contextDigest: artifact.digest,
+      updatedAt: "2026-08-04T00:00:01.000Z",
+    };
+    const harness = makeHarness({ initialRecord: record });
+    await harness.run(
+      Effect.gen(function* () {
+        const coordinator = yield* ContextHandoffCoordinator;
+        yield* coordinator.recover();
+      }),
+    );
+
+    expect(harness.startFreshSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(harness.repository.get().status).toBe("delivery-uncertain");
+    expect(
+      harness.commands.some(
+        (command) =>
+          command.type === "thread.activity.append" &&
+          (command.activity.payload as { status?: string }).status === "delivery-uncertain",
+      ),
+    ).toBe(true);
+  });
+
+  it("reconciles a durably accepted dispatch without resending", async () => {
+    const record: ContextHandoffRecord = {
+      ...requestedRecord(),
+      status: "dispatching",
+      targetRuntimeSessionId,
+      structuredContext: artifact.document,
+      contextDigest: artifact.digest,
+      acceptedProviderTurnId: targetTurnId,
+      updatedAt: "2026-08-04T00:00:01.000Z",
+    };
+    const harness = makeHarness({ initialRecord: record });
+    await harness.run(
+      Effect.gen(function* () {
+        const coordinator = yield* ContextHandoffCoordinator;
+        yield* coordinator.recover();
+      }),
+    );
+
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(harness.repository.get()).toMatchObject({
+      status: "consumed",
+      acceptedProviderTurnId: targetTurnId,
+    });
+    expect(harness.commands.some((command) => command.type === "thread.meta.update")).toBe(true);
+  });
+});

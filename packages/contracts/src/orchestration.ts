@@ -5,6 +5,7 @@ import {
   ApprovalRequestId,
   CheckpointRef,
   CommandId,
+  ContextHandoffId,
   EventId,
   IsoDateTime,
   MessageId,
@@ -12,11 +13,12 @@ import {
   PositiveInt,
   ProjectId,
   ProviderItemId,
+  RuntimeSessionId,
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
 import { WorkItemProviderKind, WorkItemState } from "./workItems.ts";
 import {
@@ -120,6 +122,100 @@ export const ModelSelection = ModelSelectionSource.pipe(
   ),
 );
 export type ModelSelection = typeof ModelSelection.Type;
+
+export const CONTEXT_HANDOFF_ACTIVITY_KIND = "context-handoff";
+export const CONTEXT_HANDOFF_CONTEXT_VERSION = 1;
+export const CONTEXT_HANDOFF_SCHEMA_VERSION = 1;
+export const CONTEXT_HANDOFF_ERROR_MAX_CHARS = 2_000;
+
+export const ContextHandoffMode = Schema.Literal("full-context-fresh-session");
+export type ContextHandoffMode = typeof ContextHandoffMode.Type;
+
+export const ContextHandoffEndpointSnapshot = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  driverKind: ProviderDriverKind,
+  providerDisplayName: Schema.optional(TrimmedNonEmptyString),
+  providerAccentColor: Schema.optional(TrimmedNonEmptyString),
+  modelSlug: TrimmedNonEmptyString,
+  modelDisplayName: Schema.optional(TrimmedNonEmptyString),
+});
+export type ContextHandoffEndpointSnapshot = typeof ContextHandoffEndpointSnapshot.Type;
+
+const ContextHandoffSources = Schema.Array(ContextHandoffEndpointSnapshot).check(
+  Schema.isMinLength(1),
+);
+const ContextHandoffDigest = TrimmedNonEmptyString.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+const ContextHandoffFailure = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(CONTEXT_HANDOFF_ERROR_MAX_CHARS),
+);
+
+const ContextHandoffActivityBaseFields = {
+  schemaVersion: Schema.Literal(CONTEXT_HANDOFF_SCHEMA_VERSION),
+  handoffId: ContextHandoffId,
+  mode: ContextHandoffMode,
+  targetMessageId: MessageId,
+  targetTurnId: Schema.optional(TurnId),
+  sourceSelection: ModelSelection,
+  targetSelection: ModelSelection,
+  sourceRuntimeSessionId: Schema.optional(RuntimeSessionId),
+  targetRuntimeSessionId: Schema.optional(RuntimeSessionId),
+} as const;
+
+const ContextHandoffPresentationFields = {
+  sources: ContextHandoffSources,
+  target: ContextHandoffEndpointSnapshot,
+} as const;
+
+const ContextHandoffContextFields = {
+  contextVersion: Schema.Literal(CONTEXT_HANDOFF_CONTEXT_VERSION),
+  contextDigest: ContextHandoffDigest,
+} as const;
+
+export const ContextHandoffActivityPayload = Schema.Union([
+  Schema.Struct({
+    ...ContextHandoffActivityBaseFields,
+    status: Schema.Literal("requested"),
+  }),
+  Schema.Struct({
+    ...ContextHandoffActivityBaseFields,
+    status: Schema.Literal("preparing"),
+  }),
+  Schema.Struct({
+    ...ContextHandoffActivityBaseFields,
+    ...ContextHandoffPresentationFields,
+    ...ContextHandoffContextFields,
+    status: Schema.Literal("dispatching"),
+  }),
+  Schema.Struct({
+    ...ContextHandoffActivityBaseFields,
+    ...ContextHandoffPresentationFields,
+    ...ContextHandoffContextFields,
+    status: Schema.Literal("consumed"),
+  }),
+  Schema.Struct({
+    ...ContextHandoffActivityBaseFields,
+    ...ContextHandoffPresentationFields,
+    contextVersion: Schema.optional(Schema.Literal(CONTEXT_HANDOFF_CONTEXT_VERSION)),
+    contextDigest: Schema.optional(ContextHandoffDigest),
+    status: Schema.Literal("failed"),
+    error: ContextHandoffFailure,
+  }),
+  Schema.Struct({
+    ...ContextHandoffActivityBaseFields,
+    ...ContextHandoffPresentationFields,
+    ...ContextHandoffContextFields,
+    status: Schema.Literal("delivery-uncertain"),
+    error: ContextHandoffFailure,
+  }),
+]);
+export type ContextHandoffActivityPayload = typeof ContextHandoffActivityPayload.Type;
+
+export const ContextHandoffReference = Schema.Struct({
+  handoffId: ContextHandoffId,
+  activityId: EventId,
+  targetMessageId: MessageId,
+});
+export type ContextHandoffReference = typeof ContextHandoffReference.Type;
 
 export const RuntimeMode = Schema.Literals([
   "approval-required",
@@ -296,6 +392,8 @@ export const OrchestrationSession = Schema.Struct({
   status: OrchestrationSessionStatus,
   providerName: Schema.NullOr(TrimmedNonEmptyString),
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  /** Runtime epoch. Optional only while replaying pre-handoff session events. */
+  runtimeSessionId: Schema.optional(RuntimeSessionId),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   tokenMode: Schema.optionalKey(AgentTokenMode),
   activeTurnId: Schema.NullOr(TurnId),
@@ -999,6 +1097,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.token-mode-set",
+  "thread.context-handoff-requested",
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
@@ -1140,6 +1239,19 @@ export const ThreadMessageSentPayload = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 
+export const ThreadContextHandoffRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  handoffId: ContextHandoffId,
+  activityId: EventId,
+  mode: ContextHandoffMode,
+  targetMessageId: MessageId,
+  sourceSelection: ModelSelection,
+  targetSelection: ModelSelection,
+  sourceRuntimeSessionId: Schema.optional(RuntimeSessionId),
+  createdAt: IsoDateTime,
+});
+export type ThreadContextHandoffRequestedPayload = typeof ThreadContextHandoffRequestedPayload.Type;
+
 export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
@@ -1153,6 +1265,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_AGENT_TOKEN_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  contextHandoff: Schema.optional(ContextHandoffReference),
   createdAt: IsoDateTime,
 });
 
@@ -1380,6 +1493,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.token-mode-set"),
     payload: ThreadTokenModeSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.context-handoff-requested"),
+    payload: ThreadContextHandoffRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

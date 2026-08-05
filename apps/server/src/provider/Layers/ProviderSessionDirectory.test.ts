@@ -3,7 +3,12 @@ import os from "node:os";
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderDriverKind, ThreadId } from "@ryco/contracts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  RuntimeSessionId,
+  ThreadId,
+} from "@ryco/contracts";
 import { it, assert } from "@effect/vitest";
 import { assertSome } from "@effect/vitest/utils";
 import { Effect, Layer, Option } from "effect";
@@ -119,6 +124,38 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
           model: "gpt-5-codex",
           activeTurnId: "turn-1",
         });
+      }
+    }));
+
+  it("clears resume state and runtime payload when the runtime epoch changes", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = ThreadId.make("thread-runtime-epoch-change");
+      const providerInstanceId = ProviderInstanceId.make("codex");
+
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId,
+        runtimeSessionId: RuntimeSessionId.make("runtime-directory-a1"),
+        threadId,
+        resumeCursor: { opaque: "resume-a1" },
+        runtimePayload: { providerThreadId: "native-a1", activeTurnId: "turn-a1" },
+      });
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId,
+        runtimeSessionId: RuntimeSessionId.make("runtime-directory-a2"),
+        threadId,
+        status: "starting",
+      });
+
+      const runtime = yield* runtimeRepository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(runtime), true);
+      if (Option.isSome(runtime)) {
+        assert.equal(runtime.value.runtimeSessionId, "runtime-directory-a2");
+        assert.equal(runtime.value.resumeCursor, null);
+        assert.equal(runtime.value.runtimePayload, null);
       }
     }));
 

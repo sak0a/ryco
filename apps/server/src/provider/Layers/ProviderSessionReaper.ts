@@ -31,6 +31,27 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
     const sweepIntervalMs = Math.max(1, options?.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS);
 
     const sweep = Effect.gen(function* () {
+      const pendingStaleBindings = yield* providerService.listStaleSessionBindings();
+      yield* Effect.forEach(
+        pendingStaleBindings,
+        (binding) =>
+          providerService.stopSessionBinding(binding).pipe(
+            Effect.tap((result) =>
+              Effect.logDebug("provider.session.reaper.stale-retry", {
+                provider: binding.provider,
+                result,
+              }),
+            ),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("provider.session.reaper.stale-retry-failed", {
+                provider: binding.provider,
+                cause,
+              }),
+            ),
+          ),
+        { concurrency: "unbounded", discard: true },
+      );
+
       const bindings = yield* directory.listBindings();
       const now = Date.now();
       let reapedCount = 0;

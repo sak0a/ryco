@@ -6,6 +6,7 @@ import {
   ProviderItemId,
   RuntimeItemId,
   RuntimeRequestId,
+  type RuntimeSessionId,
   ThreadId,
   TurnId,
   type ProviderApprovalDecision,
@@ -67,6 +68,7 @@ export interface ActiveCopilotSession {
   session: CopilotSession;
   readonly threadId: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
+  readonly runtimeSessionId: RuntimeSessionId;
   readonly createdAt: string;
   readonly runtimeMode: ProviderSession["runtimeMode"];
   readonly tokenMode: AgentTokenMode;

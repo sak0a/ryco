@@ -2,6 +2,7 @@ import type {
   ProviderInstanceId,
   ProviderDriverKind,
   ProviderSessionRuntimeStatus,
+  RuntimeSessionId,
   RuntimeMode,
   ThreadId,
 } from "@ryco/contracts";
@@ -22,6 +23,11 @@ export interface ProviderRuntimeBinding {
    * exposing bindings; runtime callers must not infer this from `provider`.
    */
   readonly providerInstanceId?: ProviderInstanceId;
+  /**
+   * Exact provider-native runtime epoch. Omission is accepted only for
+   * persisted rows created before the context-handoff migration.
+   */
+  readonly runtimeSessionId?: RuntimeSessionId;
   readonly adapterKey?: string;
   readonly status?: ProviderSessionRuntimeStatus;
   readonly resumeCursor?: unknown | null;

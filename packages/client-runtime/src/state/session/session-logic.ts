@@ -1,7 +1,9 @@
 import { isContextCompactionActivity } from "@ryco/shared/threadActivity";
 import {
   ApprovalRequestId,
+  CONTEXT_HANDOFF_ACTIVITY_KIND,
   isToolLifecycleItemType,
+  type MessageId,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
@@ -21,6 +23,10 @@ import type {
   TurnDiffFileChange,
   TurnDiffSummary,
 } from "../threads/types.ts";
+import {
+  toContextHandoffTimelineEntry,
+  type ContextHandoffTimelineEntry,
+} from "./contextHandoff.ts";
 
 export type ProviderPickerKind = ProviderDriverKind;
 
@@ -127,6 +133,7 @@ export interface ActivePlanState {
 export interface ThreadActivityViewModel {
   workLogEntries: WorkLogEntry[];
   contextCompactionEntries: ContextCompactionTimelineEntry[];
+  contextHandoffEntries: ContextHandoffTimelineEntry[];
   latestTurnHasToolActivity: boolean;
   pendingApprovals: PendingApproval[];
   pendingUserInputs: PendingUserInput[];
@@ -167,6 +174,12 @@ export type TimelineEntry =
       kind: "context-compaction";
       createdAt: string;
       marker: ContextCompactionTimelineEntry;
+    }
+  | {
+      id: string;
+      kind: "context-handoff";
+      createdAt: string;
+      marker: ContextHandoffTimelineEntry;
     };
 
 export function formatDuration(durationMs: number): string {
@@ -638,6 +651,7 @@ function shouldIncludeActivityInWorkLog(
     activity.kind !== "task.started" &&
     activity.kind !== "agent.message" &&
     activity.kind !== "context-window.updated" &&
+    activity.kind !== CONTEXT_HANDOFF_ACTIVITY_KIND &&
     !isContextCompactionActivity(activity) &&
     activity.summary !== "Checkpoint captured" &&
     !isPlanBoundaryToolActivity(activity)
@@ -1626,6 +1640,16 @@ export function deriveContextCompactionTimelineEntries(
   return entries;
 }
 
+export function deriveContextHandoffTimelineEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ContextHandoffTimelineEntry[] {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  return ordered.flatMap((activity) => {
+    const entry = toContextHandoffTimelineEntry(activity);
+    return entry ? [entry] : [];
+  });
+}
+
 function toContextCompactionTimelineEntry(
   activity: OrchestrationThreadActivity,
 ): ContextCompactionTimelineEntry {
@@ -1649,6 +1673,7 @@ export function deriveThreadActivityViewModel(
   const pendingUserInputState = new Map<ApprovalRequestId, PendingUserInput>();
   const workLogState: DerivedWorkLogEntry[] = [];
   const contextCompactionEntries: ContextCompactionTimelineEntry[] = [];
+  const contextHandoffEntries: ContextHandoffTimelineEntry[] = [];
   let latestTurnHasToolActivity = false;
   let latestPlanActivity: OrchestrationThreadActivity | null = null;
   let latestPlanActivityForTurn: OrchestrationThreadActivity | null = null;
@@ -1679,6 +1704,11 @@ export function deriveThreadActivityViewModel(
       contextCompactionEntries.push(toContextCompactionTimelineEntry(activity));
     }
 
+    const contextHandoffEntry = toContextHandoffTimelineEntry(activity);
+    if (contextHandoffEntry) {
+      contextHandoffEntries.push(contextHandoffEntry);
+    }
+
     if (shouldIncludeActivityInWorkLog(activity, effectiveLatestTurnId)) {
       workLogState.push(toDerivedWorkLogEntry(activity, startedAtByToolCallId));
     }
@@ -1687,6 +1717,7 @@ export function deriveThreadActivityViewModel(
   return {
     workLogEntries: toWorkLogEntries(workLogState),
     contextCompactionEntries,
+    contextHandoffEntries,
     latestTurnHasToolActivity,
     pendingApprovals: pendingApprovalsFromState(pendingApprovalState),
     pendingUserInputs: pendingUserInputsFromState(pendingUserInputState),
@@ -1699,6 +1730,7 @@ export function deriveTimelineEntries(
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
   contextCompactionEntries: ContextCompactionTimelineEntry[] = [],
+  contextHandoffEntries: ContextHandoffTimelineEntry[] = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1724,9 +1756,46 @@ export function deriveTimelineEntries(
     createdAt: marker.createdAt,
     marker,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows, ...contextCompactionRows].toSorted(
-    (a, b) => a.createdAt.localeCompare(b.createdAt),
-  );
+  const contextHandoffRows = contextHandoffEntries.map<
+    Extract<TimelineEntry, { kind: "context-handoff" }>
+  >((marker) => ({
+    id: marker.id,
+    kind: "context-handoff",
+    createdAt: marker.createdAt,
+    marker,
+  }));
+
+  const messageIds = new Set(messages.map((message) => message.id));
+  const anchoredHandoffRows = new Map<MessageId, TimelineEntry[]>();
+  const fallbackHandoffRows: TimelineEntry[] = [];
+  for (const row of contextHandoffRows) {
+    if (!messageIds.has(row.marker.targetMessageId)) {
+      fallbackHandoffRows.push(row);
+      continue;
+    }
+    const rowsAtAnchor = anchoredHandoffRows.get(row.marker.targetMessageId);
+    if (rowsAtAnchor) {
+      rowsAtAnchor.push(row);
+    } else {
+      anchoredHandoffRows.set(row.marker.targetMessageId, [row]);
+    }
+  }
+
+  const chronologicalRows = [
+    ...messageRows,
+    ...proposedPlanRows,
+    ...workRows,
+    ...contextCompactionRows,
+    ...fallbackHandoffRows,
+  ].toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  return chronologicalRows.flatMap((row) => {
+    if (row.kind !== "message") {
+      return [row];
+    }
+    const markers = anchoredHandoffRows.get(row.message.id);
+    return markers ? markers.concat(row) : [row];
+  });
 }
 
 export function deriveCompletionDividerBeforeEntryId(

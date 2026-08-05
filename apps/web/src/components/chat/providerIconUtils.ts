@@ -1,5 +1,9 @@
 import { ProviderDriverKind } from "@ryco/contracts";
 import {
+  getModelDisplayLabel as getSharedModelDisplayLabel,
+  getModelDisplayName as getSharedModelDisplayName,
+} from "@ryco/shared/model";
+import {
   ClaudeAI,
   CursorIcon,
   GithubCopilotIcon,
@@ -41,10 +45,7 @@ export function getDisplayModelName(
   model: ModelEsque,
   options?: { preferShortName?: boolean },
 ): string {
-  if (options?.preferShortName && model.shortName) {
-    return model.shortName;
-  }
-  return model.name;
+  return getSharedModelDisplayName(model, options);
 }
 
 export function getTriggerDisplayModelName(model: ModelEsque): string {
@@ -52,6 +53,5 @@ export function getTriggerDisplayModelName(model: ModelEsque): string {
 }
 
 export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  const title = getTriggerDisplayModelName(model);
-  return model.subProvider ? `${model.subProvider} · ${title}` : title;
+  return getSharedModelDisplayLabel(model, { preferShortName: true });
 }

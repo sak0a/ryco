@@ -68,6 +68,7 @@ function toRuntimeBinding(
           // persistence so hot routing code never has to infer an instance
           // from a driver kind.
           providerInstanceId: runtime.providerInstanceId ?? defaultInstanceIdForDriver(provider),
+          ...(runtime.runtimeSessionId ? { runtimeSessionId: runtime.runtimeSessionId } : {}),
           adapterKey: runtime.adapterKey,
           runtimeMode: runtime.runtimeMode,
           status: runtime.status,
@@ -121,11 +122,20 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
         issue: "providerInstanceId is required for provider session runtime bindings.",
       });
     }
+    const runtimeSessionChanged =
+      binding.runtimeSessionId !== undefined &&
+      binding.runtimeSessionId !== existingRuntime?.runtimeSessionId;
+    const instanceChanged =
+      existingRuntime?.providerInstanceId !== null &&
+      existingRuntime?.providerInstanceId !== undefined &&
+      existingRuntime.providerInstanceId !== providerInstanceId;
+    const identityChanged = providerChanged || instanceChanged || runtimeSessionChanged;
     yield* repository
       .upsert({
         threadId: resolvedThreadId,
         providerName: binding.provider,
         providerInstanceId,
+        runtimeSessionId: binding.runtimeSessionId ?? existingRuntime?.runtimeSessionId ?? null,
         adapterKey:
           binding.adapterKey ??
           (providerChanged ? binding.provider : (existingRuntime?.adapterKey ?? binding.provider)),
@@ -135,11 +145,12 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
         resumeCursor:
           binding.resumeCursor !== undefined
             ? binding.resumeCursor
-            : (existingRuntime?.resumeCursor ?? null),
-        runtimePayload: mergeRuntimePayload(
-          existingRuntime?.runtimePayload ?? null,
-          binding.runtimePayload,
-        ),
+            : identityChanged
+              ? null
+              : (existingRuntime?.resumeCursor ?? null),
+        runtimePayload: identityChanged
+          ? (binding.runtimePayload ?? null)
+          : mergeRuntimePayload(existingRuntime?.runtimePayload ?? null, binding.runtimePayload),
       })
       .pipe(Effect.mapError(toPersistenceError("ProviderSessionDirectory.upsert:upsert")));
   });

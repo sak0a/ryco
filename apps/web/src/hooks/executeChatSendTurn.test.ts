@@ -310,7 +310,11 @@ describe("executeChatSendTurn", () => {
         baseBranchForWorktree: null,
         shouldCreateWorktree: false,
       },
-      settings: { runtimeMode: "full-access", interactionMode: "default", tokenMode: "balanced" },
+      settings: {
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        tokenMode: "balanced",
+      },
       project: {
         projectId: ProjectId.make("project-1"),
         projectCwd: "/tmp/project",
@@ -342,7 +346,9 @@ describe("executeChatSendTurn", () => {
         sendInFlightRef: { current: false },
       } as never,
       sourceControl: { fetcher: vi.fn(async (ctx) => ctx) },
-      persistSettings: { persistThreadSettingsForNextTurn: vi.fn(async () => {}) },
+      persistSettings: {
+        persistThreadSettingsForNextTurn: vi.fn(async () => {}),
+      },
       composerHandle: { readComposer: () => null },
       formatOutgoingPrompt: ({ text }) => text,
     });
@@ -355,5 +361,130 @@ describe("executeChatSendTurn", () => {
     expect(dispatchCommand).toHaveBeenCalledWith(
       expect.objectContaining({ type: "thread.turn.start" }),
     );
+  });
+
+  it("keeps the staged target retryable after immediate rejection and undo", async () => {
+    const targetSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-sonnet-4-6",
+    };
+    const dispatchCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("handoff rejected: thread became busy"))
+      .mockResolvedValue({ sequence: 2 });
+    const setComposerDraftPrompt = vi.fn();
+    const refs = {
+      promptRef: { current: "Continue with Claude" },
+      composerImagesRef: { current: [] },
+      composerTerminalContextsRef: { current: [] },
+      sendInFlightRef: { current: false },
+    };
+    const persistThreadSettingsForNextTurn = vi.fn(async (_settings: unknown) => {});
+    const input: Parameters<typeof executeChatSendTurn>[0] = {
+      composer: {
+        prompt: "Continue with Claude",
+        trimmedPrompt: "Continue with Claude",
+        images: [],
+        sendableTerminalContexts: [],
+        sourceControlContexts: [],
+        selectedProvider: ProviderDriverKind.make("claudeAgent"),
+        selectedModel: "claude-sonnet-4-6",
+        selectedProviderModels: [],
+        selectedPromptEffort: null,
+        selectedModelSelection: targetSelection,
+        expiredTerminalContextCount: 0,
+      },
+      thread: {
+        threadId: ThreadId.make("thread-handoff"),
+        isFirstMessage: false,
+        isServerThread: true,
+        isLocalDraftThread: false,
+        activeThreadBranch: null,
+        worktreePath: null,
+        createdAt: "2026-08-04T00:00:00Z",
+        projectId: ProjectId.make("project-1"),
+      },
+      worktree: {
+        shouldMaterializeLegacyBranchWorktree: false,
+        baseBranchForWorktree: null,
+        shouldCreateWorktree: false,
+      },
+      settings: {
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        tokenMode: "balanced",
+      },
+      project: {
+        projectId: ProjectId.make("project-1"),
+        projectCwd: "/tmp/project",
+        defaultModelSelection: null,
+      },
+      scroll: { scrollToEndBeforeOptimistic: vi.fn(async () => {}) },
+      draft: {
+        composerDraftTarget: DraftId.make("draft-handoff"),
+        environmentId: EnvironmentId.make("env-1"),
+        clearComposerDraftContent: vi.fn(),
+        setComposerDraftTokenMode: vi.fn(),
+        setComposerDraftPrompt,
+        addComposerDraftImages: vi.fn(),
+        setComposerDraftTerminalContexts: vi.fn(),
+        setDraftThreadContext: vi.fn(),
+      },
+      dispatch: {
+        api: { orchestration: { dispatchCommand } } as never,
+        beginLocalDispatch: vi.fn(),
+        resetLocalDispatch: vi.fn(),
+        setOptimisticUserMessages: vi.fn(),
+        setThreadError: vi.fn(),
+      },
+      refs,
+      sourceControl: { fetcher: vi.fn(async (ctx) => ctx) },
+      persistSettings: { persistThreadSettingsForNextTurn },
+      composerHandle: { readComposer: () => null },
+      formatOutgoingPrompt: ({ text }) => text,
+    };
+
+    await executeChatSendTurn(input);
+
+    expect(refs.promptRef.current).toBe("Continue with Claude");
+    expect(setComposerDraftPrompt).toHaveBeenCalledWith(
+      DraftId.make("draft-handoff"),
+      "Continue with Claude",
+    );
+    expect(input.composer.selectedModelSelection).toEqual(targetSelection);
+    expect(persistThreadSettingsForNextTurn.mock.calls[0]?.[0]).not.toHaveProperty(
+      "modelSelection",
+    );
+
+    await executeChatSendTurn(input);
+
+    const turnStarts = dispatchCommand.mock.calls.map(([command]) => command);
+    expect(turnStarts).toHaveLength(2);
+    expect(turnStarts).toEqual([
+      expect.objectContaining({
+        type: "thread.turn.start",
+        modelSelection: targetSelection,
+      }),
+      expect.objectContaining({
+        type: "thread.turn.start",
+        modelSelection: targetSelection,
+      }),
+    ]);
+
+    await executeChatSendTurn({
+      ...input,
+      undo: {
+        windowMs: 4_000,
+        present: ({ triggerUndo }) => {
+          triggerUndo();
+          return () => {};
+        },
+      },
+    });
+
+    expect(dispatchCommand).toHaveBeenCalledTimes(2);
+    expect(persistThreadSettingsForNextTurn).toHaveBeenCalledTimes(2);
+    expect(refs.promptRef.current).toBe("Continue with Claude");
+    expect(input.composer.selectedModelSelection).toEqual(targetSelection);
   });
 });

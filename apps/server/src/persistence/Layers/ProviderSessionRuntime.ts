@@ -47,6 +47,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
           thread_id,
           provider_name,
           provider_instance_id,
+          runtime_session_id,
           adapter_key,
           runtime_mode,
           status,
@@ -58,6 +59,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
           ${runtime.threadId},
           ${runtime.providerName},
           ${runtime.providerInstanceId},
+          ${runtime.runtimeSessionId},
           ${runtime.adapterKey},
           ${runtime.runtimeMode},
           ${runtime.status},
@@ -69,6 +71,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
         DO UPDATE SET
           provider_name = excluded.provider_name,
           provider_instance_id = excluded.provider_instance_id,
+          runtime_session_id = excluded.runtime_session_id,
           adapter_key = excluded.adapter_key,
           runtime_mode = excluded.runtime_mode,
           status = excluded.status,
@@ -87,6 +90,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
           thread_id AS "threadId",
           provider_name AS "providerName",
           provider_instance_id AS "providerInstanceId",
+          runtime_session_id AS "runtimeSessionId",
           adapter_key AS "adapterKey",
           runtime_mode AS "runtimeMode",
           status,
@@ -107,6 +111,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
           thread_id AS "threadId",
           provider_name AS "providerName",
           provider_instance_id AS "providerInstanceId",
+          runtime_session_id AS "runtimeSessionId",
           adapter_key AS "adapterKey",
           runtime_mode AS "runtimeMode",
           status,
@@ -128,7 +133,7 @@ const makeProviderSessionRuntimeRepository = Effect.gen(function* () {
   });
 
   const upsert: ProviderSessionRuntimeRepositoryShape["upsert"] = (runtime) =>
-    upsertRuntimeRow(runtime).pipe(
+    upsertRuntimeRow({ ...runtime, runtimeSessionId: runtime.runtimeSessionId ?? null }).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
           "ProviderSessionRuntimeRepository.upsert:query",
