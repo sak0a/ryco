@@ -836,6 +836,12 @@ interface EstablishOptions extends HandshakePairOptions {
    * authenticates. Cases about the finish itself set it false.
    */
   readonly primeImplicitFinish?: boolean;
+  /**
+   * The relay the two endpoints emit into. A capture-only `AttackerRelay` by
+   * default; section K supplies the ACTIVE `HostileRelay` instead, which is the
+   * only difference between the two halves of this suite.
+   */
+  readonly relay?: AttackerRelay;
 }
 
 interface LiveChannel {
@@ -851,7 +857,7 @@ interface LiveChannel {
  * wired to the same relay.
  */
 const establish = async (options: EstablishOptions): Promise<LiveChannel> => {
-  const relay = new AttackerRelay();
+  const relay = options.relay ?? new AttackerRelay();
   const clientHandshake = makeClient(options);
   const nodeHandshake = makeNode(options);
 
@@ -2865,5 +2871,579 @@ describe("attacker relay: authenticated records the registries do not admit", ()
     expect(node.emitted).toHaveLength(emittedBefore);
     expect(node.session.erased).toBe(false);
     expect(node.session.sendPathUsable).toBe(true);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// K. The hostile relay: an ACTIVE man-in-the-middle that owns delivery (§2.1)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Sections A–J hand bytes across by hand, one record at a time. That proves a
+// module rejects a bad value. It does NOT prove the SESSION survives an
+// adversary who controls the channel, and the difference is a schedule: the
+// interesting failures need a frame held while another overtakes it, a
+// rejection followed by the genuine record the rejection was supposed to make
+// unusable, a duplicate landing after the peer has moved on, or an error record
+// the relay simply keeps. §14.1 requires the adversarial suite to run against an
+// ATTACKER-CONTROLLED RELAY HARNESS, and this is it.
+//
+// WHAT THE HARNESS ADDS over `AttackerRelay`: delivery. `HostileRelay` captures
+// every frame into a queue that nothing drains on its own, and each §2.1
+// capability is one method — `hold`/`release` (delay a frame and let it land
+// later), `drop` (never deliver it), `forward` (deliver the next one), the
+// `index` argument (reorder), releasing the same held frame twice (duplicate),
+// the `transform` argument (modify, which subsumes truncate and restamp because
+// both are functions of the frame's bytes), the `to` argument (reflect), and
+// `inject` (bytes no endpoint produced). It adds no key material: it is the same
+// §2.1 relay, and the cases that need a peer holding keys still say so and still
+// use `mintNonConformingEnvelope`.
+//
+// DELIVERY INTO AN ERASED ENDPOINT REJECTS, and the harness deliberately does
+// not smooth that over. §11.3 erases the session on a fatal condition and
+// `unprotect` then throws rather than returning a row, so a case that releases a
+// withheld frame after the peer has failed asserts the rejection in as many
+// words. That is the point of holding the frame in the first place.
+
+interface HeldFrame {
+  readonly id: number;
+  readonly from: Party;
+  readonly frame: RelayFrame;
+}
+
+interface ReleaseOptions {
+  /** Modify the bytes in flight. `truncateTo`, `flipBit`, and `restamp` all fit here. */
+  readonly transform?: (payload: Uint8Array) => Uint8Array;
+  /** Deliver somewhere other than the peer — with `to` equal to `from`, a reflection. */
+  readonly to?: Party;
+}
+
+class HostileRelay extends AttackerRelay {
+  /** Every delivery the attacker chose to make, with what the receiver made of it. */
+  readonly deliveries: {
+    readonly to: Party;
+    readonly label: string;
+    readonly receipt: Receipt;
+  }[] = [];
+
+  #endpoints: Record<Party, HonestEndpoint> | undefined = undefined;
+  readonly #inFlight: HeldFrame[] = [];
+  #nextId = 0;
+
+  attach(client: HonestEndpoint, node: HonestEndpoint): void {
+    this.#endpoints = { client, node };
+  }
+
+  override capture(frame: RelayFrame): RelayFrame {
+    const captured = super.capture(frame);
+    this.#nextId += 1;
+    this.#inFlight.push({ id: this.#nextId, from: frame.from, frame: captured });
+    return captured;
+  }
+
+  /** What the attacker is holding, oldest first. */
+  inFlight(from?: Party): readonly HeldFrame[] {
+    return from === undefined ? [...this.#inFlight] : this.#inFlight.filter((h) => h.from === from);
+  }
+
+  /** Start from an empty channel, discarding whatever setup left in flight. */
+  discardInFlight(): void {
+    this.#inFlight.length = 0;
+  }
+
+  /**
+   * Take a frame OUT of flight without delivering it. Release it later, release
+   * it twice, release it at its own sender, or never release it at all — those
+   * are delay, duplicate, reflect, and drop, and they are the same operation.
+   */
+  hold(from: Party, index = 0): HeldFrame {
+    const held = this.inFlight(from)[index];
+    if (held === undefined) {
+      throw new Error(`the relay holds no frame at index ${String(index)} from the ${from}`);
+    }
+    this.#inFlight.splice(this.#inFlight.indexOf(held), 1);
+    return held;
+  }
+
+  /** Named for what it means at the call site; `hold` and never releasing is the mechanism. */
+  drop(from: Party, index = 0): HeldFrame {
+    return this.hold(from, index);
+  }
+
+  /** Deliver a held frame. Calling this twice with the same frame duplicates it. */
+  async release(held: HeldFrame, at: number, options: ReleaseOptions = {}): Promise<Receipt> {
+    const to = options.to ?? (held.from === "client" ? "node" : "client");
+    const payload =
+      options.transform === undefined ? held.frame.payload : options.transform(held.frame.payload);
+    return this.#handTo(to, payload, at, held.frame.label);
+  }
+
+  /** Take the next frame from a direction and deliver it, in one step. */
+  async forward(
+    from: Party,
+    at: number,
+    options: ReleaseOptions & { readonly index?: number } = {},
+  ): Promise<Receipt> {
+    return this.release(this.hold(from, options.index ?? 0), at, options);
+  }
+
+  /**
+   * The honest schedule, for the cases that need a live channel before the
+   * attack begins: everything in flight WHEN PUMP WAS CALLED, in emission
+   * order. Records the deliveries themselves produce stay in flight, so a pump
+   * never runs away with an error record the case has not decided about.
+   */
+  async pump(at: number): Promise<Receipt[]> {
+    const scheduled = this.inFlight();
+    const receipts: Receipt[] = [];
+    for (const held of scheduled) {
+      const index = this.#inFlight.indexOf(held);
+      if (index >= 0) this.#inFlight.splice(index, 1);
+      receipts.push(await this.release(held, at));
+    }
+    return receipts;
+  }
+
+  /** Bytes no endpoint ever produced. */
+  async inject(to: Party, payload: Uint8Array, at: number, label = "injected"): Promise<Receipt> {
+    return this.#handTo(to, payload, at, label);
+  }
+
+  async #handTo(to: Party, payload: Uint8Array, at: number, label: string): Promise<Receipt> {
+    const endpoints = this.#endpoints;
+    if (endpoints === undefined) throw new Error("the hostile relay is not attached to a channel");
+    const receipt = await endpoints[to].deliver(payload, at);
+    this.deliveries.push({ to, label, receipt });
+    return receipt;
+  }
+}
+
+interface HostileChannel {
+  readonly client: HonestEndpoint;
+  readonly node: HonestEndpoint;
+  readonly relay: HostileRelay;
+  readonly sessionBindingHash: Uint8Array;
+}
+
+/** The §8 handshake, then two live endpoints whose channel the attacker drains. */
+const establishHostile = async (
+  options: EstablishOptions = { tier: "native" },
+): Promise<HostileChannel> => {
+  const relay = new HostileRelay();
+  const live = await establish({ ...options, relay });
+  relay.attach(live.client, live.node);
+  // `establish` hands the priming record over itself, so its spent copy is all
+  // that is in flight; the attacker starts from an empty channel.
+  relay.discardInFlight();
+  return {
+    client: live.client,
+    node: live.node,
+    relay,
+    sessionBindingHash: live.sessionBindingHash,
+  };
+};
+
+/** §11.3's erasure, from the attacker's side: the channel cannot be delivered into. */
+const ERASED_SESSION_MESSAGE = "Relay E2EE session has been erased; it is never resumed.";
+
+describe("hostile relay: the schedule carries an honest session", () => {
+  it("delivers a full application exchange and a clean §10.2 close", async () => {
+    // THE ANTI-VACUITY CASE. Every case below asserts that something did not
+    // happen, and all of them would pass against a harness that delivered
+    // nothing at all. This one pins that the schedule can carry a real session
+    // end to end: records in both directions, then the three-record sequential
+    // close, then **Clean** at both ends with no error record anywhere.
+    const { client, node, relay } = await establishHostile();
+
+    await client.sendRpc(Uint8Array.from([0x01]), "c2n one");
+    await node.sendRpc(Uint8Array.from([0x02]), "n2c one");
+    const exchanged = await relay.pump(NOW);
+    expect(exchanged.map((receipt) => receipt.kind)).toEqual(["rpc", "rpc"]);
+
+    await client.initiateClose(NOW);
+    expect((await relay.pump(NOW)).map((receipt) => receipt.kind)).toEqual(["close"]);
+    await node.sendOwedCloseRecord(NOW);
+    expect((await relay.pump(NOW)).map((receipt) => receipt.kind)).toEqual(["close_ack"]);
+    await client.sendOwedCloseRecord(NOW);
+    expect((await relay.pump(NOW)).map((receipt) => receipt.kind)).toEqual(["close_ack"]);
+
+    expect(client.verdict).toBe("clean");
+    expect(node.verdict).toBe("clean");
+    expect(client.close.exchangeComplete).toBe(true);
+    expect(node.close.exchangeComplete).toBe(true);
+    expect(relay.inFlight()).toHaveLength(0);
+    expect(relay.deliveries.some((entry) => entry.receipt.kind === "fatal")).toBe(false);
+  });
+});
+
+describe("hostile relay: holding a frame and releasing it after the rejection", () => {
+  it("refuses the withheld record after the reorder it caused was fatal", async () => {
+    // Section F proves the reorder is caught. This proves what the attacker is
+    // actually after: that the record it WITHHELD is worthless afterwards. The
+    // relay holds the first record, lets the second overtake it, and then
+    // releases the first into the §11.3 erasure the second one caused.
+    const { client, node, relay } = await establishHostile();
+    await client.sendRpc(Uint8Array.from([0x01]), "first");
+    await client.sendRpc(Uint8Array.from([0x02]), "second");
+
+    const withheld = relay.hold("client");
+    expect(withheld.frame.label).toBe("first");
+
+    const overtaking = expectFatal(await relay.forward("client", NOW));
+    expect(overtaking.row).toBe("Q2");
+    expect(overtaking.reason).toBe("sequence_mismatch");
+    expect(overtaking.errorEmitted).toBe(true);
+    expect(node.verdict).toBe("failed");
+    expect(node.session.erased).toBe(true);
+    expect(node.rpcDeliveries).toHaveLength(1); // the priming record only
+
+    // §11.5 from the ATTACKER's side: exactly one record came back, and it is
+    // the length-uniform error record. Nothing about it names a cause.
+    const answered = relay.inFlight("node");
+    expect(answered).toHaveLength(1);
+    expect(answered[0]?.frame.label).toBe("E2EEError(1)");
+
+    // The whole point of the hold. The record is genuine, it is at the position
+    // the node was expecting when the attack began, and it is refused.
+    await expect(relay.release(withheld, NOW)).rejects.toThrow(ERASED_SESSION_MESSAGE);
+    expect(node.rpcDeliveries).toHaveLength(1);
+    expect(relay.inFlight("node")).toHaveLength(1);
+    expect(node.verdict).toBe("failed");
+  });
+
+  it("refuses a duplicate released after the peer moved past it", async () => {
+    const { client, node, relay } = await establishHostile();
+    await client.sendRpc(Uint8Array.from([0x01]), "first");
+    await client.sendRpc(Uint8Array.from([0x02]), "second");
+
+    const first = relay.hold("client");
+    const second = relay.hold("client");
+    expect((await relay.release(first, NOW)).kind).toBe("rpc");
+    expect((await relay.release(second, NOW)).kind).toBe("rpc");
+    expect(node.rpcDeliveries).toHaveLength(3); // priming plus both
+
+    // The duplicate: the same held frame, released a second time, after the
+    // receiver has moved on.
+    const duplicated = expectFatal(await relay.release(first, NOW));
+    expect(duplicated.row).toBe("Q2");
+    expect(duplicated.reason).toBe("sequence_mismatch");
+    expect(node.rpcDeliveries).toHaveLength(3);
+    expect(node.verdict).toBe("failed");
+
+    // And the OTHER record it holds is worthless too, which is the session-level
+    // claim: one accepted duplicate does not merely fail, it ends the channel.
+    await expect(relay.release(second, NOW)).rejects.toThrow(ERASED_SESSION_MESSAGE);
+  });
+
+  it("refuses a record reflected at its sender and still delivers it to the peer", async () => {
+    // §8.10's independent exclusion, scheduled. Two mechanisms exclude a
+    // reflection — the directional epoch schedules give the two directions
+    // distinct AEAD keys, and the §3.3 AAD carries the direction label — and
+    // this case proves the CONJUNCTION rather than either one: the label on its
+    // own is isolated by `relayE2eeWire.test.ts` and `relayE2eeSession.test.ts`,
+    // which is where a change to it fails first. What the schedule adds is the
+    // second half of the attack: the failure is the reflected-at party's alone,
+    // the frame is still the attacker's to deliver, and the peer is untouched.
+    const { client, node, relay } = await establishHostile({
+      tier: "native",
+      primeImplicitFinish: false,
+    });
+    await client.sendRpc(Uint8Array.from([0x42]), "reflected");
+    // The reflected pair is exactly the one the client expects to RECEIVE next,
+    // so §9.2 passes and the AEAD is what refuses it.
+    expect(client.expectedRecv).toEqual({ epoch: 0n, counter: 0n });
+
+    const held = relay.hold("client");
+    const reflected = expectFatal(await relay.release(held, NOW, { to: "client" }));
+    expect(reflected.row).toBe("Q3");
+    expect(reflected.reason).toBe("authentication_failed");
+    expect(client.verdict).toBe("failed");
+    expect(client.rpcDeliveries).toHaveLength(0);
+
+    // The node never saw any of it, and the frame is still the attacker's to
+    // deliver: the reflection cost the client, not the channel.
+    expect(node.verdict).toBeUndefined();
+    expect((await relay.release(held, NOW)).kind).toBe("rpc");
+    expect(node.rpcDeliveries).toHaveLength(1);
+    expect(node.mayInvokeRpcHandler).toBe(true);
+  });
+});
+
+describe("hostile relay: what the attacker keeps", () => {
+  it("leaves the two ends in the asymmetric state §10.4 resolves, when it drops the error record", async () => {
+    // THE CASE ONLY A SCHEDULE CAN STATE. §11.3 obliges the failing endpoint to
+    // emit exactly one `E2EEError` — and the relay is under no obligation to
+    // carry it. So the strongest attack on a live channel is not forgery: it is
+    // to kill one end and keep the notification, leaving the peer sending into
+    // nothing.
+    //
+    // What must hold is that the peer neither hangs nor proceeds: §10.4 gives it
+    // one `T_CLOSE`-bounded wait and an UNATTRIBUTED **Unclean — abrupt**, which
+    // §2.6 already declines to attribute cryptographically. The two verdicts
+    // disagreeing is the accepted outcome; either end continuing is not.
+    const { client, node, relay } = await establishHostile();
+    await client.sendRpc(Uint8Array.from([0x01]), "corrupted in flight");
+
+    const corrupted = expectFatal(
+      await relay.forward("client", NOW, {
+        transform: (payload) => flipBit(payload, E2EE_ENVELOPE_HEADER_BYTES + 1),
+      }),
+    );
+    expect(corrupted.row).toBe("Q3");
+    expect(node.verdict).toBe("failed");
+    expect(node.session.erased).toBe(true);
+
+    // The relay keeps the one record §11.3 sent.
+    const kept = relay.drop("node");
+    expect(kept.frame.label).toBe("E2EEError(1)");
+
+    // The client is untouched and still believes it has a channel: it keeps a
+    // usable send path, no verdict, and no close reason.
+    expect(client.verdict).toBeUndefined();
+    expect(client.session.erased).toBe(false);
+    expect(client.channelCloseReason).toBeUndefined();
+    const stillSends = await client.sendRpc(Uint8Array.from([0x02]), "into nothing");
+    expect(stillSends.kind).toBe("sent");
+    expect(relay.drop("client").frame.label).toBe("into nothing");
+
+    // §10.2, §10.4: the client's own close is the only way out, and the relay
+    // keeps that too. The wait expires, the verdict is unattributed, and NO wire
+    // record is emitted for it.
+    await client.initiateClose(NOW);
+    relay.drop("client");
+    const emittedBefore = client.emitted.length;
+    expect(client.close.waitExpired(NOW + T_CLOSE + 1)).toBe(true);
+    expect(client.noteWaitExpired(NOW + T_CLOSE + 1)).toBe("unclean_abrupt");
+    expect(client.emitted).toHaveLength(emittedBefore);
+    expect(client.session.erased).toBe(true);
+
+    // Both ends terminated, on different verdicts, and neither is still running.
+    expect(client.verdict).toBe("unclean_abrupt");
+    expect(node.verdict).toBe("failed");
+  });
+
+  it("cannot resurrect a close the wait already gave up on", async () => {
+    // The delay attack on §10.2: hold the ack until the initiator's single
+    // `T_CLOSE` wait expires, then release it. §10.4's **Unclean — abrupt** is a
+    // verdict, not a pause — an implementation that accepted the late ack would
+    // report **Clean** for an exchange that timed out.
+    const { client, node, relay } = await establishHostile();
+    await client.initiateClose(NOW);
+    expect((await relay.pump(NOW)).map((receipt) => receipt.kind)).toEqual(["close"]);
+    await node.sendOwedCloseRecord(NOW);
+    const heldAck = relay.hold("node");
+
+    expect(client.close.waitExpired(NOW + T_CLOSE + 1)).toBe(true);
+    expect(client.noteWaitExpired(NOW + T_CLOSE + 1)).toBe("unclean_abrupt");
+    const emittedAfterExpiry = client.emitted.length;
+
+    await expect(relay.release(heldAck, NOW + T_CLOSE + 2)).rejects.toThrow(ERASED_SESSION_MESSAGE);
+    expect(client.verdict).toBe("unclean_abrupt");
+    expect(client.close.exchangeComplete).toBe(false);
+    expect(client.emitted).toHaveLength(emittedAfterExpiry);
+  });
+});
+
+describe("hostile relay: injection ahead of the genuine frame", () => {
+  it("keeps the §8.9 gate shut and makes the genuine finish unusable", async () => {
+    // Section G proves an injected record does not open the §8.9 gate. This adds
+    // the half the attacker cares about: the relay holds the client's genuine
+    // first envelope, spends the node's session on a record it made up at the
+    // same position, and THEN releases the genuine one. The RPC handler must
+    // never run — not for the injection, and not for the record that would have
+    // been the implicit finish.
+    const { client, node, relay } = await establishHostile({
+      tier: "native",
+      primeImplicitFinish: false,
+    });
+    await client.sendRpc(Uint8Array.from([0x11]), "implicit finish");
+    const genuine = relay.hold("client");
+
+    const forged = new Uint8Array(genuine.frame.payload.byteLength);
+    forged.set(genuine.frame.payload.subarray(0, E2EE_ENVELOPE_HEADER_BYTES));
+    forged.fill(0x5a, E2EE_ENVELOPE_HEADER_BYTES);
+    const injected = expectFatal(await relay.inject("node", forged, NOW, "relay-authored"));
+    expect(injected.row).toBe("Q3");
+    expect(injected.reason).toBe("authentication_failed");
+    expect(node.mayInvokeRpcHandler).toBe(false);
+    expect(node.mayEmitApplicationRpc).toBe(false);
+
+    await expect(relay.release(genuine, NOW)).rejects.toThrow(ERASED_SESSION_MESSAGE);
+    expect(node.rpcDeliveries).toHaveLength(0);
+    expect(node.mayInvokeRpcHandler).toBe(false);
+    expect(node.verdict).toBe("failed");
+  });
+});
+
+describe("hostile relay: scheduling the §10.2 simultaneous branch", () => {
+  it("completes the four-record exchange whichever way the acks are ordered", async () => {
+    // The relay CAUSES the simultaneous branch — it holds both closes until each
+    // endpoint has sent its own — and then reorders the two acks. §10.1.1's
+    // anchor is what makes the outcome independent of that ordering, and this is
+    // the case that drives it from the schedule rather than by hand.
+    const { client, node, relay } = await establishHostile();
+    await client.initiateClose(NOW);
+    await node.initiateClose(NOW);
+    const clientClose = relay.hold("client");
+    const nodeClose = relay.hold("node");
+
+    expect(await relay.release(nodeClose, NOW)).toEqual({ kind: "close", branch: "simultaneous" });
+    expect(await relay.release(clientClose, NOW)).toEqual({
+      kind: "close",
+      branch: "simultaneous",
+    });
+    expect(client.close.state).toBe("simultaneous_pending");
+    expect(node.close.state).toBe("simultaneous_pending");
+
+    await client.sendOwedCloseRecord(NOW);
+    await node.sendOwedCloseRecord(NOW);
+    const clientAck = relay.hold("client");
+    const nodeAck = relay.hold("node");
+
+    // Released in the reverse of the order they were produced.
+    expect(await relay.release(nodeAck, NOW)).toEqual({
+      kind: "close_ack",
+      exchangeComplete: true,
+    });
+    expect(await relay.release(clientAck, NOW)).toEqual({
+      kind: "close_ack",
+      exchangeComplete: true,
+    });
+    expect(client.verdict).toBe("clean");
+    expect(node.verdict).toBe("clean");
+
+    // The duplicate the attacker still holds: a completed exchange does not make
+    // a replayed ack harmless, and §10.4 lets **Failed** supersede **Clean**.
+    const duplicated = expectFatal(await relay.release(nodeAck, NOW));
+    expect(duplicated.row).toBe("Q2");
+    expect(duplicated.reason).toBe("sequence_mismatch");
+    expect(client.verdict).toBe("failed");
+    expect(node.verdict).toBe("clean");
+  });
+});
+
+describe("hostile relay: holding a frame across the §9.4 rekey boundary", () => {
+  it("refuses the withheld boundary record after the new epoch overtook it", async () => {
+    // Section H proves the boundary is enforced record by record. The schedule
+    // asks the sharper question: can the ratchet be made to CATCH UP? The relay
+    // holds the last record of epoch 0 and delivers the first record of epoch 1
+    // in its place. A receiver that advanced its epoch on the record it SAW —
+    // rather than on the threshold the boundary record completed — would take
+    // it, and the withheld record would then be the attacker's to spend at
+    // leisure under a key the receiver had already moved past.
+    const synthetic: E2eeSyntheticDirectionState = { epochRecords: E2EE_REKEY_MAX_RECORDS - 1 };
+    const { client, node, relay } = await establishHostile({
+      tier: "native",
+      primeImplicitFinish: false,
+      syntheticC2N: synthetic,
+    });
+    const boundary = await client.sendRpc(Uint8Array.from([0x01]), "last of epoch 0");
+    if (boundary.kind !== "sent") throw new Error("the record was not sent");
+    if (boundary.result.kind !== "protected") throw new Error("not protected");
+    expect(boundary.result.epochCompleted).toBe(true);
+    const next = await client.sendRpc(Uint8Array.from([0x02]), "first of epoch 1");
+    if (next.kind !== "sent") throw new Error("the record was not sent");
+    expect(client.sendPosition).toEqual({ epoch: 1n, counter: 1n });
+
+    const withheld = relay.hold("client");
+    expect(withheld.frame.label).toBe("last of epoch 0");
+    // The node is still inside epoch 0, so the record it is handed is at a pair
+    // that is valid for a LATER state and for no state it can be in now.
+    expect(node.expectedRecv.epoch).toBe(0n);
+    const overtaking = expectFatal(await relay.forward("client", NOW));
+    expect(overtaking.row).toBe("Q2");
+    expect(overtaking.reason).toBe("sequence_mismatch");
+    expect(node.verdict).toBe("failed");
+
+    await expect(relay.release(withheld, NOW)).rejects.toThrow(ERASED_SESSION_MESSAGE);
+    expect(node.rpcDeliveries).toHaveLength(0);
+  });
+});
+
+describe("hostile relay: truncation inside a flight of records", () => {
+  // Section A truncates one record in isolation. Scheduling it inside a flight
+  // asks the sharper question: does the fatal land on the record the relay
+  // touched, and does everything the relay is still holding become worthless?
+  // A receiver that resynchronized after a truncation would deliver the rest.
+  for (const target of [0, 1, 2]) {
+    it(`fails at record ${String(target)} of three and refuses the two behind it`, async () => {
+      const { client, node, relay } = await establishHostile();
+      const labels = ["first", "second", "third"];
+      for (const label of labels) {
+        await client.sendRpc(Uint8Array.from([0x10, labels.indexOf(label)]), label);
+      }
+      const flight = labels.map(() => relay.hold("client"));
+
+      for (let index = 0; index < target; index += 1) {
+        expect((await relay.release(flight[index]!, NOW)).kind).toBe("rpc");
+      }
+      const truncated = expectFatal(
+        await relay.release(flight[target]!, NOW, {
+          transform: (payload) => truncateTo(payload, payload.byteLength - 1),
+        }),
+      );
+      expect(truncated.row).toBe("Q3");
+      expect(truncated.reason).toBe("authentication_failed");
+      // The priming record plus exactly the records delivered before the cut.
+      expect(node.rpcDeliveries).toHaveLength(1 + target);
+
+      for (let index = target + 1; index < flight.length; index += 1) {
+        await expect(relay.release(flight[index]!, NOW)).rejects.toThrow(ERASED_SESSION_MESSAGE);
+      }
+      expect(node.rpcDeliveries).toHaveLength(1 + target);
+      expect(node.verdict).toBe("failed");
+    });
+  }
+});
+
+describe("hostile relay: the negotiation phase, where the schedule holds two frames", () => {
+  // §8 is two records long and §8.1 allows exactly one handshake attempt per
+  // channel, so hold, reorder, and delay have nowhere to go here — sections C
+  // and E already drive every reflection and mutation the two frames admit. What
+  // the schedule DOES add is duplication and substitution, and both make the
+  // same point: a rejected record spends the handshake, so the genuine record
+  // behind it is worthless too.
+
+  it("spends the client handshake on a duplicated accept", async () => {
+    const client = makeClient({ tier: "native" });
+    const hello = client.createHello(NOW);
+    if (hello.kind !== "hello") throw new Error("expected a hello");
+    const accept = makeNode().receiveHello(hello.record, NOW);
+    if (accept.kind !== "accepted") throw new Error("expected an accept");
+
+    const established = client.receiveServerAccept(accept.record, NOW);
+    expect(established.kind).toBe("established");
+
+    const duplicated = client.receiveServerAccept(accept.record, NOW);
+    expect(duplicated.kind).toBe("fatal");
+    if (duplicated.kind !== "fatal") return;
+    expect(duplicated.row).toBe("P16");
+    expect(duplicated.reason).toBe("handshake_spent");
+  });
+
+  it("makes the genuine accept unusable once the relay's forgery was refused", async () => {
+    // The relay drops the node's accept and substitutes one whose §8.7
+    // confirmation it cannot compute — it holds no exporter secret. The client
+    // refuses it (P16), and the substitution is not merely detected: the client
+    // is spent, so releasing the genuine accept afterwards changes nothing.
+    // §8.1's one-attempt rule is what makes a substitution an outage rather than
+    // a retry the attacker can grind against.
+    const client = makeClient({ tier: "native" });
+    const hello = client.createHello(NOW);
+    if (hello.kind !== "hello") throw new Error("expected a hello");
+    const accept = makeNode().receiveHello(hello.record, NOW);
+    if (accept.kind !== "accepted") throw new Error("expected an accept");
+
+    const forged = flipBit(accept.record, accept.record.byteLength - 1);
+    const refused = client.receiveServerAccept(forged, NOW);
+    expect(refused.kind).toBe("fatal");
+    if (refused.kind !== "fatal") return;
+    expect(refused.row).toBe("P16");
+    expect(refused.reason).toBe("confirmation_mismatch");
+
+    const released = client.receiveServerAccept(accept.record, NOW);
+    expect(released.kind).toBe("fatal");
+    if (released.kind !== "fatal") return;
+    expect(released.row).toBe("P16");
+    expect(released.reason).toBe("handshake_spent");
   });
 });
