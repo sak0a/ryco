@@ -5,6 +5,7 @@ import {
   RELAY_PEER_UNSUPPORTED_MESSAGE,
   RELAY_SEND_QUEUE_FULL_MESSAGE,
   type HostedRelaySocketCallbacks,
+  type RelayE2eeProvider,
   type RelaySocket,
 } from "@ryco/client-runtime/relay";
 
@@ -15,6 +16,17 @@ export interface HostedRelaySocketOptions {
   readonly ticketExpiresAt: number;
   readonly callbacks: HostedRelaySocketCallbacks;
   readonly createSocket?: (url: string) => WebSocket;
+  /**
+   * docs/relay-e2ee-protocol.md §4.4: the channel's mode machine, built at
+   * `channel.accept` from the negotiated limits.
+   *
+   * Supplied by the CALLER rather than constructed here, because §4.4 requires
+   * every selection guard — on this tier, §12.1's in-memory latch and the
+   * §12.1.1 classification it decides — to be evaluated "before it has received
+   * any payload", which means before this socket exists. A caller that supplies
+   * none gets the unchanged legacy channel, byte for byte.
+   */
+  readonly e2ee?: RelayE2eeProvider | undefined;
 }
 export function hostedRelayWebSocketUrl(): string {
   const url = new URL(window.location.origin);
@@ -63,9 +75,10 @@ function classifyInboundMessage(data: unknown): InboundMessage {
  * `RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE` is
  * docs/relay-e2ee-protocol.md §11.4 `e2ee_send_unavailable`: backpressure like
  * the queue, the channel unaffected, and the caller may submit the same message
- * again. `apps/web` passes no E2EE provider and therefore never enters
- * `negotiating` today; the mapping is here because the facade maps the engine's
- * contract and not its current caller.
+ * again. It is reachable from this facade whenever a provider is supplied — the
+ * §4.4 `negotiating` window buffers every plaintext send — and the mapping
+ * predates that, because the facade maps the engine's contract and not its
+ * current caller.
  */
 const QUOTA_EXCEEDED_MESSAGES: ReadonlySet<string> = new Set([
   RELAY_SEND_QUEUE_FULL_MESSAGE,
@@ -78,9 +91,10 @@ const QUOTA_EXCEEDED_MESSAGES: ReadonlySet<string> = new Set([
  * Map the DOM-free engine's send errors back to the original WebSocket-API
  * DOMException names at the façade boundary.
  *
- * Exported for the mapping's own test: the §4.4 refusal above is unreachable
- * from a facade that injects no provider, and a test that could only reach it
- * through `send` would be pinning the caller rather than the contract.
+ * Exported for the mapping's own test: the §4.4 refusal above is reachable only
+ * inside one channel's `negotiating` window and never at all without a provider,
+ * so a test that could reach it only through `send` would be pinning one
+ * caller's timing rather than the contract.
  */
 export function sendException(error: unknown): unknown {
   if (!(error instanceof Error) || error instanceof DOMException) return error;
@@ -142,6 +156,7 @@ export class BrowserHostedRelaySocket extends EventTarget {
         ticketExpiresAt: options.ticketExpiresAt,
         socket,
         callbacks: options.callbacks,
+        ...(options.e2ee === undefined ? {} : { e2ee: options.e2ee }),
         timers: {
           now: () => Date.now(),
           setTimeout: (f, ms) => globalThis.setTimeout(f, ms),

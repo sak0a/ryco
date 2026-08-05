@@ -50,6 +50,7 @@ import {
   type E2eeTrustAction,
   type E2eeVerificationDraft,
 } from "./e2eeTrustUiModel";
+import { CLAIM_SYMBOLS } from "./e2eeTrustSymbols";
 import { mobileE2eeTrustStore } from "../../platform/e2eeTrustStore";
 
 const HUB = "https://hub.example.com";
@@ -529,6 +530,15 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     expect(view.channelMessage).not.toContain("encrypted end to end");
     expect(view.channelMessage).not.toContain("cannot read");
     expect(view.channelLabel).not.toBe(CHANNEL_LABELS.verified);
+    // WHAT `none` ACTUALLY RENDERS, pinned as the literal strings and the
+    // symbol rather than as "the same as `unavailable`". `none` is not a
+    // neutral value — it asserts DISCONNECTION, which is why the shared
+    // vocabulary refused to fold this row into `unverified` for reporting "the
+    // session unusable". Pinning the words is what makes the choice reviewable
+    // instead of a name nobody expands.
+    expect(view.channelLabel).toBe("No connection");
+    expect(view.channelMessage).toBe("There is no node connection to describe yet.");
+    expect(CLAIM_SYMBOLS[view.claim]).toBe("lock");
     // It reads exactly as the states this tier genuinely has nothing to say
     // about, and never as the pairing ceremony or a §12.2 fallback.
     expect(view.channelLabel).toBe(securityView(session({ channel: "unavailable" })).channelLabel);

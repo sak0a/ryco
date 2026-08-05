@@ -38,7 +38,11 @@ import {
 } from "../../../environmentApi";
 import { clearHostedNodeScopedState } from "../../../hostedHub/environment";
 import { HOSTED_CONNECTION_STATUS_INDICATORS } from "../../../hostedHub/connectionStatus";
-import { hostedConnectionStatusRepresentatives } from "../../../../test/hostedConnectionVocabulary";
+import {
+  applyWebE2eeChannelStatus,
+  hostedConnectionStatusRepresentatives,
+} from "../../../../test/hostedConnectionVocabulary";
+import { resetWebE2eeSession } from "../../../hostedHub/e2eeSession";
 import { hostedHubController, useHostedHubStore } from "../../../hostedHub/state";
 import type { HostedHubNode } from "../../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../../lib/presentationTier";
@@ -254,6 +258,9 @@ describe("PhoneHome", () => {
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    // Module state, not store state: `resetForTests()` does not reach the §13
+    // projection, and a channel left locked would rename every later status.
+    resetWebE2eeSession();
     __resetEnvironmentApiOverridesForTests();
     useStore.setState({ activeEnvironmentId: null, environmentStateById: {} });
     useUiStateStore.setState({ pinnedThreadKeys: {}, projectExpandedById: {} });
@@ -408,6 +415,10 @@ describe("PhoneHome", () => {
         selectionStatus: statusInput.selectionStatus,
         transportStatus: statusInput.transportStatus,
       });
+      // The §4.4 channel dimension, from the real §13 publishers: `Legacy`,
+      // `Unsigned web`, and `Securing` are reachable in the shipped app and are
+      // measured here like every other state.
+      applyWebE2eeChannelStatus(statusInput.e2eeStatus ?? "unavailable");
       await vi.waitFor(() => {
         expect(status().textContent, `collapsed label for "${text}"`).toBe(shortLabel);
       });
