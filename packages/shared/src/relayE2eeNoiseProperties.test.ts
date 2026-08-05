@@ -50,10 +50,24 @@ import {
 // `relayCodec.test.ts`) — one seed across the package, so a change to the
 // generators is visible as a change everywhere it matters.
 //
-// RUN COUNTS ARE DELIBERATE. The handshake properties drive real X25519, so
-// they run in the low hundreds rather than the tens of thousands; the pure
-// derivation properties are cheap and run higher. Both are chosen to exercise
-// the shrinker rather than to inflate a number.
+// RUN COUNTS ARE DELIBERATE, AND SMALL, so they are stated exactly rather than
+// rounded: 80 for the handshake properties, each of which drives at least one
+// real X25519 exchange and most of which drive four; 400 for the pure
+// derivations and encodings, which are cheap; 24 for the two properties that
+// build a 64KiB buffer to probe the Noise message bound. Runs alone are not the
+// coverage argument — a generator that never reaches the interesting state is
+// worthless at any count — so the properties whose conclusion lives on a path
+// the generator must FIND count their own executions of it and fail when the
+// count is zero. Search for `expect(` after an `fc.assert` call to find them.
+//
+// COVERAGE GUARDS, and why they are assertions rather than statistics. Four
+// properties here can be silently hollowed out by a change to a generator: the
+// §8.1 ordering property, whose conclusion needs two ends that both reached
+// `split()`; and the prologue, mutation, and truncation properties, each stated
+// as a disjunction whose refusal branch is the one that actually runs. Each
+// records what it reached and asserts it after `fc.assert` returns, so the next
+// generator edit that kills the path fails the suite instead of leaving an
+// auditor a property that cannot fail.
 
 const PROPERTY_SEED = 0x5259_434f;
 
@@ -61,6 +75,8 @@ const PROPERTY_SEED = 0x5259_434f;
 const HANDSHAKE_RUNS = 80;
 /** Runs for a property over a pure derivation or an encoding. */
 const DERIVATION_RUNS = 400;
+/** Runs for a property that allocates a message beyond the Noise §3 bound. */
+const BOUNDS_RUNS = 24;
 
 const DH_LEN = E2EE_AGREEMENT_PUBLIC_KEY_BYTES;
 
@@ -207,7 +223,51 @@ const operationArb: fc.Arbitrary<Operation> = fc.record({
   source: fc.constantFrom<ReadSource>("peer", "peer", "self", "empty", "corrupt"),
 });
 
-const sequenceArb = fc.array(operationArb, { minLength: 1, maxLength: 14 });
+/**
+ * The six operations the two patterns owe, in the only order that completes
+ * them: the initiator writes message 1, the responder reads it and writes
+ * message 2, the initiator reads that, and both `split()`.
+ */
+const HONEST_SCHEDULE: readonly Operation[] = [
+  { party: "initiator", kind: "write", source: "peer" },
+  { party: "responder", kind: "read", source: "peer" },
+  { party: "responder", kind: "write", source: "peer" },
+  { party: "initiator", kind: "read", source: "peer" },
+  { party: "initiator", kind: "split", source: "peer" },
+  { party: "responder", kind: "split", source: "peer" },
+];
+
+/**
+ * A SCAFFOLDED sequence: the honest schedule above with adversarial operations
+ * interleaved into each of its seven gaps.
+ *
+ * WHY IT IS NOT A FREE DRAW over `operationArb`, which is what this was. The
+ * property's conclusion is about two ends that BOTH reached `split()`, and
+ * reaching that from an independent draw needs the six operations above to come
+ * up in order out of a 2 × 7 × 5 alphabet whose `destroy` spends a party at
+ * 1/7 per element. Measured on the shipped seed, a free draw of up to 14
+ * operations reached one `split()` 9 times in 2,000 runs and both of them zero
+ * times — so the conclusion was never evaluated, at any run count this file
+ * could afford. Scaffolding the schedule in makes the legal order the SPINE and
+ * the adversary's operations the interference around it, which is the question
+ * worth asking anyway: not "can 14 random calls stumble into a handshake" but
+ * "can an adversary interleaving arbitrary operations into a legal exchange
+ * make it complete into a disagreement". The refusal coverage is unchanged —
+ * every interleaved operation is still driven against the model — and the
+ * shrinker's floor is now the bare honest schedule, which is a readable
+ * counterexample rather than a 14-element soup.
+ */
+const sequenceArb: fc.Arbitrary<readonly Operation[]> = fc
+  .array(fc.array(operationArb, { maxLength: 2 }), {
+    minLength: HONEST_SCHEDULE.length + 1,
+    maxLength: HONEST_SCHEDULE.length + 1,
+  })
+  .map((gaps) =>
+    gaps.flatMap((gap, index) => {
+      const owed = HONEST_SCHEDULE[index];
+      return owed === undefined ? gap : [...gap, owed];
+    }),
+  );
 
 const flipFirstByte = (value: Uint8Array): Uint8Array => {
   const copy = Uint8Array.from(value);
@@ -233,6 +293,10 @@ const advanced = (state: PartyModel): E2eeNoiseHandshakeStatus => {
 
 describe("property: §8.1 message ordering is total", () => {
   it("never reaches split() except through the pattern's exact legal order", () => {
+    // Counted, not assumed: the conclusion at the bottom of the property is
+    // about two ends that BOTH split, and a generator that stops producing
+    // those turns this property into a refusal-only test without failing.
+    let bothEndsSplit = 0;
     fc.assert(
       fc.property(materialArb, sequenceArb, (material, sequence) => {
         const handshakes: Record<PartyName, E2eeNoiseHandshake> = {
@@ -364,12 +428,20 @@ describe("property: §8.1 message ordering is total", () => {
         const initiatorKeys = model.initiator.keys;
         const responderKeys = model.responder.keys;
         if (initiatorKeys !== undefined && responderKeys !== undefined) {
+          bothEndsSplit += 1;
           expect(sessionKeysEqual(initiatorKeys, responderKeys)).toBe(true);
         }
         return true;
       }),
       { seed: PROPERTY_SEED, numRuns: HANDSHAKE_RUNS },
     );
+    // THE COVERAGE GUARD, and the reason `sequenceArb` scaffolds. Without this
+    // the property above degrades silently: every assertion inside it is about
+    // an operation being REFUSED, so a generator that never completes a
+    // handshake leaves it green while the agreement conclusion — the half that
+    // catches a `split()` deriving disagreeing keys, or a responder swapping its
+    // two `Split()` outputs — never runs at all.
+    expect(bothEndsSplit).toBeGreaterThan(0);
   });
 
   it("leaves a live handshake usable after any number of precondition refusals", () => {
@@ -491,6 +563,36 @@ describe("property: §8.1 message ordering is total", () => {
 // ═════════════════════════════════════════════════════════════════════════════
 // Erasure is unconditional (§6.5, §9.5)
 // ═════════════════════════════════════════════════════════════════════════════
+//
+// WHAT IS WITNESSED ON A BUFFER HERE, AND WHAT IS NOT — stated because §6.5
+// names five things ("ephemeral private keys, chaining key, handshake hash,
+// cipher states" plus the static copy §9.5 adds) and only two of them are
+// observable from outside the module at all.
+//
+//   - The EPHEMERAL private key is observable: the test-only injected buffer is
+//     the one piece of private key material the module adopts from a caller, so
+//     the caller keeps a handle on the exact bytes the module must zero. Three
+//     properties below watch it — over every prefix, over a fatal read taken
+//     before it was generated, and over a fatal read taken with it live in
+//     `#e.secretKey`.
+//   - The HANDSHAKE HASH is observable through `testOnlyHandshakeHash`, which
+//     reports `undefined` by reading `h` and finding it all-zero rather than by
+//     consulting `#status` — so the `toBeUndefined()` below fails if the
+//     symmetric-state erasure inside `splitAndExport()` is removed.
+//   - The CHAINING KEY, the handshake cipher key, and the module's defensive
+//     copy of the static agreement secret are unobservable by construction:
+//     nothing returns them and no later operation reads them back. Two things
+//     stand in for a direct assertion, and neither is one. `NoiseSymmetricState
+//     .erase()` zeroes `ck` and `h` in a single `eraseBytes` call and then
+//     erases the cipher state, and `#eraseSecrets` zeroes the ephemeral, the
+//     static copy, and the pending slot in a single call — so every unobservable
+//     buffer is erased by the same statement or the same method as an observable
+//     one, and dropping it means editing a line whose other arguments are
+//     asserted. And the accessor scan below proves the chaining key is not
+//     handed out even if it did survive. What no test in this package can show
+//     is that a defect zeroed `h` while leaving `ck` live; that is a read of the
+//     module, and section 5 question 4 of
+//     docs/relay-e2ee-noise-audit-scope.md asks the auditor for it by name.
 
 describe("property: §6.5 erasure is unconditional", () => {
   it("zeroes the ephemeral secret buffer for any prefix of a handshake", () => {
@@ -546,13 +648,25 @@ describe("property: §6.5 erasure is unconditional", () => {
     );
   });
 
-  it("zeroes the ephemeral secret buffer on every failure path", () => {
+  it("zeroes a PENDING ephemeral when the read of message 1 is fatal", () => {
     // The path an attacker actually drives: a message the peer cannot process.
     // §8.6 step 4 makes it fatal, and fatal means erased — an implementation
     // that erased only on the two orderly endings would leave private key
     // material live in exactly the state an adversary can force at will.
+    //
+    // The responder generates its ephemeral in `writeMessage`, so the buffer
+    // under watch here is still `#pendingEphemeralSecretKey`. The property below
+    // is the mirror that watches the same erasure with the ephemeral LIVE.
+    //
+    // THE CUT IS DRAWN PER PATTERN, because the two patterns admit different
+    // truncations and a bound that fits both is a bound that tests neither. IK
+    // message 1 is `e ‖ EncryptAndHash(s) ‖ EncryptAndHash(payload)`, so any cut
+    // inside it either starves a token or lands in an AEAD region and is
+    // refused. NX message 1 is `e` followed by a CLEARTEXT payload (§8.5,
+    // §8.10), so a cut in the payload is legitimately READ and only a cut below
+    // `DHLEN` refuses.
     fc.assert(
-      fc.property(materialArb, fc.integer({ min: 0, max: 95 }), (material, cut) => {
+      fc.property(materialArb, fc.nat(), (material, cutSelector) => {
         const injected = Uint8Array.from(material.responderEphemeral);
         const responder = new E2eeNoiseHandshake({
           pattern: material.pattern,
@@ -564,9 +678,9 @@ describe("property: §6.5 erasure is unconditional", () => {
         const initiator = initiatorOf(material);
         try {
           const message1 = initiator.writeMessage(material.payload1);
-          // A truncation the pattern cannot admit: below `DHLEN` there is not
-          // even an ephemeral to read, in either pattern.
-          const truncated = message1.subarray(0, Math.min(cut, DH_LEN - 1));
+          const refusable =
+            material.pattern === E2EE_NOISE_PATTERN_IK ? message1.byteLength : DH_LEN;
+          const truncated = message1.subarray(0, cutSelector % refusable);
           expect(() => responder.readMessage(truncated)).toThrow();
           return responder.status === "destroyed" && isZeroed(injected);
         } finally {
@@ -578,13 +692,80 @@ describe("property: §6.5 erasure is unconditional", () => {
     );
   });
 
+  it("zeroes a LIVE ephemeral when the read of message 2 is fatal", () => {
+    // THE CONFIGURATION §6.5's ERASURE ACTUALLY HAS TO SURVIVE, and the one the
+    // property above cannot reach: the initiator generated its ephemeral when it
+    // wrote message 1, so the watched buffer is `#e.secretKey` — the pair the
+    // handshake is USING — and the abort is a genuine AEAD refusal rather than a
+    // length guard taken before any DH ran. An implementation that erased the
+    // pending slot on a fatal read and forgot the live pair passes every other
+    // property in this group and fails here.
+    //
+    // Any single-byte mutation of message 2 is fatal in both patterns: a flip in
+    // `e` re-rolls `ee` and the payload no longer authenticates, and a flip
+    // anywhere else is inside an AEAD region. The initiator is built inline
+    // rather than through `initiatorOf`, which copies the ephemeral and leaves
+    // the test nothing to watch.
+    fc.assert(
+      fc.property(
+        materialArb,
+        fc.nat(),
+        fc.integer({ min: 1, max: 255 }),
+        (material, byteIndex, mask) => {
+          const injected = Uint8Array.from(material.initiatorEphemeral);
+          const initiator = new E2eeNoiseHandshake({
+            pattern: material.pattern,
+            role: "initiator",
+            prologue: material.prologue,
+            ...(material.pattern === E2EE_NOISE_PATTERN_IK
+              ? {
+                  staticSecretKey: material.initiatorStatic,
+                  remoteStaticPublicKey: x25519.getPublicKey(material.responderStatic),
+                }
+              : {}),
+            testOnlyEphemeralSecretKey: injected,
+          });
+          const responder = responderOf(material);
+          try {
+            responder.readMessage(initiator.writeMessage(material.payload1));
+            // Generated and in use: the buffer moved from the pending slot into
+            // `#e.secretKey` and the handshake is mid-pattern.
+            expect(isZeroed(injected)).toBe(false);
+
+            const message2 = responder.writeMessage(material.payload2);
+            const mutated = Uint8Array.from(message2);
+            const index = byteIndex % mutated.byteLength;
+            mutated[index] = (mutated[index] ?? 0) ^ mask;
+            expect(() => initiator.readMessage(mutated)).toThrow();
+            return initiator.status === "destroyed" && isZeroed(injected);
+          } finally {
+            initiator.destroy();
+            responder.destroy();
+          }
+        },
+      ),
+      { seed: PROPERTY_SEED, numRuns: HANDSHAKE_RUNS },
+    );
+  });
+
   it("extracts the three §6.5 values and exposes nothing else that carries them", () => {
     // §6.5 fixes exactly three extractable values and forbids extracting
     // anything else from handshake state. The property reads EVERY accessor the
     // class publishes after `split()` and asserts that none of them hands back
-    // a session value or any other secret — so an accessor added later that
-    // returned the chaining key, the handshake hash, or a split output fails
-    // here rather than passing review on the strength of its doc comment.
+    // a session value, the handshake hash, or the final chaining key — the three
+    // §6.5 names by name — so an accessor added later fails here rather than
+    // passing review on the strength of its doc comment.
+    //
+    // EACH OF THE THREE IS DETECTED DIFFERENTLY, because they are observable
+    // differently. The `Split()` outputs and the exporter are compared directly.
+    // `h` is captured off the LIVE handshake first and compared against every
+    // accessor read afterwards. `ck_final` is never handed to this test at all,
+    // so it is detected by its consequence: §6.5 defines the exporter as
+    // `HKDF-Expand(ck_final, label, 32)`, so any 32-byte buffer that reproduces
+    // `exporterSecret` under `e2eeNoiseExporterSecret` IS the chaining key,
+    // whatever the accessor returning it is called. Comparing only against the
+    // three returned secrets would miss both `h` and `ck`, since they are the
+    // HKDF inputs rather than its outputs.
     fc.assert(
       fc.property(materialArb, (material) => {
         const initiator = initiatorOf(material);
@@ -592,6 +773,10 @@ describe("property: §6.5 erasure is unconditional", () => {
         try {
           responder.readMessage(initiator.writeMessage(material.payload1));
           initiator.readMessage(responder.writeMessage(material.payload2));
+          // Read while the handshake is live, so the erased answer below is a
+          // change in the buffer rather than an accessor that was always empty.
+          const liveHandshakeHash = initiator.testOnlyHandshakeHash;
+          expect(liveHandshakeHash).toBeDefined();
           const keys = initiator.split();
 
           const secrets = [keys.epochSecretC2N, keys.epochSecretN2C, keys.exporterSecret];
@@ -614,11 +799,17 @@ describe("property: §6.5 erasure is unconditional", () => {
             .map((name) => (initiator as unknown as Record<string, unknown>)[name])
             .filter((value): value is Uint8Array => value instanceof Uint8Array);
           for (const value of readable) {
-            for (const secret of secrets) {
-              expect(equalBytes(value, secret)).toBe(false);
+            for (const forbidden of [...secrets, liveHandshakeHash!]) {
+              expect(equalBytes(value, forbidden)).toBe(false);
+            }
+            if (value.byteLength === E2EE_SECRET_BYTES) {
+              expect(equalBytes(e2eeNoiseExporterSecret(value), keys.exporterSecret)).toBe(false);
             }
           }
-          // The handshake hash is gone with the rest of the symmetric state.
+          // The handshake hash is gone from `h` ITSELF: the accessor reads the
+          // buffer and reports `undefined` because `split()` zeroed it, so this
+          // fails if the symmetric-state erasure in `splitAndExport()` is
+          // dropped — which no other assertion in this package would notice.
           expect(initiator.testOnlyHandshakeHash).toBeUndefined();
           // What survives is public material only, and only where §13.5 needs
           // it: the initiator's own ephemeral public key and, on IK, the
@@ -721,8 +912,9 @@ describe("property: role symmetry and transcript binding", () => {
     // of every `EncryptAndHash`, and that is what makes a channel-id
     // disagreement (§8.4) fatal instead of silent. So the property is stated as
     // non-agreement — the same shape as the mutation and truncation properties
-    // above — and the handshake hash is asserted to move, which is the observable
+    // below — and the handshake hash is asserted to move, which is the observable
     // a constructor that dropped the prologue mix would leave unchanged.
+    let neitherEndRefused = 0;
     fc.assert(
       fc.property(materialArb, prologueArb, (material, otherPrologue) => {
         fc.pre(!equalBytes(material.prologue, otherPrologue));
@@ -743,6 +935,7 @@ describe("property: role symmetry and transcript binding", () => {
           } catch {
             return initiator.status === "destroyed";
           }
+          neitherEndRefused += 1;
           return !sessionKeysEqual(initiator.split(), responder.split());
         } finally {
           initiator.destroy();
@@ -751,6 +944,13 @@ describe("property: role symmetry and transcript binding", () => {
       }),
       { seed: PROPERTY_SEED, numRuns: HANDSHAKE_RUNS },
     );
+    // WHAT ACTUALLY RUNS — see the mutation property below for the full
+    // argument. The NX cleartext read DEFERS the refusal to message 2, whose `s`
+    // token is AEAD-protected under the diverged `h`; it does not admit a
+    // completing run. So the non-agreement branch is the disjunct's insurance
+    // and the refusal is the outcome, and this pins which of the two the
+    // property is really demonstrating.
+    expect(neitherEndRefused).toBe(0);
   });
 
   it("carries the prologue into the handshake hash, and into no other observable", () => {
@@ -784,17 +984,32 @@ describe("property: role symmetry and transcript binding", () => {
     );
   });
 
-  it("binds the IK pre-message static: a different responder static breaks the handshake", () => {
-    // IK's `<- s` pre-message is hashed by BOTH parties before the first
-    // message (Noise §5.3), so an initiator that was advertised a different
-    // node agreement prekey (§5.1, §6.4) cannot complete against this
-    // responder. The property drives the substitution from generated key
-    // material rather than from one pinned wrong key.
+  it("binds the IK pre-message static: both roles hash it, and a substituted one refuses", () => {
+    // IK's `<- s` pre-message is hashed by BOTH parties before the first message
+    // (Noise §5.3). TWO OBLIGATIONS FOLLOW, and they are asserted separately
+    // because the second does not imply the first — a constructor that dropped
+    // the pre-message `MixHash` entirely still refuses a substituted prekey, on
+    // the `es`/`ss` DH outputs disagreeing, so a property that only drove the
+    // substitution would be blind to a genuine Noise §5.3 conformance defect
+    // that changes every IK transcript.
+    //
+    //   1. THE PRE-MESSAGE REACHES `h`, IDENTICALLY AT BOTH ENDS. Before any
+    //      message is written, `h` is the protocol name, the §8.4 prologue, and
+    //      the pre-message static, and nothing else — so an honest initiator and
+    //      its responder must already agree (a `MixHash` performed by one role
+    //      only fails here), and an initiator advertised a DIFFERENT prekey must
+    //      already differ (a `MixHash` performed by neither fails here).
+    //   2. THE SUBSTITUTION IS REFUSED. An initiator advertised a different node
+    //      agreement prekey (§5.1, §6.4) cannot complete against this responder.
+    //
+    // The substitution is drawn from generated key material rather than from one
+    // pinned wrong key.
     fc.assert(
       fc.property(materialArb, secretKeyArb, (material, otherStatic) => {
         fc.pre(!equalBytes(material.responderStatic, otherStatic));
         const ikMaterial: HandshakeMaterial = { ...material, pattern: E2EE_NOISE_PATTERN_IK };
-        const initiator = new E2eeNoiseHandshake({
+        const honest = initiatorOf(ikMaterial);
+        const substituted = new E2eeNoiseHandshake({
           pattern: E2EE_NOISE_PATTERN_IK,
           role: "initiator",
           prologue: ikMaterial.prologue,
@@ -805,11 +1020,21 @@ describe("property: role symmetry and transcript binding", () => {
         });
         const responder = responderOf(ikMaterial);
         try {
-          const message1 = initiator.writeMessage(ikMaterial.payload1);
+          const honestHash = honest.testOnlyHandshakeHash;
+          const responderHash = responder.testOnlyHandshakeHash;
+          const substitutedHash = substituted.testOnlyHandshakeHash;
+          expect(honestHash).toBeDefined();
+          expect(responderHash).toBeDefined();
+          expect(substitutedHash).toBeDefined();
+          expect(equalBytes(honestHash!, responderHash!)).toBe(true);
+          expect(equalBytes(honestHash!, substitutedHash!)).toBe(false);
+
+          const message1 = substituted.writeMessage(ikMaterial.payload1);
           expect(() => responder.readMessage(message1)).toThrow();
           return responder.status === "destroyed";
         } finally {
-          initiator.destroy();
+          honest.destroy();
+          substituted.destroy();
           responder.destroy();
         }
       }),
@@ -832,6 +1057,18 @@ describe("property: mutation and truncation never produce an agreeing session", 
     // session keys. That is the claim the whole §9 record layer rests on, and
     // it is what a `DecryptAndHash` that forgot to mix the ciphertext, or an
     // AAD that dropped `h`, would break.
+    //
+    // AND WHAT ACTUALLY RUNS IS THE REFUSAL, on every generated case, which the
+    // counter below pins rather than leaves for a reader to guess. The NX
+    // cleartext read does not admit a completing run: it merely DEFERS the
+    // refusal by one message, because the divergence it causes lands on message
+    // 2, whose `s` token is AEAD-protected under the diverged `h`. So the
+    // disjunct is retained — it is the only form true for both patterns without
+    // assuming AEAD unforgeability, and this suite tests a state machine rather
+    // than a primitive — while the counter states plainly that the weaker branch
+    // is insurance rather than the outcome. A change that made it reachable is a
+    // change in what this module guarantees, and it fails here.
+    let neitherEndRefused = 0;
     fc.assert(
       fc.property(
         materialArb,
@@ -867,6 +1104,7 @@ describe("property: mutation and truncation never produce an agreeing session", 
             // Both ends processed the mutated transcript without refusing it,
             // which the NX cleartext payload makes possible. They MUST NOT
             // agree.
+            neitherEndRefused += 1;
             return !sessionKeysEqual(initiator.split(), responder.split());
           } finally {
             initiator.destroy();
@@ -876,14 +1114,18 @@ describe("property: mutation and truncation never produce an agreeing session", 
       ),
       { seed: PROPERTY_SEED, numRuns: HANDSHAKE_RUNS },
     );
+    expect(neitherEndRefused).toBe(0);
   });
 
   it("refuses, or diverges, for any truncation of either message", () => {
     // §14.1's truncation obligation, stated the same way: a truncated message
     // must never yield agreement. `take()` refuses a message the pattern runs
-    // out of bytes for, and the AEAD refuses one whose ciphertext was cut — but
-    // an NX message 1 truncated inside its cleartext payload is READ, and the
-    // divergence it causes is what must then stop the session.
+    // out of bytes for, and the AEAD refuses one whose ciphertext was cut — and
+    // an NX message 1 truncated inside its cleartext payload is READ, which
+    // defers the refusal to message 2 rather than admitting a completing run.
+    // The counter after the assert is the same one the mutation property carries
+    // and it says the same thing: the refusal is what runs.
+    let neitherEndRefused = 0;
     fc.assert(
       fc.property(
         materialArb,
@@ -911,6 +1153,7 @@ describe("property: mutation and truncation never produce an agreeing session", 
               expect(initiator.status).toBe("destroyed");
               return true;
             }
+            neitherEndRefused += 1;
             return !sessionKeysEqual(initiator.split(), responder.split());
           } finally {
             initiator.destroy();
@@ -920,6 +1163,7 @@ describe("property: mutation and truncation never produce an agreeing session", 
       ),
       { seed: PROPERTY_SEED, numRuns: HANDSHAKE_RUNS },
     );
+    expect(neitherEndRefused).toBe(0);
   });
 
   it("refuses a message beyond the Noise bound rather than reading a prefix of it", () => {
@@ -947,7 +1191,7 @@ describe("property: mutation and truncation never produce an agreeing session", 
           responder.destroy();
         }
       }),
-      { seed: PROPERTY_SEED, numRuns: 24 },
+      { seed: PROPERTY_SEED, numRuns: BOUNDS_RUNS },
     );
   });
 
@@ -987,7 +1231,7 @@ describe("property: mutation and truncation never produce an agreeing session", 
           }
         },
       ),
-      { seed: PROPERTY_SEED, numRuns: 24 },
+      { seed: PROPERTY_SEED, numRuns: BOUNDS_RUNS },
     );
   });
 });
@@ -1165,6 +1409,29 @@ describe("property: the §6.5 exporter is a deterministic, confined function of 
   });
 });
 
+// WHAT THIS GROUP DISCHARGES OF §14.1's "NONCE-PROGRESSION PROPERTIES", AND
+// WHAT IT DOES NOT — stated here rather than left for an auditor to infer from
+// three properties that all take a `bigint`.
+//
+// It covers the ENCODING and its injectivity, as a pure function. It does NOT
+// observe a counter advancing on an AEAD operation or resetting on `MixKey()`,
+// and no property over this module's public surface can: every AEAD invocation
+// in both §3.4 patterns runs at counter 0, because each is preceded by a
+// `MixKey()` that resets it, and both parties perform the same operations in the
+// same order — so an implementation whose `InitializeKey` forgot Noise §5.1's
+// reset stays in lockstep with its peer and completes every handshake. The
+// counters that DO progress are pinned elsewhere, and an auditor looking for
+// them should look there rather than here:
+//
+//   - Noise §5.1's reset, and the counter each handshake AEAD call actually
+//     runs at, are pinned by the §16.3 F15 official vectors in
+//     `relayE2eeNoise.test.ts` — byte-exact transcripts, which a missing reset
+//     changes.
+//   - The §9.3/§9.4 RECORD-layer counter and epoch progression is a different
+//     nonce (`epoch ‖ counter`, big-endian) in a different module, outside the
+//     §14.1 audit target, and is pinned by `relayE2eeSession.test.ts` and
+//     `relayE2eeWire.test.ts`.
+
 describe("property: the Noise §5.1 cipher nonce", () => {
   /**
    * The encoding stated independently of the module: 32 bits of zeros, then
@@ -1178,12 +1445,10 @@ describe("property: the Noise §5.1 cipher nonce", () => {
   };
 
   it("encodes every counter as 32 zero bits followed by little-endian n", () => {
-    // §14.1's nonce-progression obligation. It matters more here than the
-    // shape of the assertion suggests: EVERY AEAD invocation in both patterns
-    // uses counter 0, because each is preceded by a `MixKey()` that resets the
-    // counter, so no handshake transcript — official vectors included — can
-    // distinguish this encoding from a wrong one. Nothing but a direct test
-    // pins it.
+    // The encoding half of §14.1's nonce obligation, and the half that has
+    // nowhere else to go: EVERY AEAD invocation in both patterns uses counter 0,
+    // so no handshake transcript — official vectors included — can distinguish
+    // this encoding from a wrong one. Nothing but a direct test pins it.
     fc.assert(
       fc.property(fc.bigInt({ min: 0n, max: 0xffff_ffff_ffff_fffen }), (counter) => {
         const nonce = e2eeNoiseCipherNonce(counter);
