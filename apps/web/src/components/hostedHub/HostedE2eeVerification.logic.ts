@@ -20,11 +20,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // THE NUMBERS ARE QUOTED, NEVER WRITTEN
 // ─────────────────────────────────────────────────────────────────────────────
-// Both the splitter and the caption read `E2EE_WEB_SAS_CHARS` and
-// `E2EE_WEB_SAS_MIN_DISPLAYED_BITS`, exactly as `apps/mobile`'s §13.4 caption
-// reads the safety-number constants. A §13.5 format change therefore breaks the
-// split and rewrites the sentence in the same edit; it can never leave a stale
-// claim about a length behind.
+// The splitter, the caption, and the displayed-entropy figure all read
+// `E2EE_WEB_SAS_CHARS` — and, for the entropy, `E2EE_CROCKFORD_ALPHABET` —
+// exactly as `apps/mobile`'s §13.4 caption reads the safety-number constants. A
+// §13.5 format change therefore breaks the split and rewrites the sentence in
+// the same edit; it can never leave a stale claim about a length behind. The
+// test reads this module's SOURCE as well as its values, because a runtime
+// substring check cannot tell an interpolated constant from a hardcoded digit
+// that happens to match it.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // WHAT THE COPY MAY NOT SAY
@@ -33,9 +36,9 @@
 // an active interposer", "MUST NOT present the `WebSAS` as an operator-proof or
 // E2EE-verification guarantee", and "MUST NOT describe a match as proof that no
 // interposer is present". §17.5 adds that its entropy floor "is an online bound
-// rather than an offline one", so the caption states the floor together with the
-// two things that bound it — `T_HANDSHAKE` and §8.1's one attempt per channel —
-// rather than as a work factor.
+// rather than an offline one", so the caption states the shipped displayed
+// entropy together with the two things that bound it — `T_HANDSHAKE` and §8.1's
+// one attempt per channel — rather than as a work factor.
 //
 // The advisory mirrors the sentence `apps/server`'s CLI already prints beside
 // the node-side code, so the two halves of the compare-out-of-band flow read as
@@ -45,11 +48,7 @@
 // tell that denial from a claim. This module makes the same denial without the
 // tokens, so no future edit can strand one of them in the affirmative.
 
-import {
-  E2EE_CROCKFORD_ALPHABET,
-  E2EE_WEB_SAS_CHARS,
-  E2EE_WEB_SAS_MIN_DISPLAYED_BITS,
-} from "@ryco/shared/relayE2eeConstants";
+import { E2EE_CROCKFORD_ALPHABET, E2EE_WEB_SAS_CHARS } from "@ryco/shared/relayE2eeConstants";
 
 /**
  * Split §13.5's rendered value into its display groups, in derivation order.
@@ -78,38 +77,82 @@ export function e2eeWebSasGroups(display: string): ReadonlyArray<string> {
   return groups;
 }
 
-/** True only for a value in the exact §13.5 display format. */
-export function isE2eeWebSasDisplay(display: string): boolean {
-  return e2eeWebSasGroups(display).length === E2EE_WEB_SAS_CHARS.groups;
-}
+/**
+ * The entropy the SHIPPED format displays, derived rather than written.
+ *
+ * §13.5 renders `out` "in five-bit groups; each group indexes
+ * `E2EE_CROCKFORD_ALPHABET`", so one character carries exactly
+ * `log2(alphabet)` bits and the displayed total is that times
+ * `E2EE_WEB_SAS_CHARS.chars`. Both inputs are shipped constants, so a §13.5
+ * format change moves this number in the same edit.
+ *
+ * IT IS THE SHIPPED VALUE AND NOT `E2EE_WEB_SAS_MIN_DISPLAYED_BITS`, and the
+ * difference is the whole reason it exists. The floor is where "a
+ * well-resourced attacker becomes relevant" (§13.5's non-normative note) and the
+ * shipped format sits about a thousandfold above it; a caption quoting the floor
+ * told an owner their one available check cost an attacker a thousandth of what
+ * it does, which is a reason to skip the comparison rather than to make it.
+ * Understating is the safe direction for a CLAIM about who can read the payload;
+ * it is not the safe direction for an instruction about whether to perform a
+ * check. `HostedE2eeVerification.logic.test.ts` pins that this stays at or above
+ * the floor (§3.2.1 S11).
+ */
+export const E2EE_WEB_SAS_DISPLAYED_BITS =
+  E2EE_WEB_SAS_CHARS.chars * Math.log2(E2EE_CROCKFORD_ALPHABET.length);
 
 /**
  * What the surface says about the string itself — format, and what its entropy
- * floor does and does not buy.
+ * does and does not buy.
  *
- * Every number is quoted from `relayE2eeConstants.ts`. The floor is stated as a
- * floor ("at least"), because the shipped format sits about a thousandfold above
- * it (§13.5's non-normative note), and it is stated together with the window
- * that justifies it, because §17.5 is explicit that it "is justified by that
- * window and not by an offline work factor".
+ * Every number is quoted from `relayE2eeConstants.ts`. It is stated together
+ * with the two bounds that justify it, because §17.5 is explicit that the
+ * entropy here "is justified by that window and not by an offline work factor"
+ * and §13.5 forbids using the derivation "to strengthen the claims of §2.4 or
+ * §17.5".
  */
 export const E2EE_WEB_SAS_CAPTION =
   `${E2EE_WEB_SAS_CHARS.chars} characters, in ${E2EE_WEB_SAS_CHARS.groups} groups of ` +
   `${E2EE_WEB_SAS_CHARS.charsPerGroup}. The length and the grouping are the only check there is, ` +
-  `so read all ${E2EE_WEB_SAS_CHARS.chars} in order. They carry at least ` +
-  `${E2EE_WEB_SAS_MIN_DISPLAYED_BITS} bits, and that floor holds only because a handshake is ` +
+  `so read all ${E2EE_WEB_SAS_CHARS.chars} in order. They carry ` +
+  `${E2EE_WEB_SAS_DISPLAYED_BITS} bits, and that number holds only because a handshake is ` +
   "bounded in time and each channel gets exactly one attempt — it is not an amount of work an " +
   "attacker has to do offline.";
 
 /**
  * §13.5's advisory-only disclosure duty, in the words the specification bounds
  * it to: what the comparison catches, and what it cannot protect against.
+ *
+ * IT IS ALSO WHERE THE POINTER AT THE COMPARISON LIVES. §2.2's web row denies
+ * the active-Hub column for two reasons, and the one that needs no substituted
+ * bundle — "the Hub can originate an unsigned NX session" — is the one this
+ * comparison is against. So the middle clause names the party the match rules
+ * out by construction: an interposer who terminates the channel in the node's
+ * place WITHOUT also serving this page. On this tier the Hub always serves the
+ * page, which is exactly why the same sentence ends by denying it there.
  */
 export const E2EE_WEB_SAS_ADVISORY =
   "Compare this code with the one your node's CLI shows for this session. A match catches " +
-  "accidental wrong-node routing and some network interposition while the loaded code is honest; " +
-  "it cannot protect against the Hub operator, who serves that code, and a match does not rule " +
-  "out someone sitting in the middle.";
+  "accidental wrong-node routing and some network interposition — anyone standing in for your " +
+  "node who is not also serving this page — while the loaded code is honest; it cannot protect " +
+  "against the Hub operator, who serves that code, and a match does not rule out someone sitting " +
+  "in the middle.";
+
+/**
+ * What the surface says when the channel locked but no §13.5 code reached it.
+ *
+ * §13.5's duty is a DISPLAY duty, and the derivation is allowed to fail without
+ * costing the channel: `publishWebVerificationCode` in
+ * `packages/client-runtime/src/relay/relayE2eeInitiator.ts` returns silently on
+ * a derivation failure, and {@link hostedE2eeVerificationView} returns `null` for
+ * anything that is not the exact display format. Rendering nothing in that state
+ * failed OPEN on the duty: the surface kept the strongest claim this tier can
+ * make while the one check behind it had quietly gone missing, and an owner
+ * looking for the value could not tell "this build shows none" from "this
+ * session produced none". The absence gets a sentence instead.
+ */
+export const E2EE_WEB_SAS_UNAVAILABLE =
+  "No session code is available for this channel, so there is nothing here to compare against " +
+  "your node's CLI.";
 
 /**
  * Everything a surface needs to render §13.5, and nothing it can render without.

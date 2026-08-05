@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import {
   E2EE_CROCKFORD_ALPHABET,
   E2EE_WEB_SAS_CHARS,
@@ -8,19 +11,38 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   e2eeWebSasGroups,
   hostedE2eeVerificationView,
-  isE2eeWebSasDisplay,
   E2EE_WEB_SAS_ADVISORY,
   E2EE_WEB_SAS_CAPTION,
+  E2EE_WEB_SAS_DISPLAYED_BITS,
+  E2EE_WEB_SAS_UNAVAILABLE,
   type HostedE2eeVerificationView,
 } from "./HostedE2eeVerification.logic";
+
+const LOGIC_SOURCE = readFileSync(
+  fileURLToPath(new URL("./HostedE2eeVerification.logic.ts", import.meta.url)),
+  "utf8",
+);
 
 /** A well-formed §13.5 rendering, built from the constants rather than typed. */
 const VALID = ["ABCD", "EFGH"].join(E2EE_WEB_SAS_CHARS.separator);
 
+/**
+ * Format acceptance as the RENDERER decides it.
+ *
+ * Asserted through the two functions the surface actually calls — the splitter
+ * and the view builder — rather than through a boolean wrapper. The wrapper this
+ * replaced had no production caller at all, so a change that broke validation
+ * for the renderer while leaving the wrapper correct would still have been
+ * reported green by every line below.
+ */
+function accepted(display: string): boolean {
+  return e2eeWebSasGroups(display).length > 0 && hostedE2eeVerificationView(display) !== null;
+}
+
 describe("§13.5 the display format is the checksum", () => {
   it("accepts the exact format and returns its groups in order", () => {
     expect(e2eeWebSasGroups(VALID)).toEqual(["ABCD", "EFGH"]);
-    expect(isE2eeWebSasDisplay(VALID)).toBe(true);
+    expect(accepted(VALID)).toBe(true);
   });
 
   it("refuses everything that is not the exact format", () => {
@@ -45,24 +67,18 @@ describe("§13.5 the display format is the checksum", () => {
       "ABCD-EFGH ",
     ]) {
       expect(e2eeWebSasGroups(rejected), JSON.stringify(rejected)).toEqual([]);
-      expect(isE2eeWebSasDisplay(rejected), JSON.stringify(rejected)).toBe(false);
+      expect(accepted(rejected), JSON.stringify(rejected)).toBe(false);
     }
   });
 
   it("accepts every character of the alphabet and nothing outside it", () => {
     for (const character of E2EE_CROCKFORD_ALPHABET) {
       const filled = character.repeat(E2EE_WEB_SAS_CHARS.charsPerGroup);
-      expect(
-        isE2eeWebSasDisplay([filled, filled].join(E2EE_WEB_SAS_CHARS.separator)),
-        character,
-      ).toBe(true);
+      expect(accepted([filled, filled].join(E2EE_WEB_SAS_CHARS.separator)), character).toBe(true);
     }
     for (const character of "IiLlOoUu-_+/= ") {
       const filled = character.repeat(E2EE_WEB_SAS_CHARS.charsPerGroup);
-      expect(
-        isE2eeWebSasDisplay([filled, filled].join(E2EE_WEB_SAS_CHARS.separator)),
-        character,
-      ).toBe(false);
+      expect(accepted([filled, filled].join(E2EE_WEB_SAS_CHARS.separator)), character).toBe(false);
     }
   });
 
@@ -80,23 +96,77 @@ describe("§13.5 the display format is the checksum", () => {
 });
 
 describe("the caption quotes the constants", () => {
-  it("carries the format numbers from `relayE2eeConstants`, not literals", () => {
-    // A §13.5 length change rewrites this sentence in the same edit, which is
-    // the whole reason the caption is assembled rather than written.
-    expect(E2EE_WEB_SAS_CAPTION).toContain(String(E2EE_WEB_SAS_CHARS.chars));
-    expect(E2EE_WEB_SAS_CAPTION).toContain(String(E2EE_WEB_SAS_CHARS.groups));
-    expect(E2EE_WEB_SAS_CAPTION).toContain(String(E2EE_WEB_SAS_CHARS.charsPerGroup));
-    expect(E2EE_WEB_SAS_CAPTION).toContain(String(E2EE_WEB_SAS_MIN_DISPLAYED_BITS));
+  it("puts each format number in the clause that number belongs to", () => {
+    // Bare digit checks cannot tell a correct sentence from a scrambled one: a
+    // caption reading "2 characters, in 4 groups of 8 … read all 2 in order"
+    // contains every digit the shipped one does, and tells the owner to compare
+    // two characters of an eight-character code. The ASSEMBLED phrases are what
+    // pin the sentence, and §13.5 makes the length and the grouping the
+    // checksum, so this caption is the owner's only instruction about what to
+    // compare.
+    expect(E2EE_WEB_SAS_CAPTION).toContain(`${E2EE_WEB_SAS_CHARS.chars} characters`);
+    expect(E2EE_WEB_SAS_CAPTION).toContain(
+      `${E2EE_WEB_SAS_CHARS.groups} groups of ${E2EE_WEB_SAS_CHARS.charsPerGroup}`,
+    );
+    expect(E2EE_WEB_SAS_CAPTION).toContain(`read all ${E2EE_WEB_SAS_CHARS.chars} in order`);
+    expect(E2EE_WEB_SAS_CAPTION).toContain(`carry ${E2EE_WEB_SAS_DISPLAYED_BITS} bits`);
   });
 
-  it("states the entropy floor as a floor, bounded by the handshake window", () => {
-    // §17.5: the floor "is justified by that window and not by an offline work
+  it("assembles those numbers rather than typing them", () => {
+    // The runtime check above passes for a fully hardcoded string that happens
+    // to carry the same digits, which defeats the property the caption is
+    // assembled FOR: "a §13.5 format change rewrites this sentence in the same
+    // edit". Only the source can show that, so the source is what is read —
+    // the same belt-and-braces the connection controls' call-site test uses.
+    const caption = LOGIC_SOURCE.match(/export const E2EE_WEB_SAS_CAPTION =\n([\s\S]*?);\n/u)?.[1];
+    expect(caption, "the caption declaration moved — this test is testing nothing").toBeDefined();
+    expect(caption).toContain("${E2EE_WEB_SAS_CHARS.chars}");
+    expect(caption).toContain("${E2EE_WEB_SAS_CHARS.groups}");
+    expect(caption).toContain("${E2EE_WEB_SAS_CHARS.charsPerGroup}");
+    expect(caption).toContain("${E2EE_WEB_SAS_DISPLAYED_BITS}");
+    // …and no digit is written into the sentence directly. The interpolations
+    // are removed first, because the constant names carry digits of their own.
+    expect(caption!.replaceAll(/\$\{[^}]*\}/gu, "")).not.toMatch(/\d/u);
+  });
+
+  it("states the entropy the shipped format displays, bounded by the handshake window", () => {
+    // §13.5's non-normative note: at the shipped `E2EE_WEB_SAS_CHARS` the search
+    // is "~2^40 expected trials … far beyond a large GPU fleet", while the
+    // `E2EE_WEB_SAS_MIN_DISPLAYED_BITS` floor is "where a well-resourced
+    // attacker becomes relevant". Quoting the floor understated the shipped
+    // check about a thousandfold — a reason for an owner to skip the one
+    // comparison they have.
+    expect(E2EE_WEB_SAS_DISPLAYED_BITS).toBe(
+      E2EE_WEB_SAS_CHARS.chars * Math.log2(E2EE_CROCKFORD_ALPHABET.length),
+    );
+    expect(Number.isInteger(E2EE_WEB_SAS_DISPLAYED_BITS)).toBe(true);
+    // §3.2.1 S11's relationship, kept where it belongs: an invariant over the
+    // constants rather than a number in a sentence an owner has to act on.
+    expect(E2EE_WEB_SAS_DISPLAYED_BITS).toBeGreaterThanOrEqual(E2EE_WEB_SAS_MIN_DISPLAYED_BITS);
+
+    // §17.5: the entropy "is justified by that window and not by an offline work
     // factor", and §13.5 forbids using the derivation "to strengthen the claims
-    // of §2.4 or §17.5".
+    // of §2.4 or §17.5". Both bounds and the denial stay attached to the number.
     const lower = E2EE_WEB_SAS_CAPTION.toLowerCase();
-    expect(lower).toContain("at least");
+    expect(lower).toContain("bounded in time");
     expect(lower).toContain("one attempt");
     expect(lower).toContain("not an amount of work an attacker has to do offline");
+  });
+});
+
+describe("§13.5 the absence of a code is a state with words", () => {
+  it("says the channel has nothing to compare, rather than saying nothing", () => {
+    // §13.5's duty is a DISPLAY duty and the derivation is allowed to fail
+    // without costing the channel (`publishWebVerificationCode` returns silently
+    // on a derivation failure). Rendering nothing there left the strongest claim
+    // this tier can make standing with its only check silently missing.
+    const lower = E2EE_WEB_SAS_UNAVAILABLE.toLowerCase();
+    expect(lower).toContain("no session code is available");
+    expect(lower).toContain("nothing here to compare");
+    // It is an absence, not a fallback report: §12.2's `legacy` label is the one
+    // sentence allowed to say the channel went to plaintext.
+    expect(lower).not.toContain("plaintext");
+    expect(lower).not.toContain("legacy");
   });
 });
 
@@ -110,6 +180,15 @@ describe("§13.5 the advisory cannot be left out", () => {
     expect(lower).toContain("while the loaded code is honest");
     expect(lower).toContain("cannot protect against the hub operator, who serves that code");
     expect(lower).toContain("does not rule out someone sitting in the middle");
+    // §2.2's web row denies the active-Hub column twice, and the half that needs
+    // no substituted bundle — "the Hub can originate an unsigned NX session" —
+    // is what this comparison is FOR. The clause names the party a match rules
+    // out by construction, which is also why the same sentence has to deny the
+    // Hub: on this tier the Hub always serves the page.
+    expect(lower).toContain("anyone standing in for your node who is not also serving this page");
+    // It is the pointer at the ceremony, and it is here rather than in the trust
+    // notice because this value renders only where the characters do.
+    expect(lower).toContain("compare this code with the one your node's cli shows");
   });
 
   it("comes back with the code, in one value, in every view the splitter accepts", () => {

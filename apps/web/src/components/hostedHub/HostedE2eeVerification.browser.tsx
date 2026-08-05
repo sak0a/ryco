@@ -13,15 +13,21 @@ import {
   applyWebE2eeVerificationCode,
 } from "../../../test/hostedConnectionVocabulary";
 import {
+  beginWebE2eeChannelAttempt,
   publishWebE2eeVerificationCode,
   resetWebE2eeSession,
   webE2eeSessionState,
 } from "../../hostedHub/e2eeSession";
+import { useWebE2eeChannelStatus } from "../../hostedHub/useWebE2eeSession";
 import {
   buildDiagnosticsBundle,
   serializeDiagnosticsBundle,
 } from "../settings/DiagnosticsPanel.logic";
-import { E2EE_WEB_SAS_ADVISORY, E2EE_WEB_SAS_CAPTION } from "./HostedE2eeVerification.logic";
+import {
+  E2EE_WEB_SAS_ADVISORY,
+  E2EE_WEB_SAS_CAPTION,
+  E2EE_WEB_SAS_UNAVAILABLE,
+} from "./HostedE2eeVerification.logic";
 import { HostedE2eeVerification } from "./HostedE2eeVerification";
 
 /** Two well-formed §13.5 renderings, built from the constants rather than typed. */
@@ -42,6 +48,30 @@ const section = () =>
   document.querySelector<HTMLElement>('[data-testid="hosted-e2ee-verification"]');
 const codeElement = () =>
   document.querySelector<HTMLElement>('[data-testid="hosted-e2ee-verification-code"]');
+
+/**
+ * A sibling that draws the live §4.4 projection, so a DISAPPEARANCE can be
+ * asserted without polling for it.
+ *
+ * `await vi.waitFor(() => expect(section()).toBeNull())` against a DOM that is
+ * already empty resolves on its first synchronous attempt — before React has
+ * re-rendered anything — so it passes whether or not the surface's lock gate
+ * exists. Mounted in the same tree, this probe changes in the SAME commit the
+ * gate acts in: waiting for the probe to report the new state and then reading
+ * the section synchronously observes exactly the render the gate decided.
+ */
+function ChannelStatusProbe() {
+  return <span data-testid="channel-status-probe">{useWebE2eeChannelStatus()}</span>;
+}
+
+/** Wait for the probe to report `status`, then hand back that same commit. */
+async function settledAt(status: string): Promise<void> {
+  await vi.waitFor(() => {
+    expect(
+      document.querySelector<HTMLElement>('[data-testid="channel-status-probe"]')?.textContent,
+    ).toBe(status);
+  });
+}
 
 describe("§13.5 the WebSAS is legible enough to compare", () => {
   it.each([
@@ -129,34 +159,89 @@ describe("§13.5 the code belongs to one session", () => {
     });
   });
 
-  it("draws nothing until the channel has actually locked", async () => {
+  it("stops drawing the code the moment the channel is no longer locked", async () => {
     // The §4.4 machine publishes §13.5's code from INSIDE its own `e2ee` lock,
     // so the projection is still `negotiating` at that instant. Drawing then
     // would show a comparison value for a channel this surface cannot yet say
-    // is encrypted.
-    resetWebE2eeSession();
-    mounted = await render(<HostedE2eeVerification />);
-    expect(section()).toBeNull();
+    // is encrypted — and this gate is the only thing that stops it.
+    //
+    // DRIVEN FROM A DRAWN SECTION TOWARDS AN EMPTY ONE, because that is the
+    // direction in which the gate changes the DOM. Started from an empty one,
+    // every assertion below holds before React renders at all, and deleting the
+    // gate costs nothing.
+    applyWebE2eeVerificationCode(FIRST_CODE);
+    mounted = await render(
+      <>
+        <ChannelStatusProbe />
+        <HostedE2eeVerification />
+      </>,
+    );
+    await settledAt("web-unsigned");
+    expect(codeElement()!.textContent).toBe(FIRST_CODE);
 
-    applyWebE2eeChannelStatus("negotiating");
-    publishWebE2eeVerificationCode(FIRST_CODE);
-    // The projection is holding it — so the absence below is the surface's
+    // A fresh channel begins and publishes its code from inside the lock, in the
+    // order `resolveWebRelayE2eeProvider` drives: status `negotiating`, code
+    // held. The projection IS holding it, so the absence is the surface's
     // decision and not a missing value.
+    beginWebE2eeChannelAttempt();
+    publishWebE2eeVerificationCode(SECOND_CODE);
     expect(webE2eeSessionState()).toEqual({
       status: "negotiating",
-      verificationCode: FIRST_CODE,
+      verificationCode: SECOND_CODE,
     });
-    await vi.waitFor(() => {
-      expect(section()).toBeNull();
-    });
+    await settledAt("negotiating");
+    expect(section(), "the code is drawn for a channel that has not locked").toBeNull();
+    expect(document.body.textContent).not.toContain(SECOND_CODE);
 
     // …and a fallen-back channel never shows one either: §12.2 forbids any E2EE
     // claim for it, and there is no channel to compare against.
+    applyWebE2eeVerificationCode(FIRST_CODE);
+    await settledAt("web-unsigned");
+    expect(section()).not.toBeNull();
     applyWebE2eeChannelStatus("legacy");
-    await vi.waitFor(() => {
-      expect(section()).toBeNull();
-    });
+    await settledAt("legacy");
+    expect(section(), "the code survived a §12.2 fallback").toBeNull();
     expect(webE2eeSessionState().verificationCode).toBeNull();
+  });
+});
+
+describe("§13.5 a locked channel with no code says so", () => {
+  it("draws the absence rather than nothing when the derivation produced none", async () => {
+    // §13.5's duty is a DISPLAY duty and the derivation is allowed to fail
+    // without costing the channel: `publishWebVerificationCode` returns silently
+    // on a derivation failure, and the view refuses anything that is not the
+    // exact display format. Rendering `null` there left the strongest claim this
+    // tier can make standing with its only check silently gone.
+    applyWebE2eeChannelStatus("web-unsigned");
+    mounted = await render(
+      <>
+        <ChannelStatusProbe />
+        <HostedE2eeVerification />
+      </>,
+    );
+    await settledAt("web-unsigned");
+
+    const drawn = section();
+    expect(drawn, "a locked channel with no code drew nothing at all").not.toBeNull();
+    expect(drawn!.getAttribute("data-code")).toBe("absent");
+    expect(drawn!.textContent).toContain(E2EE_WEB_SAS_UNAVAILABLE);
+    expect(codeElement()).toBeNull();
+
+    // A value the §13.5 splitter refuses is the same state: half a comparison is
+    // worse than none, and it may not be drawn as a code.
+    applyWebE2eeVerificationCode("abcd-efgh");
+    await vi.waitFor(() => {
+      expect(section()!.getAttribute("data-code")).toBe("absent");
+    });
+    expect(document.body.textContent).not.toContain("abcd-efgh");
+
+    // …and a conforming code replaces the sentence with the characters.
+    applyWebE2eeVerificationCode(FIRST_CODE);
+    await vi.waitFor(() => {
+      expect(section()!.getAttribute("data-code")).toBe("present");
+    });
+    expect(codeElement()!.textContent).toBe(FIRST_CODE);
+    expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_UNAVAILABLE);
   });
 });
 

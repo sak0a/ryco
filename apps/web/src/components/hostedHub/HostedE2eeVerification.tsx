@@ -2,7 +2,10 @@ import {
   useWebE2eeChannelStatus,
   useWebE2eeVerificationCode,
 } from "../../hostedHub/useWebE2eeSession";
-import { hostedE2eeVerificationView } from "./HostedE2eeVerification.logic";
+import {
+  E2EE_WEB_SAS_UNAVAILABLE,
+  hostedE2eeVerificationView,
+} from "./HostedE2eeVerification.logic";
 
 /**
  * docs/relay-e2ee-protocol.md §13.5's `WebSAS` for the active session.
@@ -19,6 +22,14 @@ import { hostedE2eeVerificationView } from "./HostedE2eeVerification.logic";
  * never see. It renders in the same view as the characters, every time, and it
  * comes out of the same value they do ({@link hostedE2eeVerificationView}).
  *
+ * THE ABSENCE OF A CODE IS ALSO A STATE THIS DRAWS. §13.5's duty is a display
+ * duty and the derivation may fail without costing the channel, so a locked
+ * `web-unsigned` channel can reach this surface holding nothing to compare.
+ * Rendering `null` there kept the strongest claim this tier can make while the
+ * only check behind it had silently gone missing; the sentence says so instead.
+ * `null` remains the answer in every state that is not `web-unsigned`, because
+ * there the channel has made no claim to qualify.
+ *
  * The string is display state and stays that way: it is read from the in-memory
  * projection on every render and written nowhere. §13.5 — "never logged, never
  * persisted, never sent to analytics" — so there is no copy button, no `title`
@@ -27,11 +38,35 @@ import { hostedE2eeVerificationView } from "./HostedE2eeVerification.logic";
 export function HostedE2eeVerification() {
   const status = useWebE2eeChannelStatus();
   const code = useWebE2eeVerificationCode();
-  const view = status === "web-unsigned" ? hostedE2eeVerificationView(code) : null;
-  if (!view) return null;
+  if (status !== "web-unsigned") return null;
+  const view = hostedE2eeVerificationView(code);
+
+  if (!view) {
+    return (
+      <section
+        aria-label="Session code"
+        data-testid="hosted-e2ee-verification"
+        data-code="absent"
+        className="space-y-2"
+      >
+        <p className="text-xs font-medium">Session code</p>
+        <p
+          data-testid="hosted-e2ee-verification-unavailable"
+          className="text-[11px] leading-relaxed text-muted-foreground"
+        >
+          {E2EE_WEB_SAS_UNAVAILABLE}
+        </p>
+      </section>
+    );
+  }
 
   return (
-    <section aria-label="Session code" data-testid="hosted-e2ee-verification" className="space-y-2">
+    <section
+      aria-label="Session code"
+      data-testid="hosted-e2ee-verification"
+      data-code="present"
+      className="space-y-2"
+    >
       <p className="text-xs font-medium">Session code</p>
       <p
         data-testid="hosted-e2ee-verification-code"

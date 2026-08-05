@@ -33,6 +33,17 @@
 //    durable, cross-session, or Hub-resistant" — and §17.5 adds that the web
 //    latch and the durable native latch "MUST NOT be described in the same
 //    terms". The copy says the opposite of durable, because that is what is true.
+// 4. **§2.2's web row denies the active-Hub column TWICE**, and the copy owes
+//    both: "the Hub can originate an unsigned NX session **and** controls the
+//    served code". The second needs a substituted bundle; the FIRST DOES NOT.
+//    §8.10's NX rows are the structural fact — client→node is "never
+//    authenticated at the Noise level … a Hub can originate an NX session", and
+//    node→client encrypts "to an **anonymous ephemeral initiator** — any active
+//    party, including the Hub, could be that initiator" — and this tier holds no
+//    pin of any kind (§6.3, §13.1, §2.3's web bullet) with which to tell the two
+//    apart. Copy that named only the served-code case left honest served code as
+//    the sole stated condition, so a reader with no reason to doubt the bundle
+//    concluded the Hub was outside the channel. It is not.
 //
 // `HostedRelayTrustNotice.logic.test.ts` scans every string here for the phrases
 // those rules forbid. The scan is a bare substring match and therefore cannot
@@ -40,6 +51,20 @@
 // at all — including in the negative. "Never operator-proof" is written as
 // "cannot protect against the Hub operator", which is §13.5's own phrasing and
 // carries no token a future edit could strand in the affirmative.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// AND IT MAY NOT POINT AT WHAT THE SURFACE UNDER IT DOES NOT DRAW
+// ─────────────────────────────────────────────────────────────────────────────
+// This notice mounts at five sites across BOTH presentation tiers, and §13.5's
+// `WebSAS` renders at exactly one of them (the desktop node menu; `AGENTS.md`
+// freezes the web phone tier, so the phone connection sheet draws none). Copy
+// here therefore states the ceiling without presupposing a comparison value on
+// the page: a sentence about "the same session code" read identically on that
+// sheet, telling a reader they held a check they did not have. The pointer at
+// the comparison lives WITH the comparison, in `HostedE2eeVerification.logic.ts`,
+// which by construction renders only where the characters do.
+// `HostedRelayTrustNotice.logic.test.ts` scans these bodies for that reference so
+// the coupling cannot come back.
 
 import type { WebHostedE2eeChannelStatus } from "../../hostedHub/connectionStatus";
 
@@ -95,16 +120,25 @@ const HOSTED_RELAY_TRUST_DISCLOSURES = {
     body: "This tab is still agreeing a channel with your node and has released nothing to it yet. Until that settles, treat this connection as one the Hub can read.",
   },
   /**
-   * §2.2's *Web, unsigned ephemeral* row. The two MUSTs that shape it are §2.4's
-   * ceiling — the Hub serves the code, so a genuine handshake and a genuine
-   * §13.5 code are compatible with wholesale exfiltration — and §2.3's web
-   * bullet, which is stated as the in-memory, per-tab, worth-nothing-against-the-
-   * Hub thing it is. The last sentence is §2.3's own: "Only node-enforced
-   * effective `requireE2EE` closes the plaintext path for web."
+   * §2.2's *Web, unsigned ephemeral* row, and BOTH halves of the active-Hub
+   * denial it carries.
+   *
+   * The peer is named as "the node this tab was routed to" and never as "your
+   * node": §2.3's web bullet is that this client "retains no durable latch, no
+   * pin of any kind", so what a locked channel here validated is a self-signed
+   * first-contact statement (§13.1) and the identity of the far end is exactly
+   * what this tier cannot establish. The two ways the Hub gets inside are then
+   * stated separately, because they have different preconditions — one needs a
+   * substituted bundle and one needs nothing at all (§8.10's NX rows).
+   *
+   * §2.3's web bullet supplies the rest: the latch is the in-memory, per-tab,
+   * worth-nothing-against-the-Hub thing it is, and the last sentence is §2.3's
+   * own — "Only node-enforced effective `requireE2EE` closes the plaintext path
+   * for web."
    */
   "web-unsigned": {
     tone: "advisory",
-    body: "This tab and your node agreed a browser channel, so while the code this page is running is honest the Hub relays ciphertext instead of readable payload. It is weaker than the channel the Ryco mobile app gets, and it cannot protect against the Hub operator, who serves every byte of this page's JavaScript and could serve code that completes the same handshake, shows the same session code, and copies your data anyway. Its downgrade check is held in memory only — empty again in every new tab and after every reload, and worth nothing against that operator. Only your node can close the plaintext path for browsers.",
+    body: "This tab and the node it was routed to agreed a browser channel, so while the code this page is running is honest the Hub relays ciphertext instead of readable payload. It is weaker than the channel the Ryco mobile app gets, in two ways this tab cannot close. This tab pins no node identity, so it cannot tell whether the far end of that channel is your machine or the Hub standing in for it. And it cannot protect against the Hub operator, who serves every byte of this page's JavaScript and could serve code that completes the same handshake and copies your data anyway. Its downgrade check is held in memory only — empty again in every new tab and after every reload, and worth nothing against that operator. Only your node can close the plaintext path for browsers.",
   },
   /**
    * §12.2's mandatory label. It names the fallback and makes no confidentiality

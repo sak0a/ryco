@@ -128,6 +128,11 @@ describe("§12.2 honest labeling of the fallback", () => {
     expect(body.toLowerCase()).toContain("plaintext");
     expect(body.toLowerCase()).not.toContain("encrypted channel to");
     expect(tone).toBe("caution");
+    // Positive content, not just the label: who can read it, and what closes it.
+    // Without these the sentence could shrink to "This channel fell back to
+    // legacy plaintext." and still pass every check above.
+    expect(body.toLowerCase()).toContain("readable by the hub");
+    expect(body.toLowerCase()).toContain("only your node can refuse plaintext");
   });
 
   it("does not blame the node for a fallback this client cannot attribute", () => {
@@ -150,7 +155,30 @@ describe("§2.3 and §2.4 in the encrypted state", () => {
     expect(lower).toContain("cannot protect against the hub operator");
     expect(lower).toContain("every byte of this page's javascript");
     expect(lower).toContain("completes the same handshake");
-    expect(lower).toContain("shows the same session code");
+  });
+
+  it("states the OTHER half of §2.2's active-Hub denial, which needs no served code", () => {
+    // §2.2's web row: "**Not protected** — the Hub can originate an unsigned NX
+    // session **and** controls the served code". Copy that named only the second
+    // left honest served code as the sole stated condition, so a reader with no
+    // reason to doubt the bundle concluded the Hub was outside the channel.
+    // §8.10: NX client→node is "never authenticated at the Noise level … a Hub
+    // can originate an NX session", and NX node→client encrypts "to an
+    // **anonymous ephemeral initiator** — any active party, including the Hub".
+    const lower = body.toLowerCase();
+    expect(lower).toContain("pins no node identity");
+    expect(lower).toContain("your machine or the hub standing in for it");
+  });
+
+  it("never asserts the peer identity this tier cannot establish", () => {
+    // §2.3's web bullet: the web client "retains no durable latch, no pin of any
+    // kind" (§6.3, §13.1), so what a locked channel here validated is a
+    // self-signed first-contact statement and "your node" is a claim about the
+    // far end that nothing on this tier checked.
+    expect(body).not.toContain("This tab and your node");
+    // The two places the copy may still say "your node" are the ones that are
+    // about the NODE'S OWN policy rather than about who answered this channel.
+    expect(body).toContain("Only your node can close the plaintext path");
   });
 
   it("states §2.3's web bullet: in-memory only, empty again every session", () => {
@@ -188,5 +216,43 @@ describe("the states with no channel", () => {
       // downgrade report, which is the claim `legacy` alone is allowed to make.
       expect(lower, status).not.toContain("fell back");
     }
+  });
+
+  it("says what the Hub can do with the payload, and not merely that a Hub exists", () => {
+    // The negative scans above pass for any unique non-empty sentence that
+    // contains "hub" — including "The Hub relays this.", which deletes the whole
+    // substantive claim. `unavailable` is the sentence a first-time reader meets
+    // on the sign-in surface, the node directory, and the install instructions,
+    // before any channel exists, so it is the one that most needs pinning.
+    const unavailable = hostedRelayTrustDisclosure("unavailable").body.toLowerCase();
+    expect(unavailable).toContain("forwards what you send in a form it can read");
+    expect(unavailable).toContain("not to log or keep it");
+
+    // §4.4 `negotiating`: nothing is locked and nothing has been released.
+    const negotiating = hostedRelayTrustDisclosure("negotiating").body.toLowerCase();
+    expect(negotiating).toContain("released nothing");
+    expect(negotiating).toContain("the hub can read");
+  });
+});
+
+describe("the disclosure may not point at what the surface under it does not draw", () => {
+  it("refers to no session code, on any state", () => {
+    // This notice mounts at five sites across BOTH presentation tiers, and
+    // §13.5's `WebSAS` renders at exactly one of them (the desktop node menu —
+    // `HostedConnectionControls.tsx` mounts `HostedE2eeVerification` there and
+    // nowhere else, and `AGENTS.md` freezes the web phone tier). Copy here that
+    // presupposed a comparison value on the page read identically on the phone
+    // connection sheet, which draws none: it told that reader a §13.5
+    // comparison existed and that a hostile Hub could forge it, while handing
+    // them nothing to compare. The pointer lives with the comparison instead
+    // (`HostedE2eeVerification.logic.ts`), which renders only where the
+    // characters do.
+    for (const status of HOSTED_RELAY_TRUST_DISCLOSURE_STATES) {
+      const lower = hostedRelayTrustDisclosure(status).body.toLowerCase();
+      expect(lower, status).not.toContain("session code");
+      expect(lower, status).not.toContain("compare");
+    }
+    // …and the sentence that DOES point at it is still shipped, beside the code.
+    expect(E2EE_WEB_SAS_ADVISORY.toLowerCase()).toContain("compare this code");
   });
 });
