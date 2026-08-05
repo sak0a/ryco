@@ -10,6 +10,7 @@ import {
   E2EE_INNER_TYPE_RPC,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
   e2eeAeadNonce,
+  e2eeAeadNonceFromHeader,
   e2eeEnvelopeAad,
   encodeE2eeDirectionLabel,
   encodeE2eeEnvelopeHeader,
@@ -85,18 +86,31 @@ describe("§16.3 F8 — the AAD and the nonce recomputed in Chromium", () => {
   it("reproduces the header, the direction label, the nonce, and the AAD for both directions", () => {
     for (const entry of fixtureCasesMatching(F08, /^aad-(client-to-node|node-to-client)$/, 2)) {
       const direction = entry.inputs.direction as E2eeDirection;
+      // Every value below is built from the CASE, never from a literal that
+      // happens to agree with it: both cases sit at epoch 0 / counter 0 today,
+      // and a hard-coded sequence would make the next F8 AAD case at any other
+      // position report a byte mismatch — which §16.4 reads as a cross-runtime
+      // divergence rather than as a test that pinned the wrong sequence.
+      expect(entry.inputs.suite, entry.name).toBe(E2EE_SUITE_25519_CHACHAPOLY_SHA256);
+      const epoch = BigInt(entry.inputs.epoch as number);
+      const counter = BigInt(entry.inputs.counter as number);
       const header = encodeE2eeEnvelopeHeader({
         suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
-        epoch: BigInt(entry.inputs.epoch as number),
-        counter: BigInt(entry.inputs.counter as number),
+        epoch,
+        counter,
       });
       expect(hexOf(header), entry.name).toBe(hexOf(fixtureBytes(entry.expected.header)));
       expect(hexOf(encodeE2eeDirectionLabel(direction)), entry.name).toBe(
         hexOf(fixtureBytes(entry.expected.directionLabel)),
       );
-      expect(hexOf(e2eeAeadNonce(0n, 0n)), entry.name).toBe(
-        hexOf(fixtureBytes(entry.expected.nonce)),
+      const nonce = e2eeAeadNonce(epoch, counter);
+      expect(hexOf(nonce), entry.name).toBe(hexOf(fixtureBytes(entry.expected.nonce)));
+      // …and the case's own claim about that nonce is DERIVED: the sequence the
+      // header carries is read back out of the header and must produce it.
+      expect(entry.expected.nonceEqualsHeaderSequenceFields, entry.name).toBe(
+        hexOf(nonce) === hexOf(e2eeAeadNonceFromHeader(header)),
       );
+      expect(entry.expected.nonceEqualsHeaderSequenceFields, entry.name).toBe(true);
 
       const aad = e2eeEnvelopeAad({
         header,
@@ -105,8 +119,9 @@ describe("§16.3 F8 — the AAD and the nonce recomputed in Chromium", () => {
       });
       expect(hexOf(aad), entry.name).toBe(hexOf(fixtureBytes(entry.expected.aad)));
       expect(aad.byteLength, entry.name).toBe(E2EE_AAD_BYTES);
-      expect(entry.expected.matchesAadBytesConstant, entry.name).toBe(true);
-      expect(entry.expected.nonceEqualsHeaderSequenceFields, entry.name).toBe(true);
+      expect(entry.expected.matchesAadBytesConstant, entry.name).toBe(
+        aad.byteLength === E2EE_AAD_BYTES,
+      );
     }
   });
 });

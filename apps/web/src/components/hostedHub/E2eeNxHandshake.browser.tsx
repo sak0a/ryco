@@ -20,6 +20,7 @@ import {
   deliverRelayPayload,
   fixtureBytes,
   fixtureCase,
+  fixtureCasesMatching,
   fixtureStatement,
   FIXTURE_ACCOUNT_ID,
   FIXTURE_HUB_ORIGIN,
@@ -441,10 +442,7 @@ describe("§16.3 F14 — the WebSAS derived in Chromium matches the committed co
     // §16.4: "A vector that produces different bytes on any supported runtime is
     // a release-blocking defect." The Node gate already runs these; this is the
     // browser half, and it is the runtime that actually draws the string.
-    const cases = F14.cases.filter((entry) => entry.name.startsWith("web-sas-session-"));
-    expect(cases.length).toBeGreaterThan(0);
-
-    for (const entry of cases) {
+    for (const entry of fixtureCasesMatching(F14, /^web-sas-session-/, 2)) {
       const derived = deriveE2eeWebSas({
         nodeIdentityPublicKey: fixtureBytes(entry.inputs.nodeIdentityPublicKey),
         webEphemeralPublicKey: fixtureBytes(entry.inputs.webEphemeralPublicKey),
@@ -467,9 +465,12 @@ describe("§16.3 F14 — the WebSAS derived in Chromium matches the committed co
   });
 
   it("changes with the session binding, which is why it is per session", () => {
-    const displays = F14.cases
-      .filter((entry) => entry.name.startsWith("web-sas-session-"))
-      .map((entry) => entry.expected.display);
+    // Pinned rather than filtered: `new Set(displays).size === displays.length`
+    // is TRUE of the empty set and of a single case, so an unpinned filter here
+    // would report distinctness over a corpus it had stopped reading.
+    const displays = fixtureCasesMatching(F14, /^web-sas-session-/, 2).map(
+      (entry) => entry.expected.display,
+    );
     expect(new Set(displays).size).toBe(displays.length);
     expect(fixtureCase(F14, "web-sas-changes-every-session").expected.differs).toBe(true);
   });

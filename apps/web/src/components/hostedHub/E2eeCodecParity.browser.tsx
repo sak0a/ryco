@@ -137,21 +137,21 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
       return pushed.message;
     };
 
-    for (const entry of fixtureCasesCarrying(F01.cases, "isChunkedPayload", 1)) {
+    for (const entry of fixtureCasesCarrying(F01.cases, "expected", "isChunkedPayload", 1)) {
       expect(entry.expected.isChunkedPayload, entry.name).toBe(isChunkedPayload(f01Payload(entry)));
     }
-    for (const entry of fixtureCasesCarrying(F01.cases, "wirePayloadBytes", 4)) {
+    for (const entry of fixtureCasesCarrying(F01.cases, "expected", "wirePayloadBytes", 4)) {
       expect(entry.expected.wirePayloadBytes, entry.name).toBe(f01Payload(entry).byteLength);
     }
-    for (const entry of fixtureCasesCarrying(F01.cases, "preludePresent", 4)) {
+    for (const entry of fixtureCasesCarrying(F01.cases, "expected", "preludePresent", 4)) {
       expect(entry.expected.preludePresent, entry.name).toBe(carriesThePrelude(f01Payload(entry)));
     }
-    for (const entry of fixtureCasesCarrying(F01.cases, "surfacedUnchanged", 1)) {
+    for (const entry of fixtureCasesCarrying(F01.cases, "expected", "surfacedUnchanged", 1)) {
       expect(entry.expected.surfacedUnchanged, entry.name).toBe(
         hexOf(surfaced(entry)) === hexOf(f01Payload(entry)),
       );
     }
-    for (const entry of fixtureCasesCarrying(F01.cases, "firstPostStripByte", 1)) {
+    for (const entry of fixtureCasesCarrying(F01.cases, "expected", "firstPostStripByte", 1)) {
       expect(entry.expected.firstPostStripByte, entry.name).toBe(surfaced(entry)[0]);
     }
   });
@@ -267,7 +267,36 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
     );
   });
 
-  it("puts the prelude on exactly one side of the headroom boundary", () => {
+  it("re-prepares both headroom cases and lands the prelude on exactly one side", () => {
+    // The SENDER's half of §4.3 step 1. The two cases either side of the
+    // boundary are re-prepared at their own asserted chunk limit rather than
+    // read off the fixture, so this fails if the shared split rule moves the
+    // boundary under this engine — which the committed wire payloads alone,
+    // already checked above, cannot detect.
+    for (const entry of fixtureCasesMatching(F01, /-the-prelude-headroom-boundary$/, 2)) {
+      // The message re-prepared is the case's OWN envelope, recovered from the
+      // committed wire payload by the receive half, so the round trip closes on
+      // the committed bytes rather than on a same-length stand-in.
+      const received = new RelayMessageAssembler().push(f01Payload(entry));
+      if (received.kind !== "done") throw new Error(`${entry.name}: §4.3 step 1 did not complete`);
+      expect(received.message.byteLength, entry.name).toBe(entry.inputs.envelopeBytes);
+
+      const prepared = prepareRelayMessage(received.message, {
+        maxChunkBytes: entry.inputs.assertedMaxDataChunkBytes as number,
+        maxMessageBytes: RELAY_MAX_RPC_MESSAGE_BYTES,
+        peerSupportsChunking: false,
+      });
+      expect(prepared.kind, entry.name).toBe("ready");
+      if (prepared.kind !== "ready") continue;
+      expect(prepared.payloads.length, entry.name).toBe(1);
+      const payload = prepared.payloads[0];
+      if (payload === undefined) throw new Error(`${entry.name}: nothing was prepared`);
+      expect(entry.expected.preludePresent, entry.name).toBe(carriesThePrelude(payload));
+      expect(entry.expected.wirePayloadBytes, entry.name).toBe(payload.byteLength);
+      expect(hexOf(payload), entry.name).toBe(hexOf(f01Payload(entry)));
+    }
+
+    // …and they are one byte apart, which is what makes them a BOUNDARY.
     const at = fixtureCase(F01, "envelope-exactly-at-the-prelude-headroom-boundary");
     const over = fixtureCase(F01, "envelope-one-byte-over-the-prelude-headroom-boundary");
     expect(at.expected.preludePresent).toBe(true);
@@ -281,12 +310,21 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
   it("carries both reachability paths to a zero-length post-strip payload in all three modes", () => {
     const empties = fixtureCasesMatching(F01, /^empty-post-strip-payload-/, 6);
     for (const entry of empties) {
+      // Recomputed, not read: the claim is that BOTH reachability paths end at
+      // a zero-length post-strip payload, and a claim read off the case it
+      // describes holds under any codec at all.
+      const pushed = new RelayMessageAssembler().push(f01Payload(entry));
+      expect(pushed.kind, entry.name).toBe("done");
+      if (pushed.kind !== "done") continue;
+      const classified = classifyPostStripPayload(pushed.message);
+
       const pipeline = entry.expected.pipeline as JsonRecord;
       const step1 = pipeline.step1Assembler as JsonRecord;
       const step2 = pipeline.step2Discrimination as JsonRecord;
-      expect(step1.postStripBytes, entry.name).toBe(0);
-      expect(step2.class, entry.name).toBe("other");
-      expect(step2.reason, entry.name).toBe("empty");
+      expect(step1.postStripBytes, entry.name).toBe(pushed.message.byteLength);
+      expect(pushed.message.byteLength, entry.name).toBe(0);
+      expect(step2.class, entry.name).toBe(classified.kind);
+      if (classified.kind === "other") expect(step2.reason, entry.name).toBe(classified.reason);
       expect(entry.expected.neverSilentlyDropped, entry.name).toBe(true);
       // §11.2 P6 before keys, §11.3 Q6 after.
       expect(entry.expected.fatal, entry.name).toBe(
@@ -479,12 +517,17 @@ describe("§16.3 F16 authorization context — the NX cases (§8.3, §13.6)", ()
 
     // Every case of this family that DOES carry a snapshot is an IK channel,
     // and the withdrawal test is re-run here so the row above is a statement
-    // about NX and not about a sweep that never withdraws anything.
-    let withSnapshot = 0;
-    for (const other of F16.cases) {
-      const snapshot = other.inputs.admittedAuthoritySnapshot as JsonRecord | undefined;
-      if (snapshot === undefined) continue;
-      withSnapshot += 1;
+    // about NX and not about a sweep that never withdraws anything. The count
+    // is what holds that: a floor of one would let a regeneration rename ten of
+    // the eleven out of the filter and leave the file green over a sweep that
+    // no longer sweeps.
+    for (const other of fixtureCasesCarrying(
+      F16.cases,
+      "inputs",
+      "admittedAuthoritySnapshot",
+      11,
+    )) {
+      const snapshot = other.inputs.admittedAuthoritySnapshot as JsonRecord;
       const changed = other.inputs.changedRecordKey as JsonRecord;
       const record = other.inputs.postChangeRecord as JsonRecord | null;
       const keysEqual = e2eeAuthorizationKeysEqual(
@@ -518,7 +561,6 @@ describe("§16.3 F16 authorization context — the NX cases (§8.3, §13.6)", ()
         );
       expect(withdrawn, other.name).toBe(other.expected.withdrawn);
     }
-    expect(withSnapshot, "cases carrying an admitted-authority snapshot").toBeGreaterThan(0);
   });
 });
 

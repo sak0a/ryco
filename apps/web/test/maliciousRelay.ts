@@ -16,7 +16,15 @@ import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 import { RELAY_CHUNK_CAPABILITY_PRELUDE } from "@ryco/shared/relayMessageChunks";
 import { vi, type Mock } from "vite-plus/test";
 
-import { F03, F07, F14, fixtureBytes, fixtureCase, hexOf } from "./e2eeCorpus";
+import {
+  F03,
+  F07,
+  F14,
+  fixtureBytes,
+  fixtureCase,
+  fixtureCasesMatching,
+  hexOf,
+} from "./e2eeCorpus";
 
 import { BrowserHostedRelaySocket, hostedRelayWebSocketUrl } from "../src/hostedHub/relaySocket";
 
@@ -218,7 +226,7 @@ export const settleRelay = async (): Promise<void> => {
 // defect" is checked against the committed bytes and not against a copy. They
 // are re-exported here because this harness's own callers read them beside it.
 
-export { F03, F07, F14, fixtureBytes, fixtureCase, hexOf };
+export { F03, F07, F14, fixtureBytes, fixtureCase, fixtureCasesMatching, hexOf };
 
 /** TEST ONLY (§16.1). None of this material may ever reach a real endpoint. */
 const KEY_MATERIAL = F03.testKeyMaterial;

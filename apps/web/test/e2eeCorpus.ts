@@ -112,9 +112,14 @@ export function fixtureCasesMatching(
 }
 
 /**
- * The cases carrying `field` under `expected`, pinned the same way and for the
- * same reason: an assertion guarded by `if (entry.expected.x !== undefined)`
+ * The cases carrying `field` under `container`, pinned the same way and for the
+ * same reason: an assertion guarded by `if (entry.expected.x !== undefined)` —
+ * or a sweep guarded by `if (entry.inputs.x === undefined) continue` —
  * disappears with the field it reads.
+ *
+ * `inputs` is a container here and not a second helper because a sweep keyed on
+ * an INPUT deletes itself exactly as quietly as one keyed on an expectation,
+ * and a rule with two spellings gets applied to one of them.
  *
  * Presence is tested with `Object.hasOwn`, which does not READ the value, so a
  * field named here and asserted nowhere stays as inert in the browser run as it
@@ -122,13 +127,14 @@ export function fixtureCasesMatching(
  */
 export function fixtureCasesCarrying(
   cases: readonly E2eeFixtureCase[],
+  container: "inputs" | "expected",
   field: string,
   count: number,
 ): readonly E2eeFixtureCase[] {
-  const found = cases.filter((entry) => Object.hasOwn(entry.expected, field));
+  const found = cases.filter((entry) => Object.hasOwn(entry[container], field));
   if (found.length !== count) {
     throw new Error(
-      `${String(found.length)} of ${String(cases.length)} cases carry expected.${field}, this run requires exactly ${String(count)}`,
+      `${String(found.length)} of ${String(cases.length)} cases carry ${container}.${field}, this run requires exactly ${String(count)}`,
     );
   }
   return found;
