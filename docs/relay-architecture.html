@@ -1518,8 +1518,10 @@
             <a class="text-action" href="#boundaries">Inspect the trust boundary</a>
           </div>
           <p class="trust-note">
-            Transport uses HTTPS and WSS. The Hub is trusted relay infrastructure, not an
-            application-layer end-to-end encryption boundary.
+            Transport uses HTTPS and WSS. Payloads are additionally encrypted between client and
+            node on channels that negotiate it — with a materially stronger guarantee in the Ryco
+            mobile app than in the browser, whose code the Hub serves. Either way the Hub routes the
+            channel and still sees who talks to which node, when, and how much.
           </p>
         </div>
 
@@ -2332,7 +2334,10 @@
               <dt>Persists</dt>
               <dd>Accounts, node directory, grants, and bounded control records</dd>
               <dt>Forwards transiently</dt>
-              <dd>Opaque relay bytes in memory, without payload logging or persistence</dd>
+              <dd>
+                Opaque relay bytes in memory — ciphertext where the channel negotiated encryption —
+                without payload logging or persistence
+              </dd>
             </dl>
           </article>
           <article class="boundary-column node">
@@ -2353,9 +2358,17 @@
         <div class="trust-strip reveal">
           <strong>Trusted relay boundary</strong>
           <p>
-            HTTPS and WSS protect transport. The Hub can observe forwarded bytes transiently while
-            routing them, so this is not application-layer end-to-end encryption. Hub policy forbids
-            relay payload logging and persistence.
+            HTTPS and WSS protect transport, and on a channel that negotiated payload encryption the
+            Hub forwards ciphertext rather than readable bytes. What that is worth depends on the
+            client: the Ryco mobile app runs a signed tier whose code is distributed independently
+            of the Hub and whose node identity the owner verifies and pins on the device, while the
+            browser runs an unsigned tier whose ceiling is structural — the Hub serves every byte of
+            that page's code, so it could serve code that completes the same handshake and copies
+            the payload anyway. On a channel that negotiated no encryption the Hub forwards readable
+            bytes transiently and policy forbids logging or persisting them. On every channel,
+            encrypted or not, the Hub still sees which account and session talk to which node,
+            channel open and close events, frame sizes and timing, the capability and role it
+            issued, heartbeats, and transfer accounting.
           </p>
         </div>
       </section>

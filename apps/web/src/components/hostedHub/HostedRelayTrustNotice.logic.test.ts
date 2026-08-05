@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -232,6 +235,126 @@ describe("the states with no channel", () => {
     const negotiating = hostedRelayTrustDisclosure("negotiating").body.toLowerCase();
     expect(negotiating).toContain("released nothing");
     expect(negotiating).toContain("the hub can read");
+  });
+});
+
+/**
+ * THE DOCUMENT AND THE APP ARE ONE CLAIM, AND THIS IS THE ONLY THING JOINING THEM.
+ *
+ * `docs/hosted-hub-client.md` carried its own three-sentence confidentiality
+ * paragraph — a verbatim twin of the constant this module replaced — and nothing
+ * checked that the two agreed. The browser suites do import the copy, so they
+ * catch a component that renders the wrong string; they structurally cannot
+ * catch a DOCUMENT that says something the component never said, because they
+ * never read the document. That is exactly how the repository ended up asserting
+ * in public that a hosted channel "is not application-level end-to-end
+ * encrypted" while the shipped tier was negotiating one.
+ *
+ * So the document quotes the shipped strings between named markers, and the
+ * assertions below read them back. A divergence is a red test rather than a
+ * review miss, and the fix is to re-quote rather than to re-word.
+ */
+
+const REPO_ROOT = new URL("../../../../../", import.meta.url);
+
+function readRepoFile(relativePath: string): string {
+  return readFileSync(fileURLToPath(new URL(relativePath, REPO_ROOT)), "utf8");
+}
+
+const HOSTED_HUB_CLIENT_DOC = readRepoFile("docs/hosted-hub-client.md");
+
+/**
+ * Markdown prose as one line, so a hard-wrapped quotation compares equal to the
+ * single-line constant it quotes.
+ *
+ * Blockquote markers are stripped and every whitespace run collapses to one
+ * space. Both sides of every comparison go through this, so the check is over
+ * WORDS and never over where a maintainer chose to break a line — the one
+ * difference that carries no meaning, and the one a wrapping change would
+ * otherwise turn into a failing test nobody could act on.
+ */
+function normalizeProse(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^\s*>\s?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Every `<!-- KIND:NAME -->` … `<!-- /KIND:NAME -->` block in a document.
+ *
+ * Two kinds, because the two sets are checked differently: `shipped-copy` is
+ * keyed by channel state and is asserted EXHAUSTIVE against the tier's states,
+ * while `shipped-text` names one constant each and would fail that assertion.
+ */
+function quotedBlocks(markdown: string, kind: string): ReadonlyMap<string, string> {
+  const quoted = new Map<string, string>();
+  const block = new RegExp(
+    `<!--\\s*${kind}:([a-z-]+)\\s*-->([\\s\\S]*?)<!--\\s*/${kind}:\\1\\s*-->`,
+    "g",
+  );
+  for (const [, name, body] of markdown.matchAll(block)) {
+    // Both groups are mandatory in the pattern, so neither can be absent at
+    // runtime; a dynamically built `RegExp` simply does not carry that to the
+    // type checker. Skipping rather than asserting keeps the failure in the
+    // exhaustiveness check below, where it reads as "the document is missing a
+    // block" instead of as a thrown error inside a helper.
+    if (name === undefined || body === undefined) continue;
+    quoted.set(name, normalizeProse(body));
+  }
+  return quoted;
+}
+
+describe("docs/hosted-hub-client.md quotes the copy this slice ships", () => {
+  it("quotes every channel state this tier can be in, and only those", () => {
+    // Exhaustive in both directions. A state added to the tier fails here until
+    // the document gains a paragraph for it, and a paragraph for a state that no
+    // longer exists fails too — a document that quoted three of four states
+    // would otherwise pass every verbatim check below while leaving the fourth
+    // free to drift.
+    const quoted = [...quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-copy").keys()].toSorted();
+    expect(quoted).toEqual([...HOSTED_RELAY_TRUST_DISCLOSURE_STATES].toSorted());
+  });
+
+  it("quotes each disclosure verbatim", () => {
+    const quoted = quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-copy");
+    for (const status of HOSTED_RELAY_TRUST_DISCLOSURE_STATES) {
+      expect(quoted.get(status), status).toBe(
+        normalizeProse(hostedRelayTrustDisclosure(status).body),
+      );
+    }
+  });
+
+  it("quotes §13.5's advisory verbatim, where it documents the comparison", () => {
+    // The document now describes the compare-to-CLI flow, and the sentence
+    // bounding what a match is worth is as much a security claim as the
+    // disclosure is. Paraphrasing it here would rebuild the drifting second copy
+    // this slice exists to remove, one section further down the same file.
+    expect(quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-text").get("web-sas-advisory")).toBe(
+      normalizeProse(E2EE_WEB_SAS_ADVISORY),
+    );
+  });
+});
+
+describe("no public file still carries the retired claim", () => {
+  // The retired sentences were one claim written in three places, and a
+  // repository that fixed one of them would contradict itself in public. The
+  // qualification checklist is the sharpest case: it required a tester to
+  // confirm the shipped build STATES the retired claim, so leaving it made the
+  // gate passable only by shipping false copy or by waiving the item.
+  it.each([
+    ["docs/hosted-hub-client.md", "they are not application-level end-to-end encrypted"],
+    ["docs/hosted-hub-client.md", "The trusted relay can observe forwarded bytes in memory"],
+    ["docs/hosted-hub-client.md", "or new encryption protocol is part of the client"],
+    ["docs/relay-architecture.html", "not an application-layer end-to-end encryption boundary"],
+    ["docs/relay-architecture.html", "this is not application-layer end-to-end encryption"],
+    ["docs/hosted-mobile-pwa-qualification.md", "is not application-level end-to-end encryption"],
+  ])("%s does not say %j", (path, retired) => {
+    // Normalized, because these documents hard-wrap: an unnormalized scan reads
+    // green the moment a sentence crosses a line boundary.
+    expect(normalizeProse(readRepoFile(path))).not.toContain(retired);
   });
 });
 
