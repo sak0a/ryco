@@ -199,14 +199,24 @@ export function statementClient(policy: () => EffectiveNodeE2eePolicy) {
     Uint8Array.from(
       sign(null, message, createPrivateKey({ key: der, format: "der", type: "pkcs8" })),
     );
+  // §6.4: a window this node's own advertisement could legitimately carry —
+  // open at `NOW` and no longer than `E2EE_PREKEY_LIFETIME`. It used to be
+  // `[1_000, 9_000_000_000_000]`, a ~285-year window, which no node responder
+  // here ever objected to because §5.2 step 5 is the CLIENT verifier's rule, not
+  // the responder's. Nothing caught it until the interop matrix ran the real
+  // `verifyNodeE2eeCapabilityStatement` over this statement and got
+  // `prekey_lifetime_too_long`. A harness that advertises material a conforming
+  // client refuses is a harness that cannot be pointed at one.
+  const PREKEY_CREATED_AT = NOW - 60_000;
+  const PREKEY_EXPIRES_AT = PREKEY_CREATED_AT + E2EE_PREKEY_LIFETIME;
   const prekey: NodeE2eePrekeyCertificate = {
     hubOrigin: HUB_ORIGIN,
     nodeId: NODE_ID,
     identityKeyId: IDENTITY_KEY_ID,
     prekeyId: PREKEY_ID,
     agreementPublicKey: NODE_AGREEMENT_PUBLIC,
-    createdAt: 1_000,
-    expiresAt: 9_000_000_000_000,
+    createdAt: PREKEY_CREATED_AT,
+    expiresAt: PREKEY_EXPIRES_AT,
     crossSignature: signBytes(
       encodeNodeE2eePrekeyTranscript({
         hubOrigin: HUB_ORIGIN,
@@ -215,8 +225,8 @@ export function statementClient(policy: () => EffectiveNodeE2eePolicy) {
         prekeyId: PREKEY_ID,
         identityPublicKey,
         agreementPublicKey: NODE_AGREEMENT_PUBLIC,
-        createdAt: 1_000,
-        expiresAt: 9_000_000_000_000,
+        createdAt: PREKEY_CREATED_AT,
+        expiresAt: PREKEY_EXPIRES_AT,
       }),
     ),
   };
@@ -373,6 +383,14 @@ export async function harness(
     /** §5.5 U1: an asserted chunk limit below `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`. */
     readonly maxDataChunkBytes?: number;
     /**
+     * §4.5: an asserted queue bound, which is what actually MOVES the
+     * `plaintextCeiling` — `e2eeChannelSizeBudget` derives it from
+     * `maxQueuedBytes − maxControlFrameBytes` against `RELAY_MAX_RPC_MESSAGE_BYTES`,
+     * and `maxDataChunkBytes` decides only how many chunks a record is cut into.
+     * A test that wants a different ceiling has to set this one.
+     */
+    readonly maxQueuedBytes?: number;
+    /**
      * Runs inside `withPrekeySecret`, after the borrow's body has returned and
      * before the borrow resolves — the exact window a §12.6 sweep can land in
      * while a hello is being processed.
@@ -393,10 +411,13 @@ export async function harness(
     readonly registerSession?: NodeE2eeChannelSessionSources["registerSession"];
   } = {},
 ): Promise<Harness> {
-  const readyLimits: RelayLimits =
-    options.maxDataChunkBytes === undefined
-      ? RELAY_INITIAL_LIMITS
-      : { ...RELAY_INITIAL_LIMITS, maxDataChunkBytes: options.maxDataChunkBytes };
+  const readyLimits: RelayLimits = {
+    ...RELAY_INITIAL_LIMITS,
+    ...(options.maxDataChunkBytes === undefined
+      ? {}
+      : { maxDataChunkBytes: options.maxDataChunkBytes }),
+    ...(options.maxQueuedBytes === undefined ? {} : { maxQueuedBytes: options.maxQueuedBytes }),
+  };
   const sent: Uint8Array[] = [];
   const socket = {
     bufferedAmount: 0,
@@ -673,6 +694,13 @@ export async function establish(
    * must mirror exactly. See that option for why one side alone is not enough.
    */
   clientSyntheticSendState?: E2eeSyntheticDirectionState,
+  /**
+   * §4.5: the client's own `plaintextCeiling`. Defaults to a value comfortably
+   * inside every limit set this harness is used with, because most tests do not
+   * care; the interop matrix passes the CHANNEL's derived ceiling so that both
+   * ends run the same §4.5 arithmetic and a record at the ceiling really crosses.
+   */
+  clientPlaintextCeiling?: number,
 ): Promise<EstablishedClient> {
   const client = new E2eeClientHandshake({
     channel: clientChannel,
@@ -705,7 +733,7 @@ export async function establish(
       suite: established.suite,
       sessionBindingHash: established.sessionBindingHash,
       sendDirection: "c2n",
-      plaintextCeiling: 512 * 1_024,
+      plaintextCeiling: clientPlaintextCeiling ?? 512 * 1_024,
       ...(clientSyntheticSendState === undefined
         ? {}
         : { testOnlySyntheticSendState: clientSyntheticSendState }),
