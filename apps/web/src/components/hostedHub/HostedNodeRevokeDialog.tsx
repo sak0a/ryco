@@ -55,10 +55,18 @@ export function HostedNodeRevokeDialog({
   const confirmation = hostedNodeRevokeConfirmation(node);
   const retryable = hostedNodeRevokeRetryable(failure);
 
+  // Guarded on `!pending` as well as on `open`. Without it a reopen while a
+  // request is still in flight resets `pending` to false, which both un-greys
+  // the confirm button and disarms the `if (pending) return` guard below — a
+  // second POST for the same node out of one owner's two clicks.
   useEffect(() => {
-    if (!open) return;
+    if (!open || pending) return;
     setPending(false);
     setFailure(null);
+    // `pending` is deliberately absent from the deps: this resets a FRESH
+    // confirmation, and re-running it as `pending` falls back to false at the
+    // end of a failed submit would wipe the failure that submit just reported.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [node.id, open]);
 
   const confirm = async () => {
@@ -78,7 +86,29 @@ export function HostedNodeRevokeDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    // Not dismissible while the request is in flight, by any route. The busy
+    // intent was already expressed twice — `showCloseButton={!pending}` and a
+    // disabled Cancel — but neither reaches Base UI's Escape handling or its
+    // backdrop, whose defaults are both "dismiss". An Escape mid-flight closed
+    // the dialog while the POST continued, so a 403 or 429 landed on a component
+    // nobody could see: no account whatsoever of a refused irreversible action,
+    // and a row that just stayed — identical to having cancelled.
+    //
+    // The `onOpenChange` guard is what holds it, and it holds for every reason
+    // Base UI can close on — `escapeKey`, `outsidePress`, `focusOut` — because
+    // `open` is controlled from here and a change this never forwards never
+    // happens. `disablePointerDismissal` is the matching declaration on the
+    // backdrop, so the press is not attempted in the first place. The detail
+    // sheet underneath carries its own half of this: it is a sibling Base UI
+    // root, so one Escape reached both.
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && pending) return;
+        onOpenChange(next);
+      }}
+      disablePointerDismissal={pending}
+    >
       <DialogPopup className="max-w-md" showCloseButton={!pending}>
         <DialogHeader>
           <DialogTitle>{confirmation.title}</DialogTitle>
@@ -87,11 +117,14 @@ export function HostedNodeRevokeDialog({
         <DialogPanel className="space-y-4">
           {/* The identifier the label cannot supply, in the same mono treatment
               the detail sheet's own "Node ID" row uses — the value an owner
-              would be comparing against is rendered the same way in both. */}
+              would be comparing against is rendered the same way in both. It
+              comes off the confirmation rather than off `node` again, so the one
+              value that tells two identically-named machines apart is something
+              the node suite can assert on. */}
           <DataList>
             <DataListItem term="Node">{node.label}</DataListItem>
             <DataListItem term="Node ID" mono>
-              {node.id}
+              {confirmation.subjectId}
             </DataListItem>
             <DataListItem term="Platform">
               {`${platformLabel(node.platformOs)} · ${node.platformArch}`}

@@ -172,8 +172,18 @@ export function HostedNodeDetail({
   onRevoke,
 }: HostedNodeDetailProps) {
   const isPhoneTier = usePresentationTier() === "phone";
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [revokeOpen, setRevokeOpen] = useState(false);
+  // The NODE the dialog is open over, never a bare boolean.
+  //
+  // `node` is re-resolved from the store on every render and goes null the
+  // moment its row leaves the directory — another session revoked it, or the
+  // grant was removed — and this component then returns null WITHOUT the Sheet
+  // primitive ever firing `onOpenChange`. A boolean `revokeOpen` survives that:
+  // it is still `true` when the owner opens the next node, and the confirmation
+  // remounts already open over a machine they never selected, one click from an
+  // irreversible revocation of the wrong one. Derived from the node's own id
+  // there is no window at all — a different node cannot inherit it.
+  const [renameNodeId, setRenameNodeId] = useState<string | null>(null);
+  const [revokeNodeId, setRevokeNodeId] = useState<string | null>(null);
   const open = node !== null;
   if (!node) return null;
 
@@ -216,9 +226,18 @@ export function HostedNodeDetail({
       <Sheet
         open={open}
         onOpenChange={(next) => {
+          // A confirmation on top owns the dismissal. `Sheet` and `Dialog` are
+          // both `@base-ui/react` dialog roots, and the confirmations are
+          // rendered as SIBLINGS of this sheet rather than inside it — so Base
+          // UI's topmost check does not relate them, and one Escape reached both
+          // roots. The sheet closing takes `detailNodeId` with it, which unmounts
+          // the confirmation and everything it was about to report: an Escape
+          // during an in-flight revoke lost the Hub's refusal entirely, and the
+          // row just stayed, exactly as if the owner had cancelled.
+          if (!next && (revokeNodeId !== null || renameNodeId !== null)) return;
           if (!next) {
-            setRenameOpen(false);
-            setRevokeOpen(false);
+            setRenameNodeId(null);
+            setRevokeNodeId(null);
           }
           onOpenChange(next);
         }}
@@ -241,13 +260,13 @@ export function HostedNodeDetail({
               <Button
                 variant="destructive-outline"
                 className="sm:mr-auto"
-                onClick={() => setRevokeOpen(true)}
+                onClick={() => setRevokeNodeId(node.id)}
               >
                 {HOSTED_NODE_REVOKE_ACTION_LABEL}
               </Button>
             ) : null}
             {canRename ? (
-              <Button variant="outline" onClick={() => setRenameOpen(true)}>
+              <Button variant="outline" onClick={() => setRenameNodeId(node.id)}>
                 Rename
               </Button>
             ) : null}
@@ -260,16 +279,16 @@ export function HostedNodeDetail({
       {canRename ? (
         <HostedNodeRenameDialog
           node={node}
-          open={renameOpen}
-          onOpenChange={setRenameOpen}
+          open={renameNodeId === node.id}
+          onOpenChange={(next) => setRenameNodeId(next ? node.id : null)}
           onRename={(label) => onRename(node, label)}
         />
       ) : null}
       {revocable ? (
         <HostedNodeRevokeDialog
           node={node}
-          open={revokeOpen}
-          onOpenChange={setRevokeOpen}
+          open={revokeNodeId === node.id}
+          onOpenChange={(next) => setRevokeNodeId(next ? node.id : null)}
           onRevoke={() => onRevoke(node)}
         />
       ) : null}

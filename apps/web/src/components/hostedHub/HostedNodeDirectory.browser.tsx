@@ -131,6 +131,30 @@ function revokeDialogText(): string {
   return document.querySelector<HTMLElement>('[data-slot="dialog-popup"]')?.textContent ?? "";
 }
 
+/**
+ * The confirmation's text, but only while it is actually STAYING open.
+ *
+ * `revokeDialogText` alone cannot tell an open dialog from one that is 240ms
+ * into being dismissed: `dialog-popup` carries
+ * `transition-[scale,opacity,translate] duration-[240ms]`, and Base UI keeps a
+ * closing popup mounted for the whole exit. Every assertion that runs
+ * synchronously after a click therefore reads a dialog that is already on its
+ * way out and cannot see the difference — which is how "keeps the row standing
+ * when the revoke is refused" stayed green against a dialog that dismissed
+ * itself the instant the Hub refused. Base UI stamps `data-ending-style` for the
+ * duration of the exit, so this refuses to count one.
+ */
+function stayingOpenDialogText(): string {
+  const popup = document.querySelector<HTMLElement>('[data-slot="dialog-popup"]');
+  if (!popup || popup.hasAttribute("data-ending-style")) return "";
+  return popup.textContent ?? "";
+}
+
+/** Past the popup's 240ms exit transition, so a closing dialog has really gone. */
+async function settleDialogTransition(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 400));
+}
+
 syncDocumentPresentationTier();
 
 let mounted: Awaited<ReturnType<typeof render>> | null = null;
@@ -183,6 +207,31 @@ describe("hosted node directory", () => {
     await expect.element(page.getByText("Access to this node was revoked.")).toBeVisible();
     await expect.element(page.getByRole("button", { name: "Connect" })).toBeDisabled();
     await expect.element(page.getByRole("button", { name: "Rename" })).toBeEnabled();
+  });
+
+  it("names only the action the stale banner actually disables", async () => {
+    // The banner used to say "Actions are disabled until it refreshes" while
+    // Rename and Revoke were both live underneath it — and Revoke is
+    // irreversible. `nodeSelectionBlocked` gates connecting and nothing else, so
+    // the sentence is narrowed to that rather than the controls being gated: a
+    // directory whose poll is failing is not a Hub that cannot take a
+    // revocation, and disabling the one control an owner reaches for during an
+    // incident because a *read* went stale is the worse trade.
+    seedDirectory([node()], { directoryStatus: "stale" });
+    mounted = await render(<HostedHubRoot />);
+
+    await expect.element(page.getByText(/Directory data is stale/)).toBeVisible();
+    const banner = document.body.textContent ?? "";
+    expect(banner, "the banner still claims every action is disabled").not.toContain(
+      "Actions are disabled",
+    );
+    expect(banner).toContain("Connecting is unavailable until it refreshes");
+
+    // The claim above is only true because these are what it describes.
+    await expect.element(page.getByRole("button", { name: /^Studio/ })).toBeDisabled();
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await expect.element(page.getByRole("button", { name: "Connect" })).toBeDisabled();
+    await expect.element(page.getByRole("button", { name: "Revoke", exact: true })).toBeEnabled();
   });
 
   it("gives every row's details control an accessible name of its own", async () => {
@@ -679,8 +728,19 @@ describe("hosted node revocation", () => {
 
     // The node is still there and the confirmation still names it, so the owner
     // is not left reading an error over a list the error does not match.
+    //
+    // Asserted PAST the 240ms exit transition and against a popup that is not
+    // in `data-ending-style`. Read synchronously, these two lines could not tell
+    // an open dialog from one Base UI was midway through unmounting, so a
+    // `finally { onOpenChange(false) }` in the dialog's submit — dismissing the
+    // owner's only account of a refused irreversible action — left the whole
+    // file green.
+    await settleDialogTransition();
     expect(detailsNodeLabels()).toEqual(["Studio", "Travel"]);
-    expect(revokeDialogText()).toContain("Revoke Studio?");
+    expect(stayingOpenDialogText(), "the confirmation was dismissed on failure").toContain(
+      "Revoke Studio?",
+    );
+    expect(stayingOpenDialogText()).toContain("Nothing was changed");
     await expect.element(page.getByRole("button", { name: "Revoke this node" })).toBeEnabled();
   });
 
@@ -713,6 +773,150 @@ describe("hosted node revocation", () => {
       ),
       "two controls in one dialog answer to the same name",
     ).toHaveLength(1);
+  });
+
+  it("does not re-arm the confirmation over a node the owner never chose", async () => {
+    // The confirmation's open state used to be a bare `useState(false)` on the
+    // detail sheet, cleared only by the Sheet's own `onOpenChange`. But `node`
+    // is re-resolved from the store every render, and when the 20-second poll
+    // drops the node the sheet is about — another session revoked it, the grant
+    // was removed — `HostedNodeDetail` returns null WITHOUT the Sheet primitive
+    // ever firing. The flag survived, and the next node the owner opened
+    // inherited it: a fully-armed "Revoke <that node>?" they never asked for,
+    // one click from revoking the wrong machine.
+    const target = node({ id: "node_aaaaaaaaaaaaaaaaaaaaaa", label: "Studio" });
+    const other = node({ id: "node_bbbbbbbbbbbbbbbbbbbbbb", label: "Travel" });
+    seedDirectory([target, other]);
+    const revokeNode = vi.spyOn(hostedHubApi, "revokeNode").mockResolvedValue(undefined);
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await page.getByRole("button", { name: "Revoke", exact: true }).click();
+    await vi.waitFor(() => {
+      expect(revokeDialogText()).toContain("Revoke Studio?");
+    });
+
+    // The poll replaces the directory and the confirmation's node is not in it.
+    useHostedHubStore.setState({ nodes: [other] });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-slot="dialog-popup"]')).toBeNull();
+    });
+
+    // The owner now opens a DIFFERENT machine.
+    await page.getByRole("button", { name: "Node details: Travel" }).click();
+    await settleDialogTransition();
+    expect(revokeDialogText(), "the confirmation re-armed over another node").not.toContain(
+      "Revoke Travel?",
+    );
+    expect(revokeNode).not.toHaveBeenCalled();
+  });
+
+  it("keeps the confirmation up and the refusal reachable when escape is pressed mid-flight", async () => {
+    // The dialog signalled "busy" twice — no close button, disabled Cancel — but
+    // neither reaches Base UI's escape handling. Pressing it while the POST was
+    // in flight closed the dialog and left the request running, so the Hub's
+    // refusal landed on a component nobody could see: no account whatsoever of a
+    // refused irreversible action, and a row that simply stayed.
+    seedDirectory([node()]);
+    let rejectRevoke: (cause: unknown) => void = () => {};
+    vi.spyOn(hostedHubApi, "revokeNode").mockReturnValue(
+      new Promise<void>((_resolve, reject) => {
+        rejectRevoke = reject;
+      }),
+    );
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await page.getByRole("button", { name: "Revoke", exact: true }).click();
+    await page.getByRole("button", { name: "Revoke this node" }).click();
+    await vi.waitFor(() => {
+      expect(revokeDialogText()).toContain("Revoking…");
+    });
+
+    await userEvent.keyboard("{Escape}");
+    await settleDialogTransition();
+    expect(stayingOpenDialogText(), "escape dismissed an in-flight confirmation").toContain(
+      "Revoke Studio?",
+    );
+
+    rejectRevoke(new HostedHubApiError("forbidden", 403));
+    await expect.element(page.getByRole("alert")).toHaveTextContent(/Only an owner of this Hub/);
+  });
+
+  it("sends exactly one request when the owner clicks the confirmation twice", async () => {
+    // The busy presentation and the double-submit guard were both unpinned:
+    // deleting `if (pending) return` AND `disabled={pending}` together left every
+    // test in this file green. Two POSTs mean the second answers 404, so the
+    // owner's last sight of a revocation that SUCCEEDED is "there is nothing
+    // here left to revoke" with the retry withdrawn.
+    seedDirectory([node()]);
+    let resolveRevoke: () => void = () => {};
+    const revokeNode = vi.spyOn(hostedHubApi, "revokeNode").mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveRevoke = resolve;
+      }),
+    );
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await page.getByRole("button", { name: "Revoke", exact: true }).click();
+    const confirm = page.getByRole("button", { name: "Revoke this node" });
+    await confirm.click();
+
+    // The control says it is busy and refuses to be pressed again.
+    await expect.element(page.getByRole("button", { name: "Revoking…" })).toBeDisabled();
+    expect(revokeDialogText()).not.toContain("Revoke this node");
+
+    // …and pressing anyway — a real double-click lands before the disable
+    // paints — sends nothing more.
+    document
+      .querySelectorAll<HTMLElement>('[data-slot="dialog-popup"] button')
+      .forEach((button) => {
+        if (button.textContent?.trim() === "Revoking…") button.click();
+      });
+    await settleDialogTransition();
+    expect(revokeNode, "a second irreversible write went out").toHaveBeenCalledTimes(1);
+
+    resolveRevoke();
+    await vi.waitFor(() => {
+      expect(revokeNode).toHaveBeenCalledTimes(1);
+      expect(document.querySelector('[data-slot="dialog-popup"]')).toBeNull();
+    });
+  });
+
+  it("says the revocation landed even when the follow-up re-read fails", async () => {
+    // `refreshDirectory` cannot reject: its own catch settles into
+    // `directoryStatus: "stale"` and leaves `nodes` UNTOUCHED. So a Hub restart
+    // in the second after an irreversible commit left the owner looking at the
+    // same list, with the row still on it and still un-revoked, and not one word
+    // saying the revocation happened — indistinguishable from a dismissed
+    // dialog. The acknowledgement is driven by `revokeNode` resolving instead.
+    const target = node({ id: "node_aaaaaaaaaaaaaaaaaaaaaa", label: "Studio" });
+    const kept = node({ id: "node_bbbbbbbbbbbbbbbbbbbbbb", label: "Travel" });
+    seedDirectory([target, kept]);
+    vi.spyOn(hostedHubApi, "revokeNode").mockResolvedValue(undefined);
+    vi.spyOn(hostedHubApi, "listNodes").mockRejectedValue(new Error("the Hub restarted"));
+    mounted = await render(<HostedHubRoot />);
+
+    await page.getByRole("button", { name: "Node details: Studio" }).click();
+    await page.getByRole("button", { name: "Revoke", exact: true }).click();
+    await page.getByRole("button", { name: "Revoke this node" }).click();
+
+    // Named, because "a node was revoked" over a list of near-identical rows is
+    // the same ambiguity the confirmation's own title exists to avoid.
+    await expect.element(page.getByText(/Studio was revoked/)).toBeVisible();
+
+    await settleDialogTransition();
+    // The re-read failed, so the row really is still there — which is exactly
+    // the state the notice above has to survive.
+    expect(detailsNodeLabels()).toContain("Studio");
+    // And the sheet is gone, so there is no live Revoke button left on a machine
+    // that has already been revoked. Removing `setDetailNodeId(null)` used to
+    // leave every test in this file green, because the mocked re-read always
+    // dropped the row and closed the sheet on its own.
+    expect(document.querySelector('[data-slot="sheet-popup"]')).toBeNull();
+    expect(revokeDialogText()).not.toContain("Revoke Studio?");
   });
 
   it("does not offer revocation to an operator or a viewer", async () => {
