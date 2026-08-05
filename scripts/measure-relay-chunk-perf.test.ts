@@ -1,29 +1,42 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 
-import { RELAY_CHUNK_HEADER_BYTES, RELAY_INITIAL_LIMITS } from "@ryco/contracts/relay";
+import { RELAY_INITIAL_LIMITS } from "@ryco/contracts/relay";
 import { E2EE_ENVELOPE_OVERHEAD_BYTES } from "@ryco/shared/relayE2eeConstants";
-import { RelayMessageAssembler, prepareRelayMessage } from "@ryco/shared/relayMessageChunks";
+
+import { observeRoundTrip } from "./lib/relay-chunk-observation.ts";
 
 // THE DRIFT GUARD FOR THE CHUNK-PATH MEASUREMENT ARTIFACT.
 //
 // `docs/relay-e2ee-chunk-perf.json` is a checked-in measurement, and a checked-in
 // measurement rots in two different ways that need two different answers:
 //
-//   • ITS SIZE COLUMNS CAN GO STALE, and they are deterministic — the chunk
-//     count, the wire bytes, the header and prelude overhead, and both
-//     allocation figures follow from the split rule and nothing else. Those ARE
-//     recomputed here, from the real `prepareRelayMessage` and the real
-//     `RelayMessageAssembler`, and held to the recorded values. A change to the
-//     split rule that nobody re-measured fails here.
+//   • ITS SIZE AND ALLOCATION COLUMNS CAN GO STALE, and they are deterministic —
+//     the chunk count, the wire bytes, the header and prelude overhead, and both
+//     allocation figures follow from what the real functions do and nothing
+//     else. Those ARE recomputed here, through the SAME `observeRoundTrip` the
+//     script uses, which reads them off `prepareRelayMessage`'s return value,
+//     `RelayMessageAssembler.heldBytes`, array identity, and the bytes that came
+//     out the far end. A change to the split rule, to what the sender copies, or
+//     to what the assembler retains, that nobody re-measured, fails here.
+//
+//     THAT SHARED OBSERVATION IS THE POINT. The previous version of this guard
+//     asserted `receiverAllocatedBytes === (chunked ? 2 * messageBytes : 0)` and
+//     the script computed the recorded value from the identical expression: a
+//     tautology over the sizes that could not notice the assembler dropping its
+//     copies or `prepareRelayMessage` starting to copy the fitting case. Both
+//     sides now derive from behavior, so behavior changing moves the recomputed
+//     value away from the recorded one and this fails.
+//
 //   • ITS TIMING COLUMNS CANNOT BE GATED. A wall-clock assertion on shared CI is
 //     a flake generator; this program has already lost hours to load-induced
 //     false failures. So NOTHING here asserts a duration, a throughput, or a
 //     ratio between two rows' durations, and that is a deliberate choice rather
 //     than an oversight. What IS asserted is that the artifact still carries the
 //     methodology and the disclaimers a reader needs in order not to over-read
-//     the numbers — because a perf number without its methodology is worse than
-//     no number at all.
+//     the numbers — including the ones this round had to add, because the
+//     artifact's own instructions ("rerun on the same machine and compare")
+//     invite exactly the reading its dispersion makes unsafe.
 
 const ARTIFACT = new URL("../docs/relay-e2ee-chunk-perf.json", import.meta.url);
 
@@ -36,11 +49,21 @@ interface Row {
   readonly chunkHeaderBytes: number;
   readonly preludeBytes: number;
   readonly senderAllocatedBytes: number;
+  readonly senderReturnedCallerArray: boolean;
   readonly receiverAllocatedBytes: number;
+  readonly receiverPeakHeldBytes: number;
+  readonly receiverEmittedIsViewOfPayload: boolean;
+  readonly roundTripPreservesEveryByte: boolean;
   readonly nsPerOpMedian: number;
   readonly nsPerOpP90: number;
+  readonly nsPerOpRoundMedians: readonly number[];
+  readonly nsPerOpRoundMin: number;
+  readonly nsPerOpRoundSpreadPercent: number;
+  readonly nsPerOpRoundIqrPercent: number;
   readonly payloadMibPerSecond: number;
-  readonly iterations: number;
+  readonly roundTripsPerSample: number;
+  readonly samples: number;
+  readonly roundTrips: number;
 }
 
 interface Artifact {
@@ -61,7 +84,9 @@ interface Artifact {
   };
   readonly environment: {
     readonly runtime: string;
+    readonly emulatedNodeVersion: string;
     readonly platform: string;
+    readonly timerQuantumNs: number;
     readonly note: string;
   };
   readonly rows: readonly Row[];
@@ -74,30 +99,67 @@ describe("relay chunk-path perf artifact", () => {
     expect(ARTIFACT_JSON.producedBy).toBe("bun scripts/measure-relay-chunk-perf.ts");
     expect(ARTIFACT_JSON.measuredOn).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     // The scope has to say what did NOT run, or a reader takes these for the
-    // cost of the protocol rather than the cost of the chunk layer.
+    // cost of the protocol rather than the cost of the chunk layer — and it has
+    // to say that the harness itself is outside the timed region, because when
+    // it was inside it was 80–98% of every unchunked row.
     expect(ARTIFACT_JSON.scope).toContain("No AEAD runs");
     expect(ARTIFACT_JSON.scope).toContain("no socket");
+    expect(ARTIFACT_JSON.scope).toContain("no harness-side copy");
     // The single most available misreading is "E2EE costs X%", and the artifact
-    // has to close it in as many words.
+    // has to close it in as many words…
     expect(ARTIFACT_JSON.whatTheRowsMayNotBeUsedToConclude).toContain("NOT the cost of E2EE");
     expect(ARTIFACT_JSON.whatTheRowsMayNotBeUsedToConclude).toContain(
       "E2EE_ENVELOPE_OVERHEAD_BYTES",
     );
     expect(ARTIFACT_JSON.whatTheRowsMayNotBeUsedToConclude).toContain("ONE machine");
+    // …and the misreading in the OTHER direction too. An earlier revision closed
+    // "E2EE costs X%" and left "E2EE is faster" open while publishing rows that
+    // said exactly that, because of a warm-up order bias.
+    expect(ARTIFACT_JSON.whatTheRowsMayNotBeUsedToConclude).toContain("E2EE is faster");
+    expect(ARTIFACT_JSON.whatTheRowsMayNotBeUsedToConclude).toContain(
+      "A DIFFERENCE SMALLER THAN THAT SPREAD IS NOT A DIFFERENCE",
+    );
     // …and it has to say which columns are portable and which are not, because
     // the artifact mixes both kinds of number in one table.
     expect(ARTIFACT_JSON.whatTheyAreGoodFor).toContain("SAME MACHINE");
     expect(ARTIFACT_JSON.whatTheyAreGoodFor).toContain("deterministic");
-    expect(ARTIFACT_JSON.allocationMethod).toContain("MEASURED FROM REAL OUTPUTS");
+    // The comparison the artifact RECOMMENDS is only safe above the run-to-run
+    // spread, so the artifact must name that floor rather than leave a reader to
+    // discover it by mistaking noise for a regression.
+    expect(ARTIFACT_JSON.whatTheyAreGoodFor).toContain("nsPerOpRoundSpreadPercent");
+    expect(ARTIFACT_JSON.whatTheyAreGoodFor).toContain("SEPARATE PROCESSES");
+    expect(ARTIFACT_JSON.allocationMethod).toContain("OBSERVED FROM THE REAL OBJECTS");
+    expect(ARTIFACT_JSON.allocationMethod).toContain("heldBytes");
     expect(ARTIFACT_JSON.timingMethod).toContain("median");
-    // The environment is what makes a later comparison checkable at all.
-    expect(ARTIFACT_JSON.environment.runtime.length).toBeGreaterThan(3);
-    expect(ARTIFACT_JSON.environment.platform).toContain("-");
+    // Timer granularity and batching, because the smallest rows used to be six
+    // to nine ticks of a 41.7 ns clock while five significant figures were
+    // published beside them.
+    expect(ARTIFACT_JSON.timingMethod).toContain("quantum");
+    expect(ARTIFACT_JSON.timingMethod).toContain("BATCH");
+    expect(ARTIFACT_JSON.timingMethod).toContain("INTERLEAVED");
     expect(ARTIFACT_JSON.limits.maxChunkBytes).toBe(RELAY_INITIAL_LIMITS.maxDataChunkBytes);
     expect(ARTIFACT_JSON.limits.maxMessageBytes).toBe(RELAY_INITIAL_LIMITS.maxQueuedBytes);
   });
 
-  it("recomputes every deterministic column from the real chunk path", () => {
+  it("names the engine the numbers came from, not the one it emulates", () => {
+    // THE FIELD THAT EXISTS TO MAKE A LATER COMPARISON CHECKABLE. Under Bun,
+    // `process.release.name` is "node" and `process.version` is an emulated Node
+    // version, so a runtime recorded from those two named V8 for numbers
+    // JavaScriptCore produced — and a reader rerunning under genuine Node of
+    // that version would have seen a matching `environment` block and believed
+    // the comparison legitimate while comparing two engines.
+    const environment = ARTIFACT_JSON.environment;
+    const invoked = ARTIFACT_JSON.producedBy.split(" ")[0];
+    expect(invoked).toBeDefined();
+    expect(environment.runtime.startsWith(`${String(invoked)} `)).toBe(true);
+    expect(environment.runtime).not.toBe(`node ${environment.emulatedNodeVersion}`);
+    expect(environment.platform).toContain("-");
+    // The timer's own resolution, so a reader can see how many ticks a row is.
+    expect(environment.timerQuantumNs).toBeGreaterThan(0);
+    expect(environment.note.length).toBeGreaterThan(40);
+  });
+
+  it("re-observes every deterministic column from the real chunk path", () => {
     expect(ARTIFACT_JSON.rows.length).toBeGreaterThan(0);
     // Both modes at every size, so a row cannot be dropped without failing here.
     const sizes = [...new Set(ARTIFACT_JSON.rows.map((row) => row.payloadBytes))];
@@ -112,47 +174,59 @@ describe("relay chunk-path perf artifact", () => {
       );
       // Filled rather than zeroed: an all-NUL buffer is what `isChunkedPayload`
       // reads as a chunk header, so a zeroed message would be refused by the
-      // assembler below for a reason that has nothing to do with the sizes under
-      // test. No conforming sender emits one — legacy JSON starts `{` or `[` and
-      // an envelope starts `E2EE_ENVELOPE_DISCRIMINATOR` — so filling here keeps
-      // the round trip on the path the artifact describes.
-      const prepared = prepareRelayMessage(new Uint8Array(row.messageBytes).fill(0x41), {
+      // assembler for a reason that has nothing to do with the sizes under test.
+      // No conforming sender emits one — legacy JSON starts `{` or `[` and an
+      // envelope starts `E2EE_ENVELOPE_DISCRIMINATOR` — so filling here keeps the
+      // round trip on the path the artifact describes.
+      const observed = observeRoundTrip(new Uint8Array(row.messageBytes).fill(0x41), {
         maxChunkBytes: ARTIFACT_JSON.limits.maxChunkBytes,
         maxMessageBytes: ARTIFACT_JSON.limits.maxMessageBytes,
         peerSupportsChunking: ARTIFACT_JSON.limits.peerSupportsChunking,
       });
-      expect(prepared.kind, label).toBe("ready");
-      if (prepared.kind !== "ready") continue;
-      const wireBytes = prepared.payloads.reduce((total, one) => total + one.byteLength, 0);
-      const chunked = prepared.payloads.length > 1;
-      expect(row.chunks, label).toBe(prepared.payloads.length);
-      expect(row.wireBytes, label).toBe(wireBytes);
-      expect(row.chunkHeaderBytes, label).toBe(
-        chunked ? prepared.payloads.length * RELAY_CHUNK_HEADER_BYTES : 0,
-      );
-      expect(row.preludeBytes, label).toBe(chunked ? 0 : wireBytes - row.messageBytes);
-      expect(row.senderAllocatedBytes, label).toBe(
-        chunked ? wireBytes : row.preludeBytes === 0 ? 0 : wireBytes,
-      );
-      expect(row.receiverAllocatedBytes, label).toBe(chunked ? 2 * row.messageBytes : 0);
-
-      // …and the round trip really completes, so the allocation columns describe
-      // a path that works rather than one that errors out early.
-      const assembler = new RelayMessageAssembler();
-      let assembled = 0;
-      for (const payload of prepared.payloads) {
-        const result = assembler.push(Uint8Array.from(payload));
-        expect(result.kind, label).not.toBe("error");
-        if (result.kind === "done") assembled = result.message.byteLength;
-      }
-      expect(assembled, label).toBe(row.messageBytes);
+      // EVERY observed column at once, so a column can neither drift nor be
+      // added to the artifact and left ungated.
+      expect(
+        {
+          wireBytes: row.wireBytes,
+          chunks: row.chunks,
+          chunkHeaderBytes: row.chunkHeaderBytes,
+          preludeBytes: row.preludeBytes,
+          senderAllocatedBytes: row.senderAllocatedBytes,
+          senderReturnedCallerArray: row.senderReturnedCallerArray,
+          receiverAllocatedBytes: row.receiverAllocatedBytes,
+          receiverPeakHeldBytes: row.receiverPeakHeldBytes,
+          receiverEmittedIsViewOfPayload: row.receiverEmittedIsViewOfPayload,
+          roundTripPreservesEveryByte: row.roundTripPreservesEveryByte,
+        },
+        label,
+      ).toEqual(observed);
+      // …and the round trip really completes with every byte intact, which is
+      // what makes the receiver's figure a figure about a working path.
+      expect(observed.roundTripPreservesEveryByte, label).toBe(true);
 
       // The timing columns are recorded, never gated. All that is checked is
-      // that they are present and positive — a row with a zero duration is a
-      // measurement that did not happen.
+      // that they are present, positive, and internally consistent — a row with
+      // a zero duration is a measurement that did not happen, and a row whose
+      // dispersion fields disagree with its own round medians is a row whose
+      // spread disclosure means nothing.
       expect(row.nsPerOpMedian, label).toBeGreaterThan(0);
       expect(row.nsPerOpP90, label).toBeGreaterThanOrEqual(row.nsPerOpMedian);
-      expect(row.iterations, label).toBeGreaterThan(0);
+      expect(row.roundTripsPerSample, label).toBeGreaterThan(0);
+      expect(row.samples, label).toBeGreaterThan(0);
+      expect(row.roundTrips, label).toBeGreaterThanOrEqual(row.samples);
+      expect(row.nsPerOpRoundMedians.length, label).toBeGreaterThanOrEqual(5);
+      expect(row.nsPerOpRoundMin, label).toBe(Math.min(...row.nsPerOpRoundMedians));
+      const highest = Math.max(...row.nsPerOpRoundMedians);
+      expect(row.nsPerOpRoundSpreadPercent, label).toBe(
+        Math.round(((highest - row.nsPerOpRoundMin) / row.nsPerOpRoundMin) * 1000) / 10,
+      );
+      expect(row.nsPerOpRoundIqrPercent, label).toBeLessThanOrEqual(
+        row.nsPerOpRoundSpreadPercent + 0.1,
+      );
+      // Three significant figures, not five: the underlying sample is a
+      // wall-clock duration whose run-to-run spread is in the percent range.
+      const digits = String(row.payloadMibPerSecond).replace(/[^1-9]/g, "").length;
+      expect(digits, `${label} significant figures`).toBeLessThanOrEqual(3);
     }
   });
 
@@ -191,7 +265,13 @@ describe("relay chunk-path perf artifact", () => {
     if (legacy === undefined) return;
     expect(legacy.senderAllocatedBytes).toBe(0);
     expect(legacy.receiverAllocatedBytes).toBe(0);
+    // …and the reason it is zero is IDENTITY, not arithmetic: the sender handed
+    // the caller's own array back and the receiver's message is a window into it.
+    expect(legacy.senderReturnedCallerArray).toBe(true);
+    expect(legacy.receiverEmittedIsViewOfPayload).toBe(true);
     expect(boundary.senderAllocatedBytes).toBeGreaterThan(0);
     expect(boundary.receiverAllocatedBytes).toBeGreaterThan(0);
+    expect(boundary.senderReturnedCallerArray).toBe(false);
+    expect(boundary.receiverEmittedIsViewOfPayload).toBe(false);
   });
 });
