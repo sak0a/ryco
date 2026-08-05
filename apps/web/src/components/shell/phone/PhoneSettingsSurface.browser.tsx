@@ -95,20 +95,22 @@ import { syncDocumentPresentationTier } from "../../../lib/presentationTier";
 import { AppAtomRegistryProvider } from "../../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../../rpc/serverState";
 import { useSettingsDialogStore } from "../../../settingsDialogStore";
-import { PhoneSettingsSurface } from "./PhoneSettingsSurface";
+import { PhoneSettingsSurface, PHONE_SETTINGS_GENERAL_LABELS } from "./PhoneSettingsSurface";
 
-const GENERAL_SECTION_LABELS = [
-  "General",
-  "Providers",
-  "Plugins",
-  "MCP Servers",
-  "Appearance",
-  "Keybindings",
-  "Source Control",
-  "Connections",
-  "Statistics",
-  "Archive",
-] as const;
+/**
+ * The resting list's labels, DERIVED from the surface's own registry.
+ *
+ * It was a hardcoded array, and every assertion over it was "each of these is
+ * present" — never "these are all of them". A section added to the desktop
+ * dialog and forgotten here stayed green, which is how `security` shipped
+ * unreachable on the phone tier. The set is checked against the desktop
+ * inventory in `SettingsDialog.test.ts`; this drives the geometry and push
+ * assertions over whatever that set turns out to be.
+ *
+ * "Account" is filtered out at render in the standard client (it is hosted-only),
+ * so it is not in the resting list this suite walks.
+ */
+const GENERAL_SECTION_LABELS = PHONE_SETTINGS_GENERAL_LABELS.filter((label) => label !== "Account");
 
 function createBaseServerConfig(): ServerConfig {
   return {
@@ -349,6 +351,7 @@ describe("PhoneSettingsSurface", () => {
               Keybindings: "keybindings",
               "Source Control": "source-control",
               Connections: "connections",
+              Security: "security",
               Statistics: "statistics",
               Archive: "archived",
             }[label],

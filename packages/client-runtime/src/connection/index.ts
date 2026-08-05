@@ -3,6 +3,7 @@ export * from "./catalog.ts";
 export * from "./atomRpcClient.ts";
 export * from "./environmentStateSink.ts";
 export * from "./environmentApi.ts";
+export * from "./nodeE2eeOperator.ts";
 export * from "./primaryAuth.ts";
 export * from "./primaryContext.ts";
 export * from "./projectionTracker.ts";

@@ -13,6 +13,7 @@ import {
   RotateCcwIcon,
   ServerIcon,
   Settings2Icon,
+  ShieldIcon,
   UserRoundIcon,
 } from "lucide-react";
 
@@ -41,10 +42,23 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { id: "source-control", label: "Source Control", icon: GitBranchIcon },
   { id: "connections", label: "Connections", icon: Link2Icon },
+  { id: "security", label: "Security", icon: ShieldIcon },
   { id: "diagnostics", label: "Diagnostics", icon: ActivityIcon },
   { id: "statistics", label: "Statistics", icon: BarChart3Icon },
   { id: "archived", label: "Archive", icon: ArchiveIcon },
 ];
+
+/**
+ * Every section this dialog can navigate to.
+ *
+ * Exported so `PhoneSettingsSurface`'s mirrored registry can be checked against
+ * it rather than trusted: a section added here and not there is unreachable on
+ * every phone-tier presentation, and `openSettings(id)` for it falls back to the
+ * list with no error.
+ */
+export const SETTINGS_DIALOG_SECTION_IDS: ReadonlyArray<SettingsSectionId> = NAV_ITEMS.map(
+  (item) => item.id,
+);
 
 const HOSTED_OWNER_SECTIONS = new Set<SettingsSectionId>([
   "general",
@@ -53,6 +67,12 @@ const HOSTED_OWNER_SECTIONS = new Set<SettingsSectionId>([
   "mcp-servers",
   "keybindings",
   "source-control",
+  // Node-scoped and owner-only, like the rest of this set. In hosted mode the
+  // node's operator routes are unreachable anyway (the relay carries `ryco.rpc`
+  // and there is no HTTP tunnel), so the section renders this browser's own
+  // channel and says where the node-side state lives — but the gate stays
+  // closed for non-owners rather than relying on that.
+  "security",
   "diagnostics",
   "statistics",
 ]);
@@ -120,6 +140,9 @@ const LazySourceControlSettingsPanel = lazy(() =>
 const LazyConnectionsSettings = lazy(() =>
   import("./ConnectionsSettings").then((module) => ({ default: module.ConnectionsSettings })),
 );
+const LazyNodeSecuritySettings = lazy(() =>
+  import("./NodeSecuritySettings").then((module) => ({ default: module.NodeSecuritySettings })),
+);
 const LazyDiagnosticsSettings = lazy(() =>
   import("./DiagnosticsSettings").then((module) => ({ default: module.DiagnosticsSettings })),
 );
@@ -160,6 +183,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       {section === "keybindings" ? <LazyKeybindingsSettingsPanel /> : null}
       {section === "source-control" ? <LazySourceControlSettingsPanel /> : null}
       {section === "connections" ? <LazyConnectionsSettings /> : null}
+      {section === "security" ? <LazyNodeSecuritySettings /> : null}
       {section === "diagnostics" ? <LazyDiagnosticsSettings /> : null}
       {section === "statistics" ? <LazyStatisticsPanel /> : null}
       {section === "archived" ? <ArchivedThreadsPanel /> : null}
