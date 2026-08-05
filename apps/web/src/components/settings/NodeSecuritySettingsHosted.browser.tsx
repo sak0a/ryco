@@ -73,8 +73,17 @@ vi.mock("~/environments/primary", async (importOriginal) => {
 import { applyWebE2eeVerificationCode } from "../../../test/hostedConnectionVocabulary";
 import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { isHostedHubMode } from "../../env";
+import {
+  deriveHostedConnectionStatusIndicator,
+  HOSTED_CONNECTION_STATUS_INDICATORS,
+} from "../../hostedHub/connectionStatus";
+import { useHostedHubStore } from "../../hostedHub/state";
+import { webE2eeSessionState } from "../../hostedHub/e2eeSession";
 import { NodeSecuritySettings } from "./NodeSecuritySettings";
-import { nodeE2eeStrictPolicyDisposition } from "./NodeSecuritySettings.logic";
+import {
+  nodeConnectionStatement,
+  nodeE2eeStrictPolicyDisposition,
+} from "./NodeSecuritySettings.logic";
 
 const OWN_CHANNEL_CODE = ["3QRT", "9KZ0"].join(E2EE_WEB_SAS_CHARS.separator);
 
@@ -105,22 +114,27 @@ describe("the requireApprovedClientE2EE lockout is blocked outright in hosted mo
       expect(found, "the control is absent rather than disabled").not.toBeNull();
       return found!;
     });
-    // Disabled, not hidden. An absent control leaves an operator hunting for a
-    // setting they were told exists; a live one offers the lockout.
-    expect(control.getAttribute("data-disabled")).not.toBeNull();
-    // …and disabled BECAUSE the disposition blocked it, not because the panel
-    // happened to be loading. `data-blocked` is written only from
+    // Present, and inert BECAUSE the disposition blocked it — not because the
+    // panel happened to be loading. `data-blocked` is written only from
     // `disposition.kind === "blocked"`, so this fails if the guard is removed
-    // even while some other condition still greys the control out.
+    // even while some other condition still greys the row out. An absent row
+    // would leave an operator hunting for a setting they were told exists.
     expect(control.getAttribute("data-blocked")).toBe("hosted");
-    // The control is also a SINGLE control. Two of them was the earlier defect:
-    // the hosted branch drew its own hardcoded `disabled`, so deleting the guard
+    // There is no switch to press, and nothing draws a position: hosted mode
+    // never reads the node's policy, so an off switch here asserted
+    // `requireApprovedClientE2EE: false` about a value this section had just
+    // said it cannot see.
+    expect(control.getAttribute("data-policy")).toBe("unknown");
+    expect(control.getAttribute("role")).not.toBe("switch");
+    expect(control.querySelector('[role="switch"]')).toBeNull();
+    // The row is also a SINGLE row. Two of them was the earlier defect: the
+    // hosted branch drew its own hardcoded `disabled`, so deleting the guard
     // from the shared one changed nothing here.
     expect(document.querySelectorAll('[data-testid="require-approved-client-e2ee"]')).toHaveLength(
       1,
     );
     // Pressing it does nothing, which is the property the attributes stand in
-    // for. A disabled attribute a click handler ignores is not a block.
+    // for.
     control.click();
     expect(calls).not.toContain("policy-preview");
 
@@ -166,18 +180,74 @@ describe("this tab's own channel", () => {
       expect(found, "the hosted channel panel is missing").not.toBeNull();
       return found!;
     });
-    // The word comes from the shared bounded vocabulary. §2.2's native row is
-    // unreachable from this tier by construction, so the chip can never read as
-    // the signed tier's claim.
-    expect(claim.textContent).not.toBe("Encrypted");
+    // THE CHIP IS TIED TO THE DERIVATION, not checked against one forbidden
+    // word. `not.toBe("Encrypted")` was a one-string denylist against a chip
+    // that reads "Idle" in this state: replacing `{indicator.shortLabel}` with
+    // the literal `"Protected"` — a claim this tier has not earned — left both
+    // suites green.
+    const state = useHostedHubStore.getState();
+    const expected = deriveHostedConnectionStatusIndicator({
+      browserStatus: state.browserStatus,
+      sessionStatus: state.sessionStatus,
+      selectionStatus: state.selectionStatus,
+      transportStatus: state.transportStatus,
+      e2eeStatus: webE2eeSessionState().status,
+    });
+    expect(claim.textContent?.trim()).toBe(expected.shortLabel);
+    // …and whatever it turned out to be is a member of the shared bounded
+    // vocabulary, and not §2.2's bottom row, which this tier cannot reach.
+    const vocabulary = Object.values(HOSTED_CONNECTION_STATUS_INDICATORS).map(
+      (entry) => entry.shortLabel,
+    );
+    expect(vocabulary).toContain(claim.textContent?.trim());
+    expect(expected.guarantee).not.toBe("e2ee");
 
     const body = document.body.textContent ?? "";
-    // §13.5's advisory travels with the characters, from the shipped
-    // inseparable value — never obtained as bare characters here.
     expect(body).toContain(OWN_CHANNEL_CODE);
-    expect(body).toContain("cannot protect against the Hub operator");
+    // §13.5's advisory travels with the characters, from the shipped
+    // inseparable value — SCOPED TO THE VALUE'S OWN CONTAINER, because the
+    // `web-unsigned` trust disclosure rendered above it contains the same
+    // sentence: deleting `<p>{view.advisory}</p>` outright left this green while
+    // this tab's WebSAS was drawn as bare characters.
+    const code = document.querySelector<HTMLElement>('[data-testid="node-session-code"]')!;
+    expect(code.textContent).toContain(OWN_CHANNEL_CODE);
+    expect(code.textContent).toContain("cannot protect against the Hub operator");
     // §2.4: nothing on this page may claim the native row for a bundle the Hub
     // served.
     expect(body.toLowerCase()).not.toContain("end-to-end encrypted");
+  });
+
+  it("does not tell a Hub-served reader that nothing leaves this machine", async () => {
+    // The hosted statement had no live assertion: its only check was that the
+    // body contained "hub", which the LOCAL body also satisfies ("No Ryco Hub
+    // sits between them"). Returning the local statement for hosted left all
+    // node and browser tests green while a Hub-served panel rendered §2.4's
+    // forbidden conclusion.
+    mounted = await render(<NodeSecuritySettings />);
+    await expect.element(page.getByTestId("require-approved-client-e2ee")).toBeVisible();
+
+    const body = document.body.textContent ?? "";
+    expect(body).toContain(nodeConnectionStatement("hosted", null).body);
+    expect(body).not.toContain("No Ryco Hub sits between them");
+    expect(body).not.toContain("nothing you send leaves this machine");
+    // §2.3's web bullet denies the peer's identity, so the sentence does not
+    // name it as the reader's own node.
+    expect(body).not.toContain("This browser reaches your node");
+  });
+
+  it("carries the shipped trust disclosure with its tone, not a re-derived copy", async () => {
+    // The panel re-derived `hostedRelayTrustDisclosure` and rendered only
+    // `.body`, so §12.2's legacy-fallback disclosure drew in the same muted grey
+    // as the advisory one — the single presentational signal separating "the Hub
+    // can read this" from "the Hub relays ciphertext", gone at the panel about
+    // security.
+    mounted = await render(<NodeSecuritySettings />);
+    const notice = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-hosted-relay-trust-notice]");
+      expect(found, "the shipped disclosure component is not mounted").not.toBeNull();
+      return found!;
+    });
+    expect(notice.getAttribute("data-e2ee-status")).not.toBeNull();
+    expect(notice.getAttribute("data-tone")).not.toBeNull();
   });
 });
