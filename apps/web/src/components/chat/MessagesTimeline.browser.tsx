@@ -120,7 +120,9 @@ const THINKING_ENTRIES = [
   },
 ];
 
-function makeContextHandoffMarker(): ContextHandoffTimelineEntry {
+function makeContextHandoffMarker(
+  overrides: Partial<ContextHandoffTimelineEntry> = {},
+): ContextHandoffTimelineEntry {
   return {
     id: "context-handoff:activity-1",
     activityId: "activity-1",
@@ -154,6 +156,7 @@ function makeContextHandoffMarker(): ContextHandoffTimelineEntry {
       modelDisplayName: "Fable 5",
     },
     error: "Acceptance could not be proven after reconnect",
+    ...overrides,
   };
 }
 
@@ -249,6 +252,57 @@ describe("MessagesTimeline", () => {
       await expect.element(status).toBeVisible();
     } finally {
       document.documentElement.classList.remove("dark");
+      await screen.unmount();
+    }
+  });
+
+  it("opens inspection from a keyboard-accessible divider using friendly model names", async () => {
+    const marker = makeContextHandoffMarker({ status: "consumed" });
+    const onInspectContextHandoff = vi.fn();
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        onInspectContextHandoff={onInspectContextHandoff}
+        timelineEntries={[
+          {
+            id: marker.id,
+            kind: "context-handoff" as const,
+            createdAt: marker.createdAt,
+            marker,
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const divider = page.getByRole("button", {
+        name: /Context handoff from Codex Work GPT-5.6 Sol, Local Provider .* to Claude Work Fable 5\. Completed/,
+      });
+      await expect.element(divider).toBeVisible();
+      const dividerElement = divider.element();
+      expect(dividerElement.textContent).toContain("Fable 5");
+      expect(dividerElement.textContent).not.toContain("claude-fable-5");
+      const timelineRow = dividerElement.closest<HTMLElement>(
+        '[data-timeline-row-kind="context-handoff"]',
+      );
+      expect(timelineRow).not.toBeNull();
+      const dividerRect = dividerElement.getBoundingClientRect();
+      const rowRect = timelineRow!.getBoundingClientRect();
+      expect(Math.abs(dividerRect.width - rowRect.width)).toBeLessThanOrEqual(1);
+      const [leftRule, label, rightRule] = Array.from(dividerElement.children);
+      expect(leftRule).toBeInstanceOf(HTMLElement);
+      expect(label).toBeInstanceOf(HTMLElement);
+      expect(rightRule).toBeInstanceOf(HTMLElement);
+      const leftRuleRect = leftRule!.getBoundingClientRect();
+      const labelRect = label!.getBoundingClientRect();
+      const rightRuleRect = rightRule!.getBoundingClientRect();
+      expect(Math.abs(leftRuleRect.width - rightRuleRect.width)).toBeLessThanOrEqual(1);
+      expect(
+        Math.abs(labelRect.left + labelRect.width / 2 - (dividerRect.left + dividerRect.width / 2)),
+      ).toBeLessThanOrEqual(1);
+      await userEvent.click(divider);
+      expect(onInspectContextHandoff).toHaveBeenCalledWith(marker, expect.any(HTMLButtonElement));
+    } finally {
       await screen.unmount();
     }
   });

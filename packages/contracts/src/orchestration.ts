@@ -41,6 +41,13 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeThread: "orchestration.subscribeThread",
 } as const;
 
+export const CONTEXT_HANDOFF_WS_METHODS = {
+  getInspectionSummary: "contextHandoff.getInspectionSummary",
+  listInspectionEntries: "contextHandoff.listInspectionEntries",
+  readRawPayloadChunk: "contextHandoff.readRawPayloadChunk",
+  readExportChunk: "contextHandoff.readExportChunk",
+} as const;
+
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
   "on-failure",
@@ -127,6 +134,9 @@ export const CONTEXT_HANDOFF_ACTIVITY_KIND = "context-handoff";
 export const CONTEXT_HANDOFF_CONTEXT_VERSION = 1;
 export const CONTEXT_HANDOFF_SCHEMA_VERSION = 1;
 export const CONTEXT_HANDOFF_ERROR_MAX_CHARS = 2_000;
+export const CONTEXT_HANDOFF_INSPECTION_PAGE_MAX_ITEMS = 20;
+export const CONTEXT_HANDOFF_INSPECTION_MAX_RESPONSE_BYTES = 128 * 1_024;
+export const CONTEXT_HANDOFF_INSPECTION_CHUNK_MAX_BYTES = 96 * 1_024;
 
 export const ContextHandoffMode = Schema.Literal("full-context-fresh-session");
 export type ContextHandoffMode = typeof ContextHandoffMode.Type;
@@ -144,10 +154,23 @@ export type ContextHandoffEndpointSnapshot = typeof ContextHandoffEndpointSnapsh
 const ContextHandoffSources = Schema.Array(ContextHandoffEndpointSnapshot).check(
   Schema.isMinLength(1),
 );
-const ContextHandoffDigest = TrimmedNonEmptyString.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+export const ContextHandoffDigest = TrimmedNonEmptyString.check(Schema.isPattern(/^[a-f0-9]{64}$/));
+export type ContextHandoffDigest = typeof ContextHandoffDigest.Type;
 const ContextHandoffFailure = TrimmedNonEmptyString.check(
   Schema.isMaxLength(CONTEXT_HANDOFF_ERROR_MAX_CHARS),
 );
+
+export const ContextHandoffInspectionSummaryMetadata = Schema.Struct({
+  completeEntryCount: NonNegativeInt,
+  includedEntryCount: Schema.optional(NonNegativeInt),
+  truncated: Schema.optional(Schema.Boolean),
+  completeDigest: ContextHandoffDigest,
+  providerInputDigest: Schema.optional(ContextHandoffDigest),
+  preparedAt: Schema.optional(IsoDateTime),
+  acceptedAt: Schema.optional(IsoDateTime),
+});
+export type ContextHandoffInspectionSummaryMetadata =
+  typeof ContextHandoffInspectionSummaryMetadata.Type;
 
 const ContextHandoffActivityBaseFields = {
   schemaVersion: Schema.Literal(CONTEXT_HANDOFF_SCHEMA_VERSION),
@@ -191,6 +214,7 @@ export const ContextHandoffActivityPayload = Schema.Union([
     ...ContextHandoffPresentationFields,
     ...ContextHandoffContextFields,
     status: Schema.Literal("consumed"),
+    inspection: Schema.optional(ContextHandoffInspectionSummaryMetadata),
   }),
   Schema.Struct({
     ...ContextHandoffActivityBaseFields,
@@ -199,6 +223,7 @@ export const ContextHandoffActivityPayload = Schema.Union([
     contextDigest: Schema.optional(ContextHandoffDigest),
     status: Schema.Literal("failed"),
     error: ContextHandoffFailure,
+    inspection: Schema.optional(ContextHandoffInspectionSummaryMetadata),
   }),
   Schema.Struct({
     ...ContextHandoffActivityBaseFields,
@@ -206,9 +231,178 @@ export const ContextHandoffActivityPayload = Schema.Union([
     ...ContextHandoffContextFields,
     status: Schema.Literal("delivery-uncertain"),
     error: ContextHandoffFailure,
+    inspection: Schema.optional(ContextHandoffInspectionSummaryMetadata),
   }),
 ]);
 export type ContextHandoffActivityPayload = typeof ContextHandoffActivityPayload.Type;
+
+export const ContextHandoffInspectionScope = Schema.Literals(["sent", "complete"]);
+export type ContextHandoffInspectionScope = typeof ContextHandoffInspectionScope.Type;
+
+export const ContextHandoffInspectionSection = Schema.Literals([
+  "messages",
+  "plans",
+  "tools",
+  "checkpoints",
+  "notices",
+  "subagents",
+  "priorHandoffs",
+  "triggeringMessage",
+]);
+export type ContextHandoffInspectionSection = typeof ContextHandoffInspectionSection.Type;
+
+export const ContextHandoffExportFormat = Schema.Literals(["markdown", "json"]);
+export type ContextHandoffExportFormat = typeof ContextHandoffExportFormat.Type;
+
+export const ContextHandoffInspectionUnavailableReason = Schema.Literals([
+  "not-prepared",
+  "exact-payload-unavailable",
+  "invalid-artifact",
+]);
+export type ContextHandoffInspectionUnavailableReason =
+  typeof ContextHandoffInspectionUnavailableReason.Type;
+
+export const ContextHandoffInspectionSectionSummary = Schema.Struct({
+  section: ContextHandoffInspectionSection,
+  entryCount: NonNegativeInt,
+});
+export type ContextHandoffInspectionSectionSummary =
+  typeof ContextHandoffInspectionSectionSummary.Type;
+
+export const ContextHandoffInspectionScopeSummary = Schema.Struct({
+  scope: ContextHandoffInspectionScope,
+  available: Schema.Boolean,
+  unavailableReason: Schema.NullOr(ContextHandoffInspectionUnavailableReason),
+  entryCount: NonNegativeInt,
+  byteCount: NonNegativeInt,
+  digest: Schema.NullOr(ContextHandoffDigest),
+  truncated: Schema.NullOr(Schema.Boolean),
+  sections: Schema.Array(ContextHandoffInspectionSectionSummary),
+});
+export type ContextHandoffInspectionScopeSummary = typeof ContextHandoffInspectionScopeSummary.Type;
+
+export const ContextHandoffInspectionDeliveryLabel = Schema.Literals([
+  "sent",
+  "prepared-not-sent",
+  "prepared-not-accepted",
+  "delivery-uncertain",
+]);
+export type ContextHandoffInspectionDeliveryLabel =
+  typeof ContextHandoffInspectionDeliveryLabel.Type;
+
+export const ContextHandoffInspectionSummaryInput = Schema.Struct({
+  threadId: ThreadId,
+  handoffId: ContextHandoffId,
+});
+export type ContextHandoffInspectionSummaryInput = typeof ContextHandoffInspectionSummaryInput.Type;
+
+export const ContextHandoffInspectionSummary = Schema.Struct({
+  threadId: ThreadId,
+  handoffId: ContextHandoffId,
+  status: Schema.Literals([
+    "requested",
+    "preparing",
+    "dispatching",
+    "consumed",
+    "failed",
+    "delivery-uncertain",
+  ]),
+  deliveryLabel: ContextHandoffInspectionDeliveryLabel,
+  sources: ContextHandoffSources,
+  target: ContextHandoffEndpointSnapshot,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  preparedAt: Schema.NullOr(IsoDateTime),
+  acceptedAt: Schema.NullOr(IsoDateTime),
+  sent: ContextHandoffInspectionScopeSummary,
+  complete: ContextHandoffInspectionScopeSummary,
+});
+export type ContextHandoffInspectionSummary = typeof ContextHandoffInspectionSummary.Type;
+
+export const ContextHandoffInspectionEntriesInput = Schema.Struct({
+  threadId: ThreadId,
+  handoffId: ContextHandoffId,
+  scope: ContextHandoffInspectionScope,
+  section: ContextHandoffInspectionSection,
+  cursor: Schema.optional(Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(1_024)))),
+  limit: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(CONTEXT_HANDOFF_INSPECTION_PAGE_MAX_ITEMS)),
+  ),
+});
+export type ContextHandoffInspectionEntriesInput = typeof ContextHandoffInspectionEntriesInput.Type;
+
+export const ContextHandoffInspectionEntry = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  value: Schema.Unknown,
+});
+export type ContextHandoffInspectionEntry = typeof ContextHandoffInspectionEntry.Type;
+
+export const ContextHandoffInspectionEntriesPage = Schema.Struct({
+  scope: ContextHandoffInspectionScope,
+  section: ContextHandoffInspectionSection,
+  artifactDigest: ContextHandoffDigest,
+  entries: Schema.Array(ContextHandoffInspectionEntry),
+  nextCursor: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type ContextHandoffInspectionEntriesPage = typeof ContextHandoffInspectionEntriesPage.Type;
+
+export const ContextHandoffRawPayloadChunkInput = Schema.Struct({
+  threadId: ThreadId,
+  handoffId: ContextHandoffId,
+  scope: ContextHandoffInspectionScope,
+  offset: NonNegativeInt,
+});
+export type ContextHandoffRawPayloadChunkInput = typeof ContextHandoffRawPayloadChunkInput.Type;
+
+export const ContextHandoffRawPayloadChunk = Schema.Struct({
+  scope: ContextHandoffInspectionScope,
+  offset: NonNegativeInt,
+  chunk: Schema.String,
+  nextOffset: Schema.NullOr(NonNegativeInt),
+  totalBytes: NonNegativeInt,
+  digest: ContextHandoffDigest,
+});
+export type ContextHandoffRawPayloadChunk = typeof ContextHandoffRawPayloadChunk.Type;
+
+export const ContextHandoffExportChunkInput = Schema.Struct({
+  threadId: ThreadId,
+  handoffId: ContextHandoffId,
+  scope: ContextHandoffInspectionScope,
+  format: ContextHandoffExportFormat,
+  offset: NonNegativeInt,
+});
+export type ContextHandoffExportChunkInput = typeof ContextHandoffExportChunkInput.Type;
+
+export const ContextHandoffExportChunk = Schema.Struct({
+  scope: ContextHandoffInspectionScope,
+  format: ContextHandoffExportFormat,
+  offset: NonNegativeInt,
+  chunk: Schema.String,
+  nextOffset: Schema.NullOr(NonNegativeInt),
+  totalBytes: NonNegativeInt,
+  digest: ContextHandoffDigest,
+  filename: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(180),
+    Schema.isPattern(/^ryco-context-handoff-[a-zA-Z0-9_-]+-(sent|complete)\.(md|json)$/),
+  ),
+});
+export type ContextHandoffExportChunk = typeof ContextHandoffExportChunk.Type;
+
+export class ContextHandoffInspectionError extends Schema.TaggedErrorClass<ContextHandoffInspectionError>()(
+  "ContextHandoffInspectionError",
+  {
+    reason: Schema.Literals([
+      "not-found",
+      "scope-unavailable",
+      "invalid-cursor",
+      "invalid-offset",
+      "invalid-artifact",
+      "response-too-large",
+      "internal",
+    ]),
+    message: TrimmedNonEmptyString,
+  },
+) {}
 
 export const ContextHandoffReference = Schema.Struct({
   handoffId: ContextHandoffId,

@@ -49,7 +49,11 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       deleteWorktree: rpcClient.git.deleteWorktree,
     },
     ...(rpcClient.worktrees
-      ? { worktrees: { setManualPosition: rpcClient.worktrees.setManualPosition } }
+      ? {
+          worktrees: {
+            setManualPosition: rpcClient.worktrees.setManualPosition,
+          },
+        }
       : {}),
     ...(rpcClient.threads
       ? {
@@ -68,6 +72,12 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>
         rpcClient.orchestration.subscribeThread(input, callback, options),
+    },
+    contextHandoff: {
+      getInspectionSummary: rpcClient.contextHandoff.getInspectionSummary,
+      listInspectionEntries: rpcClient.contextHandoff.listInspectionEntries,
+      readRawPayloadChunk: rpcClient.contextHandoff.readRawPayloadChunk,
+      readExportChunk: rpcClient.contextHandoff.readExportChunk,
     },
   };
 }

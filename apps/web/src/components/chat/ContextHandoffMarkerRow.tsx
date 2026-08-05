@@ -7,6 +7,7 @@ import {
   contextHandoffEndpointAccessibleLabel,
 } from "./ContextHandoffEndpointLabel";
 import { cn } from "~/lib/utils";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 function markerAccessibleLabel(marker: ContextHandoffTimelineEntry): string {
   const transition = `Context handoff from ${marker.sources
@@ -21,25 +22,17 @@ function markerAccessibleLabel(marker: ContextHandoffTimelineEntry): string {
   return `${transition}. Completed`;
 }
 
-export const ContextHandoffMarkerRow = memo(function ContextHandoffMarkerRow({
+function MarkerContents({
   marker,
+  failed,
+  uncertain,
 }: {
-  marker: ContextHandoffTimelineEntry;
+  readonly marker: ContextHandoffTimelineEntry;
+  readonly failed: boolean;
+  readonly uncertain: boolean;
 }) {
-  const accessibleLabel = markerAccessibleLabel(marker);
-  const failed = marker.status === "failed";
-  const uncertain = marker.status === "delivery-uncertain";
-
   return (
-    <div
-      role="status"
-      aria-label={accessibleLabel}
-      title={accessibleLabel}
-      className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden py-2 sm:gap-3"
-      data-context-handoff-id={marker.handoffId}
-      data-context-handoff-status={marker.status}
-      data-context-handoff-source-count={marker.sources.length}
-    >
+    <>
       <span
         className={cn(
           "h-px min-w-2 flex-1",
@@ -94,6 +87,75 @@ export const ContextHandoffMarkerRow = memo(function ContextHandoffMarkerRow({
         )}
         aria-hidden
       />
-    </div>
+    </>
+  );
+}
+
+export const ContextHandoffMarkerRow = memo(function ContextHandoffMarkerRow({
+  marker,
+  onInspect,
+}: {
+  marker: ContextHandoffTimelineEntry;
+  onInspect?: (marker: ContextHandoffTimelineEntry, trigger: HTMLButtonElement) => void;
+}) {
+  const accessibleLabel = markerAccessibleLabel(marker);
+  const failed = marker.status === "failed";
+  const uncertain = marker.status === "delivery-uncertain";
+
+  if (!onInspect) {
+    return (
+      <div
+        role="status"
+        aria-label={accessibleLabel}
+        title={accessibleLabel}
+        className="flex w-full min-w-0 max-w-full items-center gap-2 overflow-hidden py-2 sm:gap-3"
+        data-context-handoff-id={marker.handoffId}
+        data-context-handoff-status={marker.status}
+        data-context-handoff-source-count={marker.sources.length}
+      >
+        <MarkerContents marker={marker} failed={failed} uncertain={uncertain} />
+      </div>
+    );
+  }
+
+  const trigger = (
+    <button
+      type="button"
+      aria-label={accessibleLabel}
+      onClick={(event) => onInspect(marker, event.currentTarget)}
+      className="group flex w-full min-w-0 max-w-full cursor-pointer items-center gap-2 overflow-hidden rounded-md py-2 outline-none transition-colors hover:bg-foreground/3 focus-visible:ring-1 focus-visible:ring-ring/60 sm:gap-3"
+      data-context-handoff-id={marker.handoffId}
+      data-context-handoff-status={marker.status}
+      data-context-handoff-source-count={marker.sources.length}
+    >
+      <MarkerContents marker={marker} failed={failed} uncertain={uncertain} />
+    </button>
+  );
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={trigger} />
+      <TooltipPopup className="max-w-80 px-2 py-1.5" side="top">
+        <div className="space-y-1 text-left">
+          <p className="font-medium text-foreground">
+            {marker.status === "consumed"
+              ? "Sent to model"
+              : marker.status === "failed"
+                ? "Context handoff failed"
+                : "Delivery uncertain"}
+          </p>
+          <p>{new Date(marker.createdAt).toLocaleString()}</p>
+          {marker.inspection ? (
+            <p>
+              {marker.inspection.includedEntryCount ?? marker.inspection.completeEntryCount} of{" "}
+              {marker.inspection.completeEntryCount} context entries
+              {marker.inspection.truncated ? " · trimmed to fit" : ""}
+            </p>
+          ) : (
+            <p>Open to inspect the available context artifact.</p>
+          )}
+        </div>
+      </TooltipPopup>
+    </Tooltip>
   );
 });

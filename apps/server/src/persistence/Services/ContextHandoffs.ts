@@ -42,6 +42,7 @@ export const ContextHandoffRecord = Schema.Struct({
   contextVersion: PositiveInt,
   structuredContext: Schema.NullOr(Schema.Unknown),
   contextDigest: Schema.NullOr(ContextDigest),
+  deliveryArtifact: Schema.NullOr(Schema.Unknown),
   firstMessageId: MessageId,
   acceptedProviderTurnId: Schema.NullOr(TurnId),
   error: Schema.NullOr(ContextHandoffError),
@@ -53,10 +54,14 @@ export type ContextHandoffRecord = typeof ContextHandoffRecord.Type;
 export const CreateContextHandoffInput = ContextHandoffRecord;
 export type CreateContextHandoffInput = typeof CreateContextHandoffInput.Type;
 
-export const GetContextHandoffInput = Schema.Struct({ handoffId: ContextHandoffId });
+export const GetContextHandoffInput = Schema.Struct({
+  handoffId: ContextHandoffId,
+});
 export type GetContextHandoffInput = typeof GetContextHandoffInput.Type;
 
-export const ListContextHandoffsByThreadInput = Schema.Struct({ threadId: ThreadId });
+export const ListContextHandoffsByThreadInput = Schema.Struct({
+  threadId: ThreadId,
+});
 export type ListContextHandoffsByThreadInput = typeof ListContextHandoffsByThreadInput.Type;
 
 export const CompareAndSetContextHandoffStatusInput = Schema.Struct({
@@ -80,6 +85,14 @@ export const StoreContextHandoffContextInput = Schema.Struct({
 });
 export type StoreContextHandoffContextInput = typeof StoreContextHandoffContextInput.Type;
 
+export const StoreContextHandoffDeliveryArtifactInput = Schema.Struct({
+  handoffId: ContextHandoffId,
+  deliveryArtifact: Schema.Unknown,
+  updatedAt: IsoDateTime,
+});
+export type StoreContextHandoffDeliveryArtifactInput =
+  typeof StoreContextHandoffDeliveryArtifactInput.Type;
+
 export const makeRequestedContextHandoffRecord = (
   input: Omit<
     ContextHandoffRecord,
@@ -87,6 +100,7 @@ export const makeRequestedContextHandoffRecord = (
     | "contextVersion"
     | "structuredContext"
     | "contextDigest"
+    | "deliveryArtifact"
     | "targetRuntimeSessionId"
     | "acceptedProviderTurnId"
     | "error"
@@ -98,6 +112,7 @@ export const makeRequestedContextHandoffRecord = (
   contextVersion: CONTEXT_HANDOFF_CONTEXT_VERSION,
   structuredContext: null,
   contextDigest: null,
+  deliveryArtifact: null,
   acceptedProviderTurnId: null,
   error: null,
 });
@@ -121,6 +136,9 @@ export interface ContextHandoffRepositoryShape {
   ) => Effect.Effect<boolean, ContextHandoffRepositoryError>;
   readonly storeContextIfEmpty: (
     input: StoreContextHandoffContextInput,
+  ) => Effect.Effect<boolean, ContextHandoffRepositoryError>;
+  readonly storeDeliveryArtifactIfEmpty: (
+    input: StoreContextHandoffDeliveryArtifactInput,
   ) => Effect.Effect<boolean, ContextHandoffRepositoryError>;
 }
 

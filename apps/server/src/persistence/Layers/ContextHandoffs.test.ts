@@ -57,6 +57,42 @@ layer("ContextHandoffRepository", (it) => {
       assert.strictEqual(row.targetSelection.model, "claude-fable-5");
       assert.strictEqual(row.sourceRuntimeSessionId, "runtime-source");
       assert.strictEqual(row.structuredContext, null);
+      assert.strictEqual(row.deliveryArtifact, null);
+    }),
+  );
+
+  it.effect("stores an exact delivery artifact once without replacing it", () =>
+    Effect.gen(function* () {
+      const repository = yield* ContextHandoffRepository;
+      const handoffId = ContextHandoffId.make("handoff-delivery-artifact");
+      yield* repository.create(requestedRecord(handoffId, "thread-delivery-artifact"));
+      const first = {
+        artifactVersion: 1,
+        providerInput: "exact provider bytes 😀",
+      };
+      const conflicting = {
+        artifactVersion: 1,
+        providerInput: "different bytes",
+      };
+
+      assert.isTrue(
+        yield* repository.storeDeliveryArtifactIfEmpty({
+          handoffId,
+          deliveryArtifact: first,
+          updatedAt: "2026-08-04T00:00:01.000Z",
+        }),
+      );
+      assert.isFalse(
+        yield* repository.storeDeliveryArtifactIfEmpty({
+          handoffId,
+          deliveryArtifact: conflicting,
+          updatedAt: "2026-08-04T00:00:02.000Z",
+        }),
+      );
+
+      const row = Option.getOrThrow(yield* repository.getById({ handoffId }));
+      assert.deepStrictEqual(row.deliveryArtifact, first);
+      assert.strictEqual(row.updatedAt, "2026-08-04T00:00:01.000Z");
     }),
   );
 

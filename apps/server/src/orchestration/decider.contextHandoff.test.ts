@@ -152,7 +152,7 @@ describe("context handoff decider", () => {
     });
   });
 
-  it("does not hand off on a first turn or options-only change", async () => {
+  it("does not hand off on a first turn or same-instance selection change", async () => {
     const firstTurn = await Effect.runPromise(
       decideOrchestrationCommand({
         command: makeCommand(),
@@ -163,6 +163,31 @@ describe("context handoff decider", () => {
       "thread.message-sent",
       "thread.turn-start-requested",
     ]);
+
+    const modelOnly = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: makeCommand({
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex_work"),
+            model: "gpt-5.7",
+          },
+        }),
+        readModel: makeReadModel(makeThread()),
+      }),
+    );
+    const modelOnlyEvents = Array.isArray(modelOnly) ? modelOnly : [modelOnly];
+    expect(modelOnlyEvents.map((event) => event.type)).toEqual([
+      "thread.message-sent",
+      "thread.turn-start-requested",
+    ]);
+    const modelOnlyTurn = modelOnlyEvents[1];
+    expect(modelOnlyTurn?.type).toBe("thread.turn-start-requested");
+    if (modelOnlyTurn?.type !== "thread.turn-start-requested") return;
+    expect(modelOnlyTurn.payload.modelSelection).toEqual({
+      instanceId: "codex_work",
+      model: "gpt-5.7",
+    });
+    expect(modelOnlyTurn.payload.contextHandoff).toBeUndefined();
 
     const optionsOnly = await Effect.runPromise(
       decideOrchestrationCommand({

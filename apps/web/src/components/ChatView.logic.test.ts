@@ -19,7 +19,6 @@ import {
   deriveComposerSendState,
   deriveProviderSelectionPolicy,
   hasServerAcknowledgedLocalDispatch,
-  modelSelectionRequiresContextHandoff,
   normalizeInteractionModeForProviderTarget,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
@@ -110,7 +109,7 @@ describe("selectionAllowedAtSendBoundary", () => {
     isSendBusy: true,
   });
 
-  it("rejects an instance or model handoff when an idle picker races busy", () => {
+  it("rejects an instance handoff but allows a same-instance model change when busy", () => {
     expect(
       selectionAllowedAtSendBoundary({
         threadStarted: true,
@@ -129,7 +128,7 @@ describe("selectionAllowedAtSendBoundary", () => {
         canonicalSelection,
         targetSelection: { ...canonicalSelection, model: "gpt-5.1" },
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("allows options-only continuation changes while constrained", () => {
@@ -137,12 +136,6 @@ describe("selectionAllowedAtSendBoundary", () => {
       ...canonicalSelection,
       options: [{ id: "reasoningEffort", value: "high" }],
     };
-    expect(
-      modelSelectionRequiresContextHandoff({
-        canonicalSelection,
-        targetSelection,
-      }),
-    ).toBe(false);
     expect(
       selectionAllowedAtSendBoundary({
         threadStarted: true,

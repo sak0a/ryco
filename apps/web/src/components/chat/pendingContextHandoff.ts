@@ -1,7 +1,6 @@
 import type { ContextHandoffEndpointSnapshot, ModelSelection } from "@ryco/contracts";
-import { getModelDisplayLabel } from "@ryco/shared/model";
+import { getModelDisplayLabel, modelSelectionRequiresContextHandoff } from "@ryco/shared/model";
 
-import { modelSelectionRequiresContextHandoff } from "../ChatView.logic";
 import type { AppModelOption } from "../../modelSelection";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 

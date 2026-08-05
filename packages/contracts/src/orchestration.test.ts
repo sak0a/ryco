@@ -3,6 +3,8 @@ import { Effect, Schema } from "effect";
 
 import {
   ContextHandoffActivityPayload,
+  ContextHandoffExportChunk,
+  ContextHandoffInspectionEntriesInput,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
@@ -38,6 +40,9 @@ const decodeOrchestrationLatestTurn = Schema.decodeUnknownEffect(OrchestrationLa
 const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(OrchestrationProposedPlan);
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const decodeContextHandoffActivity = Schema.decodeUnknownEffect(ContextHandoffActivityPayload);
+const decodeContextHandoffEntriesInput = Schema.decodeUnknownEffect(
+  ContextHandoffInspectionEntriesInput,
+);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,
@@ -735,6 +740,19 @@ it.effect("decodes every context handoff activity state", () =>
         ...presentation,
         ...context,
         targetRuntimeSessionId: "runtime-target",
+        ...(status === "consumed"
+          ? {
+              inspection: {
+                completeEntryCount: 12,
+                includedEntryCount: 8,
+                truncated: true,
+                completeDigest: "a".repeat(64),
+                providerInputDigest: "b".repeat(64),
+                preparedAt: "2026-08-05T10:00:00.000Z",
+                acceptedAt: "2026-08-05T10:00:01.000Z",
+              },
+            }
+          : {}),
         status,
       });
       assert.strictEqual(decoded.status, status);
@@ -742,6 +760,10 @@ it.effect("decodes every context handoff activity state", () =>
         throw new Error(`expected ${status} context handoff activity`);
       }
       assert.strictEqual(decoded.sources.length, 1);
+      if (decoded.status === "consumed") {
+        assert.strictEqual(decoded.inspection?.includedEntryCount, 8);
+        assert.strictEqual(decoded.inspection?.truncated, true);
+      }
     }
     const failed = yield* decodeContextHandoffActivity({
       ...base,
@@ -804,6 +826,34 @@ it.effect("rejects malformed context handoff activity metadata", () =>
       }),
     );
     assert.strictEqual(oversizedError._tag, "Failure");
+  }),
+);
+
+it.effect("bounds context handoff inspection pages and export filenames", () =>
+  Effect.gen(function* () {
+    const oversizedPage = yield* Effect.exit(
+      decodeContextHandoffEntriesInput({
+        threadId: "thread-1",
+        handoffId: "handoff-1",
+        scope: "sent",
+        section: "messages",
+        limit: 21,
+      }),
+    );
+    assert.strictEqual(oversizedPage._tag, "Failure");
+    const unsafeFilename = yield* Effect.exit(
+      Schema.decodeUnknownEffect(ContextHandoffExportChunk)({
+        scope: "sent",
+        format: "json",
+        offset: 0,
+        chunk: "{}",
+        nextOffset: null,
+        totalBytes: 2,
+        digest: "a".repeat(64),
+        filename: "../../handoff.json",
+      }),
+    );
+    assert.strictEqual(unsafeFilename._tag, "Failure");
   }),
 );
 

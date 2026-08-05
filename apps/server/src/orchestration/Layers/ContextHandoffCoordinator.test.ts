@@ -110,7 +110,10 @@ function providerSnapshot(
 
 const providerSnapshots: ReadonlyArray<ServerProvider> = [
   providerSnapshot(sourceEndpoint, { name: "GPT-5.6 Sol" }),
-  providerSnapshot(targetEndpoint, { name: "Claude Fable 5", shortName: "Fable 5" }),
+  providerSnapshot(targetEndpoint, {
+    name: "Claude Fable 5",
+    shortName: "Fable 5",
+  }),
   providerSnapshot(priorEndpoint, { name: "Grok 4.5" }),
 ];
 
@@ -233,6 +236,16 @@ function makeRepository(initial?: ContextHandoffRecord) {
         return true;
       }),
     storeContextIfEmpty: () => Effect.succeed(false),
+    storeDeliveryArtifactIfEmpty: (input) =>
+      Effect.sync(() => {
+        if (!record || record.deliveryArtifact !== null) return false;
+        record = {
+          ...record,
+          deliveryArtifact: input.deliveryArtifact,
+          updatedAt: input.updatedAt,
+        };
+        return true;
+      }),
   };
   return { service, get: () => record! };
 }
@@ -315,6 +328,7 @@ function makeHarness(input?: {
   const repository = makeRepository(input?.initialRecord);
   const thread = input?.thread ?? makeThread();
   const commands: OrchestrationCommand[] = [];
+  const deliveryOrder: string[] = [];
   const dispatch = vi.fn((command: OrchestrationCommand) =>
     Effect.sync(() => {
       commands.push(command);
@@ -323,33 +337,40 @@ function makeHarness(input?: {
   );
   const startFreshSession = vi.fn(
     (_threadId: ThreadId, freshInput: ProviderFreshSessionStartInput) =>
-      Effect.succeed({
-        session: {
-          provider: ProviderDriverKind.make("claudeAgent"),
-          providerInstanceId: targetSelection.instanceId,
-          runtimeSessionId: freshInput.runtimeSessionId,
-          status: "ready" as const,
-          runtimeMode: "full-access" as const,
-          tokenMode: "balanced" as const,
-          model: targetSelection.model,
-          threadId: thread.id,
-          createdAt,
-          updatedAt: createdAt,
-        },
-        previousBinding: {
-          threadId: thread.id,
-          provider: ProviderDriverKind.make("codex"),
-          providerInstanceId: sourceSelection.instanceId,
-          runtimeSessionId: sourceRuntimeSessionId,
-          runtimeMode: "full-access" as const,
-          resumeCursor: { source: "resume-a1" },
-        },
+      Effect.sync(() => {
+        deliveryOrder.push("start");
+        return {
+          session: {
+            provider: ProviderDriverKind.make("claudeAgent"),
+            providerInstanceId: targetSelection.instanceId,
+            runtimeSessionId: freshInput.runtimeSessionId,
+            status: "ready" as const,
+            runtimeMode: "full-access" as const,
+            tokenMode: "balanced" as const,
+            model: targetSelection.model,
+            threadId: thread.id,
+            createdAt,
+            updatedAt: createdAt,
+          },
+          previousBinding: {
+            threadId: thread.id,
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: sourceSelection.instanceId,
+            runtimeSessionId: sourceRuntimeSessionId,
+            runtimeMode: "full-access" as const,
+            resumeCursor: { source: "resume-a1" },
+          },
+        };
       }),
   );
   const sendTurn = vi.fn((_input: ProviderSendTurnInput) =>
-    input?.sendFailure
-      ? Effect.fail(input.sendFailure)
-      : Effect.succeed({ threadId: thread.id, turnId: targetTurnId }),
+    Effect.sync(() => deliveryOrder.push("send")).pipe(
+      Effect.flatMap(() =>
+        input?.sendFailure
+          ? Effect.fail(input.sendFailure)
+          : Effect.succeed({ threadId: thread.id, turnId: targetTurnId }),
+      ),
+    ),
   );
   const stopSessionBinding = vi.fn(() => Effect.succeed("stopped" as const));
   const retireSessionBinding = vi.fn(() => Effect.succeed(true));
@@ -368,12 +389,35 @@ function makeHarness(input?: {
     renderStoredContext: ({ currentMessage }) =>
       Effect.succeed({
         providerInput: `<context>${currentMessage}</context>`,
+        renderedContext: artifact.document,
         renderedContextJson: "{}",
         contextChars: 2,
         inputChars: currentMessage.length + 19,
         includedEntryCount: 0,
         totalEntryCount: 0,
         truncated: false,
+      }),
+    prepareDeliveryArtifact: ({ currentMessage, triggeringMessageId, preparedAt }) =>
+      Effect.sync(() => {
+        deliveryOrder.push("persist");
+        return {
+          artifactVersion: 1 as const,
+          rendererVersion: 1 as const,
+          renderedContext: artifact.document,
+          providerInput: `<context>${currentMessage}</context>`,
+          triggeringMessage: {
+            messageId: triggeringMessageId,
+            text: currentMessage,
+          },
+          renderedContextDigest: "b".repeat(64),
+          providerInputDigest: "c".repeat(64),
+          includedEntryCount: 0,
+          totalEntryCount: 0,
+          contextChars: 2,
+          inputChars: currentMessage.length + 19,
+          truncated: false,
+          preparedAt,
+        };
       }),
   };
 
@@ -444,6 +488,7 @@ function makeHarness(input?: {
   return {
     repository,
     commands,
+    deliveryOrder,
     startFreshSession,
     sendTurn,
     stopSessionBinding,
@@ -468,6 +513,7 @@ describe("ContextHandoffCoordinator", () => {
 
     expect(harness.startFreshSession).toHaveBeenCalledTimes(1);
     expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    expect(harness.deliveryOrder).toEqual(["persist", "start", "send"]);
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
       input: "<context>  Preserve this exact message 👩🏽‍💻  </context>",
       modelSelection: targetSelection,
@@ -492,6 +538,12 @@ describe("ContextHandoffCoordinator", () => {
     ).toMatchObject({
       sources: [{ modelSlug: "gpt-5.6-sol", modelDisplayName: "GPT-5.6 Sol" }],
       target: { modelSlug: "claude-fable-5", modelDisplayName: "Fable 5" },
+      inspection: {
+        completeEntryCount: 0,
+        includedEntryCount: 0,
+        completeDigest: "a".repeat(64),
+        providerInputDigest: "c".repeat(64),
+      },
     });
     expect(harness.commands.some((command) => command.type === "thread.meta.update")).toBe(true);
   });
@@ -521,8 +573,11 @@ describe("ContextHandoffCoordinator", () => {
     });
     expect(
       terminalActivity?.type === "thread.activity.append"
-        ? (terminalActivity.activity.payload as { target?: { modelDisplayName?: string } }).target
-            ?.modelDisplayName
+        ? (
+            terminalActivity.activity.payload as {
+              target?: { modelDisplayName?: string };
+            }
+          ).target?.modelDisplayName
         : undefined,
     ).toBeUndefined();
   });

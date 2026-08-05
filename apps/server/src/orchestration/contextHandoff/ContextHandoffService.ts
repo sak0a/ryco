@@ -21,6 +21,11 @@ import {
   stableStringifyContextHandoff,
 } from "./ContextHandoffBuilder.ts";
 import {
+  type ContextHandoffDeliveryArtifact,
+  ContextHandoffDeliveryArtifact as ContextHandoffDeliveryArtifactSchema,
+  makeContextHandoffDeliveryArtifact,
+} from "./ContextHandoffArtifacts.ts";
+import {
   ContextHandoffRenderError,
   type ContextHandoffRenderResult,
   renderContextHandoffInput,
@@ -32,7 +37,9 @@ export class ContextHandoffArtifactError extends Data.TaggedError("ContextHandof
     | "record-mismatch"
     | "missing-stored-context"
     | "invalid-stored-context"
-    | "digest-mismatch";
+    | "digest-mismatch"
+    | "invalid-delivery-artifact"
+    | "delivery-artifact-conflict";
   readonly handoffId: ContextHandoffId;
   readonly message: string;
 }> {}
@@ -62,6 +69,11 @@ export interface RenderStoredContextHandoffInput {
   readonly maxInputChars?: number | undefined;
 }
 
+export interface PrepareContextHandoffDeliveryInput extends RenderStoredContextHandoffInput {
+  readonly triggeringMessageId: MessageId;
+  readonly preparedAt: string;
+}
+
 export interface PreparedContextHandoffArtifact extends ContextHandoffArtifact {
   readonly origin: "built" | "stored";
 }
@@ -76,6 +88,9 @@ export interface ContextHandoffServiceShape {
   readonly renderStoredContext: (
     input: RenderStoredContextHandoffInput,
   ) => Effect.Effect<ContextHandoffRenderResult, ContextHandoffServiceError>;
+  readonly prepareDeliveryArtifact: (
+    input: PrepareContextHandoffDeliveryInput,
+  ) => Effect.Effect<ContextHandoffDeliveryArtifact, ContextHandoffServiceError>;
 }
 
 export class ContextHandoffService extends Context.Service<
@@ -216,10 +231,82 @@ const makeContextHandoffService = Effect.gen(function* () {
       ),
     );
 
+  const decodeDeliveryArtifact = Effect.fn("ContextHandoffService.decodeDeliveryArtifact")(
+    function* (record: ContextHandoffRecord) {
+      if (record.deliveryArtifact === null) {
+        return yield* artifactError(
+          record.handoffId,
+          "invalid-delivery-artifact",
+          "Context handoff delivery artifact has not been stored",
+        );
+      }
+      return yield* Schema.decodeUnknownEffect(ContextHandoffDeliveryArtifactSchema)(
+        record.deliveryArtifact,
+      ).pipe(
+        Effect.mapError(() =>
+          artifactError(
+            record.handoffId,
+            "invalid-delivery-artifact",
+            "Stored context handoff delivery artifact failed validation",
+          ),
+        ),
+      );
+    },
+  );
+
+  const prepareDeliveryArtifact: ContextHandoffServiceShape["prepareDeliveryArtifact"] = (input) =>
+    Effect.gen(function* () {
+      const rendered = yield* renderStoredContext(input);
+      const artifact = yield* Effect.try({
+        try: () =>
+          makeContextHandoffDeliveryArtifact({
+            renderedContext: rendered.renderedContext,
+            renderedContextJson: rendered.renderedContextJson,
+            providerInput: rendered.providerInput,
+            triggeringMessageId: input.triggeringMessageId,
+            triggeringMessage: input.currentMessage,
+            includedEntryCount: rendered.includedEntryCount,
+            totalEntryCount: rendered.totalEntryCount,
+            contextChars: rendered.contextChars,
+            inputChars: rendered.inputChars,
+            truncated: rendered.truncated,
+            preparedAt: input.preparedAt,
+          }),
+        catch: () =>
+          artifactError(
+            input.handoffId,
+            "invalid-delivery-artifact",
+            "Context handoff delivery artifact could not be prepared",
+          ),
+      });
+      const stored = yield* repository.storeDeliveryArtifactIfEmpty({
+        handoffId: input.handoffId,
+        deliveryArtifact: artifact,
+        updatedAt: input.preparedAt,
+      });
+      if (stored) return artifact;
+
+      const record = yield* requireRecord(input.handoffId);
+      const existing = yield* decodeDeliveryArtifact(record);
+      if (
+        existing.providerInputDigest !== artifact.providerInputDigest ||
+        existing.providerInput !== artifact.providerInput ||
+        existing.triggeringMessage.messageId !== artifact.triggeringMessage.messageId
+      ) {
+        return yield* artifactError(
+          input.handoffId,
+          "delivery-artifact-conflict",
+          "Stored context handoff delivery artifact conflicts with the prepared payload",
+        );
+      }
+      return existing;
+    });
+
   return {
     buildAndStore,
     loadStoredContext,
     renderStoredContext,
+    prepareDeliveryArtifact,
   } satisfies ContextHandoffServiceShape;
 });
 

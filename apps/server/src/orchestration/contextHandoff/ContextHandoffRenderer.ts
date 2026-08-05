@@ -17,6 +17,7 @@ import {
   stableStringifyContextHandoff,
   truncateUnicodeSafe,
 } from "./ContextHandoffBuilder.ts";
+import type { ContextHandoffRenderedDocument } from "./ContextHandoffArtifacts.ts";
 
 const CONTEXT_OPEN = '<context_handoff version="1" mode="full-context-fresh-session">\n';
 const CONTEXT_CLOSE = "\n</context_handoff>\n\n<current_user_message>\n";
@@ -43,19 +44,7 @@ type SectionEntryByName = {
 
 type AnySectionEntry = SectionEntryByName[SectionName];
 
-interface RenderedDocument {
-  readonly version: typeof CONTEXT_HANDOFF_CONTEXT_VERSION;
-  readonly mode: "full-context-fresh-session";
-  readonly provenance: ContextHandoffDocument["provenance"];
-  readonly thread?: ContextHandoffDocument["thread"] | undefined;
-  readonly messages?: ReadonlyArray<ContextHandoffMessageEntry> | undefined;
-  readonly plans?: ReadonlyArray<ContextHandoffPlanEntry> | undefined;
-  readonly tools?: ReadonlyArray<ContextHandoffToolEntry> | undefined;
-  readonly checkpoints?: ReadonlyArray<ContextHandoffCheckpointEntry> | undefined;
-  readonly notices?: ReadonlyArray<ContextHandoffNoticeEntry> | undefined;
-  readonly subagents?: ReadonlyArray<ContextHandoffSubagentEntry> | undefined;
-  readonly priorHandoffs?: ReadonlyArray<ContextHandoffBoundaryEntry> | undefined;
-}
+type RenderedDocument = ContextHandoffRenderedDocument;
 
 interface MutableSections {
   messages: ContextHandoffMessageEntry[];
@@ -90,6 +79,7 @@ export interface RenderContextHandoffInput {
 
 export interface ContextHandoffRenderResult {
   readonly providerInput: string;
+  readonly renderedContext: ContextHandoffRenderedDocument;
   readonly renderedContextJson: string;
   readonly contextChars: number;
   readonly inputChars: number;
@@ -247,7 +237,11 @@ function candidatesForDocument(document: ContextHandoffDocument): Candidate[] {
   const candidates: Candidate[] = [];
   for (const section of FIRST_PASS_ORDER) {
     for (const entry of sectionEntries(document, section)) {
-      candidates.push({ section, entry, priority: SECTION_PRIORITY[section] } as Candidate);
+      candidates.push({
+        section,
+        entry,
+        priority: SECTION_PRIORITY[section],
+      } as Candidate);
     }
   }
   return candidates.toSorted(compareCandidateRecency);
@@ -367,9 +361,13 @@ export function renderContextHandoffInput(
 
   const fullJson = stableStringifyContextHandoff(input.document);
   if (fullJson.length <= availableContextChars) {
-    const providerInput = envelope({ contextJson: fullJson, currentMessage: input.currentMessage });
+    const providerInput = envelope({
+      contextJson: fullJson,
+      currentMessage: input.currentMessage,
+    });
     return {
       providerInput,
+      renderedContext: input.document,
       renderedContextJson: fullJson,
       contextChars: fullJson.length,
       inputChars: providerInput.length,
@@ -434,9 +432,13 @@ export function renderContextHandoffInput(
     }
   }
 
-  const renderedContextJson = stableStringifyContextHandoff(
-    renderedDocument(input.document, sections, includeThread, includeFullProvenance),
+  const renderedContext = renderedDocument(
+    input.document,
+    sections,
+    includeThread,
+    includeFullProvenance,
   );
+  const renderedContextJson = stableStringifyContextHandoff(renderedContext);
   const providerInput = envelope({
     contextJson: renderedContextJson,
     currentMessage: input.currentMessage,
@@ -445,6 +447,7 @@ export function renderContextHandoffInput(
   const artifactWasTruncated = documentHasTruncatedEntry(input.document);
   return {
     providerInput,
+    renderedContext,
     renderedContextJson,
     contextChars: renderedContextJson.length,
     inputChars: providerInput.length,

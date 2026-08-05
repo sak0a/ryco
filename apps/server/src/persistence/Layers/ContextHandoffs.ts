@@ -16,6 +16,7 @@ import {
   GetContextHandoffInput,
   ListContextHandoffsByThreadInput,
   StoreContextHandoffContextInput,
+  StoreContextHandoffDeliveryArtifactInput,
 } from "../Services/ContextHandoffs.ts";
 
 const ContextHandoffDbRow = ContextHandoffRecord.mapFields(
@@ -23,6 +24,7 @@ const ContextHandoffDbRow = ContextHandoffRecord.mapFields(
     sourceSelection: Schema.fromJsonString(ModelSelection),
     targetSelection: Schema.fromJsonString(ModelSelection),
     structuredContext: Schema.NullOr(Schema.fromJsonString(Schema.Unknown)),
+    deliveryArtifact: Schema.NullOr(Schema.fromJsonString(Schema.Unknown)),
   }),
 );
 
@@ -30,6 +32,10 @@ const HandoffIdResult = Schema.Struct({ handoffId: ContextHandoffId });
 const StoreContextHandoffContextDbInput = StoreContextHandoffContextInput.mapFields(
   Struct.assign({ structuredContext: Schema.fromJsonString(Schema.Unknown) }),
 );
+const StoreContextHandoffDeliveryArtifactDbInput =
+  StoreContextHandoffDeliveryArtifactInput.mapFields(
+    Struct.assign({ deliveryArtifact: Schema.fromJsonString(Schema.Unknown) }),
+  );
 const decodeRecord = Schema.decodeUnknownEffect(ContextHandoffRecord);
 
 function toSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
@@ -57,6 +63,7 @@ const makeContextHandoffRepository = Effect.gen(function* () {
         context_version,
         structured_context_json,
         context_digest,
+        delivery_artifact_json,
         first_message_id,
         accepted_provider_turn_id,
         error,
@@ -73,6 +80,7 @@ const makeContextHandoffRepository = Effect.gen(function* () {
         ${row.contextVersion},
         ${row.structuredContext},
         ${row.contextDigest},
+        ${row.deliveryArtifact},
         ${row.firstMessageId},
         ${row.acceptedProviderTurnId},
         ${row.error},
@@ -99,6 +107,7 @@ const makeContextHandoffRepository = Effect.gen(function* () {
         context_version AS "contextVersion",
         structured_context_json AS "structuredContext",
         context_digest AS "contextDigest",
+        delivery_artifact_json AS "deliveryArtifact",
         first_message_id AS "firstMessageId",
         accepted_provider_turn_id AS "acceptedProviderTurnId",
         error,
@@ -125,6 +134,7 @@ const makeContextHandoffRepository = Effect.gen(function* () {
         context_version AS "contextVersion",
         structured_context_json AS "structuredContext",
         context_digest AS "contextDigest",
+        delivery_artifact_json AS "deliveryArtifact",
         first_message_id AS "firstMessageId",
         accepted_provider_turn_id AS "acceptedProviderTurnId",
         error,
@@ -151,6 +161,7 @@ const makeContextHandoffRepository = Effect.gen(function* () {
         context_version AS "contextVersion",
         structured_context_json AS "structuredContext",
         context_digest AS "contextDigest",
+        delivery_artifact_json AS "deliveryArtifact",
         first_message_id AS "firstMessageId",
         accepted_provider_turn_id AS "acceptedProviderTurnId",
         error,
@@ -190,6 +201,19 @@ const makeContextHandoffRepository = Effect.gen(function* () {
       WHERE handoff_id = ${input.handoffId}
         AND (structured_context_json IS NULL OR structured_context_json = 'null')
         AND context_digest IS NULL
+      RETURNING handoff_id AS "handoffId"
+    `,
+  });
+
+  const storeDeliveryArtifactRow = SqlSchema.findAll({
+    Request: StoreContextHandoffDeliveryArtifactDbInput,
+    Result: HandoffIdResult,
+    execute: (input) => sql`
+      UPDATE provider_context_handoffs
+      SET delivery_artifact_json = ${input.deliveryArtifact},
+          updated_at = ${input.updatedAt}
+      WHERE handoff_id = ${input.handoffId}
+        AND (delivery_artifact_json IS NULL OR delivery_artifact_json = 'null')
       RETURNING handoff_id AS "handoffId"
     `,
   });
@@ -274,6 +298,18 @@ const makeContextHandoffRepository = Effect.gen(function* () {
       ),
     );
 
+  const storeDeliveryArtifactIfEmpty: ContextHandoffRepositoryShape["storeDeliveryArtifactIfEmpty"] =
+    (input) =>
+      storeDeliveryArtifactRow(input).pipe(
+        Effect.map((rows) => rows.length === 1),
+        Effect.mapError(
+          toSqlOrDecodeError(
+            "ContextHandoffRepository.storeDeliveryArtifactIfEmpty:query",
+            "ContextHandoffRepository.storeDeliveryArtifactIfEmpty:encodeRequest",
+          ),
+        ),
+      );
+
   return {
     create,
     getById,
@@ -281,6 +317,7 @@ const makeContextHandoffRepository = Effect.gen(function* () {
     listRecoverable,
     compareAndSetStatus,
     storeContextIfEmpty,
+    storeDeliveryArtifactIfEmpty,
   } satisfies ContextHandoffRepositoryShape;
 });
 

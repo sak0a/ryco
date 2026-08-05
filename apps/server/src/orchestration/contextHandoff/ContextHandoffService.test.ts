@@ -41,7 +41,10 @@ function thread(targetMessageId: MessageId, priorText = "canonical history"): Or
     id: ThreadId.make("thread-service"),
     projectId: ProjectId.make("project-service"),
     title: "Service context",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex_a"), model: "gpt-a" },
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("codex_a"),
+      model: "gpt-a",
+    },
     runtimeMode: "full-access",
     interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
     branch: null,
@@ -82,8 +85,14 @@ function requestedRecord(handoffId: ContextHandoffId, targetMessageId: MessageId
   return makeRequestedContextHandoffRecord({
     handoffId,
     threadId: ThreadId.make("thread-service"),
-    sourceSelection: { instanceId: ProviderInstanceId.make("codex_a"), model: "gpt-a" },
-    targetSelection: { instanceId: ProviderInstanceId.make("claude_b"), model: "claude-b" },
+    sourceSelection: {
+      instanceId: ProviderInstanceId.make("codex_a"),
+      model: "gpt-a",
+    },
+    targetSelection: {
+      instanceId: ProviderInstanceId.make("claude_b"),
+      model: "claude-b",
+    },
     sourceRuntimeSessionId: RuntimeSessionId.make("runtime-source"),
     firstMessageId: targetMessageId,
     createdAt,
@@ -112,6 +121,16 @@ function memoryRepository(initial: ContextHandoffRecord) {
           contextVersion: input.contextVersion,
           structuredContext: input.structuredContext,
           contextDigest: input.contextDigest,
+          updatedAt: input.updatedAt,
+        };
+        return true;
+      }),
+    storeDeliveryArtifactIfEmpty: (input) =>
+      Effect.sync(() => {
+        if (record.deliveryArtifact !== null) return false;
+        record = {
+          ...record,
+          deliveryArtifact: input.deliveryArtifact,
           updatedAt: input.updatedAt,
         };
         return true;
@@ -176,13 +195,53 @@ it.effect("ContextHandoffService renders stored context with the exact separate 
       updatedAt: "2026-08-04T00:00:03.000Z",
     });
     const currentMessage = "  exact message 😀\nwith whitespace  ";
-    const rendered = yield* service.renderStoredContext({ handoffId, currentMessage });
+    const rendered = yield* service.renderStoredContext({
+      handoffId,
+      currentMessage,
+    });
     assert.isTrue(
       rendered.providerInput.includes(
         `<current_user_message>\n${currentMessage}\n</current_user_message>`,
       ),
     );
     assert.isFalse(rendered.renderedContextJson.includes(currentMessage));
+  }).pipe(Effect.provide(repository.layer));
+});
+
+it.effect("ContextHandoffService persists and reuses the exact delivery artifact", () => {
+  const handoffId = ContextHandoffId.make("handoff-delivery-service");
+  const targetMessageId = MessageId.make("message-target");
+  const repository = memoryRepository(requestedRecord(handoffId, targetMessageId));
+  return Effect.gen(function* () {
+    const service = yield* ContextHandoffService;
+    yield* service.buildAndStore({
+      handoffId,
+      thread: thread(targetMessageId),
+      targetMessageId,
+      source: endpoint("codex_a", "gpt-a"),
+      target: endpoint("claude_b", "claude-b"),
+      updatedAt: "2026-08-04T00:00:03.000Z",
+    });
+    const currentMessage = "  exact message 😀  ";
+    const first = yield* service.prepareDeliveryArtifact({
+      handoffId,
+      triggeringMessageId: targetMessageId,
+      currentMessage,
+      preparedAt: "2026-08-04T00:00:04.000Z",
+    });
+    const retry = yield* service.prepareDeliveryArtifact({
+      handoffId,
+      triggeringMessageId: targetMessageId,
+      currentMessage,
+      preparedAt: "2026-08-04T00:00:05.000Z",
+    });
+
+    assert.strictEqual(first.providerInput, retry.providerInput);
+    assert.strictEqual(first.providerInputDigest, retry.providerInputDigest);
+    assert.strictEqual(first.preparedAt, "2026-08-04T00:00:04.000Z");
+    assert.strictEqual(retry.preparedAt, first.preparedAt);
+    assert.strictEqual(first.triggeringMessage.text, currentMessage);
+    assert.deepStrictEqual(repository.record().deliveryArtifact, first);
   }).pipe(Effect.provide(repository.layer));
 });
 

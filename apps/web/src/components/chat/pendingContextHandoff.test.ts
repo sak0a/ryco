@@ -102,14 +102,15 @@ describe("derivePendingContextHandoff", () => {
     });
   });
 
-  it("does not present a handoff for options-only changes or canonical reselection", () => {
+  it("does not present a handoff for same-instance model or option changes", () => {
+    const modelOnlyTarget = createModelSelection(sourceSelection.instanceId, "gpt-5.7");
     const optionsOnlyTarget = createModelSelection(
       sourceSelection.instanceId,
       sourceSelection.model,
       [{ id: "reasoningEffort", value: "high" }],
     );
 
-    for (const selection of [sourceSelection, optionsOnlyTarget]) {
+    for (const selection of [sourceSelection, modelOnlyTarget, optionsOnlyTarget]) {
       expect(
         derivePendingContextHandoff({
           threadStarted: true,

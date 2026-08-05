@@ -3,6 +3,7 @@ import {
   ContextHandoffActivityPayload,
   type ContextHandoffEndpointSnapshot,
   type ContextHandoffId,
+  type ContextHandoffInspectionSummaryMetadata,
   type MessageId,
   type OrchestrationThreadActivity,
   type TurnId,
@@ -23,6 +24,7 @@ export interface ContextHandoffTimelineEntry {
   sources: ReadonlyArray<ContextHandoffEndpointSnapshot>;
   target: ContextHandoffEndpointSnapshot;
   error?: string;
+  inspection?: ContextHandoffInspectionSummaryMetadata;
 }
 
 const decodeContextHandoffActivityPayload = Schema.decodeUnknownSync(ContextHandoffActivityPayload);
@@ -65,6 +67,7 @@ export function toContextHandoffTimelineEntry(
     targetTurnId: payload.targetTurnId ?? activity.turnId,
     sources: payload.sources,
     target: payload.target,
+    ...(payload.inspection ? { inspection: payload.inspection } : {}),
     ...(payload.status === "failed" || payload.status === "delivery-uncertain"
       ? { error: payload.error }
       : {}),

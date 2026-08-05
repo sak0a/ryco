@@ -202,6 +202,10 @@ export interface TimelineStableState {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
   onOpenMessageActions: (request: TimelineMessageActionsRequest) => void;
+  onInspectContextHandoff?: (
+    marker: ContextHandoffTimelineEntry,
+    trigger: HTMLButtonElement,
+  ) => void;
 }
 
 /**
@@ -243,6 +247,9 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     onOpenTurnDiff: input.onOpenTurnDiff,
     onCloseDiff: input.onCloseDiff,
     onOpenMessageActions: input.onOpenMessageActions,
+    ...(input.onInspectContextHandoff
+      ? { onInspectContextHandoff: input.onInspectContextHandoff }
+      : {}),
   };
 }
 

@@ -5,6 +5,7 @@ import {
   CONTEXT_HANDOFF_SCHEMA_VERSION,
   CommandId,
   ContextHandoffActivityPayload,
+  type ContextHandoffInspectionSummaryMetadata,
   DEFAULT_AGENT_TOKEN_MODE,
   type ContextHandoffEndpointSnapshot,
   type ContextHandoffId,
@@ -47,6 +48,10 @@ import {
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
+  ContextHandoffDeliveryArtifact,
+  type ContextHandoffDeliveryArtifact as ContextHandoffDeliveryArtifactType,
+} from "../contextHandoff/ContextHandoffArtifacts.ts";
+import {
   ContextHandoffService,
   type PreparedContextHandoffArtifact,
 } from "../contextHandoff/ContextHandoffService.ts";
@@ -65,7 +70,37 @@ interface TerminalProjectionInput extends HandoffPresentation {
   readonly targetTurnId?: TurnId;
   readonly contextDigest?: string;
   readonly error?: string;
+  readonly inspection?: ContextHandoffInspectionSummaryMetadata;
   readonly status: "consumed" | "failed" | "delivery-uncertain";
+}
+
+function inspectionSummary(input: {
+  readonly artifact: PreparedContextHandoffArtifact;
+  readonly deliveryArtifact?: ContextHandoffDeliveryArtifactType;
+  readonly acceptedAt?: string;
+}): ContextHandoffInspectionSummaryMetadata {
+  return {
+    completeEntryCount: input.artifact.entryCount,
+    completeDigest: input.artifact.digest,
+    ...(input.deliveryArtifact
+      ? {
+          includedEntryCount: input.deliveryArtifact.includedEntryCount,
+          truncated: input.deliveryArtifact.truncated,
+          providerInputDigest: input.deliveryArtifact.providerInputDigest,
+          preparedAt: input.deliveryArtifact.preparedAt,
+        }
+      : {}),
+    ...(input.acceptedAt ? { acceptedAt: input.acceptedAt } : {}),
+  };
+}
+
+function deliveryArtifactFromRecord(
+  record: ContextHandoffRecord,
+): ContextHandoffDeliveryArtifactType | undefined {
+  if (record.deliveryArtifact === null) return undefined;
+  return Option.getOrUndefined(
+    Schema.decodeUnknownOption(ContextHandoffDeliveryArtifact)(record.deliveryArtifact),
+  );
 }
 
 const serverCommandId = (tag: string): CommandId =>
@@ -209,7 +244,13 @@ function refreshEndpointPresentation(
     ...endpoint,
     ...(provider?.displayName ? { providerDisplayName: provider.displayName } : {}),
     ...(provider?.accentColor ? { providerAccentColor: provider.accentColor } : {}),
-    ...(model ? { modelDisplayName: getModelDisplayLabel(model, { preferShortName: true }) } : {}),
+    ...(model
+      ? {
+          modelDisplayName: getModelDisplayLabel(model, {
+            preferShortName: true,
+          }),
+        }
+      : {}),
   };
 }
 
@@ -302,6 +343,7 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
           : {}),
         sources,
         target,
+        ...(input.inspection ? { inspection: input.inspection } : {}),
       };
       const payload: typeof ContextHandoffActivityPayload.Type =
         input.status === "consumed"
@@ -429,6 +471,7 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
           .loadStoredContext({ handoffId: current.handoffId })
           .pipe(Effect.option),
       );
+    const deliveryArtifact = deliveryArtifactFromRecord(current);
     const targetBinding = targetRuntimeBinding({
       record: current,
       target: input.presentation.target,
@@ -468,6 +511,14 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
         ? { targetRuntimeSessionId: current.targetRuntimeSessionId }
         : {}),
       ...(storedArtifact?.digest ? { contextDigest: storedArtifact.digest } : {}),
+      ...(storedArtifact
+        ? {
+            inspection: inspectionSummary({
+              artifact: storedArtifact,
+              ...(deliveryArtifact ? { deliveryArtifact } : {}),
+            }),
+          }
+        : {}),
       error,
       status: "failed",
     });
@@ -491,7 +542,9 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
       readonly record: ContextHandoffRecord;
       readonly activityId: EventId;
       readonly artifact: PreparedContextHandoffArtifact;
+      readonly deliveryArtifact?: ContextHandoffDeliveryArtifactType;
       readonly targetTurnId: TurnId;
+      readonly acceptedAt?: string;
       readonly sourceBinding?: ProviderRuntimeBinding;
     }) {
       if (input.record.targetRuntimeSessionId === null) {
@@ -506,6 +559,11 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
         targetRuntimeSessionId: input.record.targetRuntimeSessionId,
         targetTurnId: input.targetTurnId,
         contextDigest: input.artifact.digest,
+        inspection: inspectionSummary({
+          artifact: input.artifact,
+          ...(input.deliveryArtifact ? { deliveryArtifact: input.deliveryArtifact } : {}),
+          ...(input.acceptedAt ? { acceptedAt: input.acceptedAt } : {}),
+        }),
         status: "consumed",
       });
       yield* commitTargetSelection(input.record);
@@ -557,20 +615,24 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
       if (!message) {
         return yield* Effect.die("Context handoff target message is unavailable.");
       }
-      const rendered = yield* contextService.renderStoredContext({
+      const deliveryArtifact = yield* contextService.prepareDeliveryArtifact({
         handoffId: input.record.handoffId,
+        triggeringMessageId: input.record.firstMessageId,
         currentMessage: message.text,
+        preparedAt: nowIso(),
       });
-      const contextBytes = new TextEncoder().encode(rendered.renderedContextJson).byteLength;
+      const contextBytes = new TextEncoder().encode(
+        JSON.stringify(deliveryArtifact.renderedContext),
+      ).byteLength;
       yield* increment(
         contextHandoffContextBytesTotal,
-        { truncated: rendered.truncated },
+        { truncated: deliveryArtifact.truncated },
         contextBytes,
       );
       yield* increment(
         contextHandoffContextEntriesTotal,
-        { truncated: rendered.truncated },
-        rendered.includedEntryCount,
+        { truncated: deliveryArtifact.truncated },
+        deliveryArtifact.includedEntryCount,
       );
       let targetRuntimeSessionId = input.record.targetRuntimeSessionId;
       if (targetRuntimeSessionId === null) {
@@ -650,7 +712,7 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
       const turn = yield* providerService
         .sendTurn({
           threadId: record.threadId,
-          input: rendered.providerInput,
+          input: deliveryArtifact.providerInput,
           ...(message.attachments && message.attachments.length > 0
             ? { attachments: message.attachments }
             : {}),
@@ -662,6 +724,7 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
             : {}),
         })
         .pipe(withMetrics({ timer: contextHandoffDispatchDuration }));
+      const acceptedAt = nowIso();
       const accepted = yield* repository.compareAndSetStatus({
         handoffId: record.handoffId,
         expectedStatus: "dispatching",
@@ -669,7 +732,7 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
         targetRuntimeSessionId,
         acceptedProviderTurnId: turn.turnId,
         error: null,
-        updatedAt: nowIso(),
+        updatedAt: acceptedAt,
       });
       if (!accepted) {
         return yield* Effect.die("Context handoff acceptance could not be persisted.");
@@ -683,7 +746,9 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
         },
         activityId: input.activityId,
         artifact,
+        deliveryArtifact,
         targetTurnId: turn.turnId,
+        acceptedAt,
         ...(replacementSourceBinding ? { sourceBinding: replacementSourceBinding } : {}),
       });
     },
@@ -776,6 +841,7 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
         error,
         updatedAt: nowIso(),
       });
+      const deliveryArtifact = deliveryArtifactFromRecord(input.record);
       yield* appendTerminalActivity({
         record: input.record,
         activityId: input.activityId,
@@ -786,6 +852,10 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
           ? { targetRuntimeSessionId: input.record.targetRuntimeSessionId }
           : {}),
         contextDigest: input.artifact.digest,
+        inspection: inspectionSummary({
+          artifact: input.artifact,
+          ...(deliveryArtifact ? { deliveryArtifact } : {}),
+        }),
         error,
         status: "delivery-uncertain",
       });
@@ -836,12 +906,15 @@ export const makeContextHandoffCoordinator = Effect.gen(function* () {
           : undefined;
       const acceptedTurnId = input.record.acceptedProviderTurnId ?? projectedAcceptedTurn;
       if (acceptedTurnId) {
+        const deliveryArtifact = deliveryArtifactFromRecord(input.record);
         yield* finalizeConsumed({
           thread: input.thread,
           record: input.record,
           activityId: input.activityId,
           artifact,
+          ...(deliveryArtifact ? { deliveryArtifact } : {}),
           targetTurnId: acceptedTurnId,
+          acceptedAt: input.record.updatedAt,
           ...(sourceBinding ? { sourceBinding } : {}),
         });
         return;

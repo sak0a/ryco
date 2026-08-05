@@ -26,6 +26,7 @@ import {
   type TerminalContextDraft,
 } from "../lib/terminalContext";
 import type { DraftThreadEnvMode } from "../composerDraftStore";
+import { modelSelectionRequiresContextHandoff } from "@ryco/shared/model";
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "ryco:last-invoked-script-by-project";
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
@@ -412,21 +413,10 @@ export function deriveProviderSelectionPolicy(input: {
       };
 }
 
-/** Options-only changes stay on the normal turn path and are allowed. */
-export function modelSelectionRequiresContextHandoff(input: {
-  readonly canonicalSelection: ModelSelection;
-  readonly targetSelection: ModelSelection;
-}): boolean {
-  return (
-    input.canonicalSelection.instanceId !== input.targetSelection.instanceId ||
-    input.canonicalSelection.model !== input.targetSelection.model
-  );
-}
-
 /**
  * Recheck used at send time. The busy picker can retain its existing
- * continuation-group affordances, but a newly staged instance/model may never
- * become a queued or raced handoff after eligibility closes.
+ * continuation-group affordances, but a newly staged provider instance may
+ * never become a queued or raced handoff after eligibility closes.
  */
 export function selectionAllowedAtSendBoundary(input: {
   readonly threadStarted: boolean;

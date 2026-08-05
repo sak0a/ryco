@@ -360,6 +360,17 @@ export function createModelSelection(
 }
 
 /**
+ * Context handoff is a provider-instance boundary. Model and option changes
+ * within one configured instance remain on that provider's normal turn path.
+ */
+export function modelSelectionRequiresContextHandoff(input: {
+  readonly canonicalSelection: ModelSelection;
+  readonly targetSelection: ModelSelection;
+}): boolean {
+  return input.canonicalSelection.instanceId !== input.targetSelection.instanceId;
+}
+
+/**
  * Returns the effort value if it is a prompt-injected value according to
  * any select descriptor in the given capabilities, or null otherwise.
  *

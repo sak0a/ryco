@@ -86,6 +86,14 @@ import type {
 import type { ServerUpsertKeybindingInput } from "./server.ts";
 import type {
   ClientOrchestrationCommand,
+  ContextHandoffExportChunk,
+  ContextHandoffExportChunkInput,
+  ContextHandoffInspectionEntriesInput,
+  ContextHandoffInspectionEntriesPage,
+  ContextHandoffInspectionSummary,
+  ContextHandoffInspectionSummaryInput,
+  ContextHandoffRawPayloadChunk,
+  ContextHandoffRawPayloadChunkInput,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
   OrchestrationSearchThreadMessagesInput,
@@ -556,5 +564,17 @@ export interface EnvironmentApi {
         onResubscribe?: () => void;
       },
     ) => () => void;
+  };
+  contextHandoff: {
+    getInspectionSummary: (
+      input: ContextHandoffInspectionSummaryInput,
+    ) => Promise<ContextHandoffInspectionSummary>;
+    listInspectionEntries: (
+      input: ContextHandoffInspectionEntriesInput,
+    ) => Promise<ContextHandoffInspectionEntriesPage>;
+    readRawPayloadChunk: (
+      input: ContextHandoffRawPayloadChunkInput,
+    ) => Promise<ContextHandoffRawPayloadChunk>;
+    readExportChunk: (input: ContextHandoffExportChunkInput) => Promise<ContextHandoffExportChunk>;
   };
 }

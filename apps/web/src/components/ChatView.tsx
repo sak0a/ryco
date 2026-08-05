@@ -47,6 +47,7 @@ import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
   derivePhase,
   deriveTimelineEntries,
+  type ContextHandoffTimelineEntry,
   deriveActiveWorkStartedAt,
   deriveThreadActivityViewModel,
   findSidebarProposedPlan,
@@ -123,6 +124,7 @@ import { selectThreadTerminalState, useTerminalStateStore } from "../terminalSta
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { PersistentThreadTerminalDrawer } from "./chat/ChatTerminalShell";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
+import { ContextHandoffInspectionPanel } from "./chat/ContextHandoffInspectionPanel";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { NewWorktreeDialog, type NewWorktreeDialogTab } from "./worktrees/NewWorktreeDialog";
 import {
@@ -517,6 +519,26 @@ export default function ChatView(props: ChatViewProps) {
   // tier flips (rotation preserves route, draft, and panel state).
   const presentationTierRef = useRef(presentationTier);
   presentationTierRef.current = presentationTier;
+  const [inspectedContextHandoff, setInspectedContextHandoff] = useState<{
+    readonly marker: ContextHandoffTimelineEntry;
+    readonly trigger: HTMLButtonElement;
+  } | null>(null);
+  const openContextHandoffInspection = useCallback(
+    (marker: ContextHandoffTimelineEntry, trigger: HTMLButtonElement) => {
+      if (presentationTierRef.current === "phone") return;
+      setPlanSidebarOpen(false);
+      setInspectedContextHandoff({ marker, trigger });
+    },
+    [],
+  );
+  const closeContextHandoffInspection = useCallback(() => {
+    setInspectedContextHandoff((current) => {
+      if (current) {
+        requestAnimationFrame(() => current.trigger.focus({ preventScroll: true }));
+      }
+      return null;
+    });
+  }, []);
   // The web phone tier is frozen (see AGENTS.md): the Build-mode lock only
   // applies to non-phone presentation tiers.
   const enforceBuildMode = alwaysUseBuildMode && presentationTier !== "phone";
@@ -620,6 +642,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const isServerThread = routeKind === "server" && serverThread !== undefined;
   const activeThread = isServerThread ? serverThread : localDraftThread;
+  useEffect(() => {
+    setInspectedContextHandoff(null);
+  }, [activeThread?.id]);
   // Defers heavy MessagesTimeline render to a transition. When threadId
   // changes, the urgent render paints with the placeholder branch (see
   // the JSX gate below); React then re-renders in a transition where
@@ -3514,6 +3539,9 @@ export default function ChatView(props: ChatViewProps) {
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
                 onIsAtEndChange={onIsAtEndChange}
+                {...(presentationTier !== "phone"
+                  ? { onInspectContextHandoff: openContextHandoffInspection }
+                  : {})}
               />
             ) : (
               <div aria-hidden className="flex min-h-0 flex-1" />
@@ -3802,7 +3830,16 @@ export default function ChatView(props: ChatViewProps) {
           />
         </div>
         {/* end chat column */}
-        {renderInlineOverviewSidebar ? (
+        {inspectedContextHandoff && !shouldUsePlanSidebarSheet && !isPhoneTier ? (
+          <aside className="flex min-h-0 w-[25rem] shrink-0 border-l border-border">
+            <ContextHandoffInspectionPanel
+              environmentId={activeThread.environmentId}
+              threadId={activeThread.id}
+              marker={inspectedContextHandoff.marker}
+              onClose={closeContextHandoffInspection}
+            />
+          </aside>
+        ) : renderInlineOverviewSidebar ? (
           <OverviewSidebarMotionFrame
             animate={!prefersReducedMotion}
             open={showInlineOverviewSidebar}
@@ -3858,6 +3895,16 @@ export default function ChatView(props: ChatViewProps) {
           onAddTerminalContext={addTerminalContextToDraft}
         />
       ))}
+      {!isPhoneTier && shouldUsePlanSidebarSheet && inspectedContextHandoff ? (
+        <RightPanelSheet open onClose={closeContextHandoffInspection}>
+          <ContextHandoffInspectionPanel
+            environmentId={activeThread.environmentId}
+            threadId={activeThread.id}
+            marker={inspectedContextHandoff.marker}
+            onClose={closeContextHandoffInspection}
+          />
+        </RightPanelSheet>
+      ) : null}
       {isPhoneTier ? (
         // Phone tier: the overview promotes to a full-screen surface with an
         // explicit back affordance, consistent with the other work surfaces

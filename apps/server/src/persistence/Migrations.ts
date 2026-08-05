@@ -56,6 +56,7 @@ import Migration0039 from "./Migrations/039_WorktreeWorkItemStateNames.ts";
 import Migration0040 from "./Migrations/040_ProjectionThreadsProjectUpdatedAtIndex.ts";
 import Migration0041 from "./Migrations/041_ProjectionThreadsSubagentNesting.ts";
 import Migration0042 from "./Migrations/042_ContextHandoffRuntimeSessions.ts";
+import Migration0043 from "./Migrations/043_ContextHandoffDeliveryArtifact.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -110,6 +111,7 @@ export const migrationEntries = [
   [40, "ProjectionThreadsProjectUpdatedAtIndex", Migration0040],
   [41, "ProjectionThreadsSubagentNesting", Migration0041],
   [42, "ContextHandoffRuntimeSessions", Migration0042],
+  [43, "ContextHandoffDeliveryArtifact", Migration0043],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -302,7 +304,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
       ? "Running all migrations..."
       : `Running migrations 1 through ${toMigrationInclusive}...`,
   );
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  const executedMigrations = yield* run({
+    loader: makeMigrationLoader(toMigrationInclusive),
+  });
   if (toMigrationInclusive === undefined || toMigrationInclusive >= 31) {
     yield* repairProjectionWorktreeTitleColumn();
   }
@@ -319,7 +323,9 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     yield* repairContextHandoffRuntimeSessions();
   }
   yield* Effect.log("Migrations ran successfully").pipe(
-    Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
+    Effect.annotateLogs({
+      migrations: executedMigrations.map(([id, name]) => `${id}_${name}`),
+    }),
   );
   return executedMigrations;
 });

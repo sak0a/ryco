@@ -10,6 +10,7 @@ import {
   DEFAULT_AGENT_TOKEN_MODE,
   EventId,
 } from "@ryco/contracts";
+import { modelSelectionRequiresContextHandoff } from "@ryco/shared/model";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -470,8 +471,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const isStartedThread = targetThread.messages.some((message) => message.role === "user");
       const isContextHandoff =
         isStartedThread &&
-        (requestedSelection.instanceId !== targetThread.modelSelection.instanceId ||
-          requestedSelection.model !== targetThread.modelSelection.model);
+        modelSelectionRequiresContextHandoff({
+          canonicalSelection: targetThread.modelSelection,
+          targetSelection: requestedSelection,
+        });
       if (isContextHandoff) {
         yield* requireThreadIdleForContextHandoff({ thread: targetThread, command });
       }

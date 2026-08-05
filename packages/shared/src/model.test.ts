@@ -19,6 +19,7 @@ import {
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
   isClaudeUltrathinkPrompt,
+  modelSelectionRequiresContextHandoff,
   normalizeModelSlug,
   resolveModelSlugForProvider,
   resolveSelectableModel,
@@ -52,6 +53,34 @@ describe("model presentation", () => {
         { preferShortName: true },
       ),
     ).toBe("Vendor · vendor/model");
+  });
+});
+
+describe("context handoff boundary", () => {
+  const canonicalSelection = createModelSelection(
+    ProviderInstanceId.make("claude_work"),
+    "claude-fable-5",
+  );
+
+  it("requires a handoff only when the configured provider instance changes", () => {
+    expect(
+      modelSelectionRequiresContextHandoff({
+        canonicalSelection,
+        targetSelection: createModelSelection(
+          ProviderInstanceId.make("claude_work"),
+          "claude-opus-5",
+        ),
+      }),
+    ).toBe(false);
+    expect(
+      modelSelectionRequiresContextHandoff({
+        canonicalSelection,
+        targetSelection: createModelSelection(
+          ProviderInstanceId.make("claude_personal"),
+          "claude-opus-5",
+        ),
+      }),
+    ).toBe(true);
   });
 });
 
