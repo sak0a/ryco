@@ -1518,8 +1518,14 @@
             <a class="text-action" href="#boundaries">Inspect the trust boundary</a>
           </div>
           <p class="trust-note">
-            Transport uses HTTPS and WSS. The Hub is trusted relay infrastructure, not an
-            application-layer end-to-end encryption boundary.
+            Transport uses HTTPS and WSS. Payloads are additionally encrypted between the client and
+            the far end of the channel it was routed to, on channels that negotiate it. What that is
+            worth differs in kind rather than in degree. In the signed Ryco mobile app, on a channel
+            resolved to a node identity the owner verified and pinned, the Hub's remaining view is
+            traffic metadata — who talks to which node, when, and how much. In the browser the Hub
+            also serves every byte of the page's code, and the page pins no node identity, so the
+            Hub can be the far end of that channel or serve code that copies the payload: payload
+            confidentiality against the operator is not claimed for that tier at all.
           </p>
         </div>
 
@@ -2332,7 +2338,12 @@
               <dt>Persists</dt>
               <dd>Accounts, node directory, grants, and bounded control records</dd>
               <dt>Forwards transiently</dt>
-              <dd>Opaque relay bytes in memory, without payload logging or persistence</dd>
+              <dd>
+                Opaque relay bytes in memory — ciphertext where the channel negotiated encryption,
+                which bounds what the operator can reach only on a tier whose client the Hub does
+                not serve (see the trust boundary note below) — without payload logging or
+                persistence
+              </dd>
             </dl>
           </article>
           <article class="boundary-column node">
@@ -2353,9 +2364,23 @@
         <div class="trust-strip reveal">
           <strong>Trusted relay boundary</strong>
           <p>
-            HTTPS and WSS protect transport. The Hub can observe forwarded bytes transiently while
-            routing them, so this is not application-layer end-to-end encryption. Hub policy forbids
-            relay payload logging and persistence.
+            HTTPS and WSS protect transport, and on a channel that negotiated payload encryption the
+            Hub forwards ciphertext rather than readable bytes. What that is worth depends on the
+            client. The Ryco mobile app runs a signed tier whose code is distributed independently
+            of the Hub; it reaches the stronger guarantee on channels it resolves to a node identity
+            the owner verified and pinned through the pairing comparison on that install. Those pins
+            are install-scoped, and an app reinstall, an OS restore, a device transfer, or a
+            secure-store reset destroys every one of them at once and returns the device to first
+            contact until the owner re-pairs. The browser runs an unsigned tier whose ceiling is
+            structural for two independent reasons. It pins no node identity, so it cannot tell
+            whether the far end of the channel is the owner's machine or the Hub standing in for it
+            — and that one needs no substituted code at all. Separately, the Hub serves every byte
+            of that page's code, so it could serve code that completes the same handshake and copies
+            the payload anyway. On a channel that negotiated no encryption the Hub forwards readable
+            bytes transiently and policy forbids logging or persisting them. On every channel,
+            encrypted or not, the Hub still sees which account and session talk to which node,
+            channel open and close events, frame sizes and timing, the capability and role it
+            issued, heartbeats, and transfer accounting.
           </p>
         </div>
       </section>

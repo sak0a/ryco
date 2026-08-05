@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -232,6 +235,312 @@ describe("the states with no channel", () => {
     const negotiating = hostedRelayTrustDisclosure("negotiating").body.toLowerCase();
     expect(negotiating).toContain("released nothing");
     expect(negotiating).toContain("the hub can read");
+  });
+});
+
+/**
+ * THE DOCUMENT AND THE APP ARE ONE CLAIM, AND THIS IS THE ONLY THING JOINING THEM.
+ *
+ * `docs/hosted-hub-client.md` carried its own three-sentence confidentiality
+ * paragraph — a verbatim twin of the constant this module replaced — and nothing
+ * checked that the two agreed. The browser suites do import the copy, so they
+ * catch a component that renders the wrong string; they structurally cannot
+ * catch a DOCUMENT that says something the component never said, because they
+ * never read the document. That is exactly how the repository ended up asserting
+ * in public that a hosted channel "is not application-level end-to-end
+ * encrypted" while the shipped tier was negotiating one.
+ *
+ * So the document quotes the shipped strings between named markers, and the
+ * assertions below read them back. A divergence is a red test rather than a
+ * review miss, and the fix is to re-quote rather than to re-word.
+ */
+
+const REPO_ROOT = new URL("../../../../../", import.meta.url);
+
+function readRepoFile(relativePath: string): string {
+  return readFileSync(fileURLToPath(new URL(relativePath, REPO_ROOT)), "utf8");
+}
+
+const HOSTED_HUB_CLIENT_DOC = readRepoFile("docs/hosted-hub-client.md");
+
+/**
+ * Markdown prose as one line, so a hard-wrapped quotation compares equal to the
+ * single-line constant it quotes.
+ *
+ * Blockquote markers are stripped and every whitespace run collapses to one
+ * space. Both sides of every comparison go through this, so the check is over
+ * WORDS and never over where a maintainer chose to break a line — the one
+ * difference that carries no meaning, and the one a wrapping change would
+ * otherwise turn into a failing test nobody could act on.
+ */
+function normalizeProse(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^\s*>\s?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Every `<!-- KIND:NAME -->` … `<!-- /KIND:NAME -->` block in a document.
+ *
+ * Two kinds, because the two sets are checked differently: `shipped-copy` is
+ * keyed by channel state and is asserted EXHAUSTIVE against the tier's states,
+ * while `shipped-text` names one constant each and would fail that assertion.
+ */
+function quotedBlocks(markdown: string, kind: string): ReadonlyMap<string, string> {
+  const quoted = new Map<string, string>();
+  const block = new RegExp(
+    `<!--\\s*${kind}:([a-z-]+)\\s*-->([\\s\\S]*?)<!--\\s*/${kind}:\\1\\s*-->`,
+    "g",
+  );
+  for (const [, name, body] of markdown.matchAll(block)) {
+    // Both groups are mandatory in the pattern, so neither can be absent at
+    // runtime; a dynamically built `RegExp` simply does not carry that to the
+    // type checker. Skipping rather than asserting keeps the failure in the
+    // exhaustiveness check below, where it reads as "the document is missing a
+    // block" instead of as a thrown error inside a helper.
+    if (name === undefined || body === undefined) continue;
+    quoted.set(name, normalizeProse(body));
+  }
+  return quoted;
+}
+
+describe("docs/hosted-hub-client.md quotes the copy this slice ships", () => {
+  it("quotes every channel state this tier can be in, and only those", () => {
+    // Exhaustive in both directions. A state added to the tier fails here until
+    // the document gains a paragraph for it, and a paragraph for a state that no
+    // longer exists fails too — a document that quoted three of four states
+    // would otherwise pass every verbatim check below while leaving the fourth
+    // free to drift.
+    const quoted = [...quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-copy").keys()].toSorted();
+    expect(quoted).toEqual([...HOSTED_RELAY_TRUST_DISCLOSURE_STATES].toSorted());
+  });
+
+  it("quotes each disclosure verbatim", () => {
+    const quoted = quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-copy");
+    for (const status of HOSTED_RELAY_TRUST_DISCLOSURE_STATES) {
+      expect(quoted.get(status), status).toBe(
+        normalizeProse(hostedRelayTrustDisclosure(status).body),
+      );
+    }
+  });
+
+  it("quotes §13.5's advisory verbatim, where it documents the comparison", () => {
+    // The document now describes the compare-to-CLI flow, and the sentence
+    // bounding what a match is worth is as much a security claim as the
+    // disclosure is. Paraphrasing it here would rebuild the drifting second copy
+    // this slice exists to remove, one section further down the same file.
+    expect(quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-text").get("web-sas-advisory")).toBe(
+      normalizeProse(E2EE_WEB_SAS_ADVISORY),
+    );
+  });
+});
+
+/**
+ * THE RETIRED CLAIM, SWEPT OVER THE REPOSITORY RATHER THAN OVER A LIST OF FILES.
+ *
+ * This guard began as a table of (path, phrase) pairs over three files, and BOTH
+ * halves of that shape were blind in the same way the browser suites are.
+ *
+ * Enumerating PATHS cannot see a fourth file, and the claim was in fact written
+ * in eight: the three the table named, plus two approved design specs that still
+ * REQUIRED it of documents this repository ships, two checklist bullets that
+ * still instructed an implementer to write it, and a stale future tense in the
+ * canonical relay protocol. The specs are the sharpest of those, because
+ * `docs/relay-architecture.html` is not doc-only — `apps/web` imports it as a
+ * Vite `?url` asset and the desktop app bundles it — so a page regenerated
+ * against its governing spec would have shipped the retired claim back to users.
+ *
+ * Enumerating PHRASES cannot see a paraphrase. Re-wording "they are not
+ * application-level end-to-end encrypted" to "hosted channels are not encrypted
+ * end to end" passed every row while the file went on stating the claim.
+ *
+ * So this walks the repository's text files and matches SHAPES. The two sites
+ * that carry the retired sentence on purpose are allowlisted by path: a negative
+ * test fixture and a change record are the correct homes for a retired claim,
+ * and rewording either to satisfy a scan would delete the check it exists to be.
+ *
+ * WHAT IT DELIBERATELY DOES NOT COVER, so nobody reads a green run as more than
+ * it is. The shapes are denials, and two neighbouring defects are not denials:
+ * a requirement phrased positively ("so installing cannot be mistaken for
+ * creating an end-to-end encrypted connection" — the wrong requirement, but not
+ * the retired sentence), and a stale future tense ("allows LATER application-
+ * level end-to-end encryption", which two historical documents quote verbatim as
+ * a quotation of the relay protocol and which a scan therefore cannot forbid
+ * without ordering an edit inside a quoted record). Both were corrected by hand
+ * in the same change that widened this guard; neither has a mechanical check.
+ */
+
+/** Where the walk starts, and what it refuses to descend into. */
+const SCAN_ROOTS = ["docs", "apps", "packages"] as const;
+const SCAN_EXTENSIONS = [".md", ".html", ".ts", ".tsx"] as const;
+const SKIPPED_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  ".output",
+  ".turbo",
+  ".vite",
+  "Pods",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+]);
+
+/**
+ * The shapes, not the sentences.
+ *
+ * Each is a denial of application-level payload encryption over a relay channel,
+ * which is the claim this tier outgrew. They are deliberately anchored on the
+ * denial itself — `not … end-to-end encrypted`, `adds no … encryption` — so a
+ * synonym for "hosted channel" or a different sentence frame does not slip past,
+ * while ordinary present-tense prose about the shipped layer does not trip them.
+ */
+const RETIRED_CLAIM_SHAPES: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp }> = [
+  {
+    name: "denies application-level encryption of a relayed channel",
+    pattern:
+      /\bnot\s+(?:an?\s+)?application-(?:level|layer)\s+end-to-end\s+encr(?:ypted|yption)\b/i,
+  },
+  {
+    name: "denies end-to-end encryption in plain words",
+    pattern: /\b(?:is|are|was|were)\s+not\s+end[-\s]to[-\s]end\s+encrypted\b/i,
+  },
+  {
+    name: "denies end-to-end encryption with the qualifier trailing",
+    pattern: /\bnot\s+encrypted\s+end[-\s]to[-\s]end\b/i,
+  },
+  {
+    name: "denies that a surface or delivery provides end-to-end encryption",
+    pattern:
+      /\b(?:does\s+not\s+create|adds?\s+no|provides?\s+no|offers?\s+no)\s+(?:an?\s+)?(?:application-(?:level|layer)\s+)?end-to-end\s+(?:payload\s+)?encr(?:ypted|yption)\b/i,
+  },
+  {
+    name: "the retired trusted-relay sentence's second half",
+    pattern: /\bobserve\s+forwarded\s+bytes\b/i,
+  },
+];
+
+/**
+ * The two sites that hold the retired sentence deliberately, and why each must
+ * keep holding it.
+ */
+const RETIRED_CLAIM_ALLOWLIST: ReadonlyArray<{ readonly path: string; readonly why: string }> = [
+  {
+    path: "apps/web/test/hostedConnectionVocabulary.ts",
+    why: "the negative fixture four browser suites assert is nowhere on the page",
+  },
+  {
+    path: "apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.ts",
+    why: "the change record explaining, in the past tense, why this module is a selector",
+  },
+];
+
+/** This file, which quotes the shapes it forbids. */
+const SCAN_SELF_PATH = "apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.test.ts";
+
+/**
+ * Prose with comment leaders stripped as well as blockquote markers.
+ *
+ * `normalizeProse` is enough for Markdown; a wrapped `//` or `*` comment needs
+ * this, because the leader lands mid-sentence when the lines are joined and
+ * would break a match through the middle of the very claim being searched for.
+ */
+function normalizeForScan(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:\/\/|\*|#{1,6}|>)\s?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function collectScanTargets(): readonly string[] {
+  const found: string[] = [];
+  const visit = (relativeDirectory: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(fileURLToPath(new URL(relativeDirectory, REPO_ROOT)), {
+        withFileTypes: true,
+      });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+        visit(`${relativeDirectory}${entry.name}/`);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!SCAN_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) continue;
+      found.push(`${relativeDirectory}${entry.name}`);
+    }
+  };
+  for (const root of SCAN_ROOTS) visit(`${root}/`);
+  return found;
+}
+
+describe("no public file still carries the retired claim", () => {
+  const allowed = new Set(RETIRED_CLAIM_ALLOWLIST.map(({ path }) => path));
+
+  it("walks the repository's text files rather than a list of paths", () => {
+    // A broken walk would make every assertion below pass vacuously, which is
+    // the failure mode a scan has and a hardcoded table does not.
+    const targets = collectScanTargets();
+    expect(targets.length).toBeGreaterThan(500);
+    for (const required of [
+      "docs/hosted-hub-client.md",
+      "docs/relay-architecture.html",
+      "docs/relay-protocol.md",
+      "docs/hosted-mobile-pwa-qualification.md",
+      "docs/superpowers/plans/2026-07-19-hosted-mobile-pwa-experience.md",
+      "docs/superpowers/specs/2026-07-29-desktop-hub-advanced-settings-and-relay-atlas-design.md",
+      ...RETIRED_CLAIM_ALLOWLIST.map(({ path }) => path),
+    ]) {
+      expect(targets, required).toContain(required);
+    }
+  });
+
+  it("finds it in no file outside the two deliberate sites", () => {
+    const offenders: string[] = [];
+    for (const path of collectScanTargets()) {
+      if (path === SCAN_SELF_PATH || allowed.has(path)) continue;
+      const prose = normalizeForScan(readRepoFile(path));
+      for (const { name, pattern } of RETIRED_CLAIM_SHAPES) {
+        if (pattern.test(prose)) offenders.push(`${path}: ${name}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps the allowlist honest: each allowed site still carries the sentence", () => {
+    // An allowlist entry for a file that no longer states the claim is a hole
+    // someone could later fill without the scan objecting.
+    for (const { path, why } of RETIRED_CLAIM_ALLOWLIST) {
+      const prose = normalizeForScan(readRepoFile(path));
+      const carried = RETIRED_CLAIM_SHAPES.some(({ pattern }) => pattern.test(prose));
+      expect(carried, `${path} is allowlisted as ${why}`).toBe(true);
+    }
+  });
+
+  it("catches the paraphrases the retired phrase table could not", () => {
+    // The table matched exact strings. These are the same claim in wordings no
+    // row of it contained, and each must be caught by shape.
+    for (const paraphrase of [
+      "Hosted channels are not encrypted end to end.",
+      "Ryco relay sessions are not end-to-end encrypted.",
+      "Installing the app does not create end-to-end encryption.",
+      "This tier adds no application-level end-to-end encryption.",
+      "The relay may observe forwarded bytes while routing them.",
+    ]) {
+      const caught = RETIRED_CLAIM_SHAPES.some(({ pattern }) => pattern.test(paraphrase));
+      expect(caught, paraphrase).toBe(true);
+    }
   });
 });
 

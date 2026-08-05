@@ -4,6 +4,16 @@
 
 **Date:** 2026-07-16
 
+**Amendment (2026-08-05):** This design predates relay payload encryption, and its statements about
+encryption describe that delivery only, not the connector as it stands.
+`apps/server/src/hubConnector/` now carries the node half of the layer specified by
+[relay payload encryption](../../relay-e2ee-protocol.md), together with the `--hub-require-e2ee`
+and `--hub-require-approved-client-e2ee` admission policy documented in
+[the Hub connector guide](../../hub-connector.md). Read the two exclusions below — the
+new-encryption-protocol non-goal under "Component ownership" and the payload-encryption bullet in
+the acceptance notes — as scope statements of the 2026-07-16 delivery rather than as current
+properties of the connector.
+
 ## Summary
 
 Ryco will provide a production outbound Hub connector in `apps/server`. An enrolled server can
@@ -653,7 +663,9 @@ schemas and fixtures do not change.
 - A cold-start revoked identity is deliberately indistinguishable from other fresh-proof failures;
   only a live canonical revocation signal produces explicit `revoked` status.
 - Protected-store contents are machine/user scoped and are not a portable backup.
-- This design adds no end-to-end payload encryption beyond WSS transport security.
+- This design adds no payload encryption beyond WSS transport security. (2026-08-05: scope of this
+  delivery only — the connector has since gained the node half of `relay-e2ee-protocol.md` and its
+  admission policy.)
 
 ## Acceptance conditions
 

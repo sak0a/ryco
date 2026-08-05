@@ -235,9 +235,10 @@ counter that starts at zero and increases by one; a connection runtime may close
 gap, duplicate, or wrap. Durable application replay remains inside the opaque application
 protocol.
 
-The trusted-relay boundary permits TLS termination and the forwarding process to observe bytes in
-memory. A conforming relay must not log or persist opaque payloads. Keeping the payload schema
-opaque allows later application-level end-to-end encryption without changing relay routing.
+The trusted-relay boundary permits TLS termination and the forwarding process to observe the bytes
+it forwards in memory — which are the application-level layer's ciphertext on a channel that
+negotiated payload encryption. A conforming relay must not log or persist opaque payloads. Keeping
+the payload schema opaque is what lets that encryption layer exist without changing relay routing.
 
 That reservation is exercised by
 [End-to-end relay payload encryption](./relay-e2ee-protocol.md), which defines an application-level
