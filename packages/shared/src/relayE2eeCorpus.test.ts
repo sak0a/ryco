@@ -1,3 +1,4 @@
+import { ed25519 } from "@noble/curves/ed25519";
 import { p256 } from "@noble/curves/nist";
 import { sha256 } from "@noble/hashes/sha2";
 import { decode } from "cborg";
@@ -8,16 +9,20 @@ import { RELAY_CHUNK_HEADER_BYTES, RELAY_CHUNK_MAGIC } from "@ryco/contracts/rel
 
 import {
   E2EE_AAD_BYTES,
+  E2EE_ACCOUNT_ID_MAX_BYTES,
   E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
   E2EE_CAPABILITY_CARRIER_TAG,
   E2EE_CLIENT_HELLO_MAX_BYTES,
   E2EE_CLOSE_RECORDS_RESERVED,
   E2EE_COUNTER_MAX,
+  E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
   E2EE_ENVELOPE_HEADER_BYTES,
   E2EE_ENVELOPE_OVERHEAD_BYTES,
   E2EE_ERROR_RECORDS_RESERVED,
   E2EE_HANDSHAKE_REJECT_BYTES,
+  E2EE_HUB_ORIGIN_MAX_BYTES,
   E2EE_REKEY_MAX_RECORDS,
+  E2EE_SIGNING_INPUT_MAX_BYTES,
   RELAY_CHUNK_CAPABILITY_PRELUDE,
   RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES,
   RELAY_MAX_RPC_MESSAGE_BYTES,
@@ -80,11 +85,14 @@ import {
   E2EE_NODE_PREKEY_TRANSCRIPT_DOMAIN,
   E2EE_NOISE_PATTERN_NX,
   E2EE_STRICT_DECODE_OPTIONS,
+  decodeCanonicalE2eeCbor,
   e2eeAuthorizationContextCommitment,
   e2eeEffectiveAdmittedPatterns,
   encodeClientE2eePrekeyTranscript,
   encodeNodeE2eeCapabilitySigningEnvelope,
+  encodeNodeE2eePrekeyTranscript,
   validateNodeE2eeContinuityChain,
+  verifyNodeE2eeCapabilityCrossSignature,
   type E2eeNoisePattern,
   type E2eeTier,
 } from "./relayE2eeTranscripts.ts";
@@ -183,6 +191,49 @@ function fixtureBytes(value: unknown): Uint8Array {
 
 function hex(value: Uint8Array): string {
   return Buffer.from(value).toString("hex");
+}
+
+/** UTF-8 length, which is the unit every §3.2.1 text bound is stated in. */
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+/**
+ * Whether a §7.1 validator ACCEPTED its input. The validators signal rejection
+ * by throwing, and a case that states its own accept/reject verdict has to be
+ * compared against that verdict rather than against a literal written here.
+ */
+function accepts(validate: () => unknown): boolean {
+  try {
+    validate();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether two 32-byte Edwards point encodings carry the same sign bit and the
+ * same `y` MODULO the field prime — that is, whether they are two encodings of
+ * one point, one of which is non-canonical (RFC 8032 §5.1.3 requires `y < p`).
+ *
+ * Written out over the bytes rather than taken from a curve implementation on
+ * purpose: the claim under test is about the ENCODINGS, and decoding them
+ * through a library that already rejects the non-canonical one cannot express it.
+ */
+function sameEdwardsY(left: Uint8Array, right: Uint8Array): boolean {
+  const FIELD_PRIME = (1n << 255n) - 19n;
+  const parse = (encoding: Uint8Array): { readonly sign: number; readonly y: bigint } => {
+    expect(encoding.byteLength).toBe(32);
+    let y = 0n;
+    for (let index = 31; index >= 0; index -= 1) {
+      y = (y << 8n) | BigInt(index === 31 ? encoding[index]! & 0x7f : encoding[index]!);
+    }
+    return { sign: (encoding[31]! >> 7) & 1, y };
+  };
+  const a = parse(left);
+  const b = parse(right);
+  return a.sign === b.sign && a.y % FIELD_PRIME === b.y % FIELD_PRIME;
 }
 
 const F01 = readFamily("f01-payload-discrimination.json");
@@ -776,6 +827,289 @@ describe("§16.3 F4 prekey certificates (§7.3, §7.4, §6.4)", () => {
       expect((entry.expected.step5 as JsonRecord).failure, entry.name).toBe("malformed");
     }
   });
+
+  // ── THE NODE CERTIFICATE PATH (§7.3, §7.6) ─────────────────────────────────
+  //
+  // The client half above was driven end to end from the first round; the NODE
+  // half was not, and its seven cases were carried as `decorative` — committed,
+  // claimed by the ledger, read by nothing. Everything below re-derives each
+  // case's own stated values through the shared §7.3 encoder and the §7.6
+  // reconstruction, so a fixture that stopped agreeing with the implementation
+  // fails here instead of reading as coverage.
+  //
+  // The one thing this suite cannot supply is a signer: §7.3 transcripts are
+  // signed DIRECTLY by the node identity key, and the corpus commits its
+  // test-only seed for exactly that reason. `ed25519.sign` below is the
+  // generator's own signing step re-run over the transcript THIS side rebuilt,
+  // which is what makes the cross-signature assertions non-circular.
+
+  const NODE = F04.testKeyMaterial.identifiers as JsonRecord;
+  const nodeIdentityPublic = (): Uint8Array =>
+    fixtureBytes(F04.testKeyMaterial.nodeIdentityPublicKey);
+  const nodeAgreementPublic = (): Uint8Array =>
+    fixtureBytes(F04.testKeyMaterial.nodeAgreementPublicKey);
+  const nodeIdentitySeed = (): Uint8Array =>
+    fixtureBytes(F04.testKeyMaterial.testOnlyNodeIdentitySeed);
+
+  /** The §7.3 transcript, over the corpus material, with one field overridden. */
+  const nodeTranscript = (over: {
+    readonly hubOrigin?: string;
+    readonly prekeyId?: string;
+  }): Uint8Array => {
+    const base = caseByName(F04, "valid-node-agreement-prekey-certificate");
+    return encodeNodeE2eePrekeyTranscript({
+      hubOrigin: over.hubOrigin ?? (NODE.hubOrigin as string),
+      nodeId: NODE.nodeId as string,
+      identityKeyId: NODE.identityKeyId as string,
+      prekeyId: over.prekeyId ?? (NODE.prekeyId as string),
+      identityPublicKey: nodeIdentityPublic(),
+      agreementPublicKey: nodeAgreementPublic(),
+      createdAt: base.inputs.createdAt as number,
+      expiresAt: base.inputs.expiresAt as number,
+    });
+  };
+
+  /**
+   * §7.6 step: rebuild the §7.3 transcript from what a STATEMENT carries and
+   * check the cross-signature over it. Every field defaults to the corpus's own
+   * conforming material, so a case names only what it substitutes.
+   */
+  const reconstructCrossSignature = (over: {
+    readonly hubOrigin?: string;
+    readonly prekeyId?: string;
+    readonly identityFingerprint?: Uint8Array;
+    readonly agreementFingerprint?: Uint8Array;
+    readonly crossSignature?: Uint8Array;
+  }): boolean => {
+    const base = caseByName(F04, "valid-node-agreement-prekey-certificate");
+    return verifyNodeE2eeCapabilityCrossSignature({
+      hubOrigin: over.hubOrigin ?? (NODE.hubOrigin as string),
+      nodeId: NODE.nodeId as string,
+      identityKeyId: NODE.identityKeyId as string,
+      identityPublicKey: nodeIdentityPublic(),
+      identityFingerprint:
+        over.identityFingerprint ?? e2eeKeyFingerprint("node-identity", nodeIdentityPublic()),
+      prekeyCertificate: {
+        prekeyId: over.prekeyId ?? (NODE.prekeyId as string),
+        agreementPublicKey: nodeAgreementPublic(),
+        agreementFingerprint:
+          over.agreementFingerprint ?? e2eeKeyFingerprint("agreement", nodeAgreementPublic()),
+        createdAt: base.inputs.createdAt as number,
+        expiresAt: base.inputs.expiresAt as number,
+        crossSignature: over.crossSignature ?? ed25519.sign(nodeTranscript({}), nodeIdentitySeed()),
+      },
+    });
+  };
+
+  it("rebuilds the §7.3 node transcript and re-verifies its cross-signature", () => {
+    const entry = caseByName(F04, "valid-node-agreement-prekey-certificate");
+    const transcript = encodeNodeE2eePrekeyTranscript({
+      hubOrigin: entry.inputs.hubOrigin as string,
+      nodeId: entry.inputs.nodeId as string,
+      identityKeyId: entry.inputs.identityKeyId as string,
+      prekeyId: entry.inputs.prekeyId as string,
+      identityPublicKey: fixtureBytes(entry.inputs.identityPublicKey),
+      agreementPublicKey: fixtureBytes(entry.inputs.agreementPublicKey),
+      createdAt: entry.inputs.createdAt as number,
+      expiresAt: entry.inputs.expiresAt as number,
+    });
+    expect(hex(transcript)).toBe(hex(fixtureBytes(entry.expected.transcript)));
+    expect(transcript.byteLength).toBe(entry.expected.transcriptBytes);
+    expect(hex(sha256(transcript))).toBe(entry.expected.transcriptSha256);
+    // §7.1: both fingerprints are recomputed, never carried on trust.
+    expect(
+      hex(e2eeKeyFingerprint("node-identity", fixtureBytes(entry.inputs.identityPublicKey))),
+    ).toBe(hex(fixtureBytes(entry.expected.identityFingerprint)));
+    expect(
+      hex(e2eeKeyFingerprint("agreement", fixtureBytes(entry.inputs.agreementPublicKey))),
+    ).toBe(hex(fixtureBytes(entry.expected.agreementFingerprint)));
+    // The committed cross-signature is the node identity key's signature over
+    // exactly these bytes, and it verifies through the same choke point §5.2 uses.
+    expect(hex(ed25519.sign(transcript, nodeIdentitySeed()))).toBe(
+      hex(fixtureBytes(entry.expected.crossSignature)),
+    );
+    expect(
+      verifyE2eeSignature({
+        algorithm: E2EE_NODE_IDENTITY_ALGORITHM,
+        publicKey: fixtureBytes(entry.inputs.identityPublicKey),
+        message: transcript,
+        signature: fixtureBytes(entry.expected.crossSignature),
+      }),
+    ).toBe(entry.expected.crossSignatureReconstructionVerifies);
+    expect(reconstructCrossSignature({})).toBe(entry.expected.crossSignatureReconstructionVerifies);
+    expect(entry.expected.withinDirectSigningBound).toBe(
+      transcript.byteLength <= E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
+    );
+  });
+
+  it("fails the §7.6 reconstruction on every node-certificate substitution the family carries", () => {
+    // Each of these is a statement that disagrees with itself or with the
+    // signature it carries. §7.6 rebuilds element 7 of the §7.3 array from the
+    // statement's CARRIED element 6 rather than re-deriving it, so a
+    // disagreement produces bytes the cross-signature does not cover — which is
+    // the whole reason the reconstruction cannot go through the plain encoder.
+    const lifted = caseByName(
+      F04,
+      "node-certificate-cross-signature-lifted-from-another-hub-origin",
+    );
+    expect(
+      reconstructCrossSignature({
+        hubOrigin: lifted.inputs.statementHubOrigin as string,
+        crossSignature: ed25519.sign(
+          nodeTranscript({ hubOrigin: lifted.inputs.crossSignatureBoundToHubOrigin as string }),
+          nodeIdentitySeed(),
+        ),
+      }),
+      lifted.name,
+    ).toBe(lifted.expected.crossSignatureReconstructionVerifies);
+
+    const identity = caseByName(
+      F04,
+      "node-certificate-carried-identity-fingerprint-disagrees-with-the-identity-key",
+    );
+    expect(hex(fixtureBytes(identity.inputs.recomputedIdentityFingerprint)), identity.name).toBe(
+      hex(e2eeKeyFingerprint("node-identity", nodeIdentityPublic())),
+    );
+    expect(
+      reconstructCrossSignature({
+        identityFingerprint: fixtureBytes(identity.inputs.carriedIdentityFingerprint),
+      }),
+      identity.name,
+    ).toBe(identity.expected.crossSignatureReconstructionVerifies);
+
+    const agreement = caseByName(
+      F04,
+      "node-certificate-carried-agreement-fingerprint-disagrees-with-the-agreement-key",
+    );
+    expect(hex(fixtureBytes(agreement.inputs.recomputedAgreementFingerprint)), agreement.name).toBe(
+      hex(e2eeKeyFingerprint("agreement", nodeAgreementPublic())),
+    );
+    expect(
+      reconstructCrossSignature({
+        agreementFingerprint: fixtureBytes(agreement.inputs.carriedAgreementFingerprint),
+      }),
+      agreement.name,
+    ).toBe(agreement.expected.crossSignatureReconstructionVerifies);
+
+    const substituted = caseByName(F04, "node-certificate-prekey-id-substituted-after-signing");
+    expect(
+      reconstructCrossSignature({
+        prekeyId: substituted.inputs.carriedPrekeyId as string,
+        crossSignature: ed25519.sign(
+          nodeTranscript({ prekeyId: substituted.inputs.signedPrekeyId as string }),
+          nodeIdentitySeed(),
+        ),
+      }),
+      substituted.name,
+    ).toBe(substituted.expected.crossSignatureReconstructionVerifies);
+
+    // §7.3 elements 9 and 10 are ENCODER-DERIVED on both sides: a statement
+    // cannot present a different Noise usage, because the reconstruction rebuilds
+    // the suite's own functions and a signature over anything else fails.
+    const usage = caseByName(F04, "node-certificate-usage-fields-are-not-carrier-supplied");
+    const mutated = fixtureBytes(usage.inputs.mutatedTranscript);
+    const mutatedElements = decodeCanonicalE2eeCbor(mutated);
+    expect(mutatedElements.kind, usage.name).toBe("ok");
+    expect((mutatedElements as { readonly value: readonly unknown[] }).value[9], usage.name).toBe(
+      usage.inputs.mutatedUsageDh,
+    );
+    expect(
+      reconstructCrossSignature({ crossSignature: ed25519.sign(mutated, nodeIdentitySeed()) }),
+      usage.name,
+    ).toBe(usage.expected.crossSignatureReconstructionVerifies);
+    const rebuilt = decodeCanonicalE2eeCbor(nodeTranscript({}));
+    expect(rebuilt.kind, usage.name).toBe("ok");
+    const rebuiltElements = (rebuilt as { readonly value: readonly unknown[] }).value;
+    expect(rebuiltElements[9], usage.name).toBe(usage.expected.reconstructedUsageDh);
+    expect(rebuiltElements[10], usage.name).toBe(usage.expected.reconstructedUsageHash);
+  });
+
+  it("keeps the two largest directly signed transcripts inside §3.2.1 S9 and S2", () => {
+    // The two size-argument cases carry a transcript and nothing to rebuild it
+    // from beyond its own bounds. Each is decoded under the §3.6 strict profile
+    // and fed BACK through its own encoder: an encoder that recomputes element 7
+    // from element 6, refuses an out-of-range identifier, and applies the S9
+    // bound itself, so byte equality here is a statement about the transcript
+    // and not a tautology over the bytes.
+    const node = caseByName(
+      F04,
+      "node-certificate-at-the-maximum-hub-origin-accepted-and-within-S9",
+    );
+    const nodeElements = decodeCanonicalE2eeCbor(fixtureBytes(node.expected.transcript));
+    expect(nodeElements.kind, node.name).toBe("ok");
+    const nodeFields = (nodeElements as { readonly value: readonly unknown[] }).value;
+    expect(nodeFields[1], node.name).toBe(node.inputs.hubOrigin);
+    expect(utf8Bytes(node.inputs.hubOrigin as string), node.name).toBe(node.inputs.hubOriginBytes);
+    expect(node.inputs.hubOriginMaxBytes, node.name).toBe(E2EE_HUB_ORIGIN_MAX_BYTES);
+    const nodeTranscriptBytes = encodeNodeE2eePrekeyTranscript({
+      hubOrigin: nodeFields[1] as string,
+      nodeId: nodeFields[2] as string,
+      identityKeyId: nodeFields[4] as string,
+      prekeyId: nodeFields[5] as string,
+      identityPublicKey: nodeFields[6] as Uint8Array,
+      agreementPublicKey: nodeFields[8] as Uint8Array,
+      createdAt: nodeFields[11] as number,
+      expiresAt: nodeFields[12] as number,
+    });
+    expect(hex(nodeTranscriptBytes), node.name).toBe(hex(fixtureBytes(node.expected.transcript)));
+    expect(nodeTranscriptBytes.byteLength, node.name).toBe(node.expected.transcriptBytes);
+    expect(node.expected.directSigningTranscriptMaxBytes, node.name).toBe(
+      E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
+    );
+    expect(node.expected.satisfiesS9, node.name).toBe(
+      nodeTranscriptBytes.byteLength <= E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
+    );
+
+    const client = caseByName(
+      F04,
+      "client-certificate-at-the-maximum-namespace-accepted-and-within-S9",
+    );
+    const clientElements = decodeCanonicalE2eeCbor(fixtureBytes(client.expected.transcript));
+    expect(clientElements.kind, client.name).toBe("ok");
+    const clientFields = (clientElements as { readonly value: readonly unknown[] }).value;
+    expect(utf8Bytes(clientFields[1] as string), client.name).toBe(client.inputs.hubOriginBytes);
+    expect(utf8Bytes(clientFields[2] as string), client.name).toBe(client.inputs.accountIdBytes);
+    expect(client.inputs.accountIdMaxBytes, client.name).toBe(E2EE_ACCOUNT_ID_MAX_BYTES);
+    const clientTranscript = encodeClientE2eePrekeyTranscript({
+      hubOrigin: clientFields[1] as string,
+      accountId: clientFields[2] as string,
+      identityPublicKey: clientFields[4] as Uint8Array,
+      agreementPublicKey: clientFields[6] as Uint8Array,
+      createdAt: clientFields[9] as number,
+      expiresAt: clientFields[10] as number,
+    });
+    expect(hex(clientTranscript), client.name).toBe(hex(fixtureBytes(client.expected.transcript)));
+    expect(clientTranscript.byteLength, client.name).toBe(client.expected.transcriptBytes);
+    expect(client.expected.directSigningTranscriptMaxBytes, client.name).toBe(
+      E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
+    );
+    expect(client.expected.satisfiesS9, client.name).toBe(
+      clientTranscript.byteLength <= E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
+    );
+    expect(client.expected.signingInputMaxBytes, client.name).toBe(E2EE_SIGNING_INPUT_MAX_BYTES);
+    expect(client.expected.satisfiesS2, client.name).toBe(
+      clientTranscript.byteLength <= E2EE_SIGNING_INPUT_MAX_BYTES,
+    );
+    // …and it really is the larger of the two, which is what makes it the case
+    // S9 turns on rather than one of two arbitrary maxima.
+    expect(clientTranscript.byteLength).toBeGreaterThan(nodeTranscriptBytes.byteLength);
+  });
+
+  it("gives every rejected client certificate the one §11.2 row this family has", () => {
+    // §11.2 admits exactly one pre-key observable, so every step-5 rejection in
+    // this family is P11 and no case may state another row. Both directions
+    // fail: a case that stops stating the row, and a case that states a
+    // different one.
+    const rejected = F04.cases.filter(
+      (entry) =>
+        entry.name.startsWith("client-certificate-") &&
+        (entry.expected.step5 as JsonRecord | undefined)?.kind === "error",
+    );
+    expect(rejected.length, "rejected client-certificate cases").toBe(13);
+    for (const entry of carrying(rejected, "fatal", 13)) {
+      expect(entry.expected.fatal, entry.name).toBe("P11");
+    }
+  });
 });
 
 describe("§16.3 F3 capability statement (§5.2, §7.2.1, §7.6)", () => {
@@ -1260,6 +1594,11 @@ describe("§16.3 F17 key-material validation (§7.1, §8.1, §14.3)", () => {
     expect(() =>
       validateE2eeClientIdentityPublicKey(fixtureBytes(control.inputs.publicKey)),
     ).not.toThrow();
+    // The control's verdict is the case's OWN claim, not a literal here: an
+    // `expected` block stating the validator rejects its control would fail.
+    expect(control.expected.validationAccepted, control.name).toBe(
+      accepts(() => validateE2eeClientIdentityPublicKey(fixtureBytes(control.inputs.publicKey))),
+    );
   });
 
   it("rejects every §7.1 P-256 signature encoding the family carries", () => {
@@ -1267,27 +1606,24 @@ describe("§16.3 F17 key-material validation (§7.1, §8.1, §14.3)", () => {
       const signature = fixtureBytes(entry.inputs.signature);
       expect(() => validateE2eeClientSignature(signature), entry.name).toThrow();
       expect((entry.expected.encodingValidation as JsonRecord).rejected, entry.name).toBe(true);
-      // The single verification choke point returns false and never throws.
-      expect(
-        verifyE2eeSignature({
-          algorithm: E2EE_CLIENT_IDENTITY_ALGORITHM,
-          publicKey: fixtureBytes(F17.testKeyMaterial.clientIdentityPublicKey),
-          message: fixtureBytes(
-            caseByName(F04, "valid-client-agreement-prekey-certificate").inputs.transcript,
-          ),
-          signature,
-        }),
-        entry.name,
-      ).toBe(false);
+      // The single verification choke point returns false and never throws, and
+      // the case's own `verificationVerdict` is what it is compared against — it
+      // used to be compared against a literal `false` written here, which left
+      // the corpus free to state anything at all.
+      const verdict = verifyE2eeSignature({
+        algorithm: E2EE_CLIENT_IDENTITY_ALGORITHM,
+        publicKey: fixtureBytes(F17.testKeyMaterial.clientIdentityPublicKey),
+        message: fixtureBytes(
+          caseByName(F04, "valid-client-agreement-prekey-certificate").inputs.transcript,
+        ),
+        signature,
+      });
+      expect(verdict, entry.name).toBe(false);
+      expect(entry.expected.verificationVerdict, entry.name).toBe(verdict);
     }
   });
 
   it("applies strict RFC 8032 to Ed25519 keys and signatures (§14.3)", () => {
-    for (const entry of casesMatching(F17, /^ed25519-public-key-/)) {
-      const key = fixtureBytes(entry.inputs.publicKey);
-      expect(() => validateE2eeNodeIdentityPublicKey(key), entry.name).toThrow();
-    }
-
     const control = caseByName(
       F17,
       "ed25519-signature-with-a-canonically-encoded-identity-r-control",
@@ -1296,23 +1632,78 @@ describe("§16.3 F17 key-material validation (§7.1, §8.1, §14.3)", () => {
       F17,
       "ed25519-signature-with-a-non-canonically-encoded-identity-r",
     );
-    const verifyCase = (entry: FixtureCase): boolean =>
+    const verifyUnder = (key: Uint8Array, entry: FixtureCase): boolean =>
       verifyE2eeSignature({
         algorithm: E2EE_NODE_IDENTITY_ALGORITHM,
-        publicKey: fixtureBytes(entry.inputs.publicKey),
+        publicKey: key,
         message: fixtureBytes(entry.inputs.message),
         signature: fixtureBytes(entry.inputs.signature),
       });
+    const verifyCase = (entry: FixtureCase): boolean =>
+      verifyUnder(fixtureBytes(entry.inputs.publicKey), entry);
+
+    for (const entry of casesMatching(F17, /^ed25519-public-key-/)) {
+      const key = fixtureBytes(entry.inputs.publicKey);
+      expect(() => validateE2eeNodeIdentityPublicKey(key), entry.name).toThrow();
+      // Both halves of what the case states: the validator refuses the encoding,
+      // and the verification choke point refuses it too rather than throwing —
+      // driven against the control's own message and signature, which is the
+      // only pair in this family a key substitution can be tested with.
+      expect((entry.expected.validation as JsonRecord).rejected, entry.name).toBe(
+        !accepts(() => validateE2eeNodeIdentityPublicKey(key)),
+      );
+      expect(entry.expected.verificationVerdict, entry.name).toBe(verifyUnder(key, control));
+    }
+
     // The pair differs ONLY in the encoding of R, so the rejection below is
     // about canonicality and not about a broken verification equation.
-    expect(verifyCase(control)).toBe(true);
-    expect(verifyCase(nonCanonical)).toBe(false);
-    expect(hex(fixtureBytes(control.inputs.signature)).slice(64)).not.toBe(
-      hex(fixtureBytes(nonCanonical.inputs.signature)).slice(64),
+    expect(control.expected.verificationVerdict).toBe(verifyCase(control));
+    expect(control.expected.verificationVerdict).toBe(true);
+    expect(nonCanonical.expected.verificationVerdict).toBe(verifyCase(nonCanonical));
+    expect(nonCanonical.expected.verificationVerdict).toBe(false);
+    // §14.3 pins `zip215: false`. The case additionally RECORDS what the pinned
+    // primitive does under the relaxation rather than assuming it, so a future
+    // primitive that started admitting this encoding under ZIP215 is visible
+    // here instead of silently widening what "strict" costs.
+    expect(nonCanonical.expected.pinnedPrimitiveUnderZip215Relaxation).toBe(
+      ed25519.verify(
+        fixtureBytes(nonCanonical.inputs.signature),
+        fixtureBytes(nonCanonical.inputs.message),
+        fixtureBytes(nonCanonical.inputs.publicKey),
+        { zip215: true },
+      ),
     );
 
+    // "Differs only in the encoding of R" is derived, not asserted by fiat: the
+    // key and the message are byte-identical, and the two `R` encodings carry
+    // the same sign bit and the same `y` MODULO the field prime while differing
+    // as byte strings. The scalar half necessarily differs — `S` is computed
+    // over the encoding of `R` — so a byte comparison there would say the
+    // opposite of what the case means.
+    expect(nonCanonical.expected.differsFromTheControlOnlyInTheEncodingOfR).toBe(
+      hex(fixtureBytes(control.inputs.publicKey)) ===
+        hex(fixtureBytes(nonCanonical.inputs.publicKey)) &&
+        hex(fixtureBytes(control.inputs.message)) ===
+          hex(fixtureBytes(nonCanonical.inputs.message)) &&
+        hex(fixtureBytes(control.inputs.rEncoding)) !==
+          hex(fixtureBytes(nonCanonical.inputs.rEncoding)) &&
+        sameEdwardsY(
+          fixtureBytes(control.inputs.rEncoding),
+          fixtureBytes(nonCanonical.inputs.rEncoding),
+        ),
+    );
+    expect(nonCanonical.expected.differsFromTheControlOnlyInTheEncodingOfR).toBe(true);
+    // …and each `rEncoding` really is its own signature's first half, so the
+    // comparison above is about the signatures and not about two loose fields.
+    for (const entry of [control, nonCanonical]) {
+      expect(hex(fixtureBytes(entry.inputs.rEncoding)), entry.name).toBe(
+        hex(fixtureBytes(entry.inputs.signature).subarray(0, 32)),
+      );
+    }
+
     for (const entry of casesMatching(F17, /^ed25519-signature-scalar-/)) {
-      expect(verifyCase(entry), entry.name).toBe(false);
+      expect(entry.expected.verificationVerdict, entry.name).toBe(verifyCase(entry));
+      expect(entry.expected.verificationVerdict, entry.name).toBe(false);
     }
   });
 
@@ -3497,24 +3888,30 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 // corpus manifest under `livenessCensus`; the tests at the bottom of this file
 // hold the manifest to the corpus and to itself.
 //
-//   2,069 of 3,287 committed expectation leaves are read by some suite: 62.9%.
-//   1,218 are read by nothing. 32 of the 290 committed cases carry no live
+//   2,123 of 3,287 committed expectation leaves are read by some suite: 64.6%.
+//   1,164 are read by nothing. 17 of the 290 committed cases carry no live
 //   leaf at all — they are named one by one in `E2EE_CORPUS_CASE_LIVENESS`,
 //   each with the reason and the owner of the missing work.
 //
-//   Per family, live/total: F1 161/161 · F2 16/30 · F3 80/190 · F4 44/81 ·
+//   Per family, live/total: F1 161/161 · F2 16/30 · F3 80/190 · F4 80/81 ·
 //   F5 52/66 · F6 26/62 · F7 31/73 · F8 117/148 · F9 182/589 · F10 361/361 ·
 //   F11 198/396 · F12 42/120 · F13 8/8 · F14 30/46 · F15 22/22 · F16 144/332 ·
-//   F17 150/197 · F18 405/405.
+//   F17 168/197 · F18 405/405.
 //
-// "32 OF 290" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
-// one-leaf threshold it invites the reading that the other 258 assert something
+//   MOVED THIS ROUND, and only these two: F4 44→80 and F17 150→168, which took
+//   the contentless count from 32 to 17 and left every remaining one in F3.
+//   Nothing was relabelled to get there — each newly live leaf has a case that
+//   fails when the leaf changes, and the four ledger obligations that stopped
+//   being `unasserted` stopped because their cases went live.
+//
+// "17 OF 290" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
+// one-leaf threshold it invites the reading that the other 273 assert something
 // substantial. The distribution is what shows the shape, and the manifest
 // publishes it as `casesByLiveLeafCount`:
 //
-//   live leaves per case:  0 → 32 · 1 → 16 · 2 → 64 · 3–5 → 72 · 6–10 → 52 ·
-//   11–25 → 38 · 26+ → 16.   112 of 290 cases have at most TWO live leaves;
-//   184 have at most five.
+//   live leaves per case:  0 → 17 · 1 → 17 · 2 → 62 · 3–5 → 86 · 6–10 → 54 ·
+//   11–25 → 38 · 26+ → 16.   96 of 290 cases have at most TWO live leaves;
+//   182 have at most five.
 //
 // READ-LIVENESS IS AN UPPER BOUND ON ASSERTION, AND NO CURRENT ASSERTION FIGURE
 // EXISTS. A suite that reads a value and never compares it marks it live here.
@@ -4017,8 +4414,6 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F4 (§7.3, §7.4, §6.4)",
     spec: "valid node and client certificates (transcript bytes and signatures) [node half]",
     generated: /^valid-node-agreement-prekey-certificate$/,
-    unasserted:
-      "The corpus carries the valid node certificate and nothing asserts it: `transcript`, `transcriptBytes`, `transcriptSha256`, `identityFingerprint`, `agreementFingerprint`, `crossSignature`, `crossSignatureReconstructionVerifies` and `withinDirectSigningBound` are read by no suite. Owned by the F4 certificate harness. Reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side is per-family harness work not taken on in this round.",
   },
   {
     id: "f4-valid-client-certificate",
@@ -4034,8 +4429,6 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "[Not enumerated individually by §16.3, which states its invalid variants over the client certificate. The same rules applied to the §7.3 NODE certificate: maximum Hub origin within S9, a cross-signature lifted from another Hub origin, carried identity and agreement fingerprints disagreeing with their keys, a prekey id substituted after signing, and usage fields that are not carrier-supplied.]",
     generated: /^node-certificate-/,
     cases: 6,
-    unasserted:
-      "The corpus carries all six node-certificate variants and nothing asserts any of them: their `crossSignatureReconstructionVerifies`, `transcript`, `satisfiesS9`, `reconstructedUsageDh` and `reconstructedUsageHash` leaves are read by no suite. Owned by the F4 certificate harness. Reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side is per-family harness work not taken on in this round.",
   },
   {
     id: "f4-clock-skew-boundary",
@@ -4082,8 +4475,6 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     section: "16.3 F3 — Size-invariant cases (§3.2.1 S9), carried in F4",
     spec: "the largest §7.3, §7.4, and §7.5 transcripts at `E2EE_HUB_ORIGIN_MAX_BYTES` and `E2EE_ACCOUNT_ID_MAX_BYTES`, asserting each is within `E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES` (§3.2.1 S9) [the §7.4 client-certificate half, emitted here beside the certificate it bounds]",
     generated: /^client-certificate-at-the-maximum-namespace-/,
-    unasserted:
-      "The corpus carries the maximum-namespace client certificate and nothing asserts it: `transcript`, `transcriptBytes`, `directSigningTranscriptMaxBytes`, `satisfiesS9`, `signingInputMaxBytes` and `satisfiesS2` are read by no suite, so the §3.2.1 S9 and S2 bounds this case exists to pin are unverified. Owned by the F4 certificate harness. Reconstructing the §7.3 node transcript and re-verifying its cross-signature on the consuming side is per-family harness work not taken on in this round.",
   },
   {
     id: "f4-strict-decode",
@@ -4857,8 +5248,6 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     spec: "Ed25519 signatures that are non-canonical in point or scalar encoding — values a ZIP215-style verifier accepts and RFC 8032 MUST reject (§14.3)",
     generated: /^ed25519-(public-key|signature)-/,
     cases: 6,
-    unasserted:
-      "The corpus carries all six Ed25519 canonicality cases — the two public-key encodings, the control and non-canonical R, and both scalar cases — and nothing asserts any of them: `validation`, `verificationVerdict`, `pinnedPrimitiveUnderZip215Relaxation` and `differsFromTheControlOnlyInTheEncodingOfR` are read by no suite, so the ZIP215-vs-RFC-8032 split this obligation exists for is unverified. Owned by the F17 key-material harness. The validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
   },
   {
     id: "f17-cross-domain-substitution",
@@ -5296,7 +5685,7 @@ describe("§16.3 coverage ledger", () => {
 // committed case has at least one leaf some suite reads. It does not guarantee
 // that a case's expectations are meaningfully asserted, and it is not evidence
 // that they are. A case can keep its name and one or two live leaves with the
-// rest of its `expected` block inert and satisfy this in full; 113 of the 290
+// rest of its `expected` block inert and satisfy this in full; 96 of the 290
 // committed cases have at most two live leaves. The distribution the census
 // publishes is the honest picture; the floor is the thing a test can enforce.
 //
@@ -5357,7 +5746,7 @@ describe("§16.3 corpus liveness", () => {
     // The two totals a reader compares against the manifest, pinned so that
     // growing either is a deliberate edit rather than a line that slips in.
     expect(E2EE_CORPUS_CASE_LIVENESS.filter((claim) => claim.reader === "decorative").length).toBe(
-      32,
+      17,
     );
     expect(E2EE_CORPUS_CASE_LIVENESS.filter((claim) => claim.reader === "noise").length).toBe(4);
   });
@@ -5652,14 +6041,18 @@ describe("§16.3 corpus liveness", () => {
       ).toBeUndefined();
     }
     // Pinned, so the number moves only as a deliberate edit. It was FOURTEEN
-    // until the client mode machine gave `f16-suite-list-strip` a driver.
-    expect(unasserted, "the count of generated-but-unasserted obligations").toBe(13);
-    expect(SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined).length).toBe(13);
+    // until the client mode machine gave `f16-suite-list-strip` a driver, and
+    // THIRTEEN until the F4 certificate harness and the F17 key-material
+    // harness landed: those took `f4-valid-node-certificate`,
+    // `f4-node-certificate-variants`, `f4-max-namespace-s9` and
+    // `f17-ed25519-canonicality` off this list. Every one that remains is F3.
+    expect(unasserted, "the count of generated-but-unasserted obligations").toBe(9);
+    expect(SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined).length).toBe(9);
     // …and the manifest carries the same list, so the number reaches a reader of
     // the FIXTURES and not only a reader of this file. Ids, not just a count: a
     // count alone cannot be checked against anything.
     const declared = MANIFEST.ledgerFidelity.unassertedObligations;
-    expect(declared.count).toBe(13);
+    expect(declared.count).toBe(9);
     expect([...declared.ids].toSorted()).toEqual(
       SECTION_16_3_LEDGER.filter((entry) => entry.unasserted !== undefined)
         .map((entry) => entry.id)

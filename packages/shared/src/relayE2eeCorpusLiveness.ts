@@ -22,9 +22,12 @@
  * ledger's own partition rule was added to close, one level down: the ledger
  * reads as covering the corpus while half the corpus asserts nothing.
  *
- * Thirty-two of those cases remain contentless and are listed at the bottom of
- * this file, one by one, with the reason and the owner of the missing work. The
- * corpus manifest's `livenessCensus` carries the per-family numbers.
+ * SEVENTEEN of those cases remain contentless and are listed at the bottom of
+ * this file, one by one, with the reason and the owner of the missing work —
+ * down from thirty-two, after the F4 certificate harness and the F17
+ * key-material harness landed and drove both of those families' contentless
+ * cases to zero. Every one that remains is F3, whose residual is named there.
+ * The corpus manifest's `livenessCensus` carries the per-family numbers.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * WHAT THE PER-CASE RULE ENFORCES — A FLOOR, AND ONLY A FLOOR
@@ -418,111 +421,6 @@ export const E2EE_CORPUS_CASE_LIVENESS: readonly E2eeCorpusLivenessClaim[] = [
     reader: "decorative",
     reason:
       "States `selfCheck`; no consuming suite reads any of it. Owned by the F3 statement harness: the §5.2 verifier and the node advertisement self-check live in apps/server, and the encoder-side halves are shared-side per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "valid-node-agreement-prekey-certificate",
-    reader: "decorative",
-    reason:
-      "States `transcript`, `transcriptBytes`, `transcriptSha256`, `identityFingerprint`, `agreementFingerprint`, `crossSignature`, `crossSignatureReconstructionVerifies`, `withinDirectSigningBound`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "node-certificate-at-the-maximum-hub-origin-accepted-and-within-S9",
-    reader: "decorative",
-    reason:
-      "States `transcript`, `transcriptBytes`, `directSigningTranscriptMaxBytes`, `satisfiesS9`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "node-certificate-cross-signature-lifted-from-another-hub-origin",
-    reader: "decorative",
-    reason:
-      "States `crossSignatureReconstructionVerifies`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "node-certificate-carried-identity-fingerprint-disagrees-with-the-identity-key",
-    reader: "decorative",
-    reason:
-      "States `crossSignatureReconstructionVerifies`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "node-certificate-carried-agreement-fingerprint-disagrees-with-the-agreement-key",
-    reader: "decorative",
-    reason:
-      "States `crossSignatureReconstructionVerifies`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "node-certificate-prekey-id-substituted-after-signing",
-    reader: "decorative",
-    reason:
-      "States `crossSignatureReconstructionVerifies`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "node-certificate-usage-fields-are-not-carrier-supplied",
-    reader: "decorative",
-    reason:
-      "States `crossSignatureReconstructionVerifies`, `reconstructedUsageDh`, `reconstructedUsageHash`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f04-prekey-certificates.json",
-    case: "client-certificate-at-the-maximum-namespace-accepted-and-within-S9",
-    reader: "decorative",
-    reason:
-      "States `transcript`, `transcriptBytes`, `directSigningTranscriptMaxBytes`, `satisfiesS9`, `signingInputMaxBytes`, `satisfiesS2`; no consuming suite reads any of it. Owned by the F4 certificate harness: reconstructing the §7.3 node transcript and re-verifying its cross-signature here is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f17-key-material-validation.json",
-    case: "p256-public-key-valid-control",
-    reader: "decorative",
-    reason:
-      "States `validationAccepted`; no consuming suite reads any of it. Owned by the F17 key-material harness: the validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f17-key-material-validation.json",
-    case: "ed25519-public-key-y-at-the-field-prime",
-    reader: "decorative",
-    reason:
-      "States `validation`, `verificationVerdict`; no consuming suite reads any of it. Owned by the F17 key-material harness: the validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f17-key-material-validation.json",
-    case: "ed25519-public-key-y-above-the-field-prime",
-    reader: "decorative",
-    reason:
-      "States `validation`, `verificationVerdict`; no consuming suite reads any of it. Owned by the F17 key-material harness: the validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f17-key-material-validation.json",
-    case: "ed25519-signature-with-a-canonically-encoded-identity-r-control",
-    reader: "decorative",
-    reason:
-      "States `verificationVerdict`; no consuming suite reads any of it. Owned by the F17 key-material harness: the validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f17-key-material-validation.json",
-    case: "ed25519-signature-with-a-non-canonically-encoded-identity-r",
-    reader: "decorative",
-    reason:
-      "States `verificationVerdict`, `pinnedPrimitiveUnderZip215Relaxation`, `differsFromTheControlOnlyInTheEncodingOfR`; no consuming suite reads any of it. Owned by the F17 key-material harness: the validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f17-key-material-validation.json",
-    case: "ed25519-signature-scalar-at-the-group-order",
-    reader: "decorative",
-    reason:
-      "States `verificationVerdict`; no consuming suite reads any of it. Owned by the F17 key-material harness: the validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
-  },
-  {
-    file: "f17-key-material-validation.json",
-    case: "ed25519-signature-scalar-above-the-group-order",
-    reader: "decorative",
-    reason:
-      "States `verificationVerdict`; no consuming suite reads any of it. Owned by the F17 key-material harness: the validators and `verifyE2eeSignature` are reachable here, and driving each encoding through them is per-family harness work not taken on in this round.",
   },
   {
     file: "f15-noise-core-vectors.json",
