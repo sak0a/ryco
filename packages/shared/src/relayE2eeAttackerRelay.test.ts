@@ -2903,6 +2903,29 @@ describe("attacker relay: authenticated records the registries do not admit", ()
 // `unprotect` then throws rather than returning a row, so a case that releases a
 // withheld frame after the peer has failed asserts the rejection in as many
 // words. That is the point of holding the frame in the first place.
+//
+// WHAT THE SCHEDULE DOES NOT COVER, so that a count of this file is not read as
+// a count of harness-driven evidence:
+//
+//   - The §8 NEGOTIATION RECORDS never cross the relay. `establishHostile` runs
+//     an honest §8 exchange by handing hello and accept directly between the two
+//     handshake objects, then attaches the two live endpoints to the relay — so
+//     everything below schedules §9 records and §10 close records only. The last
+//     block in this section is hand-carried for the same reason and says so in
+//     its title: §8.1 allows one attempt per channel, which leaves a two-record
+//     phase nothing to reorder.
+//   - Most §14.1 attack CLASSES are still discharged by sections A–J against
+//     hand-carried delivery, which is the right shape for them: key and
+//     suite-list substitution, tier and pattern confusion, transcript and
+//     context-commitment mismatch, role escalation and reduction, cross-account
+//     splice, node-fingerprint substitution, mode-lock violations, and
+//     key-material validation are properties of a VALUE, and a schedule adds
+//     nothing to a value. What the schedule changes the meaning of is what runs
+//     here: replay, reorder and gap, implicit-finish abuse, the §9.4 rekey
+//     boundary, the §10.2 simultaneous branch, a kept §11.3 error record, and
+//     the §8.6/§13.6 authorization withdrawal — the last of which is a RACE
+//     rather than a value, and the only §14.1 class this section moved off
+//     hand-carried delivery for that reason.
 
 interface HeldFrame {
   readonly id: number;
@@ -3274,51 +3297,109 @@ describe("hostile relay: injection ahead of the genuine frame", () => {
   });
 });
 
-describe("hostile relay: scheduling the §10.2 simultaneous branch", () => {
-  it("completes the four-record exchange whichever way the acks are ordered", async () => {
-    // The relay CAUSES the simultaneous branch — it holds both closes until each
-    // endpoint has sent its own — and then reorders the two acks. §10.1.1's
-    // anchor is what makes the outcome independent of that ordering, and this is
-    // the case that drives it from the schedule rather than by hand.
-    const { client, node, relay } = await establishHostile();
-    await client.initiateClose(NOW);
-    await node.initiateClose(NOW);
-    const clientClose = relay.hold("client");
-    const nodeClose = relay.hold("node");
-
-    expect(await relay.release(nodeClose, NOW)).toEqual({ kind: "close", branch: "simultaneous" });
-    expect(await relay.release(clientClose, NOW)).toEqual({
-      kind: "close",
-      branch: "simultaneous",
+describe("hostile relay: widening the §8.6 withdrawal window by holding the finish", () => {
+  it("refuses a finish the owner withdrew authority for while the relay held it", async () => {
+    // THE ONE §14.1 CLASS WHOSE MEANING THE SCHEDULE CHANGES AND SECTION G COULD
+    // ONLY ASSERT. §13.6 and §8.9 make the node re-read the client authorization
+    // at the implicit finish, and section G proves the re-read refuses a reduced
+    // `maxRole`. What it cannot show is the RACE: the window between the client
+    // sending its first envelope and the node authenticating it is not fixed by
+    // the protocol, and the relay widens it for free by simply holding the
+    // frame. Here the withdrawal lands strictly INSIDE that window, with the
+    // record already minted and in the attacker's queue, and the outcome is
+    // unchanged — Q9 `authorization_withdrawn`, a `policy` error record, and no
+    // RPC handler invocation.
+    const { client, node, relay } = await establishHostile({
+      tier: "native",
+      primeImplicitFinish: false,
     });
-    expect(client.close.state).toBe("simultaneous_pending");
-    expect(node.close.state).toBe("simultaneous_pending");
+    await client.sendRpc(Uint8Array.from([0x11]), "implicit finish");
+    const finish = relay.hold("client");
 
-    await client.sendOwedCloseRecord(NOW);
-    await node.sendOwedCloseRecord(NOW);
-    const clientAck = relay.hold("client");
-    const nodeAck = relay.hold("node");
-
-    // Released in the reverse of the order they were produced.
-    expect(await relay.release(nodeAck, NOW)).toEqual({
-      kind: "close_ack",
-      exchangeComplete: true,
+    // The owner reduces `maxRole` below the admitted snapshot's while the record
+    // is held. `status` is untouched, so a status-only re-check would pass it.
+    node.reReadAuthorization = () => ({
+      status: "approved",
+      maxRole: LOWER_ROLE,
+      capabilitySet: [CAPABILITY],
     });
-    expect(await relay.release(clientAck, NOW)).toEqual({
-      kind: "close_ack",
-      exchangeComplete: true,
-    });
-    expect(client.verdict).toBe("clean");
-    expect(node.verdict).toBe("clean");
 
-    // The duplicate the attacker still holds: a completed exchange does not make
-    // a replayed ack harmless, and §10.4 lets **Failed** supersede **Clean**.
-    const duplicated = expectFatal(await relay.release(nodeAck, NOW));
-    expect(duplicated.row).toBe("Q2");
-    expect(duplicated.reason).toBe("sequence_mismatch");
-    expect(client.verdict).toBe("failed");
-    expect(node.verdict).toBe("clean");
+    const receipt = expectFatal(await relay.release(finish, NOW));
+    expect(receipt.row).toBe("Q9");
+    expect(receipt.reason).toBe("authorization_withdrawn");
+    expect(receipt.errorCode).toBe(E2EE_ERROR_CODE_POLICY);
+    expect(node.rpcDeliveries).toHaveLength(0);
+    expect(node.mayInvokeRpcHandler).toBe(false);
+    expect(node.channelCloseReason).toBe("channel_rejected");
+    expect(node.verdict).toBe("failed");
   });
+});
+
+describe("hostile relay: scheduling the §10.2 simultaneous branch", () => {
+  // The relay CAUSES the simultaneous branch — it holds both closes until each
+  // endpoint has sent its own — and then reorders the closes and the acks. Every
+  // ordering is DRIVEN rather than argued: §10.1.1's anchor is what makes the
+  // outcome independent of who lands first, so a bug that resolved correctly
+  // only when the node's record arrives first is exactly what the four
+  // combinations below exist to catch, and running one of them under a title
+  // that says "whichever way" would assert the independence instead of testing
+  // it. The duplicate at the end is aimed at whichever ack the relay released
+  // last, so the replay lands on both endpoints across the matrix.
+  for (const closeFirst of ["node", "client"] as const) {
+    for (const ackFirst of ["node", "client"] as const) {
+      it(`completes the four-record exchange with the ${closeFirst} close and the ${ackFirst} ack first`, async () => {
+        const { client, node, relay } = await establishHostile();
+        await client.initiateClose(NOW);
+        await node.initiateClose(NOW);
+        const held = {
+          client: relay.hold("client"),
+          node: relay.hold("node"),
+        };
+        const closeOrder: readonly Party[] =
+          closeFirst === "node" ? ["node", "client"] : ["client", "node"];
+        for (const party of closeOrder) {
+          expect(await relay.release(held[party], NOW)).toEqual({
+            kind: "close",
+            branch: "simultaneous",
+          });
+        }
+        expect(client.close.state).toBe("simultaneous_pending");
+        expect(node.close.state).toBe("simultaneous_pending");
+
+        await client.sendOwedCloseRecord(NOW);
+        await node.sendOwedCloseRecord(NOW);
+        const acks = {
+          client: relay.hold("client"),
+          node: relay.hold("node"),
+        };
+        const ackOrder: readonly Party[] =
+          ackFirst === "node" ? ["node", "client"] : ["client", "node"];
+        for (const party of ackOrder) {
+          expect(await relay.release(acks[party], NOW)).toEqual({
+            kind: "close_ack",
+            exchangeComplete: true,
+          });
+        }
+        expect(client.verdict).toBe("clean");
+        expect(node.verdict).toBe("clean");
+        expect(client.close.exchangeComplete).toBe(true);
+        expect(node.close.exchangeComplete).toBe(true);
+
+        // The duplicate the attacker still holds: a completed exchange does not
+        // make a replayed ack harmless, and §10.4 lets **Failed** supersede
+        // **Clean**. The replayed ack is refused by its RECEIVER, which is the
+        // party that did not send it.
+        const replayed: Party = ackFirst === "node" ? "client" : "node";
+        const receiver = replayed === "node" ? client : node;
+        const survivor = replayed === "node" ? node : client;
+        const duplicated = expectFatal(await relay.release(acks[replayed], NOW));
+        expect(duplicated.row).toBe("Q2");
+        expect(duplicated.reason).toBe("sequence_mismatch");
+        expect(receiver.verdict).toBe("failed");
+        expect(survivor.verdict).toBe("clean");
+      });
+    }
+  }
 });
 
 describe("hostile relay: holding a frame across the §9.4 rekey boundary", () => {
@@ -3395,13 +3476,17 @@ describe("hostile relay: truncation inside a flight of records", () => {
   }
 });
 
-describe("hostile relay: the negotiation phase, where the schedule holds two frames", () => {
-  // §8 is two records long and §8.1 allows exactly one handshake attempt per
-  // channel, so hold, reorder, and delay have nowhere to go here — sections C
-  // and E already drive every reflection and mutation the two frames admit. What
-  // the schedule DOES add is duplication and substitution, and both make the
-  // same point: a rejected record spends the handshake, so the genuine record
-  // behind it is worthless too.
+describe("the negotiation phase: one attempt per channel, so a refused record spends it", () => {
+  // HAND-CARRIED, AND NAMED THAT WAY. §8 is two records long and §8.1 allows
+  // exactly one handshake attempt per channel, so hold, reorder, and delay have
+  // nowhere to go here — sections C and E already drive every reflection and
+  // mutation the two frames admit. The two cases below construct no
+  // `HostileRelay` and hold no frames; they pass records between a client and a
+  // node by hand, exactly as sections A–J do. They sit in section K because the
+  // point they make is the schedule's — duplication and substitution both leave
+  // the genuine record worthless — but counting them as harness-driven evidence
+  // would overstate the harness, so the title no longer says a schedule runs
+  // here. See the same distinction in docs/relay-e2ee-noise-audit-scope.md §6.
 
   it("spends the client handshake on a duplicated accept", async () => {
     const client = makeClient({ tier: "native" });
