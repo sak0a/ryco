@@ -25,3 +25,4 @@ __screenshots__/
 squashfs-root/
 .vercel
 .superpowers/
+.gradle
