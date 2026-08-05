@@ -13,6 +13,7 @@ import {
 import {
   beginWebE2eeChannelAttempt,
   lockWebE2eeChannelMode,
+  publishWebE2eeVerificationCode,
   resetWebE2eeSession,
 } from "../src/hostedHub/e2eeSession";
 
@@ -119,6 +120,37 @@ export function applyWebE2eeChannelStatus(status: WebHostedE2eeChannelStatus): v
   if (status === "negotiating") return;
   lockWebE2eeChannelMode(status === "web-unsigned" ? "e2ee" : "legacy");
 }
+
+/**
+ * Put the REAL §13 projection into a locked `e2ee` channel holding one §13.5
+ * code, for a render sweep.
+ *
+ * The publish order is the §4.4 machine's, and it is the order that matters:
+ * `publishWebE2eeVerificationCode` runs from INSIDE the mode lock, so the
+ * projection is still `negotiating` at that instant and only the caller's
+ * post-operation sync moves it to `web-unsigned`. A helper that locked first
+ * would drive a sequence the shipped machine never produces, and a surface
+ * gating on the lock would pass here while failing in the app.
+ */
+export function applyWebE2eeVerificationCode(code: string): void {
+  resetWebE2eeSession();
+  beginWebE2eeChannelAttempt();
+  publishWebE2eeVerificationCode(code);
+  lockWebE2eeChannelMode("e2ee");
+}
+
+/**
+ * The unconditional sentence `HostedRelayTrustNotice` shipped before the claim
+ * became a function of the channel state.
+ *
+ * Kept HERE rather than in the component, because it must not be reachable from
+ * the app: it asserts the opposite of what a locked NX channel makes true, and
+ * `docs/relay-e2ee-protocol.md` §2.2 forbids a surface presenting either tier's
+ * claim for the other's configuration. The browser suites that used to pin it as
+ * the expected copy now assert it is nowhere on the page.
+ */
+export const RETIRED_HOSTED_RELAY_TRUST_SENTENCE =
+  "Hosted connections use WSS transport security, but they are not application-level end-to-end encrypted. The trusted relay can observe forwarded bytes in memory and must not log or persist payloads.";
 
 /**
  * "Connected" restated from the raw inputs in the derivation's gate order —

@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { hostedHubStore } from "@ryco/client-runtime/authorization";
 import { EnvironmentId } from "@ryco/contracts";
 import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
@@ -32,6 +35,31 @@ const SELECTION: WebE2eeSelection = {
   accountId: "acct_0123456789",
   nodeId: "node_AAAAAAAAAAAAAAAAAAAAAA",
 };
+
+/** Code with its comments removed, so prose about an API is not a use of it. */
+function stripComments(code: string): string {
+  return code.replace(/\/\*[\s\S]*?\*\//gu, " ").replace(/(^|[^:])\/\/.*$/gmu, "$1");
+}
+
+const WEB_SOURCE_ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+/** Every non-test module in `apps/web/src`, as `[path relative to src, code]`. */
+function webSourceFiles(): ReadonlyArray<readonly [string, string]> {
+  const files: Array<readonly [string, string]> = [];
+  const walk = (directory: string, prefix: string): void => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        walk(`${directory}/${entry.name}`, `${prefix}${entry.name}/`);
+        continue;
+      }
+      if (!/\.tsx?$/u.test(entry.name)) continue;
+      if (/\.(?:test|browser)\.tsx?$/u.test(entry.name)) continue;
+      files.push([`${prefix}${entry.name}`, readFileSync(`${directory}/${entry.name}`, "utf8")]);
+    }
+  };
+  walk(WEB_SOURCE_ROOT, "");
+  return files;
+}
 
 /** §5.2 steps 0–7 passed and step 8/9 refused it: still a VALIDATED statement. */
 const UNUSABLE: NodeE2eeCapabilityVerification = {
@@ -199,6 +227,27 @@ describe("§12.1 the latch ends with the application session and not before", ()
     // …and the second selection of an A→B→A round trip is still classified
     // `latched` by the real rule, read off the real attempt.
     expect(webRelayE2eeAttempt(SELECTION).selectionClass).toBe("latched");
+  });
+
+  it("is called from exactly one place, and this module says which", () => {
+    // The behavioural test above proves the catalog does not clear the latch
+    // TODAY. It does not stop the module's own doc comment from claiming the
+    // opposite — and that comment is the first thing a maintainer reads, in a
+    // file whose entire design premise is that the comment is the mechanism. A
+    // sentence naming the clearing catalog as a caller instructs precisely the
+    // §12.1.1 relaxation `environment.ts` spends a paragraph forbidding.
+    //
+    // So the caller set is read off the source of every non-test module in this
+    // app, and the doc comment is held to it.
+    const callers = webSourceFiles()
+      .filter(([, code]) => /\bclearWebE2eeLatches\s*\(/.test(stripComments(code)))
+      .map(([path]) => path)
+      .toSorted();
+    expect(callers).toEqual(["hostedHub/e2eeAttempt.ts", "hostedHub/e2eeLatch.ts"]);
+
+    const doc = latchSource.slice(0, latchSource.indexOf("export function clearWebE2eeLatches"));
+    expect(doc).toContain("CALLED ON SIGN-OUT ONLY");
+    expect(doc).toContain("deliberately does NOT call it");
   });
 
   it("is cleared on sign-out and survives a node deselect within the session", () => {

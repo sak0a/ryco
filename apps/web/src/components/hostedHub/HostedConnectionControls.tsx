@@ -4,10 +4,14 @@ import {
   LayoutGridIcon,
   LogOutIcon,
   RefreshCwIcon,
+  ShieldCheckIcon,
+  ShieldIcon,
+  ShieldOffIcon,
   UserRoundIcon,
   WifiIcon,
   WifiOffIcon,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
 import { useSettingsDialogStore } from "../../settingsDialogStore";
@@ -24,6 +28,7 @@ import { MobileStatusChip } from "../mobile/MobileStatusChip";
 import {
   deriveHostedConnectionStatusIndicator,
   deriveHostedConnectionStatusText,
+  type HostedConnectionStatusIndicator,
 } from "../../hostedHub/connectionStatus";
 import {
   leaveHostedNodeRouteToDirectory,
@@ -33,8 +38,59 @@ import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { useWebE2eeChannelStatus } from "../../hostedHub/useWebE2eeSession";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
+import {
+  hostedConnectionStatusPresentation,
+  type HostedConnectionGlyph,
+} from "./HostedConnectionControls.logic";
+import { HostedE2eeVerification } from "./HostedE2eeVerification";
 import { HostedPwaControls } from "./HostedPwaControls";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
+
+/**
+ * The one place a glyph name becomes a glyph. Everything that DECIDES which name
+ * applies lives in `HostedConnectionControls.logic.ts`, so the decision is
+ * assertable without a DOM and this map holds no policy at all.
+ */
+const HOSTED_CONNECTION_GLYPHS: Record<HostedConnectionGlyph, LucideIcon> = {
+  connected: WifiIcon,
+  disconnected: WifiOffIcon,
+  legacy: ShieldOffIcon,
+  "browser-encrypted": ShieldIcon,
+  "native-verified": ShieldCheckIcon,
+};
+
+/**
+ * The status glyph every hosted connection surface draws.
+ *
+ * Shared rather than repeated three times because it is the §2.2 decision, not a
+ * decoration: three copies of a conditional are three chances for one of them to
+ * key on `connected` again and hand `docs/relay-e2ee-protocol.md` §12.2's
+ * fallback the colour a locked channel gets. `data-connected` stays on the
+ * element for the reachability assertions that already read it, and
+ * `data-guarantee` carries the claim beside it.
+ */
+function HostedConnectionStatusIcon({
+  indicator,
+  className,
+  testId,
+}: {
+  readonly indicator: HostedConnectionStatusIndicator;
+  readonly className: string;
+  readonly testId?: string;
+}) {
+  const { glyph, iconClassName } = hostedConnectionStatusPresentation(indicator);
+  const Icon = HOSTED_CONNECTION_GLYPHS[glyph];
+  return (
+    <Icon
+      aria-hidden
+      data-testid={testId}
+      data-connected={String(indicator.connected)}
+      data-guarantee={indicator.guarantee}
+      data-glyph={glyph}
+      className={`${className} ${iconClassName}`}
+    />
+  );
+}
 
 export function NodePresence({ node }: { readonly node: HostedHubNode }) {
   if (node.revokedAt) return <span className="text-xs text-destructive">Revoked</span>;
@@ -124,23 +180,26 @@ export function HostedNodeMenu() {
   const disclosureRef = useRef<HTMLDetailsElement>(null);
   if (!node) return null;
 
-  const statusText = deriveHostedConnectionStatusText({
+  const statusInput = {
     browserStatus,
     sessionStatus: session,
     selectionStatus: selection,
     transportStatus: transport,
     e2eeStatus,
-  });
+  };
+  const statusText = deriveHostedConnectionStatusText(statusInput);
+  const indicator = deriveHostedConnectionStatusIndicator(statusInput);
 
   return (
     <div className="relative max-w-full">
       <details ref={disclosureRef} className="group relative">
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg border border-border bg-card/95 px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          {transport === "online" ? (
-            <WifiIcon aria-hidden className="size-4 text-emerald-500" />
-          ) : (
-            <WifiOffIcon aria-hidden className="size-4 text-amber-500" />
-          )}
+          {/* The glyph follows the derived state and the §2.2 claim, not the
+              transport. Read off `transportStatus` alone it drew the connected
+              green wifi beside `Delivery unknown`, beside `Authorization
+              removed`, and — once this tier ran a §4 channel — beside a §12.2
+              plaintext fallback. */}
+          <HostedConnectionStatusIcon indicator={indicator} className="size-4" />
           <span className="max-w-32 truncate font-medium">{node.label}</span>
           <span className="max-w-24 truncate text-xs text-muted-foreground">{statusText}</span>
           <ChevronDownIcon
@@ -217,6 +276,12 @@ export function HostedNodeMenu() {
             </Button>
           </div>
           <div className="mt-3 space-y-3 border-t border-border pt-3">
+            {/* §13.5's surface duty: "Shown in the web UI for the active
+                session … the owner compares the two out of band." It renders
+                itself only on a locked `e2ee` channel and returns null in every
+                other state, so this mount site carries no condition of its own
+                that could disagree with the projection. */}
+            <HostedE2eeVerification />
             <HostedRelayTrustNotice compact />
             <HostedPwaControls compact />
           </div>
@@ -263,20 +328,18 @@ export function HostedConnectionSheet({
     e2eeStatus,
   };
   const statusText = deriveHostedConnectionStatusText(statusInput);
-  const { connected } = deriveHostedConnectionStatusIndicator(statusInput);
+  const indicator = deriveHostedConnectionStatusIndicator(statusInput);
   const switchingDisabled = directory !== "ready" || browserStatus !== "current";
 
   return (
     <MobileSheet open={open} onOpenChange={onOpenChange} label="Connection">
       <MobileSheetHeader>
         <MobileSheetTitle className="flex items-center gap-2">
-          {/* The glyph follows the derived state, not the transport alone, so
-              it cannot contradict the text under it. */}
-          {connected ? (
-            <WifiIcon aria-hidden className="size-4 text-emerald-500" />
-          ) : (
-            <WifiOffIcon aria-hidden className="size-4 text-amber-500" />
-          )}
+          {/* The glyph follows the derived state and the §2.2 claim, not the
+              transport and not connectedness alone: a §12.2 fallback and a
+              locked channel are both usable sessions, so keyed on `connected`
+              they drew the same green wifi. */}
+          <HostedConnectionStatusIcon indicator={indicator} className="size-4" />
           <span className="truncate">{node.label}</span>
         </MobileSheetTitle>
         <MobileSheetDescription className="capitalize">
@@ -394,7 +457,7 @@ export function HostedConnectionPill() {
     e2eeStatus,
   };
   const statusText = deriveHostedConnectionStatusText(statusInput);
-  const { shortLabel, connected } = deriveHostedConnectionStatusIndicator(statusInput);
+  const indicator = deriveHostedConnectionStatusIndicator(statusInput);
 
   return (
     <>
@@ -429,28 +492,20 @@ export function HostedConnectionPill() {
         // stripped polarity exactly where polarity is the message, and
         // `HOSTED_CONNECTION_STATUS_INDICATORS` exists to replace it.
         label={`Connection: ${node.label}, ${statusText}`}
-        status={shortLabel}
-        // The glyph follows the same gate order as the text. Choosing it from
-        // `transport === "online"` alone put a green connected icon beside
-        // `Delivery unknown`, beside `Authorization removed`, and beside a
-        // closed ryco session — the states where the icon is doing the most
-        // work, because the collapsed chip has no room to explain itself.
+        status={indicator.shortLabel}
+        // The glyph follows the same gate order as the text, and then the §2.2
+        // claim. Choosing it from `transport === "online"` alone put a green
+        // connected icon beside `Delivery unknown`, beside `Authorization
+        // removed`, and beside a closed ryco session — the states where the icon
+        // is doing the most work, because the collapsed chip has no room to
+        // explain itself. Choosing it from `connected` alone drew the same green
+        // icon for a §12.2 plaintext fallback and for a locked channel.
         icon={
-          connected ? (
-            <WifiIcon
-              aria-hidden
-              data-testid="hosted-connection-icon"
-              data-connected="true"
-              className="size-3.5 shrink-0 text-emerald-500"
-            />
-          ) : (
-            <WifiOffIcon
-              aria-hidden
-              data-testid="hosted-connection-icon"
-              data-connected="false"
-              className="size-3.5 shrink-0 text-amber-500"
-            />
-          )
+          <HostedConnectionStatusIcon
+            indicator={indicator}
+            testId="hosted-connection-icon"
+            className="size-3.5 shrink-0"
+          />
         }
         onClick={() => setOpen(true)}
       />
