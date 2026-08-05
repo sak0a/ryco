@@ -1,6 +1,39 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { hostedSettingsSectionAllowed, settingsSectionAvailable } from "./SettingsDialog";
+import { PHONE_SETTINGS_SECTION_IDS } from "../shell/phone/PhoneSettingsSurface";
+import {
+  hostedSettingsSectionAllowed,
+  settingsSectionAvailable,
+  SETTINGS_DIALOG_SECTION_IDS,
+} from "./SettingsDialog";
+
+describe("the phone surface mirrors the desktop dialog's section inventory", () => {
+  it("navigates to exactly the same sections", () => {
+    // `PhoneSettingsSurface` keeps its own registry so it can group and order
+    // independently, and the desktop dialog is what decides which sections
+    // exist. Missing one there makes it unreachable on every phone-tier
+    // presentation — below 768px, on a coarse-pointer device under 500px tall,
+    // and in the hosted PWA on a phone — and a programmatic
+    // `openSettings(section)` falls back to the section list with no error,
+    // because `ALL_ITEMS.find(...)` returns undefined. `security` shipped in
+    // exactly that state.
+    //
+    // Set equality rather than "every label in this hardcoded array is present":
+    // the latter is what let it through.
+    expect([...PHONE_SETTINGS_SECTION_IDS].toSorted()).toEqual(
+      [...SETTINGS_DIALOG_SECTION_IDS].toSorted(),
+    );
+  });
+
+  it("has no duplicate entry on either surface", () => {
+    for (const [where, ids] of [
+      ["desktop", SETTINGS_DIALOG_SECTION_IDS],
+      ["phone", PHONE_SETTINGS_SECTION_IDS],
+    ] as const) {
+      expect(new Set(ids).size, where).toBe(ids.length);
+    }
+  });
+});
 
 describe("hosted settings capabilities", () => {
   it("fails closed while role state is unavailable", () => {

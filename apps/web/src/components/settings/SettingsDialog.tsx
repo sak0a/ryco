@@ -48,6 +48,18 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "archived", label: "Archive", icon: ArchiveIcon },
 ];
 
+/**
+ * Every section this dialog can navigate to.
+ *
+ * Exported so `PhoneSettingsSurface`'s mirrored registry can be checked against
+ * it rather than trusted: a section added here and not there is unreachable on
+ * every phone-tier presentation, and `openSettings(id)` for it falls back to the
+ * list with no error.
+ */
+export const SETTINGS_DIALOG_SECTION_IDS: ReadonlyArray<SettingsSectionId> = NAV_ITEMS.map(
+  (item) => item.id,
+);
+
 const HOSTED_OWNER_SECTIONS = new Set<SettingsSectionId>([
   "general",
   "providers",

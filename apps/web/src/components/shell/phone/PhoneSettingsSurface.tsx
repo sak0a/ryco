@@ -23,6 +23,7 @@ import {
   RotateCcwIcon,
   ServerIcon,
   Settings2Icon,
+  ShieldIcon,
   UserRoundIcon,
   XIcon,
 } from "lucide-react";
@@ -56,9 +57,17 @@ interface PhoneSettingsItem {
  * general group and the progressive-disclosure "Advanced" group. Diagnostics
  * hosts the development-only tier-preview override, which stays gated inside
  * `DiagnosticsSettings` behind `import.meta.env.DEV` — grouping it under
- * Advanced changes reachability, never gating. The registry is intentionally
- * mirrored rather than imported: the desktop dialog is frozen byte-identical
- * in this delivery step.
+ * Advanced changes reachability, never gating. The registry is mirrored rather
+ * than imported so the two surfaces can group and order independently.
+ *
+ * THE MIRROR IS CHECKED RATHER THAN TRUSTED. A section added to the desktop
+ * dialog and not here is unreachable on every phone-tier presentation — below
+ * 768px, on a coarse-pointer device under 500px tall, and in the hosted PWA on
+ * a phone — and a programmatic `openSettings(id)` for it falls silently back to
+ * the list, because `ALL_ITEMS.find` returns undefined. That is exactly what
+ * happened to `security`. {@link PHONE_SETTINGS_SECTION_IDS} is exported so
+ * `SettingsDialog.test.ts` can assert the two inventories agree, which no
+ * "every label in this array is present" test could.
  */
 const GENERAL_ITEMS: ReadonlyArray<PhoneSettingsItem> = [
   { id: "account", label: "Account", icon: UserRoundIcon },
@@ -70,6 +79,7 @@ const GENERAL_ITEMS: ReadonlyArray<PhoneSettingsItem> = [
   { id: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { id: "source-control", label: "Source Control", icon: GitBranchIcon },
   { id: "connections", label: "Connections", icon: Link2Icon },
+  { id: "security", label: "Security", icon: ShieldIcon },
   { id: "statistics", label: "Statistics", icon: BarChart3Icon },
   { id: "archived", label: "Archive", icon: ArchiveIcon },
 ];
@@ -79,6 +89,16 @@ const ADVANCED_ITEMS: ReadonlyArray<PhoneSettingsItem> = [
 ];
 
 const ALL_ITEMS: ReadonlyArray<PhoneSettingsItem> = [...GENERAL_ITEMS, ...ADVANCED_ITEMS];
+
+/** Every section this surface can navigate to, for the mirror check. */
+export const PHONE_SETTINGS_SECTION_IDS: ReadonlyArray<SettingsSectionId> = ALL_ITEMS.map(
+  (item) => item.id,
+);
+
+/** The resting list's labels, in order, for the phone browser suite. */
+export const PHONE_SETTINGS_GENERAL_LABELS: ReadonlyArray<string> = GENERAL_ITEMS.map(
+  (item) => item.label,
+);
 
 const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
   "general",
@@ -129,6 +149,11 @@ const LazyConnectionsSettings = lazy(() =>
     default: module.ConnectionsSettings,
   })),
 );
+const LazyNodeSecuritySettings = lazy(() =>
+  import("../../settings/NodeSecuritySettings").then((module) => ({
+    default: module.NodeSecuritySettings,
+  })),
+);
 const LazyDiagnosticsSettings = lazy(() =>
   import("../../settings/DiagnosticsSettings").then((module) => ({
     default: module.DiagnosticsSettings,
@@ -158,6 +183,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       {section === "keybindings" ? <LazyKeybindingsSettingsPanel /> : null}
       {section === "source-control" ? <LazySourceControlSettingsPanel /> : null}
       {section === "connections" ? <LazyConnectionsSettings /> : null}
+      {section === "security" ? <LazyNodeSecuritySettings /> : null}
       {section === "diagnostics" ? <LazyDiagnosticsSettings presentation="phone-legacy" /> : null}
       {section === "statistics" ? <LazyStatisticsPanel /> : null}
       {section === "archived" ? <ArchivedThreadsPanel /> : null}
