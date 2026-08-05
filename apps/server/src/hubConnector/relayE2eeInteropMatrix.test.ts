@@ -7,16 +7,24 @@ import {
   e2eeChannelSizeBudget,
 } from "@ryco/shared/relayE2eeConstants";
 import { E2eeClientHandshake } from "@ryco/shared/relayE2eeHandshake";
-import { e2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
-import { E2EE_NOISE_PATTERN_IK, E2EE_NOISE_PATTERN_NX } from "@ryco/shared/relayE2eeTranscripts";
+import { deriveE2eeAgreementPublicKey, e2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
+import {
+  E2EE_NOISE_PATTERN_IK,
+  E2EE_NOISE_PATTERN_NX,
+  decodeCanonicalE2eeCbor,
+  encodeCanonicalE2eeCbor,
+} from "@ryco/shared/relayE2eeTranscripts";
 import {
   deriveE2eeSafetyNumber,
   deriveE2eeWebSas,
 } from "@ryco/shared/relayE2eeVerificationDisplay";
 import {
   E2EE_INNER_TYPE_RPC,
+  E2EE_NEGOTIATION_TYPE_CLIENT_HELLO,
   E2EE_SUITE_25519_CHACHAPOLY_SHA256,
   classifyPostStripPayload,
+  decodeE2eeNegotiationRecord,
+  encodeE2eeNegotiationRecord,
 } from "@ryco/shared/relayE2eeWire";
 import { prepareRelayMessage } from "@ryco/shared/relayMessageChunks";
 
@@ -318,15 +326,28 @@ describe("§16 endpoint interoperability matrix (same runtime)", () => {
 
   it("gives each tier the §13 display its own pattern defines, over one node", async () => {
     // The two tiers do not merely both work — they reach DIFFERENT verification
-    // ceremonies over the same node identity, and each side derives its half
-    // independently here so a node feeding the wrong input would show up as a
-    // different string rather than as a passing shape check.
-    const nativeNode = await harness();
+    // ceremonies over the same node identity, and the NODE's own §13 output is
+    // read on both sides here rather than inferred. What makes each half a pair
+    // check is the node value: the web session's registered code is compared
+    // against a WebSAS this test derives from the client's real Noise ephemeral,
+    // so a node feeding the wrong input produces a different string; the native
+    // session's ABSENCE of a per-session code is asserted for the same reason,
+    // because §13.4's value is a property of the identity pair and lives on the
+    // Branch A record rather than on the session.
+    const nativeRegistrations: { readonly verificationCode: string | undefined }[] = [];
+    const nativeNode = await harness({
+      registerSession: (session) => {
+        nativeRegistrations.push({ verificationCode: session.verificationCode });
+        return () => undefined;
+      },
+    });
     const nativeAdvertisement = await nativeNode.open();
     const nativeClient = await establish(nativeNode, "native", nativeAdvertisement);
     // §13.4: the native tier's ceremony is the safety number over both identity
     // keys under the channel's namespace, which exists only because the native
-    // tier has a client identity at all.
+    // tier has a client identity at all. It is NOT a session value, and the node
+    // publishing one here would be publishing a §13.5 code for a tier that has
+    // no ceremony for it.
     const safety = deriveE2eeSafetyNumber({
       hubOrigin: HUB_ORIGIN,
       accountId: "acct_0123456789",
@@ -335,20 +356,51 @@ describe("§16 endpoint interoperability matrix (same runtime)", () => {
     });
     expect(safety.display.length).toBeGreaterThan(0);
     expect(nativeClient.sessionBindingHash.byteLength).toBe(32);
+    expect(nativeRegistrations).toHaveLength(1);
+    expect(nativeRegistrations[0]?.verificationCode).toBeUndefined();
 
-    const webNode = await harness({ authorization: authorizationFor(undefined) });
+    const webRegistrations: {
+      readonly tier: string;
+      readonly verificationCode: string | undefined;
+    }[] = [];
+    const webNode = await harness({
+      authorization: authorizationFor(undefined),
+      registerSession: (session) => {
+        webRegistrations.push({ tier: session.tier, verificationCode: session.verificationCode });
+        return () => undefined;
+      },
+    });
     const webAdvertisement = await webNode.open();
     const webEphemeral = new Uint8Array(32).fill(0x3d);
+    // Derived BEFORE `establish`: §9.5's erasure reaches the injected buffer,
+    // which is this array, so reading it afterwards reads zeroes.
+    const webEphemeralPublicKey = deriveE2eeAgreementPublicKey(webEphemeral);
     const webClient = await establish(webNode, "web", webAdvertisement, webEphemeral);
     // §13.5: the web tier has no client identity, so its ceremony is the session
-    // WebSAS over the node identity, the web client's Noise ephemeral, and the
+    // WebSAS over the node identity, the WEB CLIENT's Noise ephemeral, and the
     // §8.8 binding hash — a per-session code, not a per-pair number.
     const sas = deriveE2eeWebSas({
       nodeIdentityPublicKey: webAdvertisement.nodeIdentityPublicKey,
-      webEphemeralPublicKey: webAdvertisement.material.agreementPublicKey,
+      webEphemeralPublicKey,
       sessionBindingHash: webClient.sessionBindingHash,
     });
     expect(sas.display.length).toBeGreaterThan(0);
+    // THE PAIR CHECK. The node derived its code from the ephemeral it read out
+    // of the Noise handshake and from the binding hash it computed itself; this
+    // side derived the same code from the ephemeral it injected and the binding
+    // hash the client computed. Substituting any other 32-byte point — the
+    // node's own §6.4 prekey, say, which `validateE2eeAgreementPublicKey`
+    // accepts as readily — fails here rather than passing a shape check.
+    expect(webRegistrations).toHaveLength(1);
+    expect(webRegistrations[0]?.tier).toBe("web");
+    expect(webRegistrations[0]?.verificationCode).toBe(sas.display);
+    expect(
+      deriveE2eeWebSas({
+        nodeIdentityPublicKey: webAdvertisement.nodeIdentityPublicKey,
+        webEphemeralPublicKey: webAdvertisement.material.agreementPublicKey,
+        sessionBindingHash: webClient.sessionBindingHash,
+      }).display,
+    ).not.toBe(webRegistrations[0]?.verificationCode);
     // The two ceremonies are not interchangeable: a safety number is a property
     // of the identity pair and a WebSAS is a property of one session, so the two
     // strings must not collide even over the same node.
@@ -373,13 +425,37 @@ describe("§16 endpoint interoperability matrix (same runtime)", () => {
     const hello = client.createHello(NOW);
     expect(hello.kind).toBe("hello");
     if (hello.kind !== "hello") return;
-    // Rewrite the selected suite in the CLEAR framing to an unregistered id. The
-    // hello's own AAD covers the framing, so this is a hello no conforming client
-    // produced — which is the point: the node must not admit it.
-    const tampered = Uint8Array.from(hello.record);
-    tampered[tampered.length - 1] = tampered[tampered.length - 1]! ^ 0xff;
+    // REBUILD the §8.5 body with an unregistered `selectedSuite`, rather than
+    // corrupting bytes. The body is
+    // `[e2eeVersion, tier, selectedSuite, offeredSuites, clientNonce,
+    //   contextCommitment, noiseMessage1]` and `selectedSuite` is element 3, so
+    // flipping a trailing byte would land in the Noise message-1 AEAD tag and
+    // exercise tamper detection — which is the attacker-relay suite's subject,
+    // not this file's — while never reaching §8.6 step 2 at all. §3.4 registers
+    // exactly one suite id, so 0x7f is outside every conforming registry; the
+    // hello is otherwise byte-for-byte what this client produced.
+    const decodedRecord = decodeE2eeNegotiationRecord(hello.record);
+    expect(decodedRecord.kind).toBe("ok");
+    if (decodedRecord.kind !== "ok") return;
+    expect(decodedRecord.value.recordType).toBe(E2EE_NEGOTIATION_TYPE_CLIENT_HELLO);
+    const decodedBody = decodeCanonicalE2eeCbor(decodedRecord.value.body);
+    expect(decodedBody.kind).toBe("ok");
+    if (decodedBody.kind !== "ok") return;
+    const fields = decodedBody.value as unknown[];
+    expect(fields).toHaveLength(7);
+    expect(fields[2]).toBe(E2EE_SUITE_25519_CHACHAPOLY_SHA256);
+    const UNREGISTERED_SUITE = 0x7f;
+    fields[2] = UNREGISTERED_SUITE;
+    // §8.6 step 2 also requires `offeredSuites` to contain the selection, so the
+    // offer moves with it: otherwise the hello fails a DIFFERENT clause of the
+    // same check and the cell stops being about the registry.
+    fields[3] = [UNREGISTERED_SUITE];
+    const rewritten = encodeE2eeNegotiationRecord(
+      E2EE_NEGOTIATION_TYPE_CLIENT_HELLO,
+      encodeCanonicalE2eeCbor(fields),
+    );
     const before = node.dataPayloads().length;
-    await node.deliver(tampered);
+    await node.deliver(rewritten);
     node.flush();
     const answered = node.dataPayloads().slice(before);
     // §11.2: every pre-key failure is the same 64-byte reject, or nothing at
@@ -388,5 +464,11 @@ describe("§16 endpoint interoperability matrix (same runtime)", () => {
     for (const payload of answered) {
       expect(classifyPostStripPayload(stripPrelude(payload)).kind).toBe("negotiation");
     }
+    // …and the node refused at the WRAPPER, before any Noise state existed. The
+    // §11.4 row is node-local diagnostic state and is the only thing that
+    // distinguishes this rejection from the AEAD failure a trailing-byte flip
+    // produces (P10), which is what makes the cell about the suite registry
+    // rather than about tamper detection.
+    expect(node.rows()).toEqual(["P9"]);
   });
 });

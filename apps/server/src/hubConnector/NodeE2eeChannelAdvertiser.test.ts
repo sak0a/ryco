@@ -9,9 +9,11 @@ import type {
   RelayLimits,
 } from "@ryco/contracts/relay";
 import { decodeRelayFrame } from "@ryco/shared/relayCodec";
+import { verifyNodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeCapabilityVerify";
 import {
   E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES,
   E2EE_CAPABILITY_CARRIER_TAG,
+  E2EE_PREKEY_LIFETIME,
 } from "@ryco/shared/relayE2eeConstants";
 import { deriveE2eeAgreementPublicKey, verifyE2eeSignature } from "@ryco/shared/relayE2eeKeys";
 import {
@@ -53,6 +55,17 @@ const IDENTITY_KEY_ID = `nkey_${"K".repeat(22)}`;
 const PREKEY_ID = `epk_${"P".repeat(22)}`;
 const CONTINUITY_ID = `nct_${"C".repeat(22)}`;
 const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+/**
+ * §6.4: a prekey window this node's own advertisement could legitimately carry.
+ *
+ * It used to be `[1_000, 9_000_000_000_000]`, a ~285-year window, and nothing
+ * objected — the responder never applies §5.2 step 5, which is the CLIENT
+ * verifier's rule. The whole-verifier assertion below is what turns that into a
+ * failure, and it is the reason this suite advertises a conforming window: a
+ * node whose advertisement a conforming client refuses is not advertising.
+ */
+const PREKEY_CREATED_AT = Date.now() - 60_000;
+const PREKEY_EXPIRES_AT = PREKEY_CREATED_AT + E2EE_PREKEY_LIFETIME;
 const channelA = `ch_${"A".repeat(22)}` as RelayChannelId;
 const version = { protocolMajor: 1, protocolMinor: 2 } as const;
 
@@ -85,8 +98,8 @@ function statementClient(): {
     identityKeyId: IDENTITY_KEY_ID,
     prekeyId: PREKEY_ID,
     agreementPublicKey,
-    createdAt: 1_000,
-    expiresAt: 9_000_000_000_000,
+    createdAt: PREKEY_CREATED_AT,
+    expiresAt: PREKEY_EXPIRES_AT,
     crossSignature: signBytes(
       encodeNodeE2eePrekeyTranscript({
         hubOrigin: HUB_ORIGIN,
@@ -95,8 +108,8 @@ function statementClient(): {
         prekeyId: PREKEY_ID,
         identityPublicKey,
         agreementPublicKey,
-        createdAt: 1_000,
-        expiresAt: 9_000_000_000_000,
+        createdAt: PREKEY_CREATED_AT,
+        expiresAt: PREKEY_EXPIRES_AT,
       }),
     ),
   };
@@ -338,6 +351,31 @@ describe("NodeE2eeChannelAdvertiser on the relay path", () => {
         },
       }),
     ).toBe(true);
+
+    // THE WHOLE VERIFIER, over the same bytes, for both tiers. The step-by-step
+    // checks above each pass on their own while the statement as a whole is one
+    // a conforming client refuses — §5.2 step 5's prekey-lifetime rule is not
+    // reachable from any single one of them, and it is the node responder's
+    // blind spot by design, because the responder never runs the client's rules
+    // against its own advertisement. This is the assertion that closes the
+    // node-builds-statement to client-verifies-statement seam, and it belongs
+    // here rather than only in the interop matrix so that narrowing the matrix
+    // cannot reopen it.
+    for (const tier of ["native", "web"] as const) {
+      const verdict = verifyNodeE2eeCapabilityStatement({
+        statement,
+        connectedHubOrigin: HUB_ORIGIN,
+        tier,
+        localSuitePreference: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
+        now: Date.now(),
+        ...(tier === "native" ? { accountId: "acct_0123456789" } : {}),
+      });
+      expect(verdict.kind, `${tier}: ${verdict.kind === "invalid" ? verdict.reason : ""}`).toBe(
+        "verified",
+      );
+      if (verdict.kind !== "verified") continue;
+      expect(verdict.selectedSuite, tier).toBe(E2EE_SUITE_25519_CHACHAPOLY_SHA256);
+    }
   });
 
   it("suppresses on an undersized connection and counts it in its own class (§5.5 U1, row N16)", async () => {
