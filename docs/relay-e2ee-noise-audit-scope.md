@@ -19,7 +19,7 @@ Framework at the revision named in [section 3](#3-protocol-names-spec-revision-a
 
 | Path                                         | Lines | Role                                     |
 | -------------------------------------------- | ----- | ---------------------------------------- |
-| `packages/shared/src/relayE2eeNoise.ts`      | 978   | The state machine. The audit target.     |
+| `packages/shared/src/relayE2eeNoise.ts`      | 986   | The state machine. The audit target.     |
 | `packages/shared/src/relayE2eeNoise.test.ts` | 1,088 | Its colocated suite, 46 cases. Evidence. |
 
 The module is heavily commented; the executable surface is roughly half its line count. It
@@ -215,20 +215,36 @@ Timing and memory-residue observations are welcome as context; they are known an
 
 ## 6. Evidence available to the auditor
 
-| Evidence                                       | Status                                                                        |
-| ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| The specification                              | Landed: `docs/relay-e2ee-protocol.md`, normative, ~6,200 lines                |
-| Colocated unit and golden-transcript suite     | Landed: `packages/shared/src/relayE2eeNoise.test.ts`, 46 cases                |
-| Official Noise vectors (§16.3 family F15)      | Landed: `packages/shared/fixtures/e2ee/v1/f15-noise-core-vectors.json`        |
-| Cross-implementation vectors                   | Partly landed by F15; see below                                               |
-| Property-based state-machine suite             | Landed: `packages/shared/src/relayE2eeNoiseProperties.test.ts`, 23 properties |
-| Adversarial suite with a hostile-relay harness | Landed: `packages/shared/src/relayE2eeAttackerRelay.test.ts`, 124 cases       |
+| Evidence                                    | Status                                                                        |
+| ------------------------------------------- | ----------------------------------------------------------------------------- |
+| The specification                           | Landed: `docs/relay-e2ee-protocol.md`, normative, ~6,200 lines                |
+| Colocated unit and golden-transcript suite  | Landed: `packages/shared/src/relayE2eeNoise.test.ts`, 46 cases                |
+| Official Noise vectors (§16.3 family F15)   | Landed: `packages/shared/fixtures/e2ee/v1/f15-noise-core-vectors.json`        |
+| Cross-implementation vectors                | Partly landed by F15; see below                                               |
+| Property-based state-machine suite          | Landed: `packages/shared/src/relayE2eeNoiseProperties.test.ts`, 24 properties |
+| Adversarial suite                           | Landed: `packages/shared/src/relayE2eeAttackerRelay.test.ts`, 128 cases       |
+| — of which run on the hostile-relay harness | 16 (section K); the other 112 hand-carry delivery one record at a time        |
 
 That table is deliberately honest: an auditor should know which evidence exists today and which is
 an obligation still being discharged. One row remains short of closed — cross-implementation
 vectors, discharged by F15 for the official inputs but not for this protocol's own §8.4 prologue and
 §8.5/§8.7 payload shapes, as the F15 note below explains. Every other row is landed, and none of
 them is a deliverable the auditor is being asked to produce.
+
+The adversarial row is split into two lines for a reason worth stating before an engagement is
+sized: 128 cases is the size of the adversarial suite, not the size of the harness-driven evidence
+inside it. §14.1's requirement that the suite run against an attacker-controlled relay harness is
+discharged by section K, which is 16 of those cases; the rest predate the harness and pass records
+between endpoints by hand. That is the right shape for most of what §14.1 enumerates — key and
+suite-list substitution, tier and pattern confusion, transcript and context-commitment mismatch,
+role escalation and reduction, cross-account splice, node-fingerprint substitution, mode-lock
+violations, and key-material validation are properties of a **value**, and a schedule adds nothing
+to a value — and the wrong shape for the seven the schedule does change: replay, reorder and gap,
+implicit-finish abuse, the §9.4 rekey boundary, the §10.2 simultaneous branch, a §11.3 error record
+the relay simply keeps, and the §8.6/§13.6 authorization withdrawal — which is a **race** rather
+than a value, since the window between the client minting its first envelope and the node
+authenticating it is one the relay widens for free by holding the frame. Those seven are what
+section K drives.
 
 **F15, precisely.** The corpus holds the four applicable vectors — the `Noise_IK_25519_ChaChaPoly_SHA256`
 and `Noise_NX_25519_ChaChaPoly_SHA256` entries of the published cacophony (Haskell) and snow (Rust)
@@ -271,7 +287,7 @@ The golden transcripts explicitly do **not** discharge §14.1's official-vector 
 a first-party cross-check, and the official vectors are family F15 of the §16 corpus, described
 above.
 
-**The property suite, precisely.** `relayE2eeNoiseProperties.test.ts` holds 23 properties in seven
+**The property suite, precisely.** `relayE2eeNoiseProperties.test.ts` holds 24 properties in seven
 groups, run under `fast-check` with a fixed seed recorded in the file header, so a failure on CI
 reproduces byte for byte with no extra flags. It quantifies over what the enumerated suite can only
 sample. Message ordering is checked against a model of the module's own status across arbitrary
@@ -282,32 +298,70 @@ sequence reaches `split()` except through the pattern's exact legal order over a
 that two ends that both split always agree. The two failure classes of section 5 question 1 are
 separated as properties: any number of precondition refusals leaves a handshake completing normally,
 and every operation after a handshake is spent — by `split()`, by `destroy()`, or by a processing
-failure — is refused. Erasure is asserted **on the buffer**, not on a flag, over every prefix of a
-handshake and over the failure paths an attacker can force. Mutation and truncation are stated in
-the only form that is true for both patterns, since an NX message-1 payload is cleartext and a
+failure — is refused. Mutation and truncation are stated in the only form that is true for both
+patterns without assuming AEAD unforgeability, since an NX message-1 payload is cleartext and a
 mutated one is legitimately read: no mutation and no truncation of any handshake message may leave
-the two ends holding the same session keys. The remaining groups cover role symmetry (both roles
-reaching one handshake hash and one `Split()`), prologue binding (stated where it actually lives —
-in `h`, not in `ck`, which is why a fixed key set under two prologues yields the _same_ `Split()`
-outputs and a differing handshake hash), the IK pre-message static, key-material bounds, the
-exporter as a pure confined function of `ck`, and the Noise §5.1 nonce encoding against an
-independently written little-endian reference.
+the two ends holding the same session keys. In practice the NX cleartext read only **defers** the
+refusal by one message — message 2's `s` token is AEAD-protected under the diverged `h` — so on
+every generated case one of the two ends refuses, and each of those properties counts the runs in
+which neither did and fails if that count is ever non-zero. The remaining groups cover role symmetry
+(both roles reaching one handshake hash and one `Split()`), prologue binding (stated where it
+actually lives — in `h`, not in `ck`, which is why a fixed key set under two prologues yields the
+_same_ `Split()` outputs and a differing handshake hash), the IK pre-message static, key-material
+bounds, the exporter as a pure confined function of `ck`, and the Noise §5.1 nonce encoding against
+an independently written little-endian reference.
+
+Three things about that suite are worth stating rather than leaving to be inferred, because each is
+a bound on what it proves:
+
+- **Erasure is asserted on a buffer where a buffer is reachable, and only there.** The injected
+  test-only ephemeral is the one piece of private key material the module adopts from a caller, so
+  three properties watch the caller's own bytes go to zero — over every prefix of a handshake, on a
+  fatal read taken before the ephemeral was generated, and on a fatal read taken with it live in
+  `#e` — and a fourth watches a refused constructor leave the same buffer untouched. The handshake
+  hash is watched through `testOnlyHandshakeHash`, which reports the erased state by reading `h` and
+  finding it all-zero rather than by consulting a status flag. The chaining key, the handshake
+  cipher key, and the module's defensive copy of the static agreement secret are **not** observable
+  from outside the module and nothing in this repository proves they are zeroed;
+  `NoiseSymmetricState.erase()` and `#eraseSecrets` each zero their buffers in a single call that
+  also covers an observable one, and section 5 question 4 asks the auditor to confirm the rest by
+  reading the code.
+- **The chaining key is proven un-extractable even so.** One property reads every accessor the class
+  publishes after `split()` and checks each against the three §6.5 outputs, against the handshake
+  hash captured while the handshake was live, and — because `ck_final` is never handed to a test —
+  against `ck_final`'s consequence: any 32-byte buffer that reproduces `exporterSecret` under
+  `e2eeNoiseExporterSecret` **is** the chaining key, whatever the accessor returning it is called.
+- **Nonce _progression_ is not proven here, and cannot be.** §14.1 asks for "nonce-progression
+  properties" and this group covers the encoding and its injectivity only. Every AEAD invocation in
+  both patterns runs at counter 0, because each is preceded by a `MixKey()` that resets it, and both
+  parties perform the same operations in the same order — so an implementation that dropped Noise
+  §5.1's reset stays in lockstep with its peer and completes every handshake. What pins the reset is
+  the F15 official vectors, which are byte-exact; what pins the §9.3/§9.4 record-layer counter and
+  epoch progression is `relayE2eeSession.test.ts` and `relayE2eeWire.test.ts`, over a different
+  nonce (`epoch ‖ counter`, big-endian) in a module outside this audit target.
 
 **The hostile-relay harness, precisely.** `relayE2eeAttackerRelay.test.ts` runs two complete
-endpoints — handshake, record session, and close machine — against each other with the relay
-between them, and its final section replaces the hand-carried delivery of the earlier sections with
-a relay that **owns** delivery: frames are captured into a queue nothing drains on its own, and each
-§2.1 capability is one operation — hold and release later, drop, reorder, duplicate (release the
-same held frame twice), modify (which subsumes truncate and restamp), reflect, and inject bytes no
-endpoint produced. The harness adds no key material; cases needing a record that is authentic but
+endpoints — record session and close machine — against each other with the relay between them, and
+its final section replaces the hand-carried delivery of the earlier sections with a relay that
+**owns** delivery: frames are captured into a queue nothing drains on its own, and each §2.1
+capability is one operation — hold and release later, drop, reorder, duplicate (release the same
+held frame twice), modify (which subsumes truncate and restamp), reflect, and inject bytes no
+endpoint produced. The §8 negotiation records are **not** scheduled: `establishHostile` runs an
+honest §8 exchange by handing hello and accept straight between the two handshake objects and then
+attaches the live endpoints to the relay, so the harness carries §9 records and §10 close records
+only. §8 admits no schedule anyway — it is two records long and §8.1 allows one attempt per channel
+— and the substitution and duplication attacks on those two records are hand-carried cases that say
+so in their titles. The harness adds no key material; cases needing a record that is authentic but
 non-conforming still say so and still mint it from a peer's own keys. What the schedule buys over
 value mutation is the second half of each attack: the withheld record released into the erasure the
 overtaking one caused, the same across a §9.4 rekey boundary, the duplicate landing after the peer
 moved on, the genuine implicit finish released after an injected record spent the node's session, an
-ack held past `T_CLOSE` and released after the verdict, and — the case only a schedule can state —
-the relay **keeping** the single §11.3 `E2EEError`, which leaves the two ends in the asymmetric state
-§10.4 resolves as an unattributed **Unclean — abrupt** rather than in one either side can be walked
-out of.
+ack held past `T_CLOSE` and released after the verdict, the §10.2 simultaneous branch driven through
+all four orderings of the two closes and the two acks, an owner withdrawal landing strictly inside
+the §8.6/§13.6 re-read window because the relay held the client's first envelope open, and — the
+case only a schedule can state — the relay **keeping** the single §11.3 `E2EEError`, which leaves
+the two ends in the asymmetric state §10.4 resolves as an unattributed **Unclean — abrupt** rather
+than in one either side can be walked out of.
 
 **One accessor exists only for F15.** `E2eeNoiseHandshake.testOnlyHandshakeHash` returns the Noise
 §5.2 handshake hash of a live handshake and `undefined` once `split()` or `destroy()` has erased it.
@@ -315,9 +369,11 @@ Nothing in the protocol consumes `h` — §6.5 fixes the three extractable value
 handshake hash to be erased, and §8.7/§8.8 hash exact wire bytes instead — but the cacophony vectors
 publish a `handshake_hash` per vector and `h` is unobservable through every other surface here,
 since the `Split()` outputs and the exporter all derive from `ck`. The accessor is the only way that
-field could be checked rather than silently dropped, and the suite asserts it returns `undefined`
-after erasure, so it witnesses the §6.5 rule rather than weakening it. An auditor should confirm
-that no production path reads it.
+field could be checked rather than silently dropped. It derives its `undefined` from `h` **itself**,
+by reading the buffer and finding it all-zero, rather than from the handshake's status — which is
+what makes the `undefined` both suites assert a witness of the §6.5 erasure rather than of a state
+transition an implementation could reach with the symmetric state still live. An auditor should
+confirm that no production path reads it, and that a live `h` is never all-zero.
 
 ## 7. Practical notes
 
@@ -357,16 +413,22 @@ implementation phases that exercise it, and it has now been driven from both dir
 responder (`apps/server/src/hubConnector/NodeE2eeChannelSession.ts`) and the client initiator
 (`packages/client-runtime/src/relay/relayE2eeInitiator.ts`) both complete real IK handshakes against
 it, and the §16.3 corpus is generated through it. That was the point of auditing after those phases
-rather than before: the file has not changed since the client and node work landed, so an audit
-commissioned now is auditing the code that ships.
+rather than before: an audit commissioned now is auditing the code that ships. Nothing in the
+handshake logic has changed since the client and node work landed. The one edit since is inside
+`testOnlyHandshakeHash`, which now reports erasure by reading `h` instead of by reading the status
+flag — a strictly stronger witness of the same rule, described in section 6.
 
 **The two §14.1 evidence obligations that were outstanding are now landed** — the property-based
 state-machine suite and the adversarial suite driven through a hostile-relay harness, both described
 in section 6. Neither was ever a deliverable the auditor was asked to produce; they are the
 evidence the engagement is read alongside, and an auditor should find them in the tree rather than
-be told they are coming. The one row still short of closed is the cross-implementation vectors,
-which F15 discharges for the official inputs but not for this protocol's own §8.4 prologue and
-§8.5/§8.7 payload shapes.
+be told they are coming. Landed is not the same as exhaustive, and section 6 states each bound where
+it applies: the harness drives 16 of the adversarial suite's 128 cases and the §8 negotiation
+records do not cross it; erasure is asserted on a buffer for the ephemeral and the handshake hash
+and by code reading for the chaining key, the cipher key, and the static copy; and §14.1's
+nonce-progression obligation is discharged over the encoding here and over byte-exact transcripts in
+F15. The one row still short of closed is the cross-implementation vectors, which F15 discharges for
+the official inputs but not for this protocol's own §8.4 prologue and §8.5/§8.7 payload shapes.
 
 What the audit gates, precisely: §14.1 makes it a precondition for flipping the `requireE2EE` default
 (§12.3), and nothing else. Every tier below that default ships without it. §17.1 carries the
