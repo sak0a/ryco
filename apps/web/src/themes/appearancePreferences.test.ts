@@ -230,8 +230,8 @@ describe("appearance preferences", () => {
     expect(css).toContain(
       ":root, :root.dark { --primary: #0ea5e9; --ring: #0ea5e9; --primary-foreground: #ffffff; }",
     );
-    expect(css).toContain("--app-surface-opacity: 78%;");
-    expect(css).toContain("--app-glass-light-popover-alpha: 78%;");
+    expect(css).toContain("--app-surface-opacity: 82.4%;");
+    expect(css).toContain("--app-glass-light-popover-alpha: 71.4%;");
     expect(css).toContain("--app-dialog-viewport-light-alpha: 37%;");
   });
 
@@ -322,7 +322,7 @@ describe("phone Material step resolution", () => {
     expect(getEffectiveSurfaceTransparency()).toBe("glass");
     const style = installStyleDocument();
     applyAppearancePreferencesToDocument();
-    expect(style.read()).toContain("--app-surface-opacity: 72%;");
+    expect(style.read()).toContain("--app-surface-opacity: 80%;");
 
     expect(getAppearancePreferences().surfaceTransparency).toBe("glass");
     expect(JSON.parse(localStorage.getItem(APPEARANCE_PREFERENCES_STORAGE_KEY) ?? "{}")).toEqual(
@@ -337,8 +337,8 @@ describe("phone Material step resolution", () => {
     environment.tier = "phone";
     const style = installStyleDocument();
     applyAppearancePreferencesToDocument();
-    // The `medium` step: 84% surface opacity, and the sheet tier at its floor.
-    expect(style.read()).toContain("--app-surface-opacity: 84%;");
+    // The `medium` step: 87.2% surface opacity, and the sheet tier at its floor.
+    expect(style.read()).toContain("--app-surface-opacity: 87.2%;");
     expect(style.read()).toContain("--app-glass-sheet-dark-alpha: 96%;");
     expect(style.read()).toContain("--app-glass-sheet-dark-scrim-alpha: 0%;");
   });
@@ -432,6 +432,15 @@ describe("desktop appearance regression", () => {
   const EXISTING_SURFACE_VARIABLES: Record<string, ReadonlyArray<string>> = {
     default: [
       "--app-surface-opacity: 100%;",
+      "--app-surface-dark-opacity: 100%;",
+      "--app-surface-filter: none;",
+      "--app-composer-alpha: 93%;",
+      "--app-composer-dark-alpha: 92%;",
+      "--app-composer-filter: blur(10px) saturate(158%);",
+      "--app-glass-popover-filter: none;",
+      "--app-glass-panel-filter: none;",
+      "--app-glass-panel-light-alpha: 100%;",
+      "--app-glass-panel-dark-alpha: 100%;",
       "--app-muted-surface-opacity: 100%;",
       "--app-dialog-viewport-light-alpha: 48%;",
       "--app-dialog-viewport-dark-alpha: 28%;",
@@ -446,7 +455,16 @@ describe("desktop appearance regression", () => {
       "--app-glass-dark-popover-alpha: 100%;",
     ],
     light: [
-      "--app-surface-opacity: 92%;",
+      "--app-surface-opacity: 93.6%;",
+      "--app-surface-dark-opacity: 93.6%;",
+      "--app-surface-filter: blur(8px) saturate(158%);",
+      "--app-composer-alpha: 93%;",
+      "--app-composer-dark-alpha: 92%;",
+      "--app-composer-filter: blur(10px) saturate(158%);",
+      "--app-glass-popover-filter: blur(14px) saturate(158%);",
+      "--app-glass-panel-filter: blur(10px) saturate(158%);",
+      "--app-glass-panel-light-alpha: 92.4%;",
+      "--app-glass-panel-dark-alpha: 92.4%;",
       "--app-muted-surface-opacity: 94%;",
       "--app-dialog-viewport-light-alpha: 44%;",
       "--app-dialog-viewport-dark-alpha: 25.12%;",
@@ -455,13 +473,22 @@ describe("desktop appearance regression", () => {
       "--app-glass-light-start-alpha: 6%;",
       "--app-glass-light-end-alpha: 2.56%;",
       "--app-glass-foreground-alpha: 1.44%;",
-      "--app-glass-light-popover-alpha: 92%;",
+      "--app-glass-light-popover-alpha: 89.6%;",
       "--app-glass-dark-start-alpha: 1.44%;",
       "--app-glass-dark-end-alpha: 0.4%;",
-      "--app-glass-dark-popover-alpha: 92%;",
+      "--app-glass-dark-popover-alpha: 89.6%;",
     ],
     medium: [
-      "--app-surface-opacity: 84%;",
+      "--app-surface-opacity: 87.2%;",
+      "--app-surface-dark-opacity: 87.2%;",
+      "--app-surface-filter: blur(12px) saturate(158%);",
+      "--app-composer-alpha: 87.2%;",
+      "--app-composer-dark-alpha: 87.2%;",
+      "--app-composer-filter: blur(12px) saturate(158%);",
+      "--app-glass-popover-filter: blur(18px) saturate(158%);",
+      "--app-glass-panel-filter: blur(14px) saturate(158%);",
+      "--app-glass-panel-light-alpha: 84.8%;",
+      "--app-glass-panel-dark-alpha: 84.8%;",
       "--app-muted-surface-opacity: 88%;",
       "--app-dialog-viewport-light-alpha: 40%;",
       "--app-dialog-viewport-dark-alpha: 22.24%;",
@@ -470,13 +497,22 @@ describe("desktop appearance regression", () => {
       "--app-glass-light-start-alpha: 12%;",
       "--app-glass-light-end-alpha: 5.12%;",
       "--app-glass-foreground-alpha: 2.88%;",
-      "--app-glass-light-popover-alpha: 84%;",
+      "--app-glass-light-popover-alpha: 79.2%;",
       "--app-glass-dark-start-alpha: 2.88%;",
       "--app-glass-dark-end-alpha: 0.8%;",
-      "--app-glass-dark-popover-alpha: 84%;",
+      "--app-glass-dark-popover-alpha: 79.2%;",
     ],
     high: [
-      "--app-surface-opacity: 78%;",
+      "--app-surface-opacity: 82.4%;",
+      "--app-surface-dark-opacity: 82.4%;",
+      "--app-surface-filter: blur(14px) saturate(158%);",
+      "--app-composer-alpha: 82.4%;",
+      "--app-composer-dark-alpha: 82.4%;",
+      "--app-composer-filter: blur(14px) saturate(158%);",
+      "--app-glass-popover-filter: blur(22px) saturate(158%);",
+      "--app-glass-panel-filter: blur(18px) saturate(158%);",
+      "--app-glass-panel-light-alpha: 79.1%;",
+      "--app-glass-panel-dark-alpha: 79.1%;",
       "--app-muted-surface-opacity: 83.5%;",
       "--app-dialog-viewport-light-alpha: 37%;",
       "--app-dialog-viewport-dark-alpha: 20.08%;",
@@ -485,13 +521,22 @@ describe("desktop appearance regression", () => {
       "--app-glass-light-start-alpha: 16.5%;",
       "--app-glass-light-end-alpha: 7.04%;",
       "--app-glass-foreground-alpha: 3.96%;",
-      "--app-glass-light-popover-alpha: 78%;",
+      "--app-glass-light-popover-alpha: 71.4%;",
       "--app-glass-dark-start-alpha: 3.96%;",
       "--app-glass-dark-end-alpha: 1.1%;",
-      "--app-glass-dark-popover-alpha: 78%;",
+      "--app-glass-dark-popover-alpha: 71.4%;",
     ],
     glass: [
-      "--app-surface-opacity: 72%;",
+      "--app-surface-opacity: 80%;",
+      "--app-surface-dark-opacity: 77.6%;",
+      "--app-surface-filter: blur(16px) saturate(158%);",
+      "--app-composer-alpha: 80%;",
+      "--app-composer-dark-alpha: 77.6%;",
+      "--app-composer-filter: blur(16px) saturate(158%);",
+      "--app-glass-popover-filter: blur(26px) saturate(158%);",
+      "--app-glass-panel-filter: blur(22px) saturate(158%);",
+      "--app-glass-panel-light-alpha: 76%;",
+      "--app-glass-panel-dark-alpha: 73.4%;",
       "--app-muted-surface-opacity: 79%;",
       "--app-dialog-viewport-light-alpha: 34%;",
       "--app-dialog-viewport-dark-alpha: 17.92%;",
@@ -500,10 +545,10 @@ describe("desktop appearance regression", () => {
       "--app-glass-light-start-alpha: 21%;",
       "--app-glass-light-end-alpha: 8.96%;",
       "--app-glass-foreground-alpha: 5.04%;",
-      "--app-glass-light-popover-alpha: 72%;",
+      "--app-glass-light-popover-alpha: 66%;",
       "--app-glass-dark-start-alpha: 5.04%;",
       "--app-glass-dark-end-alpha: 1.4%;",
-      "--app-glass-dark-popover-alpha: 72%;",
+      "--app-glass-dark-popover-alpha: 63.6%;",
     ],
   };
 

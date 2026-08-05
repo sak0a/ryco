@@ -167,6 +167,16 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  /* Sidebar family. These utilities were consumed by ui/sidebar.tsx long
+     before the tokens existed — Tailwind emitted nothing and the sidebar
+     accidentally rendered the html chrome background. Now they are real,
+     theme-relative tokens (see :root), so chrome can be tinted independently
+     of content and themes restyle it for free. */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -287,6 +297,12 @@
   padding-right: max(env(safe-area-inset-right), 0px);
 }
 
+/* Selection color follows the theme accent instead of the UA default, so
+   custom palettes don't clash the moment text is selected. */
+::selection {
+  background-color: color-mix(in srgb, var(--primary) 26%, transparent);
+}
+
 /* Suppress all transitions during theme changes */
 .no-transitions,
 .no-transitions *,
@@ -304,7 +320,23 @@
   --font-family-mono: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --font-size-base: 16px;
   --app-surface-opacity: 100%;
+  --app-surface-dark-opacity: 100%;
   --app-muted-surface-opacity: 100%;
+  /* Desktop material filters. `appearancePreferences.ts` rewrites these from
+     the Material step; `none` (not a zero-radius blur) is the Solid value so
+     no backdrop root exists until translucency is actually requested. */
+  --app-surface-filter: none;
+  --app-glass-popover-filter: none;
+  --app-glass-panel-filter: none;
+  --app-glass-panel-light-alpha: 100%;
+  --app-glass-panel-dark-alpha: 100%;
+  /* The composer keeps a glass floor even at the Solid step — it is the one
+     surface content deliberately scrolls beneath, so it always reads as
+     floating material rather than a slab. Steps above Solid follow the
+     shared surface plate/blur. */
+  --app-composer-alpha: 93%;
+  --app-composer-dark-alpha: 92%;
+  --app-composer-filter: blur(10px) saturate(158%);
   --app-dialog-viewport-light-alpha: 48%;
   --app-dialog-viewport-dark-alpha: 28%;
   --app-sheet-backdrop-alpha: 32%;
@@ -365,36 +397,57 @@
      the durations to 0s when motion is reduced by the OS or by the phone
      Motion preference; these are the pre-script defaults. */
   --app-motion-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Spring pair for the liquid-glass chrome: `snappy` for controls (press,
+     chip, popover entrance), `gentle` for panes and fades. Durations reuse the
+     three house steps so reduced motion zeroes springs for free. */
+  --app-motion-spring-snappy: cubic-bezier(0.3, 1.36, 0.44, 1);
+  --app-motion-spring-gentle: cubic-bezier(0.22, 1, 0.36, 1);
   --app-motion-duration-sheet: 200ms;
   --app-motion-duration-stack: 260ms;
   --app-motion-duration-chip: 120ms;
+  --app-motion-duration-pop: 200ms;
   --background: var(--color-white);
   --app-chrome-background: var(--background);
   --foreground: var(--color-neutral-800);
+  /* Chrome (sidebar + bars) sits one step below content so light mode has a
+     surface hierarchy at all. Derived from --background so theme patches
+     re-tint chrome without naming it. */
+  --sidebar: color-mix(in srgb, var(--color-black) 3%, var(--background));
+  --sidebar-foreground: var(--foreground);
+  --sidebar-border: --alpha(var(--color-black) / 7%);
+  --sidebar-accent: --alpha(var(--color-black) / 5%);
+  --sidebar-accent-foreground: var(--foreground);
   --card: var(--color-white);
   --card-foreground: var(--color-neutral-800);
   --popover: var(--color-white);
   --popover-foreground: var(--color-neutral-800);
-  --primary: oklch(0.488 0.217 264);
+  /* Neutral-first default: monochrome primary, greys carry the interface.
+     The Settings primary-color override re-accents primary/ring/links on top
+     of this, so color is an explicit user choice rather than the default.
+     Interactive-state alphas are deliberately stepped (muted < secondary <
+     accent) so hover and selection are distinguishable — the old uniform 4%
+     made states nearly invisible on dark surfaces. */
+  --primary: var(--color-neutral-900);
   --primary-foreground: var(--color-white);
-  --secondary: --alpha(var(--color-black) / 4%);
+  --secondary: --alpha(var(--color-black) / 5%);
   --secondary-foreground: var(--color-neutral-800);
-  --muted: --alpha(var(--color-black) / 4%);
+  --muted: --alpha(var(--color-black) / 4.5%);
   --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-black));
-  --accent: --alpha(var(--color-black) / 4%);
-  --accent-foreground: var(--color-neutral-800);
+  --accent: --alpha(var(--color-black) / 6.5%);
+  --accent-foreground: var(--color-neutral-900);
   --destructive: var(--color-red-500);
-  --border: --alpha(var(--color-black) / 8%);
-  --input: --alpha(var(--color-black) / 10%);
-  --ring: oklch(0.488 0.217 264);
+  --border: --alpha(var(--color-black) / 10%);
+  --input: --alpha(var(--color-black) / 12%);
+  --ring: var(--color-neutral-600);
   --destructive-foreground: var(--color-red-700);
   --info: var(--color-blue-500);
   --info-foreground: var(--color-blue-700);
-  /* Every link in a chat reply — URLs and openable file mentions alike. Tracks
-     `--primary` so a theme that restyles its accent restyles links for free;
-     override this token alone to give links their own color. `--info-*` stays
-     what it says it is: a status tone, not an interaction color. */
-  --chat-link: var(--primary);
+  /* Every link in a chat reply — URLs and openable file mentions alike. The
+     neutral-first palette keeps prose monochrome, so links carry the one
+     deliberate hue: the scheme-paired info tone (blue-700 on light, blue-400
+     on dark — both AA as body text). Override this token alone to restyle
+     links. */
+  --chat-link: var(--info-foreground);
   --success: var(--color-emerald-500);
   --success-foreground: var(--color-emerald-700);
   --warning: var(--color-amber-500);
@@ -407,25 +460,35 @@
 
   @variant dark {
     color-scheme: dark;
-    --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+    /* Graphite default: near-black with lifted interactive states. Derived
+       from Midnight Graphite, which had the right character but invisible
+       hover/selection (4-5% deltas on near-black). States here are stepped
+       and stronger: hover reads instantly, selection reads stronger than
+       hover. */
+    --background: #0b0b0c;
     --app-chrome-background: var(--background);
-    --foreground: var(--color-neutral-100);
-    --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
-    --card-foreground: var(--color-neutral-100);
-    --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
-    --popover-foreground: var(--color-neutral-100);
-    --primary: oklch(0.588 0.217 264);
-    --primary-foreground: var(--color-white);
-    --secondary: --alpha(var(--color-white) / 4%);
-    --secondary-foreground: var(--color-neutral-100);
-    --muted: --alpha(var(--color-white) / 4%);
-    --muted-foreground: color-mix(in srgb, var(--color-neutral-500) 90%, var(--color-white));
-    --accent: --alpha(var(--color-white) / 4%);
-    --accent-foreground: var(--color-neutral-100);
+    --foreground: #ececed;
+    --sidebar: color-mix(in srgb, var(--color-black) 34%, var(--background));
+    --sidebar-foreground: var(--foreground);
+    --sidebar-border: --alpha(var(--color-white) / 7%);
+    --sidebar-accent: --alpha(var(--color-white) / 8%);
+    --sidebar-accent-foreground: var(--foreground);
+    --card: color-mix(in srgb, var(--background) 96%, var(--color-white));
+    --card-foreground: var(--foreground);
+    --popover: color-mix(in srgb, var(--background) 94%, var(--color-white));
+    --popover-foreground: var(--foreground);
+    --primary: #e4e4e5;
+    --primary-foreground: #0b0b0c;
+    --secondary: --alpha(var(--color-white) / 7%);
+    --secondary-foreground: var(--foreground);
+    --muted: --alpha(var(--color-white) / 6%);
+    --muted-foreground: color-mix(in srgb, var(--color-neutral-400) 82%, var(--color-white));
+    --accent: --alpha(var(--color-white) / 9%);
+    --accent-foreground: #f4f4f5;
     --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
-    --ring: oklch(0.588 0.217 264);
+    --border: --alpha(var(--color-white) / 9%);
+    --input: --alpha(var(--color-white) / 12%);
+    --ring: #a1a1a6;
     --destructive-foreground: var(--color-red-400);
     --info: var(--color-blue-500);
     --info-foreground: var(--color-blue-400);
@@ -440,6 +503,17 @@
   }
 }
 
+/* The composer glass floor yields to the OS transparency setting: fully
+   opaque, no filter. Declared on :root (not the component) so the injected
+   preference style cannot out-cascade it. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --app-composer-alpha: 100% !important;
+    --app-composer-dark-alpha: 100% !important;
+    --app-composer-filter: none !important;
+  }
+}
+
 /* Pre-script default for the OS setting: `appearancePreferences.ts` resolves
    the same collapse (and the phone Motion preference) into the injected style
    element, which wins once it is written. */
@@ -448,6 +522,7 @@
     --app-motion-duration-sheet: 0s;
     --app-motion-duration-stack: 0s;
     --app-motion-duration-chip: 0s;
+    --app-motion-duration-pop: 0s;
   }
 }
 
@@ -538,6 +613,64 @@ code {
 @layer components {
   .app-surface {
     background-color: color-mix(in srgb, var(--popover) var(--app-surface-opacity), transparent);
+    /* Translucency and blur travel together: the Material step that thins
+       this plate also sets the filter, so a see-through surface always frosts
+       what is behind it. Solid resolves the filter to `none`. */
+    -webkit-backdrop-filter: var(--app-surface-filter);
+    backdrop-filter: var(--app-surface-filter);
+  }
+
+  .dark .app-surface {
+    background-color: color-mix(
+      in srgb,
+      var(--popover) var(--app-surface-dark-opacity),
+      transparent
+    );
+  }
+
+  /* The ambient base layer behind the shell. Derived from --primary at very
+     low alpha so themes re-tint it for free; deliberately restrained — it is
+     lighting for translucent chrome, not decoration. */
+  .app-ambient {
+    background:
+      radial-gradient(
+        56% 46% at 74% 14%,
+        color-mix(in srgb, var(--primary) 13%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        48% 44% at 18% 90%,
+        color-mix(in srgb, var(--primary) 7%, transparent),
+        transparent 72%
+      ),
+      radial-gradient(
+        70% 55% at 50% -10%,
+        color-mix(in srgb, var(--foreground) 5%, transparent),
+        transparent 65%
+      ),
+      var(--app-chrome-background);
+  }
+
+  /* Chrome-layer panels: the desktop sidebar and bars. Same architecture as
+     the popover glass — plate with a legibility floor + step-driven filter —
+     tuned more opaque because these are large, text-dense, always-on
+     surfaces. At the Solid step this is exactly the old opaque chrome. */
+  .app-chrome-glass {
+    background-color: color-mix(
+      in srgb,
+      var(--sidebar) var(--app-glass-panel-light-alpha),
+      transparent
+    );
+    -webkit-backdrop-filter: var(--app-glass-panel-filter);
+    backdrop-filter: var(--app-glass-panel-filter);
+  }
+
+  .dark .app-chrome-glass {
+    background-color: color-mix(
+      in srgb,
+      var(--sidebar) var(--app-glass-panel-dark-alpha),
+      transparent
+    );
   }
 
   .app-muted-surface {
@@ -663,6 +796,16 @@ code {
     }
   }
 
+  /* No glass on glass: a surface nested inside a glass shell must not open a
+     second backdrop root — the shell already frosted the backdrop, and a
+     nested filter would re-blur the shell itself. The nested surface keeps
+     its plate paint; only the filter is suppressed. */
+  .selection-glass-surface .app-surface,
+  .app-chrome-glass .app-surface {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   .selection-glass-surface {
     background-color: color-mix(
       in srgb,
@@ -685,8 +828,11 @@ code {
       inset 0 -1px 0 rgb(255 255 255 / 0.08),
       0 18px 54px rgb(15 23 42 / 0.09),
       0 2px 10px rgb(15 23 42 / 0.035);
-    -webkit-backdrop-filter: blur(10px) saturate(132%) contrast(1.03);
-    backdrop-filter: blur(10px) saturate(132%) contrast(1.03);
+    /* The Material step drives the blur (Solid → none), replacing the old
+       hardcoded blur(10px) that ran even over an opaque plate and was too
+       weak to frost text once the plate thinned. */
+    -webkit-backdrop-filter: var(--app-glass-popover-filter);
+    backdrop-filter: var(--app-glass-popover-filter);
   }
 
   .dark .selection-glass-surface {
@@ -717,6 +863,14 @@ code {
   @media (prefers-reduced-transparency: reduce) {
     .app-surface {
       background-color: var(--popover);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+
+    .app-chrome-glass {
+      background-color: var(--sidebar);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
 
     .app-muted-surface,
@@ -769,8 +923,11 @@ code {
   @media (forced-colors: active) {
     .app-surface,
     .app-muted-surface,
-    .app-muted-before::before {
+    .app-muted-before::before,
+    .app-chrome-glass {
       background: Canvas;
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
 
     .selection-glass-surface {
@@ -1055,6 +1212,40 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown pre,
 .chat-markdown table {
   margin: 0.65rem 0;
+}
+
+/* Headings. Preflight resets h1-h6 to body text, and this block never
+   restored them — assistant prose rendered with no hierarchy at all. Sized in
+   em so the text-size preference scales the ramp; deliberately compact: the
+   transcript is a conversation, not a document. */
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  margin: 1.1em 0 0.4em;
+}
+
+.chat-markdown h1 {
+  font-size: 1.3em;
+}
+
+.chat-markdown h2 {
+  font-size: 1.18em;
+}
+
+.chat-markdown h3 {
+  font-size: 1.08em;
+}
+
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+  font-size: 1em;
 }
 
 .chat-markdown ul {
