@@ -732,12 +732,20 @@ export class E2eeNoiseHandshake {
    * `Split()` outputs and the §6.5 exporter all derive from `ck`, not from `h`.
    * Without this accessor the §16.3 F15 obligation could not be discharged for
    * that field, and `relayE2eeNoise.test.ts` would have to silently drop it.
-   * Returning `undefined` after erasure is itself asserted there, so this
-   * accessor also witnesses the §6.5 erasure rule rather than weakening it.
+   *
+   * THE ERASED ANSWER IS READ FROM `h` ITSELF, NOT FROM `#status`. `split()` and
+   * `destroy()` both zero the symmetric state in place (§6.5, §9.5), so the
+   * all-zero buffer IS the erasure and this accessor reports exactly that. A
+   * status check here would have been cheaper and strictly weaker: it would make
+   * the `undefined` both suites assert witness a state transition rather than
+   * the §6.5 rule, and an implementation that stopped erasing the symmetric
+   * state would keep returning `undefined` with `h` and `ck` still live. A live
+   * `h` is a SHA-256 output and is never all-zero in practice.
    */
   get testOnlyHandshakeHash(): Uint8Array | undefined {
-    if (this.#status === "complete" || this.#status === "destroyed") return undefined;
-    return this.#symmetric.handshakeHash;
+    const hash = this.#symmetric.handshakeHash;
+    if (hash.every((byte) => byte === 0)) return undefined;
+    return hash;
   }
 
   /**
