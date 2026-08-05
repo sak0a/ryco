@@ -5,6 +5,18 @@
 > the historical execution plan. Physical iOS and Chromium qualification remains outstanding and
 > external to the public repository.
 
+> **Retired copy (2026-08-05):** The two disclosure items below — the exact-wording bullet in the
+> installation section and the documentation bullet about installation and end-to-end encryption —
+> are **retired and MUST NOT be executed as written**. The hosted web client now negotiates the
+> relay payload encryption layer of [relay payload encryption](../../relay-e2ee-protocol.md), so
+> the sentence they mandate is false of a channel that locked encrypted. The disclosure is a
+> function of the channel state; its shipped strings live in
+> `apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.ts` and are quoted between
+> `<!-- shipped-copy:* -->` markers in [Hosted Hub client](../../hosted-hub-client.md). The
+> outstanding physical qualification runs against
+> [the qualification checklist](../../hosted-mobile-pwa-qualification.md), which already requires
+> the state-keyed copy; where the two disagree, that checklist wins.
+
 **Goal:** Make the production hosted Ryco client installable and usable on physical iOS and Android
 devices while keeping authenticated, node-owned, and relay data network-only and making browser
 resume fail closed until authorization and node state are current.
@@ -166,9 +178,13 @@ safe-area, and mobile composer primitives instead of creating another applicatio
       available after dismissal or prompt rejection.
 - [ ] Put the install action in a stable hosted-shell location and make it available again from the
       hosted node menu or settings surface without an automatic modal.
-- [ ] Use this exact disclosure as the initial reviewed copy: “Hosted connections use WSS transport
-      security, but they are not application-level end-to-end encrypted. The trusted relay can
-      observe forwarded bytes in memory and must not log or persist payloads.”
+- [x] ~~Use this exact disclosure as the initial reviewed copy.~~ **RETIRED 2026-08-05 — do not
+      execute.** The wording this bullet fixed was retired when the hosted web client began
+      negotiating relay payload encryption; it is preserved only as a negative fixture in
+      `apps/web/test/hostedConnectionVocabulary.ts`, which four browser suites assert is nowhere on
+      the page. The disclosure is now a function of the channel state. Its shipped strings are in
+      `apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.ts` and are quoted between the
+      `<!-- shipped-copy:* -->` markers in [Hosted Hub client](../../hosted-hub-client.md).
 - [ ] Show the disclosure on the hosted authentication/registration surface, node-selection path,
       and install-help surface. Do not put it only behind documentation or settings.
 - [ ] Give dialogs, instructions, prompt actions, and dismissal controls accessible names, focus
@@ -336,8 +352,15 @@ safe-area, and mobile composer primitives instead of creating another applicatio
 - [ ] Replace the statement that installable/mobile PWA behavior is out of scope with the hosted-only
       build, install, cache, update, offline, and resume contract.
 - [ ] Document Android Chrome native prompting and iOS Safari manual Add to Home Screen guidance.
-- [ ] Document that installation does not create application-level end-to-end encryption and quote
-      the same trusted-relay limitation shown in the UI.
+- [x] ~~Document the installation surface's relay-trust limitation and quote the same wording shown
+      in the UI.~~ **RETIRED 2026-08-05 — do not execute, in this or any re-worded form.** As
+      written this bullet required the hosted client documentation to deny that installation creates
+      application-level payload encryption, which is the wrong claim for a channel that locked
+      encrypted. The replacement is already in
+      [Hosted Hub client](../../hosted-hub-client.md) under **Mobile installation and updates**:
+      installation changes nothing about who can read what crosses the relay, because an installed
+      tab gets the same browser tier with the same ceiling — which is not the same as denying that
+      the channel is encrypted.
 - [ ] Document that conversations, files, terminals, attachments, credentials, tickets, request
       bodies, and relay payloads never enter the service-worker cache.
 - [ ] Add a physical-device checklist for iOS Safari and Android Chrome covering browser use,

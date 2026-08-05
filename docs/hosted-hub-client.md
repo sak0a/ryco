@@ -83,8 +83,12 @@ Hosted mode deliberately does not expose one ambiguous `connected` flag.
 
 Relay encryption is a property of one channel and never of a node, an account, or a tab: it is
 republished as negotiating when a channel begins and dropped when that channel ends, so a state one
-channel earned never describes the next one. The signed native tier's two states are not in this
-client's state type at all, so the browser cannot report them even by mistake.
+channel earned never describes the next one. One path is deliberately outside that rule. A page that
+refuses encryption outright at startup — no cryptographic random source, or no secure context — has
+no per-channel machine to publish from, so its legacy label is published once when the socket is
+built, before any channel exists, and stands until the node is torn down or the session ends. The
+signed native tier's two states are not in this client's state type at all, so the browser cannot
+report them even by mistake.
 
 Directory refresh runs on a bounded 20-second visible-page cadence. Failures retain the last bounded
 directory as stale, clear role authority, disable selection/actions, and retry with a capped delay.
@@ -136,10 +140,13 @@ pipeline: restore the Hub session → refresh the authorized directory → valid
 against the directory → issue a fresh one-use relay ticket → establish the relay channel → validate
 the node's signed capability advertisement and run the browser handshake, which locks the channel
 either encrypted or legacy plaintext → synchronize canonical node state → only then enable
-mutations. No application payload leaves the tab before that lock: sends issued while a channel is
-still negotiating are buffered, are flushed as encrypted records once the channel locks encrypted,
-and are discarded unflushed when the channel fails closed instead. The UI stays on read-only blocked
-surfaces until each stage completes. Possession of a node URL grants nothing.
+mutations. No application payload leaves the tab before that lock, and the lock decides which of
+three things becomes of it: sends issued while a channel is still negotiating are buffered, and are
+then flushed as encrypted records on an encrypted lock, flushed **in the clear** on a legacy lock,
+or discarded unflushed when the channel fails closed. The legacy branch is the one that hands the
+buffer to the Hub in readable form, and it is reached whenever a channel falls back — against an
+un-upgraded node, or against any node whose capability advertisement did not arrive. The UI stays on
+read-only blocked surfaces until each stage completes. Possession of a node URL grants nothing.
 
 A reload starts a fresh application session, and the tab's downgrade check starts empty again with
 it. That check is set on the first capability statement the session validates for a node and is held
@@ -173,10 +180,10 @@ code, or Authorization header. Its first binary frame is canonical protocol 1.2 
 authentication and must complete within five seconds.
 
 The adapter consumes canonical `ready`, authorized `channel.open`, `channel.accept/reject`, data,
-flow pause/resume, ping/pong, error, and close frames. Relay frames, relay ordering, relay size
-limits, and the RPC message the application hands down are all unchanged — but on an encrypted
-channel the bytes inside `data.payload` are the encryption layer's record envelope rather than the
-RPC message itself, and that layer runs its own replay, reorder, and gap detection over its own
+flow pause/resume, ping/pong, error, and close frames. Relay frames, relay ordering, and the RPC
+message the application hands down are all unchanged — but on an encrypted channel the bytes inside
+`data.payload` are the encryption layer's record envelope rather than the RPC message itself, and
+that layer runs its own replay, reorder, and gap detection over its own
 records because it treats the relay's ordering guarantees as untrusted
 ([relay protocol](./relay-protocol.md), [relay payload encryption](./relay-e2ee-protocol.md)).
 Inbound and outbound queues honor negotiated chunk/control/queue limits, include native
@@ -184,43 +191,71 @@ Inbound and outbound queues honor negotiated chunk/control/queue limits, include
 consumer rather than growing without bound. No TCP forwarding, SSH, WebRTC, or peer discovery is
 part of the client. One encryption protocol is part of it, and only one: the relay payload
 encryption layer described below, which lives entirely inside `data.payload` and adds no relay
-frame, field, limit, close reason, or version.
+frame, field, close reason, or version.
+
+It does cost message budget, and that is the one thing it changes that a caller can observe. The
+per-message plaintext ceiling on a channel carrying the layer is the relay's effective message
+ceiling less the record envelope overhead, and a send submitted while the channel is still
+negotiating is additionally bounded by the negotiation buffer. Both refusals are sender-local: they
+put nothing on the wire and leave the channel usable. So a message sized between the two ceilings is
+accepted on a channel with no encryption layer and refused on one that is negotiating or locked
+encrypted.
 
 ## Relay payload encryption in the browser
 
 Where the node offers it, a hosted channel negotiates
 [relay payload encryption](./relay-e2ee-protocol.md) at the browser's tier: an unsigned ephemeral
-(Noise NX) handshake and record layer that run in the page, encrypting what the tab sends to the
-node and decrypting what comes back, so that while the served code is honest the Hub relays
-ciphertext instead of readable payload. A channel that does not negotiate it locks legacy plaintext
-and is labeled legacy on every surface that reports it. A page with no cryptographic random source,
-or one not served in a secure context, refuses encryption at startup and runs the legacy path rather
-than a partial one.
+(Noise NX) handshake and record layer that run in the page, encrypting what the tab sends to the far
+end of that channel and decrypting what comes back. Two conditions bound what that is worth, and
+both belong in the sentence that makes the claim: the Hub relays ciphertext instead of readable
+payload only while the code it served this page is honest, and this tier pins no node identity, so
+the far end is the node this tab was routed to and is never established to be your machine rather
+than the Hub standing in for it. A channel that does not negotiate it locks legacy plaintext and is
+labeled legacy on every surface that reports it. A page with no cryptographic random source, or one
+not served in a secure context, refuses encryption at startup and runs the legacy path rather than a
+partial one.
 
-That claim has a ceiling, and the ceiling is structural rather than a gap to be closed later. The
-Hub serves every byte of this application's JavaScript, so a malicious or compelled Hub can serve
-code that completes the genuine handshake, displays the genuine session code, and exfiltrates
-plaintext or traffic keys anyway; no in-page check and no out-of-band comparison can make an
-attacker-controlled display trustworthy. The browser tier is therefore **never operator-proof**, and
-the specification does not offer it as such. Separately — and needing no substituted code at all —
-this tier authenticates the node to the browser but never the browser to the node and holds no node
-pin of any kind, so the Hub can also simply originate a session and be the far end of the channel
-itself. Independently distributed code with hardware-anchored identity and durable pins is what
-supports the stronger claim, and that is the Ryco mobile app, not this client.
+That claim has a ceiling made of two independent limits. Both are structural rather than gaps to be
+closed later, and neither is a lesser degree of the other.
+
+**The first needs no substituted code at all.** This tier holds no node pin and no prior
+fingerprint, so the signed capability statement a locked channel validated is one it has no anchor
+for: a self-signed first-contact statement whose key the client takes as agreed material rather than
+as evidence. A genuine handshake therefore establishes only that the far end holds the key in the
+statement the channel itself carried — and the Hub can supply both, minting an identity key,
+self-signing a statement, and being the far end of a channel that is genuinely encrypted and
+genuinely verified against nothing. Nor does the handshake authenticate the browser to the node in
+the other direction, which is why what can close this gap is the node's admission policy and never
+this client.
+
+**The second is the served code.** The Hub serves every byte of this application's JavaScript, so a
+malicious or compelled Hub can serve code that completes the genuine handshake, displays the genuine
+session code, and exfiltrates plaintext or traffic keys anyway; no in-page check and no out-of-band
+comparison can make an attacker-controlled display trustworthy. The browser tier is therefore
+**never operator-proof**, and the specification does not offer it as such.
+
+Independently distributed code with hardware-anchored identity and durable pins is what supports the
+stronger claim, and that is the Ryco mobile app, not this client. "Durable" there is scoped to one
+install: the stronger guarantee is per channel and holds for channels the app resolves to a pin the
+owner verified through the pairing comparison, and a reinstall, an OS restore, a device transfer, or
+a secure-store reset destroys every pin on that device at once and returns it to first contact until
+the owner re-pairs.
 
 ### The disclosure this client shows
 
 The relay-trust disclosure is a function of the channel state, and it is shown on the hosted
-authentication, node-selection, connection, and installation surfaces. The paragraphs below are the
-shipped strings, quoted verbatim from
+authentication, node-selection, connection, and installation surfaces. It takes no state from the
+surface it mounts on: every mount site reads the live channel projection, so install help opened
+from a connected node's menu or from the phone connection sheet states that channel's disclosure and
+not the no-channel one. The paragraphs below are the shipped strings, quoted verbatim from
 `apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.ts`. They are quoted rather than
 paraphrased on purpose: a paraphrase here would be a second copy of a security claim, free to drift
 away from the one the application renders. `HostedRelayTrustNotice.logic.test.ts` reads this file
 and asserts that each quotation below is exactly the shipped copy for its state, so a divergence
 fails a test instead of surviving a review.
 
-No node channel open in this tab — the sign-in surface, the node directory, and the installation
-instructions:
+No node channel open in this tab — the sign-in surface, the node directory, and install help reached
+from the directory:
 
 <!-- shipped-copy:unavailable -->
 
@@ -269,12 +304,21 @@ A channel that fell back to plaintext:
 ### Key custody, and what the node decides
 
 The browser's agreement key material, handshake state, session keys, downgrade check, and session
-verification code exist in process memory for the life of the tab and have no storage class they may
-enter; the no-durable-secrets rules under **Security and browser persistence** apply to all of them
-verbatim. Nothing is resumed: every reconnect obtains a fresh ticket, opens a fresh channel, and
-runs a fresh handshake, and the previous channel's keys and code are dropped with it.
+verification code exist in process memory and nowhere else: there is no storage class any of them
+may enter, and the no-durable-secrets rules under **Security and browser persistence** apply to all
+of them verbatim. The bound is where they live, not how long — each is scoped to the channel that
+produced it and is erased when that channel ends, with session keys zeroized, handshake state
+destroyed on every terminal path, and the verification code dropped. The downgrade check is the one
+value scoped to the application session instead of to a channel, and it is cleared on sign-out.
+Nothing is resumed: every reconnect obtains a fresh ticket, opens a fresh channel, and runs a fresh
+handshake.
 
-Whether plaintext is reachable at all is the node's decision and never the browser's. Under the
+Only your node can refuse plaintext for browsers, and that is the durable half of the decision: this
+client keeps no policy of its own and cannot make a node offer encryption. It is not a passenger in
+the other direction, though. A page that fails the startup random-source or secure-context check
+refuses encryption itself whatever the node offers, and that channel is legacy because of the
+browser rather than because of the node. And once this session's downgrade check is set for a node,
+a channel that would otherwise fall back closes instead of running plaintext. Under the
 compatibility default a node still admits legacy plaintext, so a browser session against an
 un-upgraded node is legacy and is labeled legacy. A node configured to require encryption rejects
 plaintext but still admits unsigned browser sessions — it closes the downgrade path, not the
@@ -397,15 +441,19 @@ Hosted mode keeps authentication material, node-owned state, and every value the
 layer produces out of localStorage, sessionStorage, IndexedDB, service-worker caches, URL/history
 state, configuration exports, and browser logs. The encryption values are the browser's ephemeral
 agreement key material, its handshake and session-key state, its in-memory downgrade check, and the
-session verification code: all of them live in process memory for the life of the tab, and the
-browser has no storage class any of them may enter. Draft, terminal, general UI, script-selection,
+session verification code: all of them live in process memory, the browser has no storage class any
+of them may enter, and each is erased when the channel — or, for the downgrade check, the
+application session — that produced it ends. Draft, terminal, general UI, script-selection,
 and other generic local-storage hooks use in-memory storage. The hosted root installs a fail-closed
 console sink before authentication because older local-client feature paths may log caught values.
 Relay payloads are never persisted or sent to client analytics — which is not the same as the Hub
 seeing nothing, because on every channel, encrypted or not, the Hub still sees which account and
 session talk to which node, channel open and close events and their reasons, frame sizes and timing,
 the capability and effective role carried in `channel.open`, heartbeats, and transfer-budget
-accounting.
+accounting. That list is what stays visible where the encryption works. It is not the boundary of
+what the Hub can reach on this tier: whether the encryption works against the Hub at all is bounded
+by **Relay payload encryption in the browser** above, and on a legacy channel the Hub forwards the
+readable payload itself.
 
 Do not add passwords, cookies, Authorization headers, CSRF values, WebAuthn challenges/responses,
 invitation secrets, tickets, node proofs, encryption key material, handshake or session-key state,
@@ -420,9 +468,11 @@ live regions. Online, offline, stale, reconnecting, delivery-unknown, and relay-
 text and icons in addition to color, and an encrypted browser channel is given an advisory rather
 than a success treatment, so the weaker configuration is not dressed as the stronger one through
 styling. The same shell adapts from narrow browser widths through tablet and desktop; there is no
-second hosted feature UI. That sameness is about presentation and
-feature surface only. It says nothing about the encryption tier, which does fork between this
-browser client and the Ryco mobile app, as stated at the top of this document.
+second hosted feature UI, with one deliberate exception — the session verification code renders only
+in the desktop-width node menu, so the narrow presentation offers no comparison to make and its
+disclosure points at none. That sameness is otherwise about presentation and feature surface only.
+It says nothing about the encryption tier, which does fork between this browser client and the Ryco
+mobile app, as stated at the top of this document.
 
 ## First-owner and node onboarding
 
@@ -457,9 +507,12 @@ remain server-enforced.
 - **Incompatible or revoked:** an administrator must restore compatible node access. The browser
   will not downgrade the protocol or bypass authorization.
 - **Delivery unknown:** inspect the authoritative node state before issuing the command again.
-- **Channel says legacy plaintext:** the browser cannot tell whether the node offered no encrypted
-  channel or something on the path removed the offer, so check the node: confirm it is a version
-  that advertises encryption, and use its admission policy if plaintext should be refused outright.
+- **Channel says legacy plaintext:** rule out the page first. An origin that is not a secure
+  context, or a browser exposing no cryptographic random source, makes this client refuse encryption
+  at startup, and the label is then the browser's doing and the node's configuration is untouched.
+  Otherwise the browser cannot tell whether the node offered no encrypted channel or something on
+  the path removed the offer, so check the node: confirm it is a version that advertises encryption,
+  and use its admission policy if plaintext should be refused outright.
 - **Session codes do not match:** stop using the session and reconnect, then compare again. A
   mismatch is a reason to investigate routing and the network path; a match is advisory only and
   does not clear the Hub, which serves the JavaScript that draws it.

@@ -15,6 +15,13 @@ directly below the header, and the phone entry route — are superseded by
 contract, installation experience, hosted resume and mutation gate, user-visible state model,
 and the addenda below remain authoritative.
 
+**Amendment (2026-08-05):** The relay-trust disclosure wording required by "Shared behavior" under
+the installation experience is superseded by the relay payload encryption program
+([relay payload encryption](../../relay-e2ee-protocol.md)). The hosted web client now negotiates an
+unsigned ephemeral (Noise NX) channel, so a requirement that the installation surface deny
+end-to-end encryption would state the wrong claim for the configuration. The requirement is
+rewritten in place below. Everything else in the installation experience remains authoritative.
+
 ## Summary
 
 Ryco's hosted web client will become an installable mobile progressive web app without turning the
@@ -133,10 +140,17 @@ The install action appears in a stable hosted-shell location and may be repeated
 not shown as an aggressive automatic modal. Once `display-mode: standalone` is active, with the
 legacy iOS standalone flag used only as a compatibility fallback, installation guidance is hidden.
 
-The installation surface includes the concise hosted-relay trust disclosure so installing the app
-cannot be mistaken for creating a direct or end-to-end encrypted connection. The same disclosure
-is visible in the hosted admission or connection path. Its wording is static, bounded, and contains
-no deployment-specific details.
+The installation surface includes the hosted-relay trust disclosure so installing the app cannot be
+mistaken for changing the relay trust boundary. The same disclosure is visible in the hosted
+admission or connection path.
+
+Amended 2026-08-05: the disclosure is a function of the channel state rather than one static
+sentence, and every mount site — the installation surface included — reads the live channel
+projection. On a channel that negotiated encryption it states the browser ceiling in the same breath
+as the claim: that the tab pins no node identity, and that it cannot protect against the Hub
+operator, who serves the page's code. The shipped strings are
+`apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.ts`; they are bounded and contain no
+deployment-specific details.
 
 ## Service-worker cache contract
 

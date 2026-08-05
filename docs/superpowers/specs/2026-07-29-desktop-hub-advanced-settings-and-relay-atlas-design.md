@@ -4,6 +4,16 @@
 
 **Date:** 2026-07-29
 
+**Amendment (2026-08-05):** The trust-boundary content this document requires of
+`docs/relay-architecture.html` is superseded by
+[relay payload encryption](../../relay-e2ee-protocol.md) §2.2, §2.4, and §2.5. The relay now
+carries an application-level encryption layer inside `data.payload`, so the two "direct statement"
+bullets in section 5 below — and the non-goal that named a new encryption protocol — are rewritten
+here rather than left as a mandate to restore a claim the shipped clients have outgrown. Everything
+else in this design remains authoritative. The page is not doc-only: `apps/web` imports it as a
+Vite `?url` asset and the desktop app bundles it, so a regeneration against a stale requirement
+ships the stale claim to users.
+
 ## Summary
 
 Ryco will update the desktop Hub settings added by pull request 243 to cover the current Hub launch
@@ -63,7 +73,10 @@ fails, and a different origin still fails when development mode is configured.
   Hub connector configuration.
 - Multi-Hub enrollment.
 - Hub account, node grant, or role administration from the node.
-- A generic tunnel, remote desktop, SSH replacement, peer discovery, or a new encryption protocol.
+- A generic tunnel, remote desktop, SSH replacement, or peer discovery. (2026-08-05 amendment: this
+  non-goal also read "or a new encryption protocol". The relay payload encryption layer of
+  `relay-e2ee-protocol.md` has since shipped; it was out of scope for this delivery, not forbidden
+  to the product, and the atlas is expected to describe it.)
 - Extending the frozen `apps/web` phone presentation tier.
 - Copying private Hub source, private issue links, deployment identifiers, infrastructure policy, or
   qualification evidence into this public repository.
@@ -308,10 +321,14 @@ The page is a hybrid atlas rather than a long linear article:
 
 5. **Persistence and trust boundary**
    - A three-column comparison of client, Hub, and node persistence.
-   - A direct statement that relay WebSockets are transport-encrypted but not application-layer
-     end-to-end encrypted from a trusted Hub.
-   - A direct statement that the Hub may observe bytes transiently while forwarding but does not
-     persist or log relay payloads.
+   - A direct, tier-split statement of what payload encryption is worth (2026-08-05 amendment):
+     relay WebSockets are transport-encrypted, and on a channel that negotiated payload encryption
+     the Hub forwards ciphertext; the signed mobile tier reaches the stronger guarantee on channels
+     resolved to an owner-verified pin, while the browser tier's ceiling is structural because the
+     page pins no node identity and the Hub serves its code.
+   - A direct statement that the Hub may observe transiently forwarded bytes — readable on a
+     channel that negotiated no encryption — but does not persist or log relay payloads, and that
+     the metadata of `relay-e2ee-protocol.md` §2.5 stays visible on every channel either way.
 
 6. **Failure and recovery**
    - Client suspension and reconnect.
