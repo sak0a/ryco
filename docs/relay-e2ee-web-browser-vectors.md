@@ -10,10 +10,14 @@ browser test suite as well as under the repository's Node gate:
 This note records exactly what runs in Chromium today, what does not, and why. It exists so any gap
 is a tracked obligation rather than an omission somebody has to rediscover from the suite listing.
 
-**Every family §16.4 names now runs in the browser suite.** The five that this note previously
-carried as deferred — F1, F2, F8, F16's NX cases, and F17's P-256 cases — landed with the Phase 6
-runtime-parity run. What remains is not a family: it is the corpus's own declaration of the run,
-which still says the run does not exist. See “What remains” below.
+**The five families this note carried as deferred have landed.** F1, F2, F8, F16's NX cases, and
+F17's P-256 cases came in with the Phase 6 runtime-parity run, so every family §16.4 names is now
+represented in the browser suite by at least one file.
+
+**Represented is not the same as fully driven, and the difference is tracked below.** Three of
+§16.4's scopes are still only partly covered in Chromium — F10 in full, one case of F7, and two of
+F3's five admitted-pattern cases — and the corpus's own manifest still declares that no browser run
+exists at all. See “What remains”.
 
 ## What runs in Chromium today
 
@@ -22,22 +26,23 @@ Every file is under `apps/web/src/components/hostedHub/` because
 vector placed anywhere else silently matches nothing, and `vp test run` reports success over zero
 matched files. A new vector file is only real once it appears by path in the run's own file list.
 
-| Family                                   | Where                                                           | What it drives                                                                                                                                                                                                    |
-| ---------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F1 — payload discrimination and chunking | `E2eeCodecParity.browser.tsx`                                   | The §4.3 receive pipeline for all 12 cases carrying a wire payload, the §4.5 budget and both sides of the plaintext ceiling re-protected from the family's own §6.5 stand-in secrets, and the chunked reassembly. |
-| F2 — carrier compatibility (§5.5, §5.6)  | `E2eeCodecParity.browser.tsx`                                   | C1 through the assembler in both prelude states; C6 parsed by **Chromium's own** `JSON.parse`, with and without the prelude; the maximum carrier re-prepared at the §5.5 advertisement floor.                     |
-| F3 — admitted-pattern cases              | `E2eeNxHandshake.browser.tsx`                                   | The committed `["IK"]` statement evaluated as web, latched (`K2`/`P15`, buffered sends non-empty and none flushed) and unlatched (`K3`, labelled rule-level); `["IK","NX"]` as web (`K1`).                        |
-| F7 — NX rules this tier reaches          | `E2eeMaliciousRelay.browser.tsx`                                | The responder-static substitution driven live against a real node half, and the nonempty message-1 payload refused by that node half.                                                                             |
-| F8 — record protection (§9.1–§9.3)       | `E2eeRecordProtection.browser.tsx`                              | Every case, on a session established from the F6 trace's committed §6.5 outputs: both AADs and the nonce, both counter-zero-and-one traces re-protected byte for byte, and all six tampers through `unprotect`.   |
-| F10 — the web mapping (§12.1.1)          | `E2eeNxHandshake.browser.tsx`, `E2eeMaliciousRelay.browser.tsx` | `K1`, `K2`, `K3`, `K5`, `K10`, `K11`, `K12`, `K13`, `K14`, `K15` and the `P16` accept rows, each with its §12.1.1 classification stated as an input.                                                              |
-| F14 — the `WebSAS` half                  | `E2eeNxHandshake.browser.tsx`                                   | Every `web-sas-session-*` case re-derived in Chromium WebCrypto and byte-matched against the committed intermediates, plus §3.2.1 S11.                                                                            |
-| F16 — the NX cases                       | `E2eeCodecParity.browser.tsx`                                   | The web/NX context block's §8.3 commitment and both absence forms against the IK arm; the absence-semantics violation as `P13`; and the NX channel that no §13.6 withdrawal matches, beside the sweep that does.  |
-| F17 — the P-256 cases                    | `E2eeCodecParity.browser.tsx`                                   | All nine rejected §7.1 public-key encodings plus the valid control, and all seven rejected signature encodings verified against F04's committed transcript through `verifyE2eeSignature`.                         |
+| Family                                   | Where                                                           | What it drives                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 — payload discrimination and chunking | `E2eeCodecParity.browser.tsx`                                   | The §4.3 receive pipeline for all 12 cases carrying a wire payload, the §4.5 budget and both sides of the plaintext ceiling re-protected from the family's own §6.5 stand-in secrets, the chunked reassembly, and both prelude-headroom cases re-prepared through `prepareRelayMessage` at their own chunk limit. |
+| F2 — carrier compatibility (§5.5, §5.6)  | `E2eeCodecParity.browser.tsx`                                   | C1 through the assembler in both prelude states; C6 parsed by **Chromium's own** `JSON.parse`, with and without the prelude; the maximum carrier re-prepared at the §5.5 advertisement floor.                                                                                                                     |
+| F3 — admitted-pattern cases              | `E2eeNxHandshake.browser.tsx`                                   | The committed `["IK"]` statement evaluated as web, latched (`K2`/`P15`, buffered sends non-empty and none flushed) and unlatched (`K3`, labelled rule-level); `["IK","NX"]` as web (`K1`).                                                                                                                        |
+| F7 — NX rules this tier reaches          | `E2eeMaliciousRelay.browser.tsx`                                | The responder-static substitution driven live against a real node half, and the nonempty message-1 payload refused by that node half.                                                                                                                                                                             |
+| F8 — record protection (§9.1–§9.3)       | `E2eeRecordProtection.browser.tsx`                              | Every case, on a session established from the F6 trace's committed §6.5 outputs: both AADs and the nonce, both counter-zero-and-one traces re-protected byte for byte, and all six tampers through `unprotect`.                                                                                                   |
+| F10 — the web mapping (§12.1.1)          | `E2eeNxHandshake.browser.tsx`, `E2eeMaliciousRelay.browser.tsx` | The `K1`, `K2`, `K3`, `K5`, `K10`, `K11`, `K12`, `K13`, `K14`, `K15` and `P16` rows as BEHAVIOUR, driven through the shipped web client with each classification stated as an input. **Not fixture-driven** — see “What remains”.                                                                                 |
+| F14 — the `WebSAS` half                  | `E2eeNxHandshake.browser.tsx`                                   | Both `web-sas-session-*` cases re-derived through the shared `@noble/hashes` HKDF/SHA-256 under Chromium's JS engine and byte-matched against the committed intermediates, plus §3.2.1 S11.                                                                                                                       |
+| F16 — the NX cases                       | `E2eeCodecParity.browser.tsx`                                   | The web/NX context block's §8.3 commitment and both absence forms against the IK arm; the absence-semantics violation as `P13`; and the NX channel that no §13.6 withdrawal matches, beside the sweep that does.                                                                                                  |
+| F17 — the P-256 cases                    | `E2eeCodecParity.browser.tsx`                                   | All nine rejected §7.1 public-key encodings plus the valid control, and all seven rejected signature encodings verified against F04's committed transcript through `verifyE2eeSignature`.                                                                                                                         |
 
-All of them read the committed fixtures in `packages/shared/fixtures/e2ee/v1/` directly, through the
-one reader in `apps/web/test/e2eeCorpus.ts`. Nothing in `apps/web` regenerates or copies them, so
-§16.4's "a vector that produces different bytes on any supported runtime is a release-blocking
-defect" is checked against the corpus and not against a second copy of it.
+Every family in the table except F10 reads the committed fixtures in
+`packages/shared/fixtures/e2ee/v1/` directly, through the one reader in `apps/web/test/e2eeCorpus.ts`
+— which loads F1–F4, F6–F8, F14, F16 and F17 and no other family. Nothing in `apps/web` regenerates
+or copies them, so §16.4's "a vector that produces different bytes on any supported runtime is a
+release-blocking defect" is checked against the corpus and not against a second copy of it.
 
 `apps/web/test/e2eeCorpus.ts` also carries the §9 session harness. F8 is the only family here that
 cannot be checked from bytes alone — every case is a record protected or authenticated by a session
@@ -45,9 +50,19 @@ that already holds epoch secrets — and that is the whole reason it was deferre
 one from a family's own committed secrets; F1's two boundary cases reuse it unchanged, differing
 only in which family's secrets they hand over.
 
-**No cross-runtime byte divergence was found.** Every committed envelope, AAD, header, nonce,
-context block, commitment, and reassembly this run drives reproduces in Chromium exactly as it does
-under Node. §16.4 makes a divergence release-blocking; there is none to report.
+**No cross-runtime byte divergence was found in what this run drives.** Every committed envelope,
+AAD, header, nonce, authorization-context commitment, `WebSAS` intermediate, and reassembly it
+recomputes reproduces in Chromium exactly as it does under Node. §16.4 makes a divergence
+release-blocking; there is none to report, over the cases listed above and not over the corpus.
+
+The §8.3 context BLOCK is not in that list on purpose: neither runtime re-derives it from its 18
+elements. Both read the committed block and re-hash it, so what reproduces is the commitment over
+those bytes and not the encoding that produced them. None of these runs uses a browser-supplied
+primitive either — no E2EE path in this repository calls `crypto.subtle`, and WebCrypto does not
+expose ChaCha20-Poly1305 at all — so the parity established is that the same `@noble` JS produces
+the same bytes on Chromium's engine, not that a second implementation agrees with it. The genuinely
+browser-supplied behaviour these files exercise is the DOM, `WebSocket`, `JSON.parse` (F2's C6 case)
+and `TextDecoder`.
 
 **None of this adds a security property the web tier claims.** §2.2 and §2.3 deny that tier any
 operator-proof protection: the Hub serves every byte of the JavaScript, so it can complete a genuine
@@ -57,15 +72,46 @@ claim they would say something false.
 
 ## What remains
 
-**The corpus still declares the browser run as not existing, and that is now the whole gap.**
+### Scopes §16.4 names that are still not driven in Chromium
+
+The scope strings below are quoted from `crossRuntime.browserRun.scopes` in
+`packages/shared/fixtures/e2ee/v1/manifest.json`. A row here means the browser suite does not
+recompute those committed vectors, so §16.4's release-blocking condition — "a vector that produces
+different bytes on any supported runtime" — is untested for them outside Node.
+
+| Not driven                                                                                   | Manifest scope                                | Size                                                                                                              |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **F10 in full.** `f10-mode-machine.json` is imported nowhere under `apps/web`.               | `"this whole family"`                         | 34 cases, 28 of them carrying committed `$bytes`.                                                                 |
+| **F7's `nx-handshake-complete-trace`.** The other two F7 cases run live against a node half. | `"this whole family"`                         | 1 of 3 cases — the one carrying both Noise messages, `serverAccept`, `sessionBindingHash` and both epoch secrets. |
+| **F3's `-under-require-approved-client-e2ee` and `-evaluated-as-native`.**                   | `"the admitted-pattern cases of this family"` | 2 of 5 admitted-pattern cases; the three web-evaluated ones run.                                                  |
+
+F10's §12.1.1 rows are exercised as BEHAVIOUR in the browser — the shipped web client takes them
+against a hostile relay — but that is a different obligation from recomputing the family's committed
+bytes, and it is not what §16.4's divergence clause is about. Do not read the F10 row of the table
+above as discharging this one.
+
+Closing these is bounded work, not blocked work — the reader in `apps/web/test/e2eeCorpus.ts` takes a
+new family in one line — but it is not uniform work either.
+`admitted-pattern-set-ik-only-evaluated-as-native` evaluates the NATIVE tier and
+`admitted-pattern-set-under-require-approved-client-e2ee` carries only `requireApprovedClientE2EE`
+as an input, so neither is a web-tier behaviour and both would run here as `selectE2eeSuite` parity,
+the way F17's P-256 cases already do. F10 is the largest and is deliberately left as an explicit
+obligation rather than folded into a run that did not do it.
+
+### The corpus's own declaration of the run
+
+**The corpus still declares the browser run as not existing.**
 `packages/shared/fixtures/e2ee/v1/manifest.json` carries `crossRuntime.browserRun.state:
 "not-wired"` with the reason "this repository has no browser test gate over `packages/shared`, so no
 vector in these families has yet been run anywhere but Node", and each of the nine family files
 repeats that sentence in its own `deferred` list.
 
-That was already stale for F3, F7, F10, and F14 before this run — those landed in Phase 4 without
-the declaration moving — and it is now stale for all nine. It is accurate about `packages/shared`,
-which still has no browser gate; it is wrong about the vectors, which run in `apps/web`.
+That was already stale for F3, F7, and F14 before this run — those landed in Phase 4 without the
+declaration moving — and it is now stale for eight of the nine. It is accurate about
+`packages/shared`, which still has no browser gate; it is wrong about the vectors of those eight,
+which run in `apps/web`. **For F10 it is not stale but true**, which is the point of the table above:
+no F10 vector has run anywhere but Node, so that family's `deferred` entry is the only one a
+correction may leave standing.
 
 Correcting it is a `packages/shared` change with a wide blast radius: the manifest and every family
 file are generator output, so the text moves through `scripts/generate-e2ee-fixtures.ts` and a
