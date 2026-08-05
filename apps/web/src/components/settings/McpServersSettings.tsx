@@ -468,7 +468,7 @@ function ProviderSupportSection({
   if (providers.length === 0) return null;
 
   return (
-    <section className="rounded-lg border bg-muted/10">
+    <section className="overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm/4">
       <div className="border-b px-4 py-3">
         <h3 className="text-sm font-semibold">Provider MCP support</h3>
       </div>
@@ -934,7 +934,7 @@ export function McpServersSettings() {
         {selectedWorkspace ? (
           <div className="rounded-lg border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <span className="font-mono">{selectedWorkspace.displayPath}</span>
+              <span className="min-w-0 break-all font-mono">{selectedWorkspace.displayPath}</span>
               <span>
                 {selectedWorkspace.mode === "authOverlay" ? "Auth overlay" : "Direct home"}
               </span>
@@ -946,7 +946,7 @@ export function McpServersSettings() {
               </span>
             </div>
             {snapshot?.configPath ? (
-              <div className="mt-1 font-mono text-[11px] text-muted-foreground/70">
+              <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground/70">
                 {snapshot.configPath}
               </div>
             ) : null}
