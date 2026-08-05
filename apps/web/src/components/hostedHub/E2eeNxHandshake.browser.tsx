@@ -53,8 +53,9 @@ import {
 // reaches them, F10's web mapping, and the `WebSAS` half of F14 — driven through
 // the real `BrowserHostedRelaySocket` against real Chromium WebCrypto.
 //
-// The runtime-parity families (F1, F2, F8, F17) are DEFERRED to Phase 6; see
-// `docs/relay-e2ee-web-browser-vectors.md`.
+// The RUNTIME-PARITY half of the same obligation — F1, F2, F8, F16's NX cases
+// and F17's P-256 cases — lives in `E2eeCodecParity.browser.tsx` and
+// `E2eeRecordProtection.browser.tsx`; see `docs/relay-e2ee-web-browser-vectors.md`.
 //
 // WHAT THIS FILE MAY NOT BE READ AS SAYING. Every case below passes on a client
 // whose JavaScript a malicious Hub serves, because that Hub can complete a
