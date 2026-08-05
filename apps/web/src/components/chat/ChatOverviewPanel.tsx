@@ -97,7 +97,10 @@ export function OverviewSidebarMotionFrame(props: {
       aria-hidden={props.open ? undefined : true}
       inert={props.open ? undefined : true}
       className={cn(
-        "h-full min-h-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+        // Clears the floating chat header (the transcript scrolls beneath it,
+        // this docked panel must not — its own header row carries the branch
+        // control). Unset on tiers without the overlay, resolving to 0.
+        "h-full min-h-0 shrink-0 overflow-hidden pt-[var(--chat-header-clearance,0px)] transition-[width,opacity] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
         active ? "w-(--overview-sidebar-frame-width) opacity-100" : "w-0 opacity-0",
       )}
       style={
@@ -143,7 +146,7 @@ export function FloatingOverviewMotionFrame(props: {
   const active = props.animate ? props.open && entered : props.open;
 
   return (
-    <div className="pointer-events-none absolute top-3 right-3 z-40">
+    <div className="pointer-events-none absolute top-[calc(var(--chat-header-clearance,0px)+0.75rem)] right-3 z-40">
       <div
         aria-hidden={props.open ? undefined : true}
         inert={props.open ? undefined : true}

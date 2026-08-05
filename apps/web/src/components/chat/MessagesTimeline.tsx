@@ -128,8 +128,20 @@ import {
 const TimelineStreamingCtx = createContext<TimelineStreamingState>(null!);
 const TimelineStableCtx = createContext<TimelineStableState>(null!);
 const NOOP_CLOSE_DIFF = () => {};
-const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
-const TIMELINE_LIST_FOOTER = <div className="h-3 sm:h-4" />;
+/* Top clearance mirrors the footer: when the desktop header overlays the
+   transcript, the chat shell publishes `--chat-header-clearance` and the
+   first row always clears the floating bar. */
+const TIMELINE_LIST_HEADER = (
+  <div className="h-[var(--chat-header-clearance,0.75rem)] sm:h-[var(--chat-header-clearance,1rem)]" />
+);
+/* When the desktop composer overlays the transcript, the chat column
+   publishes `--chat-composer-clearance` (bar height + gap) and this footer
+   becomes the internal scroll clearance — content scrolls beneath the glass
+   bar but the last line can always clear it. Unset (phone tier, new-thread
+   hero), it falls back to the original static spacer. */
+const TIMELINE_LIST_FOOTER = (
+  <div className="h-[var(--chat-composer-clearance,0.75rem)] sm:h-[var(--chat-composer-clearance,1rem)]" />
+);
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const EMPTY_THREAD_MESSAGE_SEARCH_OCCURRENCES_BY_MESSAGE_ID: ReadonlyMap<
   MessageId,
@@ -767,7 +779,7 @@ function TimelineMinimap({
                 transform: `translateY(${activeTooltipTranslate})`,
               }}
             >
-              <span className="block rounded-xl border border-border/70 bg-popover/95 p-3 text-left text-popover-foreground shadow-xl shadow-black/25 backdrop-blur">
+              <span className="selection-glass-surface block rounded-xl border p-3 text-left text-popover-foreground">
                 <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
                   {activeItem.userText ?? "User message"}
                 </span>

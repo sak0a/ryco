@@ -114,11 +114,16 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
 
   return (
     <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
+      {/* Ambient base layer: a faint primary-derived tint behind the shell.
+          Opaque content covers it entirely; it exists so translucent chrome
+          (Material steps above Solid) frosts something other than a flat
+          fill. Static gradient — no animation, no compositing cost. */}
+      <div aria-hidden className="app-ambient fixed inset-0 pointer-events-none" />
       {presentationTier === "desktop" ? (
         <Sidebar
           side="left"
           collapsible="offcanvas"
-          className="border-r border-border bg-card text-foreground"
+          className="border-r border-sidebar-border text-sidebar-foreground"
           resizable={{
             minWidth: THREAD_SIDEBAR_MIN_WIDTH,
             shouldAcceptWidth: ({ nextWidth, wrapper }) =>

@@ -3407,19 +3407,82 @@ export default function ChatView(props: ChatViewProps) {
     workspacePanelOpen,
   ]);
 
+  // Direction A chrome layering: on the desktop tier the input bar overlays
+  // the transcript so messages scroll beneath the glass composer. The bar's
+  // rendered height travels as a CSS variable on the chat column — consumed
+  // by the timeline's list footer (internal scroll clearance) and the
+  // scroll-to-bottom pill. The phone tier and the new-thread hero keep the
+  // in-flow layout, where the variable stays unset and the old spacers apply.
+  const composerOverlayActive = presentationTier !== "phone" && !showNewThreadSurface;
+  const headerOverlayActive = presentationTier !== "phone";
+  const chatColumnRef = useRef<HTMLDivElement | null>(null);
+  const composerOverlayRef = useRef<HTMLDivElement | null>(null);
+  const chatShellRef = useRef<HTMLDivElement | null>(null);
+  const headerOverlayRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const column = chatColumnRef.current;
+    if (!column) return;
+    if (!composerOverlayActive) {
+      column.style.removeProperty("--chat-composer-clearance");
+      return;
+    }
+    const bar = composerOverlayRef.current;
+    if (!bar) return;
+    const apply = () =>
+      column.style.setProperty("--chat-composer-clearance", `${bar.offsetHeight + 8}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      column.style.removeProperty("--chat-composer-clearance");
+    };
+  }, [composerOverlayActive]);
+  // Same mechanism for the top bar: the header overlays the transcript and
+  // publishes its height so the timeline's list header, the search bar, the
+  // floating overview, and the (rare) banner stack clear it.
+  useEffect(() => {
+    const shell = chatShellRef.current;
+    if (!shell) return;
+    if (!headerOverlayActive) {
+      shell.style.removeProperty("--chat-header-clearance");
+      return;
+    }
+    const header = headerOverlayRef.current;
+    if (!header) return;
+    const apply = () =>
+      shell.style.setProperty("--chat-header-clearance", `${header.offsetHeight + 8}px`);
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(header);
+    return () => {
+      observer.disconnect();
+      shell.style.removeProperty("--chat-header-clearance");
+    };
+  }, [headerOverlayActive]);
+
   // Empty state: no active thread
   if (!activeThread) {
     return <NoActiveThreadState />;
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <div
+      ref={chatShellRef}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
+    >
       {/* Top bar */}
       <header
+        ref={headerOverlayRef}
         className={cn(
           // The phone tier pads the top safe area itself (the root-level
           // inset is disabled for the phone tier in index.css).
-          "border-b border-border bg-muted/24 phone:pt-safe",
+          // Chrome-layer material: same plate/filter family as the sidebar,
+          // so the bar and the sidebar read as one continuous chrome tier.
+          "app-chrome-glass border-b border-sidebar-border phone:pt-safe",
+          // Desktop: the bar floats over the transcript, which scrolls
+          // beneath it (the timeline's list header provides the clearance).
+          headerOverlayActive && "absolute inset-x-0 top-0 z-20",
           isElectron
             ? cn(
                 "drag-region flex min-h-[52px] items-stretch px-3 sm:px-5 wco:min-h-[env(titlebar-area-height)]",
@@ -3481,16 +3544,24 @@ export default function ChatView(props: ChatViewProps) {
         onOpenChange={handleHeaderLinkedItemDialogOpenChange}
       />
 
-      {/* Error banner */}
-      <ProviderStatusBanner status={activeProviderStatus} />
-      <ThreadErrorBanner
-        error={activeThread.error}
-        onDismiss={() => setThreadError(activeThread.id, null)}
-      />
+      {/* Error banners. With the header overlaying the transcript they float
+          just beneath it instead of participating in flow (they are transient
+          interrupts, not layout). */}
+      <div
+        className={cn(
+          headerOverlayActive && "absolute inset-x-0 top-(--chat-header-clearance,0px) z-20",
+        )}
+      >
+        <ProviderStatusBanner status={activeProviderStatus} />
+        <ThreadErrorBanner
+          error={activeThread.error}
+          onDismiss={() => setThreadError(activeThread.id, null)}
+        />
+      </div>
       {/* Main content area with optional plan sidebar */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {/* Chat column */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div ref={chatColumnRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {/* Messages Wrapper. Stays `flex-1` even while empty so the absolutely
               positioned children below (search bar, floating overview, scroll
               pill) keep a full-height containing block. */}
@@ -3596,7 +3667,7 @@ export default function ChatView(props: ChatViewProps) {
 
             {/* scroll to bottom pill — shown when user has scrolled away from the bottom */}
             {showScrollToBottom && (
-              <div className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
+              <div className="pointer-events-none absolute bottom-[calc(var(--chat-composer-clearance,0px)+0.25rem)] left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5">
                 <button
                   type="button"
                   onClick={() => scrollToEnd(true)}
@@ -3665,15 +3736,29 @@ export default function ChatView(props: ChatViewProps) {
               timeline upward (unclipped, so the stack hover reveal keeps
               working) instead of pushing the composer behind the keyboard. */}
           <div
+            ref={composerOverlayRef}
             className={cn(
               "flex min-h-0 flex-col justify-end",
+              // Overlay mode: the bar floats over the transcript. The wrapper
+              // ignores pointer events so the transcript's side gutters stay
+              // clickable; the composer stack re-enables them below.
+              composerOverlayActive && "pointer-events-none absolute inset-x-0 bottom-0 z-20",
               "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] pt-1.5 sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)] sm:pt-2",
               isGitRepo
                 ? "pb-[calc(max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))+0.25rem)]"
                 : "pb-[calc(max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))+0.75rem)] sm:pb-[calc(max(env(safe-area-inset-bottom),var(--app-keyboard-inset,0px))+1rem)]",
             )}
           >
-            <div className="relative isolate">
+            {composerOverlayActive ? (
+              // Soft scroll-edge scrim across the whole floating bar
+              // (composer + branch toolbar): keeps transcript lines readable
+              // as they travel beneath without reserving layout for it.
+              <div
+                aria-hidden
+                className="-top-10 -z-10 pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t from-background via-background/45 to-transparent"
+              />
+            ) : null}
+            <div className={cn("relative isolate", composerOverlayActive && "pointer-events-auto")}>
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
               {showNewThreadComposerSpacer ? <div aria-hidden className="mb-2 h-5" /> : null}
               <ComposerQueuedMessages
@@ -3760,31 +3845,33 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             </div>
             {isGitRepo && (
-              <BranchToolbar
-                environmentId={activeThread.environmentId}
-                threadId={activeThread.id}
-                {...(routeKind === "draft" && draftId ? { draftId } : {})}
-                {...(canOverrideServerThreadBranch
-                  ? {
-                      activeThreadBranchOverride: activeThreadBranch,
-                      onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
-                    }
-                  : {})}
-                envLocked={envLocked}
-                onComposerFocusRequest={scheduleComposerFocus}
-                onOpenWorktreeSources={openWorktreeSources}
-                contextControlsHoisted={showNewThreadSurface}
-                {...(canCheckoutPullRequestIntoThread
-                  ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                  : {})}
-                {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
-                availableEnvironments={logicalProjectEnvironments}
-                terminalAvailable={activeProject !== undefined && terminalCapability.allowed}
-                terminalOpen={terminalState.terminalOpen}
-                terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-                onToggleTerminal={toggleTerminalVisibility}
-                terminalCount={terminalState.terminalIds.length}
-              />
+              <div className={cn(composerOverlayActive && "pointer-events-auto")}>
+                <BranchToolbar
+                  environmentId={activeThread.environmentId}
+                  threadId={activeThread.id}
+                  {...(routeKind === "draft" && draftId ? { draftId } : {})}
+                  {...(canOverrideServerThreadBranch
+                    ? {
+                        activeThreadBranchOverride: activeThreadBranch,
+                        onActiveThreadBranchOverrideChange: setPendingServerThreadBranch,
+                      }
+                    : {})}
+                  envLocked={envLocked}
+                  onComposerFocusRequest={scheduleComposerFocus}
+                  onOpenWorktreeSources={openWorktreeSources}
+                  contextControlsHoisted={showNewThreadSurface}
+                  {...(canCheckoutPullRequestIntoThread
+                    ? { onCheckoutPullRequestRequest: openPullRequestDialog }
+                    : {})}
+                  {...(hasMultipleEnvironments ? { onEnvironmentChange } : {})}
+                  availableEnvironments={logicalProjectEnvironments}
+                  terminalAvailable={activeProject !== undefined && terminalCapability.allowed}
+                  terminalOpen={terminalState.terminalOpen}
+                  terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+                  onToggleTerminal={toggleTerminalVisibility}
+                  terminalCount={terminalState.terminalIds.length}
+                />
+              </div>
             )}
           </div>
 
@@ -3831,7 +3918,7 @@ export default function ChatView(props: ChatViewProps) {
         </div>
         {/* end chat column */}
         {inspectedContextHandoff && !shouldUsePlanSidebarSheet && !isPhoneTier ? (
-          <aside className="flex min-h-0 w-[25rem] shrink-0 border-l border-border">
+          <aside className="flex min-h-0 w-[25rem] shrink-0 border-l border-border pt-[var(--chat-header-clearance,0px)]">
             <ContextHandoffInspectionPanel
               environmentId={activeThread.environmentId}
               threadId={activeThread.id}
