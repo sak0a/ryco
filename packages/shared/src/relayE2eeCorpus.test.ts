@@ -385,11 +385,21 @@ interface CorpusManifest {
      */
     readonly perCaseFloor: string;
     /**
-     * Whether an assertion-liveness figure exists for THIS corpus. It does not;
-     * this block says so and names the cost of producing one.
+     * How much assertion-liveness figure exists for THIS corpus. Two families
+     * have been swept; this block says which, carries their numbers, and names
+     * the cost of the rest.
      */
     readonly assertionLiveness: {
       readonly currentCorpus: string;
+      readonly measuredFamilySweep: {
+        readonly families: string;
+        readonly method: string;
+        readonly leaves: number;
+        readonly liveLeaves: number;
+        readonly inertLeaves: number;
+        readonly agreesWithReadLiveness: boolean;
+        readonly note: string;
+      };
       readonly published: string;
       readonly staleFigure: string;
       readonly refreshCost: string;
@@ -850,6 +860,10 @@ describe("§16.3 F4 prekey certificates (§7.3, §7.4, §6.4)", () => {
     fixtureBytes(F04.testKeyMaterial.nodeAgreementPublicKey);
   const nodeIdentitySeed = (): Uint8Array =>
     fixtureBytes(F04.testKeyMaterial.testOnlyNodeIdentitySeed);
+  const clientIdentityPublic = (): Uint8Array =>
+    fixtureBytes(F04.testKeyMaterial.clientIdentityPublicKey);
+  const clientAgreementPublic = (): Uint8Array =>
+    fixtureBytes(F04.testKeyMaterial.clientAgreementPublicKey);
 
   /** The §7.3 transcript, over the corpus material, with one field overridden. */
   const nodeTranscript = (over: {
@@ -1025,12 +1039,17 @@ describe("§16.3 F4 prekey certificates (§7.3, §7.4, §6.4)", () => {
   });
 
   it("keeps the two largest directly signed transcripts inside §3.2.1 S9 and S2", () => {
-    // The two size-argument cases carry a transcript and nothing to rebuild it
-    // from beyond its own bounds. Each is decoded under the §3.6 strict profile
-    // and fed BACK through its own encoder: an encoder that recomputes element 7
-    // from element 6, refuses an out-of-range identifier, and applies the S9
-    // bound itself, so byte equality here is a statement about the transcript
-    // and not a tautology over the bytes.
+    // The two size-argument cases are rebuilt from their own `inputs` — never
+    // from the committed transcript — and the result is compared against the
+    // committed bytes. That direction is what makes the comparison falsifiable:
+    // an encoder fed from the decoded transcript would copy every verbatim
+    // element straight back and compare it with itself, so a fixture that
+    // stopped agreeing with the implementation on the node id, either public
+    // key, an identifier or a timestamp would read as covered. Driving the
+    // encoder from the inputs instead means every element the encoder COPIES is
+    // pinned by the input it came from, and every element it DERIVES — element
+    // 7's fingerprint, the algorithm and usage constants, the S9 bound — is
+    // pinned by the encoder itself.
     const node = caseByName(
       F04,
       "node-certificate-at-the-maximum-hub-origin-accepted-and-within-S9",
@@ -1041,17 +1060,38 @@ describe("§16.3 F4 prekey certificates (§7.3, §7.4, §6.4)", () => {
     expect(nodeFields[1], node.name).toBe(node.inputs.hubOrigin);
     expect(utf8Bytes(node.inputs.hubOrigin as string), node.name).toBe(node.inputs.hubOriginBytes);
     expect(node.inputs.hubOriginMaxBytes, node.name).toBe(E2EE_HUB_ORIGIN_MAX_BYTES);
+    // …and the identifiers and keys the case names really are this family's own
+    // material, so the inputs cannot drift away from the corpus either.
+    expect(node.inputs.nodeId, node.name).toBe(NODE.nodeId);
+    expect(node.inputs.identityKeyId, node.name).toBe(NODE.identityKeyId);
+    expect(node.inputs.prekeyId, node.name).toBe(NODE.prekeyId);
+    expect(hex(fixtureBytes(node.inputs.identityPublicKey)), node.name).toBe(
+      hex(nodeIdentityPublic()),
+    );
+    expect(hex(fixtureBytes(node.inputs.agreementPublicKey)), node.name).toBe(
+      hex(nodeAgreementPublic()),
+    );
     const nodeTranscriptBytes = encodeNodeE2eePrekeyTranscript({
-      hubOrigin: nodeFields[1] as string,
-      nodeId: nodeFields[2] as string,
-      identityKeyId: nodeFields[4] as string,
-      prekeyId: nodeFields[5] as string,
-      identityPublicKey: nodeFields[6] as Uint8Array,
-      agreementPublicKey: nodeFields[8] as Uint8Array,
-      createdAt: nodeFields[11] as number,
-      expiresAt: nodeFields[12] as number,
+      hubOrigin: node.inputs.hubOrigin as string,
+      nodeId: node.inputs.nodeId as string,
+      identityKeyId: node.inputs.identityKeyId as string,
+      prekeyId: node.inputs.prekeyId as string,
+      identityPublicKey: fixtureBytes(node.inputs.identityPublicKey),
+      agreementPublicKey: fixtureBytes(node.inputs.agreementPublicKey),
+      createdAt: node.inputs.createdAt as number,
+      expiresAt: node.inputs.expiresAt as number,
     });
     expect(hex(nodeTranscriptBytes), node.name).toBe(hex(fixtureBytes(node.expected.transcript)));
+    // The decoded transcript agrees with the inputs element for element, which
+    // is the same statement made from the other side: the committed bytes carry
+    // exactly the material the encoder was handed.
+    expect(nodeFields[2], node.name).toBe(node.inputs.nodeId);
+    expect(nodeFields[4], node.name).toBe(node.inputs.identityKeyId);
+    expect(nodeFields[5], node.name).toBe(node.inputs.prekeyId);
+    expect(hex(nodeFields[6] as Uint8Array), node.name).toBe(hex(nodeIdentityPublic()));
+    expect(hex(nodeFields[8] as Uint8Array), node.name).toBe(hex(nodeAgreementPublic()));
+    expect(nodeFields[11], node.name).toBe(node.inputs.createdAt);
+    expect(nodeFields[12], node.name).toBe(node.inputs.expiresAt);
     expect(nodeTranscriptBytes.byteLength, node.name).toBe(node.expected.transcriptBytes);
     expect(node.expected.directSigningTranscriptMaxBytes, node.name).toBe(
       E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
@@ -1067,18 +1107,36 @@ describe("§16.3 F4 prekey certificates (§7.3, §7.4, §6.4)", () => {
     const clientElements = decodeCanonicalE2eeCbor(fixtureBytes(client.expected.transcript));
     expect(clientElements.kind, client.name).toBe("ok");
     const clientFields = (clientElements as { readonly value: readonly unknown[] }).value;
-    expect(utf8Bytes(clientFields[1] as string), client.name).toBe(client.inputs.hubOriginBytes);
-    expect(utf8Bytes(clientFields[2] as string), client.name).toBe(client.inputs.accountIdBytes);
+    expect(utf8Bytes(client.inputs.hubOrigin as string), client.name).toBe(
+      client.inputs.hubOriginBytes,
+    );
+    expect(utf8Bytes(client.inputs.accountId as string), client.name).toBe(
+      client.inputs.accountIdBytes,
+    );
     expect(client.inputs.accountIdMaxBytes, client.name).toBe(E2EE_ACCOUNT_ID_MAX_BYTES);
+    expect(hex(fixtureBytes(client.inputs.identityPublicKey)), client.name).toBe(
+      hex(clientIdentityPublic()),
+    );
+    expect(hex(fixtureBytes(client.inputs.agreementPublicKey)), client.name).toBe(
+      hex(clientAgreementPublic()),
+    );
     const clientTranscript = encodeClientE2eePrekeyTranscript({
-      hubOrigin: clientFields[1] as string,
-      accountId: clientFields[2] as string,
-      identityPublicKey: clientFields[4] as Uint8Array,
-      agreementPublicKey: clientFields[6] as Uint8Array,
-      createdAt: clientFields[9] as number,
-      expiresAt: clientFields[10] as number,
+      hubOrigin: client.inputs.hubOrigin as string,
+      accountId: client.inputs.accountId as string,
+      identityPublicKey: fixtureBytes(client.inputs.identityPublicKey),
+      agreementPublicKey: fixtureBytes(client.inputs.agreementPublicKey),
+      createdAt: client.inputs.createdAt as number,
+      expiresAt: client.inputs.expiresAt as number,
     });
     expect(hex(clientTranscript), client.name).toBe(hex(fixtureBytes(client.expected.transcript)));
+    // The account-id TEXT is compared, not only its UTF-8 length: a 256-byte
+    // string of the wrong bytes is the same length as the right one.
+    expect(clientFields[1], client.name).toBe(client.inputs.hubOrigin);
+    expect(clientFields[2], client.name).toBe(client.inputs.accountId);
+    expect(hex(clientFields[4] as Uint8Array), client.name).toBe(hex(clientIdentityPublic()));
+    expect(hex(clientFields[6] as Uint8Array), client.name).toBe(hex(clientAgreementPublic()));
+    expect(clientFields[9], client.name).toBe(client.inputs.createdAt);
+    expect(clientFields[10], client.name).toBe(client.inputs.expiresAt);
     expect(clientTranscript.byteLength, client.name).toBe(client.expected.transcriptBytes);
     expect(client.expected.directSigningTranscriptMaxBytes, client.name).toBe(
       E2EE_DIRECT_SIGNING_TRANSCRIPT_MAX_BYTES,
@@ -1678,8 +1736,13 @@ describe("§16.3 F17 key-material validation (§7.1, §8.1, §14.3)", () => {
     // key and the message are byte-identical, and the two `R` encodings carry
     // the same sign bit and the same `y` MODULO the field prime while differing
     // as byte strings. The scalar half necessarily differs — `S` is computed
-    // over the encoding of `R` — so a byte comparison there would say the
-    // opposite of what the case means.
+    // over the encoding of `R` — so an EQUALITY there would say the opposite of
+    // what the case means; the inequality below is the statement that does hold,
+    // and it is asserted rather than left implicit so a regenerated pair that
+    // reused one `S` across both cases fails here.
+    expect(hex(fixtureBytes(control.inputs.signature)).slice(64)).not.toBe(
+      hex(fixtureBytes(nonCanonical.inputs.signature)).slice(64),
+    );
     expect(nonCanonical.expected.differsFromTheControlOnlyInTheEncodingOfR).toBe(
       hex(fixtureBytes(control.inputs.publicKey)) ===
         hex(fixtureBytes(nonCanonical.inputs.publicKey)) &&
@@ -3900,9 +3963,18 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 //
 //   MOVED THIS ROUND, and only these two: F4 44→80 and F17 150→168, which took
 //   the contentless count from 32 to 17 and left every remaining one in F3.
-//   Nothing was relabelled to get there — each newly live leaf has a case that
-//   fails when the leaf changes, and the four ledger obligations that stopped
-//   being `unasserted` stopped because their cases went live.
+//   Nothing was relabelled to get there, and that is MEASURED rather than
+//   asserted: a per-leaf mutation sweep was run over both families — all 278
+//   committed leaves, one mutation per run, each followed by a full run of this
+//   file — and 248 of them fail when the leaf changes. The 30 that survive are
+//   EXACTLY the 30 the two families' residuals below declare inert. Neither
+//   family has an entry in `E2EE_CORPUS_DELEGATED_LEAF_READS`, so this suite is
+//   their sole reader and the sweep covers their whole union. For F4 and F17,
+//   therefore, read-liveness is not merely an upper bound on assertion — it is
+//   tight. The manifest records the sweep under
+//   `livenessCensus.assertionLiveness.measuredFamilySweep`. The four ledger
+//   obligations that stopped being `unasserted` stopped because their cases went
+//   live.
 //
 // "17 OF 290" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
 // one-leaf threshold it invites the reading that the other 273 assert something
@@ -3913,17 +3985,19 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 //   11–25 → 38 · 26+ → 16.   96 of 290 cases have at most TWO live leaves;
 //   182 have at most five.
 //
-// READ-LIVENESS IS AN UPPER BOUND ON ASSERTION, AND NO CURRENT ASSERTION FIGURE
-// EXISTS. A suite that reads a value and never compares it marks it live here.
-// The tighter measure is a per-leaf MUTATION sweep, and the only one anyone has
-// run was against the 3,684-leaf corpus that PRECEDED this round: 1,821 live,
-// 1,863 inert, 49.4%, 37 contentless cases. That corpus is superseded — the
-// 397-leaf close-machine `steps` blocks were deleted and F8 and F17 assertions
-// were added since — so 49.4% is stale and no line-for-line comparison with the
-// per-family numbers above is valid. Everything published above is read-
-// liveness. Refreshing the tight figure means re-running the sweep: ~3,287
-// single-leaf mutations, each followed by the shared, node and Noise suites.
-// The manifest records this under `livenessCensus.assertionLiveness`.
+// READ-LIVENESS IS AN UPPER BOUND ON ASSERTION EVERYWHERE EXCEPT F4 AND F17. A
+// suite that reads a value and never compares it marks it live here. The tighter
+// measure is a per-leaf MUTATION sweep; this round ran one over F4 and F17 (see
+// above), and for those two the two measures agree exactly. For the other
+// sixteen families the only global assertion figure anyone has is the sweep
+// against the 3,684-leaf corpus that PRECEDED this round: 1,821 live, 1,863
+// inert, 49.4%, 37 contentless cases. That corpus is superseded — the 397-leaf
+// close-machine `steps` blocks were deleted and F8 and F17 assertions were added
+// since — so 49.4% is stale and no line-for-line comparison with the per-family
+// numbers above is valid. Everything published above for those sixteen families
+// is read-liveness. Closing the rest means ~3,000 further single-leaf mutations,
+// each followed by the shared, node and Noise suites. The manifest records this
+// under `livenessCensus.assertionLiveness`.
 //
 // THE MECHANISM, as opposed to the number, IS A FLOOR: a committed case must
 // carry at least ONE leaf some consuming suite reads, or appear in
@@ -5975,15 +6049,15 @@ describe("§16.3 corpus liveness", () => {
     expect(distribution.buckets[0]?.cases).toBe(MANIFEST.livenessCensus.totals.casesWithNoLiveLeaf);
   });
 
-  it("says in the census that the published figure is READ-liveness and the tight one is stale", () => {
-    // The only assertion-liveness numbers that exist were measured against the
-    // corpus as it stood BEFORE this round. Publishing them beside current
-    // per-family figures without saying so reads as though the corpus has a
-    // current tight measurement. It does not, and the census says which is
-    // which, what the published figure actually is, and what refreshing the
-    // tight one would take.
+  it("says in the census which families have a tight figure and that the global one is stale", () => {
+    // Two families have been swept against THIS corpus; the global
+    // assertion-liveness numbers were measured against the corpus as it stood
+    // BEFORE this round. Publishing either beside current per-family figures
+    // without saying which is which reads as though the whole corpus has a
+    // current tight measurement. It does not, and the census says what is
+    // measured, what is read-liveness, and what closing the rest would take.
     const assertion = MANIFEST.livenessCensus.assertionLiveness;
-    expect(assertion.currentCorpus).toContain("none");
+    expect(assertion.currentCorpus).toContain("PARTIAL");
     expect(assertion.published).toContain("READ-liveness");
     expect(assertion.published).toContain("upper bound");
     expect(assertion.staleFigure).toContain("STALE");
@@ -5996,6 +6070,32 @@ describe("§16.3 corpus liveness", () => {
     expect(MANIFEST.livenessCensus.independentMutationSweep.totalLeaves).not.toBe(
       MANIFEST.livenessCensus.totals.expectedLeaves,
     );
+
+    // THE SWEPT FAMILIES' NUMBERS ARE HELD TO THE CENSUS ITSELF, so the sweep
+    // block cannot claim a coverage the per-family entries beside it contradict.
+    // The sweep found the tight figure equal to the read figure for both, which
+    // is the whole content of the claim — if a later round widens either family
+    // without re-sweeping, `liveLeaves` moves here and this fails.
+    const sweep = assertion.measuredFamilySweep;
+    const swept = MANIFEST.livenessCensus.families.filter((family) =>
+      [4, 17].includes(family.family),
+    );
+    expect(swept).toHaveLength(2);
+    expect(sweep.families).toBe("F4 and F17");
+    expect(sweep.leaves).toBe(swept.reduce((total, family) => total + family.expectedLeaves, 0));
+    expect(sweep.liveLeaves).toBe(swept.reduce((total, family) => total + family.liveLeaves, 0));
+    expect(sweep.inertLeaves).toBe(swept.reduce((total, family) => total + family.inertLeaves, 0));
+    expect(sweep.agreesWithReadLiveness).toBe(true);
+    // …and a swept family may not ALSO delegate leaves to another suite, because
+    // the sweep ran only this file: a delegated leaf would be counted live by
+    // the census and inert by the sweep, and the equality above would be false
+    // for a reason nobody stated.
+    for (const family of swept) {
+      expect(
+        E2EE_CORPUS_DELEGATED_LEAF_READS.filter((entry) => entry.file === family.file),
+        family.file,
+      ).toEqual([]);
+    }
   });
 
   it("marks every ledger obligation whose every case is decorative as unasserted", () => {

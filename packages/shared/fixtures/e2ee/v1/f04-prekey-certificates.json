@@ -119,10 +119,22 @@
         "7.3",
         "3.2.1 S9"
       ],
+      "note": "Every field the §7.3 encoder copies verbatim is carried here as an INPUT, so a consumer can rebuild the transcript from the inputs alone and compare against the committed bytes. Rebuilding it from the committed bytes instead would compare each copied element with itself.",
       "inputs": {
         "hubOrigin": "https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com",
         "hubOriginBytes": 128,
-        "hubOriginMaxBytes": 128
+        "hubOriginMaxBytes": 128,
+        "nodeId": "node_AAAAAAAAAAAAAAAAAAAAAA",
+        "identityKeyId": "nkey_BBBBBBBBBBBBBBBBBBBBBB",
+        "prekeyId": "epk_EEEEEEEEEEEEEEEEEEEEEE",
+        "identityPublicKey": {
+          "$bytes": "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+        },
+        "agreementPublicKey": {
+          "$bytes": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13"
+        },
+        "createdAt": 4294967296,
+        "expiresAt": 4294967296
       },
       "expected": {
         "transcript": {
@@ -257,11 +269,21 @@
         "7.4",
         "3.2.1 S9"
       ],
-      "note": "The largest §7.4 transcript the bounds admit: Hub origin at `E2EE_HUB_ORIGIN_MAX_BYTES`, account id at `E2EE_ACCOUNT_ID_MAX_BYTES`, every unsigned field at its widest canonical encoding. It is the largest of the three directly signed transcripts, so it is the one S9 turns on.",
+      "note": "The largest §7.4 transcript the bounds admit: Hub origin at `E2EE_HUB_ORIGIN_MAX_BYTES`, account id at `E2EE_ACCOUNT_ID_MAX_BYTES`, every unsigned field at its widest canonical encoding. It is the largest of the three directly signed transcripts, so it is the one S9 turns on. Every encoder input is carried here rather than left to be read back out of the committed transcript, for the reason the node case beside it states.",
       "inputs": {
+        "hubOrigin": "https://hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh.example.com",
         "hubOriginBytes": 128,
+        "accountId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "accountIdBytes": 256,
-        "accountIdMaxBytes": 256
+        "accountIdMaxBytes": 256,
+        "identityPublicKey": {
+          "$bytes": "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650"
+        },
+        "agreementPublicKey": {
+          "$bytes": "052a50773ac8d91773f2dc9662e12f0defe915e415b8a1c8e20a5a3d6ab2b843"
+        },
+        "createdAt": 4294967296,
+        "expiresAt": 6886967296
       },
       "expected": {
         "transcript": {

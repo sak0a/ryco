@@ -1974,10 +1974,18 @@ function buildFamily4(): FixtureFamily {
     cases.push({
       name: "node-certificate-at-the-maximum-hub-origin-accepted-and-within-S9",
       sections: ["7.3", "3.2.1 S9"],
+      note: "Every field the §7.3 encoder copies verbatim is carried here as an INPUT, so a consumer can rebuild the transcript from the inputs alone and compare against the committed bytes. Rebuilding it from the committed bytes instead would compare each copied element with itself.",
       inputs: {
         hubOrigin: MAX_HUB_ORIGIN,
         hubOriginBytes: Buffer.byteLength(MAX_HUB_ORIGIN, "utf8"),
         hubOriginMaxBytes: E2EE_HUB_ORIGIN_MAX_BYTES,
+        nodeId: NODE_ID,
+        identityKeyId: IDENTITY_KEY_ID,
+        prekeyId: PREKEY_ID,
+        identityPublicKey: b(NODE_IDENTITY_PUBLIC),
+        agreementPublicKey: b(NODE_AGREEMENT_PUBLIC),
+        createdAt: MAX_SIZE_TIMESTAMP,
+        expiresAt: MAX_SIZE_TIMESTAMP,
       },
       expected: {
         transcript: b(maxOriginTranscript),
@@ -2091,11 +2099,17 @@ function buildFamily4(): FixtureFamily {
     cases.push({
       name: "client-certificate-at-the-maximum-namespace-accepted-and-within-S9",
       sections: ["7.4", "3.2.1 S9"],
-      note: "The largest §7.4 transcript the bounds admit: Hub origin at `E2EE_HUB_ORIGIN_MAX_BYTES`, account id at `E2EE_ACCOUNT_ID_MAX_BYTES`, every unsigned field at its widest canonical encoding. It is the largest of the three directly signed transcripts, so it is the one S9 turns on.",
+      note: "The largest §7.4 transcript the bounds admit: Hub origin at `E2EE_HUB_ORIGIN_MAX_BYTES`, account id at `E2EE_ACCOUNT_ID_MAX_BYTES`, every unsigned field at its widest canonical encoding. It is the largest of the three directly signed transcripts, so it is the one S9 turns on. Every encoder input is carried here rather than left to be read back out of the committed transcript, for the reason the node case beside it states.",
       inputs: {
+        hubOrigin: MAX_HUB_ORIGIN,
         hubOriginBytes: Buffer.byteLength(MAX_HUB_ORIGIN, "utf8"),
+        accountId: MAX_ACCOUNT_ID,
         accountIdBytes: Buffer.byteLength(MAX_ACCOUNT_ID, "utf8"),
         accountIdMaxBytes: E2EE_ACCOUNT_ID_MAX_BYTES,
+        identityPublicKey: b(CLIENT_IDENTITY_PUBLIC),
+        agreementPublicKey: b(CLIENT_AGREEMENT_PUBLIC),
+        createdAt: MAX_SIZE_TIMESTAMP,
+        expiresAt: MAX_SIZE_TIMESTAMP + E2EE_PREKEY_LIFETIME,
       },
       expected: {
         transcript: b(maxTranscript),
@@ -9757,13 +9771,23 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
         "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 290 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
       assertionLiveness: {
         currentCorpus:
-          "none. No assertion-liveness figure has been measured against the corpus as it stands. Every per-family and total number in this census is read-liveness.",
+          "PARTIAL. Two families have been swept against the corpus as it stands — F4 and F17, the two whose live counts moved this round — and for those two the tight figure now EQUALS the read-liveness figure. Every other family's number in this census is read-liveness and nothing more.",
+        measuredFamilySweep: {
+          families: "F4 and F17",
+          method:
+            'Every scalar under `expected` in both families mutated in turn, one per run — booleans negated, numbers incremented, strings altered in their first character, `{"$bytes": …}` wrappers XORed in their first byte — followed by a full run of `packages/shared/src/relayE2eeCorpus.test.ts`. A leaf counts LIVE when its mutation fails that run. Neither family has an entry in `E2EE_CORPUS_DELEGATED_LEAF_READS`, so the shared suite is their sole reader and this sweep is their whole union rather than a lower bound on it.',
+          leaves: 278,
+          liveLeaves: 248,
+          inertLeaves: 30,
+          agreesWithReadLiveness: true,
+          note: "248 of 278, and the 30 that survive mutation are EXACTLY the 30 the per-family residuals below declare inert: F4's one `enforcedBy` prose pointer, and F17's four `disposition`/`mandatedBehavior` restatements, nine `rejectedBeforeAnySignatureCheck` ordering claims, nine `positionNote` rows and seven p256-signature `fatal` rows. So for these two families read-liveness is not merely an upper bound on assertion — it is tight, and every leaf the census calls live has a case that fails when the leaf changes.",
+        },
         published:
-          "READ-liveness, which is an upper bound on assertion: a leaf a suite reads and never compares to anything counts as live here. Treat every `liveLeaves` figure below as a ceiling on how much is actually asserted, not as a measure of it.",
+          "READ-liveness, which is an upper bound on assertion: a leaf a suite reads and never compares to anything counts as live here. Treat every `liveLeaves` figure below as a ceiling on how much is actually asserted, not as a measure of it — except for F4 and F17, where `measuredFamilySweep` has closed the gap.",
         staleFigure:
-          "The 49.4% in `independentMutationSweep` is the only assertion-liveness number that exists, and it is STALE: it was measured against a superseded corpus — 3,684 leaves, before the 397-leaf close-machine `steps` blocks were deleted and before the F8 tampering, F8 round-trip and F17 substitution-matrix assertions were added. It is not comparable line for line with anything below.",
+          "The 49.4% in `independentMutationSweep` is a GLOBAL assertion-liveness number and it is STALE: it was measured against a superseded corpus — 3,684 leaves, before the 397-leaf close-machine `steps` blocks were deleted and before the F8 tampering, F8 round-trip and F17 substitution-matrix assertions were added. It is not comparable line for line with anything below.",
         refreshCost:
-          "A per-leaf mutation sweep over the current corpus: mutate each of the 3,287 committed expectation leaves in turn and re-run the three consuming suites for each, then re-derive the per-family and per-case figures from which mutations failed a test. It is a sweep harness plus roughly 3,287 full suite runs, which is why this round publishes read-liveness and says so rather than quoting a stale tight number as if it were current.",
+          "A per-leaf mutation sweep over the remaining sixteen families: mutate each of their committed expectation leaves in turn and re-run the three consuming suites for each, then re-derive the per-family and per-case figures from which mutations failed a test. That is roughly 3,000 further full suite runs, which is why this round sweeps the two families whose numbers moved and publishes read-liveness for the rest rather than quoting a stale global figure as if it were current.",
         ownedBy: "the hardening phase, alongside the per-family assertion harnesses",
       },
       independentMutationSweep: {
