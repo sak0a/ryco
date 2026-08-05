@@ -52,24 +52,34 @@ pin is already gated under Node.
 
 ## The web §13 surfaces: what is wired, and what is still owed
 
-The web tier now runs a §4.4 machine on every relay socket, publishes what that machine locked
+The web tier runs a §4.4 machine on every relay socket, publishes what that machine locked
 (`apps/web/src/hostedHub/e2eeSession.ts`), and all three hosted connection surfaces — the desktop
 node menu, the phone connection sheet, and the pill — read it. §12.2's "MUST label the channel
 **legacy** in every user-facing surface" is therefore met in shipped code, and the browser render
 sweeps draw `Legacy`, `Unsigned web`, and `Securing` like every other bounded status
 (`apps/web/test/hostedConnectionVocabulary.ts` carries the §4.4 dimension).
 
-Two §13.5 duties are **not** discharged and are owed to the copy slice that follows:
+The two §13.5 duties this note previously recorded as owed are now discharged:
 
-| Owed                             | What is missing                                                                                                                                                                                                                                                                                               |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| §13.5 "Shown in the web UI"      | The `WebSAS` is derived client-side and held in the §13 projection, and nothing renders it. Until it is drawn — with §13.5's advisory-only disclosure text beside it, which MUST say the comparison cannot protect against the Hub operator — the owner has no string to compare against the node CLI's.      |
-| The relay trust notice's wording | `HOSTED_RELAY_TRUST_DISCLOSURE` is channel-independent and says the same thing whether the channel locked `e2ee` or `legacy`. Its "not application-level end-to-end encrypted / the trusted relay can observe forwarded bytes" sentence is stale for a `web-unsigned` channel and is an UNDERSTATEMENT there. |
+| Duty                             | Where it is discharged                                                                                                                                                                                                                                                                                                              |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| §13.5 "Shown in the web UI"      | `HostedE2eeVerification.tsx`, mounted in the desktop node menu. The renderer returns the code, the format caption, and §13.5's advisory sentence as ONE value (`HostedE2eeVerification.logic.ts`), so a caller cannot draw the characters without the "cannot protect against the Hub operator, who serves that code" denial.       |
+| The relay trust notice's wording | `HostedRelayTrustNotice.logic.ts`. The claim is now a selector over the channel state, keyed on the tier-fenced `WebHostedE2eeChannelStatus`, so a new channel state cannot ship without a sentence. The `web-unsigned` copy states §2.3's web bullet and §2.4's served-code ceiling; the `legacy` copy is §12.2's mandatory label. |
 
-The second is deliberately left understated rather than rewritten in passing. §2.2 and §2.3 forbid
-this tier from presenting a stronger claim for a weaker configuration, and a notice that starts
-describing NX protection is exactly where that rule is violated by accident; the replacement text is
-security copy and belongs with the `WebSAS` surface that has to state the same caveat.
+The glyph and tone at all three connection surfaces now key on
+`HostedConnectionStatusIndicator.guarantee` rather than on connectedness
+(`HostedConnectionControls.logic.ts`). Both `legacy` and `web-unsigned` are usable sessions, so
+keyed on `connected` they drew the identical green connected glyph — §2.2's "MUST NOT present a
+stronger claim for a weaker configuration", arrived at through an icon.
+
+**One §13.5 surface gap remains, and it is a scope ruling rather than an oversight.** The `WebSAS`
+renders in the desktop node menu only. `AGENTS.md` freezes the `apps/web` phone tier — "Do not
+extend the web phone tier" — and mounting a new block inside the phone connection sheet is a new
+phone-tier surface. The phone tier is therefore TRUTHFUL but offers no comparison aid: it carries
+the same state-keyed disclosure and the same guarantee-keyed glyph as the desktop tier, and it
+claims nothing the absent code would have qualified. `apps/mobile` is the intended phone experience
+and ships the native §13 trust surfaces. Unfreezing the web phone tier to add the `WebSAS` is a
+separate approved change.
 
 ## Still outstanding beyond this document
 
