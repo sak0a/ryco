@@ -47,6 +47,13 @@ syncDocumentVisualViewportInsets();
 // reduced motion — without ever writing a stored value.
 syncAppearancePreferenceEnvironment();
 
+// Liquid-glass refraction on floating glass popups (menus, model picker,
+// command palette). Chromium only; no-ops under reduced transparency,
+// forced colors, coarse pointers, and the Solid material step.
+void import("./lib/liquidGlass").then(({ installLiquidGlassEnhancer }) =>
+  installLiquidGlassEnhancer(),
+);
+
 document.title = APP_DISPLAY_NAME;
 
 if (hostedPwaLifecycle) {

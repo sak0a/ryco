@@ -119,6 +119,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { resolveShortcutCommand, shouldIgnoreGlobalNavigationShortcut } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { ComposerLiquidGlass } from "./ComposerLiquidGlass";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashPicker } from "./ComposerStashPicker";
 import { PendingContextHandoffChip } from "./PendingContextHandoffChip";
@@ -2320,6 +2321,7 @@ export const ChatComposer = memo(
               setIsComposerFocused(true);
             }}
           >
+            <ComposerLiquidGlass hostRef={composerSurfaceRef} />
             {!isComposerCollapsedMobile &&
               (activePendingApproval ? (
                 <div className="rounded-t-[max(0px,calc(var(--radius-3xl)-3px))] border-b border-border/65 bg-muted/20">

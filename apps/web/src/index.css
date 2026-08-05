@@ -651,6 +651,102 @@ code {
       var(--app-chrome-background);
   }
 
+  /* Experimental composer liquid glass (ComposerLiquidGlass.tsx). When the
+     layer is active, the host's plate and blur move onto the empty warp
+     layer beneath the content — in Chromium the warp also carries the SVG
+     displacement filter, refracting the backdrop at the rim. Double bezel:
+     two 1px gradient rims via mask-composite, one screen glint, one overlay
+     contrast ring, angle driven by the pointer. */
+  /* The liquid material lives entirely on the host: thin plate + a
+     backdrop-filter chain the component composes per engine (Chromium:
+     url(#sdf-displacement) blur saturate — the backdrop is refracted at the
+     rim, then frosted; others: plain heavy frost). Child layers cannot carry
+     the frost here — backdrop-filter on descendants of this subtree does not
+     composite in current Chromium — which is why the filter must ride the
+     host itself. Content stays sharp: backdrop-filter never touches the
+     element's own painting. */
+  [data-liquid-glass="true"] {
+    position: relative;
+    background: color-mix(in srgb, var(--card) 52%, transparent) !important;
+    -webkit-backdrop-filter: var(--composer-liquid-backdrop, blur(24px) saturate(185%)) !important;
+    backdrop-filter: var(--composer-liquid-backdrop, blur(24px) saturate(185%)) !important;
+  }
+
+  .dark [data-liquid-glass="true"] {
+    background: color-mix(in srgb, var(--card) 40%, transparent) !important;
+  }
+
+  /* Sheen and bezel rings paint above static content; the real children are
+     lifted one layer up so text and controls always sit on top. */
+  [data-liquid-glass="true"] > :not(.liquid-glass-sheen):not(.liquid-glass-ring):not(svg) {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Specular sheen: unfiltered sibling so it never gets displaced. */
+  .liquid-glass-sheen {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background:
+      linear-gradient(165deg, rgb(255 255 255 / 0.5), transparent 38%),
+      radial-gradient(120% 90% at 50% -30%, rgb(255 255 255 / 0.35), transparent 60%);
+  }
+
+  .dark .liquid-glass-sheen {
+    background:
+      linear-gradient(165deg, rgb(255 255 255 / 0.09), transparent 38%),
+      radial-gradient(120% 90% at 50% -30%, rgb(255 255 255 / 0.1), transparent 60%);
+  }
+
+  /* Enhancer-injected sheen paints above popup/dialog content (their children
+     are not lifted like the composer's), so it stays a whisper. */
+  .liquid-glass-sheen--subtle {
+    background: linear-gradient(170deg, rgb(255 255 255 / 0.16), transparent 34%);
+  }
+
+  .dark .liquid-glass-sheen--subtle {
+    background: linear-gradient(170deg, rgb(255 255 255 / 0.05), transparent 34%);
+  }
+
+  .liquid-glass-ring {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    border-radius: inherit;
+    padding: 1px;
+    pointer-events: none;
+    background: linear-gradient(
+      var(--lg-bezel-angle, 135deg),
+      transparent 8%,
+      rgb(255 255 255 / 0.5) 36%,
+      transparent 60%,
+      rgb(255 255 255 / 0.26) 92%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    mix-blend-mode: screen;
+    opacity: 0.5;
+  }
+
+  .liquid-glass-ring--overlay {
+    background: linear-gradient(
+      calc(var(--lg-bezel-angle, 135deg) + 180deg),
+      transparent 16%,
+      rgb(255 255 255 / 0.2) 55%,
+      transparent 90%
+    );
+    mix-blend-mode: overlay;
+    opacity: 0.9;
+  }
+
   /* Chrome-layer panels: the desktop sidebar and bars. Same architecture as
      the popover glass — plate with a legibility floor + step-driven filter —
      tuned more opaque because these are large, text-dense, always-on
