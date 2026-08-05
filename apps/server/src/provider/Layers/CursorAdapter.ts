@@ -19,6 +19,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeRequestId,
+  type RuntimeSessionId,
   type RuntimeMode,
   type ThreadId,
   TurnId,
@@ -67,6 +68,7 @@ import {
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
+import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
 import { applyCursorAcpModelSelection, makeCursorAcpRuntime } from "../acp/CursorAcpSupport.ts";
 import {
   CursorAskQuestionRequest,
@@ -335,8 +337,15 @@ export function makeCursorAdapter(
     const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.make(id));
     const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
-    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
-      PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
+    const offerRuntimeEventForRuntime = (
+      runtimeSessionId: RuntimeSessionId,
+      event: ProviderRuntimeEvent,
+    ) => {
+      return PubSub.publish(
+        runtimeEventPubSub,
+        stampRuntimeEvent(event, { providerInstanceId: boundInstanceId, runtimeSessionId }),
+      ).pipe(Effect.asVoid);
+    };
 
     const offerAcpSubagentRuntimeEvents = Effect.fn("offerAcpSubagentRuntimeEvents")(function* (
       ctx: CursorSessionContext,
@@ -350,7 +359,7 @@ export function makeCursorAdapter(
       const subagentId = String(subagentState.subagent.subagentId);
       if (!ctx.startedSubagentIds.has(subagentId)) {
         ctx.startedSubagentIds.add(subagentId);
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
           type: "subagent.started",
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
@@ -376,7 +385,7 @@ export function makeCursorAdapter(
           return;
         }
         ctx.completedSubagentIds.add(subagentId);
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
           type: "subagent.completed",
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
@@ -396,7 +405,7 @@ export function makeCursorAdapter(
         return;
       }
 
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
         type: "subagent.updated",
         ...(yield* makeEventStamp()),
         provider: PROVIDER,
@@ -482,7 +491,8 @@ export function makeCursorAdapter(
           return;
         }
         ctx.lastPlanFingerprint = fingerprint;
-        yield* offerRuntimeEvent(
+        yield* offerRuntimeEventForRuntime(
+          ctx.session.runtimeSessionId!,
           makeAcpPlanUpdatedEvent({
             stamp: yield* makeEventStamp(),
             provider: PROVIDER,
@@ -519,7 +529,7 @@ export function makeCursorAdapter(
         }
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
         sessions.delete(ctx.threadId);
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
           type: "session.exited",
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
@@ -539,6 +549,17 @@ export function makeCursorAdapter(
               issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
             });
           }
+          if (
+            input.providerInstanceId !== undefined &&
+            input.providerInstanceId !== boundInstanceId
+          ) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: `Expected provider instance '${boundInstanceId}' but received '${input.providerInstanceId}'.`,
+            });
+          }
+          const runtimeSessionId = yield* requireRuntimeSessionId(PROVIDER, input);
           if (!input.cwd?.trim()) {
             return yield* new ProviderAdapterValidationError({
               provider: PROVIDER,
@@ -552,7 +573,14 @@ export function makeCursorAdapter(
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const existing = sessions.get(input.threadId);
           if (existing && !existing.stopped) {
-            yield* stopSessionInternal(existing);
+            if (existing.session.runtimeSessionId === runtimeSessionId) {
+              return existing.session;
+            }
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: `Thread '${input.threadId}' still has runtime '${existing.session.runtimeSessionId ?? "legacy"}'; stop it before starting '${runtimeSessionId}'.`,
+            });
           }
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
@@ -564,7 +592,10 @@ export function makeCursorAdapter(
           );
           let ctx!: CursorSessionContext;
 
-          const resumeSessionId = parseCursorResume(input.resumeCursor)?.sessionId;
+          const resumeSessionId =
+            input.resumePolicy === "fresh"
+              ? undefined
+              : parseCursorResume(input.resumeCursor)?.sessionId;
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
@@ -616,7 +647,7 @@ export function makeCursorAdapter(
                 const runtimeRequestId = RuntimeRequestId.make(requestId);
                 const answers = yield* Deferred.make<ProviderUserInputAnswers>();
                 pendingUserInputs.set(requestId, { answers });
-                yield* offerRuntimeEvent({
+                yield* offerRuntimeEventForRuntime(runtimeSessionId, {
                   type: "user-input.requested",
                   ...(yield* makeEventStamp()),
                   provider: PROVIDER,
@@ -632,7 +663,7 @@ export function makeCursorAdapter(
                 });
                 const resolved = yield* Deferred.await(answers);
                 pendingUserInputs.delete(requestId);
-                yield* offerRuntimeEvent({
+                yield* offerRuntimeEventForRuntime(runtimeSessionId, {
                   type: "user-input.resolved",
                   ...(yield* makeEventStamp()),
                   provider: PROVIDER,
@@ -652,7 +683,7 @@ export function makeCursorAdapter(
                   params,
                   "acp.cursor.extension",
                 );
-                yield* offerRuntimeEvent({
+                yield* offerRuntimeEventForRuntime(runtimeSessionId, {
                   type: "turn.proposed.completed",
                   ...(yield* makeEventStamp()),
                   provider: PROVIDER,
@@ -717,7 +748,8 @@ export function makeCursorAdapter(
                   decision,
                   kind: permissionRequest.kind,
                 });
-                yield* offerRuntimeEvent(
+                yield* offerRuntimeEventForRuntime(
+                  runtimeSessionId,
                   makeAcpRequestOpenedEvent({
                     stamp: yield* makeEventStamp(),
                     provider: PROVIDER,
@@ -734,7 +766,8 @@ export function makeCursorAdapter(
                 );
                 const resolved = yield* Deferred.await(decision);
                 pendingApprovals.delete(requestId);
-                yield* offerRuntimeEvent(
+                yield* offerRuntimeEventForRuntime(
+                  runtimeSessionId,
                   makeAcpRequestResolvedEvent({
                     stamp: yield* makeEventStamp(),
                     provider: PROVIDER,
@@ -777,6 +810,7 @@ export function makeCursorAdapter(
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: boundInstanceId,
+            runtimeSessionId,
             status: "ready",
             runtimeMode: input.runtimeMode,
             tokenMode,
@@ -814,7 +848,8 @@ export function makeCursorAdapter(
                   case "ModeChanged":
                     return;
                   case "AssistantItemStarted":
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpAssistantItemEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -826,7 +861,8 @@ export function makeCursorAdapter(
                     );
                     return;
                   case "AssistantItemCompleted":
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpAssistantItemEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -859,7 +895,8 @@ export function makeCursorAdapter(
                       event.rawPayload,
                       "acp.jsonrpc",
                     );
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpToolCallEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -882,7 +919,8 @@ export function makeCursorAdapter(
                       event.rawPayload,
                       "acp.jsonrpc",
                     );
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpContentDeltaEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -901,7 +939,8 @@ export function makeCursorAdapter(
                       event.rawPayload,
                       "acp.jsonrpc",
                     );
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpTokenUsageEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -921,21 +960,21 @@ export function makeCursorAdapter(
           sessions.set(input.threadId, ctx);
           sessionScopeTransferred = true;
 
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEventForRuntime(runtimeSessionId, {
             type: "session.started",
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { resume: started.initializeResult },
           });
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEventForRuntime(runtimeSessionId, {
             type: "session.state.changed",
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { state: "ready", reason: "Cursor ACP session ready" },
           });
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEventForRuntime(runtimeSessionId, {
             type: "thread.started",
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -977,7 +1016,7 @@ export function makeCursorAdapter(
           updatedAt: yield* nowIso,
         };
 
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
           type: "turn.started",
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
@@ -1048,7 +1087,7 @@ export function makeCursorAdapter(
           model: resolvedModel,
         };
 
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
           type: "turn.completed",
           ...(yield* makeEventStamp()),
           provider: PROVIDER,

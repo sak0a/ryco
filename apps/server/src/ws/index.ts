@@ -11,6 +11,7 @@ import { makeProjectHandlers } from "./projectRpc.ts";
 import { makeSourceControlHandlers } from "./sourceControlRpc.ts";
 import { makeProviderHandlers } from "./providerRpc.ts";
 import { makeStatisticsHandlers } from "./statisticsRpc.ts";
+import { makeContextHandoffHandlers } from "./contextHandoffRpc.ts";
 
 export const makeWsRpcLayer = (principal: RpcPrincipal) =>
   WsRpcGroup.toLayer(
@@ -18,6 +19,7 @@ export const makeWsRpcLayer = (principal: RpcPrincipal) =>
       const ctx = yield* makeWsRpcContext(principal);
       return WsRpcGroup.of({
         ...makeOrchestrationHandlers(ctx),
+        ...makeContextHandoffHandlers(ctx),
         ...makeProviderHandlers(ctx),
         ...makeStatisticsHandlers(ctx),
         ...makeSourceControlHandlers(ctx),

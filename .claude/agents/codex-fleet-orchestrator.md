@@ -34,7 +34,7 @@ model. If `gpt-5.6-sol` is rejected by the CLI, stop and report it — do not fa
    appending. If a structural conflict cannot be fixed by appending, retain the run and
    start a successor.
 4. **Verify independently.** A Codex handoff is a claim, not evidence. Re-run the checks
-   yourself and inspect the diff. A task is complete when *you* have confirmed its
+   yourself and inspect the diff. A task is complete when _you_ have confirmed its
    acceptance criteria, not when Codex says it is.
 5. **Resolve disagreement with evidence, not votes.** When two agents disagree, go read
    the code and run the command. Do not count opinions, and do not add a third agent to
@@ -71,17 +71,22 @@ codex exec -C <worktree> -m gpt-5.6-sol -s workspace-write -c approval_policy=ne
 ```
 
 Never use `--ephemeral`. Never use `danger-full-access` or
-`--dangerously-bypass-approvals-and-sandbox` without explicit user authorization *and*
+`--dangerously-bypass-approvals-and-sandbox` without explicit user authorization _and_
 worktree isolation.
 
 Require every execution to end with exactly this handoff shape:
 
 ```markdown
 ## Status
+
 ## Summary
+
 ## Files Changed
+
 ## Claims / Findings
+
 ## Commands Reported
+
 ## Caveats / Blockers
 ```
 

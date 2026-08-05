@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   ApprovalRequestId,
   CommandId,
+  ContextHandoffActivityPayload,
   defaultInstanceIdForDriver,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_MODEL,
@@ -14,12 +15,16 @@ import {
   ProviderDriverKind,
   ThreadId,
   ModelSelection,
+  type OrchestrationThread,
   ProviderInstanceId,
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Option, Schema } from "effect";
 
-import type { TestTurnResponse } from "./TestProviderAdapter.integration.ts";
+import type {
+  TestProviderAdapterHarness,
+  TestTurnResponse,
+} from "./TestProviderAdapter.integration.ts";
 import {
   gitRefExists,
   gitShowFileAtRef,
@@ -110,6 +115,29 @@ function withRealCodexHarness<A, E>(
     use,
     (harness) => harness.dispose,
   ).pipe(Effect.provide(NodeServices.layer));
+}
+
+function withContextHandoffHarness<A, E>(
+  use: (harness: OrchestrationIntegrationHarness) => Effect.Effect<A, E>,
+) {
+  return Effect.acquireUseRelease(
+    makeOrchestrationIntegrationHarness({
+      providers: [CODEX_PROVIDER, CLAUDE_AGENT_PROVIDER, ProviderDriverKind.make("grok")],
+    }),
+    use,
+    (harness) => harness.dispose,
+  ).pipe(Effect.provide(NodeServices.layer));
+}
+
+function completedContextHandoffs(thread: OrchestrationThread) {
+  const decode = Schema.decodeUnknownOption(ContextHandoffActivityPayload);
+  return thread.activities.flatMap((activity) => {
+    if (activity.kind !== "context-handoff") return [];
+    return Option.match(decode(activity.payload), {
+      onNone: () => [],
+      onSome: (payload) => (payload.status === "consumed" ? [payload] : []),
+    });
+  });
 }
 
 const seedProjectAndThread = (harness: OrchestrationIntegrationHarness) =>
@@ -257,6 +285,209 @@ it.live("runs a single turn end-to-end and persists checkpoint state in sqlite +
       assert.equal(gitRefExists(harness.workspaceDir, ref1), true);
       assert.equal(gitShowFileAtRef(harness.workspaceDir, ref0, "README.md"), "v1\n");
       assert.equal(gitShowFileAtRef(harness.workspaceDir, ref1, "README.md"), "v1\n");
+    }),
+  ),
+);
+
+it.live("hands one canonical thread from Codex to Claude to Grok and back to fresh Codex", () =>
+  withContextHandoffHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+
+      const adapterFor = (provider: ProviderDriverKind) => {
+        const adapter = harness.adapterHarnesses.find((entry) => entry.provider === provider);
+        if (!adapter) throw new Error(`Missing integration adapter for ${provider}`);
+        return adapter;
+      };
+      const codex = adapterFor(CODEX_PROVIDER);
+      const claude = adapterFor(CLAUDE_AGENT_PROVIDER);
+      const grokProvider = ProviderDriverKind.make("grok");
+      const grok = adapterFor(grokProvider);
+      const selectionFor = (provider: ProviderDriverKind): ModelSelection => ({
+        instanceId: defaultInstanceIdForDriver(provider),
+        model: DEFAULT_MODEL_BY_PROVIDER[provider] ?? DEFAULT_MODEL,
+      });
+      const completedResponse: TestTurnResponse = {
+        events: [
+          {
+            type: "turn.started",
+            ...runtimeBase("context-turn-started", nowIso()),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+          },
+          {
+            type: "turn.completed",
+            ...runtimeBase("context-turn-completed", nowIso()),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            status: "completed",
+          },
+        ],
+      };
+      const waitForIdleTurn = (
+        phase: string,
+        userMessageCount: number,
+        handoffCount: number,
+        adapter: TestProviderAdapterHarness,
+        sentTurnCount: number,
+      ) =>
+        harness
+          .waitForThread(
+            THREAD_ID,
+            (thread) =>
+              thread.session?.status === "ready" &&
+              thread.latestTurn?.state === "completed" &&
+              thread.messages.filter((message) => message.role === "user").length ===
+                userMessageCount &&
+              completedContextHandoffs(thread).length === handoffCount &&
+              adapter.getSentTurns().length === sentTurnCount &&
+              thread.checkpoints.some(
+                (checkpoint) => checkpoint.checkpointTurnCount === userMessageCount,
+              ),
+            5_000,
+          )
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.gen(function* () {
+                const snapshot = yield* harness.snapshotQuery.getSnapshot();
+                const thread = snapshot.threads.find((entry) => entry.id === THREAD_ID);
+                const records = yield* harness.contextHandoffRepository.listByThread({
+                  threadId: THREAD_ID,
+                });
+                yield* Effect.logError("context handoff integration wait failed", {
+                  phase,
+                  sessionStatus: thread?.session?.status,
+                  sessionProvider: thread?.session?.providerName,
+                  latestTurnState: thread?.latestTurn?.state,
+                  handoffStatuses: records.map((record) => ({
+                    status: record.status,
+                    error: record.error,
+                  })),
+                  grokStarts: grok.getStartCount(),
+                  grokSends: grok.getSentTurns().length,
+                });
+                return yield* Effect.failCause(cause);
+              }),
+            ),
+          );
+
+      yield* codex.queueTurnResponseForNextSession(completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-a1-first",
+        messageId: "msg-context-a1-first",
+        text: "A1 first turn",
+      });
+      yield* waitForIdleTurn("a1-first", 1, 0, codex, 1);
+
+      yield* codex.queueTurnResponse(THREAD_ID, completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-a1-second",
+        messageId: "msg-context-a1-second",
+        text: "A1 ordinary second turn",
+      });
+      yield* waitForIdleTurn("a1-second", 2, 0, codex, 2);
+
+      const bMessage = "  Claude handoff message 👩🏽‍💻  ";
+      yield* claude.queueTurnResponseForNextSession(completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-b1-first",
+        messageId: "msg-context-b1-first",
+        text: bMessage,
+        modelSelection: selectionFor(CLAUDE_AGENT_PROVIDER),
+      });
+      yield* waitForIdleTurn("b1-first", 3, 1, claude, 1);
+
+      yield* claude.queueTurnResponse(THREAD_ID, completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-b1-second",
+        messageId: "msg-context-b1-second",
+        text: "B1 ordinary second turn",
+      });
+      yield* waitForIdleTurn("b1-second", 4, 1, claude, 2);
+
+      const cMessage = "Grok handoff message";
+      yield* grok.queueTurnResponseForNextSession(completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-c1-first",
+        messageId: "msg-context-c1-first",
+        text: cMessage,
+        modelSelection: selectionFor(grokProvider),
+      });
+      yield* waitForIdleTurn("c1-first", 5, 2, grok, 1);
+
+      yield* grok.queueTurnResponse(THREAD_ID, completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-c1-second",
+        messageId: "msg-context-c1-second",
+        text: "C1 ordinary second turn",
+      });
+      yield* waitForIdleTurn("c1-second", 6, 2, grok, 2);
+
+      const a2Message = "Codex fresh-epoch return";
+      yield* codex.queueTurnResponseForNextSession(completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-a2-first",
+        messageId: "msg-context-a2-first",
+        text: a2Message,
+        modelSelection: selectionFor(CODEX_PROVIDER),
+      });
+      const finalHandoffThread = yield* waitForIdleTurn("a2-first", 7, 3, codex, 3);
+
+      yield* codex.queueTurnResponse(THREAD_ID, completedResponse);
+      yield* startTurn({
+        harness,
+        commandId: "cmd-context-a2-second",
+        messageId: "msg-context-a2-second",
+        text: "A2 ordinary second turn",
+      });
+      yield* waitForIdleTurn("a2-second", 8, 3, codex, 4);
+
+      const startedRuntimeSessionIds = [
+        ...codex.getStartedRuntimeSessionIds(),
+        ...claude.getStartedRuntimeSessionIds(),
+        ...grok.getStartedRuntimeSessionIds(),
+      ];
+      assert.equal(startedRuntimeSessionIds.length, 4);
+      assert.equal(new Set(startedRuntimeSessionIds).size, 4);
+
+      const records = yield* harness.contextHandoffRepository.listByThread({
+        threadId: THREAD_ID,
+      });
+      assert.equal(records.length, 3);
+      assert.equal(
+        records.every((record) => record.status === "consumed"),
+        true,
+      );
+      assert.equal(
+        records.every((record) => record.structuredContext !== null),
+        true,
+      );
+      assert.equal(completedContextHandoffs(finalHandoffThread).length, 3);
+
+      const claudeTurns = claude.getSentTurns();
+      const grokTurns = grok.getSentTurns();
+      const codexTurns = codex.getSentTurns();
+      const assertHandoffInput = (input: string, exactMessage: string) => {
+        assert.equal((input.match(/<context_handoff /g) ?? []).length, 1);
+        assert.equal(
+          input.endsWith(`<current_user_message>\n${exactMessage}\n</current_user_message>`),
+          true,
+        );
+      };
+      assertHandoffInput(claudeTurns[0]!.input ?? "", bMessage);
+      assertHandoffInput(grokTurns[0]!.input ?? "", cMessage);
+      assertHandoffInput(codexTurns[2]!.input ?? "", a2Message);
+      assert.equal(claudeTurns[1]!.input, "B1 ordinary second turn");
+      assert.equal(grokTurns[1]!.input, "C1 ordinary second turn");
+      assert.equal(codexTurns[1]!.input, "A1 ordinary second turn");
+      assert.equal(codexTurns[3]!.input, "A2 ordinary second turn");
     }),
   ),
 );

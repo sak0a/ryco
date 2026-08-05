@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
 import { AtlassianSaveProjectLinkInput } from "./atlassian.ts";
-import { ORCHESTRATION_WS_METHODS } from "./orchestration.ts";
+import { CONTEXT_HANDOFF_WS_METHODS, ORCHESTRATION_WS_METHODS } from "./orchestration.ts";
 import { WS_METHODS } from "./rpc.ts";
 import { StatisticsSnapshot } from "./statistics.ts";
 import { WorkItemGetInput } from "./workItems.ts";
@@ -29,6 +29,16 @@ describe("WS_METHODS Atlassian and work item names", () => {
     expect(ORCHESTRATION_WS_METHODS.searchThreadMessages).toBe(
       "orchestration.searchThreadMessages",
     );
+    expect(CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary).toBe(
+      "contextHandoff.getInspectionSummary",
+    );
+    expect(CONTEXT_HANDOFF_WS_METHODS.listInspectionEntries).toBe(
+      "contextHandoff.listInspectionEntries",
+    );
+    expect(CONTEXT_HANDOFF_WS_METHODS.readRawPayloadChunk).toBe(
+      "contextHandoff.readRawPayloadChunk",
+    );
+    expect(CONTEXT_HANDOFF_WS_METHODS.readExportChunk).toBe("contextHandoff.readExportChunk");
     expect(WS_METHODS.workItemsListProjects).toBe("workItems.listProjects");
     expect(WS_METHODS.workItemsList).toBe("workItems.list");
     expect(WS_METHODS.workItemsUpdate).toBe("workItems.update");

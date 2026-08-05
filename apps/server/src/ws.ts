@@ -23,9 +23,17 @@ import { respondToAuthError } from "./auth/http.ts";
 import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { makeWsRpcLayer } from "./ws/index.ts";
 import { directRpcPrincipal, type RpcPrincipal } from "./ws/RpcPrincipal.ts";
+import { ContextHandoffInspectionLive } from "./orchestration/Layers/ContextHandoffInspection.ts";
+import { ContextHandoffRepositoryLive } from "./persistence/Layers/ContextHandoffs.ts";
 
 export const makeServerWsRpcLayer = (principal: RpcPrincipal) =>
   makeWsRpcLayer(principal).pipe(
+    Layer.provide(
+      ContextHandoffInspectionLive.pipe(
+        Layer.provide(ContextHandoffRepositoryLive),
+        Layer.provide(SqlitePersistenceLayerLive),
+      ),
+    ),
     Layer.provideMerge(RpcSerialization.layerJson),
     Layer.provide(ProviderMaintenanceRunner.layer),
     Layer.provide(

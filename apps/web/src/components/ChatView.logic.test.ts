@@ -17,18 +17,143 @@ import {
   buildExpiredTerminalContextToastCopy,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  deriveProviderSelectionPolicy,
   hasServerAcknowledgedLocalDispatch,
+  normalizeInteractionModeForProviderTarget,
   reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
   resolveChatSendWorktreePlan,
   shouldShowNewThreadSurface,
   buildChatSendTitleSeed,
   shouldWriteThreadErrorToCurrentServerThread,
+  selectionAllowedAtSendBoundary,
   threadIsPromotedAndPersisted,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
+
+const idleProviderSelectionPolicyInput = {
+  threadStarted: true,
+  canonicalProvider: ProviderDriverKind.make("codex"),
+  phase: "ready" as const,
+  orchestrationStatus: "idle" as const,
+  isConnecting: false,
+  isSendBusy: false,
+  isPreparingWorktree: false,
+  hasPendingApproval: false,
+  hasPendingUserInput: false,
+  hasQueuedMessage: false,
+  isRevertingCheckpoint: false,
+  mutationAllowed: true,
+  environmentAvailable: true,
+  isPhoneTier: false,
+};
+
+describe("deriveProviderSelectionPolicy", () => {
+  it("exposes every ready provider on a started, truly idle desktop thread", () => {
+    expect(deriveProviderSelectionPolicy(idleProviderSelectionPolicyInput)).toEqual({
+      mode: "all-ready",
+      lockedProvider: null,
+      reason: null,
+    });
+  });
+
+  it("keeps empty threads configurable even before mutation state is ready", () => {
+    expect(
+      deriveProviderSelectionPolicy({
+        ...idleProviderSelectionPolicyInput,
+        threadStarted: false,
+        mutationAllowed: false,
+        environmentAvailable: false,
+        isPhoneTier: true,
+      }),
+    ).toEqual({ mode: "all-ready", lockedProvider: null, reason: null });
+  });
+
+  it.each([
+    ["running", { phase: "running" as const }],
+    ["starting", { orchestrationStatus: "starting" as const }],
+    ["connecting", { phase: "connecting" as const }],
+    ["local-dispatch", { isSendBusy: true }],
+    ["worktree-preparation", { isPreparingWorktree: true }],
+    ["pending-approval", { hasPendingApproval: true }],
+    ["pending-input", { hasPendingUserInput: true }],
+    ["queued-message", { hasQueuedMessage: true }],
+    ["checkpoint-revert", { isRevertingCheckpoint: true }],
+    ["mutation-unavailable", { mutationAllowed: false }],
+    ["environment-unavailable", { environmentAvailable: false }],
+    ["phone-tier", { isPhoneTier: true }],
+  ] as const)("uses continuation-only mode for %s", (reason, override) => {
+    expect(
+      deriveProviderSelectionPolicy({
+        ...idleProviderSelectionPolicyInput,
+        ...override,
+      }),
+    ).toEqual({
+      mode: "continuation-only",
+      lockedProvider: ProviderDriverKind.make("codex"),
+      reason,
+    });
+  });
+});
+
+describe("selectionAllowedAtSendBoundary", () => {
+  const canonicalSelection = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-5",
+    options: [{ id: "reasoningEffort", value: "medium" }],
+  };
+  const busyPolicy = deriveProviderSelectionPolicy({
+    ...idleProviderSelectionPolicyInput,
+    isSendBusy: true,
+  });
+
+  it("rejects an instance handoff but allows a same-instance model change when busy", () => {
+    expect(
+      selectionAllowedAtSendBoundary({
+        threadStarted: true,
+        policy: busyPolicy,
+        canonicalSelection,
+        targetSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-sonnet-4-6",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      selectionAllowedAtSendBoundary({
+        threadStarted: true,
+        policy: busyPolicy,
+        canonicalSelection,
+        targetSelection: { ...canonicalSelection, model: "gpt-5.1" },
+      }),
+    ).toBe(true);
+  });
+
+  it("allows options-only continuation changes while constrained", () => {
+    const targetSelection = {
+      ...canonicalSelection,
+      options: [{ id: "reasoningEffort", value: "high" }],
+    };
+    expect(
+      selectionAllowedAtSendBoundary({
+        threadStarted: true,
+        policy: busyPolicy,
+        canonicalSelection,
+        targetSelection,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("normalizeInteractionModeForProviderTarget", () => {
+  it("drops Ask when the staged target cannot honor it", () => {
+    expect(normalizeInteractionModeForProviderTarget("ask", false)).toBe("default");
+    expect(normalizeInteractionModeForProviderTarget("ask", true)).toBe("ask");
+    expect(normalizeInteractionModeForProviderTarget("plan", false)).toBe("plan");
+  });
+});
 
 describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {
@@ -322,7 +447,10 @@ const makeThread = (input?: {
   codexThreadId: null,
   projectId: ProjectId.make("project-1"),
   title: "Thread",
-  modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+  modelSelection: {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "gpt-5.4",
+  },
   runtimeMode: "full-access" as const,
   interactionMode: "default" as const,
   session: null,
@@ -626,7 +754,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -663,7 +794,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -709,7 +843,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -752,7 +889,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -795,7 +935,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,
@@ -845,7 +988,10 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
       codexThreadId: null,
       projectId,
       title: "Thread",
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      },
       runtimeMode: "full-access",
       interactionMode: "default",
       session: previousSession,

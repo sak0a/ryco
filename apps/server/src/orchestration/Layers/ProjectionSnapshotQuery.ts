@@ -254,6 +254,7 @@ function mapSessionRow(
     status: row.status,
     providerName: row.providerName,
     ...(row.providerInstanceId !== null ? { providerInstanceId: row.providerInstanceId } : {}),
+    ...(row.runtimeSessionId !== null ? { runtimeSessionId: row.runtimeSessionId } : {}),
     runtimeMode: row.runtimeMode,
     tokenMode: row.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
     activeTurnId: row.activeTurnId,
@@ -483,6 +484,44 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  // The command read model does not need full message history, but it must
+  // retain whether a thread has already accepted a user turn. Otherwise a
+  // process restart makes an established thread look new and a provider/model
+  // change bypasses the atomic context-handoff path.
+  const listFirstUserMessageRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadMessageDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          messages.message_id AS "messageId",
+          messages.thread_id AS "threadId",
+          messages.turn_id AS "turnId",
+          messages.role,
+          messages.text,
+          messages.attachments_json AS "attachments",
+          messages.is_streaming AS "isStreaming",
+          messages.created_at AS "createdAt",
+          messages.updated_at AS "updatedAt"
+        FROM projection_thread_messages messages
+        WHERE messages.role = 'user'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM projection_thread_messages earlier
+            WHERE earlier.thread_id = messages.thread_id
+              AND earlier.role = 'user'
+              AND (
+                earlier.created_at < messages.created_at
+                OR (
+                  earlier.created_at = messages.created_at
+                  AND earlier.message_id < messages.message_id
+                )
+              )
+          )
+        ORDER BY messages.thread_id ASC
+      `,
+  });
+
   const listThreadProposedPlanRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadProposedPlanDbRowSchema,
@@ -526,6 +565,40 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  // Idle-only command invariants need the lifecycle pairs that can block a
+  // handoff even after restart. Keep this intentionally narrow instead of
+  // hydrating arbitrary activity history into the command read model.
+  const listActionableThreadActivityRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE kind IN (
+          'approval.requested',
+          'approval.resolved',
+          'user-input.requested',
+          'user-input.resolved',
+          'context-handoff'
+        )
+        ORDER BY
+          thread_id ASC,
+          sequence ASC,
+          created_at ASC,
+          activity_id ASC
+      `,
+  });
+
   const listThreadSessionRows = SqlSchema.findAll({
     Request: Schema.Void,
     Result: ProjectionThreadSessionDbRowSchema,
@@ -536,6 +609,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           status,
           provider_name AS "providerName",
           provider_instance_id AS "providerInstanceId",
+          runtime_session_id AS "runtimeSessionId",
           provider_session_id AS "providerSessionId",
           provider_thread_id AS "providerThreadId",
           runtime_mode AS "runtimeMode",
@@ -861,6 +935,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           status,
           provider_name AS "providerName",
           provider_instance_id AS "providerInstanceId",
+          runtime_session_id AS "runtimeSessionId",
           runtime_mode AS "runtimeMode",
           token_mode AS "tokenMode",
           active_turn_id AS "activeTurnId",
@@ -1148,6 +1223,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   ...(row.providerInstanceId !== null
                     ? { providerInstanceId: row.providerInstanceId }
                     : {}),
+                  ...(row.runtimeSessionId !== null
+                    ? { runtimeSessionId: row.runtimeSessionId }
+                    : {}),
                   runtimeMode: row.runtimeMode,
                   tokenMode: row.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
                   activeTurnId: row.activeTurnId,
@@ -1251,6 +1329,22 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listFirstUserMessageRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listFirstUserMessages:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listFirstUserMessages:decodeRows",
+              ),
+            ),
+          ),
+          listActionableThreadActivityRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listActionableThreadActivities:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listActionableThreadActivities:decodeRows",
+              ),
+            ),
+          ),
           listThreadProposedPlanRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1291,6 +1385,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             projectRows,
             worktreeRows,
             threadRows,
+            firstUserMessageRows,
+            actionableActivityRows,
             proposedPlanRows,
             sessionRows,
             latestTurnRows,
@@ -1301,6 +1397,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               const projects: OrchestrationProject[] = [];
               const worktrees: OrchestrationWorktreeShell[] = [];
               const threads: OrchestrationThread[] = [];
+              const firstUserMessageByThread = new Map<string, OrchestrationMessage>();
+              const actionableActivitiesByThread = new Map<
+                string,
+                Array<OrchestrationThreadActivity>
+              >();
 
               for (let index = 0; index < projectRows.length; index += 1) {
                 const row = projectRows[index];
@@ -1334,6 +1435,42 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 }
                 updatedAt = maxIso(updatedAt, row.updatedAt);
                 worktrees.push(toWorktreeShell(row));
+              }
+              for (let index = 0; index < firstUserMessageRows.length; index += 1) {
+                const row = firstUserMessageRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt);
+                firstUserMessageByThread.set(row.threadId, {
+                  id: row.messageId,
+                  role: row.role,
+                  text: row.text,
+                  ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+                  turnId: row.turnId,
+                  streaming: row.isStreaming === 1,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                });
+              }
+              for (let index = 0; index < actionableActivityRows.length; index += 1) {
+                const row = actionableActivityRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.createdAt);
+                const activities = actionableActivitiesByThread.get(row.threadId) ?? [];
+                activities.push({
+                  id: row.activityId,
+                  tone: row.tone,
+                  kind: row.kind,
+                  summary: row.summary,
+                  payload: row.payload,
+                  turnId: row.turnId,
+                  ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+                  createdAt: row.createdAt,
+                });
+                actionableActivitiesByThread.set(row.threadId, activities);
               }
               for (let index = 0; index < proposedPlanRows.length; index += 1) {
                 const row = proposedPlanRows[index];
@@ -1422,9 +1559,11 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   updatedAt: row.updatedAt,
                   archivedAt: row.archivedAt,
                   deletedAt: row.deletedAt,
-                  messages: [],
+                  messages: firstUserMessageByThread.has(row.threadId)
+                    ? [firstUserMessageByThread.get(row.threadId)!]
+                    : [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-                  activities: [],
+                  activities: actionableActivitiesByThread.get(row.threadId) ?? [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
                 });

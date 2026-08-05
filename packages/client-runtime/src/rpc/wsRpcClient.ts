@@ -5,6 +5,7 @@ import {
   type VcsStatusResult,
   type VcsStatusStreamEvent,
   type LocalApi,
+  CONTEXT_HANDOFF_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
   type OpinionatedPluginCheckInput,
   type OpinionatedPluginInstallInput,
@@ -256,6 +257,18 @@ export interface WsRpcClient {
     >;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
+  };
+  readonly contextHandoff: {
+    readonly getInspectionSummary: RpcUnaryMethod<
+      typeof CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary
+    >;
+    readonly listInspectionEntries: RpcUnaryMethod<
+      typeof CONTEXT_HANDOFF_WS_METHODS.listInspectionEntries
+    >;
+    readonly readRawPayloadChunk: RpcUnaryMethod<
+      typeof CONTEXT_HANDOFF_WS_METHODS.readRawPayloadChunk
+    >;
+    readonly readExportChunk: RpcUnaryMethod<typeof CONTEXT_HANDOFF_WS_METHODS.readExportChunk>;
   };
 }
 
@@ -552,6 +565,22 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           listener,
           { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThread },
         ),
+    },
+    contextHandoff: {
+      getInspectionSummary: (input) =>
+        transport.request((client) =>
+          client[CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary](input),
+        ),
+      listInspectionEntries: (input) =>
+        transport.request((client) =>
+          client[CONTEXT_HANDOFF_WS_METHODS.listInspectionEntries](input),
+        ),
+      readRawPayloadChunk: (input) =>
+        transport.request((client) =>
+          client[CONTEXT_HANDOFF_WS_METHODS.readRawPayloadChunk](input),
+        ),
+      readExportChunk: (input) =>
+        transport.request((client) => client[CONTEXT_HANDOFF_WS_METHODS.readExportChunk](input)),
     },
   };
 }

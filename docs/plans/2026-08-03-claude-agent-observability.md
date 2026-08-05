@@ -27,16 +27,16 @@ Ryco depends on `@anthropic-ai/claude-agent-sdk`, pinned at **0.3.159** (`bun.lo
 
 `query()` yields `SDKMessage`. The observability-relevant variants:
 
-| Message | Fields we want |
-| --- | --- |
-| `SDKTaskStartedMessage` | `task_id`, `tool_use_id`, `description`, `task_type` (`local_bash` \| `local_agent` \| `local_workflow` \| `remote_agent`) |
-| `SDKTaskProgressMessage` | `subagent_type`, `usage{total_tokens, tool_uses, duration_ms}`, `last_tool_name`, `summary` |
-| `SDKTaskUpdatedMessage` | `patch{status, end_time, error, is_backgrounded}` — merge into a map keyed by `task_id` |
-| `SDKBackgroundTasksChangedMessage` | authoritative full live task set on every membership change |
-| `SDKToolProgressMessage` | `tool_use_id`, `tool_name`, `parent_tool_use_id`, `elapsed_time_seconds`, `subagent_type`, `subagent_retry` |
-| `parent_tool_use_id` (assistant/user) | subagent attribution — the basis for a per-subagent transcript |
-| `AgentOutput` via `tool_use_result` | `resolvedModel`, `modelsUsed[]`, `totalTokens`, `totalToolUseCount`, `toolStats{…}`, `worktreePath` |
-| `SDKResultMessage.modelUsage` | per-model `{inputTokens, outputTokens, cacheRead…, costUSD, contextWindow}` — whole-tree accounting |
+| Message                               | Fields we want                                                                                                             |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `SDKTaskStartedMessage`               | `task_id`, `tool_use_id`, `description`, `task_type` (`local_bash` \| `local_agent` \| `local_workflow` \| `remote_agent`) |
+| `SDKTaskProgressMessage`              | `subagent_type`, `usage{total_tokens, tool_uses, duration_ms}`, `last_tool_name`, `summary`                                |
+| `SDKTaskUpdatedMessage`               | `patch{status, end_time, error, is_backgrounded}` — merge into a map keyed by `task_id`                                    |
+| `SDKBackgroundTasksChangedMessage`    | authoritative full live task set on every membership change                                                                |
+| `SDKToolProgressMessage`              | `tool_use_id`, `tool_name`, `parent_tool_use_id`, `elapsed_time_seconds`, `subagent_type`, `subagent_retry`                |
+| `parent_tool_use_id` (assistant/user) | subagent attribution — the basis for a per-subagent transcript                                                             |
+| `AgentOutput` via `tool_use_result`   | `resolvedModel`, `modelsUsed[]`, `totalTokens`, `totalToolUseCount`, `toolStats{…}`, `worktreePath`                        |
+| `SDKResultMessage.modelUsage`         | per-model `{inputTokens, outputTokens, cacheRead…, costUSD, contextWindow}` — whole-tree accounting                        |
 
 Two options gate most of it:
 
@@ -45,7 +45,7 @@ Two options gate most of it:
 - **`agentProgressSummaries: true`** — populates `summary` on `task_progress`.
 
 **The structural gap:** the `Workflow` tool returns immediately with
-`{taskId, runId, scriptPath, transcriptDir, workflowName}` and the entire run is *one*
+`{taskId, runId, scriptPath, transcriptDir, workflowName}` and the entire run is _one_
 background task on the stream. Its member `agent()` calls never appear as SDK messages.
 Recovering them requires reading the run's transcript directory off disk (Phase 5).
 
@@ -225,18 +225,18 @@ Do not try to synthesize streaming for it.
 
 **Size:** S–M · **Blocks:** 4, 5 · **Blocked by:** 2 (sequence, not logic)
 
-Ordered *after* 1–2 deliberately: those two phases work on the pinned version, so we prove
+Ordered _after_ 1–2 deliberately: those two phases work on the pinned version, so we prove
 the pipeline before taking on version risk.
 
 Version thresholds we need:
 
-| Feature | Requires |
-| --- | --- |
-| `Workflow` tool | 0.3.149 (have it) |
-| `resolvedModel` on `AgentOutput` | CC 2.1.174 |
-| `background_tasks_changed` | CC 2.1.203 |
-| `SDKConversationResetMessage` typings | CC 2.1.203 |
-| `modelsUsed`, `subagent_retry`, `heartbeat`, `aborted` | CC 2.1.212–214 |
+| Feature                                                | Requires          |
+| ------------------------------------------------------ | ----------------- |
+| `Workflow` tool                                        | 0.3.149 (have it) |
+| `resolvedModel` on `AgentOutput`                       | CC 2.1.174        |
+| `background_tasks_changed`                             | CC 2.1.203        |
+| `SDKConversationResetMessage` typings                  | CC 2.1.203        |
+| `modelsUsed`, `subagent_retry`, `heartbeat`, `aborted` | CC 2.1.212–214    |
 
 SDK patch number tracks the CLI's: SDK v0.3.191 bundles Claude Code v2.1.191.
 
@@ -287,7 +287,7 @@ is unspecified, and that nothing is emitted at startup. So:
 ### Contract addition
 
 ```ts
-"task.set.changed"  // payload: { tasks: ReadonlyArray<{ taskId, taskType, description }> }
+"task.set.changed"; // payload: { tasks: ReadonlyArray<{ taskId, taskType, description }> }
 ```
 
 Ingestion reconciles: for each known-running subagent whose `providerTaskId` is not in the
@@ -318,7 +318,7 @@ Pure functions, no I/O, fully unit-testable:
   (no variables, calls, spreads or interpolation), so a bounded parse is safe. Return
   `null` on anything unparseable — never throw.
 - `parseWorkflowAgentPlans(source)` → per-`agent()` `{label, phase, model, effort}`. This
-  is the *planned* configuration and is the lowest-precedence source for those fields.
+  is the _planned_ configuration and is the lowest-precedence source for those fields.
 - Cap input size; refuse to parse beyond a fixed byte limit.
 
 ### 5b. `apps/server/src/provider/claudeWorkflowRuntime.ts`
@@ -353,7 +353,7 @@ Hard requirements:
   `{status, taskId, runId, scriptPath, transcriptDir, workflowName, summary, error}`.
   **Check `error` first** — a script that fails its syntax check returns
   `status: "async_launched"` with `error` set and never runs.
-- Read the script from the tool *input* (`script`) or from `scriptPath`; feed 5a.
+- Read the script from the tool _input_ (`script`) or from `scriptPath`; feed 5a.
 - Register the workflow in `liveWorkflowTaskIds`; spawn a poller fiber scoped to the turn;
   interrupt it on settle after one final catch-up read.
 - **Member linkage:** the SDK carries no parent-task linkage. Tag an agent task that
@@ -476,13 +476,13 @@ cost more than the parallelism saved.
 
 ### What genuinely parallelizes
 
-| Track | Phases | Owns |
-| --- | --- | --- |
-| A (serial) | 1 → 2 → 3 → 4 → 5c/5d | `ClaudeAdapter.ts`, `providerRuntime.ts`, ingestion, migrations |
-| B (parallel from start) | 5a, 5b | two brand-new files, pure logic + fs, zero overlap |
-| C (parallel after 1) | 6a | `workflowRunViewModel.ts` — new file, built against fixtures |
-| D (after A reaches 1) | 1's UI slice | `ThreadWorkspacePanel.tsx` |
-| E (after 5 + 6a) | 6b | new components |
+| Track                   | Phases                | Owns                                                            |
+| ----------------------- | --------------------- | --------------------------------------------------------------- |
+| A (serial)              | 1 → 2 → 3 → 4 → 5c/5d | `ClaudeAdapter.ts`, `providerRuntime.ts`, ingestion, migrations |
+| B (parallel from start) | 5a, 5b                | two brand-new files, pure logic + fs, zero overlap              |
+| C (parallel after 1)    | 6a                    | `workflowRunViewModel.ts` — new file, built against fixtures    |
+| D (after A reaches 1)   | 1's UI slice          | `ThreadWorkspacePanel.tsx`                                      |
+| E (after 5 + 6a)        | 6b                    | new components                                                  |
 
 Tracks B and C are the real wins: `claudeWorkflowScript.ts`, `claudeWorkflowRuntime.ts` and
 `workflowRunViewModel.ts` are ~1000 lines of pure, heavily-testable logic that depend only

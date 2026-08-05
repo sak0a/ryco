@@ -34,6 +34,7 @@ import {
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { increment, providerRuntimeStaleEventsTotal } from "../../observability/Metrics.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerCommandId = (
@@ -1687,6 +1688,34 @@ const make = Effect.gen(function* () {
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
+      const activeSession = thread.session;
+      const instanceMatches =
+        activeSession?.providerInstanceId === undefined
+          ? event.providerInstanceId === undefined
+          : event.providerInstanceId === activeSession.providerInstanceId;
+      const runtimeMatches =
+        activeSession?.runtimeSessionId === undefined
+          ? event.runtimeSessionId === undefined
+          : event.runtimeSessionId === activeSession.runtimeSessionId;
+      if (!activeSession || !instanceMatches || !runtimeMatches) {
+        const reason = !activeSession
+          ? "missing-active-session"
+          : !instanceMatches
+            ? "provider-instance-mismatch"
+            : "runtime-session-mismatch";
+        yield* increment(providerRuntimeStaleEventsTotal, {
+          provider: event.provider,
+          eventType: event.type,
+          reason,
+        });
+        yield* Effect.logDebug("provider.runtime-event.stale-dropped", {
+          provider: event.provider,
+          eventType: event.type,
+          reason,
+        });
+        return;
+      }
+
       let loadedThreadDetail: OrchestrationThread | null | undefined;
       const getLoadedThreadDetail = () =>
         Effect.gen(function* () {
@@ -1846,6 +1875,9 @@ const make = Effect.gen(function* () {
               providerName: event.provider,
               ...(event.providerInstanceId !== undefined
                 ? { providerInstanceId: event.providerInstanceId }
+                : {}),
+              ...(event.runtimeSessionId !== undefined
+                ? { runtimeSessionId: event.runtimeSessionId }
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               tokenMode: thread.session?.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
@@ -2187,6 +2219,9 @@ const make = Effect.gen(function* () {
               providerName: event.provider,
               ...(event.providerInstanceId !== undefined
                 ? { providerInstanceId: event.providerInstanceId }
+                : {}),
+              ...(event.runtimeSessionId !== undefined
+                ? { runtimeSessionId: event.runtimeSessionId }
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
               tokenMode: thread.session?.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,

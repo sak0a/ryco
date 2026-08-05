@@ -104,7 +104,12 @@ import { toastManager } from "./ui/toast";
 import { DEFAULT_CLIENT_SETTINGS } from "@ryco/contracts/settings";
 
 vi.mock("../lib/gitStatusState", () => ({
-  useGitStatus: () => ({ data: null, error: null, cause: null, isPending: false }),
+  useGitStatus: () => ({
+    data: null,
+    error: null,
+    cause: null,
+    isPending: false,
+  }),
   useGitStatuses: () => new Map(),
   refreshGitStatus: () => Promise.resolve(null),
   resetGitStatusStateForTests: () => undefined,
@@ -367,6 +372,7 @@ function createMockEnvironmentApi(input: {
       subscribeThread: (() => () =>
         undefined) as EnvironmentApi["orchestration"]["subscribeThread"],
     },
+    contextHandoff: {} as EnvironmentApi["contextHandoff"],
   };
 }
 
@@ -964,7 +970,10 @@ function createSnapshotWithSecondaryProject(options?: {
           id: "thread-secondary-project" as ThreadId,
           projectId: SECOND_PROJECT_ID,
           title: "Release checklist",
-          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5",
+          },
           interactionMode: "default",
           runtimeMode: "full-access",
           branch: "release/docs-portal",
@@ -996,7 +1005,10 @@ function createSnapshotWithSecondaryProject(options?: {
           id: ARCHIVED_SECONDARY_THREAD_ID,
           projectId: SECOND_PROJECT_ID,
           title: "Archived Docs Notes",
-          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5",
+          },
           interactionMode: "default",
           runtimeMode: "full-access",
           branch: "release/docs-archive",
@@ -1032,7 +1044,10 @@ function createSnapshotWithSecondaryProject(options?: {
         title: "Docs Portal",
         workspaceRoot: "/repo/clients/docs-portal",
         projectMetadataDir: ".ryco",
-        defaultModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5",
+        },
         scripts: [],
         createdAt: NOW_ISO,
         updatedAt: NOW_ISO,
@@ -1980,6 +1995,59 @@ function enableComposerStashShortcut(nextFixture: TestFixture): void {
   };
 }
 
+function configureContextHandoffProviders(nextFixture: TestFixture): void {
+  const codex = nextFixture.serverConfig.providers[0];
+  if (!codex) throw new Error("Expected the default Codex provider fixture.");
+  nextFixture.serverConfig = {
+    ...nextFixture.serverConfig,
+    providers: [
+      {
+        ...codex,
+        continuation: { groupKey: "codex:default" },
+        supportsAskMode: true,
+        models: [
+          {
+            slug: "gpt-5",
+            name: "GPT-5",
+            isCustom: false,
+            capabilities: createModelCapabilities({ optionDescriptors: [] }),
+          },
+          {
+            slug: "gpt-5.1",
+            name: "GPT-5.1",
+            isCustom: false,
+            capabilities: createModelCapabilities({ optionDescriptors: [] }),
+          },
+        ],
+      },
+      {
+        driver: ProviderDriverKind.make("claudeAgent"),
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        displayName: "Claude",
+        continuation: { groupKey: "claude:default" },
+        supportsAskMode: false,
+        enabled: true,
+        installed: true,
+        version: "2.1.117",
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt: NOW_ISO,
+        models: [
+          {
+            slug: "claude-sonnet-4-6",
+            name: "Claude Sonnet 4.6",
+            shortName: "Sonnet 4.6",
+            isCustom: false,
+            capabilities: createModelCapabilities({ optionDescriptors: [] }),
+          },
+        ],
+        slashCommands: [],
+        skills: [],
+      },
+    ],
+  };
+}
+
 async function openCommandPaletteFromTrigger(): Promise<void> {
   const trigger = page.getByTestId("command-palette-trigger");
   await expect.element(trigger).toBeInTheDocument();
@@ -2198,7 +2266,14 @@ function createSnapshotWithWorkSurfaceCheckpoint(options: {
                 checkpointTurnCount: 1,
                 checkpointRef: "checkpoint-work-surface-1" as CheckpointRef,
                 status: "ready" as const,
-                files: [{ path: "src/wide.ts", kind: "M", additions: 1, deletions: 1 }],
+                files: [
+                  {
+                    path: "src/wide.ts",
+                    kind: "M",
+                    additions: 1,
+                    deletions: 1,
+                  },
+                ],
                 assistantMessageId: null,
                 completedAt: NOW_ISO,
               },
@@ -2453,9 +2528,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
       expect(localStorage.getItem(PROMPT_STASH_STORAGE_KEY)).toContain("Stashed text");
 
-      usePromptStashStore
-        .getState()
-        .stashEntry(createPromptStashEntry({ id: "newer-picker-entry", prompt: "Other stash" }));
+      usePromptStashStore.getState().stashEntry(
+        createPromptStashEntry({
+          id: "newer-picker-entry",
+          prompt: "Other stash",
+        }),
+      );
       const emptyShortcut = dispatchComposerStashShortcut();
       expect(emptyShortcut.defaultPrevented).toBe(true);
       await waitForElement(
@@ -2803,7 +2881,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       useComposerDraftStore.getState().clearPromptAndImages(THREAD_REF);
       const currentImages = [
-        createBrowserComposerImage({ id: "current-duplicate", name: "duplicate.png" }),
+        createBrowserComposerImage({
+          id: "current-duplicate",
+          name: "duplicate.png",
+        }),
         ...Array.from({ length: 6 }, (_, index) =>
           createBrowserComposerImage({
             id: `current-${index}`,
@@ -3816,7 +3897,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
                 type?: string;
                 bootstrap?: {
                   createThread?: { projectId?: string };
-                  prepareWorktree?: { projectCwd?: string; baseBranch?: string; branch?: string };
+                  prepareWorktree?: {
+                    projectCwd?: string;
+                    baseBranch?: string;
+                    branch?: string;
+                  };
                   runSetupScript?: boolean;
                 };
               }
@@ -3884,7 +3969,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   slug: "claude-opus-4-7",
                   name: "Claude Opus 4.7",
                   isCustom: false,
-                  capabilities: createModelCapabilities({ optionDescriptors: [] }),
+                  capabilities: createModelCapabilities({
+                    optionDescriptors: [],
+                  }),
                 },
               ],
               slashCommands: [],
@@ -3905,7 +3992,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   slug: "claude-opus-4-7",
                   name: "Claude Opus 4.7",
                   isCustom: false,
-                  capabilities: createModelCapabilities({ optionDescriptors: [] }),
+                  capabilities: createModelCapabilities({
+                    optionDescriptors: [],
+                  }),
                 },
               ],
               slashCommands: [],
@@ -4915,7 +5004,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
     try {
       useComposerDraftStore.getState().setPrompt(THREAD_REF, "selected");
       await waitForComposerText("selected");
-      await setComposerSelectionByTextOffsets({ start: 0, end: "selected".length });
+      await setComposerSelectionByTextOffsets({
+        start: 0,
+        end: "selected".length,
+      });
       await pressComposerKey("(");
       await waitForComposerText("(selected)");
 
@@ -4988,7 +5080,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForComposerText("quoted");
-      await setComposerSelectionByTextOffsets({ start: 0, end: "quoted".length });
+      await setComposerSelectionByTextOffsets({
+        start: 0,
+        end: "quoted".length,
+      });
       await pressComposerKey("«");
       await waitForComposerText("«quoted»");
     } finally {
@@ -5009,7 +5104,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
     try {
       await waitForComposerText("quoted");
-      await setComposerSelectionByTextOffsets({ start: 0, end: "quoted".length });
+      await setComposerSelectionByTextOffsets({
+        start: 0,
+        end: "quoted".length,
+      });
       const composerEditor = await waitForComposerEditor();
       composerEditor.focus();
       composerEditor.dispatchEvent(
@@ -6442,7 +6540,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
           if (body.partialPath === "~/Development/codex/") {
             return {
               parentPath: "~/Development/codex/",
-              entries: [{ name: "Codex.app", fullPath: "~/Development/codex/Codex.app" }],
+              entries: [
+                {
+                  name: "Codex.app",
+                  fullPath: "~/Development/codex/Codex.app",
+                },
+              ],
             };
           }
 
@@ -6608,7 +6711,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          expect(remoteBrowseMock).toHaveBeenCalledWith({ partialPath: "~/workspaces/" });
+          expect(remoteBrowseMock).toHaveBeenCalledWith({
+            partialPath: "~/workspaces/",
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -6616,7 +6721,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await page.getByPlaceholder(ADD_PROJECT_SUBMENU_PLACEHOLDER).fill("~/workspaces/");
       await vi.waitFor(
         () => {
-          expect(remoteBrowseMock).toHaveBeenCalledWith({ partialPath: "~/workspaces/" });
+          expect(remoteBrowseMock).toHaveBeenCalledWith({
+            partialPath: "~/workspaces/",
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -6709,7 +6816,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         () => {
-          expect(pickFolder).toHaveBeenCalledWith({ initialPath: "~/Applications" });
+          expect(pickFolder).toHaveBeenCalledWith({
+            initialPath: "~/Applications",
+          });
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -6995,7 +7104,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
   it("creates a new thread from project search when no active project thread exists", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
-      snapshot: createSnapshotWithSecondaryProject({ includeSecondaryThread: false }),
+      snapshot: createSnapshotWithSecondaryProject({
+        includeSecondaryThread: false,
+      }),
       configureFixture: (nextFixture) => {
         nextFixture.serverConfig = {
           ...nextFixture.serverConfig,
@@ -7480,6 +7591,197 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("stages an idle provider target locally and sends it without an unsafe model meta update", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-context-handoff-stage" as MessageId,
+      targetText: "context handoff staging thread",
+    });
+    const thread = snapshot.threads.find((candidate) => candidate.id === THREAD_ID);
+    if (!thread) throw new Error("Expected context handoff thread fixture.");
+    Object.assign(thread, { interactionMode: "ask" as const });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot,
+      configureFixture: configureContextHandoffProviders,
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return { sequence: fixture.snapshot.snapshotSequence + 1 };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const picker = await waitForElement(
+        findComposerProviderModelPicker,
+        "Unable to find provider/model picker for context handoff.",
+      );
+      await picker.click();
+      await page.getByRole("button", { name: "Claude", exact: true }).click();
+      await page.getByText("Sonnet 4.6", { exact: true }).click();
+      await waitForLayout();
+
+      const pendingHandoff = await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-pending-context-handoff="true"]'),
+        "Unable to find the staged context-handoff chip.",
+      );
+      expect(pendingHandoff.textContent).toContain("Next message hands off context");
+      expect(pendingHandoff.textContent).toContain("GPT-5");
+      expect(pendingHandoff.textContent).toContain("Sonnet 4.6");
+      expect(pendingHandoff.textContent).not.toContain("claude-sonnet-4-6");
+      expect(pendingHandoff.querySelector("button")).toBeNull();
+      expect(pendingHandoff.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        document
+          .querySelector<HTMLElement>('[data-chat-composer-mobile-collapsed="false"]')!
+          .getBoundingClientRect().top,
+      );
+
+      expect(
+        wsRequests.some((request) => request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand),
+      ).toBe(false);
+      expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)).toMatchObject({
+        activeProvider: ProviderInstanceId.make("claudeAgent"),
+        modelSelectionByProvider: {
+          claudeAgent: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-sonnet-4-6",
+          },
+        },
+        interactionMode: "default",
+      });
+      expect(useComposerDraftStore.getState().stickyActiveProvider).not.toBe(
+        ProviderInstanceId.make("claudeAgent"),
+      );
+
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Continue on the staged target");
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const turnStart = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          );
+          expect(turnStart).toMatchObject({
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: "claude-sonnet-4-6",
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      expect(document.querySelector('[data-pending-context-handoff="true"]')).toBeNull();
+      expect(
+        wsRequests.some(
+          (request) =>
+            request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+            request.type === "thread.meta.update" &&
+            "modelSelection" in request,
+        ),
+      ).toBe(false);
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("changes models inside the active provider without presenting a context handoff", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-same-provider-model-stage" as MessageId,
+        targetText: "same provider model staging thread",
+      }),
+      configureFixture: configureContextHandoffProviders,
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return { sequence: fixture.snapshot.snapshotSequence + 1 };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const picker = await waitForElement(
+        findComposerProviderModelPicker,
+        "Unable to find provider/model picker for same-provider model change.",
+      );
+      await picker.click();
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+      await page.getByText("GPT-5.1", { exact: true }).click();
+      await waitForLayout();
+
+      expect(document.querySelector('[data-pending-context-handoff="true"]')).toBeNull();
+      expect(useComposerDraftStore.getState().getComposerDraft(THREAD_REF)).toMatchObject({
+        activeProvider: ProviderInstanceId.make("codex"),
+        modelSelectionByProvider: {
+          codex: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.1",
+          },
+        },
+      });
+
+      useComposerDraftStore.getState().setPrompt(THREAD_REF, "Continue with the new Codex model");
+      const sendButton = await waitForSendButton();
+      sendButton.click();
+
+      await vi.waitFor(
+        () => {
+          const turnStart = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          );
+          expect(turnStart).toMatchObject({
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5.1",
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+      expect(document.querySelector('[data-pending-context-handoff="true"]')).toBeNull();
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the frozen web phone picker on the current provider", async () => {
+    const mounted = await mountChatView({
+      viewport: PHONE_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-context-handoff-phone" as MessageId,
+        targetText: "frozen phone provider thread",
+      }),
+      configureFixture: configureContextHandoffProviders,
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      await expandPhoneComposerIfCollapsed();
+      const picker = await waitForElement(
+        findComposerProviderModelPicker,
+        "Unable to find frozen phone provider/model picker.",
+      );
+      await picker.click();
+      await waitForElement(
+        () => document.querySelector('[data-slot="mobile-select-sheet-list"]'),
+        "Unable to find phone model sheet.",
+      );
+
+      expect(document.body.textContent).toContain("GPT-5");
+      expect(document.body.textContent).not.toContain("Claude Sonnet 4.6");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("opens the model picker when selecting /model", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
@@ -7541,7 +7843,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         threads: snapshot.threads.map((thread) =>
           thread.id === THREAD_ID
             ? Object.assign({}, thread, {
-                modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+                modelSelection: {
+                  instanceId: ProviderInstanceId.make("codex"),
+                  model: "gpt-5.4",
+                },
               })
             : thread,
         ),
@@ -7599,7 +7904,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   isCustom: false,
                   capabilities: createModelCapabilities({
                     optionDescriptors: [
-                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                      {
+                        id: "fastMode",
+                        label: "Fast Mode",
+                        type: "boolean" as const,
+                      },
                     ],
                   }),
                 },
@@ -7609,7 +7918,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   isCustom: false,
                   capabilities: createModelCapabilities({
                     optionDescriptors: [
-                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                      {
+                        id: "fastMode",
+                        label: "Fast Mode",
+                        type: "boolean" as const,
+                      },
                     ],
                   }),
                 },
@@ -7619,7 +7932,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
                   isCustom: false,
                   capabilities: createModelCapabilities({
                     optionDescriptors: [
-                      { id: "fastMode", label: "Fast Mode", type: "boolean" as const },
+                      {
+                        id: "fastMode",
+                        label: "Fast Mode",
+                        type: "boolean" as const,
+                      },
                     ],
                   }),
                 },
@@ -7885,7 +8202,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       // (and the approval action row) at roughly 400px — inside the 320-430px
       // range the acceptance criteria target. The shell sizes itself with
       // viewport units, so the container height must match the viewport.
-      await mounted.setContainerSize({ width: 656, height: DEFAULT_VIEWPORT.height });
+      await mounted.setContainerSize({
+        width: 656,
+        height: DEFAULT_VIEWPORT.height,
+      });
 
       const buttons: HTMLElement[] = [];
       for (const label of APPROVAL_ACTION_LABELS) {
@@ -8424,7 +8744,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         once: true,
         capture: true,
       });
-      document.addEventListener("focusin", recordFocusIn, { once: true, capture: true });
+      document.addEventListener("focusin", recordFocusIn, {
+        once: true,
+        capture: true,
+      });
 
       await page.getByTestId("composer-editor").click();
 
@@ -8959,12 +9282,24 @@ describe("ChatView timeline estimator parity (full app)", () => {
     const stopAdapter = syncDocumentVisualViewportInsets();
     try {
       for (const { viewport, keyboardInset, expectTopWithinViewport } of [
-        { viewport: PHONE_VIEWPORT, keyboardInset: 300, expectTopWithinViewport: true },
-        { viewport: NARROW_PHONE_VIEWPORT, keyboardInset: 250, expectTopWithinViewport: true },
+        {
+          viewport: PHONE_VIEWPORT,
+          keyboardInset: 300,
+          expectTopWithinViewport: true,
+        },
+        {
+          viewport: NARROW_PHONE_VIEWPORT,
+          keyboardInset: 250,
+          expectTopWithinViewport: true,
+        },
         // Landscape with the keyboard open leaves less visible height than
         // the clamp allowance; the 4.5rem floor must keep the menu usable
         // instead of collapsing it to 0px, even if its top edge is cropped.
-        { viewport: PHONE_LANDSCAPE_VIEWPORT, keyboardInset: 160, expectTopWithinViewport: false },
+        {
+          viewport: PHONE_LANDSCAPE_VIEWPORT,
+          keyboardInset: 160,
+          expectTopWithinViewport: false,
+        },
       ]) {
         await mounted.setViewport(viewport);
         await expandPhoneComposerIfCollapsed();
@@ -9941,7 +10276,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       // A plan arriving mid-composition must not steal focus into the
       // full-screen overview takeover or close the keyboard.
-      emitPlanSnapshot({ turnId: "turn-plan-live-1", title: "Planned thread", offset: 1 });
+      emitPlanSnapshot({
+        turnId: "turn-plan-live-1",
+        title: "Planned thread",
+        offset: 1,
+      });
       await vi.waitFor(() => {
         expect(threadTitleShown("Planned thread")).toBe(true);
       });
@@ -9962,7 +10301,11 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       // With the composer no longer focused, the next turn's plan auto-opens
       // the overview surface as configured.
-      emitPlanSnapshot({ turnId: "turn-plan-live-2", title: "Planned thread again", offset: 2 });
+      emitPlanSnapshot({
+        turnId: "turn-plan-live-2",
+        title: "Planned thread again",
+        offset: 2,
+      });
       await vi.waitFor(() => {
         expect(threadTitleShown("Planned thread again")).toBe(true);
       });

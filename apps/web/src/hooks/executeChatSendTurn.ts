@@ -155,7 +155,6 @@ export interface SendTurnPersistSettingsDeps {
   persistThreadSettingsForNextTurn: (input: {
     threadId: ThreadId;
     createdAt: string;
-    modelSelection?: ModelSelection;
     runtimeMode: RuntimeMode;
     interactionMode: ProviderInteractionMode;
     tokenMode: AgentTokenMode;
@@ -294,7 +293,9 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
     dispatch;
 
   refs.sendInFlightRef.current = true;
-  beginLocalDispatch({ preparingWorktree: Boolean(worktree.baseBranchForWorktree) });
+  beginLocalDispatch({
+    preparingWorktree: Boolean(worktree.baseBranchForWorktree),
+  });
 
   const imagesSnapshot = [...composer.images];
   const terminalContextsSnapshot = [...composer.sendableTerminalContexts];
@@ -320,7 +321,10 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
   const turnAttachmentsPromise = Promise.all(
     imagesSnapshot.map(async (image) =>
       buildSendTurnDispatchAttachment({
-        attachment: await webAttachmentCodec.encode({ id: image.id, file: image.file }),
+        attachment: await webAttachmentCodec.encode({
+          id: image.id,
+          file: image.file,
+        }),
         name: image.name,
       }),
     ),
@@ -465,7 +469,6 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       outgoingMessageText,
       turnAttachments,
       modelSelection: composer.selectedModelSelection,
-      hasSelectedModel: Boolean(composer.selectedModel),
       runtimeMode: settings.runtimeMode,
       interactionMode: settings.interactionMode,
       tokenMode: settings.tokenMode,

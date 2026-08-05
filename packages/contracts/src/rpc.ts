@@ -77,6 +77,16 @@ import {
 } from "./opinionatedPlugins.ts";
 import {
   ClientOrchestrationCommand,
+  CONTEXT_HANDOFF_WS_METHODS,
+  ContextHandoffExportChunk,
+  ContextHandoffExportChunkInput,
+  ContextHandoffInspectionEntriesInput,
+  ContextHandoffInspectionEntriesPage,
+  ContextHandoffInspectionError,
+  ContextHandoffInspectionSummary,
+  ContextHandoffInspectionSummaryInput,
+  ContextHandoffRawPayloadChunk,
+  ContextHandoffRawPayloadChunkInput,
   ORCHESTRATION_WS_METHODS,
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
@@ -1213,6 +1223,42 @@ export const WsOrchestrationSubscribeThreadRpc = Rpc.make(
   },
 );
 
+export const WsContextHandoffGetInspectionSummaryRpc = Rpc.make(
+  CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary,
+  {
+    payload: ContextHandoffInspectionSummaryInput,
+    success: ContextHandoffInspectionSummary,
+    error: Schema.Union([ContextHandoffInspectionError, AuthRpcError]),
+  },
+);
+
+export const WsContextHandoffListInspectionEntriesRpc = Rpc.make(
+  CONTEXT_HANDOFF_WS_METHODS.listInspectionEntries,
+  {
+    payload: ContextHandoffInspectionEntriesInput,
+    success: ContextHandoffInspectionEntriesPage,
+    error: Schema.Union([ContextHandoffInspectionError, AuthRpcError]),
+  },
+);
+
+export const WsContextHandoffReadRawPayloadChunkRpc = Rpc.make(
+  CONTEXT_HANDOFF_WS_METHODS.readRawPayloadChunk,
+  {
+    payload: ContextHandoffRawPayloadChunkInput,
+    success: ContextHandoffRawPayloadChunk,
+    error: Schema.Union([ContextHandoffInspectionError, AuthRpcError]),
+  },
+);
+
+export const WsContextHandoffReadExportChunkRpc = Rpc.make(
+  CONTEXT_HANDOFF_WS_METHODS.readExportChunk,
+  {
+    payload: ContextHandoffExportChunkInput,
+    success: ContextHandoffExportChunk,
+    error: Schema.Union([ContextHandoffInspectionError, AuthRpcError]),
+  },
+);
+
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
@@ -1352,4 +1398,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationReplayEventsPageRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsContextHandoffGetInspectionSummaryRpc,
+  WsContextHandoffListInspectionEntriesRpc,
+  WsContextHandoffReadRawPayloadChunkRpc,
+  WsContextHandoffReadExportChunkRpc,
 );

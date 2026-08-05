@@ -302,6 +302,37 @@ describe("orchestration projector", () => {
     const thread = afterRunning.threads[0];
     expect(thread?.latestTurn?.turnId).toBe("turn-1");
     expect(thread?.session?.status).toBe("running");
+
+    const afterReady = await Effect.runPromise(
+      projectEvent(
+        afterRunning,
+        makeEvent({
+          sequence: 3,
+          type: "thread.session-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: "2026-02-23T08:00:10.000Z",
+          commandId: "cmd-ready",
+          payload: {
+            threadId: "thread-1",
+            session: {
+              threadId: "thread-1",
+              status: "ready",
+              providerName: "codex",
+              providerSessionId: "session-1",
+              providerThreadId: "provider-thread-1",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-02-23T08:00:10.000Z",
+            },
+          },
+        }),
+      ),
+    );
+
+    expect(afterReady.threads[0]?.latestTurn).toBeNull();
+    expect(afterReady.threads[0]?.session?.status).toBe("ready");
   });
 
   it("updates canonical thread runtime mode from thread.runtime-mode-set", async () => {

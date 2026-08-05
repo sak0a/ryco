@@ -19,6 +19,7 @@ import {
   ProviderDriverKind,
   ThreadId,
   ProviderInstanceId,
+  RuntimeSessionId,
   type ProviderRuntimeEvent,
 } from "@ryco/contracts";
 
@@ -102,6 +103,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       ).pipe(Effect.forkChild);
 
       const session = yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-1"),
         threadId,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
@@ -124,6 +126,14 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* Deferred.await(turnCompleted);
       yield* Fiber.interrupt(runtimeEventsFiber);
+      assert.equal(
+        runtimeEvents.every(
+          (event) =>
+            event.providerInstanceId === ProviderInstanceId.make("grok") &&
+            event.runtimeSessionId === session.runtimeSessionId,
+        ),
+        true,
+      );
       const types = runtimeEvents.map((e) => e.type);
 
       assert.includeMembers(types, [
@@ -170,6 +180,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const adapter = yield* makeTestAdapter(wrapperPath);
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-2"),
         threadId,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
@@ -192,6 +203,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       const error = yield* Effect.flip(
         adapter.startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-grokadapter-3"),
           threadId,
           provider: ProviderDriverKind.make("cursor"),
           cwd: process.cwd(),
@@ -211,6 +223,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const threadId = ThreadId.make("grok-invalid-resume-cursor");
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-4"),
         threadId,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
@@ -230,6 +243,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       for (const resumeCursor of invalidResumeCursors) {
         const error = yield* Effect.flip(
           adapter.startSession({
+            runtimeSessionId: RuntimeSessionId.make("test-grokadapter-5"),
             threadId,
             provider: ProviderDriverKind.make("grok"),
             cwd: process.cwd(),
@@ -261,6 +275,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const adapter = yield* makeTestAdapter(wrapperPath);
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-6"),
         threadId,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
@@ -306,6 +321,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       ).pipe(Effect.forkChild);
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-7"),
         threadId,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
@@ -359,6 +375,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       }).pipe(Effect.forkChild);
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-8"),
         threadId,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
@@ -420,6 +437,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       ).pipe(Effect.forkChild);
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-grokadapter-9"),
         threadId,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),

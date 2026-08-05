@@ -17,7 +17,11 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
-import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
+import {
+  deriveTimelineEntries,
+  formatElapsed,
+  type ContextHandoffTimelineEntry,
+} from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
@@ -71,6 +75,7 @@ import {
   TIMELINE_MINIMAP_MIN_ITEMS,
 } from "./MessagesTimeline.logic";
 import { MessageActionsSheet } from "./MessageActionsSheet";
+import { ContextHandoffMarkerRow } from "./ContextHandoffMarkerRow";
 import { useLongPress } from "~/hooks/useLongPress";
 import { usePresentationTier } from "~/hooks/usePresentationTier";
 import type { ThreadMessageSearchOccurrence } from "./ThreadMessageSearch.logic";
@@ -174,6 +179,10 @@ interface MessagesTimelineProps {
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onInspectContextHandoff?: (
+    marker: ContextHandoffTimelineEntry,
+    trigger: HTMLButtonElement,
+  ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +221,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   onIsAtEndChange,
+  onInspectContextHandoff,
 }: MessagesTimelineProps) {
   usePerfMark("MessagesTimeline");
   const turnFoldExpandedById = useUiStateStore(
@@ -405,7 +415,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           '[data-thread-message-search-active="true"]',
         );
         if (activeSearchHit) {
-          activeSearchHit.scrollIntoView({ behavior: "smooth", block: "center" });
+          activeSearchHit.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
           return;
         }
       }
@@ -462,6 +475,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         onOpenTurnDiff,
         onCloseDiff: onCloseDiff ?? NOOP_CLOSE_DIFF,
         onOpenMessageActions,
+        ...(onInspectContextHandoff ? { onInspectContextHandoff } : {}),
       }),
     [
       timestampFormat,
@@ -481,6 +495,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onOpenTurnDiff,
       onCloseDiff,
       onOpenMessageActions,
+      onInspectContextHandoff,
     ],
   );
 
@@ -874,6 +889,13 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
 
       {row.kind === "context-compaction" && (
         <ContextCompactionMarkerRow createdAt={row.createdAt} label={row.marker.label} />
+      )}
+
+      {row.kind === "context-handoff" && (
+        <ContextHandoffMarkerRow
+          marker={row.marker}
+          {...(ctx.onInspectContextHandoff ? { onInspect: ctx.onInspectContextHandoff } : {})}
+        />
       )}
 
       {row.kind === "message" &&

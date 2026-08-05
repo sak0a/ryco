@@ -31,6 +31,13 @@ export const metricNames = {
   providerTurnsTotal: "ryco_provider_turns_total",
   providerTurnDuration: "ryco_provider_turn_duration",
   providerRuntimeEventsTotal: "ryco_provider_runtime_events_total",
+  providerRuntimeStaleEventsTotal: "ryco_provider_runtime_stale_events_total",
+  providerStaleStopTimeoutsTotal: "ryco_provider_stale_stop_timeouts_total",
+  contextHandoffsTotal: "ryco_context_handoffs_total",
+  contextHandoffContextBytesTotal: "ryco_context_handoff_context_bytes_total",
+  contextHandoffContextEntriesTotal: "ryco_context_handoff_context_entries_total",
+  contextHandoffPreparationDuration: "ryco_context_handoff_preparation_duration",
+  contextHandoffDispatchDuration: "ryco_context_handoff_dispatch_duration",
   providerEventLogRecordsDroppedTotal: "ryco_provider_event_log_records_dropped_total",
   runtimeQueueEnqueuesTotal: "ryco_runtime_queue_enqueues_total",
   runtimeQueueDequeuesTotal: "ryco_runtime_queue_dequeues_total",
@@ -96,6 +103,52 @@ export const providerTurnDuration = Metric.timer(metricNames.providerTurnDuratio
 export const providerRuntimeEventsTotal = Metric.counter(metricNames.providerRuntimeEventsTotal, {
   description: "Total canonical provider runtime events processed.",
 });
+
+export const providerRuntimeStaleEventsTotal = Metric.counter(
+  metricNames.providerRuntimeStaleEventsTotal,
+  {
+    description: "Total provider runtime events dropped because their instance or epoch is stale.",
+  },
+);
+
+export const providerStaleStopTimeoutsTotal = Metric.counter(
+  metricNames.providerStaleStopTimeoutsTotal,
+  {
+    description: "Total bounded stale provider runtime stop attempts that timed out.",
+  },
+);
+
+export const contextHandoffsTotal = Metric.counter(metricNames.contextHandoffsTotal, {
+  description: "Total context handoff operations by durable lifecycle outcome.",
+});
+
+export const contextHandoffContextBytesTotal = Metric.counter(
+  metricNames.contextHandoffContextBytesTotal,
+  {
+    description: "Total rendered context bytes prepared for context handoff target turns.",
+  },
+);
+
+export const contextHandoffContextEntriesTotal = Metric.counter(
+  metricNames.contextHandoffContextEntriesTotal,
+  {
+    description: "Total structured context entries included in context handoff target turns.",
+  },
+);
+
+export const contextHandoffPreparationDuration = Metric.timer(
+  metricNames.contextHandoffPreparationDuration,
+  {
+    description: "Context handoff preparation duration before target turn dispatch.",
+  },
+);
+
+export const contextHandoffDispatchDuration = Metric.timer(
+  metricNames.contextHandoffDispatchDuration,
+  {
+    description: "Context handoff target turn dispatch duration through provider acceptance.",
+  },
+);
 
 export const providerEventLogRecordsDroppedTotal = Metric.counter(
   metricNames.providerEventLogRecordsDroppedTotal,

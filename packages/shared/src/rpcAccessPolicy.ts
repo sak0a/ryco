@@ -1,8 +1,14 @@
-import { ORCHESTRATION_WS_METHODS, WS_METHODS, type RelayEffectiveRole } from "@ryco/contracts";
+import {
+  CONTEXT_HANDOFF_WS_METHODS,
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
+  type RelayEffectiveRole,
+} from "@ryco/contracts";
 
 export type RpcMethod =
   | (typeof WS_METHODS)[keyof typeof WS_METHODS]
-  | (typeof ORCHESTRATION_WS_METHODS)[keyof typeof ORCHESTRATION_WS_METHODS];
+  | (typeof ORCHESTRATION_WS_METHODS)[keyof typeof ORCHESTRATION_WS_METHODS]
+  | (typeof CONTEXT_HANDOFF_WS_METHODS)[keyof typeof CONTEXT_HANDOFF_WS_METHODS];
 
 export type RpcAccess = RelayEffectiveRole | "authenticated" | "direct_owner";
 
@@ -41,6 +47,10 @@ export const RPC_ACCESS_POLICY = {
   [ORCHESTRATION_WS_METHODS.searchThreadMessages]: "viewer",
   [ORCHESTRATION_WS_METHODS.subscribeShell]: "viewer",
   [ORCHESTRATION_WS_METHODS.subscribeThread]: "viewer",
+  [CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary]: "viewer",
+  [CONTEXT_HANDOFF_WS_METHODS.listInspectionEntries]: "viewer",
+  [CONTEXT_HANDOFF_WS_METHODS.readRawPayloadChunk]: "viewer",
+  [CONTEXT_HANDOFF_WS_METHODS.readExportChunk]: "viewer",
   [WS_METHODS.projectsAdd]: "operator",
   [WS_METHODS.projectsInitializeGit]: "operator",
   [WS_METHODS.projectsList]: "viewer",

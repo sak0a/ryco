@@ -8,6 +8,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
   type ProviderSession,
+  type RuntimeSessionId,
   type UserInputQuestion,
 } from "@ryco/contracts";
 import type { PermissionRequestResult, SessionConfig, SessionEvent } from "@github/copilot-sdk";
@@ -18,6 +19,7 @@ import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { getProviderOptionStringSelectionValue } from "@ryco/shared/model";
 import { makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderAdapterRequestError, ProviderAdapterSessionNotFoundError } from "../Errors.ts";
+import { stampRuntimeEvent } from "../runtimeSession.ts";
 import type { CopilotAdapterShape } from "../Services/CopilotAdapter.ts";
 import {
   COPILOT_DRIVER_KIND,
@@ -92,11 +94,19 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         );
   };
 
-  const emit = (events: ReadonlyArray<ProviderRuntimeEvent>) =>
-    Queue.offerAll(runtimeEventQueue, events).pipe(
+  const emit = (events: ReadonlyArray<ProviderRuntimeEvent>) => {
+    for (const event of events) {
+      if (event.runtimeSessionId === undefined) {
+        throw new Error(
+          `CopilotAdapter emitted '${event.type}' without a runtime session for thread '${event.threadId}'.`,
+        );
+      }
+    }
+    return Queue.offerAll(runtimeEventQueue, events).pipe(
       Effect.andThen(runtimeEventQueueMetrics.recordEnqueued(events.length)),
       Effect.asVoid,
     );
+  };
 
   const logNativeEvent = Effect.fn("logCopilotNativeEvent")(function* (
     threadId: ThreadId,
@@ -116,29 +126,36 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 
   const makeSyntheticEvent = <TType extends ProviderRuntimeEvent["type"]>(
     threadId: ThreadId,
+    runtimeSessionId: RuntimeSessionId,
     type: TType,
     payload: Extract<ProviderRuntimeEvent, { type: TType }>["payload"],
     extra?: { turnId?: TurnId; itemId?: string; requestId?: string },
   ): Effect.Effect<Extract<ProviderRuntimeEvent, { type: TType }>> =>
     Effect.gen(function* () {
       const stamp = yield* makeEventStamp();
-      return {
-        ...eventBase({
-          eventId: stamp.eventId,
-          createdAt: stamp.createdAt,
-          threadId,
+      return stampRuntimeEvent(
+        {
+          ...eventBase({
+            eventId: stamp.eventId,
+            createdAt: stamp.createdAt,
+            threadId,
+            providerInstanceId: instanceId,
+            ...(extra?.turnId ? { turnId: extra.turnId } : {}),
+            ...(extra?.itemId ? { itemId: extra.itemId } : {}),
+            ...(extra?.requestId ? { requestId: extra.requestId } : {}),
+            raw: {
+              source: "copilot.sdk.synthetic",
+              payload,
+            },
+          }),
+          type,
+          payload,
+        } as Extract<ProviderRuntimeEvent, { type: TType }>,
+        {
           providerInstanceId: instanceId,
-          ...(extra?.turnId ? { turnId: extra.turnId } : {}),
-          ...(extra?.itemId ? { itemId: extra.itemId } : {}),
-          ...(extra?.requestId ? { requestId: extra.requestId } : {}),
-          raw: {
-            source: "copilot.sdk.synthetic",
-            payload,
-          },
-        }),
-        type,
-        payload,
-      } as Extract<ProviderRuntimeEvent, { type: TType }>;
+          runtimeSessionId,
+        },
+      ) as Extract<ProviderRuntimeEvent, { type: TType }>;
     });
 
   const mapEventDeps: MapEventDeps = { makeEventStamp, nextEventId };
@@ -186,7 +203,12 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     }
 
     yield* logNativeEvent(session.threadId, event);
-    const mapped = yield* mapEvent(mapEventDeps, session, event);
+    const mapped = (yield* mapEvent(mapEventDeps, session, event)).map((runtimeEvent) =>
+      stampRuntimeEvent(runtimeEvent, {
+        providerInstanceId: instanceId,
+        runtimeSessionId: session.runtimeSessionId,
+      }),
+    );
     if (mapped.length > 0) {
       yield* emit(mapped);
     }
@@ -201,6 +223,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     input: {
       threadId: ThreadId;
       runtimeMode: ProviderSession["runtimeMode"];
+      runtimeSessionId: RuntimeSessionId;
       cwd?: string;
       modelSelection?: ProviderSendTurnInput["modelSelection"] | ProviderSession["resumeCursor"];
     },
@@ -248,6 +271,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 
         void makeSyntheticEvent(
           input.threadId,
+          input.runtimeSessionId,
           "request.opened",
           {
             requestType,
@@ -275,6 +299,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
             pending.resolve({ kind: "approve-once" });
             const event = yield* makeSyntheticEvent(
               input.threadId,
+              input.runtimeSessionId,
               "request.resolved",
               {
                 requestType,
@@ -313,6 +338,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 
         void makeSyntheticEvent(
           input.threadId,
+          input.runtimeSessionId,
           "user-input.requested",
           { questions: [question] },
           {
@@ -362,6 +388,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       pending.resolve(approvalDecisionToPermissionResult(decision, pending.request));
       const event = yield* makeSyntheticEvent(
         threadId,
+        record.runtimeSessionId,
         "request.resolved",
         {
           requestType: pending.requestType,
@@ -404,6 +431,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 
       const event = yield* makeSyntheticEvent(
         threadId,
+        record.runtimeSessionId,
         "user-input.resolved",
         { answers },
         {

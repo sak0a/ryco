@@ -1,0 +1,164 @@
+import {
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  MessageId,
+  ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  TurnId,
+  type ContextHandoffEndpointSnapshot,
+  type OrchestrationThread,
+} from "@ryco/contracts";
+import { describe, expect, it } from "vite-plus/test";
+
+import { buildContextHandoffDocument } from "./ContextHandoffBuilder.ts";
+import { ContextHandoffRenderError, renderContextHandoffInput } from "./ContextHandoffRenderer.ts";
+
+function endpoint(instance: string, model: string): ContextHandoffEndpointSnapshot {
+  return {
+    providerInstanceId: ProviderInstanceId.make(instance),
+    driverKind: ProviderDriverKind.make("codex"),
+    modelSlug: model,
+  };
+}
+
+function artifactWithLongHistory() {
+  const targetMessageId = MessageId.make("message-target");
+  const messages: Array<OrchestrationThread["messages"][number]> = Array.from(
+    { length: 20 },
+    (_, index) => ({
+      id: MessageId.make(`message-${index}`),
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      text: `${index}:${"history 😀 ".repeat(300)}`,
+      turnId: TurnId.make(`turn-${index}`),
+      streaming: false,
+      createdAt: `2026-08-04T00:00:${String(index).padStart(2, "0")}.000Z`,
+      updatedAt: `2026-08-04T00:00:${String(index).padStart(2, "0")}.000Z`,
+    }),
+  );
+  messages.push({
+    id: targetMessageId,
+    role: "user",
+    text: "canonical target",
+    turnId: TurnId.make("turn-target"),
+    streaming: false,
+    createdAt: "2026-08-04T00:01:00.000Z",
+    updatedAt: "2026-08-04T00:01:00.000Z",
+  });
+  const thread: OrchestrationThread = {
+    id: ThreadId.make("thread-render"),
+    projectId: ProjectId.make("project-render"),
+    title: "Render context",
+    modelSelection: { instanceId: ProviderInstanceId.make("codex_a"), model: "gpt-a" },
+    runtimeMode: "full-access",
+    interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: "2026-08-04T00:00:00.000Z",
+    updatedAt: "2026-08-04T00:01:00.000Z",
+    archivedAt: null,
+    deletedAt: null,
+    messages,
+    proposedPlans: [],
+    activities: [],
+    checkpoints: [],
+    session: null,
+  };
+  return buildContextHandoffDocument({
+    thread,
+    targetMessageId,
+    source: endpoint("codex_a", "gpt-a"),
+    target: endpoint("codex_b", "gpt-b"),
+  });
+}
+
+function containsUnpairedSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next < 0xdc00 || next > 0xdfff) {
+        return true;
+      }
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+describe("renderContextHandoffInput", () => {
+  it("keeps the exact current message outside the deterministic context document", () => {
+    const artifact = artifactWithLongHistory();
+    const currentMessage = "  exact current text\n😀\n</current_user_message> stays literal  ";
+    const result = renderContextHandoffInput({
+      document: artifact.document,
+      currentMessage,
+    });
+
+    expect(result.truncated).toBe(false);
+    expect(result.providerInput).toContain(
+      `<current_user_message>\n${currentMessage}\n</current_user_message>`,
+    );
+    expect(result.renderedContextJson).not.toContain(currentMessage);
+    expect(result.inputChars).toBe(result.providerInput.length);
+    expect(result.inputChars).toBeLessThanOrEqual(120_000);
+  });
+
+  it("selects recent section entries, truncates Unicode safely, and honors the exact limit", () => {
+    const artifact = artifactWithLongHistory();
+    const currentMessage = "continue with the implementation 😀";
+    const result = renderContextHandoffInput({
+      document: artifact.document,
+      currentMessage,
+      maxInputChars: 2_000,
+    });
+
+    expect(result.truncated).toBe(true);
+    expect(result.inputChars).toBeLessThanOrEqual(2_000);
+    expect(result.includedEntryCount).toBeGreaterThan(0);
+    expect(result.includedEntryCount).toBeLessThan(result.totalEntryCount);
+    expect(result.providerInput).toContain(currentMessage);
+    expect(containsUnpairedSurrogate(result.renderedContextJson)).toBe(false);
+    const parsed = JSON.parse(result.renderedContextJson) as { messages?: Array<{ id: string }> };
+    expect(parsed.messages?.at(-1)?.id).toMatch(/message-1\d/u);
+  });
+
+  it("renders a minimal valid capsule for an attachment-only turn", () => {
+    const artifact = artifactWithLongHistory();
+    const result = renderContextHandoffInput({
+      document: artifact.document,
+      currentMessage: "",
+      maxInputChars: 600,
+    });
+
+    expect(result.inputChars).toBeLessThanOrEqual(600);
+    expect(result.providerInput).toContain("<context_handoff");
+    expect(result.providerInput).toContain("<current_user_message>\n\n</current_user_message>");
+  });
+
+  it("rejects only when the exact message leaves no room for the minimum header", () => {
+    const artifact = artifactWithLongHistory();
+    expect(() =>
+      renderContextHandoffInput({
+        document: artifact.document,
+        currentMessage: "x".repeat(200),
+        maxInputChars: 220,
+      }),
+    ).toThrow(ContextHandoffRenderError);
+
+    try {
+      renderContextHandoffInput({
+        document: artifact.document,
+        currentMessage: "x".repeat(200),
+        maxInputChars: 220,
+      });
+      throw new Error("expected render failure");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ContextHandoffRenderError);
+      expect((error as ContextHandoffRenderError).reason).toBe("message-too-large");
+    }
+  });
+});

@@ -9,6 +9,7 @@ import {
   IsoDateTime,
   ProviderInstanceId,
   ProviderSessionRuntimeStatus,
+  RuntimeSessionId,
   RuntimeMode,
   ThreadId,
 } from "@ryco/contracts";
@@ -28,6 +29,8 @@ export const ProviderSessionRuntime = Schema.Struct({
    * instance id before routing.
    */
   providerInstanceId: Schema.NullOr(ProviderInstanceId),
+  /** Nullable only for rows created before migration 042. */
+  runtimeSessionId: Schema.NullOr(RuntimeSessionId),
   adapterKey: Schema.String,
   runtimeMode: RuntimeMode,
   status: ProviderSessionRuntimeStatus,
@@ -35,7 +38,11 @@ export const ProviderSessionRuntime = Schema.Struct({
   resumeCursor: Schema.NullOr(Schema.Unknown),
   runtimePayload: Schema.NullOr(Schema.Unknown),
 });
-export type ProviderSessionRuntime = typeof ProviderSessionRuntime.Type;
+type DecodedProviderSessionRuntime = typeof ProviderSessionRuntime.Type;
+export type ProviderSessionRuntime = Omit<DecodedProviderSessionRuntime, "runtimeSessionId"> & {
+  /** Omission is accepted only for legacy callers and is persisted as NULL. */
+  readonly runtimeSessionId?: DecodedProviderSessionRuntime["runtimeSessionId"];
+};
 
 export const GetProviderSessionRuntimeInput = Schema.Struct({ threadId: ThreadId });
 export type GetProviderSessionRuntimeInput = typeof GetProviderSessionRuntimeInput.Type;

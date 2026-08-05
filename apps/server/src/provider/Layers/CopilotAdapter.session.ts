@@ -10,6 +10,7 @@ import {
   type ProviderSendTurnInput,
   type ProviderSession,
   type ProviderTurnStartResult,
+  type RuntimeSessionId,
 } from "@ryco/contracts";
 import {
   CopilotClient,
@@ -29,6 +30,7 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import type { CopilotAdapterShape } from "../Services/CopilotAdapter.ts";
+import { requireRuntimeSessionId } from "../runtimeSession.ts";
 import {
   COPILOT_DRIVER_KIND,
   type ActiveCopilotSession,
@@ -57,6 +59,7 @@ export interface SessionOpsDeps {
   readonly emit: (events: ReadonlyArray<ProviderRuntimeEvent>) => Effect.Effect<void>;
   readonly makeSyntheticEvent: (
     threadId: ThreadId,
+    runtimeSessionId: RuntimeSessionId,
     type: string,
     payload: unknown,
     extra?: { turnId?: TurnId; itemId?: string; requestId?: string },
@@ -65,6 +68,7 @@ export interface SessionOpsDeps {
     input: {
       threadId: ThreadId;
       runtimeMode: ProviderSession["runtimeMode"];
+      runtimeSessionId: RuntimeSessionId;
       cwd?: string;
       modelSelection?: ProviderSendTurnInput["modelSelection"] | ProviderSession["resumeCursor"];
     },
@@ -153,12 +157,21 @@ export const makeStartSession =
           issue: `Expected provider instance '${deps.instanceId}' but received '${input.providerInstanceId}'.`,
         });
       }
+      const runtimeSessionId = yield* requireRuntimeSessionId(COPILOT_DRIVER_KIND, input);
 
       const existing = deps.sessions.get(input.threadId);
       if (existing) {
+        if (existing.runtimeSessionId !== runtimeSessionId) {
+          return yield* new ProviderAdapterValidationError({
+            provider: COPILOT_DRIVER_KIND,
+            operation: "startSession",
+            issue: `Thread '${input.threadId}' still has runtime '${existing.runtimeSessionId}'; stop it before starting '${runtimeSessionId}'.`,
+          });
+        }
         return {
           provider: COPILOT_DRIVER_KIND,
           providerInstanceId: deps.instanceId,
+          runtimeSessionId,
           status: existing.activeTurnId ? "running" : "ready",
           runtimeMode: existing.runtimeMode,
           tokenMode: existing.tokenMode,
@@ -189,6 +202,7 @@ export const makeStartSession =
         {
           threadId: input.threadId,
           runtimeMode: input.runtimeMode,
+          runtimeSessionId,
           ...(input.cwd ? { cwd: input.cwd } : {}),
           ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
         },
@@ -198,9 +212,10 @@ export const makeStartSession =
         stoppedRef,
       );
 
+      const effectiveResumeCursor = input.resumePolicy === "fresh" ? undefined : input.resumeCursor;
       const session = yield* Effect.tryPromise({
         try: () => {
-          const sessionId = parseResumeCursor(input.resumeCursor);
+          const sessionId = parseResumeCursor(effectiveResumeCursor);
           return sessionId
             ? client.resumeSession(sessionId, sessionConfig)
             : client.createSession(sessionConfig);
@@ -221,6 +236,7 @@ export const makeStartSession =
         session,
         threadId: input.threadId,
         providerInstanceId: deps.instanceId,
+        runtimeSessionId,
         createdAt,
         runtimeMode: input.runtimeMode,
         tokenMode,
@@ -273,13 +289,14 @@ export const makeStartSession =
       yield* deps.emit([
         yield* deps.makeSyntheticEvent(
           input.threadId,
+          runtimeSessionId,
           "session.started",
-          input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
+          effectiveResumeCursor !== undefined ? { resume: effectiveResumeCursor } : {},
         ),
-        yield* deps.makeSyntheticEvent(input.threadId, "thread.started", {
+        yield* deps.makeSyntheticEvent(input.threadId, runtimeSessionId, "thread.started", {
           providerThreadId: session.sessionId,
         }),
-        yield* deps.makeSyntheticEvent(input.threadId, "session.state.changed", {
+        yield* deps.makeSyntheticEvent(input.threadId, runtimeSessionId, "session.state.changed", {
           state: "ready",
           reason: "session.started",
         }),
@@ -288,6 +305,7 @@ export const makeStartSession =
       return {
         provider: COPILOT_DRIVER_KIND,
         providerInstanceId: deps.instanceId,
+        runtimeSessionId,
         status: "ready",
         runtimeMode: input.runtimeMode,
         tokenMode,
@@ -519,6 +537,7 @@ export const makeListSessions =
         const session: { -readonly [K in keyof ProviderSession]: ProviderSession[K] } = {
           provider: COPILOT_DRIVER_KIND,
           providerInstanceId: deps.instanceId,
+          runtimeSessionId: record.runtimeSessionId,
           status: record.activeTurnId ? "running" : "ready",
           runtimeMode: record.runtimeMode,
           tokenMode: record.tokenMode,

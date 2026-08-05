@@ -12,6 +12,7 @@ import {
   IsoDateTime,
   OrchestrationSessionStatus,
   ProviderInstanceId,
+  RuntimeSessionId,
   ThreadId,
   TurnId,
 } from "@ryco/contracts";
@@ -25,13 +26,19 @@ export const ProjectionThreadSession = Schema.Struct({
   status: OrchestrationSessionStatus,
   providerName: Schema.NullOr(Schema.String),
   providerInstanceId: Schema.NullOr(ProviderInstanceId),
+  /** Nullable only for session projections created before migration 042. */
+  runtimeSessionId: Schema.NullOr(RuntimeSessionId),
   runtimeMode: RuntimeMode,
   tokenMode: AgentTokenMode,
   activeTurnId: Schema.NullOr(TurnId),
   lastError: Schema.NullOr(Schema.String),
   updatedAt: IsoDateTime,
 });
-export type ProjectionThreadSession = typeof ProjectionThreadSession.Type;
+type DecodedProjectionThreadSession = typeof ProjectionThreadSession.Type;
+export type ProjectionThreadSession = Omit<DecodedProjectionThreadSession, "runtimeSessionId"> & {
+  /** Omission is accepted only for legacy callers and is persisted as NULL. */
+  readonly runtimeSessionId?: DecodedProjectionThreadSession["runtimeSessionId"];
+};
 
 export const GetProjectionThreadSessionInput = Schema.Struct({
   threadId: ThreadId,

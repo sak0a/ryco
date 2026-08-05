@@ -6,6 +6,22 @@ import { ProviderRuntimeEvent } from "./providerRuntime.ts";
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
 describe("ProviderRuntimeEvent", () => {
+  it("decodes historical events without an epoch and new events with one", () => {
+    const base = {
+      type: "session.started",
+      eventId: "event-session",
+      provider: "codex",
+      providerInstanceId: "codex_work",
+      createdAt: "2026-02-28T00:00:00.000Z",
+      threadId: "thread-1",
+      payload: {},
+    } as const;
+    expect(decodeRuntimeEvent(base).runtimeSessionId).toBeUndefined();
+    expect(
+      decodeRuntimeEvent({ ...base, runtimeSessionId: "runtime-session-1" }).runtimeSessionId,
+    ).toBe("runtime-session-1");
+  });
+
   it("accepts fork-provided driver kinds as branded slugs", () => {
     const parsed = decodeRuntimeEvent({
       type: "session.started",

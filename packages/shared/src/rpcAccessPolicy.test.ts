@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ORCHESTRATION_WS_METHODS, WS_METHODS } from "@ryco/contracts";
+import { CONTEXT_HANDOFF_WS_METHODS, ORCHESTRATION_WS_METHODS, WS_METHODS } from "@ryco/contracts";
 import { hostedRoleAllows, RPC_ACCESS_POLICY, rpcAccessFor } from "./rpcAccessPolicy.ts";
 
 describe("shared RPC access policy", () => {
   it("classifies every current and legacy RPC method", () => {
     expect(new Set(Object.keys(RPC_ACCESS_POLICY))).toEqual(
-      new Set([...Object.values(WS_METHODS), ...Object.values(ORCHESTRATION_WS_METHODS)]),
+      new Set([
+        ...Object.values(WS_METHODS),
+        ...Object.values(ORCHESTRATION_WS_METHODS),
+        ...Object.values(CONTEXT_HANDOFF_WS_METHODS),
+      ]),
     );
     expect(rpcAccessFor(WS_METHODS.searchThreadMessages)).toBe("owner");
     expect(rpcAccessFor(ORCHESTRATION_WS_METHODS.searchThreadMessages)).toBe("viewer");

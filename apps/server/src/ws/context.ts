@@ -22,6 +22,7 @@ import { Keybindings } from "../keybindings.ts";
 import { makeCodexMcpService } from "../mcp/CodexMcpService.ts";
 import { Open, resolveAvailableEditors } from "../open.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
+import { ContextHandoffInspection } from "../orchestration/Services/ContextHandoffInspection.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { StatisticsQuery } from "../statistics/StatisticsQuery.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
@@ -99,6 +100,10 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const statisticsQuery = yield* StatisticsQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
+    // Most server route tests intentionally provide only the services used by
+    // the RPC under test. Keep this additive capability optional at context
+    // construction; production provides it in `makeServerWsRpcLayer`.
+    const contextHandoffInspection = yield* Effect.serviceOption(ContextHandoffInspection);
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
     const keybindings = yield* Keybindings;
     const open = yield* Open;
@@ -173,10 +178,9 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
         for (const worktree of worktrees) {
           if (worktree.archivedAt !== null) continue;
           if (worktree.prNumber === null && worktree.issueNumber === null) continue;
-          yield* refreshWorktreeSourceControlState({ worktreeId: worktree.worktreeId }).pipe(
-            Effect.ignoreCause({ log: true }),
-            Effect.forkDetach,
-          );
+          yield* refreshWorktreeSourceControlState({
+            worktreeId: worktree.worktreeId,
+          }).pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach);
         }
       }).pipe(Effect.ignoreCause({ log: true }), Effect.asVoid);
 
@@ -645,6 +649,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       projectionSnapshotQuery,
       statisticsQuery,
       orchestrationEngine,
+      contextHandoffInspection,
       checkpointDiffQuery,
       keybindings,
       open,

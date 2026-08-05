@@ -4,7 +4,13 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@ryco/contracts";
-import { DEFAULT_AGENT_TOKEN_MODE } from "@ryco/contracts";
+import {
+  CONTEXT_HANDOFF_ACTIVITY_KIND,
+  ContextHandoffId,
+  DEFAULT_AGENT_TOKEN_MODE,
+  EventId,
+} from "@ryco/contracts";
+import { modelSelectionRequiresContextHandoff } from "@ryco/shared/model";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -18,6 +24,7 @@ import {
   requireThreadArchived,
   requireThreadAbsent,
   requireThreadNotArchived,
+  requireThreadIdleForContextHandoff,
   requireWorktree,
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
@@ -460,6 +467,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Thread '${command.threadId}' already has active turn '${targetThread.session.activeTurnId}' and cannot start another turn until it finishes.`,
         });
       }
+      const requestedSelection = command.modelSelection ?? targetThread.modelSelection;
+      const isStartedThread = targetThread.messages.some((message) => message.role === "user");
+      const isContextHandoff =
+        isStartedThread &&
+        modelSelectionRequiresContextHandoff({
+          canonicalSelection: targetThread.modelSelection,
+          targetSelection: requestedSelection,
+        });
+      if (isContextHandoff) {
+        yield* requireThreadIdleForContextHandoff({ thread: targetThread, command });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -504,6 +522,70 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           updatedAt: command.createdAt,
         },
       };
+      const handoffId = ContextHandoffId.make(`context-handoff:${command.commandId}`);
+      const handoffActivityId = EventId.make(`context-handoff-activity:${command.commandId}`);
+      const contextHandoffRequestedEvent: Omit<OrchestrationEvent, "sequence"> | null =
+        isContextHandoff
+          ? {
+              ...withEventBase({
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+              }),
+              type: "thread.context-handoff-requested",
+              payload: {
+                threadId: command.threadId,
+                handoffId,
+                activityId: handoffActivityId,
+                mode: "full-context-fresh-session",
+                targetMessageId: command.message.messageId,
+                sourceSelection: targetThread.modelSelection,
+                targetSelection: requestedSelection,
+                ...(targetThread.session?.runtimeSessionId !== undefined
+                  ? { sourceRuntimeSessionId: targetThread.session.runtimeSessionId }
+                  : {}),
+                createdAt: command.createdAt,
+              },
+            }
+          : null;
+      const handoffActivityEvent: Omit<OrchestrationEvent, "sequence"> | null = isContextHandoff
+        ? {
+            ...withEventBase({
+              aggregateKind: "thread",
+              aggregateId: command.threadId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }),
+            ...(contextHandoffRequestedEvent !== null
+              ? { causationEventId: contextHandoffRequestedEvent.eventId }
+              : {}),
+            type: "thread.activity-appended",
+            payload: {
+              threadId: command.threadId,
+              activity: {
+                id: handoffActivityId,
+                tone: "info",
+                kind: CONTEXT_HANDOFF_ACTIVITY_KIND,
+                summary: "Context handoff requested",
+                payload: {
+                  schemaVersion: 1,
+                  handoffId,
+                  mode: "full-context-fresh-session",
+                  status: "requested",
+                  targetMessageId: command.message.messageId,
+                  sourceSelection: targetThread.modelSelection,
+                  targetSelection: requestedSelection,
+                  ...(targetThread.session?.runtimeSessionId !== undefined
+                    ? { sourceRuntimeSessionId: targetThread.session.runtimeSessionId }
+                    : {}),
+                },
+                turnId: null,
+                createdAt: command.createdAt,
+              },
+            },
+          }
+        : null;
       const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
@@ -524,10 +606,26 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: targetThread.interactionMode,
           tokenMode: normalizeTokenMode(targetThread.tokenMode),
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          ...(isContextHandoff
+            ? {
+                contextHandoff: {
+                  handoffId,
+                  activityId: handoffActivityId,
+                  targetMessageId: command.message.messageId,
+                },
+              }
+            : {}),
           createdAt: command.createdAt,
         },
       };
-      return [userMessageEvent, turnStartRequestedEvent];
+      return isContextHandoff && contextHandoffRequestedEvent && handoffActivityEvent
+        ? [
+            contextHandoffRequestedEvent,
+            handoffActivityEvent,
+            userMessageEvent,
+            turnStartRequestedEvent,
+          ]
+        : [userMessageEvent, turnStartRequestedEvent];
     }
 
     case "thread.turn.interrupt": {

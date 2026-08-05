@@ -31,10 +31,15 @@ import { OrchestrationEventStoreLive } from "../src/persistence/Layers/Orchestra
 import { ProjectionCheckpointRepositoryLive } from "../src/persistence/Layers/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../src/persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
+import { ContextHandoffRepositoryLive } from "../src/persistence/Layers/ContextHandoffs.ts";
 import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
 import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
-import { makeAdapterRegistryMock } from "../src/provider/testUtils/providerAdapterRegistryMock.ts";
+import { ContextHandoffRepository } from "../src/persistence/Services/ContextHandoffs.ts";
+import {
+  makeAdapterRegistryMock,
+  type KindAdapterMap,
+} from "../src/provider/testUtils/providerAdapterRegistryMock.ts";
 import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
 import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
 import { ServerSettingsService } from "../src/serverSettings.ts";
@@ -45,6 +50,7 @@ import {
   ProviderEventLoggers,
 } from "../src/provider/Layers/ProviderEventLoggers.ts";
 import { ProviderService } from "../src/provider/Services/ProviderService.ts";
+import { ProviderRegistry } from "../src/provider/Services/ProviderRegistry.ts";
 import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
 import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
 import { RepositoryIdentityResolverLive } from "../src/project/Layers/RepositoryIdentityResolver.ts";
@@ -62,6 +68,8 @@ import {
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
 import { ThreadDeletionReactor } from "../src/orchestration/Services/ThreadDeletionReactor.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
+import { ContextHandoffCoordinatorLive } from "../src/orchestration/Layers/ContextHandoffCoordinator.ts";
+import { ContextHandoffServiceLive } from "../src/orchestration/contextHandoff/ContextHandoffService.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
   RuntimeReceiptBus,
@@ -95,6 +103,7 @@ const initializeGitWorkspace = Effect.fn(function* (cwd: string) {
   runGit(cwd, ["init", "--initial-branch=main"]);
   runGit(cwd, ["config", "user.email", "test@example.com"]);
   runGit(cwd, ["config", "user.name", "Test User"]);
+  runGit(cwd, ["config", "commit.gpgsign", "false"]);
   const fileSystem = yield* FileSystem.FileSystem;
   const { join } = yield* Path.Path;
   yield* fileSystem.writeFileString(join(cwd, "README.md"), "v1\n");
@@ -178,12 +187,14 @@ export interface OrchestrationIntegrationHarness {
   readonly workspaceDir: string;
   readonly dbPath: string;
   readonly adapterHarness: TestProviderAdapterHarness | null;
+  readonly adapterHarnesses: ReadonlyArray<TestProviderAdapterHarness>;
   readonly engine: OrchestrationEngineShape;
   readonly snapshotQuery: ProjectionSnapshotQuery["Service"];
   readonly providerService: ProviderService["Service"];
   readonly checkpointStore: CheckpointStore["Service"];
   readonly checkpointRepository: ProjectionCheckpointRepository["Service"];
   readonly pendingApprovalRepository: ProjectionPendingApprovalRepository["Service"];
+  readonly contextHandoffRepository: ContextHandoffRepository["Service"];
   readonly waitForThread: (
     threadId: string,
     predicate: (thread: OrchestrationThread) => boolean,
@@ -224,6 +235,7 @@ export interface OrchestrationIntegrationHarness {
 
 interface MakeOrchestrationIntegrationHarnessOptions {
   readonly provider?: ProviderDriverKind;
+  readonly providers?: ReadonlyArray<ProviderDriverKind>;
   readonly realCodex?: boolean;
 }
 
@@ -234,19 +246,26 @@ export const makeOrchestrationIntegrationHarness = (
     const path = yield* Path.Path;
     const fileSystem = yield* FileSystem.FileSystem;
 
-    const provider = options?.provider ?? ProviderDriverKind.make("codex");
+    const provider =
+      options?.provider ?? options?.providers?.[0] ?? ProviderDriverKind.make("codex");
     const useRealCodex = options?.realCodex === true;
-    const adapterHarness = useRealCodex
-      ? null
-      : yield* makeTestProviderAdapterHarness({
-          provider,
-        });
-    const fakeRegistry = adapterHarness
-      ? Layer.succeed(
-          ProviderAdapterRegistry,
-          makeAdapterRegistryMock({ [adapterHarness.provider]: adapterHarness.adapter }),
-        )
-      : null;
+    const adapterHarnesses = useRealCodex
+      ? []
+      : yield* Effect.forEach(options?.providers ?? [provider], (driverKind) =>
+          makeTestProviderAdapterHarness({
+            provider: driverKind,
+            ...(options?.providers ? { turnIdPrefix: String(driverKind) } : {}),
+          }),
+        );
+    const adapterHarness = adapterHarnesses[0] ?? null;
+    const adapterMap: KindAdapterMap = {};
+    for (const harness of adapterHarnesses) {
+      adapterMap[harness.provider] = harness.adapter;
+    }
+    const fakeRegistry =
+      adapterHarnesses.length > 0
+        ? Layer.succeed(ProviderAdapterRegistry, makeAdapterRegistryMock(adapterMap))
+        : null;
     const rootDir = yield* fileSystem.makeTempDirectoryScoped({
       prefix: "ryco-orchestration-integration-",
     });
@@ -326,7 +345,22 @@ export const makeOrchestrationIntegrationHarness = (
       generateBranchName: () => Effect.succeed({ branch: "update" }),
       generateThreadTitle: () => Effect.succeed({ title: "New thread" }),
     } as unknown as TextGenerationShape);
+    const contextHandoffRepositoryLayer = ContextHandoffRepositoryLive;
+    const contextHandoffServiceLayer = ContextHandoffServiceLive.pipe(
+      Layer.provideMerge(contextHandoffRepositoryLayer),
+    );
+    const providerRegistryLayer = Layer.mock(ProviderRegistry)({
+      getProviders: Effect.succeed([]),
+      streamChanges: Stream.empty,
+    });
+    const contextHandoffCoordinatorLayer = ContextHandoffCoordinatorLive.pipe(
+      Layer.provideMerge(runtimeServicesLayer),
+      Layer.provideMerge(contextHandoffServiceLayer),
+      Layer.provideMerge(contextHandoffRepositoryLayer),
+      Layer.provideMerge(providerRegistryLayer),
+    );
     const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
+      Layer.provideMerge(contextHandoffCoordinatorLayer),
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(gitWorkflowLayer),
       Layer.provideMerge(textGenerationLayer),
@@ -363,6 +397,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(VcsProcess.layer),
     );
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
+      Layer.provideMerge(contextHandoffCoordinatorLayer),
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
@@ -376,6 +411,7 @@ export const makeOrchestrationIntegrationHarness = (
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(orchestrationReactorLayer),
+      Layer.provideMerge(contextHandoffRepositoryLayer),
       Layer.provideMerge(LocalDiagnosticsMetricsLive),
       Layer.provide(persistenceLayer),
       Layer.provideMerge(RepositoryIdentityResolverLive),
@@ -407,6 +443,10 @@ export const makeOrchestrationIntegrationHarness = (
     const pendingApprovalRepository = yield* tryRuntimePromise(
       "load ProjectionPendingApprovalRepository service",
       () => runtime.runPromise(Effect.service(ProjectionPendingApprovalRepository)),
+    ).pipe(Effect.orDie);
+    const contextHandoffRepository = yield* tryRuntimePromise(
+      "load ContextHandoffRepository service",
+      () => runtime.runPromise(Effect.service(ContextHandoffRepository)),
     ).pipe(Effect.orDie);
     const runtimeReceiptBus = yield* tryRuntimePromise("load RuntimeReceiptBus service", () =>
       runtime.runPromise(Effect.service(RuntimeReceiptBus)),
@@ -545,12 +585,14 @@ export const makeOrchestrationIntegrationHarness = (
       workspaceDir,
       dbPath,
       adapterHarness,
+      adapterHarnesses,
       engine,
       snapshotQuery,
       providerService,
       checkpointStore,
       checkpointRepository,
       pendingApprovalRepository,
+      contextHandoffRepository,
       waitForThread,
       waitForDomainEvent,
       waitForPendingApproval,

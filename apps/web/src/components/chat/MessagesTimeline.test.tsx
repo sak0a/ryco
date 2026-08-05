@@ -1,8 +1,16 @@
-import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
+import {
+  ContextHandoffId,
+  EnvironmentId,
+  MessageId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  TurnId,
+} from "@ryco/contracts";
 import { createRef } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import type { LegendListRef } from "@legendapp/list/react";
+import type { ContextHandoffTimelineEntry } from "../../session-logic";
 
 vi.mock("@legendapp/list/react", async () => {
   const React = await import("react");
@@ -73,6 +81,39 @@ beforeAll(() => {
 });
 
 const ACTIVE_THREAD_ENVIRONMENT_ID = EnvironmentId.make("environment-local");
+
+function makeContextHandoffMarker(
+  overrides: Partial<ContextHandoffTimelineEntry> = {},
+): ContextHandoffTimelineEntry {
+  return {
+    id: "context-handoff:activity-1",
+    activityId: "activity-1",
+    handoffId: ContextHandoffId.make("handoff-1"),
+    createdAt: "2026-03-17T19:12:28.000Z",
+    turnId: TurnId.make("turn-target"),
+    status: "consumed",
+    targetMessageId: MessageId.make("message-target"),
+    targetTurnId: TurnId.make("turn-target"),
+    sources: [
+      {
+        providerInstanceId: ProviderInstanceId.make("codex_work"),
+        driverKind: ProviderDriverKind.make("codex"),
+        providerDisplayName: "Codex Work",
+        providerAccentColor: "#4f46e5",
+        modelSlug: "gpt-5.6-sol",
+        modelDisplayName: "GPT-5.6 Sol",
+      },
+    ],
+    target: {
+      providerInstanceId: ProviderInstanceId.make("claude_work"),
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+      providerDisplayName: "Claude Work",
+      modelSlug: "claude-fable-5",
+      modelDisplayName: "Fable 5",
+    },
+    ...overrides,
+  };
+}
 
 function buildProps() {
   return {
@@ -199,6 +240,82 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Context compacted");
     expect(markup).not.toContain("Work log");
+  });
+
+  it("renders an accessible persisted context handoff with multiple and unknown providers", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const marker = makeContextHandoffMarker({
+      sources: [
+        ...makeContextHandoffMarker().sources,
+        {
+          providerInstanceId: ProviderInstanceId.make("local_provider"),
+          driverKind: ProviderDriverKind.make("localProvider"),
+          providerDisplayName: "Local Provider",
+          modelSlug: "a-very-long-model-slug-for-responsive-overflow-testing",
+          modelDisplayName: "A Very Long Local Model Label That Must Truncate Responsively",
+        },
+      ],
+    });
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: marker.id,
+            kind: "context-handoff",
+            createdAt: marker.createdAt,
+            marker,
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain('data-timeline-row-kind="context-handoff"');
+    expect(markup).toContain('data-context-handoff-status="consumed"');
+    expect(markup).toContain('data-context-handoff-source-count="2"');
+    expect(markup).toContain("Context handoff from Codex Work GPT-5.6 Sol, Local Provider");
+    expect(markup).toContain("to Claude Work Fable 5. Completed");
+    expect(markup).toContain("A Very Long Local Model Label That Must Truncate Responsively");
+    expect(markup).toContain(">LP<");
+    expect(markup).toContain("lucide-arrow-left-right");
+    expect(markup).toContain("lucide-arrow-right");
+    expect(markup).not.toContain("Work log");
+    expect(markup).not.toContain("data-message-id");
+    expect(markup).not.toContain('data-testid="timeline-minimap"');
+  });
+
+  it("renders failed and delivery-uncertain handoffs with explicit status semantics", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const failed = makeContextHandoffMarker({
+      id: "context-handoff:failed",
+      handoffId: ContextHandoffId.make("handoff-failed"),
+      status: "failed",
+      error: "Target runtime could not start",
+    });
+    const uncertain = makeContextHandoffMarker({
+      id: "context-handoff:uncertain",
+      handoffId: ContextHandoffId.make("handoff-uncertain"),
+      status: "delivery-uncertain",
+      error: "Acceptance could not be proven",
+    });
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[failed, uncertain].map((marker) => ({
+          id: marker.id,
+          kind: "context-handoff" as const,
+          createdAt: marker.createdAt,
+          marker,
+        }))}
+      />,
+    );
+
+    expect(markup).toContain('data-context-handoff-status="failed"');
+    expect(markup).toContain('data-context-handoff-status="delivery-uncertain"');
+    expect(markup).toContain("Failed: Target runtime could not start");
+    expect(markup).toContain("Delivery uncertain: Acceptance could not be proven");
+    expect(markup).toContain("lucide-circle-alert");
+    expect(markup).toContain("lucide-circle-question-mark");
   });
 
   it("formats changed file paths from the workspace root", async () => {

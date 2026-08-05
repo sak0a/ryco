@@ -10,6 +10,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   RuntimeRequestId,
+  type RuntimeSessionId,
   type ThreadId,
   TurnId,
 } from "@ryco/contracts";
@@ -53,6 +54,7 @@ import {
 } from "../acp/AcpCoreRuntimeEvents.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
+import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,
@@ -200,8 +202,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         ),
       );
 
-    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
-      PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
+    const offerRuntimeEventForRuntime = (
+      runtimeSessionId: RuntimeSessionId,
+      event: ProviderRuntimeEvent,
+    ) => {
+      return PubSub.publish(
+        runtimeEventPubSub,
+        stampRuntimeEvent(event, { providerInstanceId: boundInstanceId, runtimeSessionId }),
+      ).pipe(Effect.asVoid);
+    };
 
     const getThreadSemaphore = (threadId: string) =>
       SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
@@ -271,7 +280,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           return;
         }
         ctx.lastPlanFingerprint = fingerprint;
-        yield* offerRuntimeEvent(
+        yield* offerRuntimeEventForRuntime(
+          ctx.session.runtimeSessionId!,
           makeAcpPlanUpdatedEvent({
             stamp: yield* makeEventStamp(),
             provider: PROVIDER,
@@ -308,7 +318,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         }
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
         sessions.delete(ctx.threadId);
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
           type: "session.exited",
           ...(yield* makeEventStamp()),
           provider: PROVIDER,
@@ -328,6 +338,17 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
             });
           }
+          if (
+            input.providerInstanceId !== undefined &&
+            input.providerInstanceId !== boundInstanceId
+          ) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: `Expected provider instance '${boundInstanceId}' but received '${input.providerInstanceId}'.`,
+            });
+          }
+          const runtimeSessionId = yield* requireRuntimeSessionId(PROVIDER, input);
           if (!input.cwd?.trim()) {
             return yield* new ProviderAdapterValidationError({
               provider: PROVIDER,
@@ -335,9 +356,13 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               issue: "cwd is required and must be non-empty.",
             });
           }
+          const effectiveResumeCursor =
+            input.resumePolicy === "fresh" ? undefined : input.resumeCursor;
           const grokResume =
-            input.resumeCursor === undefined ? undefined : parseGrokResume(input.resumeCursor);
-          if (input.resumeCursor !== undefined && grokResume === undefined) {
+            effectiveResumeCursor === undefined
+              ? undefined
+              : parseGrokResume(effectiveResumeCursor);
+          if (effectiveResumeCursor !== undefined && grokResume === undefined) {
             return yield* new ProviderAdapterValidationError({
               provider: PROVIDER,
               operation: "startSession",
@@ -350,7 +375,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const existing = sessions.get(input.threadId);
           if (existing && !existing.stopped) {
-            yield* stopSessionInternal(existing);
+            if (existing.session.runtimeSessionId === runtimeSessionId) {
+              return existing.session;
+            }
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: `Thread '${input.threadId}' still has runtime '${existing.session.runtimeSessionId ?? "legacy"}'; stop it before starting '${runtimeSessionId}'.`,
+            });
           }
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
@@ -400,7 +432,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       const runtimeRequestId = RuntimeRequestId.make(requestId);
                       const resolution = yield* Deferred.make<PendingUserInputResolution>();
                       pendingUserInputs.set(requestId, { resolution });
-                      yield* offerRuntimeEvent({
+                      yield* offerRuntimeEventForRuntime(runtimeSessionId, {
                         type: "user-input.requested",
                         ...(yield* makeEventStamp()),
                         provider: PROVIDER,
@@ -417,7 +449,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       const resolved = yield* Deferred.await(resolution);
                       pendingUserInputs.delete(requestId);
                       const resolvedAnswers = resolved._tag === "answered" ? resolved.answers : {};
-                      yield* offerRuntimeEvent({
+                      yield* offerRuntimeEventForRuntime(runtimeSessionId, {
                         type: "user-input.resolved",
                         ...(yield* makeEventStamp()),
                         provider: PROVIDER,
@@ -462,7 +494,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   const runtimeRequestId = RuntimeRequestId.make(requestId);
                   const decision = yield* Deferred.make<ProviderApprovalDecision>();
                   pendingApprovals.set(requestId, { decision });
-                  yield* offerRuntimeEvent(
+                  yield* offerRuntimeEventForRuntime(
+                    runtimeSessionId,
                     makeAcpRequestOpenedEvent({
                       stamp: yield* makeEventStamp(),
                       provider: PROVIDER,
@@ -482,7 +515,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   );
                   const resolved = yield* Deferred.await(decision);
                   pendingApprovals.delete(requestId);
-                  yield* offerRuntimeEvent(
+                  yield* offerRuntimeEventForRuntime(
+                    runtimeSessionId,
                     makeAcpRequestResolvedEvent({
                       stamp: yield* makeEventStamp(),
                       provider: PROVIDER,
@@ -528,6 +562,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: boundInstanceId,
+            runtimeSessionId,
             status: "ready",
             runtimeMode: input.runtimeMode,
             tokenMode: input.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
@@ -563,7 +598,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               Effect.gen(function* () {
                 switch (event._tag) {
                   case "AssistantItemStarted":
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpAssistantItemEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -575,7 +611,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     );
                     return;
                   case "AssistantItemCompleted":
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpAssistantItemEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -592,7 +629,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return;
                   case "ToolCallUpdated":
                     yield* logNative(ctx.threadId, "session/update", event.rawPayload);
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpToolCallEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -605,7 +643,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return;
                   case "ContentDelta":
                     yield* logNative(ctx.threadId, "session/update", event.rawPayload);
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpContentDeltaEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -619,7 +658,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     return;
                   case "UsageUpdated":
                     yield* logNative(ctx.threadId, "session/update", event.rawPayload);
-                    yield* offerRuntimeEvent(
+                    yield* offerRuntimeEventForRuntime(
+                      runtimeSessionId,
                       makeAcpTokenUsageEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -639,21 +679,21 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           sessions.set(input.threadId, ctx);
           sessionScopeTransferred = true;
 
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEventForRuntime(runtimeSessionId, {
             type: "session.started",
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { resume: started.initializeResult },
           });
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEventForRuntime(runtimeSessionId, {
             type: "session.state.changed",
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { state: "ready", reason: "Grok ACP session ready" },
           });
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEventForRuntime(runtimeSessionId, {
             type: "thread.started",
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -745,7 +785,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               ...(displayModel ? { model: displayModel } : {}),
             };
 
-            yield* offerRuntimeEvent({
+            yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
               type: "turn.started",
               ...(yield* makeEventStamp()),
               provider: PROVIDER,
@@ -797,7 +837,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               ...(prepared.displayModel ? { model: prepared.displayModel } : {}),
             };
 
-            yield* offerRuntimeEvent({
+            yield* offerRuntimeEventForRuntime(ctx.session.runtimeSessionId!, {
               type: "turn.completed",
               ...(yield* makeEventStamp()),
               provider: PROVIDER,

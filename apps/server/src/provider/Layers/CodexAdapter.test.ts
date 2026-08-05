@@ -11,6 +11,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderItemId,
+  RuntimeSessionId,
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderSession,
@@ -257,6 +258,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       const adapter = yield* CodexAdapter;
       const result = yield* adapter
         .startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-codexadapter-1"),
           provider: ProviderDriverKind.make("claudeAgent"),
           threadId: asThreadId("thread-1"),
           runtimeMode: "full-access",
@@ -275,12 +277,32 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
     }),
   );
+  it.effect("returns validation error for a mismatched provider instance", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const result = yield* adapter
+        .startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-codexadapter-instance-mismatch"),
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: ProviderInstanceId.make("codex-other"),
+          threadId: asThreadId("thread-instance-mismatch"),
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.result);
+
+      assert.equal(result._tag, "Failure");
+      assert.equal(result.failure._tag, "ProviderAdapterValidationError");
+      assert.match(result.failure.issue, /Expected provider instance 'codex'/);
+      assert.equal(validationRuntimeFactory.factory.mock.calls.length, 0);
+    }),
+  );
   it.effect("maps codex model options before starting a session", () =>
     Effect.gen(function* () {
       validationRuntimeFactory.factory.mockClear();
       const adapter = yield* CodexAdapter;
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-2"),
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-1"),
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
@@ -296,6 +318,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         cwd: process.cwd(),
         model: "gpt-5.3-codex",
         providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-2"),
         serviceTier: "fast",
         threadId: asThreadId("thread-1"),
         runtimeMode: "full-access",
@@ -349,6 +372,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-3"),
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-missing"),
         runtimeMode: "full-access",
@@ -400,6 +424,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     return Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-4"),
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-custom-instance"),
         runtimeMode: "full-access",
@@ -455,6 +480,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       fs.writeFileSync(attachmentPath, Uint8Array.from([1, 2, 3, 4]));
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-5"),
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-attachment-small"),
         runtimeMode: "full-access",
@@ -491,6 +517,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     return Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-6"),
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-attachment-count"),
         runtimeMode: "full-access",
@@ -548,6 +575,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         fs.writeFileSync(attachmentPath, Buffer.alloc(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES + 1));
 
         yield* adapter.startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-codexadapter-7"),
           provider: ProviderDriverKind.make("codex"),
           threadId: asThreadId("sess-attachment-large"),
           runtimeMode: "full-access",
@@ -596,24 +624,92 @@ const lifecycleLayer = it.layer(
   ),
 );
 
-function startLifecycleRuntime() {
+it.effect("CodexAdapter keeps a late A1 exit stamped A1 after starting A2", () => {
+  const runtimeFactory = makeRuntimeFactory();
+  const layer = makeCodexAdapterTestLayer({
+    runtimeFactory,
+    prefix: "ryco-codex-runtime-epoch-",
+  });
+  const threadId = asThreadId("thread-codex-runtime-epoch");
+  const runtimeA1 = RuntimeSessionId.make("runtime-codex-a1");
+  const runtimeA2 = RuntimeSessionId.make("runtime-codex-a2");
+
   return Effect.gen(function* () {
     const adapter = yield* CodexAdapter;
     yield* adapter.startSession({
+      runtimeSessionId: runtimeA1,
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      threadId,
+      runtimeMode: "full-access",
+    });
+    const firstRuntime = runtimeFactory.lastRuntime;
+    assert.ok(firstRuntime);
+
+    const lateEventFiber = yield* adapter.streamEvents.pipe(
+      Stream.filter((event) => event.eventId === asEventId("evt-codex-late-a1-exit")),
+      Stream.runHead,
+      Effect.forkChild,
+    );
+    firstRuntime.closeImpl.mockImplementation(async () => {
+      await Effect.runPromise(
+        firstRuntime.emit({
+          id: asEventId("evt-codex-late-a1-exit"),
+          kind: "session",
+          provider: ProviderDriverKind.make("codex"),
+          threadId,
+          createdAt: new Date().toISOString(),
+          method: "session/closed",
+          message: "Late A1 exit",
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    yield* adapter.stopSession(threadId);
+    yield* adapter.startSession({
+      runtimeSessionId: runtimeA2,
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      threadId,
+      runtimeMode: "full-access",
+    });
+
+    const lateEvent = yield* Fiber.join(lateEventFiber).pipe(Effect.timeout("1 second"));
+    assert.equal(lateEvent._tag, "Some");
+    if (lateEvent._tag === "Some") {
+      assert.equal(lateEvent.value.runtimeSessionId, runtimeA1);
+      assert.notEqual(lateEvent.value.runtimeSessionId, runtimeA2);
+    }
+  }).pipe(Effect.provide(layer));
+});
+
+let lifecycleRuntimeSequence = 0;
+
+function startLifecycleRuntime() {
+  return Effect.gen(function* () {
+    const adapter = yield* CodexAdapter;
+    if (yield* adapter.hasSession(asThreadId("thread-1"))) {
+      yield* adapter.stopSession(asThreadId("thread-1"));
+    }
+    const session = yield* adapter.startSession({
+      runtimeSessionId: RuntimeSessionId.make(
+        `test-codexadapter-lifecycle-${++lifecycleRuntimeSequence}`,
+      ),
       provider: ProviderDriverKind.make("codex"),
       threadId: asThreadId("thread-1"),
       runtimeMode: "full-access",
     });
     const runtime = lifecycleRuntimeFactory.lastRuntime;
     assert.ok(runtime);
-    return { adapter, runtime };
+    return { adapter, runtime, session };
   });
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
   it.effect("maps completed agent message items to canonical item.completed events", () =>
     Effect.gen(function* () {
-      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const { adapter, runtime, session } = yield* startLifecycleRuntime();
       const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
 
       const event: ProviderEvent = {
@@ -644,6 +740,8 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         return;
       }
       assert.equal(firstEvent.value.type, "item.completed");
+      assert.equal(firstEvent.value.providerInstanceId, ProviderInstanceId.make("codex"));
+      assert.equal(firstEvent.value.runtimeSessionId, session.runtimeSessionId);
       if (firstEvent.value.type !== "item.completed") {
         return;
       }
@@ -1182,6 +1280,7 @@ scopedLifecycleLayer("CodexAdapterLive scoped lifecycle", (it) => {
       const adapter = yield* CodexAdapter;
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-9"),
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-stop"),
         runtimeMode: "full-access",
@@ -1227,6 +1326,7 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
 
       const result = yield* adapter
         .startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-codexadapter-10"),
           provider: ProviderDriverKind.make("codex"),
           threadId: asThreadId("thread-fail"),
           runtimeMode: "full-access",
@@ -1271,6 +1371,7 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
       const adapter = yield* Effect.service(CodexAdapter).pipe(Effect.provide(context));
 
       yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-codexadapter-11"),
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-logger"),
         runtimeMode: "full-access",

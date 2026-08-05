@@ -121,6 +121,8 @@ import { isTerminalFocused } from "../../lib/terminalFocus";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashPicker } from "./ComposerStashPicker";
+import { PendingContextHandoffChip } from "./PendingContextHandoffChip";
+import { derivePendingContextHandoff } from "./pendingContextHandoff";
 
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
   '[data-slot="popover-popup"]',
@@ -261,6 +263,7 @@ export interface ChatComposerProps {
   activeThreadId: ThreadId | null;
   activeThreadEnvironmentId: EnvironmentId | undefined;
   activeThreadSessionProviderInstanceId: ProviderInstanceId | null | undefined;
+  activeThreadStarted: boolean;
   isServerThread: boolean;
   isLocalDraftThread: boolean;
 
@@ -384,6 +387,7 @@ export const ChatComposer = memo(
       activeThreadId,
       activeThreadEnvironmentId: _activeThreadEnvironmentId,
       activeThreadSessionProviderInstanceId,
+      activeThreadStarted,
       isServerThread: _isServerThread,
       isLocalDraftThread: _isLocalDraftThread,
       phase,
@@ -548,12 +552,18 @@ export const ChatComposer = memo(
     //   5. First enabled entry overall / default instance for the kind.
     //
     const selectedInstanceId = useMemo<ProviderInstanceId>(() => {
-      const candidates: Array<string | null | undefined> = [
-        composerDraft.activeProvider,
-        activeThreadSessionProviderInstanceId,
-        activeThreadModelSelection?.instanceId,
-        activeProjectDefaultModelSelection?.instanceId,
-      ];
+      const candidates: Array<string | null | undefined> = lockedProvider
+        ? [
+            activeThreadModelSelection?.instanceId,
+            activeThreadSessionProviderInstanceId,
+            activeProjectDefaultModelSelection?.instanceId,
+          ]
+        : [
+            composerDraft.activeProvider,
+            activeThreadSessionProviderInstanceId,
+            activeThreadModelSelection?.instanceId,
+            activeProjectDefaultModelSelection?.instanceId,
+          ];
       for (const candidate of candidates) {
         if (!candidate) continue;
         const match = providerInstanceEntries.find(
@@ -603,7 +613,7 @@ export const ChatComposer = memo(
       selectedProvider,
     ]);
 
-    const { modelOptions: composerModelOptions, selectedModel } = useEffectiveComposerModelState({
+    const effectiveModelState = useEffectiveComposerModelState({
       threadRef: composerDraftTarget,
       providers: providerStatuses,
       selectedProvider,
@@ -612,6 +622,11 @@ export const ChatComposer = memo(
       projectModelSelection: activeProjectDefaultModelSelection,
       settings,
     });
+    const composerModelOptions = effectiveModelState.modelOptions;
+    const selectedModel =
+      lockedProvider && activeThreadModelSelection?.instanceId === selectedInstanceId
+        ? activeThreadModelSelection.model
+        : effectiveModelState.selectedModel;
 
     // Resolve the active instance's snapshot by `instanceId` so a custom
     // instance gets its own slash commands, skills, and model list — not
@@ -732,6 +747,25 @@ export const ChatComposer = memo(
     // landscape phones collapse consistently with the rest of the phone UI.
     const isMobileViewport = presentationTier === "phone";
     const isComposerCollapsedMobile = isMobileViewport && !isComposerFocused;
+    const pendingContextHandoff = useMemo(
+      () =>
+        derivePendingContextHandoff({
+          threadStarted: activeThreadStarted,
+          isPhoneTier: isMobileViewport,
+          canonicalSelection: activeThreadModelSelection,
+          targetSelection: selectedModelSelection,
+          providerInstanceEntries,
+          modelOptionsByInstance,
+        }),
+      [
+        activeThreadModelSelection,
+        activeThreadStarted,
+        isMobileViewport,
+        modelOptionsByInstance,
+        providerInstanceEntries,
+        selectedModelSelection,
+      ],
+    );
 
     // ------------------------------------------------------------------
     // Refs
@@ -2177,6 +2211,19 @@ export const ChatComposer = memo(
         className="relative mx-auto w-full min-w-0 max-w-208"
         data-chat-composer-form="true"
       >
+        {pendingContextHandoff ? (
+          <div
+            className={cn(
+              "mb-2 flex min-w-0 items-center px-4",
+              stashEntries.length > 0 && "pr-24",
+            )}
+          >
+            <PendingContextHandoffChip
+              source={pendingContextHandoff.source}
+              target={pendingContextHandoff.target}
+            />
+          </div>
+        ) : null}
         {!isMobileViewport ? (
           <>
             <ComposerStashBadge

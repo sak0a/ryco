@@ -11,17 +11,78 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   createModelCapabilities,
   createModelSelection,
+  getModelDisplayLabel,
+  getModelDisplayName,
   getModelSelectionBooleanOptionValue,
   getModelSelectionStringOptionValue,
   getProviderOptionDescriptors,
   getProviderOptionBooleanSelectionValue,
   getProviderOptionStringSelectionValue,
   isClaudeUltrathinkPrompt,
+  modelSelectionRequiresContextHandoff,
   normalizeModelSlug,
   resolveModelSlugForProvider,
   resolveSelectableModel,
   trimOrNull,
 } from "./model.ts";
+
+describe("model presentation", () => {
+  it("uses the picker-compatible short name and sub-provider label", () => {
+    const model = {
+      slug: "claude-fable-5",
+      name: "Claude Fable 5",
+      shortName: "Fable 5",
+      subProvider: "Anthropic",
+    };
+
+    expect(getModelDisplayName(model)).toBe("Claude Fable 5");
+    expect(getModelDisplayName(model, { preferShortName: true })).toBe("Fable 5");
+    expect(getModelDisplayLabel(model, { preferShortName: true })).toBe("Anthropic · Fable 5");
+  });
+
+  it("trims catalog labels and falls back through name to slug", () => {
+    expect(
+      getModelDisplayLabel(
+        { slug: "vendor/model", name: " Friendly Model ", shortName: "  ", subProvider: "  " },
+        { preferShortName: true },
+      ),
+    ).toBe("Friendly Model");
+    expect(
+      getModelDisplayLabel(
+        { slug: "vendor/model", name: " ", shortName: " ", subProvider: "Vendor" },
+        { preferShortName: true },
+      ),
+    ).toBe("Vendor · vendor/model");
+  });
+});
+
+describe("context handoff boundary", () => {
+  const canonicalSelection = createModelSelection(
+    ProviderInstanceId.make("claude_work"),
+    "claude-fable-5",
+  );
+
+  it("requires a handoff only when the configured provider instance changes", () => {
+    expect(
+      modelSelectionRequiresContextHandoff({
+        canonicalSelection,
+        targetSelection: createModelSelection(
+          ProviderInstanceId.make("claude_work"),
+          "claude-opus-5",
+        ),
+      }),
+    ).toBe(false);
+    expect(
+      modelSelectionRequiresContextHandoff({
+        canonicalSelection,
+        targetSelection: createModelSelection(
+          ProviderInstanceId.make("claude_personal"),
+          "claude-opus-5",
+        ),
+      }),
+    ).toBe(true);
+  });
+});
 
 const codexCaps: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [

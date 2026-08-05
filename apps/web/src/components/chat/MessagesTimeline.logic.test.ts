@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, MessageId, TurnId } from "@ryco/contracts";
-import { type WorkLogEntry } from "../../session-logic";
+import {
+  ContextHandoffId,
+  EnvironmentId,
+  MessageId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  TurnId,
+} from "@ryco/contracts";
+import { type ContextHandoffTimelineEntry, type WorkLogEntry } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import {
   buildTimelineStableState,
@@ -31,6 +38,38 @@ function makeWorkEntry(overrides: Partial<WorkLogEntry> = {}): WorkLogEntry {
     createdAt: "2026-01-01T00:00:00Z",
     label: "Bash",
     tone: "tool",
+    ...overrides,
+  };
+}
+
+function makeContextHandoffMarker(
+  overrides: Partial<ContextHandoffTimelineEntry> = {},
+): ContextHandoffTimelineEntry {
+  return {
+    id: "context-handoff:activity-1",
+    activityId: "activity-1",
+    handoffId: ContextHandoffId.make("handoff-1"),
+    createdAt: "2026-01-01T00:00:02Z",
+    turnId: TurnId.make("turn-target"),
+    status: "consumed",
+    targetMessageId: MessageId.make("message-target"),
+    targetTurnId: TurnId.make("turn-target"),
+    sources: [
+      {
+        providerInstanceId: ProviderInstanceId.make("codex_work"),
+        driverKind: ProviderDriverKind.make("codex"),
+        providerDisplayName: "Codex Work",
+        modelSlug: "gpt-5.6",
+        modelDisplayName: "GPT-5.6",
+      },
+    ],
+    target: {
+      providerInstanceId: ProviderInstanceId.make("claude_work"),
+      driverKind: ProviderDriverKind.make("claudeAgent"),
+      providerDisplayName: "Claude Work",
+      modelSlug: "claude-fable-5",
+      modelDisplayName: "Claude Fable 5",
+    },
     ...overrides,
   };
 }
@@ -943,6 +982,45 @@ describe("deriveMessagesTimelineRows", () => {
     expect(userRow?.revertTurnCount).toBe(1);
     expect(assistantRow?.assistantTurnDiffSummary).toBe(assistantTurnDiffSummary);
   });
+
+  it("keeps context handoffs as dedicated rows outside work groups and turn folds", () => {
+    const marker = makeContextHandoffMarker();
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "work-before",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:01Z",
+          entry: makeWorkEntry({ id: "work-before", createdAt: "2026-01-01T00:00:01Z" }),
+        },
+        {
+          id: marker.id,
+          kind: "context-handoff",
+          createdAt: marker.createdAt,
+          marker,
+        },
+        {
+          id: "work-after",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:03Z",
+          entry: makeWorkEntry({ id: "work-after", createdAt: "2026-01-01T00:00:03Z" }),
+        },
+      ],
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.kind)).toEqual(["work", "context-handoff", "work"]);
+    expect(rows[1]).toEqual({
+      kind: "context-handoff",
+      id: marker.id,
+      createdAt: marker.createdAt,
+      marker,
+    });
+    expect(deriveTimelineMinimapItems(rows)).toEqual([]);
+  });
 });
 
 describe("deriveUndoTurnCountByTurnId", () => {
@@ -1082,6 +1160,21 @@ describe("deriveRevertTurnCountByUserMessageId", () => {
 });
 
 describe("computeStableMessagesTimelineRows", () => {
+  it("preserves a context handoff row while its marker identity is unchanged", () => {
+    const marker = makeContextHandoffMarker();
+    const row = {
+      kind: "context-handoff" as const,
+      id: marker.id,
+      createdAt: marker.createdAt,
+      marker,
+    };
+    const initial = computeStableMessagesTimelineRows([row], { byId: new Map(), result: [] });
+    const stable = computeStableMessagesTimelineRows([{ ...row }], initial);
+
+    expect(stable).toBe(initial);
+    expect(stable.result[0]).toBe(initial.result[0]);
+  });
+
   it("returns the previous result when row order and content are unchanged", () => {
     const firstUserMessage = {
       id: "user-1" as never,

@@ -658,7 +658,7 @@ export function projectEvent(
                         ? thread.latestTurn.assistantMessageId
                         : null,
                   }
-                : thread.latestTurn,
+                : null,
             updatedAt: event.occurredAt,
           }),
         };

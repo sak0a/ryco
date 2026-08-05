@@ -5,6 +5,7 @@ import {
   TurnId,
   ProviderDriverKind,
   ProviderInstanceId,
+  RuntimeSessionId,
 } from "@ryco/contracts";
 import { Effect, Exit, Layer, ManagedRuntime, Option, Scope, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
@@ -16,6 +17,7 @@ import { ProviderSessionRuntimeRepository } from "../../persistence/Services/Pro
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderSessionReaper } from "../Services/ProviderSessionReaper.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
+import type { ProviderRuntimeBinding } from "../Services/ProviderSessionDirectory.ts";
 import { ProviderSessionDirectoryLive } from "./ProviderSessionDirectory.ts";
 import { makeProviderSessionReaperLive } from "./ProviderSessionReaper.ts";
 
@@ -127,6 +129,7 @@ describe("ProviderSessionReaper", () => {
     readonly stopSessionImplementation?: (input: {
       readonly threadId: ThreadId;
     }) => ReturnType<ProviderServiceShape["stopSession"]>;
+    readonly staleBindings?: ReadonlyArray<ProviderRuntimeBinding>;
   }) {
     const stoppedThreadIds = new Set<ThreadId>();
     const stopSession = vi.fn<ProviderServiceShape["stopSession"]>(
@@ -137,9 +140,18 @@ describe("ProviderSessionReaper", () => {
               stoppedThreadIds.add(request.threadId);
             })) as ReturnType<ProviderServiceShape["stopSession"]>,
     );
+    const stopSessionBinding = vi.fn<ProviderServiceShape["stopSessionBinding"]>(() =>
+      Effect.succeed("stopped"),
+    );
 
     const providerService: ProviderServiceShape = {
       startSession: () => unsupported(),
+      startFreshSession: () => unsupported(),
+      getSession: () => Effect.succeed(Option.none()),
+      restoreSessionBinding: () => Effect.succeed(false),
+      retireSessionBinding: () => Effect.succeed(false),
+      stopSessionBinding,
+      listStaleSessionBindings: () => Effect.succeed(input.staleBindings ?? []),
       sendTurn: () => unsupported(),
       interruptTurn: () => unsupported(),
       respondToRequest: () => unsupported(),
@@ -203,8 +215,32 @@ describe("ProviderSessionReaper", () => {
     );
 
     runtime = ManagedRuntime.make(layer);
-    return { stopSession, stoppedThreadIds };
+    return { stopSession, stopSessionBinding, stoppedThreadIds };
   }
+
+  it("retries exact stale instance/runtime bindings before inactivity cleanup", async () => {
+    const threadId = ThreadId.make("thread-reaper-stale-epoch");
+    const staleBinding: ProviderRuntimeBinding = {
+      threadId,
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      runtimeSessionId: RuntimeSessionId.make("runtime-reaper-stale-epoch"),
+      runtimeMode: "full-access",
+      status: "running",
+    };
+    const harness = await createHarness({
+      readModel: makeReadModel([]),
+      staleBindings: [staleBinding],
+    });
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper));
+    scope = await Effect.runPromise(Scope.make("sequential"));
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)));
+
+    await waitFor(() => harness.stopSessionBinding.mock.calls.length === 1);
+    expect(harness.stopSessionBinding.mock.calls[0]).toEqual([staleBinding]);
+    expect(harness.stopSession.mock.calls).toHaveLength(0);
+  });
 
   it("reaps stale persisted sessions without active turns", async () => {
     const threadId = ThreadId.make("thread-reaper-stale");

@@ -1,6 +1,7 @@
 import {
   formatDuration,
   type ContextCompactionTimelineEntry,
+  type ContextHandoffTimelineEntry,
   type TimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
@@ -201,6 +202,10 @@ export interface TimelineStableState {
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
   onOpenMessageActions: (request: TimelineMessageActionsRequest) => void;
+  onInspectContextHandoff?: (
+    marker: ContextHandoffTimelineEntry,
+    trigger: HTMLButtonElement,
+  ) => void;
 }
 
 /**
@@ -242,6 +247,9 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     onOpenTurnDiff: input.onOpenTurnDiff,
     onCloseDiff: input.onCloseDiff,
     onOpenMessageActions: input.onOpenMessageActions,
+    ...(input.onInspectContextHandoff
+      ? { onInspectContextHandoff: input.onInspectContextHandoff }
+      : {}),
   };
 }
 
@@ -309,6 +317,12 @@ export type MessagesTimelineRow =
       id: string;
       createdAt: string;
       marker: ContextCompactionTimelineEntry;
+    }
+  | {
+      kind: "context-handoff";
+      id: string;
+      createdAt: string;
+      marker: ContextHandoffTimelineEntry;
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
@@ -828,6 +842,16 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "context-handoff") {
+      nextRows.push({
+        kind: "context-handoff",
+        id: timelineEntry.id,
+        createdAt: timelineEntry.createdAt,
+        marker: timelineEntry.marker,
+      });
+      continue;
+    }
+
     // Resolved once: the summary supplies both the changed-files card and the
     // turn identity its Undo action rolls back to.
     const assistantTurnDiffSummary =
@@ -928,6 +952,9 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       return areWorkRowsUnchanged(a, b as typeof a);
 
     case "context-compaction":
+      return a.marker === (b as typeof a).marker;
+
+    case "context-handoff":
       return a.marker === (b as typeof a).marker;
 
     case "message": {

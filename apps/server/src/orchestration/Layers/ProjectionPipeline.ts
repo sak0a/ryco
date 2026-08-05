@@ -1185,6 +1185,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         status: event.payload.session.status,
         providerName: event.payload.session.providerName,
         providerInstanceId: event.payload.session.providerInstanceId ?? null,
+        runtimeSessionId: event.payload.session.runtimeSessionId ?? null,
         runtimeMode: event.payload.session.runtimeMode,
         tokenMode: event.payload.session.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
         activeTurnId: event.payload.session.activeTurnId,
