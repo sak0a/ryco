@@ -415,9 +415,10 @@ export function HostedConnectionPill() {
       <MobileStatusChip
         testId="hosted-connection-pill"
         // Node identity and the COMPLETE bounded status text stay in the
-        // accessible name at collapsed size; the visible word is that text's
-        // leading token, so the visible label remains part of the accessible
-        // name.
+        // accessible name at collapsed size. The visible word is the runtime's
+        // CHOSEN short label, never a token of the text: the leading token
+        // stripped polarity exactly where polarity is the message, and
+        // `HOSTED_CONNECTION_STATUS_INDICATORS` exists to replace it.
         label={`Connection: ${node.label}, ${statusText}`}
         status={shortLabel}
         // The glyph follows the same gate order as the text. Choosing it from

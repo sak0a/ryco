@@ -5,6 +5,7 @@ import {
   HOSTED_RELAY_TRANSPORT_STATUSES,
   HOSTED_RYCO_SESSION_STATUSES,
   HOSTED_SELECTION_STATUSES,
+  type HostedConnectionGuarantee,
   type HostedConnectionStatusInput,
   type HostedConnectionStatusText,
 } from "../src/authorization/connectionStatus.ts";
@@ -86,7 +87,10 @@ export function hostedConnectionConnectedByGateOrder(value: HostedConnectionStat
   // §4.4's channel state, restated from the input rather than read off the
   // indicator: a `negotiating` channel has released nothing and a §13.1
   // release-gated `unverified` one carries the pairing ceremony alone, so
-  // neither is a session the owner can use. `legacy` is usable and says so.
+  // neither is a session the owner can use. `legacy` is usable and says so, and
+  // so is `web-unsigned` — §13.1's release gate is native-only by construction,
+  // so a web NX channel releases payload exactly as a locked native one does.
+  // That is the whole reason it could not reuse `unverified`.
   const e2eeStatus = value.e2eeStatus ?? "unavailable";
   return e2eeStatus !== "negotiating" && e2eeStatus !== "unverified";
 }
@@ -96,14 +100,17 @@ export function hostedConnectionConnectedByGateOrder(value: HostedConnectionStat
  *
  * The second opinion for `HostedConnectionStatusIndicator.guarantee`: only a
  * usable session on a channel that locked `e2ee` AND resolved to a verified pin
- * may claim `e2ee`, and only a usable session on a fallen-back channel is
- * labeled `legacy` (§12.2).
+ * may claim `e2ee`, only a usable session on a fallen-back channel is labeled
+ * `legacy` (§12.2), and a usable session on the unsigned web tier claims `web`
+ * — §2.2's own row, which is weaker than `e2ee` in the one column that matters:
+ * an active Hub is not protected against, because it serves the code.
  */
 export function hostedConnectionGuaranteeByGateOrder(
   value: HostedConnectionStatusInput,
-): "none" | "legacy" | "e2ee" {
+): HostedConnectionGuarantee {
   if (!hostedConnectionConnectedByGateOrder(value)) return "none";
   if (value.e2eeStatus === "verified") return "e2ee";
+  if (value.e2eeStatus === "web-unsigned") return "web";
   if (value.e2eeStatus === "legacy") return "legacy";
   return "none";
 }

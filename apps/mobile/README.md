@@ -334,6 +334,26 @@ Four properties are structural rather than documented:
   `deriveHubNodeSectionModel`) and supplied from `useMobileE2eeChannelStatus()`:
   an optional field with a benign default is how the whole vocabulary stayed
   unreachable in the shipped app while its unit tests passed.
+- **The shared vocabulary now carries a web row, and this app cannot reach it.**
+  `HostedE2eeChannelStatus` has a `web-unsigned` member — §2.2's _Web, unsigned
+  ephemeral_ row, rendered `Browser encrypted` with `guarantee: "web"` — because
+  a Hub that serves the browser's JavaScript can exfiltrate plaintext while
+  completing a genuine handshake, so §2.2 and §2.3 forbid the web tier from
+  spelling its channel the way this one does. §8.1's role/tier matrix makes this
+  app the IK initiator, and `lockMobileE2eeChannelMode` emits only `legacy`,
+  `verified`, and `unverified` — asserted in `e2eeSession.test.ts` across every
+  exported publisher, so no path through this store reaches the member. Two
+  native edits the member forced: an arm in `e2eeTrustUiModel`'s `claimFor`,
+  which the exhaustive switch would not compile without and which answers `none`
+  — the claim that asserts nothing, because a state this tier does not have has
+  no honest label — and a `web` arm in `hostedStatusTone`. The tone mapper is
+  the one that matters: it is the repository's ONLY reader of `guarantee`, and
+  an `if (guarantee === "legacy")` chain silently absorbed the new member into
+  the connected branch and handed §2.2's web row the verified session's success
+  token, differing from `Encrypted` by a noun and nothing else. It now decides
+  from `guarantee` exhaustively, `web` takes the informational token, and the
+  success rule is stated positively — connected, and `none` or `e2ee` — so the
+  next guarantee added is a compile error rather than a default.
 - **Every guard is re-resolved on every owner decision.** The prepared §4.4
   attempt is keyed on the selection **and** on `mobileE2eeTrustStore.revision()`,
   which the store bumps on every commit. §13.2 step 5's promotion, §13.3's

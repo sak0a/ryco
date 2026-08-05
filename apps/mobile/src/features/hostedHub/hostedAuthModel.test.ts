@@ -448,29 +448,69 @@ describe("hosted status tone", () => {
     ).toBe("text-danger-foreground");
   });
 
+  it("withholds the verified session's colour from §2.2's web row", () => {
+    // §2.2/§2.4: the Hub serves the browser's JavaScript, so the web NX row is
+    // encrypted while that code is honest and NOT the operator-proof row. The
+    // mapper is the repository's only tone decision, so a web chip that differs
+    // from the verified one by a noun and by nothing else is §2.2's "stronger
+    // claim for a weaker configuration" rendered.
+    const web = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS["Browser encrypted"]);
+    const verified = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Encrypted);
+    expect(web.textClassName).not.toBe("text-success");
+    expect(web.pillClassName).not.toBe(verified.pillClassName);
+    expect(web).not.toEqual({ ...verified, label: web.label });
+    // …and it is not the fallback's colour either: a web NX channel IS
+    // encrypted, and §12.2's amber is the label for one that is not.
+    const legacy = hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.Legacy);
+    expect(web.pillClassName).not.toBe(legacy.pillClassName);
+    expect(web.textClassName).not.toBe(legacy.textClassName);
+    // Nor the tone of a state that is not a usable connection at all: the web
+    // row IS one (§13.1's release gate is native-only).
+    expect(web.textClassName).not.toBe(
+      hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS.connecting).textClassName,
+    );
+    expect(web.label).toBe(HOSTED_CONNECTION_STATUS_INDICATORS["Browser encrypted"].shortLabel);
+  });
+
   it("cannot contradict its own label, for any status in the vocabulary", () => {
     for (const text of HOSTED_CONNECTION_STATUS_TEXTS) {
       const indicator = HOSTED_CONNECTION_STATUS_INDICATORS[text];
       const tone = hostedStatusTone(indicator);
       // The label is the runtime's, never the mapper's.
       expect(tone.label).toBe(indicator.shortLabel);
-      // And the success token is reachable only where §2.2 permits a claim:
-      // a usable connection that is not a labeled fallback.
+      // And the success token is reachable only where §2.2 permits a claim,
+      // stated POSITIVELY: a usable connection whose guarantee is the absence of
+      // a claim or §2.2's bottom row. Written as `!== "legacy"` this admitted
+      // every guarantee added later — `web` among them — by default, which is
+      // exactly how the web NX row took the verified session's colour.
       if (tone.textClassName === "text-success") {
         expect(indicator.connected).toBe(true);
-        expect(indicator.guarantee).not.toBe("legacy");
+        expect(["none", "e2ee"], `guarantee for "${text}"`).toContain(indicator.guarantee);
       }
     }
   });
 
   it("uses only design tokens — no hardcoded colours and no `dark:` prefixes", () => {
-    for (const label of HOSTED_CONNECTION_STATUS_TEXTS) {
-      const tone = hostedStatusTone({ shortLabel: label, connected: false, guarantee: "none" });
+    // The REAL indicators as well as the synthetic disconnected ones: keyed on
+    // `guarantee: "none"` alone this walked two of the mapper's branches and
+    // never saw the tokens a claim chooses.
+    const tones = [
+      ...HOSTED_CONNECTION_STATUS_TEXTS.map((label) =>
+        hostedStatusTone({ shortLabel: label, connected: false, guarantee: "none" }),
+      ),
+      ...HOSTED_CONNECTION_STATUS_TEXTS.map((text) =>
+        hostedStatusTone(HOSTED_CONNECTION_STATUS_INDICATORS[text]),
+      ),
+    ];
+    for (const tone of tones) {
       const classNames = `${tone.pillClassName} ${tone.textClassName}`;
       expect(classNames).not.toMatch(/#[0-9a-f]{3,8}\b/i);
       expect(classNames).not.toMatch(/\bdark:/);
       expect(classNames).not.toMatch(/\brgba?\(/);
     }
+    // Every branch of the mapper is actually exercised above, so the scan cannot
+    // pass by visiting one of them.
+    expect(new Set(tones.map((tone) => tone.pillClassName)).size).toBe(5);
   });
 });
 

@@ -18,6 +18,7 @@ import {
 } from "@ryco/shared/relayE2eeHandshake";
 import { eraseE2eeSessionSecrets, type E2eeSessionSecrets } from "@ryco/shared/relayE2eeSession";
 import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
+import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
 import {
   classifyPostStripPayload,
   decodeE2eeCapabilityCarrier,
@@ -136,6 +137,21 @@ export interface RelayE2eeInitiatorAttempt {
   /** §13.2.1: the unexpected-node surface, raised locally on rows K23 and K24. */
   readonly onUnexpectedNode?: ((evidence: RelayE2eeUnexpectedNodeEvidence) => void) | undefined;
   readonly onDiagnostic?: ((diagnostic: RelayE2eeInitiatorDiagnostic) => void) | undefined;
+  /**
+   * §13.5: the RENDERED `WebSAS` for this session, once and only at the `e2ee`
+   * lock, and only on the WEB tier.
+   *
+   * THE PAYLOAD IS THE DISPLAY STRING AND NOTHING ELSE. §13.5 derives the value
+   * from this client's own Noise ephemeral and the §8.8 `sessionBindingHash`,
+   * both of which stay inside this module and the shared handshake: an app tier
+   * that received the ephemeral could render a code for a handshake this client
+   * never completed, which is precisely the session binding §13.5 relies on for
+   * non-precomputability. It is ephemeral display state — §13.5 forbids logging,
+   * persisting, or sending it to analytics — and the disclosure duty that MUST
+   * accompany it (advisory only; no protection against the Hub, which serves the
+   * code that draws it) belongs to the surface that renders it.
+   */
+  readonly onWebVerificationCode?: ((code: string) => void) | undefined;
 }
 
 export interface RelayE2eeInitiatorSources {
@@ -246,6 +262,13 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
   let established: RelayE2eeChannel | undefined;
   let advTimer: unknown;
   let handshakeTimer: unknown;
+  /**
+   * §13.5's node half, retained from the statement §5.2 VALIDATED on this
+   * channel — the only source a web client has, since §13.1 gives it no durable
+   * pin to anchor one against. Captured on the web tier alone, so the derivation
+   * below is unreachable rather than merely unused when the tier is `native`.
+   */
+  let webSasNodeIdentityPublicKey: Uint8Array | undefined;
 
   function clearTimers(): void {
     if (advTimer !== undefined) host.clearTimeout(advTimer);
@@ -342,6 +365,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     readonly secrets: E2eeSessionSecrets;
     readonly suite: E2eeSuiteId;
     readonly sessionBindingHash: Uint8Array;
+    readonly webEphemeralPublicKey: Uint8Array | undefined;
   }): RelayE2eeInboundDisposition {
     if (!e2eeChannelSizeBudget(host.limits).establishable) {
       // §4.5 / §11.2 P14. The channel would erase these itself, but it is never
@@ -363,7 +387,44 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     mode = "e2ee";
     clearTimers();
     host.lockMode("e2ee");
+    publishWebVerificationCode(input.sessionBindingHash, input.webEphemeralPublicKey);
     return CLAIMED;
+  }
+
+  /**
+   * §13.5, AFTER the lock and never before it — the mirror of the node's own
+   * rule that a value the owner can read must describe a session that exists.
+   *
+   * WHAT SELECTS THIS IS THE TIER THE CREDENTIALS ALREADY CARRY, exactly as
+   * `releaseGatedWithoutVerifiedPin` above is selected, and for the same reason:
+   * §13.5 is defined over the WEB client's Noise ephemeral, so a flag a caller
+   * could forget to set would be a second source of truth for which tier the
+   * channel is. On `native` there is no ephemeral on the established result to
+   * derive from and the §13.4 safety number is the owner-facing value instead.
+   *
+   * A derivation failure costs the code and nothing else: this is a display
+   * duty, and §11.2 admits no channel outcome that varies with one.
+   */
+  function publishWebVerificationCode(
+    sessionBindingHash: Uint8Array,
+    webEphemeralPublicKey: Uint8Array | undefined,
+  ): void {
+    if (attempt.credentials.tier !== "web") return;
+    const publish = attempt.onWebVerificationCode;
+    if (publish === undefined) return;
+    const nodeIdentityPublicKey = webSasNodeIdentityPublicKey;
+    if (webEphemeralPublicKey === undefined || nodeIdentityPublicKey === undefined) return;
+    let code: string;
+    try {
+      code = deriveE2eeWebSas({
+        nodeIdentityPublicKey,
+        webEphemeralPublicKey,
+        sessionBindingHash,
+      }).display;
+    } catch {
+      return;
+    }
+    publish(code);
   }
 
   // ─── §4.4 timers ───────────────────────────────────────────────────────────
@@ -509,6 +570,13 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       client.destroy();
       return fatalPre("local");
     }
+    // §13.5's node half, taken from the statement this channel validated and
+    // held only until the lock reads it. The web tier resolves to no pin, so
+    // there is nothing else it could be anchored to; `advertisedMaterial` above
+    // reads the pin for elements 9 and 17 for the same reason and finds none.
+    if (attempt.credentials.tier === "web") {
+      webSasNodeIdentityPublicKey = statement.identityPublicKey;
+    }
     handshake = client;
     helloSent = true;
     if (advTimer !== undefined) host.clearTimeout(advTimer);
@@ -582,6 +650,8 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       secrets: result.secrets,
       suite: result.suite,
       sessionBindingHash: result.sessionBindingHash,
+      // Present on the web arm alone (§13.5); absent by construction on IK.
+      webEphemeralPublicKey: result.webEphemeralPublicKey,
     });
   }
 

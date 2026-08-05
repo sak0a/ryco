@@ -29,6 +29,7 @@ import {
 import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
 import { e2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import { E2eeRecordSession, type E2eeSessionSecrets } from "@ryco/shared/relayE2eeSession";
+import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
 import {
   e2eeAuthorizationContextCommitment,
   encodeCanonicalE2eeCbor,
@@ -1524,6 +1525,208 @@ describe("§13.1 release gate — a native channel with no verified pin never op
     // establishing at all.
     const { test } = await establish();
     expect(test.machine().mode()).toBe("e2ee");
+    expect(test.diagnostics).toEqual([]);
+  });
+});
+
+// ─── §13.5 the web verification string ───────────────────────────────────────
+
+describe("§13.5 WebSAS — the web tier's advisory code, and only the web tier's", () => {
+  /** Everything a web attempt is: no static, no pin, no account-scoped record. */
+  const WEB_CREDENTIALS: E2eeClientHandshakeCredentials = { tier: "web" };
+
+  /** Drive rows K1 and K5 on the WEB tier and collect what was published. */
+  async function establishWeb(overrides: Partial<RelayE2eeInitiatorAttempt> = {}) {
+    const codes: unknown[] = [];
+    const test = harness({
+      credentials: WEB_CREDENTIALS,
+      onWebVerificationCode: (code) => codes.push(code),
+      ...overrides,
+    });
+    deliver(test.socket, CARRIER);
+    await flush();
+    const hello = outbound(test.socket).at(-1);
+    const accept = hello === undefined ? undefined : respond(Uint8Array.from(hello));
+    if (accept !== undefined) {
+      deliver(test.socket, accept.record, 1);
+      await flush();
+    }
+    return { test, accept, codes };
+  }
+
+  it("publishes the code once, at the e2ee lock, and it is the node's own value", async () => {
+    const { test, accept, codes } = await establishWeb();
+
+    expect(test.machine().mode()).toBe("e2ee");
+    expect(codes).toHaveLength(1);
+    // §13.5's whole purpose: the owner compares this against what the node CLI
+    // shows for the same session. The node derives it from the ephemeral it read
+    // off message 1 and its own §8.8 binding, so agreement here is the property.
+    expect(codes[0]).toBe(
+      deriveE2eeWebSas({
+        nodeIdentityPublicKey: NODE_IDENTITY_PUBLIC,
+        webEphemeralPublicKey: accept!.peerEphemeralPublicKey,
+        sessionBindingHash: accept!.sessionBindingHash,
+      }).display,
+    );
+    // A RENDERED STRING AND NOTHING ELSE. No app tier ever receives the
+    // ephemeral, so no surface can draw a code for a handshake this client did
+    // not complete — which is exactly what §13.5's session binding rests on.
+    expect(typeof codes[0]).toBe("string");
+    expect(codes[0]).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+  });
+
+  it("never publishes one for a native attempt, pin or no pin", async () => {
+    const codes: unknown[] = [];
+    const test = harness({
+      verifiedPin: VERIFIED_PIN,
+      onWebVerificationCode: (code) => codes.push(code),
+    });
+    deliver(test.socket, CARRIER);
+    await flush();
+    deliver(test.socket, respond(Uint8Array.from(outbound(test.socket).at(-1)!)).record, 1);
+    await flush();
+
+    // The native channel established — so this is a withheld code, not an
+    // unreached branch — and §13.4's long-term safety number is its value.
+    expect(test.machine().mode()).toBe("e2ee");
+    expect(codes).toEqual([]);
+  });
+
+  it("publishes nothing on a FATAL-PRE row, on either side of the hello", async () => {
+    // §11.2: a client executing FATAL-PRE sends nothing and closes. There is no
+    // session, so there is nothing for a code to describe — and a string that
+    // outlived its channel is exactly the "value the operator can read that
+    // describes a session that does not exist" the node's own rule forbids.
+    // Row K2 / §11.2 P15: an unusable statement under a latched selection, so
+    // no hello is ever built and no ephemeral ever exists.
+    const codes: unknown[] = [];
+    const k2 = harness({
+      credentials: WEB_CREDENTIALS,
+      selectionClass: "latched",
+      onWebVerificationCode: (code) => codes.push(code),
+    });
+    deliver(k2.socket, UNUSABLE_CARRIER);
+    await flush();
+    expect(k2.machine().mode()).toBe("closed");
+    expect(k2.diagnostics).toEqual(["P15"]);
+    expect(codes).toEqual([]);
+
+    // Row K6: a hello went out and the accept does not verify.
+    const test = harness({
+      credentials: WEB_CREDENTIALS,
+      onWebVerificationCode: (code) => codes.push(code),
+    });
+    deliver(test.socket, CARRIER);
+    await flush();
+    const accept = respond(Uint8Array.from(outbound(test.socket).at(-1)!));
+    const tampered = Uint8Array.from(accept.record);
+    tampered[tampered.length - 1] ^= 0xff;
+    deliver(test.socket, tampered, 1);
+    await flush();
+    expect(test.machine().mode()).toBe("closed");
+    expect(codes).toEqual([]);
+
+    // Row K15: the handshake deadline expires with the accept never arriving.
+    const expired = harness({
+      credentials: WEB_CREDENTIALS,
+      onWebVerificationCode: () => codes.push("K15"),
+    });
+    deliver(expired.socket, CARRIER);
+    await flush();
+    expired.advance(T_HANDSHAKE);
+    expect(expired.machine().mode()).toBe("closed");
+    expect(expired.diagnostics).toEqual(["P20"]);
+    expect(codes).toEqual([]);
+  });
+
+  it("publishes nothing on the two FATAL-PRE rows that follow an established accept", async () => {
+    // THE ROWS ABOVE HAVE NO SESSION MATERIAL AT ALL, which is why they cannot
+    // observe where the publish sits. §4.5's P14 and §11.2's P21 are the only
+    // FATAL-PRE rows reached AFTER `receiveServerAccept` returned an established
+    // result — an ephemeral, a session binding, and secrets all exist — so they
+    // are the only rows on which a `WebSAS` could actually be drawn for a channel
+    // that never opened. On the web tier that string is the whole of the owner's
+    // handshake evidence (§13.5), and the node's own rule is that a value the
+    // owner can read must describe a session that exists.
+
+    // Row P14 / §4.5: CONFORMING limits whose plaintext ceiling is not positive,
+    // so the channel fails during establishment. The hand-built host is what
+    // reaches it — the engine's admission bound preempts the row on the real
+    // path.
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 2_048,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 2_048,
+    });
+    expect(e2eeChannelSizeBudget(limits).establishable).toBe(false);
+    const p14Codes: unknown[] = [];
+    const p14 = standalone(
+      {
+        credentials: WEB_CREDENTIALS,
+        onWebVerificationCode: (code) => p14Codes.push(code),
+      },
+      limits,
+    );
+    expect(await p14.machine.intercept(CARRIER)).toEqual({ kind: "claimed" });
+    expect(await p14.machine.intercept(respond(p14.emitted.at(-1)!).record)).toEqual({
+      kind: "rejected",
+    });
+    expect(p14.machine.mode()).toBe("closed");
+    expect(p14.events).toEqual(["diagnostic:P14", "close:channel_rejected"]);
+    expect(p14Codes).toEqual([]);
+
+    // Row P21 / §13.2 step 2: a pairing-only attempt releases nothing at all
+    // regardless of outcome, and a code is a release the owner reads.
+    const p21Codes: unknown[] = [];
+    const p21 = harness({
+      credentials: WEB_CREDENTIALS,
+      pairingOnly: true,
+      onWebVerificationCode: (code) => p21Codes.push(code),
+    });
+    deliver(p21.socket, CARRIER);
+    await flush();
+    deliver(p21.socket, respond(Uint8Array.from(outbound(p21.socket).at(-1)!)).record, 1);
+    await flush();
+    expect(p21.machine().mode()).toBe("closed");
+    expect(p21.diagnostics).toEqual(["P21"]);
+    expect(p21.events.onOpen).not.toHaveBeenCalled();
+    expect(p21Codes).toEqual([]);
+  });
+
+  it("locks the channel whether or not a caller asked for the code", async () => {
+    // §11.2 admits no channel outcome that varies with a display duty: omitting
+    // the callback reaches the same mode, the same release, and the same one
+    // bounded hello. (The bytes differ only in the §8.5 nonce and the ephemeral,
+    // both of which come from the §14.5 CSPRNG on this path.)
+    const withCallback = await establishWeb();
+    const without = harness({ credentials: WEB_CREDENTIALS });
+    deliver(without.socket, CARRIER);
+    await flush();
+    deliver(without.socket, respond(Uint8Array.from(outbound(without.socket).at(-1)!)).record, 1);
+    await flush();
+
+    for (const test of [without, withCallback.test]) {
+      expect(test.machine().mode()).toBe("e2ee");
+      expect(test.events.onOpen).toHaveBeenCalledOnce();
+      expect(test.diagnostics).toEqual([]);
+      expect(closeReasons(test.socket)).toEqual([]);
+      const emitted = outbound(test.socket);
+      expect(emitted).toHaveLength(1);
+      const hello = decodeE2eeClientHello(Uint8Array.from(emitted[0]!));
+      expect(hello.kind === "ok" && hello.value.tier).toBe("web");
+    }
+  });
+
+  it("releases application payload on the web tier — §13.1's gate is native-only", async () => {
+    // The reason the web row could not reuse `unverified`: web holds no durable
+    // pin of any kind (§6.3, §13.1), so the release gate does not apply to it
+    // and an NX channel carries application traffic exactly as a locked native
+    // one does. A tier that reported itself unusable here would be lying.
+    const { test } = await establishWeb();
+    expect(test.machine().mode()).toBe("e2ee");
+    expect(test.events.onOpen).toHaveBeenCalledOnce();
     expect(test.diagnostics).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import { HOSTED_E2EE_CHANNEL_STATUSES } from "@ryco/client-runtime/authorization";
 import {
   E2EE_SAFETY_NUMBER_DIGITS,
   E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS,
@@ -154,6 +155,13 @@ function securityView(state: MobileE2eeSessionState, overrides: { unreadable?: b
 /**
  * Every string any §13 surface can render, so a claim cannot hide in a branch
  * the spot checks below did not visit.
+ *
+ * The channel dimension is the runtime's own exhaustive enumeration and never a
+ * hand-written list: `HOSTED_E2EE_CHANNEL_STATUSES` is `satisfies
+ * Record<HostedE2eeChannelStatus, true>`, so a member added to the shared union
+ * enters this scan — and the §2.2/§2.3 forbidden-string check it feeds — rather
+ * than skipping it. A copied array is how `web-unsigned` was added to the union
+ * without any of the three sweeps in this file noticing.
  */
 function everyRenderedString(): readonly string[] {
   const strings: string[] = [];
@@ -164,13 +172,7 @@ function everyRenderedString(): readonly string[] {
       for (const entry of Object.values(value)) collect(entry);
     }
   };
-  for (const channel of [
-    "unavailable",
-    "negotiating",
-    "verified",
-    "unverified",
-    "legacy",
-  ] as const) {
+  for (const channel of HOSTED_E2EE_CHANNEL_STATUSES) {
     for (const markerSet of [true, false, null]) {
       for (const legacyPermitted of [true, false]) {
         for (const event of [
@@ -495,9 +497,9 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
   });
 
   it("makes the E2EE claim only for a verified channel", () => {
-    const claims = (
-      ["unavailable", "negotiating", "verified", "unverified", "legacy"] as const
-    ).map((channel) => securityView(session({ channel })));
+    const claims = HOSTED_E2EE_CHANNEL_STATUSES.map((channel) =>
+      securityView(session({ channel })),
+    );
     for (const view of claims) {
       if (view.channelMessage.includes("encrypted end to end")) {
         expect(view.claim).toBe("verified");
@@ -511,6 +513,28 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
     expect(verified.channelLabel).toBe("Encrypted");
     expect(verified.channelMessage).toContain("encrypted end to end");
     expect(verified.channelMessage).toContain("cannot read");
+  });
+
+  it("answers §2.2's web row with the claim that carries no E2EE assertion", () => {
+    // The arm `claimFor` was forced to grow when `web-unsigned` entered the
+    // shared union. This app is the IK initiator (§8.1) and cannot occupy the
+    // row, and `e2eeSession.test.ts` proves no publisher here emits it — but
+    // unreachable is not the same as unasserted: the arm answered `none` and
+    // nothing said so, so changing it to `verified` — the app's strongest §2.2
+    // claim — left the whole suite green.
+    const view = securityView(session({ channel: "web-unsigned" }));
+    expect(view.claim).toBe("none");
+    // And the surface says nothing about an encrypted channel or an active-Hub
+    // guarantee for it, which is the property the claim is a proxy for.
+    expect(view.channelMessage).not.toContain("encrypted end to end");
+    expect(view.channelMessage).not.toContain("cannot read");
+    expect(view.channelLabel).not.toBe(CHANNEL_LABELS.verified);
+    // It reads exactly as the states this tier genuinely has nothing to say
+    // about, and never as the pairing ceremony or a §12.2 fallback.
+    expect(view.channelLabel).toBe(securityView(session({ channel: "unavailable" })).channelLabel);
+    expect(view.channelMessage).toBe(
+      securityView(session({ channel: "unavailable" })).channelMessage,
+    );
   });
 
   it("gives every claim its own word and its own sentence", () => {
@@ -554,7 +578,10 @@ describe("§13.1's release gate and §12.2's honest labelling", () => {
 
 describe("key loss (§13.1.1) and honest labelling (§2.2, §2.3, §12.2)", () => {
   it("claims no active-Hub guarantee anywhere while no node is verified", () => {
-    for (const channel of ["unavailable", "negotiating", "legacy", "unverified"] as const) {
+    // Every channel state the shared union carries EXCEPT the one whose whole
+    // definition is a verified pin, from the enumeration rather than a copied
+    // list — a member added to the union has to be answered here.
+    for (const channel of HOSTED_E2EE_CHANNEL_STATUSES.filter((value) => value !== "verified")) {
       const view = securityView(session({ channel, markerSet: false, previouslyVerified: null }));
       expect(view.claim).not.toBe("verified");
       expect(view.channelMessage).not.toContain("cannot read");

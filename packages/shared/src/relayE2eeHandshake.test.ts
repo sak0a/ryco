@@ -118,6 +118,8 @@ const CLIENT_IDENTITY_PUBLIC = bytes(
     "7903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299",
 );
 const CLIENT_EPHEMERAL_SECRET = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+/** X25519 public half of the ephemeral above; `relayE2eeNoise.test.ts` pins it too. */
+const CLIENT_EPHEMERAL_PUBLIC = "07a37cbc142093c8b755dc1b10e86cb426374ad16aa853ed0bdfc0b2b86d1c7c";
 const NODE_EPHEMERAL_SECRET = "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40";
 const CLIENT_NONCE = "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180";
 
@@ -925,6 +927,35 @@ describe("§8 full handshakes between two in-process endpoints", () => {
     // NX carries no Branch A record, so no admitted-authority snapshot exists.
     expect(accept.admittedAuthority).toBeUndefined();
     expect(node.admittedAuthority).toBeUndefined();
+  });
+
+  it("carries the web client's ephemeral on the NX result and on no IK one (§13.5)", () => {
+    // §13.5 is the ONLY consumer, and it is a web-tier value: web has no
+    // long-term client identity, so the per-handshake ephemeral is the only
+    // thing the string can be computed over. The native tier's owner-facing
+    // value is §13.4's long-term safety number, and an IK result carrying a
+    // per-session key would be a second, weaker one nothing should render.
+    const web = runHandshake("web");
+    expect(hex(web.established.webEphemeralPublicKey!)).toBe(CLIENT_EPHEMERAL_PUBLIC);
+    // The two ends of §13.5 on the SAME session: the client's own `e`, and the
+    // `e` the responder observed off message 1 and reports for the node CLI.
+    expect(hex(web.established.webEphemeralPublicKey!)).toBe(
+      hex(web.accept.peerEphemeralPublicKey),
+    );
+
+    // The native arm carries no such field at all — absent, not `undefined`.
+    const native = runHandshake("native");
+    expect("webEphemeralPublicKey" in native.established).toBe(false);
+    expect(native.established.webEphemeralPublicKey).toBeUndefined();
+    // …even though IK transmits an initiator ephemeral too, so the node still
+    // has one. The field is selected by the credentials union, not by whether a
+    // key exists.
+    expect(hex(native.accept.peerEphemeralPublicKey)).toBe(CLIENT_EPHEMERAL_PUBLIC);
+
+    // It is a copy: mutating what the caller was handed cannot reach back into
+    // anything, and both ends still agree.
+    web.established.webEphemeralPublicKey!.fill(0);
+    expect(hex(web.accept.peerEphemeralPublicKey)).toBe(CLIENT_EPHEMERAL_PUBLIC);
   });
 
   it("gives the two tiers different sessions over identical channel state", () => {

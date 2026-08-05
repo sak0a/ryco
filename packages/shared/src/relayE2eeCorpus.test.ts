@@ -78,6 +78,7 @@ import {
   E2EE_NODE_CAPABILITY_DIGEST_DOMAIN,
   E2EE_NODE_IDENTITY_CONTINUITY_TRANSCRIPT_DOMAIN,
   E2EE_NODE_PREKEY_TRANSCRIPT_DOMAIN,
+  E2EE_NOISE_PATTERN_NX,
   E2EE_STRICT_DECODE_OPTIONS,
   e2eeAuthorizationContextCommitment,
   e2eeEffectiveAdmittedPatterns,
@@ -91,6 +92,7 @@ import {
   NODE_AUTH_TRANSCRIPT_DOMAIN,
   NODE_KEY_ROTATION_TRANSCRIPT_DOMAIN,
 } from "./nodeIdentity.ts";
+import { E2eeNoiseHandshake } from "./relayE2eeNoise.ts";
 import { deriveE2eeSafetyNumber, deriveE2eeWebSas } from "./relayE2eeVerificationDisplay.ts";
 import {
   E2EE_DIRECTION_CLIENT_TO_NODE,
@@ -555,6 +557,70 @@ describe("§16.3 F14 safety number and WebSAS (§13.4, §13.5)", () => {
   it("keeps the safety number namespace-bound and the WebSAS per session", () => {
     expect(caseByName(F14, "safety-number-is-namespace-bound").expected.differs).toBe(true);
     expect(caseByName(F14, "web-sas-changes-every-session").expected.differs).toBe(true);
+  });
+
+  /**
+   * §13.5's whole point is a comparison: the web UI shows the string and the
+   * node CLI shows the string, and the owner compares them out of band. That
+   * only means something if the two ends feed the derivation IDENTICAL bytes,
+   * and the one input they reach differently is the web client's Noise
+   * ephemeral — the client holds its own (`localEphemeralPublicKey`), the node
+   * observes it off message 1 (`remoteEphemeralPublicKey`, which is how
+   * `E2eeNodeAcceptResult.peerEphemeralPublicKey` is filled).
+   *
+   * So the fixture's `webEphemeralPublicKey` is not taken on trust here: it is
+   * re-derived by driving a REAL NX handshake from the case's own
+   * `testOnlyWebEphemeralSecretKey` and read once through each accessor. Both
+   * are then run through §13.5 and required to reproduce the case's exact
+   * rendered display — the compare-to-CLI claim, discharged at the derivation
+   * level rather than assumed.
+   */
+  it("renders the same WebSAS from the client's own ephemeral and the node's view of it", () => {
+    const displays: string[] = [];
+    for (const entry of casesMatching(F14, /^web-sas-session-/)) {
+      const client = new E2eeNoiseHandshake({
+        pattern: E2EE_NOISE_PATTERN_NX,
+        role: "initiator",
+        prologue: new Uint8Array(0),
+        testOnlyEphemeralSecretKey: fixtureBytes(entry.inputs.testOnlyWebEphemeralSecretKey),
+      });
+      const node = new E2eeNoiseHandshake({
+        pattern: E2EE_NOISE_PATTERN_NX,
+        role: "responder",
+        prologue: new Uint8Array(0),
+        staticSecretKey: fixtureBytes(F14.testKeyMaterial.testOnlyNodeAgreementSecretKey),
+      });
+      node.readMessage(client.writeMessage(new Uint8Array(0)));
+      client.readMessage(node.writeMessage(new Uint8Array(0)));
+      // §6.2: the ephemeral SECRET is gone from here on; only the public
+      // component of it survives, on both sides.
+      client.split();
+      node.split();
+
+      const fromClient = client.localEphemeralPublicKey;
+      const fromNode = node.remoteEphemeralPublicKey;
+      expect(hex(fromClient!), entry.name).toBe(
+        hex(fixtureBytes(entry.inputs.webEphemeralPublicKey)),
+      );
+      expect(hex(fromNode!), entry.name).toBe(hex(fromClient!));
+
+      const shared = {
+        nodeIdentityPublicKey: fixtureBytes(entry.inputs.nodeIdentityPublicKey),
+        sessionBindingHash: fixtureBytes(entry.inputs.sessionBindingHash),
+      };
+      const clientSide = deriveE2eeWebSas({ ...shared, webEphemeralPublicKey: fromClient! });
+      const nodeSide = deriveE2eeWebSas({ ...shared, webEphemeralPublicKey: fromNode! });
+      expect(clientSide.display, entry.name).toBe(entry.expected.display);
+      expect(nodeSide.display, entry.name).toBe(clientSide.display);
+      expect(hex(nodeSide.output), entry.name).toBe(hex(clientSide.output));
+      displays.push(clientSide.display);
+    }
+    // `web-sas-changes-every-session`, restated over the two live handshakes
+    // above: one node key, one ephemeral, two session bindings, two strings.
+    expect(displays.length).toBe(2);
+    expect(displays[0] !== displays[1]).toBe(
+      caseByName(F14, "web-sas-changes-every-session").expected.differs,
+    );
   });
 });
 
