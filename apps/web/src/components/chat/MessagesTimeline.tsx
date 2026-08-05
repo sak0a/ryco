@@ -1286,7 +1286,7 @@ function PendingWorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
         </>
       ) : null}
       <div className="pt-1.5 text-[13px] text-muted-foreground/70">
-        <span className="shimmer">Thinking</span>
+        <span className="shimmer thinking-status-shimmer">Thinking</span>
       </div>
     </div>
   );

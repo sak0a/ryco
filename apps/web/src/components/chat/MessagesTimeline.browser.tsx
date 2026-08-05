@@ -15,6 +15,8 @@ import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
+import { cdpSession } from "../../../test/browserPointer";
+
 const scrollToEndSpy = vi.fn();
 const scrollToIndexSpy = vi.fn();
 type MockListenerType = "totalSize" | "headerSize" | "footerSize";
@@ -341,6 +343,70 @@ describe("MessagesTimeline", () => {
       await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
     } finally {
       await screen.unmount();
+    }
+  });
+
+  it("duty-cycles only the pending Thinking label and removes it when work settles", async () => {
+    const props = buildProps();
+    const screen = await render(<MessagesTimeline {...props} isWorking timelineEntries={[]} />);
+
+    try {
+      const thinking = page.getByText("Thinking", { exact: true });
+      await expect.element(thinking).toBeVisible();
+
+      const thinkingElement = thinking.element();
+      expect(thinkingElement.classList.contains("shimmer")).toBe(true);
+      expect(thinkingElement.classList.contains("thinking-status-shimmer")).toBe(true);
+      expect(getComputedStyle(thinkingElement).animationName).toBe("thinking-status-shimmer");
+      expect(getComputedStyle(thinkingElement).animationDuration).toBe("6s");
+
+      await screen.rerender(<MessagesTimeline {...props} isWorking={false} timelineEntries={[]} />);
+
+      await expect.element(thinking).not.toBeInTheDocument();
+      expect(document.querySelector(".thinking-status-shimmer")).toBeNull();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("disables the status pulse, ping, and pending Thinking shimmer under reduced motion", async () => {
+    await cdpSession().send("Emulation.setEmulatedMedia", {
+      features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+    });
+    let screen: Awaited<ReturnType<typeof render>> | null = null;
+
+    try {
+      await vi.waitFor(() => {
+        expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(true);
+      });
+
+      screen = await render(
+        <div>
+          <span data-testid="status-pulse-probe" className="animate-status-pulse" />
+          <span data-testid="status-ping-probe" className="animate-status-ping" />
+          <MessagesTimeline {...buildProps()} isWorking timelineEntries={[]} />
+        </div>,
+      );
+
+      const thinking = page.getByText("Thinking", { exact: true });
+      await expect.element(thinking).toBeVisible();
+
+      expect(getComputedStyle(page.getByTestId("status-pulse-probe").element()).animationName).toBe(
+        "none",
+      );
+      expect(getComputedStyle(page.getByTestId("status-ping-probe").element()).animationName).toBe(
+        "none",
+      );
+      expect(getComputedStyle(thinking.element()).animationName).toBe("none");
+      expect(getComputedStyle(thinking.element()).backgroundImage).toBe("none");
+    } finally {
+      await cdpSession().send("Emulation.setEmulatedMedia", {
+        features: [{ name: "prefers-reduced-motion", value: "" }],
+      });
+      await vi.waitFor(() => {
+        expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false);
+      });
+      await screen?.unmount();
     }
   });
 
