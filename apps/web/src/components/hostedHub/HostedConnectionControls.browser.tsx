@@ -34,7 +34,11 @@ import {
   writePrimaryEnvironmentDescriptor,
 } from "../../environments/primary";
 import { resetPointerEmulation, setCoarsePointerEmulation } from "../../../test/browserPointer";
-import { HOSTED_CONNECTION_STATUS_INDICATORS } from "../../hostedHub/connectionStatus";
+import {
+  deriveHostedConnectionStatusIndicator,
+  deriveHostedConnectionStatusText,
+  HOSTED_CONNECTION_STATUS_INDICATORS,
+} from "../../hostedHub/connectionStatus";
 import {
   applyWebE2eeChannelStatus,
   applyWebE2eeVerificationCode,
@@ -42,6 +46,7 @@ import {
   hostedConnectionGuaranteeByGateOrder,
   hostedConnectionStatusRepresentatives,
   RETIRED_HOSTED_RELAY_TRUST_SENTENCE,
+  WEB_HOSTED_E2EE_CHANNEL_STATUSES,
 } from "../../../test/hostedConnectionVocabulary";
 import { hostedConnectionStatusPresentation } from "./HostedConnectionControls.logic";
 import { E2EE_WEB_SAS_ADVISORY } from "./HostedE2eeVerification.logic";
@@ -692,22 +697,135 @@ describe("hosted connection controls", () => {
       mounted = await render(<HostedConnectionSheet open onOpenChange={() => undefined} />);
     }
 
-    for (const status of ["unavailable", "negotiating", "web-unsigned", "legacy"] as const) {
+    // Every channel state the tier can be in, from the runtime's own exhaustive
+    // enumeration — so a member added to the union sweeps here without an edit.
+    const drawn = new Map<string, { readonly colour: string; readonly outline: string }>();
+    for (const status of WEB_HOSTED_E2EE_CHANNEL_STATUSES) {
       applyWebE2eeChannelStatus(status);
       const expected = hostedRelayTrustDisclosure(status);
-      await vi.waitFor(() => {
+      const notice = await vi.waitFor(() => {
         const notices = [
           ...document.querySelectorAll<HTMLElement>("[data-hosted-relay-trust-notice]"),
         ];
         expect(notices.length, `mounted notices for ${status}`).toBe(1);
-        const notice = notices[0]!;
-        expect(notice.getAttribute("data-e2ee-status"), status).toBe(status);
-        expect(notice.getAttribute("data-tone"), status).toBe(expected.tone);
-        expect(notice.textContent, status).toContain(expected.body);
-        expect(notice.getBoundingClientRect().height, status).toBeGreaterThan(0);
+        const found = notices[0]!;
+        expect(found.getAttribute("data-e2ee-status"), status).toBe(status);
+        expect(found.getAttribute("data-tone"), status).toBe(expected.tone);
+        expect(found.textContent, status).toContain(expected.body);
+        expect(found.getBoundingClientRect().height, status).toBeGreaterThan(0);
+        return found;
       });
       expect(document.body.textContent, status).not.toContain(RETIRED_HOSTED_RELAY_TRUST_SENTENCE);
+
+      // The TONE, as something drawn. `data-tone` is the decision; the glyph and
+      // its colour are what a reader receives, and §2.2's "MUST NOT present a
+      // stronger claim for a weaker configuration" is violated by an icon just
+      // as well as by a sentence. The `compact` variant both surfaces mount
+      // drops the frame, so the glyph is the only tonal carrier here.
+      const glyph = notice.querySelector<SVGElement>("svg");
+      expect(glyph, `notice glyph for ${status}`).not.toBeNull();
+      drawn.set(status, {
+        colour: getComputedStyle(glyph!).color,
+        // EVERY drawn segment, not the first: the caution and advisory shields
+        // share their outer outline and differ only in the marks inside it, so
+        // a first-path comparison reports two different glyphs as identical.
+        outline: [...glyph!.querySelectorAll("path,line,circle")]
+          .map((shape) => shape.getAttribute("d") ?? shape.outerHTML)
+          .join("|"),
+      });
     }
+
+    // The one state that encrypted something is drawn differently from the two
+    // that did not — in colour AND in shape, never in colour alone.
+    const encrypted = drawn.get("web-unsigned")!;
+    for (const status of ["legacy", "unavailable", "negotiating"] as const) {
+      const plain = drawn.get(status)!;
+      expect(encrypted.colour, `${status} wears the encrypted colour`).not.toBe(plain.colour);
+      expect(encrypted.outline, `${status} wears the encrypted glyph`).not.toBe(plain.outline);
+    }
+    // …and the three that claim nothing are drawn alike, because they say the
+    // same thing about who can read the payload.
+    expect(
+      new Set(
+        (["legacy", "unavailable", "negotiating"] as const).map(
+          (status) => drawn.get(status)!.colour,
+        ),
+      ).size,
+    ).toBe(1);
+  });
+
+  it.each([
+    ["the desktop menu", "menu"],
+    ["the phone connection sheet", "sheet"],
+  ] as const)("labels the live channel on the status line of %s", async (_name, surface) => {
+    // §12.2: "A client that falls back MUST label the channel **legacy** in
+    // every user-facing surface". Only the pill was ever swept across channel
+    // states, so both of these could have pinned `e2eeStatus` to `unavailable`
+    // in their `statusInput` and rendered `operator · Online` beside a plaintext
+    // fallback with the whole suite green. The source regex in the node test
+    // catches a DROPPED field; nothing caught a substituted one.
+    seedConnectedState();
+    if (surface === "menu") {
+      mounted = await render(<HostedNodeMenu />);
+      const disclosure = document.querySelector<HTMLDetailsElement>("details");
+      expect(disclosure, "no desktop menu rendered").not.toBeNull();
+      disclosure!.open = true;
+    } else {
+      await page.viewport(390, 844);
+      mounted = await render(<HostedConnectionSheet open onOpenChange={() => undefined} />);
+    }
+
+    const store = useHostedHubStore.getState();
+    const statusLine = () =>
+      surface === "menu"
+        ? document.querySelector<HTMLElement>("details > div > p.capitalize")
+        : document.querySelector<HTMLElement>('[data-slot="mobile-sheet-description"]');
+    const glyph = () =>
+      document.querySelector<HTMLElement>(
+        surface === "menu" ? "details > summary svg[data-guarantee]" : "svg[data-guarantee]",
+      );
+
+    for (const status of WEB_HOSTED_E2EE_CHANNEL_STATUSES) {
+      applyWebE2eeChannelStatus(status);
+      const expected = deriveHostedConnectionStatusText({
+        browserStatus: store.browserStatus,
+        sessionStatus: store.sessionStatus,
+        selectionStatus: store.selectionStatus,
+        transportStatus: store.transportStatus,
+        e2eeStatus: status,
+      });
+      await vi.waitFor(() => {
+        expect(statusLine()?.textContent, `status line for ${status}`).toBe(
+          `${store.effectiveRole} · ${expected}`,
+        );
+      });
+      // The polite live region carries the same words, so a screen reader is
+      // told about the downgrade too.
+      const live = [...document.querySelectorAll<HTMLElement>('[aria-live="polite"]')].filter(
+        (region) => region.textContent?.includes(selectedNode.label),
+      );
+      expect(live, `live region for ${status}`).toHaveLength(1);
+      expect(live[0]!.textContent, `live region for ${status}`).toContain(expected);
+      // …and the glyph beside it carries §2.2's claim rather than reachability.
+      const indicator = deriveHostedConnectionStatusIndicator({
+        browserStatus: store.browserStatus,
+        sessionStatus: store.sessionStatus,
+        selectionStatus: store.selectionStatus,
+        transportStatus: store.transportStatus,
+        e2eeStatus: status,
+      });
+      expect(glyph()?.getAttribute("data-guarantee"), `drawn claim for ${status}`).toBe(
+        indicator.guarantee,
+      );
+      expect(glyph()?.getAttribute("data-glyph"), `glyph for ${status}`).toBe(
+        hostedConnectionStatusPresentation(indicator).glyph,
+      );
+    }
+
+    // The sweep is only worth anything if it reached the states the defect hid
+    // in: `Legacy` and `Browser encrypted` must both have been drawn above.
+    expect([...WEB_HOSTED_E2EE_CHANNEL_STATUSES]).toContain("legacy");
+    expect([...WEB_HOSTED_E2EE_CHANNEL_STATUSES]).toContain("web-unsigned");
   });
 
   it("shows §13.5's code and its advisory in the desktop menu, and only on a locked channel", async () => {

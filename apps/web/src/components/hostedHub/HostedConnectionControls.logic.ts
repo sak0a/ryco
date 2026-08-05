@@ -51,18 +51,18 @@ export interface HostedConnectionStatusPresentation {
   readonly glyph: HostedConnectionGlyph;
   /** The glyph's colour utility. Never the only carrier of the state. */
   readonly iconClassName: string;
-  /**
-   * Where this presentation sits on §2.2's ladder, or `null` where the state
-   * makes no confidentiality claim at all.
-   *
-   * `null` rather than a zero: `none` is the ABSENCE of a claim — every state
-   * from `Offline` to a plain `Online` has it — and ranking absence against
-   * §12.2's explicit "this is plaintext" would be inventing an order the
-   * specification does not have. What the specification does order is the three
-   * claims, and a test can assert `legacy < web < e2ee` strictly because of it.
-   */
-  readonly claimRank: 1 | 2 | 3 | null;
 }
+
+// THERE IS NO ORDINAL FIELD HERE, and there deliberately is not one. A
+// `claimRank: 1 | 2 | 3 | null` shipped in this shape with no reader outside its
+// own unit test: nothing rendered it, so the `legacy < web < e2ee` assertion
+// written over it restated three integer literals declared eleven lines away and
+// credited itself with defending §2.2's ladder. The UI has no ladder — it has
+// three claims that must stay TELLABLE APART — so what the suite asserts is what
+// the surface draws: a distinct glyph and a distinct colour per claim, none of
+// them the plain-connected pair, and the web row never the native one
+// (`HostedConnectionControls.logic.test.ts`, and the rendered comparison of
+// colour and path in `HostedConnectionControls.browser.tsx`).
 
 /**
  * The presentation of each §2.2 claim that asserts something, as an exhaustive
@@ -80,16 +80,16 @@ export interface HostedConnectionStatusPresentation {
 const HOSTED_CLAIM_PRESENTATIONS = {
   // §12.2's mandatory label, drawn as the negative assertion it is. A struck
   // shield rather than a signal bar, and never the success colour.
-  legacy: { glyph: "legacy", iconClassName: "text-amber-500", claimRank: 1 },
+  legacy: { glyph: "legacy", iconClassName: "text-amber-500" },
   // §2.2's *Web, unsigned ephemeral* row and §2.4's ceiling: a usable,
   // encrypted channel whose code the Hub serves. It gets the informational
   // colour — the one connected tone that is neither the fallback's amber nor
   // the row the success colour means — so the scale reads legacy, then browser,
   // then verified, rather than grouping the browser row with the one §2.2
   // forbids it from claiming.
-  web: { glyph: "browser-encrypted", iconClassName: "text-sky-500", claimRank: 2 },
+  web: { glyph: "browser-encrypted", iconClassName: "text-sky-500" },
   // Native only, and unreachable from this tier by construction.
-  e2ee: { glyph: "native-verified", iconClassName: "text-emerald-500", claimRank: 3 },
+  e2ee: { glyph: "native-verified", iconClassName: "text-emerald-500" },
 } as const satisfies Record<
   Exclude<HostedConnectionGuarantee, "none">,
   HostedConnectionStatusPresentation
@@ -108,6 +108,6 @@ export function hostedConnectionStatusPresentation(
 ): HostedConnectionStatusPresentation {
   if (indicator.guarantee !== "none") return HOSTED_CLAIM_PRESENTATIONS[indicator.guarantee];
   return indicator.connected
-    ? { glyph: "connected", iconClassName: "text-emerald-500", claimRank: null }
-    : { glyph: "disconnected", iconClassName: "text-amber-500", claimRank: null };
+    ? { glyph: "connected", iconClassName: "text-emerald-500" }
+    : { glyph: "disconnected", iconClassName: "text-amber-500" };
 }

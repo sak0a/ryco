@@ -88,21 +88,18 @@ describe("§2.2 the presentation is a pure function of the claim", () => {
   it("falls through to reachability only where there is no claim", () => {
     expect(hostedConnectionStatusPresentation(indicator("none", true)).glyph).toBe("connected");
     expect(hostedConnectionStatusPresentation(indicator("none", false)).glyph).toBe("disconnected");
-    for (const guarantee of ["none"] as const) {
-      expect(hostedConnectionStatusPresentation(indicator(guarantee, true)).claimRank).toBeNull();
-    }
   });
 });
 
 describe("§2.2 no stronger claim for a weaker configuration", () => {
-  it("ranks legacy strictly below the browser row, and that strictly below the native one", () => {
-    const legacy = hostedConnectionStatusPresentation(indicator("legacy", true));
-    const web = hostedConnectionStatusPresentation(indicator("web", true));
-    const native = hostedConnectionStatusPresentation(indicator("e2ee", true));
-    expect(legacy.claimRank).not.toBeNull();
-    expect(legacy.claimRank!).toBeLessThan(web.claimRank!);
-    expect(web.claimRank!).toBeLessThan(native.claimRank!);
-  });
+  // There is no ordinal to assert here. The field this suite used to rank —
+  // `claimRank` — had no reader outside these lines, so the ordering it stated
+  // was a fact about a map rather than about anything a user sees; the mutant
+  // that swapped its ends turned exactly one node assertion red and left every
+  // rendered surface green. What §2.2 constrains is that the three claims stay
+  // tellable apart, which is what the glyph and colour cases below assert and
+  // what `HostedConnectionControls.browser.tsx` re-checks against drawn colour
+  // and drawn path.
 
   it("never draws the browser row the way the native verified row is drawn", () => {
     // The claim this slice is forbidden to make, as an assertion: a Hub that
@@ -134,11 +131,11 @@ describe("§2.2 no stronger claim for a weaker configuration", () => {
     expect(new Set(presentations.map((entry) => entry.glyph)).size).toBe(presentations.length);
     // Colours may repeat where the glyphs already separate the rows — the
     // disconnected amber and the legacy amber are both "something is wrong" —
-    // but the three connected rows must not share one.
-    const connectedTones = presentations
-      .filter((entry) => entry.claimRank !== null)
-      .map((entry) => entry.iconClassName);
-    expect(new Set(connectedTones).size).toBe(connectedTones.length);
+    // but the three states that ASSERT something must not share one.
+    const claimedTones = (["legacy", "web", "e2ee"] as const).map(
+      (guarantee) => hostedConnectionStatusPresentation(indicator(guarantee, true)).iconClassName,
+    );
+    expect(new Set(claimedTones).size).toBe(claimedTones.length);
   });
 
   it("uses no hardcoded colour values", () => {
