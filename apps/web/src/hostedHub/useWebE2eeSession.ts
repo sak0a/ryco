@@ -34,3 +34,25 @@ const channelStatus = (): WebHostedE2eeChannelStatus => webE2eeSessionState().st
 export function useWebE2eeChannelStatus(): WebHostedE2eeChannelStatus {
   return useSyncExternalStore(subscribeWebE2eeSession, channelStatus, channelStatus);
 }
+
+const verificationCode = (): string | null => webE2eeSessionState().verificationCode;
+
+/**
+ * §13.5's rendered code for the current session, or `null`.
+ *
+ * Narrowed to the one field for the reason {@link useWebE2eeChannelStatus} is:
+ * the two change on different events, and a surface drawing the code should not
+ * re-render every connection pill on the page.
+ *
+ * IT IS DISPLAY STATE AND HAS NO OTHER SUPPLIER. §13.5 makes the string
+ * "ephemeral display state: never logged, never persisted, never sent to
+ * analytics", so it is read from the in-memory projection on every render and
+ * there is no accessor that hands it to anything but a component. A caller
+ * cannot say what channel the code belongs to from this hook alone — that is
+ * {@link useWebE2eeChannelStatus}'s answer, and the surface gates on it, because
+ * the §4.4 machine publishes the code from inside its own `e2ee` lock and the
+ * projection is still reporting `negotiating` at that instant.
+ */
+export function useWebE2eeVerificationCode(): string | null {
+  return useSyncExternalStore(subscribeWebE2eeSession, verificationCode, verificationCode);
+}
