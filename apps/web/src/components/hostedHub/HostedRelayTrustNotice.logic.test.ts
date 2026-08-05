@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vite-plus/test";
@@ -338,23 +338,209 @@ describe("docs/hosted-hub-client.md quotes the copy this slice ships", () => {
   });
 });
 
+/**
+ * THE RETIRED CLAIM, SWEPT OVER THE REPOSITORY RATHER THAN OVER A LIST OF FILES.
+ *
+ * This guard began as a table of (path, phrase) pairs over three files, and BOTH
+ * halves of that shape were blind in the same way the browser suites are.
+ *
+ * Enumerating PATHS cannot see a fourth file, and the claim was in fact written
+ * in eight: the three the table named, plus two approved design specs that still
+ * REQUIRED it of documents this repository ships, two checklist bullets that
+ * still instructed an implementer to write it, and a stale future tense in the
+ * canonical relay protocol. The specs are the sharpest of those, because
+ * `docs/relay-architecture.html` is not doc-only — `apps/web` imports it as a
+ * Vite `?url` asset and the desktop app bundles it — so a page regenerated
+ * against its governing spec would have shipped the retired claim back to users.
+ *
+ * Enumerating PHRASES cannot see a paraphrase. Re-wording "they are not
+ * application-level end-to-end encrypted" to "hosted channels are not encrypted
+ * end to end" passed every row while the file went on stating the claim.
+ *
+ * So this walks the repository's text files and matches SHAPES. The two sites
+ * that carry the retired sentence on purpose are allowlisted by path: a negative
+ * test fixture and a change record are the correct homes for a retired claim,
+ * and rewording either to satisfy a scan would delete the check it exists to be.
+ *
+ * WHAT IT DELIBERATELY DOES NOT COVER, so nobody reads a green run as more than
+ * it is. The shapes are denials, and two neighbouring defects are not denials:
+ * a requirement phrased positively ("so installing cannot be mistaken for
+ * creating an end-to-end encrypted connection" — the wrong requirement, but not
+ * the retired sentence), and a stale future tense ("allows LATER application-
+ * level end-to-end encryption", which two historical documents quote verbatim as
+ * a quotation of the relay protocol and which a scan therefore cannot forbid
+ * without ordering an edit inside a quoted record). Both were corrected by hand
+ * in the same change that widened this guard; neither has a mechanical check.
+ */
+
+/** Where the walk starts, and what it refuses to descend into. */
+const SCAN_ROOTS = ["docs", "apps", "packages"] as const;
+const SCAN_EXTENSIONS = [".md", ".html", ".ts", ".tsx"] as const;
+const SKIPPED_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  ".output",
+  ".turbo",
+  ".vite",
+  "Pods",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+  "target",
+]);
+
+/**
+ * The shapes, not the sentences.
+ *
+ * Each is a denial of application-level payload encryption over a relay channel,
+ * which is the claim this tier outgrew. They are deliberately anchored on the
+ * denial itself — `not … end-to-end encrypted`, `adds no … encryption` — so a
+ * synonym for "hosted channel" or a different sentence frame does not slip past,
+ * while ordinary present-tense prose about the shipped layer does not trip them.
+ */
+const RETIRED_CLAIM_SHAPES: ReadonlyArray<{ readonly name: string; readonly pattern: RegExp }> = [
+  {
+    name: "denies application-level encryption of a relayed channel",
+    pattern:
+      /\bnot\s+(?:an?\s+)?application-(?:level|layer)\s+end-to-end\s+encr(?:ypted|yption)\b/i,
+  },
+  {
+    name: "denies end-to-end encryption in plain words",
+    pattern: /\b(?:is|are|was|were)\s+not\s+end[-\s]to[-\s]end\s+encrypted\b/i,
+  },
+  {
+    name: "denies end-to-end encryption with the qualifier trailing",
+    pattern: /\bnot\s+encrypted\s+end[-\s]to[-\s]end\b/i,
+  },
+  {
+    name: "denies that a surface or delivery provides end-to-end encryption",
+    pattern:
+      /\b(?:does\s+not\s+create|adds?\s+no|provides?\s+no|offers?\s+no)\s+(?:an?\s+)?(?:application-(?:level|layer)\s+)?end-to-end\s+(?:payload\s+)?encr(?:ypted|yption)\b/i,
+  },
+  {
+    name: "the retired trusted-relay sentence's second half",
+    pattern: /\bobserve\s+forwarded\s+bytes\b/i,
+  },
+];
+
+/**
+ * The two sites that hold the retired sentence deliberately, and why each must
+ * keep holding it.
+ */
+const RETIRED_CLAIM_ALLOWLIST: ReadonlyArray<{ readonly path: string; readonly why: string }> = [
+  {
+    path: "apps/web/test/hostedConnectionVocabulary.ts",
+    why: "the negative fixture four browser suites assert is nowhere on the page",
+  },
+  {
+    path: "apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.ts",
+    why: "the change record explaining, in the past tense, why this module is a selector",
+  },
+];
+
+/** This file, which quotes the shapes it forbids. */
+const SCAN_SELF_PATH = "apps/web/src/components/hostedHub/HostedRelayTrustNotice.logic.test.ts";
+
+/**
+ * Prose with comment leaders stripped as well as blockquote markers.
+ *
+ * `normalizeProse` is enough for Markdown; a wrapped `//` or `*` comment needs
+ * this, because the leader lands mid-sentence when the lines are joined and
+ * would break a match through the middle of the very claim being searched for.
+ */
+function normalizeForScan(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:\/\/|\*|#{1,6}|>)\s?/, ""))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function collectScanTargets(): readonly string[] {
+  const found: string[] = [];
+  const visit = (relativeDirectory: string): void => {
+    let entries;
+    try {
+      entries = readdirSync(fileURLToPath(new URL(relativeDirectory, REPO_ROOT)), {
+        withFileTypes: true,
+      });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        if (SKIPPED_DIRECTORIES.has(entry.name)) continue;
+        visit(`${relativeDirectory}${entry.name}/`);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!SCAN_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) continue;
+      found.push(`${relativeDirectory}${entry.name}`);
+    }
+  };
+  for (const root of SCAN_ROOTS) visit(`${root}/`);
+  return found;
+}
+
 describe("no public file still carries the retired claim", () => {
-  // The retired sentences were one claim written in three places, and a
-  // repository that fixed one of them would contradict itself in public. The
-  // qualification checklist is the sharpest case: it required a tester to
-  // confirm the shipped build STATES the retired claim, so leaving it made the
-  // gate passable only by shipping false copy or by waiving the item.
-  it.each([
-    ["docs/hosted-hub-client.md", "they are not application-level end-to-end encrypted"],
-    ["docs/hosted-hub-client.md", "The trusted relay can observe forwarded bytes in memory"],
-    ["docs/hosted-hub-client.md", "or new encryption protocol is part of the client"],
-    ["docs/relay-architecture.html", "not an application-layer end-to-end encryption boundary"],
-    ["docs/relay-architecture.html", "this is not application-layer end-to-end encryption"],
-    ["docs/hosted-mobile-pwa-qualification.md", "is not application-level end-to-end encryption"],
-  ])("%s does not say %j", (path, retired) => {
-    // Normalized, because these documents hard-wrap: an unnormalized scan reads
-    // green the moment a sentence crosses a line boundary.
-    expect(normalizeProse(readRepoFile(path))).not.toContain(retired);
+  const allowed = new Set(RETIRED_CLAIM_ALLOWLIST.map(({ path }) => path));
+
+  it("walks the repository's text files rather than a list of paths", () => {
+    // A broken walk would make every assertion below pass vacuously, which is
+    // the failure mode a scan has and a hardcoded table does not.
+    const targets = collectScanTargets();
+    expect(targets.length).toBeGreaterThan(500);
+    for (const required of [
+      "docs/hosted-hub-client.md",
+      "docs/relay-architecture.html",
+      "docs/relay-protocol.md",
+      "docs/hosted-mobile-pwa-qualification.md",
+      "docs/superpowers/plans/2026-07-19-hosted-mobile-pwa-experience.md",
+      "docs/superpowers/specs/2026-07-29-desktop-hub-advanced-settings-and-relay-atlas-design.md",
+      ...RETIRED_CLAIM_ALLOWLIST.map(({ path }) => path),
+    ]) {
+      expect(targets, required).toContain(required);
+    }
+  });
+
+  it("finds it in no file outside the two deliberate sites", () => {
+    const offenders: string[] = [];
+    for (const path of collectScanTargets()) {
+      if (path === SCAN_SELF_PATH || allowed.has(path)) continue;
+      const prose = normalizeForScan(readRepoFile(path));
+      for (const { name, pattern } of RETIRED_CLAIM_SHAPES) {
+        if (pattern.test(prose)) offenders.push(`${path}: ${name}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps the allowlist honest: each allowed site still carries the sentence", () => {
+    // An allowlist entry for a file that no longer states the claim is a hole
+    // someone could later fill without the scan objecting.
+    for (const { path, why } of RETIRED_CLAIM_ALLOWLIST) {
+      const prose = normalizeForScan(readRepoFile(path));
+      const carried = RETIRED_CLAIM_SHAPES.some(({ pattern }) => pattern.test(prose));
+      expect(carried, `${path} is allowlisted as ${why}`).toBe(true);
+    }
+  });
+
+  it("catches the paraphrases the retired phrase table could not", () => {
+    // The table matched exact strings. These are the same claim in wordings no
+    // row of it contained, and each must be caught by shape.
+    for (const paraphrase of [
+      "Hosted channels are not encrypted end to end.",
+      "Ryco relay sessions are not end-to-end encrypted.",
+      "Installing the app does not create end-to-end encryption.",
+      "This tier adds no application-level end-to-end encryption.",
+      "The relay may observe forwarded bytes while routing them.",
+    ]) {
+      const caught = RETIRED_CLAIM_SHAPES.some(({ pattern }) => pattern.test(paraphrase));
+      expect(caught, paraphrase).toBe(true);
+    }
   });
 });
 
