@@ -1,30 +1,41 @@
-import { E2EE_SAFETY_NUMBER_DIGITS } from "@ryco/shared/relayE2eeConstants";
+import { E2EE_SAFETY_NUMBER_DIGITS, E2EE_WEB_SAS_CHARS } from "@ryco/shared/relayE2eeConstants";
 import { describe, expect, it } from "vite-plus/test";
 
+import { E2EE_WEB_SAS_ADVISORY } from "../hostedHub/HostedE2eeVerification.logic";
 import {
   everyNodeSecurityString,
   formatNodeEpoch,
   nodeApproveConfirmation,
+  nodeClientRowTitle,
   nodeConnectionStatement,
   nodeContinuityRows,
   nodeE2eeActionConfirmation,
+  nodeE2eePairingWindowConfirmation,
   nodeE2eePolicyGate,
+  nodeE2eeRecordConfirmation,
   nodeE2eeStrictPolicyDisposition,
   nodeEnrollmentFingerprintView,
   nodeFallbackReport,
+  nodeOperatorDataAvailability,
+  nodePairingWindowRows,
+  nodePolicyChangeDestructive,
+  nodePolicyChangeSummary,
   nodePolicyPreviewWarnings,
   nodePolicyRows,
   nodePrekeyRemedy,
   nodePrekeyRows,
+  nodeRefusedAttemptsDescription,
   nodeSafetyNumberGroups,
   nodeSafetyNumberView,
   nodeSecurityMode,
   nodeSessionRows,
+  nodeSessionVerificationView,
   NODE_E2EE_ACTION_IDS,
   NODE_E2EE_APPROVABLE_ROLES,
+  NODE_E2EE_APPROVAL_CAPABILITY_SET,
+  NODE_E2EE_RECORD_ACTION_IDS,
   NODE_SAFETY_NUMBER_ADVISORY,
-  NODE_SAFETY_NUMBER_CAPTION,
-  type NodeSafetyNumberView,
+  NODE_SESSION_WEB_SAS_ADVISORY,
 } from "./NodeSecuritySettings.logic";
 
 /** A well-formed §13.4 rendering, built from the constants rather than typed. */
@@ -116,7 +127,43 @@ describe("the local mode raises no alarm about a relay that is not there", () =>
     // `resolvePrimaryEnvironmentHttpUrl` throws in hosted mode, so the sixteen
     // operator routes are unreachable from a hosted browser. The panel says so
     // rather than rendering an empty table that reads as "no clients".
-    expect(nodeConnectionStatement("hosted", null).body.toLowerCase()).toContain("hub");
+    //
+    // THE ASSERTION IS ON THE FUNCTION THIS TEST IS NAMED FOR. It used to check
+    // `nodeConnectionStatement("hosted", null).body` for the substring "hub" — a
+    // different function, and one the LOCAL body also satisfies ("No Ryco Hub
+    // sits between them"). `nodeOperatorDataAvailability` had no node coverage at
+    // all, so replacing it with `{ available: true }` left this suite green.
+    expect(nodeOperatorDataAvailability("hosted")).toEqual({
+      available: false,
+      unavailableBody: expect.stringContaining("ryco e2ee"),
+    });
+    expect(nodeOperatorDataAvailability("local")).toEqual({
+      available: true,
+      unavailableBody: "",
+    });
+  });
+
+  it("says something DIFFERENT about the connection in each mode", () => {
+    // Substring presence is not discrimination. Both bodies contain "hub", so
+    // the earlier check passed under a mutation that returned the local
+    // statement for hosted too — which puts §2.4's forbidden conclusion
+    // ("nothing you send leaves this machine") on a Hub-served page.
+    const local = nodeConnectionStatement("local", null);
+    const hosted = nodeConnectionStatement("hosted", null);
+    expect(hosted.body).not.toBe(local.body);
+    expect(hosted.headline).not.toBe(local.headline);
+    expect(local.body).toContain("No Ryco Hub sits between them");
+    expect(hosted.body).toContain("through the Ryco Hub relay");
+    expect(hosted.body).not.toContain("No Ryco Hub sits between them");
+  });
+
+  it("does not name the far end of a hosted channel as the reader's node", () => {
+    // §2.3's web bullet: this client "retains no durable latch, no pin of any
+    // kind", so the identity of the peer is exactly what this tier cannot
+    // establish. `HostedRelayTrustNotice.logic.ts` calls it "the node this tab
+    // was routed to" for that reason, and this sentence is drawn ABOVE that
+    // disclosure in the larger, earlier position.
+    expect(nodeConnectionStatement("hosted", null).body).not.toContain("your node");
   });
 });
 
@@ -133,20 +180,20 @@ describe("§13.4 the safety number and its ceiling are one value", () => {
   it("cannot be constructed without its advisory", () => {
     // The whole mechanism: rendering the number without the sentence beside it
     // has to be a deliberate deletion of a field from a returned object, never
-    // an omitted second call. The annotation below is the assertion — a
-    // `NodeSafetyNumberView` missing `advisory` does not typecheck, so there is
-    // no shape a surface can build that carries the digits alone.
-    const withoutAdvisory = {
-      groups: nodeSafetyNumberGroups(SAFETY_NUMBER),
-      display: SAFETY_NUMBER,
-      caption: NODE_SAFETY_NUMBER_CAPTION,
-    };
-    expect(Object.hasOwn(withoutAdvisory, "advisory")).toBe(false);
-    const complete: NodeSafetyNumberView = {
-      ...withoutAdvisory,
-      advisory: NODE_SAFETY_NUMBER_ADVISORY,
-    };
-    expect(complete.advisory.length).toBeGreaterThan(0);
+    // an omitted second call.
+    //
+    // THE ASSERTION IS OVER THE REAL RETURN VALUE. This test used to build two
+    // object literals and assert `Object.hasOwn` on them — it executed no
+    // production code, so making `advisory` optional on the interface and
+    // dropping it from the returned object left the test that carries the
+    // mechanism's name green.
+    const view = nodeSafetyNumberView(SAFETY_NUMBER);
+    expect(view).not.toBeNull();
+    expect(Object.keys(view!)).toContain("advisory");
+    expect(view!.advisory.trim().length).toBeGreaterThan(0);
+    // …and there is no accessor that hands back the digits alone: the format
+    // validator returns groups, so joining them is a visible act.
+    expect(Array.isArray(nodeSafetyNumberGroups(SAFETY_NUMBER))).toBe(true);
   });
 
   it("is the only export that hands back a §13.4 display string", () => {
@@ -237,6 +284,44 @@ describe("prohibited claims", () => {
       expect(text.trim().length, where).toBeGreaterThan(0);
     }
   });
+
+  it("reaches every function in this module that produces owner-facing prose", () => {
+    // THE SCAN WALKED A HAND-KEPT LIST AND THAT WAS THE HOLE. It enumerated call
+    // sites, so the fallback report's class meanings, the listing notices, the
+    // preview warnings, the change summary and the prekey remedy were all
+    // rendered to owners and none of them was ever read. Banned phrases written
+    // into any of them passed. Pinning the producers by name here fails when one
+    // is dropped from the flattener, which a "length > 20" check cannot.
+    const covered = everyNodeSecurityString().map((entry) => entry.where);
+    for (const producer of [
+      "listingNotices",
+      "fallbackClass",
+      "fallbackOverflow",
+      "fallbackUndersized",
+      "prekeyRemedy",
+      "policyChangeSummary",
+      "previewWarnings",
+      "refusedAttempts",
+      "pairingWindowRows",
+      "record(",
+      "pairingWindow.",
+      "policyGateRefusal",
+      "nodeSessionSasAdvisory",
+      "policyNoWithdrawal",
+      "policyValueUnreadable",
+      // The claim-bearing `.tsx` copy, moved here so a unit scan can see it. The
+      // browser suite runs the same list over the rendered DOM for the rest.
+      "requireE2eeDescription",
+      "strictDescription",
+      "nodeSessionRowDescription",
+      "panelSubtitle",
+    ]) {
+      expect(
+        covered.some((where) => where.includes(producer)),
+        `everyNodeSecurityString() never reaches ${producer}`,
+      ).toBe(true);
+    }
+  });
 });
 
 describe("owner actions carry a confirmation proportionate to the consequence", () => {
@@ -287,9 +372,11 @@ describe("owner actions carry a confirmation proportionate to the consequence", 
       const confirmation = nodeApproveConfirmation(role);
       expect(confirmation.title, role).toContain(role);
       expect(confirmation.confirmLabel, role).toContain(role);
-      // The capability set is granted empty and the sentence says so, rather
-      // than inferring authority nobody asked for.
-      expect(confirmation.body.toLowerCase(), role).toContain("no extra capabilities are granted");
+      // The capability the approval actually grants is named, rather than the
+      // sentence implying an empty grant is a smaller one.
+      for (const capability of NODE_E2EE_APPROVAL_CAPABILITY_SET) {
+        expect(confirmation.body, role).toContain(capability);
+      }
     }
     // Least authority first, so the first thing under the cursor is the
     // smallest grant.
@@ -316,33 +403,143 @@ describe("owner actions carry a confirmation proportionate to the consequence", 
     );
     expect(new Set(labels).size).toBe(labels.length);
   });
+
+  it("grants a capability set the node can actually admit", () => {
+    // §8.6 step 6 refuses a native handshake unless the record's capability set
+    // contains the intended capability, unconditionally on that tier. The relay
+    // vocabulary has one member, so an EMPTY set matches nothing: the record
+    // commits as `approved`, the row goes green, and every handshake dies with
+    // fatal P12 `authorization`. The node's own CLI forbids that state
+    // (`--capability` is `Flag.atLeast(1)`); this panel could reach it.
+    expect(NODE_E2EE_APPROVAL_CAPABILITY_SET.length).toBeGreaterThan(0);
+    for (const capability of NODE_E2EE_APPROVAL_CAPABILITY_SET) {
+      expect(capability.trim().length).toBeGreaterThan(0);
+    }
+  });
+
+  it("names the record in every per-record withdrawal, not only the verb", () => {
+    // §13.6's withdrawals act on one record and close its channels before the
+    // node acknowledges them. Two devices under one Hub account render with the
+    // same account, the same origin, and the same fallback label, and the dialog
+    // paints an opaque scrim over the row behind it — so a confirmation that
+    // names no record catches an accidental click and nothing else.
+    const subject = {
+      fingerprint: "SHA256:AAAAphoneAAAA",
+      accountId: "acct_reader",
+      hubOrigin: "https://hub.example.test",
+    };
+    const other = { ...subject, fingerprint: "SHA256:BBBBlaptopBBBB" };
+    for (const action of NODE_E2EE_RECORD_ACTION_IDS) {
+      const confirmation = nodeE2eeRecordConfirmation(action, subject);
+      const values = (confirmation.facts ?? []).map((fact) => fact.value);
+      expect(values, action).toContain(subject.fingerprint);
+      expect(values, action).toContain(subject.accountId);
+      expect(values, action).toContain(subject.hubOrigin);
+      // Mono, because the comparison is character by character.
+      expect(
+        confirmation.facts!.find((fact) => fact.value === subject.fingerprint)!.mono,
+        action,
+      ).toBe(true);
+      // …and two records do not produce the same dialog.
+      expect(JSON.stringify(nodeE2eeRecordConfirmation(action, other)), action).not.toBe(
+        JSON.stringify(confirmation),
+      );
+    }
+  });
+
+  it("echoes the fingerprint a pairing window would admit", () => {
+    // The body names a wrong fingerprint as the exact risk, and the input it was
+    // typed into sits behind the dialog's scrim, so this is the last place a
+    // transposed character or a stale paste can be caught. The node parses the
+    // value and refuses only an unparseable one, never a wrong one.
+    const confirmation = nodeE2eePairingWindowConfirmation("SHA256:CCCCwindowCCCC");
+    expect((confirmation.facts ?? []).map((fact) => fact.value)).toContain("SHA256:CCCCwindowCCCC");
+    expect(confirmation.body).toContain("lets the wrong device in");
+  });
+
+  it("says the narrow leaves the capability grant alone", () => {
+    // The panel sends `narrow` with no capability set and the node reads that as
+    // "leave capabilities alone" (`capabilitySet ?? found.entry.capabilitySet`),
+    // so only the role ceiling moves — while §13.6 treats the capability grant
+    // as a separate authority the owner names.
+    const lower = nodeE2eeActionConfirmation("narrow").body.toLowerCase();
+    expect(lower).toContain("capability grant is left exactly as it is");
+    expect(lower).toContain("only the ceiling drops");
+  });
+
+  it("tells two client rows apart when the node stored no label", () => {
+    const base = {
+      status: "pending" as const,
+      hubOrigin: "https://hub.example.test",
+      accountId: "acct_reader",
+      maxRole: "",
+      capabilitySet: [],
+      createdAt: 0,
+      safetyNumber: SAFETY_NUMBER,
+      pairingReserved: false,
+    };
+    const phone = nodeClientRowTitle({ ...base, fingerprint: "SHA256:AAAAphone0" });
+    const laptop = nodeClientRowTitle({ ...base, fingerprint: "SHA256:BBBBlaptop1" });
+    expect(phone).not.toBe(laptop);
+    expect(phone).not.toBe("Client key");
+    // A stored label still wins: it is the owner's own name for the device.
+    expect(
+      nodeClientRowTitle({ ...base, fingerprint: "SHA256:AAAAphone0", displayLabel: "Phone" }),
+    ).toBe("Phone");
+    // …and a blank one does not, because a blank title tells nobody anything.
+    expect(
+      nodeClientRowTitle({ ...base, fingerprint: "SHA256:AAAAphone0", displayLabel: "   " }),
+    ).toBe(phone);
+  });
 });
 
 describe("§12.6 the preview is what the warning is computed from", () => {
+  const CURRENT = {
+    requireE2EE: true,
+    requireApprovedClientE2EE: false,
+    effectiveRequireE2EE: true,
+    admittedPatterns: ["IK", "NX"] as const,
+    suiteRegistry: [1],
+    generation: 4,
+  };
   const preview = {
-    policy: {
-      requireE2EE: true,
-      requireApprovedClientE2EE: false,
-      effectiveRequireE2EE: true,
-      admittedPatterns: ["IK", "NX"] as const,
-      suiteRegistry: [1],
-      generation: 4,
-    },
+    // §12.6's preview answers with the RESULTING policy, which is why the
+    // widening branches are read against `CURRENT` and not against this.
+    policy: CURRENT,
     withdrawal: true,
     changed: true,
     counts: { legacy: 2, nxE2ee: 1, suiteWithdrawn: 0, abortedHandshakes: 3 },
   };
 
   it("states §12.4's three duties when the strict policy is being enabled", () => {
-    const warnings = nodePolicyPreviewWarnings(preview, { requireApprovedClientE2EE: true });
+    const warnings = nodePolicyPreviewWarnings(
+      preview,
+      { requireApprovedClientE2EE: true },
+      CURRENT,
+    );
     const joined = warnings.join(" ").toLowerCase();
     expect(joined).toContain("closes browser and legacy access entirely");
     expect(joined).toContain("strands remote access");
     expect(joined).toContain("closes live channels");
   });
 
+  it("does not state the enable-time warning when the policy is being turned OFF", () => {
+    // The discriminator is `=== true`, and nothing exercised the other side of
+    // it: relaxing it to `!== undefined` showed a local operator the consequence
+    // of the OPPOSITE action immediately before they confirmed.
+    const joined = nodePolicyPreviewWarnings(
+      { ...preview, withdrawal: false },
+      { requireApprovedClientE2EE: false },
+      { ...CURRENT, requireApprovedClientE2EE: true },
+    ).join(" ");
+    expect(joined).not.toContain("strands remote access");
+    expect(joined).not.toContain(
+      "requireApprovedClientE2EE closes browser and legacy access entirely",
+    );
+  });
+
   it("reports §12.6's approximate counts and says they are approximate", () => {
-    const joined = nodePolicyPreviewWarnings(preview, { requireE2EE: true }).join(" ");
+    const joined = nodePolicyPreviewWarnings(preview, { requireE2EE: true }, CURRENT).join(" ");
     expect(joined).toContain("2 legacy");
     expect(joined).toContain("1 browser");
     expect(joined).toContain("3 handshake(s) in flight");
@@ -353,17 +550,108 @@ describe("§12.6 the preview is what the warning is computed from", () => {
     const joined = nodePolicyPreviewWarnings(
       { ...preview, withdrawal: false, changed: false },
       { requireE2EE: true },
+      CURRENT,
     ).join(" ");
     expect(joined.toLowerCase()).toContain("changes nothing");
   });
 
-  it("warns about nothing when a widening changes something", () => {
+  it("states what a widening re-admits, in the consequence's own terms", () => {
+    // A widening closes nothing by construction, so `withdrawal` is false and
+    // the count sentence is true and useless. This branch used to return `[]`,
+    // which the dialog rendered as "The node reports that this closes no live
+    // channels." — one reassuring sentence, offered for the change that puts the
+    // plaintext path back for every browser and legacy client.
+    const joined = nodePolicyPreviewWarnings(
+      { ...preview, withdrawal: false },
+      { requireE2EE: false },
+      CURRENT,
+    )
+      .join(" ")
+      .toLowerCase();
+    expect(joined).toContain("re-admits plaintext");
+    expect(joined).toContain("has not encrypted");
+
+    const clearing = nodePolicyPreviewWarnings(
+      { ...preview, withdrawal: false },
+      { requireApprovedClientE2EE: false },
+      { ...CURRENT, requireApprovedClientE2EE: true },
+    )
+      .join(" ")
+      .toLowerCase();
+    expect(clearing).toContain("re-admits the browser and legacy tiers");
+  });
+
+  it("stays quiet about a widening the node is not actually making", () => {
+    // A proposal restating a value the node already holds is not a widening, and
+    // saying it re-admits plaintext would train the owner to ignore the sentence
+    // that matters.
+    const joined = nodePolicyPreviewWarnings(
+      { ...preview, withdrawal: false },
+      { requireE2EE: false, suiteRegistry: [1, 2] },
+      { ...CURRENT, requireE2EE: false },
+    )
+      .join(" ")
+      .toLowerCase();
+    expect(joined).not.toContain("re-admits plaintext");
+  });
+
+  it("warns about a widening it cannot rule out, when the policy was never read", () => {
+    // Not knowing what the node enforces now is not a reason to tell an owner
+    // nothing is being given up.
+    const joined = nodePolicyPreviewWarnings(
+      { ...preview, withdrawal: false },
+      { requireE2EE: false },
+      null,
+    )
+      .join(" ")
+      .toLowerCase();
+    expect(joined).toContain("re-admits plaintext");
+  });
+
+  it("never returns nothing, in any branch", () => {
+    // The dialog renders whatever comes back, and an empty list rendered as a
+    // reassurance. Every reachable combination has to say something.
+    for (const [where, proposal, current] of [
+      ["widen suite", { suiteRegistry: [1, 2] }, CURRENT],
+      ["no fields", {}, CURRENT],
+      ["restate", { requireE2EE: true }, CURRENT],
+    ] as const) {
+      expect(
+        nodePolicyPreviewWarnings({ ...preview, withdrawal: false }, proposal, current).length,
+        where,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("reserves the destructive confirmation for changes that cost something", () => {
+    // Every policy change drawing the same red Apply is the pattern that trains
+    // an owner to click through the one that strands their access.
+    expect(nodePolicyChangeDestructive(preview, { requireE2EE: true }, CURRENT)).toBe(true);
     expect(
-      nodePolicyPreviewWarnings(
-        { ...preview, withdrawal: false, changed: true },
+      nodePolicyChangeDestructive(
+        { ...preview, withdrawal: false },
         { requireE2EE: false },
+        CURRENT,
       ),
-    ).toEqual([]);
+    ).toBe(true);
+    expect(
+      nodePolicyChangeDestructive(
+        { ...preview, withdrawal: false },
+        { suiteRegistry: [1, 2] },
+        CURRENT,
+      ),
+    ).toBe(false);
+  });
+
+  it("reports §12.6(c)'s counts after the change, broken out by class", () => {
+    // The apply route answers with these so the operator can be told what the
+    // change actually did; the panel used to build the sentence and overwrite it
+    // with "Policy applied." in the same microtask.
+    const summary = nodePolicyChangeSummary(preview);
+    expect(summary).toContain("2 legacy channel(s)");
+    expect(summary).toContain("1 browser channel(s)");
+    expect(summary).toContain("3 handshake(s)");
+    expect(nodePolicyChangeSummary({ ...preview, changed: false })).toContain("Policy unchanged.");
   });
 });
 
@@ -389,6 +677,79 @@ describe("§12.3/§12.4 the policy display shows raw and effective, always", () 
 
   it("says the policy is unknown rather than inventing a default", () => {
     expect(nodePolicyRows(null)).toEqual([{ label: "Admission policy", value: "unknown" }]);
+  });
+});
+
+describe("an unread value is a stated absence, never the reassuring one", () => {
+  it("does not report a pairing window as closed on a listing it never read", () => {
+    // `snapshot.clients` is null on every mount and stays null for the whole
+    // session whenever a read keeps failing — a non-owner local session, a node
+    // predating these routes, a network fault. Optional-chaining straight to
+    // `pairingWindow === undefined` collapsed that into "closed", an affirmative
+    // "no device can introduce itself right now" about state the panel does not
+    // have.
+    expect(nodePairingWindowRows(null)).toEqual([{ label: "Pairing window", value: "unknown" }]);
+    expect(
+      nodePairingWindowRows({
+        records: [],
+        pendingGlobalSaturated: false,
+        saturatedAccounts: [],
+        refusedPairingAttempts: 0,
+      }),
+    ).toEqual([{ label: "Pairing window", value: "closed" }]);
+  });
+
+  it("does not report zero refused attempts on a listing it never read", () => {
+    expect(nodeRefusedAttemptsDescription(null)).not.toContain("0 attempt");
+    expect(nodeRefusedAttemptsDescription(null).toLowerCase()).toContain("has not been read");
+    expect(
+      nodeRefusedAttemptsDescription({
+        records: [],
+        pendingGlobalSaturated: false,
+        saturatedAccounts: [],
+        refusedPairingAttempts: 2,
+      }),
+    ).toContain("2 attempt(s)");
+  });
+});
+
+describe("§13.5 from the node's end of the comparison", () => {
+  /** Built from the format's own constants rather than typed. */
+  const CODE = ["7HJ2", "MQ5T"].join(E2EE_WEB_SAS_CHARS.separator);
+
+  it("never sends the reader to compare the node against itself", () => {
+    // The shipped advisory is written from the BROWSER end — "Compare this code
+    // with the one your node's CLI shows for this session" — and it is correct
+    // there. Rendered on the node's own live-session list it inverts: the reader
+    // is already at the node, so the comparison always matches and establishes
+    // nothing, and the ceiling clause blames "the Hub operator, who serves that
+    // code" for a page the node itself served in local mode.
+    const view = nodeSessionVerificationView(CODE);
+    expect(view).not.toBeNull();
+    expect(view!.advisory).toBe(NODE_SESSION_WEB_SAS_ADVISORY);
+    expect(view!.advisory).not.toBe(E2EE_WEB_SAS_ADVISORY);
+    expect(view!.advisory.toLowerCase()).not.toContain("your node's cli");
+    expect(view!.advisory.toLowerCase()).toContain("that browser is showing");
+  });
+
+  it("keeps §13.5's denial at full strength in node-end terms", () => {
+    // §13.5 forbids using the derivation "to strengthen the claims of §2.4 or
+    // §17.5". Rewriting the referent may not soften the ceiling.
+    const lower = NODE_SESSION_WEB_SAS_ADVISORY.toLowerCase();
+    expect(lower).toContain("cannot protect against whoever served that page");
+    expect(lower).toContain("does not rule out someone sitting in the middle");
+  });
+
+  it("reuses the shipped validator rather than parsing a second time", () => {
+    // A value the shipped function refuses is refused here: half a comparison is
+    // worse than none.
+    expect(nodeSessionVerificationView(null)).toBeNull();
+    expect(nodeSessionVerificationView("nope")).toBeNull();
+    expect(nodeSessionVerificationView(CODE)!.display).toBe(CODE);
+  });
+
+  it("carries its advisory as a required field of the returned object", () => {
+    expect(Object.keys(nodeSessionVerificationView(CODE)!)).toContain("advisory");
   });
 });
 

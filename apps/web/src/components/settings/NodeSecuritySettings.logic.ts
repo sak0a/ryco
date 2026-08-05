@@ -5,9 +5,17 @@
 // `HostedConnectionControls.logic.ts` are: a decision whose failure mode is
 // security-relevant rather than cosmetic belongs somewhere a node test can reach
 // it without a DOM, and copy that could mislead an owner about what is protected
-// belongs under a prohibited-phrase scan. Anything written inside the `.tsx` is
-// effectively untestable in this repository, so the `.tsx` owns layout and
-// nothing else.
+// belongs under a prohibited-phrase scan.
+//
+// WHAT THE SCAN OVER THIS MODULE DOES AND DOES NOT COVER. `everyNodeSecurityString`
+// flattens the sentences this module PRODUCES, and the node suite walks it. It
+// does not reach a literal written inside the `.tsx`, and claiming otherwise is
+// how a contradiction ships: the panel's own live-session row once told an owner
+// to compare a code against the machine they were sitting at, in a sentence no
+// unit scan could see. Claim-bearing `.tsx` copy is therefore exported from here
+// as a constant, and the browser suite runs the same prohibited list over the
+// RENDERED DOM so a literal added to the `.tsx` is covered without waiting for
+// someone to move it.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // THE PANEL DESCRIBES THE NODE. IT PROVES NOTHING ABOUT THE READER'S SESSION.
@@ -32,6 +40,7 @@
 
 import { E2EE_SAFETY_NUMBER_DIGITS } from "@ryco/shared/relayE2eeConstants";
 
+import type { RelayCapability } from "@ryco/contracts/relay";
 import type {
   NodeE2eeClientListing,
   NodeE2eeClientRecord,
@@ -44,6 +53,10 @@ import type {
   NodeE2eeSession,
 } from "@ryco/client-runtime/connection";
 import type { HostedConnectionStatusIndicator } from "../../hostedHub/connectionStatus";
+import {
+  hostedE2eeVerificationView,
+  type HostedE2eeVerificationView,
+} from "../hostedHub/HostedE2eeVerification.logic";
 
 /**
  * Which of the two connection modes this build is running in.
@@ -92,6 +105,15 @@ export interface NodeConnectionStatement {
  * deriving indicators independently once shipped a contradictory pill, so the
  * hosted statement takes the already-derived indicator and quotes its own words.
  * This module adds no status noun of its own.
+ *
+ * THE HOSTED BODY DOES NOT NAME THE PEER AS THE OWNER'S NODE.
+ * `HostedRelayTrustNotice.logic.ts` calls it "the node this tab was routed to"
+ * and never "your node", because §2.3's web bullet is that this client "retains
+ * no durable latch, no pin of any kind" — the identity of the far end is exactly
+ * what this tier cannot establish. This sentence is drawn in the larger, earlier
+ * position, directly above the disclosure that denies the claim, so asserting it
+ * here would put the stronger sentence where readers look and the denial where
+ * they do not.
  */
 export function nodeConnectionStatement(
   mode: NodeSecurityMode,
@@ -105,7 +127,7 @@ export function nodeConnectionStatement(
   }
   return {
     headline: indicator === null ? "Through the Ryco Hub" : indicator.shortLabel,
-    body: "This browser reaches your node through the Ryco Hub relay. What that channel is worth is stated with the channel itself, below.",
+    body: "This browser reaches a node through the Ryco Hub relay. What that channel is worth is stated with the channel itself, below.",
   };
 }
 
@@ -204,6 +226,21 @@ export type NodeE2eePolicyGate =
   | { readonly allowed: true; readonly proposal: NodeE2eePolicyProposal }
   | { readonly allowed: false; readonly refusal: string };
 
+/**
+ * The gate's own refusal, for the case where the disposition does not supply one.
+ *
+ * The guard and the sentence are separate concerns and the sentence is NOT
+ * allowed to fall back to `""`. The panel renders its error banner from this
+ * string; an empty one renders as no banner at all, so a control that snapped
+ * back with nothing said would be the only signal — and a guard that fails
+ * silently is one an operator routes around. The branch is unreachable today
+ * (hosted always blocks), which is exactly why it has to be written correctly
+ * rather than left to a future tier to notice.
+ */
+export const NODE_E2EE_POLICY_GATE_REFUSAL =
+  "This build cannot change whether the node admits only approved native client keys. Run " +
+  "`ryco e2ee policy set --require-approved-client-e2ee` on the machine running the node.";
+
 export function nodeE2eePolicyGate(
   mode: NodeSecurityMode,
   proposal: NodeE2eePolicyProposal,
@@ -212,7 +249,7 @@ export function nodeE2eePolicyGate(
     const disposition = nodeE2eeStrictPolicyDisposition(mode);
     return {
       allowed: false,
-      refusal: disposition.kind === "blocked" ? disposition.reason : "",
+      refusal: disposition.kind === "blocked" ? disposition.reason : NODE_E2EE_POLICY_GATE_REFUSAL,
     };
   }
   return { allowed: true, proposal };
@@ -472,6 +509,32 @@ export function nodeClientStatusTone(
   }
 }
 
+/**
+ * How many trailing fingerprint characters a row title and a confirmation carry.
+ *
+ * Enough to tell two devices apart at a glance, and never offered as a substitute
+ * for the full value: the row's own `FactRows` and every per-record confirmation
+ * carry all of it, because §13.2 step 5's comparison is character for character.
+ */
+const CLIENT_TITLE_FINGERPRINT_TAIL = 8;
+
+/**
+ * The name a row gives one record.
+ *
+ * IT NEVER DEGRADES TO A CONSTANT. Two devices paired under one Hub account
+ * carry the same account, the same origin, and — because nothing in this panel
+ * sets `displayLabel` — the same stored label, which left every row reading
+ * "Client key" over the identical description. The only value that told them
+ * apart was the fingerprint inside the expanded facts, so a mis-targeted click on
+ * a withdrawal was indistinguishable from the intended one. The fallback is the
+ * fingerprint's tail for that reason.
+ */
+export function nodeClientRowTitle(record: NodeE2eeClientRecord): string {
+  const label = record.displayLabel?.trim() ?? "";
+  if (label !== "") return label;
+  return `Client key …${record.fingerprint.slice(-CLIENT_TITLE_FINGERPRINT_TAIL)}`;
+}
+
 export function nodeClientRows(record: NodeE2eeClientRecord): ReadonlyArray<NodeFactRow> {
   return [
     { label: "Fingerprint", value: record.fingerprint, mono: true },
@@ -520,11 +583,26 @@ export function nodeClientListingNotices(
   return notices;
 }
 
-/** §13.6: while a window is open, all three of these facts, or it is closed. */
+/**
+ * §13.6: while a window is open, all three of these facts, or it is closed —
+ * and `unknown` when no listing was ever read.
+ *
+ * THE UNREAD CASE IS TAKEN FIRST, BEFORE THE OPTIONAL CHAIN. `listing` is `null`
+ * on every mount until the first read resolves, and stays `null` for the whole
+ * session whenever a read keeps failing — a non-owner local session, a node
+ * predating these routes, a network fault. Optional-chaining straight to
+ * `pairingWindow === undefined` collapsed both into "closed", which is an
+ * affirmative statement that no device can introduce itself right now about a
+ * node whose pairing state this panel does not have. `nodeE2eeOperator.ts`'s own
+ * rule is that a field the node stops sending "degrades to a stated absence
+ * instead of to a confident wrong value", and `nodePolicyRows(null)` and
+ * `nodePrekeyRows(null)` both already say `unknown`.
+ */
 export function nodePairingWindowRows(
   listing: NodeE2eeClientListing | null,
 ): ReadonlyArray<NodeFactRow> {
-  const window = listing?.pairingWindow;
+  if (listing === null) return [{ label: "Pairing window", value: UNKNOWN }];
+  const window = listing.pairingWindow;
   if (window === undefined) return [{ label: "Pairing window", value: "closed" }];
   return [
     { label: "Pairing window", value: "open" },
@@ -533,6 +611,23 @@ export function nodePairingWindowRows(
     { label: "Reservation", value: window.spent ? "spent" : "unspent" },
   ];
 }
+
+/**
+ * §13.6's refused-attempt counter, or the same stated absence.
+ *
+ * `?? 0` on an unread listing renders "0 attempt(s) refused" — a count the panel
+ * does not have, drawn as the reassuring value.
+ */
+export function nodeRefusedAttemptsDescription(listing: NodeE2eeClientListing | null): string {
+  if (listing === null) {
+    return "How many pairing attempts this node refused because the pending list was full has not been read here.";
+  }
+  return `${listing.refusedPairingAttempts} attempt(s) refused because the pending list was full.`;
+}
+
+/** The row copy for a pairing window, which is a §13.6 admission-widening tool. */
+export const NODE_PAIRING_WINDOW_DESCRIPTION =
+  "A window lets exactly one device introduce itself, and only the one whose fingerprint you name.";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §13.5 LIVE SESSIONS
@@ -566,6 +661,74 @@ export function nodeSessionRows(session: NodeE2eeSession): ReadonlyArray<NodeFac
  */
 export const NODE_SESSION_NATIVE_CODE_ABSENT =
   "Native sessions have no per-session code. Compare this device's long-term number on its record above instead.";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §13.5 FROM THE NODE'S END OF THE COMPARISON
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * §13.5's advisory WRITTEN FROM THE NODE END, because a comparison has two ends
+ * and the shipped one names only the other.
+ *
+ * `E2EE_WEB_SAS_ADVISORY` says "Compare this code with the one your node's CLI
+ * shows for this session", and it is correct where it ships: a browser holding
+ * its own channel's code is told to check it against the node. Rendered on the
+ * NODE's live-session list it inverts — the reader is already at the node, so the
+ * instruction sends them to compare the node against itself, which always matches
+ * and establishes nothing. Its ceiling clause inverts with it: "the Hub operator,
+ * who serves that code" is the party serving the BROWSER its page, and in local
+ * mode the node is serving this one.
+ *
+ * So the node end gets its own sentence, with §13.5's denial restated in node-end
+ * terms and no weaker: the match is against the remote browser's screen, and it
+ * still cannot rule out whoever served that browser its JavaScript.
+ */
+export const NODE_SESSION_WEB_SAS_ADVISORY =
+  "Compare this code with the one that browser is showing for this session, on that screen. A " +
+  "match catches accidental wrong-node routing and some network interposition — anyone standing " +
+  "in for this node who is not also serving that browser its page — while the code that browser " +
+  "loaded is honest; it cannot protect against whoever served that page, and a match does not " +
+  "rule out someone sitting in the middle.";
+
+/** The node end's absence sentence, for the same reason §13.5's own has one. */
+export const NODE_SESSION_WEB_SAS_UNAVAILABLE =
+  "No session code reached this listing for that channel, so there is nothing here to compare " +
+  "against the browser holding it.";
+
+/**
+ * §13.5's value for a session on the node's own list, as one inseparable object.
+ *
+ * The format validation, the groups, and the caption are the shipped function's —
+ * this is not a second parser, and a value that function refuses is refused here.
+ * Only the advisory is replaced, and only because its referent is the other end
+ * of the comparison. It is still a required field on the returned object, so
+ * drawing these characters without a sentence takes deleting a field.
+ */
+export type NodeSessionVerificationView = HostedE2eeVerificationView;
+
+export function nodeSessionVerificationView(
+  code: string | null,
+): NodeSessionVerificationView | null {
+  const view = hostedE2eeVerificationView(code);
+  if (view === null) return null;
+  return {
+    groups: view.groups,
+    display: view.display,
+    caption: view.caption,
+    advisory: NODE_SESSION_WEB_SAS_ADVISORY,
+  };
+}
+
+/**
+ * The live-session row's description.
+ *
+ * It does NOT repeat the comparison instruction. Two comparison sentences one
+ * line apart is how the panel came to tell an owner to check the browser's screen
+ * and the node's own CLI about the same characters; the instruction lives in the
+ * advisory that travels with the value, and nowhere else.
+ */
+export const NODE_SESSION_WEB_ROW_DESCRIPTION =
+  "A browser channel this node has open. Its per-session code is below.";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §12.3–§12.6 ADMISSION POLICY
@@ -607,6 +770,7 @@ export function nodePolicyRows(policy: NodeE2eePolicy | null): ReadonlyArray<Nod
 export function nodePolicyPreviewWarnings(
   preview: NodeE2eePolicyChange,
   proposal: NodeE2eePolicyProposal,
+  current: NodeE2eePolicy | null,
 ): ReadonlyArray<string> {
   const warnings: string[] = [];
   if (proposal.requireApprovedClientE2EE === true) {
@@ -618,6 +782,7 @@ export function nodePolicyPreviewWarnings(
       "requireApprovedClientE2EE closes browser and legacy access entirely. Only approved native client keys reach application payload after this, and losing every approved key strands remote access to this node until someone recovers it at the machine — which never relaxes admission policy.",
     );
   }
+  for (const widening of nodePolicyWidenings(proposal, current)) warnings.push(widening);
   if (preview.withdrawal) {
     warnings.push(
       `This narrows what the node admits, so it closes live channels. Roughly matching now: ${preview.counts.legacy} legacy, ${preview.counts.nxE2ee} browser, ${preview.counts.suiteWithdrawn} on a withdrawn suite, and ${preview.counts.abortedHandshakes} handshake(s) in flight. These move while you read them.`,
@@ -626,7 +791,71 @@ export function nodePolicyPreviewWarnings(
   if (!preview.changed) {
     warnings.push("This changes nothing: the node already admits exactly this.");
   }
+  // NO BRANCH OF THIS DIALOG IS PURELY REASSURING. The panel used to render an
+  // empty list as "The node reports that this closes no live channels." — the
+  // one sentence an owner saw while turning `requireE2EE` off, which is the
+  // change that re-admits plaintext. A widening closes nothing by definition, so
+  // the count sentence is true and useless there, and the fallback below says
+  // what it is a statement about.
+  if (warnings.length === 0) warnings.push(NODE_POLICY_NO_WITHDRAWAL_NOTICE);
   return warnings;
+}
+
+/**
+ * What the node will admit AFTER a proposal that relaxes admission, in the
+ * consequence's own terms.
+ *
+ * Read against the policy the node currently reports rather than against the
+ * preview, because §12.6's preview answers with the RESULTING policy: a proposal
+ * turning `requireE2EE` off comes back with `requireE2EE: false` either way, so
+ * the preview alone cannot tell a change from a restatement. An unread current
+ * policy (`null`) warns rather than stays quiet — not knowing what the node
+ * enforces now is not a reason to tell an owner nothing is being given up.
+ */
+function nodePolicyWidenings(
+  proposal: NodeE2eePolicyProposal,
+  current: NodeE2eePolicy | null,
+): ReadonlyArray<string> {
+  const widenings: string[] = [];
+  if (proposal.requireE2EE === false && current?.requireE2EE !== false) {
+    widenings.push(
+      "Turning this off re-admits plaintext. The node goes back to accepting relay payload it has not encrypted, for browsers and for legacy clients, and the Hub carries that in a form it can read. It closes nothing now — what changes is what the node accepts next.",
+    );
+  }
+  if (
+    proposal.requireApprovedClientE2EE === false &&
+    current?.requireApprovedClientE2EE !== false
+  ) {
+    widenings.push(
+      "Clearing this re-admits the browser and legacy tiers. Client keys this node has not approved reach it again on their next connection, under whatever the remaining policy allows.",
+    );
+  }
+  return widenings;
+}
+
+/**
+ * §12.6's count sentence when there is nothing else to say, written so it is not
+ * a reassurance.
+ */
+export const NODE_POLICY_NO_WITHDRAWAL_NOTICE =
+  "The node reports that this closes no channel it has open now. That is a statement about the " +
+  "live channels and not about what the node will admit afterwards.";
+
+/**
+ * Whether the confirmation for a policy change should read as destructive.
+ *
+ * IT DISCRIMINATES, WHICH IS THE ONLY THING A RED BUTTON IS FOR. Every policy
+ * change used to draw the same red Apply, including the ones whose own body said
+ * they closed nothing — and an owner taught to click through one red affordance
+ * clicks through the one that strands their access. Red means the node will shut
+ * live channels, or the change reduces what it enforces.
+ */
+export function nodePolicyChangeDestructive(
+  preview: NodeE2eePolicyChange,
+  proposal: NodeE2eePolicyProposal,
+  current: NodeE2eePolicy | null,
+): boolean {
+  return preview.withdrawal || nodePolicyWidenings(proposal, current).length > 0;
 }
 
 /** What the node reported after a change actually ran (§12.6(c)). */
@@ -644,7 +873,20 @@ export function nodePolicyChangeSummary(change: NodeE2eePolicyChange): string {
  * accept only a strictly higher generation than the one they remember.
  */
 export const NODE_POLICY_RECOVER_WARNING =
-  "This advances the policy generation past every value this node may already have advertised, and the jump is deliberate. Clients accept only a higher generation than the one they remember, so nothing below the new value can be advertised again. If the record was rolled back, recovery commits the fail-closed policy rather than restoring the old values — widen it back afterwards with an explicit change.";
+  "This advances the policy generation past every value this node may already have advertised, " +
+  "and the jump is deliberate. Clients accept only a higher generation than the one they " +
+  "remember, so nothing below the new value can be advertised again. " +
+  // §12.4's consequence, spelled out rather than named. The node decides which
+  // of the two outcomes this command has — it commits the fail-closed policy
+  // when the record sits below the anchor's high-water mark, and nothing this
+  // panel can read tells an operator which they are about to get. "Commits the
+  // fail-closed policy" is not a sentence an owner can price; what it does is.
+  "If a restore rolled the record back, recovery does not restore the old values: it commits the " +
+  "fail-closed policy, which admits only approved native client keys and so closes browser and " +
+  "legacy access entirely, including every remote browser session open now. There is no way to " +
+  "tell from here which of the two this will be. Widening it back is a separate, explicit policy " +
+  "change, and if this node's only remaining access was a browser it has to be made at the " +
+  "machine.";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §12.5 FALLBACK DIAGNOSTICS
@@ -773,6 +1015,18 @@ export interface NodeE2eeActionConfirmation {
   readonly body: string;
   readonly confirmLabel: string;
   readonly destructive: boolean;
+  /**
+   * The exact record or value this confirmation is about, drawn in the same
+   * mono face the record's own facts use.
+   *
+   * §13.6's per-record withdrawals need it. A confirmation that names no record
+   * catches an accidental click and nothing else — and two devices paired under
+   * one Hub account render with the same account, the same origin, and, since
+   * nothing here sets `displayLabel`, the same stored label. The dialog paints an
+   * opaque scrim over the list, so the row behind it cannot be re-read either:
+   * whatever tells the two apart has to be inside the dialog.
+   */
+  readonly facts?: ReadonlyArray<NodeFactRow>;
 }
 
 const ACTION_CONFIRMATIONS = {
@@ -786,7 +1040,14 @@ const ACTION_CONFIRMATIONS = {
   },
   narrow: {
     title: "Reduce what this client may do?",
-    body: "Anything this device has open under the wider authority closes immediately — the node will not confirm the change until those channels are shut. The device reconnects with the smaller authority.",
+    // The capability clause is not a hedge. The panel sends `narrow` with no
+    // capability set and the node reads that as "leave capabilities alone"
+    // (`capabilitySet ?? found.entry.capabilitySet`), so the role ceiling is the
+    // only dimension that moves — while §13.6 treats the capability grant as a
+    // separate authority the owner names, and this panel's own approve flow makes
+    // them name it. "The device reconnects with the smaller authority" without
+    // that clause reads as both.
+    body: "Anything this device has open under the wider authority closes immediately — the node will not confirm the change until those channels are shut. The device reconnects with the smaller role ceiling. Its capability grant is left exactly as it is; only the ceiling drops, and changing the capabilities is a separate command on the node.",
     confirmLabel: "Reduce authority",
     destructive: true,
   },
@@ -856,6 +1117,69 @@ export function nodeE2eeActionConfirmation(action: NodeE2eeActionId): NodeE2eeAc
   return ACTION_CONFIRMATIONS[action];
 }
 
+/** The three §13.6 commands that name one record and act on it alone. */
+export const NODE_E2EE_RECORD_ACTION_IDS = ["narrow", "revoke", "purge"] as const;
+export type NodeE2eeRecordActionId = (typeof NODE_E2EE_RECORD_ACTION_IDS)[number];
+
+/** The record key a per-record confirmation echoes back. */
+export interface NodeE2eeRecordSubject {
+  readonly fingerprint: string;
+  readonly accountId: string;
+  readonly hubOrigin: string;
+}
+
+/**
+ * Why a per-record confirmation carries the record and not only the verb.
+ *
+ * `purge` is the sharpest case: the node removes the record and echoes nothing
+ * back, deliberately — "echoing a stale copy of a record the owner just deleted
+ * would be the one answer an operator could misread as 'it is still there'". So
+ * the last chance to see which record is going is this dialog.
+ */
+export const NODE_E2EE_RECORD_SUBJECT_PROMPT =
+  "It applies to the key below and to no other. Check the fingerprint against the device you " +
+  "meant: two devices paired under one account are told apart by nothing else here.";
+
+export function nodeE2eeRecordSubjectFacts(
+  subject: NodeE2eeRecordSubject,
+): ReadonlyArray<NodeFactRow> {
+  return [
+    { label: "Fingerprint", value: subject.fingerprint, mono: true },
+    { label: "Account", value: subject.accountId },
+    { label: "Hub origin", value: subject.hubOrigin },
+  ];
+}
+
+export function nodeE2eeRecordConfirmation(
+  action: NodeE2eeRecordActionId,
+  subject: NodeE2eeRecordSubject,
+): NodeE2eeActionConfirmation {
+  const base = ACTION_CONFIRMATIONS[action];
+  return {
+    ...base,
+    body: `${base.body} ${NODE_E2EE_RECORD_SUBJECT_PROMPT}`,
+    facts: nodeE2eeRecordSubjectFacts(subject),
+  };
+}
+
+/**
+ * The pairing-window confirmation, with the fingerprint it is about to admit.
+ *
+ * The body already names a wrong fingerprint as the exact risk — "a window naming
+ * the wrong one lets the wrong device in" — while withholding the value that was
+ * named, behind a scrim that makes the input unreadable. The node parses the
+ * value and refuses only an unparseable one, never a wrong one, so this dialog is
+ * the last place a transposed character or a stale paste can be caught.
+ */
+export function nodeE2eePairingWindowConfirmation(fingerprint: string): NodeE2eeActionConfirmation {
+  const base = ACTION_CONFIRMATIONS["open-window"];
+  return {
+    ...base,
+    body: `${base.body} Read the value below off the device now, before confirming.`,
+    facts: [{ label: "Only this fingerprint", value: fingerprint, mono: true }],
+  };
+}
+
 /**
  * §8.3's role ordering, as the roles an approval may name.
  *
@@ -879,20 +1203,51 @@ const APPROVAL_ROLE_MEANINGS: Record<NodeE2eeApprovableRole, string> = {
 };
 
 /**
- * The approval confirmation, with the role the owner picked written into it.
+ * The capability set an approval from this panel grants.
  *
- * The capability set is granted EMPTY and the sentence says so. §13.6 has the
- * owner name it too, and a panel that inferred one would be granting authority
- * nobody asked for; an empty set is the least it can be, and widening it later
- * is an explicit `ryco e2ee client approve --capability …` on the node.
+ * IT IS NOT EMPTY, AND AN EMPTY ONE IS NOT "THE LEAST IT CAN BE" — IT IS BELOW
+ * THE LEAST USABLE VALUE. §8.6 step 6 admits a native handshake only when
+ * `record.capabilitySet.includes(intendedCapability)`, unconditionally on that
+ * tier and not gated on `requireApprovedClientE2EE`. `RelayCapability` is a
+ * closed vocabulary with one member, so an empty set matches nothing a relay
+ * channel can ever intend: the record commits as `approved`, the row goes green,
+ * and every handshake the device attempts dies with fatal P12 `authorization`.
+ * The node's own CLI makes that state unreachable — `--capability` is
+ * `Flag.atLeast(1)` — and this panel was the only way to reach it.
+ *
+ * The element is typed as `RelayCapability`, so widening or renaming the relay
+ * capability vocabulary in `@ryco/contracts` stops this file compiling rather
+ * than silently leaving an approval that admits nothing.
  */
-export function nodeApproveConfirmation(role: NodeE2eeApprovableRole): NodeE2eeActionConfirmation {
+export const NODE_E2EE_APPROVAL_CAPABILITY_SET: ReadonlyArray<RelayCapability> = ["ryco.rpc"];
+
+/**
+ * The approval confirmation, with the role the owner picked written into it and
+ * the record it names.
+ *
+ * §13.6 has the owner name the maximum role AND the capability set. The role is
+ * theirs — one button each, least authority first. The capability set is not a
+ * choice this surface can offer, because there is exactly one capability a relay
+ * channel carries and any other value approves a key that cannot connect; so the
+ * sentence states what is granted rather than implying an empty grant is a
+ * smaller one.
+ */
+export function nodeApproveConfirmation(
+  role: NodeE2eeApprovableRole,
+  subject?: NodeE2eeRecordSubject,
+): NodeE2eeActionConfirmation {
   const base = ACTION_CONFIRMATIONS.approve;
+  const capabilities = NODE_E2EE_APPROVAL_CAPABILITY_SET.join(", ");
   return {
     title: `Approve this client key as ${role}?`,
-    body: `${base.body} At most it will be able to ${APPROVAL_ROLE_MEANINGS[role]}. No extra capabilities are granted here — add those from the node if you need them.`,
+    body:
+      `${base.body} At most it will be able to ${APPROVAL_ROLE_MEANINGS[role]}. ` +
+      `It is granted the one capability a relay channel carries, ${capabilities} — a key ` +
+      `approved with none is admitted by nothing and could not connect at all. ` +
+      `${subject === undefined ? "" : NODE_E2EE_RECORD_SUBJECT_PROMPT}`.trimEnd(),
     confirmLabel: `Approve as ${role}`,
     destructive: false,
+    ...(subject === undefined ? {} : { facts: nodeE2eeRecordSubjectFacts(subject) }),
   };
 }
 
@@ -901,51 +1256,246 @@ export const NODE_E2EE_ACTION_IDS = Object.keys(
   ACTION_CONFIRMATIONS,
 ) as ReadonlyArray<NodeE2eeActionId>;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE PANEL'S CLAIM-BEARING ROW COPY
+// ─────────────────────────────────────────────────────────────────────────────
+// Every sentence below is rendered by the `.tsx` and says something about what
+// the node admits, encrypts, or refuses. They live here so the node suite's
+// prohibited-claims scan reaches them; the browser suite runs the same list over
+// the rendered DOM, which is what covers the layout copy that stays in the
+// component.
+
+export const NODE_PANEL_SUBTITLE =
+  "What this node will admit, and which client keys it has on file.";
+
+export const NODE_POLICY_REQUIRE_E2EE_TITLE = "Require an encrypted channel";
+export const NODE_POLICY_REQUIRE_E2EE_DESCRIPTION = "Refuse plaintext, including for browsers.";
+
+export const NODE_POLICY_STRICT_TITLE = "Only approved native client keys";
+export const NODE_POLICY_STRICT_DESCRIPTION =
+  "Closes browser and legacy access entirely. Only approved native client keys reach application payload.";
+
+export const NODE_POLICY_GENERATION_DESCRIPTION =
+  "Recover a generation that a restore rolled back.";
+
 /**
- * Every owner-facing sentence this module ships, flattened.
+ * What a policy switch says when the node's value for it has not been read.
  *
- * The prohibited-claims scan walks this rather than a hand-kept list, so a
- * constant added above is covered the moment it exists.
+ * A disabled switch still draws in a position, and a position is a claim. In
+ * hosted mode the policy is structurally unreadable — the operator routes are not
+ * on the relay — so an off switch there asserted `requireApprovedClientE2EE:
+ * false` about a node whose policy the same section had just said it cannot see.
+ * The panel's convention everywhere else is a stated absence:
+ * `nodePolicyRows(null)` says `Admission policy: unknown`,
+ * `formatNodeEpoch(undefined)` says `never`.
+ */
+export const NODE_POLICY_VALUE_UNREADABLE =
+  "Its current value on the node has not been read here, so nothing on this row states what it is.";
+
+export const NODE_PREKEY_DESCRIPTION = "The key this node offers for new channels.";
+export const NODE_CONTINUITY_DESCRIPTION = "The lineage paired clients remember this node by.";
+export const NODE_NO_CLIENTS_DESCRIPTION = "No device has introduced itself to this node yet.";
+export const NODE_NO_SESSIONS_DESCRIPTION = "Nothing is connected right now.";
+
+/**
+ * Every owner-facing sentence this module produces, flattened.
+ *
+ * IT WALKS THE PRODUCERS, NOT A LIST OF CONSTANTS. The earlier version enumerated
+ * call sites by hand and missed most of what the panel renders — the fallback
+ * report's class meanings, the listing notices, the preview warnings, the change
+ * summary — so a banned phrase written into any of them passed the scan while
+ * being drawn to owners. Every function that returns owner-facing prose is called
+ * here with a representative input, and the DOM scan in the browser suite covers
+ * what the `.tsx` still writes for itself.
  */
 export function everyNodeSecurityString(): ReadonlyArray<{
   readonly where: string;
   readonly text: string;
 }> {
   const strings: { where: string; text: string }[] = [];
+  const push = (where: string, text: string) => {
+    strings.push({ where, text });
+  };
+  const pushAll = (where: string, texts: ReadonlyArray<string>) => {
+    texts.forEach((text, index) => push(`${where}[${index}]`, text));
+  };
+  const pushConfirmation = (where: string, confirmation: NodeE2eeActionConfirmation) => {
+    push(`${where}.title`, confirmation.title);
+    push(`${where}.body`, confirmation.body);
+    push(`${where}.confirmLabel`, confirmation.confirmLabel);
+    for (const fact of confirmation.facts ?? []) push(`${where}.fact(${fact.label})`, fact.label);
+  };
+  const pushRows = (where: string, rows: ReadonlyArray<NodeFactRow>) => {
+    for (const row of rows) {
+      push(`${where}.${row.label}.label`, row.label);
+      push(`${where}.${row.label}.value`, row.value);
+    }
+  };
+
   for (const mode of ["local", "hosted"] as const) {
     const statement = nodeConnectionStatement(mode, null);
-    strings.push({ where: `connection(${mode}).headline`, text: statement.headline });
-    strings.push({ where: `connection(${mode}).body`, text: statement.body });
+    push(`connection(${mode}).headline`, statement.headline);
+    push(`connection(${mode}).body`, statement.body);
     const availability = nodeOperatorDataAvailability(mode);
     if (availability.unavailableBody !== "")
-      strings.push({ where: `availability(${mode})`, text: availability.unavailableBody });
+      push(`availability(${mode})`, availability.unavailableBody);
     const disposition = nodeE2eeStrictPolicyDisposition(mode);
-    if (disposition.kind === "blocked")
-      strings.push({ where: `strictPolicy(${mode})`, text: disposition.reason });
+    if (disposition.kind === "blocked") push(`strictPolicy(${mode})`, disposition.reason);
   }
+  push("policyGateRefusal", NODE_E2EE_POLICY_GATE_REFUSAL);
+
   for (const action of NODE_E2EE_ACTION_IDS) {
-    const confirmation = nodeE2eeActionConfirmation(action);
-    strings.push({ where: `action(${action}).title`, text: confirmation.title });
-    strings.push({ where: `action(${action}).body`, text: confirmation.body });
-    strings.push({ where: `action(${action}).confirmLabel`, text: confirmation.confirmLabel });
+    pushConfirmation(`action(${action})`, nodeE2eeActionConfirmation(action));
   }
+  const subject: NodeE2eeRecordSubject = {
+    fingerprint: "SHA256:example",
+    accountId: "acct_example",
+    hubOrigin: "https://hub.example",
+  };
+  for (const action of NODE_E2EE_RECORD_ACTION_IDS) {
+    pushConfirmation(`record(${action})`, nodeE2eeRecordConfirmation(action, subject));
+  }
+  pushConfirmation("pairingWindow", nodeE2eePairingWindowConfirmation("SHA256:example"));
   for (const role of NODE_E2EE_APPROVABLE_ROLES) {
-    const confirmation = nodeApproveConfirmation(role);
-    strings.push({ where: `approve(${role}).title`, text: confirmation.title });
-    strings.push({ where: `approve(${role}).body`, text: confirmation.body });
-    strings.push({ where: `approve(${role}).confirmLabel`, text: confirmation.confirmLabel });
+    pushConfirmation(`approve(${role})`, nodeApproveConfirmation(role));
+    pushConfirmation(`approve(${role}, record)`, nodeApproveConfirmation(role, subject));
   }
+  push("recordSubjectPrompt", NODE_E2EE_RECORD_SUBJECT_PROMPT);
+
   for (const fingerprint of [null, "SHA256:example"]) {
-    strings.push({
-      where: `enrollmentFingerprint(${fingerprint === null ? "absent" : "pending"})`,
-      text: nodeEnrollmentFingerprintView(fingerprint).caption,
-    });
+    push(
+      `enrollmentFingerprint(${fingerprint === null ? "absent" : "pending"})`,
+      nodeEnrollmentFingerprintView(fingerprint).caption,
+    );
   }
-  strings.push({ where: "safetyNumberCaption", text: NODE_SAFETY_NUMBER_CAPTION });
-  strings.push({ where: "safetyNumberAdvisory", text: NODE_SAFETY_NUMBER_ADVISORY });
-  strings.push({ where: "safetyNumberUnavailable", text: NODE_SAFETY_NUMBER_UNAVAILABLE });
-  strings.push({ where: "nativeSessionCode", text: NODE_SESSION_NATIVE_CODE_ABSENT });
-  strings.push({ where: "policyRecoverWarning", text: NODE_POLICY_RECOVER_WARNING });
-  strings.push({ where: "fallbackQuiet", text: NODE_FALLBACK_QUIET });
+
+  // §6.4 / §7.5 remedies and rows, in every state that produces prose.
+  push("prekeyRemedy(none)", nodePrekeyRemedy({ present: false }) ?? "");
+  pushRows("prekeyRows(null)", nodePrekeyRows(null));
+  pushRows("prekeyRows(none)", nodePrekeyRows({ present: false }));
+  pushRows("continuityRows(null)", nodeContinuityRows(null));
+  pushRows(
+    "continuityRows(unavailable)",
+    nodeContinuityRows({ status: "unavailable", reason: "anchor_disagrees" }),
+  );
+  pushRows("policyRows(null)", nodePolicyRows(null));
+  pushRows("pairingWindowRows(null)", nodePairingWindowRows(null));
+  push("refusedAttempts(null)", nodeRefusedAttemptsDescription(null));
+  push(
+    "refusedAttempts(read)",
+    nodeRefusedAttemptsDescription({
+      records: [],
+      pendingGlobalSaturated: false,
+      saturatedAccounts: [],
+      refusedPairingAttempts: 3,
+    }),
+  );
+  push("pairingWindowDescription", NODE_PAIRING_WINDOW_DESCRIPTION);
+
+  // §13.6's listing instrumentation, in the state that produces both sentences.
+  pushAll(
+    "listingNotices",
+    nodeClientListingNotices({
+      records: [],
+      pendingGlobalSaturated: true,
+      saturatedAccounts: [],
+      refusedPairingAttempts: 4,
+    }),
+  );
+
+  // §12.6's warnings, in every branch, and §12.6(c)'s report.
+  const previewPolicy: NodeE2eePolicy = {
+    requireE2EE: true,
+    requireApprovedClientE2EE: false,
+    effectiveRequireE2EE: true,
+    admittedPatterns: ["IK", "NX"],
+    suiteRegistry: [1],
+    generation: 4,
+  };
+  const change: NodeE2eePolicyChange = {
+    policy: previewPolicy,
+    withdrawal: true,
+    changed: true,
+    counts: { legacy: 1, nxE2ee: 2, suiteWithdrawn: 3, abortedHandshakes: 4 },
+  };
+  pushAll(
+    "previewWarnings(strict)",
+    nodePolicyPreviewWarnings(change, { requireApprovedClientE2EE: true }, previewPolicy),
+  );
+  pushAll(
+    "previewWarnings(widenE2ee)",
+    nodePolicyPreviewWarnings(
+      { ...change, withdrawal: false },
+      { requireE2EE: false },
+      previewPolicy,
+    ),
+  );
+  pushAll(
+    "previewWarnings(widenStrict)",
+    nodePolicyPreviewWarnings(
+      { ...change, withdrawal: false },
+      { requireApprovedClientE2EE: false },
+      {
+        ...previewPolicy,
+        requireApprovedClientE2EE: true,
+      },
+    ),
+  );
+  pushAll(
+    "previewWarnings(noop)",
+    nodePolicyPreviewWarnings(
+      { ...change, withdrawal: false, changed: false },
+      { requireE2EE: true },
+      previewPolicy,
+    ),
+  );
+  pushAll(
+    "previewWarnings(quiet)",
+    nodePolicyPreviewWarnings(
+      { ...change, withdrawal: false },
+      { suiteRegistry: [1, 2] },
+      previewPolicy,
+    ),
+  );
+  push("policyChangeSummary", nodePolicyChangeSummary(change));
+  push("policyChangeSummary(unchanged)", nodePolicyChangeSummary({ ...change, changed: false }));
+
+  // §12.5's report, in the states that produce prose.
+  const report = nodeFallbackReport({
+    windowStartedAt: 1_000,
+    peerLegacy: { occurrences: 1, ringOverflows: 1, lastOccurrenceAt: 2_000 },
+    advertisementUnavailable: { occurrences: 2, ringOverflows: 0 },
+    ring: [{ occurredAt: 2_000, reason: "peer-legacy" }],
+    undersizedConnection: { assertedMaxDataChunkBytes: 100, advertisementMinChunkBytes: 512 },
+  })!;
+  for (const entry of report.classes) {
+    push(`fallbackClass(${entry.label}).label`, entry.label);
+    push(`fallbackClass(${entry.label}).meaning`, entry.meaning);
+  }
+  push("fallbackOverflow", report.overflowNotice!);
+  push("fallbackUndersized", report.undersizedNotice!);
+
+  push("safetyNumberCaption", NODE_SAFETY_NUMBER_CAPTION);
+  push("safetyNumberAdvisory", NODE_SAFETY_NUMBER_ADVISORY);
+  push("safetyNumberUnavailable", NODE_SAFETY_NUMBER_UNAVAILABLE);
+  push("nativeSessionCode", NODE_SESSION_NATIVE_CODE_ABSENT);
+  push("nodeSessionSasAdvisory", NODE_SESSION_WEB_SAS_ADVISORY);
+  push("nodeSessionSasUnavailable", NODE_SESSION_WEB_SAS_UNAVAILABLE);
+  push("nodeSessionRowDescription", NODE_SESSION_WEB_ROW_DESCRIPTION);
+  push("policyRecoverWarning", NODE_POLICY_RECOVER_WARNING);
+  push("policyNoWithdrawal", NODE_POLICY_NO_WITHDRAWAL_NOTICE);
+  push("policyValueUnreadable", NODE_POLICY_VALUE_UNREADABLE);
+  push("fallbackQuiet", NODE_FALLBACK_QUIET);
+
+  push("panelSubtitle", NODE_PANEL_SUBTITLE);
+  push("requireE2eeTitle", NODE_POLICY_REQUIRE_E2EE_TITLE);
+  push("requireE2eeDescription", NODE_POLICY_REQUIRE_E2EE_DESCRIPTION);
+  push("strictTitle", NODE_POLICY_STRICT_TITLE);
+  push("strictDescription", NODE_POLICY_STRICT_DESCRIPTION);
+  push("policyGenerationDescription", NODE_POLICY_GENERATION_DESCRIPTION);
+  push("prekeyDescription", NODE_PREKEY_DESCRIPTION);
+  push("continuityDescription", NODE_CONTINUITY_DESCRIPTION);
+  push("noClients", NODE_NO_CLIENTS_DESCRIPTION);
+  push("noSessions", NODE_NO_SESSIONS_DESCRIPTION);
   return strings;
 }

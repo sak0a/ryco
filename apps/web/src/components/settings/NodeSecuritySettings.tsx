@@ -44,7 +44,7 @@ import {
   E2EE_WEB_SAS_UNAVAILABLE,
   hostedE2eeVerificationView,
 } from "../hostedHub/HostedE2eeVerification.logic";
-import { hostedRelayTrustDisclosure } from "../hostedHub/HostedRelayTrustNotice.logic";
+import { HostedRelayTrustNotice } from "../hostedHub/HostedRelayTrustNotice";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -64,34 +64,57 @@ import {
   nodeApproveConfirmation,
   nodeClientListingNotices,
   nodeClientRows,
+  nodeClientRowTitle,
   nodeClientStatusTone,
   nodeConnectionStatement,
   nodeContinuityRemedy,
   nodeContinuityRows,
   nodeE2eeActionConfirmation,
+  nodeE2eePairingWindowConfirmation,
   nodeE2eePolicyGate,
+  nodeE2eeRecordConfirmation,
   nodeE2eeStrictPolicyDisposition,
   nodeEnrollmentFingerprintView,
   nodeFallbackReport,
   nodeOperatorDataAvailability,
   nodePairingWindowRows,
+  nodePolicyChangeDestructive,
   nodePolicyChangeSummary,
   nodePolicyPreviewWarnings,
   nodePolicyRows,
   nodePrekeyRemedy,
   nodePrekeyRows,
+  nodeRefusedAttemptsDescription,
   nodeSafetyNumberView,
   nodeSecurityMode,
   nodeSessionRows,
+  nodeSessionVerificationView,
   type NodeE2eeActionConfirmation,
   type NodeE2eeActionId,
   type NodeE2eeApprovableRole,
+  type NodeE2eeRecordActionId,
+  type NodeE2eeRecordSubject,
   type NodeE2eeStrictPolicyDisposition,
   type NodeFactRow,
+  NODE_CONTINUITY_DESCRIPTION,
   NODE_E2EE_APPROVABLE_ROLES,
+  NODE_E2EE_APPROVAL_CAPABILITY_SET,
   NODE_FALLBACK_QUIET,
+  NODE_NO_CLIENTS_DESCRIPTION,
+  NODE_NO_SESSIONS_DESCRIPTION,
+  NODE_PAIRING_WINDOW_DESCRIPTION,
+  NODE_PANEL_SUBTITLE,
+  NODE_POLICY_GENERATION_DESCRIPTION,
+  NODE_POLICY_REQUIRE_E2EE_DESCRIPTION,
+  NODE_POLICY_REQUIRE_E2EE_TITLE,
+  NODE_POLICY_STRICT_DESCRIPTION,
+  NODE_POLICY_STRICT_TITLE,
+  NODE_POLICY_VALUE_UNREADABLE,
+  NODE_PREKEY_DESCRIPTION,
   NODE_SAFETY_NUMBER_UNAVAILABLE,
   NODE_SESSION_NATIVE_CODE_ABSENT,
+  NODE_SESSION_WEB_ROW_DESCRIPTION,
+  NODE_SESSION_WEB_SAS_UNAVAILABLE,
 } from "./NodeSecuritySettings.logic";
 
 /**
@@ -112,6 +135,8 @@ import {
  * the one wrong answer this data has.
  */
 const POLL_INTERVAL_MS = 5_000;
+/** The ceiling the back-off below climbs to while reads keep failing. */
+const POLL_MAX_INTERVAL_MS = 60_000;
 
 interface NodeSecuritySnapshot {
   readonly clients: NodeE2eeClientListing | null;
@@ -194,29 +219,38 @@ function SafetyNumber({ value }: { readonly value: string }) {
 }
 
 /**
- * §13.5's `WebSAS`, through the shipped inseparable value and no other path.
+ * §13.5's characters, with whatever advisory came in the same object.
  *
- * `hostedE2eeVerificationView` returns the groups, the caption and §13.5's
- * advisory as one object with the advisory non-optional. This is the only way
- * this panel obtains the characters.
+ * It cannot be handed a code and an advisory separately — there is one argument,
+ * and it is a view whose `advisory` is a required field. Which advisory that is
+ * belongs to the caller's END of the comparison, and the two callers below are
+ * the only ones: each is wired to exactly one view builder, so the referent is
+ * structural rather than a parameter someone can pass the wrong way round.
  */
-function SessionVerificationCode({ code }: { readonly code: string | null }) {
-  const view = hostedE2eeVerificationView(code);
+function VerificationCode({
+  view,
+  unavailable,
+  testId,
+}: {
+  readonly view: {
+    readonly display: string;
+    readonly caption: string;
+    readonly advisory: string;
+  } | null;
+  readonly unavailable: string;
+  readonly testId: string;
+}) {
   if (!view) {
     return (
-      <p
-        data-testid="node-session-code"
-        data-code="absent"
-        className="text-[11px] text-muted-foreground"
-      >
-        {E2EE_WEB_SAS_UNAVAILABLE}
+      <p data-testid={testId} data-code="absent" className="text-[11px] text-muted-foreground">
+        {unavailable}
       </p>
     );
   }
   return (
-    <div data-testid="node-session-code" data-code="present" className="space-y-1.5">
+    <div data-testid={testId} data-code="present" className="space-y-1.5">
       <p
-        data-testid="node-session-code-value"
+        data-testid={`${testId}-value`}
         className="font-mono text-sm leading-none font-semibold tracking-[0.2em] whitespace-nowrap select-all"
       >
         {view.display}
@@ -224,6 +258,41 @@ function SessionVerificationCode({ code }: { readonly code: string | null }) {
       <p className="text-[11px] leading-relaxed text-muted-foreground">{view.caption}</p>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{view.advisory}</p>
     </div>
+  );
+}
+
+/**
+ * §13.5 for THIS TAB'S OWN channel, through the shipped inseparable value.
+ *
+ * The shipped advisory is written from the browser end — "compare this code with
+ * the one your node's CLI shows" — and this is the one site in this panel where
+ * the reader is at the browser end, so it is correct here and nowhere else.
+ */
+function OwnChannelVerificationCode({ code }: { readonly code: string | null }) {
+  return (
+    <VerificationCode
+      view={hostedE2eeVerificationView(code)}
+      unavailable={E2EE_WEB_SAS_UNAVAILABLE}
+      testId="node-session-code"
+    />
+  );
+}
+
+/**
+ * §13.5 for a session on the NODE'S list, through the node-end view.
+ *
+ * The reader here is at the node. Rendering the browser-end advisory would tell
+ * them to compare the node's code against the node's own CLI — a comparison that
+ * always matches and establishes nothing — so the node end has its own sentence,
+ * with §13.5's denial restated in node-end terms.
+ */
+function NodeSessionVerificationCode({ code }: { readonly code: string | null }) {
+  return (
+    <VerificationCode
+      view={nodeSessionVerificationView(code)}
+      unavailable={NODE_SESSION_WEB_SAS_UNAVAILABLE}
+      testId="node-session-code"
+    />
   );
 }
 
@@ -253,7 +322,6 @@ function ThisConnectionSection() {
     transportStatus,
     e2eeStatus: channelStatus,
   });
-  const disclosure = hostedRelayTrustDisclosure(channelStatus);
   const statement = nodeConnectionStatement("hosted", indicator);
 
   return (
@@ -282,8 +350,16 @@ function ThisConnectionSection() {
         }
       >
         <div className="space-y-3 pb-3.5">
-          <p className="text-[11px] leading-relaxed text-muted-foreground">{disclosure.body}</p>
-          {channelStatus === "web-unsigned" ? <SessionVerificationCode code={code} /> : null}
+          {/* THE SHIPPED COMPONENT, AS ITS SIXTH MOUNT SITE. Deriving the
+              disclosure here and drawing only `.body` dropped the `tone` the
+              component exists to carry, so §12.2's legacy-fallback disclosure
+              rendered in the same muted grey as the advisory one — the single
+              presentational signal that separates "the Hub can read this" from
+              "the Hub relays ciphertext", gone at the panel about security. It
+              reads the §4.4 projection itself, so nothing is passed to it and
+              nothing here can pass it a stale one. */}
+          <HostedRelayTrustNotice />
+          {channelStatus === "web-unsigned" ? <OwnChannelVerificationCode code={code} /> : null}
         </div>
       </SettingsRow>
     </SettingsSection>
@@ -315,10 +391,12 @@ export function NodeSecuritySettings() {
   const [preview, setPreview] = useState<{
     readonly proposal: NodeE2eePolicyProposal;
     readonly warnings: ReadonlyArray<string>;
+    readonly destructive: boolean;
   } | null>(null);
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null);
   const [windowFingerprint, setWindowFingerprint] = useState("");
   const mountedRef = useRef(true);
+  const failuresRef = useRef(0);
   const { copyToClipboard } = useCopyToClipboard();
 
   useEffect(() => {
@@ -343,6 +421,7 @@ export function NodeSecuritySettings() {
       // returns null for it rather than throwing.
       const enrollment = await fetchHubEnrollment().catch(() => null);
       if (!mountedRef.current) return;
+      failuresRef.current = 0;
       setSnapshot({
         clients,
         sessions,
@@ -355,6 +434,7 @@ export function NodeSecuritySettings() {
       setError(null);
     } catch (cause) {
       if (!mountedRef.current) return;
+      failuresRef.current += 1;
       // The last good snapshot stays on screen: blanking the client list on a
       // transient read failure would read as "nothing is authorized".
       setError(
@@ -363,22 +443,59 @@ export function NodeSecuritySettings() {
     }
   }, [availability.available]);
 
+  /**
+   * The poll, WITH A CEILING ON HOW OFTEN IT RETRIES A FAILURE.
+   *
+   * These six routes are owner-only, and a session that is not the owner's gets
+   * 403 from every one of them for as long as it holds the panel open. A flat
+   * five-second interval re-issued all six forever against a refusal that cannot
+   * start succeeding — the first unconditioned polling loop of its kind in this
+   * client. Backing off on consecutive failures keeps the recovery from a
+   * transient outage (the first retry is still five seconds later) while bounding
+   * what a permanent one costs.
+   */
   useEffect(() => {
     void refresh();
     if (!availability.available) return;
-    const timer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      if (cancelled) return;
+      const delay = Math.min(
+        POLL_INTERVAL_MS * 2 ** Math.max(0, failuresRef.current - 1),
+        POLL_MAX_INTERVAL_MS,
+      );
+      timer = setTimeout(() => {
+        void refresh().finally(schedule);
+      }, delay);
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
   }, [availability.available, refresh]);
 
-  /** Every mutation goes through here, so none of them can skip the refresh. */
+  /**
+   * Every mutation goes through here, so none of them can skip the refresh.
+   *
+   * THE OPERATION MAY OWN ITS OWN NOTICE, and RETURNING A STRING is how it does.
+   * `run` used to write `message` unconditionally after awaiting — in the same
+   * synchronous continuation the operation had just written its own notice in —
+   * so §12.6(c)'s post-change report was built and then discarded a line later,
+   * and a change that closed twelve channels and aborted three handshakes
+   * reported the same three words as one that touched nothing. Every node client
+   * call resolves to a record, a listing, or nothing, so a string here is always
+   * a deliberate notice and never a leaked response body.
+   */
   const run = useCallback(
     async (operation: () => Promise<unknown>, message: string) => {
       setBusy(true);
       setError(null);
       setNotice(null);
       try {
-        await operation();
-        if (mountedRef.current) setNotice(message);
+        const produced = await operation();
+        if (mountedRef.current) setNotice(typeof produced === "string" ? produced : message);
         await refresh();
       } catch (cause) {
         if (!mountedRef.current) return;
@@ -396,6 +513,14 @@ export function NodeSecuritySettings() {
         copy: nodeE2eeActionConfirmation(action),
         run: () => run(operation, message),
       });
+    },
+    [run],
+  );
+
+  /** The same gate, for the confirmations that must echo the record they name. */
+  const confirmCopyThen = useCallback(
+    (copy: NodeE2eeActionConfirmation, operation: () => Promise<unknown>, message: string) => {
+      setConfirmation({ copy, run: () => run(operation, message) });
     },
     [run],
   );
@@ -421,9 +546,15 @@ export function NodeSecuritySettings() {
       try {
         const previewed = await previewNodeE2eePolicy(gate.proposal);
         if (!mountedRef.current) return;
+        // The warnings and the button's colour are both read against the policy
+        // the node currently reports, because §12.6's preview answers with the
+        // RESULTING policy — a proposal that relaxes admission comes back
+        // reporting the relaxed value either way, so the preview alone cannot
+        // tell a widening from a restatement.
         setPreview({
           proposal: gate.proposal,
-          warnings: nodePolicyPreviewWarnings(previewed, gate.proposal),
+          warnings: nodePolicyPreviewWarnings(previewed, gate.proposal, snapshot.policy),
+          destructive: nodePolicyChangeDestructive(previewed, gate.proposal, snapshot.policy),
         });
       } catch (cause) {
         if (!mountedRef.current) return;
@@ -432,7 +563,7 @@ export function NodeSecuritySettings() {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [mode],
+    [mode, snapshot.policy],
   );
 
   const applyPreviewedPolicy = useCallback(async () => {
@@ -449,24 +580,45 @@ export function NodeSecuritySettings() {
     }
     const proposal = gate.proposal;
     setPreview(null);
+    // §12.6(c)'s report is RETURNED rather than written, so `run` cannot
+    // overwrite it with the generic message on the next line.
     await run(async () => {
       const change: NodeE2eePolicyChange = await applyNodeE2eePolicy(proposal);
-      if (mountedRef.current) setNotice(nodePolicyChangeSummary(change));
+      return nodePolicyChangeSummary(change);
     }, "Policy applied.");
   }, [mode, preview, run]);
 
+  /**
+   * §13.6's three per-record withdrawals, whose confirmation echoes the record.
+   *
+   * The subject is derived from the same request the network gets, so the key
+   * named in the dialog and the key in the body cannot disagree.
+   */
   const authorize = useCallback(
-    (request: NodeE2eeAuthorizationRequest, action: NodeE2eeActionId, message: string) => {
-      confirmThen(action, () => applyNodeE2eeAuthorization(request), message);
+    (request: NodeE2eeAuthorizationRequest, action: NodeE2eeRecordActionId, message: string) => {
+      const subject: NodeE2eeRecordSubject = {
+        fingerprint: request.fingerprint,
+        accountId: request.accountId,
+        hubOrigin: request.hubOrigin,
+      };
+      confirmCopyThen(
+        nodeE2eeRecordConfirmation(action, subject),
+        () => applyNodeE2eeAuthorization(request),
+        message,
+      );
     },
-    [confirmThen],
+    [confirmCopyThen],
   );
 
   /** An approval, whose confirmation names the role the owner picked (§13.6). */
   const approve = useCallback(
     (request: NodeE2eeAuthorizationRequest, role: NodeE2eeApprovableRole) => {
       setConfirmation({
-        copy: nodeApproveConfirmation(role),
+        copy: nodeApproveConfirmation(role, {
+          fingerprint: request.fingerprint,
+          accountId: request.accountId,
+          hubOrigin: request.hubOrigin,
+        }),
         run: () => run(() => applyNodeE2eeAuthorization(request), `Client approved as ${role}.`),
       });
     },
@@ -489,9 +641,7 @@ export function NodeSecuritySettings() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-base font-semibold">Security</h1>
-          <p className="mt-1 text-muted-foreground text-xs">
-            What this node will admit, and which client keys it has on file.
-          </p>
+          <p className="mt-1 text-muted-foreground text-xs">{NODE_PANEL_SUBTITLE}</p>
         </div>
         {availability.available ? (
           <Button size="xs" variant="outline" disabled={busy} onClick={() => void refresh()}>
@@ -501,7 +651,10 @@ export function NodeSecuritySettings() {
         ) : null}
       </div>
 
-      {error ? (
+      {/* `error !== null` rather than truthiness: a refusal that arrived as an
+          empty string would otherwise render as no message at all, and a guard
+          that fails silently is one operators route around. */}
+      {error !== null ? (
         <Alert variant="error">
           <TriangleAlertIcon />
           <AlertTitle>That didn&apos;t work</AlertTitle>
@@ -525,9 +678,13 @@ export function NodeSecuritySettings() {
             title={nodeConnectionStatement(mode, null).headline}
             description={availability.unavailableBody}
           />
+          {/* `null`, not `false`. Hosted mode never reads the node's policy —
+              `refresh()` returns before it asks — so a switch drawn in the off
+              position asserted `requireApprovedClientE2EE: false` about a node
+              this very section had just said it cannot see. */}
           <StrictPolicyRow
             disposition={strictPolicy}
-            checked={false}
+            checked={null}
             busy={busy}
             onChange={(checked) => void startPolicyChange({ requireApprovedClientE2EE: checked })}
           />
@@ -562,7 +719,7 @@ export function NodeSecuritySettings() {
             </SettingsRow>
             <SettingsRow
               title="Agreement prekey"
-              description={prekeyRemedy ?? "The key this node offers for new channels."}
+              description={prekeyRemedy ?? NODE_PREKEY_DESCRIPTION}
               control={
                 <Button
                   size="xs"
@@ -582,7 +739,7 @@ export function NodeSecuritySettings() {
             </SettingsRow>
             <SettingsRow
               title="Continuity"
-              description={continuityRemedy ?? "The lineage paired clients remember this node by."}
+              description={continuityRemedy ?? NODE_CONTINUITY_DESCRIPTION}
               control={
                 <>
                   <Button
@@ -628,7 +785,7 @@ export function NodeSecuritySettings() {
             ))}
             <SettingsRow
               title="Pairing window"
-              description="A window lets exactly one device introduce itself, and only the one whose fingerprint you name."
+              description={NODE_PAIRING_WINDOW_DESCRIPTION}
               control={
                 <>
                   <Input
@@ -644,8 +801,11 @@ export function NodeSecuritySettings() {
                     variant="outline"
                     disabled={busy || windowFingerprint.trim() === ""}
                     onClick={() =>
-                      confirmThen(
-                        "open-window",
+                      // The confirmation echoes the trimmed value, because its
+                      // own body names a wrong fingerprint as the risk and the
+                      // input it was typed into sits behind the dialog's scrim.
+                      confirmCopyThen(
+                        nodeE2eePairingWindowConfirmation(windowFingerprint.trim()),
                         () =>
                           setNodeE2eePairingWindow({
                             action: "open",
@@ -680,7 +840,7 @@ export function NodeSecuritySettings() {
             </SettingsRow>
             <SettingsRow
               title="Refused attempts"
-              description={`${snapshot.clients?.refusedPairingAttempts ?? 0} attempt(s) refused because the pending list was full.`}
+              description={nodeRefusedAttemptsDescription(snapshot.clients)}
               control={
                 <Button
                   size="xs"
@@ -696,7 +856,7 @@ export function NodeSecuritySettings() {
             />
             {(snapshot.clients?.records ?? []).map((record) => (
               <ClientRecordRow
-                key={`${record.hubOrigin} ${record.accountId} ${record.fingerprint}`}
+                key={`${record.hubOrigin}\u0000${record.accountId}\u0000${record.fingerprint}`}
                 record={record}
                 busy={busy}
                 onAuthorize={authorize}
@@ -706,7 +866,7 @@ export function NodeSecuritySettings() {
             {snapshot.clients !== null && snapshot.clients.records.length === 0 ? (
               <SettingsRow
                 title="No client keys on file"
-                description="No device has introduced itself to this node yet."
+                description={NODE_NO_CLIENTS_DESCRIPTION}
               />
             ) : null}
           </SettingsSection>
@@ -716,48 +876,53 @@ export function NodeSecuritySettings() {
               <SettingsRow
                 key={session.sessionIndex}
                 title={`Session ${session.sessionIndex}`}
+                // The comparison instruction is NOT here. It lives in the
+                // advisory that travels with the characters, and nowhere else:
+                // a row description telling the owner to check one screen, one
+                // line above an advisory telling them to check another, is how
+                // this panel came to contradict itself on §13.5.
                 description={
                   session.tier === "native"
                     ? NODE_SESSION_NATIVE_CODE_ABSENT
-                    : "Compare the code below with the one that browser shows."
+                    : NODE_SESSION_WEB_ROW_DESCRIPTION
                 }
               >
                 <div className="space-y-3 pb-3.5">
                   <FactRows rows={nodeSessionRows(session)} />
                   {session.tier === "web" ? (
-                    <SessionVerificationCode code={session.verificationCode ?? null} />
+                    <NodeSessionVerificationCode code={session.verificationCode ?? null} />
                   ) : null}
                 </div>
               </SettingsRow>
             ))}
             {snapshot.sessions !== null && snapshot.sessions.sessions.length === 0 ? (
-              <SettingsRow title="No sessions" description="Nothing is connected right now." />
+              <SettingsRow title="No sessions" description={NODE_NO_SESSIONS_DESCRIPTION} />
             ) : null}
           </SettingsSection>
 
           <SettingsSection title="Admission policy">
-            <SettingsRow
-              title="Require an encrypted channel"
-              description="Refuse plaintext, including for browsers."
-              control={
-                <Switch
-                  checked={snapshot.policy?.requireE2EE ?? false}
-                  disabled={busy || snapshot.policy === null}
-                  aria-label="Require E2EE"
-                  data-testid="require-e2ee"
-                  onCheckedChange={(checked) => void startPolicyChange({ requireE2EE: checked })}
-                />
-              }
+            {/* Both switches take `null` while the policy has not been read.
+                `?? false` drew them in the off position next to
+                `nodePolicyRows(null)`'s "Admission policy: unknown" — the two
+                disagreeing on screen about the same values. */}
+            <PolicySwitchRow
+              title={NODE_POLICY_REQUIRE_E2EE_TITLE}
+              description={NODE_POLICY_REQUIRE_E2EE_DESCRIPTION}
+              checked={snapshot.policy === null ? null : snapshot.policy.requireE2EE}
+              busy={busy}
+              ariaLabel="Require E2EE"
+              testId="require-e2ee"
+              onChange={(checked) => void startPolicyChange({ requireE2EE: checked })}
             />
             <StrictPolicyRow
               disposition={strictPolicy}
-              checked={snapshot.policy?.requireApprovedClientE2EE ?? false}
-              busy={busy || snapshot.policy === null}
+              checked={snapshot.policy === null ? null : snapshot.policy.requireApprovedClientE2EE}
+              busy={busy}
               onChange={(checked) => void startPolicyChange({ requireApprovedClientE2EE: checked })}
             />
             <SettingsRow
               title="Policy generation"
-              description="Recover a generation that a restore rolled back."
+              description={NODE_POLICY_GENERATION_DESCRIPTION}
               control={
                 <Button
                   size="xs"
@@ -839,20 +1004,28 @@ export function NodeSecuritySettings() {
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>Apply this policy change?</AlertDialogTitle>
+            {/* There is no empty branch: `nodePolicyPreviewWarnings` never
+                returns an empty list, so the dialog cannot fall back to a
+                sentence that reads as "this is safe" for a change that reduces
+                what the node enforces. */}
             <AlertDialogDescription>
-              {preview?.warnings.length === 0
-                ? "The node reports that this closes no live channels."
-                : preview?.warnings.map((warning) => (
-                    <span key={warning} className="block pb-2">
-                      {warning}
-                    </span>
-                  ))}
+              {preview?.warnings.map((warning) => (
+                <span key={warning} className="block pb-2">
+                  {warning}
+                </span>
+              ))}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose>Leave it</AlertDialogClose>
             <Button
-              variant="destructive"
+              // Red only when the node will shut live channels or the change
+              // reduces what it enforces. Every policy change drawing the same
+              // red Apply — including the ones whose own body says they close
+              // nothing — trains the click-through that costs an owner the one
+              // that strands their access.
+              variant={preview?.destructive ? "destructive" : "default"}
+              data-testid="policy-apply"
               disabled={busy}
               onClick={() => void applyPreviewedPolicy()}
             >
@@ -871,10 +1044,19 @@ export function NodeSecuritySettings() {
             <AlertDialogTitle>{activeConfirmation?.title}</AlertDialogTitle>
             <AlertDialogDescription>{activeConfirmation?.body}</AlertDialogDescription>
           </AlertDialogHeader>
+          {/* The record or value this confirmation is about, in the same mono
+              face its row uses. The dialog paints an opaque scrim over the list,
+              so whatever tells two rows apart has to be inside it. */}
+          {activeConfirmation?.facts ? (
+            <div data-testid="node-confirmation-facts" className="pb-1">
+              <FactRows rows={activeConfirmation.facts} />
+            </div>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogClose>Cancel</AlertDialogClose>
             <Button
               variant={activeConfirmation?.destructive ? "destructive" : "default"}
+              data-testid="node-confirmation-confirm"
               disabled={busy}
               onClick={() => {
                 const pending = confirmation;
@@ -915,28 +1097,87 @@ function StrictPolicyRow({
   onChange,
 }: {
   readonly disposition: NodeE2eeStrictPolicyDisposition;
-  readonly checked: boolean;
+  readonly checked: boolean | null;
   readonly busy: boolean;
   readonly onChange: (checked: boolean) => void;
 }) {
   const blocked = disposition.kind === "blocked";
   return (
-    <SettingsRow
-      title="Only approved native client keys"
+    <PolicySwitchRow
+      title={NODE_POLICY_STRICT_TITLE}
       description={
-        disposition.kind === "blocked"
-          ? disposition.reason
-          : "Closes browser and legacy access entirely. Only approved native client keys reach application payload."
+        disposition.kind === "blocked" ? disposition.reason : NODE_POLICY_STRICT_DESCRIPTION
+      }
+      checked={checked}
+      busy={busy}
+      blocked={blocked}
+      ariaLabel="Require approved client E2EE"
+      testId="require-approved-client-e2ee"
+      onChange={onChange}
+    />
+  );
+}
+
+/**
+ * A policy switch that can say it does not know.
+ *
+ * A DISABLED SWITCH STILL DRAWS IN A POSITION, AND A POSITION IS A CLAIM. Both
+ * of these rows used to take `?? false`, so an unread policy rendered as "off" —
+ * in hosted mode permanently, because that build never reads the policy at all,
+ * and in local mode on first paint and for the whole life of a failing read. An
+ * owner who had locked their node with `--require-approved-client-e2ee` opened
+ * the hosted panel and read that it was off. Everywhere else this panel states
+ * the absence instead (`Admission policy: unknown`, `never`), so the `null` case
+ * renders no control at all rather than a control in a position.
+ */
+function PolicySwitchRow({
+  title,
+  description,
+  checked,
+  busy,
+  blocked = false,
+  ariaLabel,
+  testId,
+  onChange,
+}: {
+  readonly title: string;
+  readonly description: string;
+  readonly checked: boolean | null;
+  readonly busy: boolean;
+  readonly blocked?: boolean;
+  readonly ariaLabel: string;
+  readonly testId: string;
+  readonly onChange: (checked: boolean) => void;
+}) {
+  return (
+    <SettingsRow
+      title={title}
+      description={
+        checked === null ? `${description} ${NODE_POLICY_VALUE_UNREADABLE}` : description
       }
       control={
-        <Switch
-          checked={checked}
-          disabled={blocked || busy}
-          aria-label="Require approved client E2EE"
-          data-testid="require-approved-client-e2ee"
-          data-blocked={blocked ? "hosted" : undefined}
-          onCheckedChange={onChange}
-        />
+        checked === null ? (
+          // No `aria-label` and no control role: the row title is the name, and
+          // an unknown value has nothing for a control to be set to.
+          <span
+            data-testid={testId}
+            data-policy="unknown"
+            data-blocked={blocked ? "hosted" : undefined}
+            className="text-[11px] text-muted-foreground"
+          >
+            unknown
+          </span>
+        ) : (
+          <Switch
+            checked={checked}
+            disabled={blocked || busy}
+            aria-label={ariaLabel}
+            data-testid={testId}
+            data-policy={String(checked)}
+            data-blocked={blocked ? "hosted" : undefined}
+            onCheckedChange={onChange}
+          />
+        )
       }
     />
   );
@@ -975,7 +1216,7 @@ function ClientRecordRow({
   readonly busy: boolean;
   readonly onAuthorize: (
     request: NodeE2eeAuthorizationRequest,
-    action: NodeE2eeActionId,
+    action: NodeE2eeRecordActionId,
     message: string,
   ) => void;
   readonly onApprove: (request: NodeE2eeAuthorizationRequest, role: NodeE2eeApprovableRole) => void;
@@ -991,7 +1232,7 @@ function ClientRecordRow({
     <SettingsRow
       title={
         <span className="flex items-center gap-2">
-          {record.displayLabel ?? "Client key"}
+          {nodeClientRowTitle(record)}
           <Badge size="sm" variant={tone === "success" ? "success" : tone}>
             {record.status}
           </Badge>
@@ -1003,7 +1244,13 @@ function ClientRecordRow({
           {/* §13.6: an approval names the maximum role, and the OWNER names it.
               One button per role rather than one button and a default, because a
               default is the panel choosing the ceiling every channel this key
-              opens is admitted under. Least authority first. */}
+              opens is admitted under. Least authority first.
+
+              The capability set is NOT the owner's to pick here and is not left
+              empty: §8.6 step 6 admits a native handshake only if the record's
+              set contains the intended capability, and `RelayCapability` has one
+              member — so an empty set approves a key that is refused by every
+              handshake it attempts. */}
           {record.status === "approved"
             ? null
             : NODE_E2EE_APPROVABLE_ROLES.map((role) => (
@@ -1013,13 +1260,24 @@ function ClientRecordRow({
                   variant="outline"
                   disabled={busy}
                   onClick={() =>
-                    onApprove({ ...key, action: "approve", maxRole: role, capabilitySet: [] }, role)
+                    onApprove(
+                      {
+                        ...key,
+                        action: "approve",
+                        maxRole: role,
+                        capabilitySet: NODE_E2EE_APPROVAL_CAPABILITY_SET,
+                      },
+                      role,
+                    )
                   }
                 >
                   Approve as {role}
                 </Button>
               ))}
-          {record.status === "approved" ? (
+          {/* Absent at `viewer`: the node treats a narrow that changes nothing as
+              a no-op, so the button would offer an action with no effect behind a
+              dialog promising immediate channel closure. */}
+          {record.status === "approved" && record.maxRole !== "viewer" ? (
             <Button
               size="xs"
               variant="destructive-outline"

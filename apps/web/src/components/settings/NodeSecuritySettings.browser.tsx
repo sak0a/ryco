@@ -14,10 +14,18 @@
 //     coverage `HostedE2eeVerification.browser.tsx` already has over this tab's
 //     own `WebSAS` to every value this panel draws;
 //   * local mode raises no alarm about a relay that is not in the path, and
-//     draws no channel panel for a channel that does not exist.
+//     draws no channel panel for a channel that does not exist;
+//   * every gate that stands between a click and the network actually stands
+//     there — the confirmations, §12.6's preview-then-apply, and the request an
+//     approval builds. Those were covered only as strings in a lookup table:
+//     replacing `setConfirmation(...)` with a direct `run(...)`, or the preview
+//     call with the apply call, or the approval's role with `owner` and its
+//     capability set with `["*"]`, left both suites green;
+//   * the prohibited-claims list runs over the RENDERED DOM, which is the only
+//     scan that reaches copy written inside the `.tsx`.
 import "../../index.css";
 
-import { page } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
 
@@ -115,8 +123,22 @@ vi.mock("~/environments/primary", async (importOriginal) => ({
 import { applyWebE2eeVerificationCode } from "../../../test/hostedConnectionVocabulary";
 import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { isHostedHubMode } from "../../env";
+import {
+  applyNodeE2eeAuthorization,
+  applyNodeE2eePolicy,
+  previewNodeE2eePolicy,
+} from "~/environments/primary";
+import { E2EE_WEB_SAS_ADVISORY } from "../hostedHub/HostedE2eeVerification.logic";
 import { buildDiagnosticsBundle, serializeDiagnosticsBundle } from "./DiagnosticsPanel.logic";
 import { NodeSecuritySettings } from "./NodeSecuritySettings";
+import {
+  everyNodeSecurityString,
+  nodeE2eeActionConfirmation,
+  nodeE2eeRecordConfirmation,
+  nodePolicyPreviewWarnings,
+  NODE_E2EE_APPROVAL_CAPABILITY_SET,
+  NODE_SESSION_WEB_SAS_ADVISORY,
+} from "./NodeSecuritySettings.logic";
 
 /** A well-formed §13.4 rendering, built from the constants rather than typed. */
 const SAFETY_NUMBER = Array.from({ length: E2EE_SAFETY_NUMBER_DIGITS.groups }, (_unused, index) =>
@@ -128,6 +150,19 @@ const NODE_SESSION_CODE = ["7HJ2", "MQ5T"].join(E2EE_WEB_SAS_CHARS.separator);
 const OWN_CHANNEL_CODE = ["3QRT", "9KZ0"].join(E2EE_WEB_SAS_CHARS.separator);
 
 const FINGERPRINT = "SHA256:AAAAclientAAAAclientAAAAclientAAAAclientAA0";
+/**
+ * A second record under THE SAME ACCOUNT AND ORIGIN, approved.
+ *
+ * Two devices paired under one Hub account is the case the per-record
+ * confirmations exist for: the account, the origin and the stored label are
+ * identical, so the fingerprint is the only thing that tells the rows apart.
+ */
+const SECOND_FINGERPRINT = "SHA256:BBBBlaptopBBBBlaptopBBBBlaptopBBBBlaptopB1";
+const SECOND_SAFETY_NUMBER = Array.from(
+  { length: E2EE_SAFETY_NUMBER_DIGITS.groups },
+  (_unused, index) =>
+    String(13_570 + index).padStart(E2EE_SAFETY_NUMBER_DIGITS.digitsPerGroup, "0"),
+).join(E2EE_SAFETY_NUMBER_DIGITS.separator);
 
 const CLIENTS: NodeE2eeClientListing = {
   records: [
@@ -140,6 +175,18 @@ const CLIENTS: NodeE2eeClientListing = {
       capabilitySet: [],
       createdAt: 1_700_000_000_000,
       safetyNumber: SAFETY_NUMBER,
+      pairingReserved: false,
+    },
+    {
+      status: "approved",
+      hubOrigin: "https://hub.example.test",
+      accountId: "acct_reader",
+      fingerprint: SECOND_FINGERPRINT,
+      maxRole: "operator",
+      capabilitySet: ["ryco.rpc"],
+      createdAt: 1_700_000_000_000,
+      approvedAt: 1_700_000_000_000,
+      safetyNumber: SECOND_SAFETY_NUMBER,
       pairingReserved: false,
     },
   ],
@@ -199,6 +246,9 @@ let mounted: Awaited<ReturnType<typeof render>> | null = null;
 
 beforeEach(() => {
   calls.length = 0;
+  // Call history only — the factory's implementations stay in place. Without it
+  // an assertion in one test would be satisfied by a click in an earlier one.
+  vi.clearAllMocks();
 });
 
 afterEach(async () => {
@@ -211,6 +261,27 @@ afterEach(async () => {
 
 const safetyNumber = () =>
   document.querySelector<HTMLElement>('[data-testid="node-safety-number"]');
+
+/** Every rendered element whose text is exactly `label`, in document order. */
+const buttonsLabelled = (label: string) =>
+  [...document.querySelectorAll<HTMLElement>("button")].filter(
+    (element) => (element.textContent ?? "").trim() === label,
+  );
+
+const confirmDialog = () => document.querySelector<HTMLElement>('[data-slot="alert-dialog-popup"]');
+const confirmButton = () =>
+  document.querySelector<HTMLElement>('[data-testid="node-confirmation-confirm"]');
+const applyButton = () => document.querySelector<HTMLElement>('[data-testid="policy-apply"]');
+const cancelButton = () =>
+  [...document.querySelectorAll<HTMLElement>("button")].find(
+    (element) => (element.textContent ?? "").trim() === "Cancel",
+  );
+
+async function mountLocalPanel() {
+  mounted = await render(<NodeSecuritySettings />);
+  await expect.element(page.getByText(SAFETY_NUMBER)).toBeVisible();
+  return mounted;
+}
 
 describe("local mode: the node's operator state, and no alarm about a relay that is not there", () => {
   it("draws the node's data without a channel panel or a downgrade warning", async () => {
@@ -247,11 +318,23 @@ describe("local mode: the node's operator state, and no alarm about a relay that
     expect(getComputedStyle(value).fontFamily.toLowerCase()).toMatch(/mono/u);
   });
 
-  it("renders a node web session's §13.5 code through the shipped inseparable value", async () => {
+  it("renders a node web session's §13.5 code with the NODE END's advisory", async () => {
     mounted = await render(<NodeSecuritySettings />);
     await expect.element(page.getByText(NODE_SESSION_CODE)).toBeVisible();
-    // The advisory travels with the characters, from `hostedE2eeVerificationView`.
-    expect(document.body.textContent).toContain("cannot protect against the Hub operator");
+
+    // The advisory travels with the characters, and it is scoped to the value's
+    // own container so a sentence elsewhere on the page cannot stand in for it.
+    const code = document.querySelector<HTMLElement>('[data-testid="node-session-code"]')!;
+    expect(code.textContent).toContain(NODE_SESSION_CODE);
+    expect(code.textContent).toContain(NODE_SESSION_WEB_SAS_ADVISORY);
+
+    // THE READER IS AT THE NODE. The shipped advisory says "Compare this code
+    // with the one your node's CLI shows for this session" — correct from the
+    // browser end, and a comparison of the node against itself here: it always
+    // matches and establishes nothing, while the row one line above told the
+    // owner to check the browser instead. Both sentences were on screen at once.
+    expect(code.textContent).not.toContain("your node's CLI");
+    expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_ADVISORY);
     // …and a native session gets the pointer at the long-term value instead of a
     // blank that reads as a missing code.
     expect(document.body.textContent).toContain("Native sessions have no per-session code");
@@ -338,6 +421,296 @@ describe("§13.4 and §13.5 are never written down", () => {
         }
       }
     }
+  });
+});
+
+describe("the confirmation stands between the click and the network", () => {
+  it("shows the dialog and sends nothing until the owner confirms", async () => {
+    // §13.6's withdrawals close the target's live channels before the node
+    // acknowledges them. Nothing asserted that a click was gated at all:
+    // replacing `setConfirmation({...})` with a direct `run(...)` — every
+    // destructive action firing on first click, no dialog — left both suites
+    // green.
+    await mountLocalPanel();
+
+    const revoke = buttonsLabelled("Revoke");
+    expect(revoke.length).toBeGreaterThan(0);
+    revoke[0]!.click();
+
+    const dialog = await vi.waitFor(() => {
+      const found = confirmDialog();
+      expect(found, "no confirmation dialog opened").not.toBeNull();
+      return found!;
+    });
+    expect(applyNodeE2eeAuthorization).not.toHaveBeenCalled();
+    expect(calls).not.toContain("authorization");
+    // The dialog is the revoke one, tied to the action id rather than to
+    // whatever copy happened to be lying in state.
+    expect(dialog.textContent).toContain(nodeE2eeActionConfirmation("revoke").title);
+    expect(confirmButton()?.textContent?.trim()).toBe(
+      nodeE2eeActionConfirmation("revoke").confirmLabel,
+    );
+
+    // Cancelling still sends nothing.
+    cancelButton()!.click();
+    await vi.waitFor(() => {
+      expect(confirmDialog()).toBeNull();
+    });
+    expect(applyNodeE2eeAuthorization).not.toHaveBeenCalled();
+
+    // Reopening and confirming sends it exactly once.
+    buttonsLabelled("Revoke")[0]!.click();
+    await vi.waitFor(() => {
+      expect(confirmButton()).not.toBeNull();
+    });
+    confirmButton()!.click();
+    await vi.waitFor(() => {
+      expect(applyNodeE2eeAuthorization).toHaveBeenCalledTimes(1);
+    });
+    expect(applyNodeE2eeAuthorization).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "revoke", fingerprint: FINGERPRINT }),
+    );
+  });
+
+  it("names the record it will withdraw, so two rows do not read the same", async () => {
+    // Both records carry the same account and origin and neither has a stored
+    // label, so the dialog is the only place the owner can tell the phone from
+    // the laptop — and it paints an opaque scrim over the row behind it.
+    await mountLocalPanel();
+
+    const revoke = buttonsLabelled("Revoke");
+    expect(revoke.length).toBeGreaterThanOrEqual(2);
+
+    revoke[0]!.click();
+    const first = await vi.waitFor(() => {
+      const found = confirmDialog();
+      expect(found).not.toBeNull();
+      return found!.textContent ?? "";
+    });
+    expect(first).toContain(FINGERPRINT);
+    expect(first).not.toContain(SECOND_FINGERPRINT);
+    // …in a face that makes a character-by-character check possible.
+    const facts = document.querySelector<HTMLElement>('[data-testid="node-confirmation-facts"]')!;
+    const value = [...facts.querySelectorAll<HTMLElement>("dd")].find((element) =>
+      (element.textContent ?? "").includes(FINGERPRINT),
+    )!;
+    expect(getComputedStyle(value).fontFamily.toLowerCase()).toMatch(/mono/u);
+
+    cancelButton()!.click();
+    await vi.waitFor(() => {
+      expect(confirmDialog()).toBeNull();
+    });
+
+    buttonsLabelled("Revoke")[1]!.click();
+    const second = await vi.waitFor(() => {
+      const found = confirmDialog();
+      expect(found).not.toBeNull();
+      return found!.textContent ?? "";
+    });
+    expect(second).toContain(SECOND_FINGERPRINT);
+    expect(second).not.toContain(FINGERPRINT);
+  });
+
+  it("echoes the fingerprint a pairing window would admit", async () => {
+    await mountLocalPanel();
+    const input = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Pairing window fingerprint"]',
+    )!;
+    await userEvent.fill(input, "SHA256:CCCCwindowCCCC");
+    buttonsLabelled("Open")[0]!.click();
+
+    const dialog = await vi.waitFor(() => {
+      const found = confirmDialog();
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    // Its own body names a wrong fingerprint as the risk; withholding the value
+    // is withholding the evidence for the risk it just raised.
+    expect(dialog.textContent).toContain("lets the wrong device in");
+    expect(dialog.textContent).toContain("SHA256:CCCCwindowCCCC");
+  });
+});
+
+describe("§13.6 the request an approval builds is the one the owner was shown", () => {
+  it("sends the named role and a capability set the node can admit", async () => {
+    // The dialog and the wire could disagree silently: nothing asserted the
+    // built request at all, so `maxRole: "owner", capabilitySet: ["*"]` behind a
+    // button labelled "Approve as viewer" left both suites green. And the
+    // shipped set was EMPTY, which §8.6 step 6 refuses on every native
+    // handshake — an `approved` record that cannot connect.
+    await mountLocalPanel();
+
+    buttonsLabelled("Approve as viewer")[0]!.click();
+    await vi.waitFor(() => {
+      expect(confirmButton()).not.toBeNull();
+    });
+    expect(confirmDialog()!.textContent).toContain("Approve this client key as viewer?");
+    confirmButton()!.click();
+
+    await vi.waitFor(() => {
+      expect(applyNodeE2eeAuthorization).toHaveBeenCalledTimes(1);
+    });
+    expect(applyNodeE2eeAuthorization).toHaveBeenCalledWith({
+      hubOrigin: "https://hub.example.test",
+      accountId: "acct_reader",
+      fingerprint: FINGERPRINT,
+      action: "approve",
+      maxRole: "viewer",
+      capabilitySet: NODE_E2EE_APPROVAL_CAPABILITY_SET,
+    });
+    expect(NODE_E2EE_APPROVAL_CAPABILITY_SET.length).toBeGreaterThan(0);
+  });
+
+  it("discriminates between sibling roles rather than sending a default", async () => {
+    await mountLocalPanel();
+
+    buttonsLabelled("Approve as owner")[0]!.click();
+    await vi.waitFor(() => {
+      expect(confirmButton()).not.toBeNull();
+    });
+    confirmButton()!.click();
+    await vi.waitFor(() => {
+      expect(applyNodeE2eeAuthorization).toHaveBeenCalledTimes(1);
+    });
+    expect(applyNodeE2eeAuthorization).toHaveBeenCalledWith(
+      expect.objectContaining({ maxRole: "owner" }),
+    );
+  });
+
+  it("offers no narrowing on a record already at the smallest ceiling", async () => {
+    // The node treats a narrow that changes nothing as a no-op, so the button
+    // would offer an action with no effect behind a dialog promising immediate
+    // channel closure. Only the `operator` record gets one.
+    await mountLocalPanel();
+    expect(buttonsLabelled("Reduce to viewer")).toHaveLength(1);
+
+    buttonsLabelled("Reduce to viewer")[0]!.click();
+    await vi.waitFor(() => {
+      expect(confirmDialog()).not.toBeNull();
+    });
+    expect(confirmDialog()!.textContent).toContain(SECOND_FINGERPRINT);
+    // …and the confirmation says the capability grant is untouched, because the
+    // request carries no capability set and the node reads that as "leave it".
+    expect(confirmDialog()!.textContent).toContain(
+      nodeE2eeRecordConfirmation("narrow", {
+        fingerprint: SECOND_FINGERPRINT,
+        accountId: "acct_reader",
+        hubOrigin: "https://hub.example.test",
+      }).body,
+    );
+  });
+});
+
+describe("§12.6 preview first, always", () => {
+  it("previews without applying, warns, and applies only on the second press", async () => {
+    // Nothing distinguished the non-mutating preview route from the mutating
+    // apply route: swapping `previewNodeE2eePolicy` for `applyNodeE2eePolicy`
+    // left both suites green, which commits the policy and sweeps the channels
+    // §12.6 says to warn about, then offers to "Apply" what already happened.
+    await mountLocalPanel();
+
+    document.querySelector<HTMLElement>('[data-testid="require-e2ee"]')!.click();
+    await vi.waitFor(() => {
+      expect(previewNodeE2eePolicy).toHaveBeenCalledTimes(1);
+    });
+    expect(calls.filter((entry) => entry.startsWith("policy-"))).toEqual(["policy-preview"]);
+    expect(applyNodeE2eePolicy).not.toHaveBeenCalled();
+    expect(previewNodeE2eePolicy).toHaveBeenCalledWith({ requireE2EE: true });
+
+    const dialog = await vi.waitFor(() => {
+      const found = applyButton();
+      expect(found, "the §12.6 dialog did not open").not.toBeNull();
+      return confirmDialog()!;
+    });
+    for (const warning of nodePolicyPreviewWarnings(
+      { policy: POLICY, withdrawal: true, changed: true, counts: COUNTS },
+      { requireE2EE: true },
+      POLICY,
+    )) {
+      expect(dialog.textContent).toContain(warning);
+    }
+
+    applyButton()!.click();
+    await vi.waitFor(() => {
+      expect(applyNodeE2eePolicy).toHaveBeenCalledTimes(1);
+    });
+    expect(calls.filter((entry) => entry.startsWith("policy-"))).toEqual([
+      "policy-preview",
+      "policy-apply",
+    ]);
+  });
+
+  it("applies nothing when the preview dialog is dismissed", async () => {
+    await mountLocalPanel();
+    document.querySelector<HTMLElement>('[data-testid="require-e2ee"]')!.click();
+    await vi.waitFor(() => {
+      expect(applyButton()).not.toBeNull();
+    });
+
+    [...document.querySelectorAll<HTMLElement>("button")]
+      .find((element) => (element.textContent ?? "").trim() === "Leave it")!
+      .click();
+    await vi.waitFor(() => {
+      expect(applyButton()).toBeNull();
+    });
+    expect(applyNodeE2eePolicy).not.toHaveBeenCalled();
+  });
+
+  it("reports §12.6(c)'s counts rather than a generic acknowledgement", async () => {
+    // The summary was built and then overwritten by "Policy applied." in the
+    // same microtask, so the counts the apply route exists to return were never
+    // painted.
+    await mountLocalPanel();
+    document.querySelector<HTMLElement>('[data-testid="require-e2ee"]')!.click();
+    await vi.waitFor(() => {
+      expect(applyButton()).not.toBeNull();
+    });
+    applyButton()!.click();
+
+    await vi.waitFor(() => {
+      const body = document.body.textContent ?? "";
+      expect(body).toContain(`${COUNTS.legacy} legacy channel(s)`);
+      expect(body).toContain(`${COUNTS.nxE2ee} browser channel(s)`);
+    });
+    expect(document.body.textContent).not.toContain("Policy applied.");
+  });
+});
+
+describe("the rendered panel makes no claim it has not earned", () => {
+  it.each([
+    // The same list the unit scan walks, run over the DOM — which is the only
+    // scan that reaches copy written inside the `.tsx`. The unit scan sees only
+    // what this module produces, and the local mode is where the client list,
+    // the sessions, the policy and the fallback report are all drawn.
+    "end-to-end encrypted",
+    "proof",
+    "no interposer",
+    "cannot be intercepted",
+    "unforgeable",
+    "guaranteed",
+    "verified",
+    "your connection is secure",
+    "this session is protected",
+    "you are protected",
+    "nobody can read",
+  ])("never renders %j anywhere on the page", async (phrase) => {
+    await mountLocalPanel();
+    // Every action's confirmation copy too: the dialogs are rendered on demand,
+    // so open one before scanning.
+    buttonsLabelled("Revoke")[0]!.click();
+    await vi.waitFor(() => {
+      expect(confirmDialog()).not.toBeNull();
+    });
+    expect((document.body.textContent ?? "").toLowerCase()).not.toContain(phrase);
+  });
+
+  it("covers with the DOM scan what the unit scan cannot see", async () => {
+    // A sanity check on the scan itself: the panel must actually be rendering
+    // the module's sentences, or the `it.each` above is vacuous.
+    await mountLocalPanel();
+    const body = document.body.textContent ?? "";
+    const rendered = everyNodeSecurityString().filter((entry) => body.includes(entry.text));
+    expect(rendered.length).toBeGreaterThan(10);
   });
 });
 
