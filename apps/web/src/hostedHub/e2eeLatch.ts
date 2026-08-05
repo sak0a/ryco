@@ -83,8 +83,20 @@ export function isWebE2eeSelectionLatched(selection: WebE2eeSelection): boolean 
  * End the application session's latches (§12.1: "MUST NOT persist beyond the
  * application session").
  *
- * Called from the node-scoped clearing catalog and on sign-out. It is the only
- * mutator besides the setter, and it removes rather than exports.
+ * CALLED ON SIGN-OUT ONLY (`e2eeAttempt.ts`, `watchWebHostedSessionForE2ee`).
+ * The node-scoped clearing catalog deliberately does NOT call it — see
+ * `environment.ts` — because that catalog runs on every node teardown,
+ * including the A→B switch `activateHostedNode` performs. Clearing there would
+ * return already-latched selections to `legacy-eligible`, which RELAXES
+ * §12.1.1's classification rather than tightening it: a Hub that then withholds
+ * the §5.3 carrier past `T_ADV` takes row K13 instead of row K14 and flushes the
+ * buffered application sends onto the relay as plaintext, on a selection that
+ * had already validated a statement in this same session. `e2eeLatch.test.ts`
+ * asserts the latch survives that catalog, so the rule is enforced and not only
+ * written here — but this sentence is what a maintainer reads first, so it may
+ * not name a caller that must never exist.
+ *
+ * It is the only mutator besides the setter, and it removes rather than exports.
  */
 export function clearWebE2eeLatches(): void {
   latched.clear();

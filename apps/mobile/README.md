@@ -355,13 +355,26 @@ Four properties are structural rather than documented:
   member the way `legacy-no-custody` did.
 
   The second is a `web` arm in `hostedStatusTone`. The tone mapper is
-  the one that matters: it is the repository's ONLY reader of `guarantee`, and
-  an `if (guarantee === "legacy")` chain silently absorbed the new member into
-  the connected branch and handed §2.2's web row the verified session's success
-  token, differing from `Encrypted` by a noun and nothing else. It now decides
-  from `guarantee` exhaustively, `web` takes the informational token, and the
-  success rule is stated positively — connected, and `none` or `e2ee` — so the
-  next guarantee added is a compile error rather than a default.
+  the one that matters: an `if (guarantee === "legacy")` chain silently absorbed
+  the new member into the connected branch and handed §2.2's web row the verified
+  session's success token, differing from `Encrypted` by a noun and nothing else.
+  It now decides from `guarantee` exhaustively, `web` takes the informational
+  token, and the success rule is stated positively — connected, and `none` or
+  `e2ee` — so the next guarantee added is a compile error rather than a default.
+
+  **There are now two readers of `guarantee`, in two apps, and each is separately
+  exhaustive over it.** `hostedStatusTone` here chooses this app's tone token;
+  `hostedConnectionStatusPresentation` in
+  `apps/web/src/components/hostedHub/HostedConnectionControls.logic.ts` chooses
+  the glyph and colour every hosted web surface draws, for the same §2.2 reason
+  and after the same defect (a chain keyed on connectedness gave §12.2's
+  plaintext fallback the locked channel's green connected icon). A member added
+  to `HostedConnectionGuarantee` is a compile error in BOTH — neither has a
+  default arm — so fixing only the one named here ships a half-decided member.
+  The two ladders are deliberately not shared: a native token vocabulary and a
+  web Tailwind colour are different alphabets, and what §2.2 constrains is that
+  each keeps its own three claims distinguishable, which each app asserts in its
+  own suite.
 
 - **Every guard is re-resolved on every owner decision.** The prepared §4.4
   attempt is keyed on the selection **and** on `mobileE2eeTrustStore.revision()`,
