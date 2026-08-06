@@ -124,6 +124,9 @@ export const LazyRightPanel = (props: {
   openedPanelModes: ReadonlyArray<RightPanelMode>;
   openedAgentKeys: ReadonlyArray<string>;
   onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
+  maximized?: boolean;
+  onToggleMaximized?: (() => void) | undefined;
+  reserveChromeInset?: boolean;
 }) => {
   return (
     <DiffWorkerPoolProvider>
@@ -153,6 +156,9 @@ export const LazyRightPanel = (props: {
           openedPanelModes={props.openedPanelModes}
           openedAgentKeys={props.openedAgentKeys}
           onClosePanelTab={props.onClosePanelTab}
+          maximized={props.maximized ?? false}
+          onToggleMaximized={props.onToggleMaximized}
+          reserveChromeInset={props.reserveChromeInset ?? false}
         />
       </Suspense>
     </DiffWorkerPoolProvider>
@@ -168,8 +174,13 @@ export const RightPanelInlineSidebar = (props: {
   onClose: () => void;
   onOpen: () => void;
   renderContent: boolean;
+  /** Fills the workspace instead of sitting in a resizable column. */
+  maximized: boolean;
+  onToggleMaximized: () => void;
+  /** The maximized panel owns the workspace's top-left chrome corner. */
+  reserveChromeInset: boolean;
 }) => {
-  const { open, onClose, onOpen, panelMode, renderContent } = props;
+  const { maximized, open, onClose, onOpen, panelMode, renderContent } = props;
   const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
   const renderPanelSurface = useDelayedUnmount(
     open,
@@ -241,17 +252,30 @@ export const RightPanelInlineSidebar = (props: {
       open
       onOpenChange={onOpenChange}
       className={cn(
-        "min-h-0 flex-none bg-transparent transition-[width] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
-        open ? "w-(--sidebar-width)" : "w-0",
+        "min-h-0 bg-transparent",
+        // A maximized panel takes the whole workspace line, so there is no
+        // column width left to animate.
+        maximized
+          ? "min-w-0 flex-1"
+          : cn(
+              "flex-none transition-[width] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+              open ? "w-(--sidebar-width)" : "w-0",
+            ),
       )}
       style={{ "--sidebar-width": RIGHT_PANEL_INLINE_DEFAULT_WIDTH } as CSSProperties}
     >
       <Sidebar
         side="right"
         collapsible="offcanvas"
+        maximized={maximized}
         className={cn(
-          "border-l border-border bg-card text-foreground transition-[translate,width] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
-          open ? "translate-x-0" : "pointer-events-none translate-x-full",
+          "border-l border-border bg-card text-foreground",
+          maximized
+            ? "translate-x-0"
+            : cn(
+                "transition-[translate,width] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none",
+                open ? "translate-x-0" : "pointer-events-none translate-x-full",
+              ),
         )}
         resizable={{
           maxWidth: RIGHT_PANEL_INLINE_SIDEBAR_MAX_WIDTH,
@@ -269,15 +293,20 @@ export const RightPanelInlineSidebar = (props: {
                 openedPanelModes={props.openedPanelModes}
                 openedAgentKeys={props.openedAgentKeys}
                 onClosePanelTab={props.onClosePanelTab}
+                maximized={maximized}
+                onToggleMaximized={props.onToggleMaximized}
+                reserveChromeInset={props.reserveChromeInset}
               />
             ) : null}
           </div>
         </RightPanelContentMotionFrame>
-        <SidebarRail
-          aria-label="Resize workspace panel"
-          className={RIGHT_PANEL_RESIZE_RAIL_CLASS_NAME}
-          title="Drag to resize workspace panel"
-        />
+        {maximized ? null : (
+          <SidebarRail
+            aria-label="Resize workspace panel"
+            className={RIGHT_PANEL_RESIZE_RAIL_CLASS_NAME}
+            title="Drag to resize workspace panel"
+          />
+        )}
       </Sidebar>
     </SidebarProvider>
   );

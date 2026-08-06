@@ -1,4 +1,4 @@
-import { SettingsIcon } from "lucide-react";
+import { PanelLeftCloseIcon, SettingsIcon } from "lucide-react";
 import React, { memo, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
 import { APP_STAGE_LABEL, APP_VERSION } from "../../branding";
@@ -37,12 +37,15 @@ function RycoWordmark() {
   );
 }
 
+const SIDEBAR_HEADER_ACTION_CLASS_NAME =
+  "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2";
+
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
 }: {
   isElectron: boolean;
 }) {
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, toggleSidebar } = useSidebar();
   const openSettings = useSettingsDialogStore((s) => s.openSettings);
   const handleSettingsClick = useCallback(() => {
     if (isMobile) {
@@ -51,25 +54,44 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     openSettings();
   }, [isMobile, openSettings, setOpenMobile]);
 
-  const actionButton = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label="Settings"
-            onClick={handleSettingsClick}
-            className="ml-auto inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2"
-          >
-            <SettingsIcon className="size-3.5" />
-            <span className="hidden text-xs @[12rem]/sidebar-header:inline">Settings</span>
-          </button>
-        }
-      />
-      <TooltipPopup side="bottom" sideOffset={2}>
-        Settings
-      </TooltipPopup>
-    </Tooltip>
+  const actionButtons = (
+    <div className="ml-auto flex shrink-0 items-center gap-0.5">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Settings"
+              onClick={handleSettingsClick}
+              className={SIDEBAR_HEADER_ACTION_CLASS_NAME}
+            >
+              <SettingsIcon className="size-3.5" />
+              <span className="hidden text-xs @[12rem]/sidebar-header:inline">Settings</span>
+            </button>
+          }
+        />
+        <TooltipPopup side="bottom" sideOffset={2}>
+          Settings
+        </TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Hide sidebar"
+              onClick={toggleSidebar}
+              className={SIDEBAR_HEADER_ACTION_CLASS_NAME}
+            >
+              <PanelLeftCloseIcon className="size-3.5" />
+            </button>
+          }
+        />
+        <TooltipPopup side="bottom" sideOffset={2}>
+          Hide sidebar
+        </TooltipPopup>
+      </Tooltip>
+    </div>
   );
 
   const wordmark = (
@@ -93,7 +115,7 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
           Version {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
-      {actionButton}
+      {actionButtons}
     </div>
   );
 

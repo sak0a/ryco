@@ -10,6 +10,7 @@ import {
 } from "../../composerDraftSelectors";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
+import { useRightPanelMaximized } from "../../hooks/useRightPanelMaximized";
 import { useSettings } from "../../hooks/useSettings";
 import { usePerfMark } from "../../perf/tabSwitchInstrumentation";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
@@ -38,7 +39,8 @@ import { threadHasStarted } from "../ChatView.logic";
 import { LazyRightPanel, RightPanelInlineSidebar, closeRightPanelSearch } from "../ChatRightPanel";
 import { RightPanelSheet } from "../RightPanelSheet";
 import { PhoneWorkSurfaceSheet } from "../shell/phone/PhoneWorkSurface";
-import { SidebarInset } from "~/components/ui/sidebar";
+import { SidebarInset, useSidebar } from "~/components/ui/sidebar";
+import { cn } from "~/lib/utils";
 
 export function ChatThreadRouteView({
   threadRef,
@@ -82,7 +84,15 @@ export function ChatThreadRouteView({
     search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const presentationTier = usePresentationTier();
+  const appSidebarCollapsed = useSidebar().state === "collapsed" && presentationTier === "desktop";
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
+  // Maximizing only means anything for the inline split — the sheet and the
+  // phone work surface already cover the viewport.
+  const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } =
+    useRightPanelMaximized({
+      threadKey: currentThreadKey,
+      available: rightPanelOpen && !shouldUseDiffSheet && presentationTier !== "phone",
+    });
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
     threadKey: currentThreadKey,
     hasOpenedDiff: diffOpen,
@@ -517,7 +527,16 @@ export function ChatThreadRouteView({
   if (!shouldUseDiffSheet) {
     return (
       <>
-        <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+        {/* Maximized: the chat column keeps its subtree mounted (drafts,
+            scroll position, streaming turns) but gives up all of its width
+            and goes inert so nothing behind the panel stays focusable. */}
+        <SidebarInset
+          className={cn(
+            "h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh",
+            rightPanelMaximized && "w-0 flex-none",
+          )}
+          inert={rightPanelMaximized ? true : undefined}
+        >
           <ChatView
             environmentId={threadRef.environmentId}
             threadId={threadRef.threadId}
@@ -539,6 +558,9 @@ export function ChatThreadRouteView({
           onClose={closeRightPanel}
           onOpen={openRightPanel}
           renderContent={shouldRenderRightPanelContent}
+          maximized={rightPanelMaximized}
+          onToggleMaximized={toggleRightPanelMaximized}
+          reserveChromeInset={rightPanelMaximized && appSidebarCollapsed}
         />
       </>
     );

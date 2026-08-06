@@ -9,8 +9,10 @@ import {
   FolderIcon,
   GlobeIcon,
   GitCompareIcon,
+  Maximize2Icon,
   MessageSquarePlusIcon,
   MessageSquareTextIcon,
+  Minimize2Icon,
   PlusIcon,
   TerminalIcon,
   XIcon,
@@ -18,6 +20,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
+import { COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS } from "../appChrome";
 import {
   getRightPanelMode,
   parseRightPanelRouteSearch,
@@ -653,8 +656,23 @@ export default function ThreadWorkspacePanel(props: {
   openedPanelModes: ReadonlyArray<RightPanelMode>;
   openedAgentKeys: ReadonlyArray<string>;
   onClosePanelTab: (input: { mode: RightPanelMode; agentKey?: string }) => void;
+  /** Inline presentation only: the panel has taken over the whole workspace. */
+  maximized?: boolean;
+  /**
+   * Toggles the maximized layout. Absent wherever maximizing makes no sense —
+   * the phone work surface and the narrow-viewport sheet are already
+   * full-bleed — and the control is hidden in that case.
+   */
+  onToggleMaximized?: (() => void) | undefined;
+  /**
+   * The tab bar owns the workspace's top-left chrome corner (maximized with
+   * the app sidebar collapsed), so it reserves room for the window controls
+   * and the floating show-sidebar control.
+   */
+  reserveChromeInset?: boolean;
 }) {
-  const { onClosePanelTab } = props;
+  const { onClosePanelTab, onToggleMaximized } = props;
+  const maximized = props.maximized ?? false;
   // Full-screen phone work surface: the bar swaps to a surface bar (back
   // affordance to the thread instead of the desktop close X) and every tab
   // control meets the >=44px phone touch-target floor.
@@ -836,6 +854,7 @@ export default function ThreadWorkspacePanel(props: {
         className={cn(
           "flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-2",
           isPhoneSurface ? "h-14" : "h-12",
+          props.reserveChromeInset && COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
         )}
       >
         {isPhoneSurface ? (
@@ -942,15 +961,44 @@ export default function ThreadWorkspacePanel(props: {
           </Tooltip>
         </div>
         {isPhoneSurface ? null : (
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            className="shrink-0 text-muted-foreground/70 hover:text-foreground"
-            onClick={closePanel}
-            aria-label="Close workspace panel"
-          >
-            <XIcon className="size-3.5" />
-          </Button>
+          <>
+            {onToggleMaximized ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="shrink-0 text-muted-foreground/70 hover:text-foreground"
+                      onClick={onToggleMaximized}
+                      aria-pressed={maximized}
+                      aria-label={
+                        maximized ? "Restore workspace panel" : "Maximize workspace panel"
+                      }
+                    >
+                      {maximized ? (
+                        <Minimize2Icon className="size-3.5" />
+                      ) : (
+                        <Maximize2Icon className="size-3.5" />
+                      )}
+                    </Button>
+                  }
+                />
+                <TooltipPopup side="bottom">
+                  {maximized ? "Restore workspace panel" : "Maximize workspace panel"}
+                </TooltipPopup>
+              </Tooltip>
+            ) : null}
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="shrink-0 text-muted-foreground/70 hover:text-foreground"
+              onClick={closePanel}
+              aria-label="Close workspace panel"
+            >
+              <XIcon className="size-3.5" />
+            </Button>
+          </>
         )}
       </div>
       <div

@@ -116,13 +116,22 @@ function SidebarProvider({
         _setOpen(openState);
       }
 
-      // This sets the cookie to keep the sidebar state.
-      await cookieStore.set({
-        expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
-        name: SIDEBAR_COOKIE_NAME,
-        path: "/",
-        value: String(openState),
-      });
+      // This sets the cookie to keep the sidebar state. Guarded: `cookieStore`
+      // is still unimplemented in some browsers we ship to, and the open state
+      // is owned by the app shell — a failed mirror write must never take the
+      // toggle down with it.
+      try {
+        if (typeof cookieStore !== "undefined") {
+          await cookieStore.set({
+            expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
+            name: SIDEBAR_COOKIE_NAME,
+            path: "/",
+            value: String(openState),
+          });
+        }
+      } catch {
+        // Ignore cookie failures (disabled storage, partitioned contexts).
+      }
     },
     [setOpenProp, open],
   );
@@ -177,6 +186,7 @@ function Sidebar({
   variant = "sidebar",
   collapsible = "offcanvas",
   resizable = false,
+  maximized = false,
   className,
   children,
   ...props
@@ -185,10 +195,19 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
   resizable?: boolean | SidebarResizableOptions;
+  /**
+   * Drops the off-canvas geometry and lets the sidebar fill the space its
+   * parent gives it, so a panel can take over the whole workspace without
+   * remounting its content. The DOM shape is deliberately unchanged — only
+   * layout classes differ — because the panel owns live state (terminals,
+   * scroll positions) that must survive the transition.
+   */
+  maximized?: boolean;
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
-    if (isMobile || collapsible === "none" || !resizable) {
+    // A maximized sidebar has no width of its own to drag.
+    if (isMobile || collapsible === "none" || !resizable || maximized) {
       return null;
     }
 
@@ -200,7 +219,7 @@ function Sidebar({
       ...(options.onResize ? { onResize: options.onResize } : {}),
       ...(options.shouldAcceptWidth ? { shouldAcceptWidth: options.shouldAcceptWidth } : {}),
     };
-  }, [collapsible, isMobile, resizable]);
+  }, [collapsible, isMobile, maximized, resizable]);
   const instanceContextValue = React.useMemo<SidebarInstanceContextProps>(
     () => ({ side, resizable: resolvedResizable }),
     [resolvedResizable, side],
@@ -264,8 +283,14 @@ function Sidebar({
   return (
     <SidebarInstanceContext.Provider value={instanceContextValue}>
       <div
-        className="group peer text-sidebar-foreground phone:hidden"
+        className={cn(
+          "group peer text-sidebar-foreground phone:hidden",
+          // Maximized: the root becomes a flex line so the container below can
+          // claim the width the parent hands it instead of `--sidebar-width`.
+          maximized && "flex min-w-0 flex-1",
+        )}
         data-collapsible={state === "collapsed" ? collapsible : ""}
+        data-maximized={maximized ? "true" : undefined}
         data-side={side}
         data-slot="sidebar"
         data-state={state}
@@ -280,15 +305,21 @@ function Sidebar({
             variant === "floating" || variant === "inset"
               ? "group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]"
               : "group-data-[collapsible=icon]:w-(--sidebar-width-icon)",
+            // Nothing to reserve: a maximized sidebar is in flow, not fixed.
+            maximized && "hidden",
           )}
           data-slot="sidebar-gap"
         />
         <div
           className={cn(
-            "fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear phone:hidden",
-            side === "left"
-              ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
-              : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+            maximized
+              ? "relative z-10 flex h-full min-h-0 min-w-0 flex-1 self-stretch phone:hidden"
+              : cn(
+                  "fixed inset-y-0 z-10 flex h-svh w-(--sidebar-width) transition-[left,right,width] duration-200 ease-linear phone:hidden",
+                  side === "left"
+                    ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
+                    : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
+                ),
             // Adjust the padding for floating and inset variants.
             variant === "floating" || variant === "inset"
               ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]"

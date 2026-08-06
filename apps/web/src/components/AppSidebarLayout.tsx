@@ -1,8 +1,15 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { Schema } from "effect";
+import { PanelLeftOpenIcon } from "lucide-react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 
 import ThreadSidebar from "./Sidebar";
+import { isElectron } from "../env";
+import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 import { usePresentationTier } from "../hooks/usePresentationTier";
-import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
+import { cn } from "~/lib/utils";
+import { Button } from "./ui/button";
+import { Sidebar, SidebarProvider, SidebarRail, useSidebar } from "./ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   clearShortcutModifierState,
   syncShortcutModifierStateFromKeyboardEvent,
@@ -10,8 +17,17 @@ import {
 import { useSettingsDialogStore } from "../settingsDialogStore";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
+const THREAD_SIDEBAR_OPEN_STORAGE_KEY = "chat_thread_sidebar_open";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
+
+function readPersistedThreadSidebarOpen(): boolean {
+  try {
+    return getLocalStorageItem(THREAD_SIDEBAR_OPEN_STORAGE_KEY, Schema.Boolean) ?? true;
+  } catch {
+    return true;
+  }
+}
 
 const LazySettingsDialog = lazy(() =>
   import("./settings/SettingsDialog").then((module) => ({ default: module.SettingsDialog })),
@@ -99,6 +115,50 @@ export function useAppShellGlobalEffects(): void {
 }
 
 /**
+ * The way back from a collapsed thread sidebar.
+ *
+ * Offcanvas collapse takes the sidebar — and with it the collapse button in
+ * its header — off screen, and the resize rail is deliberately inert in that
+ * state. Rather than make every workspace surface host its own re-open
+ * affordance, the shell floats one over the corner the sidebar vacated.
+ * Surfaces that own that corner reserve room for it with
+ * `COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS`.
+ */
+function AppSidebarExpandControl() {
+  const { toggleSidebar } = useSidebar();
+
+  return (
+    <div
+      className={cn(
+        "pointer-events-none fixed top-0 z-50 flex items-center phone:hidden",
+        isElectron
+          ? // Clears the macOS traffic lights, or the Window Controls Overlay
+            // origin on the platforms that publish one.
+            "left-[86px] h-[52px] wco:left-[calc(env(titlebar-area-x)+0.5rem)] wco:h-[env(titlebar-area-height)]"
+          : "top-[env(safe-area-inset-top)] left-[calc(env(safe-area-inset-left)+0.5rem)] h-[52px]",
+      )}
+    >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              aria-label="Show sidebar"
+              className="pointer-events-auto text-muted-foreground/72 hover:text-foreground"
+              onClick={toggleSidebar}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <PanelLeftOpenIcon />
+            </Button>
+          }
+        />
+        <TooltipPopup side="bottom">Show sidebar</TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
+/**
  * The tier-aware application shell (delivery step 6 of the focused mobile
  * workspace design). The `SidebarProvider` context and the route subtree stay
  * mounted identically on both tiers — a tier flip (mid-size rotation, QA
@@ -111,15 +171,33 @@ export function useAppShellGlobalEffects(): void {
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   useAppShellGlobalEffects();
   const presentationTier = usePresentationTier();
+  // Collapsing the sidebar is a deliberate layout choice, so it outlives the
+  // session the same way the sidebar width does. The shell owns the state
+  // (rather than `SidebarProvider`'s internal default) because the collapsed
+  // layout also decides whether the floating re-open control renders.
+  const [sidebarOpen, setSidebarOpen] = useState(readPersistedThreadSidebarOpen);
+  const isDesktopTier = presentationTier === "desktop";
+  const handleSidebarOpenChange = useCallback((open: boolean) => {
+    setSidebarOpen(open);
+    try {
+      setLocalStorageItem(THREAD_SIDEBAR_OPEN_STORAGE_KEY, open, Schema.Boolean);
+    } catch {
+      // Ignore quota/storage failures — the collapse still applies this session.
+    }
+  }, []);
 
   return (
-    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
+    <SidebarProvider
+      className="h-dvh! min-h-0!"
+      open={sidebarOpen}
+      onOpenChange={handleSidebarOpenChange}
+    >
       {/* Ambient base layer: a faint primary-derived tint behind the shell.
           Opaque content covers it entirely; it exists so translucent chrome
           (Material steps above Solid) frosts something other than a flat
           fill. Static gradient — no animation, no compositing cost. */}
       <div aria-hidden className="app-ambient fixed inset-0 pointer-events-none" />
-      {presentationTier === "desktop" ? (
+      {isDesktopTier ? (
         <Sidebar
           side="left"
           collapsible="offcanvas"
@@ -136,6 +214,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         </Sidebar>
       ) : null}
       {children}
+      {isDesktopTier && !sidebarOpen ? <AppSidebarExpandControl /> : null}
       <LazySettingsDialogMount />
     </SidebarProvider>
   );

@@ -85,7 +85,9 @@ import { PREFERS_REDUCED_MOTION_QUERY } from "../lib/perf/motion";
 import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { usePresentationTier } from "../hooks/usePresentationTier";
+import { COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS } from "../appChrome";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
+import { useSidebar } from "./ui/sidebar";
 import { BranchToolbar } from "./BranchToolbar";
 import {
   hasOpenDialogShortcutTarget,
@@ -517,6 +519,10 @@ export default function ChatView(props: ChatViewProps) {
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const prefersReducedMotion = useMediaQuery(PREFERS_REDUCED_MOTION_QUERY);
   const presentationTier = usePresentationTier();
+  // With the thread sidebar collapsed this header owns the workspace's
+  // top-left corner, so it reserves the room the shell's floating
+  // show-sidebar control (and the native window controls) need there.
+  const appSidebarCollapsed = useSidebar().state === "collapsed" && presentationTier === "desktop";
   // Ref mirror for effects that must observe the tier without re-running on
   // tier flips (rotation preserves route, draft, and panel state).
   const presentationTierRef = useRef(presentationTier);
@@ -3545,11 +3551,17 @@ export default function ChatView(props: ChatViewProps) {
           headerOverlayActive && "absolute inset-x-0 top-0 z-20",
           isElectron
             ? cn(
-                "drag-region flex min-h-[52px] items-stretch px-3 sm:px-5 wco:min-h-[env(titlebar-area-height)]",
+                "drag-region flex min-h-[52px] items-stretch pr-3 sm:pr-5 wco:min-h-[env(titlebar-area-height)]",
+                appSidebarCollapsed ? COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS : "pl-3 sm:pl-5",
                 reserveTitleBarControlInset &&
                   "wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
               )
-            : "pl-[calc(env(safe-area-inset-left)+0.75rem)] pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pl-[calc(env(safe-area-inset-left)+1.25rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+            : cn(
+                "pr-[calc(env(safe-area-inset-right)+0.75rem)] sm:pr-[calc(env(safe-area-inset-right)+1.25rem)]",
+                appSidebarCollapsed
+                  ? COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS
+                  : "pl-[calc(env(safe-area-inset-left)+0.75rem)] sm:pl-[calc(env(safe-area-inset-left)+1.25rem)]",
+              ),
         )}
       >
         {presentationTier === "phone" ? (
