@@ -95,27 +95,36 @@ export const readWorkflowScript = Effect.fn("orchestration.readWorkflowScript")(
 
   // Realpath the FILE itself (not just its directory): a symlink named
   // like a script inside a contained directory must not escape.
+  // Failures echo only the client-supplied path — the resolved path and the
+  // raw fs cause stay in server logs (clients could otherwise probe the
+  // filesystem layout through error payloads).
   const resolved = yield* Effect.tryPromise({
     try: () => NodeFSP.realpath(requested),
-    catch: (cause) =>
-      new OrchestrationGetWorkflowScriptError({
-        reason: "not-found",
-        scriptPath: requested,
-        cause,
-      }),
-  });
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.logInfo("workflow script realpath failed", { requested, cause }).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new OrchestrationGetWorkflowScriptError({ reason: "not-found", scriptPath: requested }),
+          ),
+        ),
+      ),
+    ),
+  );
 
   const contained = resolvedRoots.some(
     (root) => resolved === root || resolved.startsWith(`${root}${NodePath.sep}`),
   );
   if (!contained) {
+    yield* Effect.logWarning("workflow script escaped containment", { requested, resolved });
     return yield* Effect.fail(
-      new OrchestrationGetWorkflowScriptError({ reason: "outside-root", scriptPath: resolved }),
+      new OrchestrationGetWorkflowScriptError({ reason: "outside-root", scriptPath: requested }),
     );
   }
   if (NodePath.extname(resolved) !== ".js") {
     return yield* Effect.fail(
-      new OrchestrationGetWorkflowScriptError({ reason: "not-js", scriptPath: resolved }),
+      new OrchestrationGetWorkflowScriptError({ reason: "not-js", scriptPath: requested }),
     );
   }
 
@@ -151,22 +160,32 @@ export const readWorkflowScript = Effect.fn("orchestration.readWorkflowScript")(
         await handle.close();
       }
     },
-    catch: (cause) =>
-      new OrchestrationGetWorkflowScriptError({
-        reason: "read-failed",
-        scriptPath: resolved,
-        cause,
-      }),
-  });
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("workflow script read failed", { requested, resolved, cause }).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new OrchestrationGetWorkflowScriptError({
+              reason: "read-failed",
+              scriptPath: requested,
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
   if ("failure" in read) {
     return yield* new OrchestrationGetWorkflowScriptError({
       reason: read.failure,
-      scriptPath: resolved,
+      scriptPath: requested,
     });
   }
 
   return {
-    scriptPath: resolved,
+    // Echo the client's path, not the realpath: symlinked homes would
+    // otherwise reveal the server's actual filesystem layout.
+    scriptPath: requested,
     contents: read.contents,
     truncated: read.truncated,
   };

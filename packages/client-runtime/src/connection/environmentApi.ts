@@ -67,6 +67,8 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
       getWorkflowScript: rpcClient.orchestration.getWorkflowScript,
+      getTaskOutput: rpcClient.orchestration.getTaskOutput,
+      stopBackgroundTask: rpcClient.orchestration.stopBackgroundTask,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       searchThreadMessages: rpcClient.orchestration.searchThreadMessages,
       subscribeShell: (callback, options) =>

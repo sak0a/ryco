@@ -1996,8 +1996,9 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedErrorClass
       "changed-during-read",
       "read-failed",
     ]),
+    /** Always the client-supplied path: failures never echo the server-side
+     * resolved path (or a raw cause) — those stay in server logs. */
     scriptPath: Schema.String,
-    cause: Schema.optional(Schema.Defect),
   },
 ) {
   override get message(): string {
@@ -2050,8 +2051,9 @@ export class OrchestrationGetTaskOutputError extends Schema.TaggedErrorClass<Orc
       "changed-during-read",
       "read-failed",
     ]),
+    /** Always the client-supplied path: failures never echo the server-side
+     * resolved path (or a raw cause) — those stay in server logs. */
     outputPath: Schema.String,
-    cause: Schema.optional(Schema.Defect),
   },
 ) {
   override get message(): string {
@@ -2082,7 +2084,6 @@ export class OrchestrationStopBackgroundTaskError extends Schema.TaggedErrorClas
     reason: Schema.Literals(["unsupported", "session-not-found", "stop-failed"]),
     threadId: Schema.String,
     taskId: Schema.String,
-    cause: Schema.optional(Schema.Defect),
   },
 ) {
   override get message(): string {

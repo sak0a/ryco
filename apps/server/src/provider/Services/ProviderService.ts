@@ -21,6 +21,7 @@ import type {
   ProviderSession,
   ProviderSessionStartInput,
   RuntimeSessionId,
+  ProviderStopBackgroundTaskInput,
   ProviderStopSessionInput,
   ThreadId,
   ProviderTurnStartResult,

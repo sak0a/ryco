@@ -131,7 +131,7 @@ export type ProviderStopSessionInput = typeof ProviderStopSessionInput.Type;
 export const ProviderStopBackgroundTaskInput = Schema.Struct({
   threadId: ThreadId,
   /** Provider-runtime task id (task.* linkage fields). */
-  taskId: Schema.String,
+  taskId: TrimmedNonEmptyString,
 });
 export type ProviderStopBackgroundTaskInput = typeof ProviderStopBackgroundTaskInput.Type;
 

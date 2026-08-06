@@ -35,7 +35,10 @@ const OUTPUT_EXTENSIONS = new Set([".output", ".jsonl"]);
 
 function harnessTmpRoots(): ReadonlyArray<string> {
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
-  const names = uid === undefined ? ["claude"] : [`claude-${uid}`, "claude"];
+  // Only the uid-scoped harness directory is trusted: a bare `/tmp/claude`
+  // can be pre-created (or symlinked elsewhere) by any local user on a
+  // multi-user host, which would turn root containment into a grant.
+  const names = uid === undefined ? [] : [`claude-${uid}`];
   const bases = [...new Set(["/tmp", NodeOS.tmpdir()])];
   return bases.flatMap((base) => names.map((name) => NodePath.join(base, name)));
 }
@@ -94,27 +97,36 @@ export const readTaskOutput = Effect.fn("orchestration.readTaskOutput")(function
 
   // Realpath the FILE itself (not just its directory): agent-task outputs
   // are symlinks by design, so containment applies to the resolved target.
+  // Failures echo only the client-supplied path — the resolved path and the
+  // raw fs cause stay in server logs (clients could otherwise probe the
+  // filesystem layout through error payloads).
   const resolved = yield* Effect.tryPromise({
     try: () => NodeFSP.realpath(requested),
-    catch: (cause) =>
-      new OrchestrationGetTaskOutputError({
-        reason: "not-found",
-        outputPath: requested,
-        cause,
-      }),
-  });
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.logInfo("task output realpath failed", { requested, cause }).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new OrchestrationGetTaskOutputError({ reason: "not-found", outputPath: requested }),
+          ),
+        ),
+      ),
+    ),
+  );
 
   const contained = resolvedRoots.some(
     (root) => resolved === root || resolved.startsWith(`${root}${NodePath.sep}`),
   );
   if (!contained) {
+    yield* Effect.logWarning("task output escaped containment", { requested, resolved });
     return yield* Effect.fail(
-      new OrchestrationGetTaskOutputError({ reason: "outside-root", outputPath: resolved }),
+      new OrchestrationGetTaskOutputError({ reason: "outside-root", outputPath: requested }),
     );
   }
   if (!OUTPUT_EXTENSIONS.has(NodePath.extname(resolved))) {
     return yield* Effect.fail(
-      new OrchestrationGetTaskOutputError({ reason: "invalid-path", outputPath: resolved }),
+      new OrchestrationGetTaskOutputError({ reason: "invalid-path", outputPath: requested }),
     );
   }
 
@@ -141,9 +153,44 @@ export const readTaskOutput = Effect.fn("orchestration.readTaskOutput")(function
         const length = Math.min(size - start, CHUNK_BYTE_CAP);
         const buffer = Buffer.alloc(length);
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+        const bytes = buffer.subarray(0, bytesRead);
+        // Each chunk decodes standalone and the client concatenates by
+        // nextOffset, so both window edges must land on codepoint
+        // boundaries — a split codepoint would become a permanent
+        // replacement character in the assembled text.
+        // Head: a tail-mode start can land mid-sequence; continuation
+        // bytes without their lead are undecodable, skip them.
+        let head = 0;
+        if (start > 0) {
+          while (head < bytes.length && (bytes[head]! & 0xc0) === 0x80) head += 1;
+        }
+        // Tail: hold back an INCOMPLETE trailing sequence (byte cap, or a
+        // writer caught mid-append at EOF) so the next poll re-reads it
+        // whole. Complete sequences are never held back, so a file that
+        // simply ends in multi-byte text still drains fully.
+        let tail = bytes.length;
+        let lead = tail - 1;
+        const floor = Math.max(head, tail - 4);
+        while (lead >= floor && (bytes[lead]! & 0xc0) === 0x80) lead -= 1;
+        if (lead >= head && (bytes[lead]! & 0x80) !== 0) {
+          const leadByte = bytes[lead]!;
+          const expected =
+            (leadByte & 0xe0) === 0xc0
+              ? 2
+              : (leadByte & 0xf0) === 0xe0
+                ? 3
+                : (leadByte & 0xf8) === 0xf0
+                  ? 4
+                  : // Invalid lead byte: not a sequence start, leave it to
+                    // decode as a replacement character rather than stall.
+                    1;
+          if (expected > tail - lead) {
+            tail = lead;
+          }
+        }
         return {
-          chunk: buffer.subarray(0, bytesRead).toString("utf8"),
-          nextOffset: start + bytesRead,
+          chunk: bytes.subarray(head, tail).toString("utf8"),
+          nextOffset: start + tail,
           size,
           truncatedHead: offset === undefined && start > 0,
         };
@@ -151,22 +198,29 @@ export const readTaskOutput = Effect.fn("orchestration.readTaskOutput")(function
         await handle.close();
       }
     },
-    catch: (cause) =>
-      new OrchestrationGetTaskOutputError({
-        reason: "read-failed",
-        outputPath: resolved,
-        cause,
-      }),
-  });
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("task output read failed", { requested, resolved, cause }).pipe(
+        Effect.andThen(
+          Effect.fail(
+            new OrchestrationGetTaskOutputError({ reason: "read-failed", outputPath: requested }),
+          ),
+        ),
+      ),
+    ),
+  );
   if ("failure" in read) {
     return yield* new OrchestrationGetTaskOutputError({
       reason: read.failure,
-      outputPath: resolved,
+      outputPath: requested,
     });
   }
 
   return {
-    outputPath: resolved,
+    // Echo the client's path, not the realpath: agent outputs are symlinks
+    // by design and the resolved target reveals the server's layout.
+    outputPath: requested,
     chunk: read.chunk,
     nextOffset: read.nextOffset,
     size: read.size,

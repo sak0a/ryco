@@ -26,6 +26,7 @@ import { ContextHandoffInspection } from "../orchestration/Services/ContextHando
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { StatisticsQuery } from "../statistics/StatisticsQuery.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
+import { ProviderService } from "../provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "../provider/providerMaintenanceRunner.ts";
 import { ServerLifecycleEvents } from "../serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "../serverRuntimeStartup.ts";
@@ -112,6 +113,10 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
     const terminalManager = yield* TerminalManager;
     const providerRegistry = yield* ProviderRegistry;
+    // Optional for the same reason as ContextHandoffInspection: route tests
+    // provide only the services their RPC under test needs. Production
+    // always has ProviderService in the runtime environment.
+    const providerService = yield* Effect.serviceOption(ProviderService);
     const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -658,6 +663,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       vcsStatusBroadcaster,
       terminalManager,
       providerRegistry,
+      providerService,
       providerMaintenanceRunner,
       config,
       lifecycleEvents,

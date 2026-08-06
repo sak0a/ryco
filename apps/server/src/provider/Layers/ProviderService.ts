@@ -18,6 +18,7 @@ import {
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
   ProviderSessionStartInput,
+  ProviderStopBackgroundTaskInput,
   ProviderStopSessionInput,
   RuntimeSessionId,
   type ProviderInstanceId,
@@ -58,7 +59,11 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
-import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import {
+  type ProviderAdapterError,
+  ProviderUnsupportedError,
+  ProviderValidationError,
+} from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import {
@@ -1168,6 +1173,35 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
+  const stopBackgroundTask: ProviderServiceShape["stopBackgroundTask"] = Effect.fn(
+    "stopBackgroundTask",
+  )(function* (rawInput) {
+    const input = yield* decodeInputOrValidationError({
+      operation: "ProviderService.stopBackgroundTask",
+      schema: ProviderStopBackgroundTaskInput,
+      payload: rawInput,
+    });
+    const routed = yield* resolveRoutableSession({
+      threadId: input.threadId,
+      operation: "ProviderService.stopBackgroundTask",
+      allowRecovery: true,
+    });
+    yield* Effect.annotateCurrentSpan({
+      "provider.operation": "stop-background-task",
+      "provider.kind": routed.adapter.provider,
+      "provider.thread_id": input.threadId,
+      "provider.task_id": input.taskId,
+    });
+    const stop = routed.adapter.stopBackgroundTask;
+    if (stop === undefined) {
+      return yield* new ProviderUnsupportedError({ provider: routed.adapter.provider });
+    }
+    yield* stop(routed.threadId, input.taskId);
+    yield* analytics.record("provider.background_task.stopped", {
+      provider: routed.adapter.provider,
+    });
+  });
+
   const respondToRequest: ProviderServiceShape["respondToRequest"] = Effect.fn("respondToRequest")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -1467,6 +1501,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     listStaleSessionBindings,
     sendTurn,
     interruptTurn,
+    stopBackgroundTask,
     respondToRequest,
     respondToUserInput,
     stopSession,

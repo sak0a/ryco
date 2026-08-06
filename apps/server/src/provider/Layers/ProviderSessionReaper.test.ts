@@ -154,6 +154,7 @@ describe("ProviderSessionReaper", () => {
       listStaleSessionBindings: () => Effect.succeed(input.staleBindings ?? []),
       sendTurn: () => unsupported(),
       interruptTurn: () => unsupported(),
+      stopBackgroundTask: () => unsupported(),
       respondToRequest: () => unsupported(),
       respondToUserInput: () => unsupported(),
       stopSession,
