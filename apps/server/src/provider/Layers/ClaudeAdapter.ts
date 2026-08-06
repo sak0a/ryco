@@ -231,6 +231,13 @@ interface ClaudeSessionContext {
   readonly workflowMemberFingerprints: Map<string, string>;
   /** Task ids that have started and not yet reached a terminal state. */
   readonly liveTaskIds: Set<string>;
+  /**
+   * Task ids positively observed as backgrounded (membership in a
+   * background_tasks_changed set, or a task_updated is_backgrounded patch).
+   * Only these are ever settled by set reconciliation: the set carries
+   * BACKGROUND work only, so a foreground task's absence proves nothing.
+   */
+  readonly backgroundedTaskIds: Set<string>;
   turnState: ClaudeTurnState | undefined;
   lastKnownContextWindow: number | undefined;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
@@ -2036,6 +2043,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
     // Clear any remaining stale entries (e.g. from interrupted content blocks)
     context.inFlightTools.clear();
+    // Suppressed-narration bookkeeping is per-message; anything left after
+    // the turn is an interrupted stream's residue.
+    context.suppressedSubagentBlocks.clear();
 
     for (const block of turnState.assistantTextBlockOrder) {
       yield* completeAssistantTextBlock(context, block, {
@@ -2795,13 +2805,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       },
     };
 
-    // Authoritative live-set reconciliation (CC ≥ 2.1.203; the pinned SDK
-    // typings don't carry the subtype yet, hence the runtime check before
-    // the typed switch). Ordering against per-task events is unspecified,
-    // so membership is replaced wholesale: tracked ids missing from the set
-    // settle as stopped — a dropped task_notification otherwise leaves them
-    // Working forever and un-stoppable — and unknown ids in the set get a
-    // synthesized start so a partial stream still yields a roster entry.
+    // Background-set reconciliation (CC ≥ 2.1.203; the pinned SDK typings
+    // don't carry the subtype yet, hence the runtime check before the typed
+    // switch). The set carries BACKGROUND tasks only — the CLI's own schema
+    // note says a foreground agent joins it when backgrounded, and warns
+    // against correlating it with the edge stream. So absence only settles
+    // ids we positively observed as backgrounded (earlier set membership or
+    // an is_backgrounded patch); a live foreground subagent is simply not a
+    // member and must never be settled by this message. Unknown ids in the
+    // set get a synthesized start so a partial stream still yields a roster
+    // entry, and every member is flagged backgrounded for later settling —
+    // that is how a background task whose task_notification drops still
+    // stops reading as Working forever.
     if ((message.subtype as string) === "background_tasks_changed") {
       const wire = message as unknown as { background_tasks?: unknown; tasks?: unknown };
       const rawEntries = Array.isArray(wire.background_tasks)
@@ -2840,11 +2855,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
+      for (const [taskId] of liveSet) {
+        context.backgroundedTaskIds.add(taskId);
+      }
+
       for (const taskId of [...context.liveTaskIds]) {
-        if (liveSet.has(taskId)) {
+        if (liveSet.has(taskId) || !context.backgroundedTaskIds.has(taskId)) {
           continue;
         }
         context.liveTaskIds.delete(taskId);
+        context.backgroundedTaskIds.delete(taskId);
         const settleStamp = yield* makeEventStamp();
         yield* offerRuntimeEventForContext(context, {
           ...base,
@@ -3101,6 +3121,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           patch.status !== undefined ? CLAUDE_TASK_PATCH_STATUS[patch.status] : undefined;
         if (status === "completed" || status === "failed" || status === "cancelled") {
           context.liveTaskIds.delete(message.task_id);
+          context.backgroundedTaskIds.delete(message.task_id);
+        }
+        if (patch.is_backgrounded !== undefined) {
+          if (patch.is_backgrounded) {
+            context.backgroundedTaskIds.add(message.task_id);
+          } else {
+            context.backgroundedTaskIds.delete(message.task_id);
+          }
         }
         const endedAt =
           typeof patch.end_time === "number" && Number.isFinite(patch.end_time)
@@ -3125,6 +3153,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
       case "task_notification": {
         context.liveTaskIds.delete(message.task_id);
+        context.backgroundedTaskIds.delete(message.task_id);
         if (message.usage) {
           const normalizedUsage = normalizeClaudeTokenUsage(
             message.usage,
@@ -3974,6 +4003,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         taskAgents: new Map(),
         workflowMemberFingerprints: new Map(),
         liveTaskIds: new Set(),
+        backgroundedTaskIds: new Set(),
         turnState: undefined,
         lastKnownContextWindow: undefined,
         lastKnownTokenUsage: undefined,

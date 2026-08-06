@@ -710,7 +710,15 @@ export default function ThreadWorkspacePanel(props: {
     // No Agents workspace tab on the frozen phone tier.
     return isPhoneSurface ? built.filter((tab) => tab.mode !== "agents") : built;
   }, [agentKey, isPhoneSurface, openedPanelModes, props.openedAgentKeys, subagents]);
-  const activeTabKey = activeMode === "agent" ? agentKey : activeMode;
+  // A phone agents deep link falls back to the launcher with the agents tab
+  // filtered out — no tab is active then, so aria-labelledby never points
+  // at a tab id that is not in the DOM.
+  const activeTabKey =
+    activeMode === "agent"
+      ? agentKey
+      : isPhoneSurface && activeMode === "agents"
+        ? null
+        : activeMode;
 
   const navigateSearch = useCallback(
     (buildSearch: (previous: Record<string, unknown>) => Record<string, unknown>) => {

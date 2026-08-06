@@ -61,6 +61,7 @@ import {
 } from "../../observability/Metrics.ts";
 import {
   type ProviderAdapterError,
+  ProviderSessionNotFoundError,
   ProviderUnsupportedError,
   ProviderValidationError,
 } from "../Errors.ts";
@@ -1181,10 +1182,13 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       schema: ProviderStopBackgroundTaskInput,
       payload: rawInput,
     });
+    // No recovery: a stop against a dormant thread must not resurrect a
+    // provider process just to tell it to stop nothing. Background tasks
+    // die with their session, so no live session means nothing to stop.
     const routed = yield* resolveRoutableSession({
       threadId: input.threadId,
       operation: "ProviderService.stopBackgroundTask",
-      allowRecovery: true,
+      allowRecovery: false,
     });
     yield* Effect.annotateCurrentSpan({
       "provider.operation": "stop-background-task",
@@ -1192,6 +1196,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       "provider.thread_id": input.threadId,
       "provider.task_id": input.taskId,
     });
+    if (!routed.isActive) {
+      return yield* new ProviderSessionNotFoundError({ threadId: input.threadId });
+    }
     const stop = routed.adapter.stopBackgroundTask;
     if (stop === undefined) {
       return yield* new ProviderUnsupportedError({ provider: routed.adapter.provider });

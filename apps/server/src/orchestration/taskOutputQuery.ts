@@ -164,28 +164,32 @@ export const readTaskOutput = Effect.fn("orchestration.readTaskOutput")(function
         if (start > 0) {
           while (head < bytes.length && (bytes[head]! & 0xc0) === 0x80) head += 1;
         }
-        // Tail: hold back an INCOMPLETE trailing sequence (byte cap, or a
-        // writer caught mid-append at EOF) so the next poll re-reads it
-        // whole. Complete sequences are never held back, so a file that
-        // simply ends in multi-byte text still drains fully.
+        // Tail: hold back an INCOMPLETE trailing sequence at the byte cap so
+        // the next poll re-reads it whole. Only when the window stops short
+        // of EOF — at EOF the residue is emitted as-is (a replacement
+        // character at worst), because holding it back would pin nextOffset
+        // below size forever on a file that permanently ends mid-sequence
+        // and turn a `while (nextOffset < size)` poll into a hot loop.
         let tail = bytes.length;
-        let lead = tail - 1;
-        const floor = Math.max(head, tail - 4);
-        while (lead >= floor && (bytes[lead]! & 0xc0) === 0x80) lead -= 1;
-        if (lead >= head && (bytes[lead]! & 0x80) !== 0) {
-          const leadByte = bytes[lead]!;
-          const expected =
-            (leadByte & 0xe0) === 0xc0
-              ? 2
-              : (leadByte & 0xf0) === 0xe0
-                ? 3
-                : (leadByte & 0xf8) === 0xf0
-                  ? 4
-                  : // Invalid lead byte: not a sequence start, leave it to
-                    // decode as a replacement character rather than stall.
-                    1;
-          if (expected > tail - lead) {
-            tail = lead;
+        if (start + bytes.length < size) {
+          let lead = tail - 1;
+          const floor = Math.max(head, tail - 4);
+          while (lead >= floor && (bytes[lead]! & 0xc0) === 0x80) lead -= 1;
+          if (lead >= head && (bytes[lead]! & 0x80) !== 0) {
+            const leadByte = bytes[lead]!;
+            const expected =
+              (leadByte & 0xe0) === 0xc0
+                ? 2
+                : (leadByte & 0xf0) === 0xe0
+                  ? 3
+                  : (leadByte & 0xf8) === 0xf0
+                    ? 4
+                    : // Invalid lead byte: not a sequence start, leave it to
+                      // decode as a replacement character rather than stall.
+                      1;
+            if (expected > tail - lead) {
+              tail = lead;
+            }
           }
         }
         return {

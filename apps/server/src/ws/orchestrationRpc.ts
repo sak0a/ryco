@@ -170,7 +170,12 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     [ORCHESTRATION_WS_METHODS.getWorkflowScript]: (input) =>
       observeRpcEffect(
         ORCHESTRATION_WS_METHODS.getWorkflowScript,
-        Effect.gen(function* () {
+        // ownerEffect enforces the "operator" tier from RPC_ACCESS_POLICY —
+        // the policy table alone is advisory; per-handler guards are the
+        // only server-side enforcement in this codebase.
+        ownerEffect(
+          ORCHESTRATION_WS_METHODS.getWorkflowScript,
+          Effect.gen(function* () {
           // Thread binding first: the requested thread must exist and its
           // persisted activities must reference this exact script path.
           // "not-found" deliberately does not distinguish unknown threads,
@@ -194,13 +199,16 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
             scriptPath: input.scriptPath,
             roots: workflowScriptRootsFromSettings(settings),
           });
-        }),
+          }),
+        ),
         { "rpc.aggregate": "orchestration" },
       ),
     [ORCHESTRATION_WS_METHODS.getTaskOutput]: (input) =>
       observeRpcEffect(
         ORCHESTRATION_WS_METHODS.getTaskOutput,
-        Effect.gen(function* () {
+        ownerEffect(
+          ORCHESTRATION_WS_METHODS.getTaskOutput,
+          Effect.gen(function* () {
           // Same thread binding as getWorkflowScript, against the task
           // `outputFile` handles the thread's activities reference.
           const referenced = yield* referencedTaskPaths(input.threadId);
@@ -221,13 +229,16 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
             offset: input.offset,
             roots: taskOutputRootsFromSettings(settings),
           });
-        }),
+          }),
+        ),
         { "rpc.aggregate": "orchestration" },
       ),
     [ORCHESTRATION_WS_METHODS.stopBackgroundTask]: (input) =>
       observeRpcEffect(
         ORCHESTRATION_WS_METHODS.stopBackgroundTask,
-        Option.match(providerService, {
+        ownerEffect(
+          ORCHESTRATION_WS_METHODS.stopBackgroundTask,
+          Option.match(providerService, {
           onNone: () =>
             // No ProviderService in the environment is a wiring gap, not a
             // client mistake — log loudly and fail closed.
@@ -259,7 +270,9 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
                     reason:
                       cause._tag === "ProviderUnsupportedError"
                         ? "unsupported"
-                        : cause._tag === "ProviderSessionNotFoundError"
+                        : cause._tag === "ProviderSessionNotFoundError" ||
+                            cause._tag === "ProviderAdapterSessionNotFoundError" ||
+                            cause._tag === "ProviderAdapterSessionClosedError"
                           ? "session-not-found"
                           : "stop-failed",
                     threadId: input.threadId,
@@ -267,7 +280,8 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
                   }),
               ),
             ),
-        }).pipe(Effect.as({})),
+          }).pipe(Effect.as({})),
+        ),
         { "rpc.aggregate": "orchestration" },
       ),
     [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>
