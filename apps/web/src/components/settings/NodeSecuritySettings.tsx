@@ -226,6 +226,11 @@ function SafetyNumber({ value }: { readonly value: string }) {
  * belongs to the caller's END of the comparison, and the two callers below are
  * the only ones: each is wired to exactly one view builder, so the referent is
  * structural rather than a parameter someone can pass the wrong way round.
+ *
+ * `more` is the one optional field, and only because the node end genuinely has
+ * none: the browser-end view always carries it (the type makes it required
+ * there), while a session on the node's own list has one form of its sentence
+ * and no second surface to send its reader to.
  */
 function VerificationCode({
   view,
@@ -234,8 +239,8 @@ function VerificationCode({
 }: {
   readonly view: {
     readonly display: string;
-    readonly caption: string;
     readonly advisory: string;
+    readonly more?: string;
   } | null;
   readonly unavailable: string;
   readonly testId: string;
@@ -255,8 +260,10 @@ function VerificationCode({
       >
         {view.display}
       </p>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.caption}</p>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{view.advisory}</p>
+      {view.more === undefined ? null : (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">{view.more}</p>
+      )}
     </div>
   );
 }
@@ -267,11 +274,17 @@ function VerificationCode({
  * The shipped advisory is written from the browser end — "compare this code with
  * the one your node's CLI shows" — and this is the one site in this panel where
  * the reader is at the browser end, so it is correct here and nowhere else.
+ *
+ * IT TAKES THE `settings` LENGTH, WHICH IS THIS PANEL'S WHOLE JOB HERE. The
+ * connection surface draws the one line §13.5 requires and points at this page
+ * for the rest; this is that page, so drawing the same short line would make the
+ * pointer circular and leave §2.2's second reason — that this tab pins no node
+ * identity — stated nowhere the pointer led.
  */
 function OwnChannelVerificationCode({ code }: { readonly code: string | null }) {
   return (
     <VerificationCode
-      view={hostedE2eeVerificationView(code)}
+      view={hostedE2eeVerificationView(code, "settings")}
       unavailable={E2EE_WEB_SAS_UNAVAILABLE}
       testId="node-session-code"
     />

@@ -22,6 +22,13 @@ import {
  * never see. It renders in the same view as the characters, every time, and it
  * comes out of the same value they do ({@link hostedE2eeVerificationView}).
  *
+ * IT IS THE SHORT FORM, AND IT SAYS SO. This is the surface an owner is looking
+ * at while they compare eight characters, so it draws the one line that
+ * discharges §13.5 and the pointer at where the rest of it is — never the long
+ * account, which lives one navigation away in Settings → Security. The
+ * `inline` placement is what picks both, and it is not defaultable: a surface
+ * cannot end up with the code and no sentence by leaving an argument off.
+ *
  * THE ABSENCE OF A CODE IS ALSO A STATE THIS DRAWS. §13.5's duty is a display
  * duty and the derivation may fail without costing the channel, so a locked
  * `web-unsigned` channel can reach this surface holding nothing to compare.
@@ -39,7 +46,7 @@ export function HostedE2eeVerification() {
   const status = useWebE2eeChannelStatus();
   const code = useWebE2eeVerificationCode();
   if (status !== "web-unsigned") return null;
-  const view = hostedE2eeVerificationView(code);
+  const view = hostedE2eeVerificationView(code, "inline");
 
   if (!view) {
     return (
@@ -78,8 +85,8 @@ export function HostedE2eeVerification() {
       >
         {view.display}
       </p>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.caption}</p>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{view.advisory}</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.more}</p>
     </section>
   );
 }

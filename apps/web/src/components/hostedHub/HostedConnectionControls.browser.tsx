@@ -49,7 +49,11 @@ import {
   WEB_HOSTED_E2EE_CHANNEL_STATUSES,
 } from "../../../test/hostedConnectionVocabulary";
 import { hostedConnectionStatusPresentation } from "./HostedConnectionControls.logic";
-import { E2EE_WEB_SAS_ADVISORY } from "./HostedE2eeVerification.logic";
+import {
+  E2EE_WEB_SAS_ADVISORY,
+  E2EE_WEB_SAS_DETAIL,
+  E2EE_WEB_SAS_MORE,
+} from "./HostedE2eeVerification.logic";
 import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
@@ -855,8 +859,13 @@ describe("hosted connection controls", () => {
       expect(verification()).not.toBeNull();
     });
     expect(verification()!.textContent).toContain(MENU_WEB_SAS);
-    // The denial is in the same view as the characters, every time.
+    // The denial is in the same view as the characters, every time — at this
+    // surface's length, with the pointer at the longer account beside it. The
+    // long form is Settings → Security's, and drawing it in a 288px popover is
+    // the block of prose this shape removed.
     expect(verification()!.textContent).toContain(E2EE_WEB_SAS_ADVISORY);
+    expect(verification()!.textContent).toContain(E2EE_WEB_SAS_MORE);
+    expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_DETAIL);
     expect(verification()!.querySelector("details")).toBeNull();
   });
 

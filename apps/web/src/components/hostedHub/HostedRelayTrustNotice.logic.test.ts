@@ -7,7 +7,13 @@ import {
   HOSTED_E2EE_CHANNEL_STATUSES,
   type WebHostedE2eeChannelStatus,
 } from "../../hostedHub/connectionStatus";
-import { E2EE_WEB_SAS_ADVISORY, E2EE_WEB_SAS_CAPTION } from "./HostedE2eeVerification.logic";
+import {
+  E2EE_WEB_SAS_ADVISORY,
+  E2EE_WEB_SAS_COMPARE,
+  E2EE_WEB_SAS_DETAIL,
+  E2EE_WEB_SAS_MORE,
+  E2EE_WEB_SAS_UNAVAILABLE,
+} from "./HostedE2eeVerification.logic";
 import {
   hostedRelayTrustDisclosure,
   HOSTED_RELAY_TRUST_DISCLOSURE_STATES,
@@ -24,15 +30,26 @@ import {
  * would pass "this is end-to-end encrypted" the day someone deleted a "not".
  */
 
-/** Every string a user can read, flattened. */
+/**
+ * Every string a user can read, flattened.
+ *
+ * THE §13.5 COPY IS IN HERE AT EVERY LENGTH IT SHIPS. Splitting one sentence
+ * into a short form, a long form, and the two pointers that carry them made four
+ * places a banned claim could be written where there had been two, and a scan
+ * that only knew the old constant would have gone on passing while the new ones
+ * said anything at all.
+ */
 function everyDisclosure(): ReadonlyArray<{ readonly where: string; readonly text: string }> {
   return [
     ...HOSTED_RELAY_TRUST_DISCLOSURE_STATES.map((status) => ({
       where: `disclosure(${status})`,
       text: hostedRelayTrustDisclosure(status).body,
     })),
-    { where: "webSasCaption", text: E2EE_WEB_SAS_CAPTION },
     { where: "webSasAdvisory", text: E2EE_WEB_SAS_ADVISORY },
+    { where: "webSasMore", text: E2EE_WEB_SAS_MORE },
+    { where: "webSasDetail", text: E2EE_WEB_SAS_DETAIL },
+    { where: "webSasCompare", text: E2EE_WEB_SAS_COMPARE },
+    { where: "webSasUnavailable", text: E2EE_WEB_SAS_UNAVAILABLE },
   ];
 }
 
@@ -327,14 +344,24 @@ describe("docs/hosted-hub-client.md quotes the copy this slice ships", () => {
     }
   });
 
-  it("quotes §13.5's advisory verbatim, where it documents the comparison", () => {
-    // The document now describes the compare-to-CLI flow, and the sentence
-    // bounding what a match is worth is as much a security claim as the
-    // disclosure is. Paraphrasing it here would rebuild the drifting second copy
-    // this slice exists to remove, one section further down the same file.
-    expect(quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-text").get("web-sas-advisory")).toBe(
-      normalizeProse(E2EE_WEB_SAS_ADVISORY),
-    );
+  it("quotes §13.5's copy verbatim, at every length it ships", () => {
+    // The document describes the compare-to-CLI flow, and the sentences bounding
+    // what a match is worth are as much a security claim as the disclosure is.
+    // Paraphrasing them here would rebuild the drifting second copy this slice
+    // exists to remove, one section further down the same file.
+    //
+    // ALL FOUR, because the split into a short and a long form is exactly where
+    // a document falls behind: quoting only the inline line would have let the
+    // long form — the one carrying §2.2's second reason — drift unwatched.
+    const quoted = quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-text");
+    for (const [name, text] of [
+      ["web-sas-advisory", E2EE_WEB_SAS_ADVISORY],
+      ["web-sas-more", E2EE_WEB_SAS_MORE],
+      ["web-sas-detail", E2EE_WEB_SAS_DETAIL],
+      ["web-sas-compare", E2EE_WEB_SAS_COMPARE],
+    ] as const) {
+      expect(quoted.get(name), name).toBe(normalizeProse(text));
+    }
   });
 });
 

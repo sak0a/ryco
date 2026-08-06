@@ -79,6 +79,11 @@ import {
 } from "../../hostedHub/connectionStatus";
 import { useHostedHubStore } from "../../hostedHub/state";
 import { webE2eeSessionState } from "../../hostedHub/e2eeSession";
+import {
+  E2EE_WEB_SAS_COMPARE,
+  E2EE_WEB_SAS_DETAIL,
+  E2EE_WEB_SAS_MORE,
+} from "../hostedHub/HostedE2eeVerification.logic";
 import { NodeSecuritySettings } from "./NodeSecuritySettings";
 import {
   nodeConnectionStatement,
@@ -212,6 +217,14 @@ describe("this tab's own channel", () => {
     const code = document.querySelector<HTMLElement>('[data-testid="node-session-code"]')!;
     expect(code.textContent).toContain(OWN_CHANNEL_CODE);
     expect(code.textContent).toContain("cannot protect against the Hub operator");
+    // THIS PAGE IS WHERE THE POINTER LEADS, SO IT DRAWS THE LONG FORM. The node
+    // menu shows one line and says "Settings → Security explains what else this
+    // tab cannot check"; if this panel drew that same short line, the pointer
+    // would be circular and §2.2's second reason — this tab pins no node
+    // identity — would be stated nowhere an owner was sent to read it.
+    expect(code.textContent).toContain(E2EE_WEB_SAS_DETAIL);
+    expect(code.textContent).toContain(E2EE_WEB_SAS_COMPARE);
+    expect(body).not.toContain(E2EE_WEB_SAS_MORE);
     // §2.4: nothing on this page may claim the native row for a bundle the Hub
     // served.
     expect(body.toLowerCase()).not.toContain("end-to-end encrypted");

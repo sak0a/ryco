@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
 import {
   E2EE_CROCKFORD_ALPHABET,
   E2EE_WEB_SAS_CHARS,
@@ -12,16 +9,14 @@ import {
   e2eeWebSasGroups,
   hostedE2eeVerificationView,
   E2EE_WEB_SAS_ADVISORY,
-  E2EE_WEB_SAS_CAPTION,
+  E2EE_WEB_SAS_COMPARE,
+  E2EE_WEB_SAS_DETAIL,
   E2EE_WEB_SAS_DISPLAYED_BITS,
+  E2EE_WEB_SAS_MORE,
   E2EE_WEB_SAS_UNAVAILABLE,
+  HOSTED_E2EE_VERIFICATION_PLACEMENTS,
   type HostedE2eeVerificationView,
 } from "./HostedE2eeVerification.logic";
-
-const LOGIC_SOURCE = readFileSync(
-  fileURLToPath(new URL("./HostedE2eeVerification.logic.ts", import.meta.url)),
-  "utf8",
-);
 
 /** A well-formed §13.5 rendering, built from the constants rather than typed. */
 const VALID = ["ABCD", "EFGH"].join(E2EE_WEB_SAS_CHARS.separator);
@@ -33,10 +28,16 @@ const VALID = ["ABCD", "EFGH"].join(E2EE_WEB_SAS_CHARS.separator);
  * and the view builder — rather than through a boolean wrapper. The wrapper this
  * replaced had no production caller at all, so a change that broke validation
  * for the renderer while leaving the wrapper correct would still have been
- * reported green by every line below.
+ * reported green by every line below. Every placement is required to agree: a
+ * length is a choice about words, never about which strings are a valid code.
  */
 function accepted(display: string): boolean {
-  return e2eeWebSasGroups(display).length > 0 && hostedE2eeVerificationView(display) !== null;
+  return (
+    e2eeWebSasGroups(display).length > 0 &&
+    HOSTED_E2EE_VERIFICATION_PLACEMENTS.every(
+      (placement) => hostedE2eeVerificationView(display, placement) !== null,
+    )
+  );
 }
 
 describe("§13.5 the display format is the checksum", () => {
@@ -95,62 +96,128 @@ describe("§13.5 the display format is the checksum", () => {
   });
 });
 
-describe("the caption quotes the constants", () => {
-  it("puts each format number in the clause that number belongs to", () => {
-    // Bare digit checks cannot tell a correct sentence from a scrambled one: a
-    // caption reading "2 characters, in 4 groups of 8 … read all 2 in order"
-    // contains every digit the shipped one does, and tells the owner to compare
-    // two characters of an eight-character code. The ASSEMBLED phrases are what
-    // pin the sentence, and §13.5 makes the length and the grouping the
-    // checksum, so this caption is the owner's only instruction about what to
-    // compare.
-    expect(E2EE_WEB_SAS_CAPTION).toContain(`${E2EE_WEB_SAS_CHARS.chars} characters`);
-    expect(E2EE_WEB_SAS_CAPTION).toContain(
-      `${E2EE_WEB_SAS_CHARS.groups} groups of ${E2EE_WEB_SAS_CHARS.charsPerGroup}`,
-    );
-    expect(E2EE_WEB_SAS_CAPTION).toContain(`read all ${E2EE_WEB_SAS_CHARS.chars} in order`);
-    expect(E2EE_WEB_SAS_CAPTION).toContain(`carry ${E2EE_WEB_SAS_DISPLAYED_BITS} bits`);
-  });
-
-  it("assembles those numbers rather than typing them", () => {
-    // The runtime check above passes for a fully hardcoded string that happens
-    // to carry the same digits, which defeats the property the caption is
-    // assembled FOR: "a §13.5 format change rewrites this sentence in the same
-    // edit". Only the source can show that, so the source is what is read —
-    // the same belt-and-braces the connection controls' call-site test uses.
-    const caption = LOGIC_SOURCE.match(/export const E2EE_WEB_SAS_CAPTION =\n([\s\S]*?);\n/u)?.[1];
-    expect(caption, "the caption declaration moved — this test is testing nothing").toBeDefined();
-    expect(caption).toContain("${E2EE_WEB_SAS_CHARS.chars}");
-    expect(caption).toContain("${E2EE_WEB_SAS_CHARS.groups}");
-    expect(caption).toContain("${E2EE_WEB_SAS_CHARS.charsPerGroup}");
-    expect(caption).toContain("${E2EE_WEB_SAS_DISPLAYED_BITS}");
-    // …and no digit is written into the sentence directly. The interpolations
-    // are removed first, because the constant names carry digits of their own.
-    expect(caption!.replaceAll(/\$\{[^}]*\}/gu, "")).not.toMatch(/\d/u);
-  });
-
-  it("states the entropy the shipped format displays, bounded by the handshake window", () => {
-    // §13.5's non-normative note: at the shipped `E2EE_WEB_SAS_CHARS` the search
-    // is "~2^40 expected trials … far beyond a large GPU fleet", while the
-    // `E2EE_WEB_SAS_MIN_DISPLAYED_BITS` floor is "where a well-resourced
-    // attacker becomes relevant". Quoting the floor understated the shipped
-    // check about a thousandfold — a reason for an owner to skip the one
-    // comparison they have.
+describe("§3.2.1 S11 is an invariant over the constants, not a sentence", () => {
+  it("keeps the shipped format above the displayed-entropy floor", () => {
+    // The caption that used to state this number is gone: §17.5 makes the
+    // entropy "justified by that window and not by an offline work factor", so
+    // it was a derivation an owner could not act on, and §13.5 forbids using the
+    // derivation "to strengthen the claims of §2.4 or §17.5" — which is the only
+    // thing a number beside the code could have been read as doing.
+    //
+    // THE RELATIONSHIP IS NOT COPY AND DID NOT LEAVE WITH THE SENTENCE. A format
+    // change that quietly dropped the rendered value below the floor would be a
+    // real regression whether or not any surface mentions bits.
     expect(E2EE_WEB_SAS_DISPLAYED_BITS).toBe(
       E2EE_WEB_SAS_CHARS.chars * Math.log2(E2EE_CROCKFORD_ALPHABET.length),
     );
     expect(Number.isInteger(E2EE_WEB_SAS_DISPLAYED_BITS)).toBe(true);
-    // §3.2.1 S11's relationship, kept where it belongs: an invariant over the
-    // constants rather than a number in a sentence an owner has to act on.
     expect(E2EE_WEB_SAS_DISPLAYED_BITS).toBeGreaterThanOrEqual(E2EE_WEB_SAS_MIN_DISPLAYED_BITS);
+  });
+});
 
-    // §17.5: the entropy "is justified by that window and not by an offline work
-    // factor", and §13.5 forbids using the derivation "to strengthen the claims
-    // of §2.4 or §17.5". Both bounds and the denial stay attached to the number.
-    const lower = E2EE_WEB_SAS_CAPTION.toLowerCase();
-    expect(lower).toContain("bounded in time");
-    expect(lower).toContain("one attempt");
-    expect(lower).toContain("not an amount of work an attacker has to do offline");
+describe("§13.5 the inline form is short, and still discharges the duty", () => {
+  it("carries both clauses of the advisory-only disclosure duty", () => {
+    const lower = E2EE_WEB_SAS_ADVISORY.toLowerCase();
+    // "MUST state that the comparison catches accidental wrong-node routing and
+    // some network interposition while the loaded code is honest, and **cannot**
+    // protect against the Hub operator, who serves the code that displays it."
+    // A bare code violates that MUST, so shortening may drop wording and may
+    // never drop either clause.
+    expect(lower).toContain("accidental wrong-node routing");
+    expect(lower).toContain("some network interposition");
+    expect(lower).toContain("while the loaded code is honest");
+    expect(lower).toContain("cannot protect against the hub operator, who serves this page");
+    // It is the pointer at the ceremony, and it is here rather than in the trust
+    // notice because this value renders only where the characters do.
+    expect(lower).toContain("compare this code with the one your node's cli shows");
+  });
+
+  it("no longer states the format, the arithmetic, or the hedge", () => {
+    // The three things the owner did not need while comparing eight characters:
+    // the character count and grouping (visible in the code itself), the bit
+    // total and the window-and-one-attempt justification behind it, and the
+    // trailing "a match does not rule out someone sitting in the middle", which
+    // restated the clause immediately before it.
+    const lower = E2EE_WEB_SAS_ADVISORY.toLowerCase();
+    expect(E2EE_WEB_SAS_ADVISORY).not.toMatch(/\d/u);
+    for (const cut of [
+      "groups of",
+      "in order",
+      "bits",
+      "bounded in time",
+      "one attempt",
+      "offline",
+      "does not rule out",
+    ]) {
+      expect(lower, `the inline form still says ${cut}`).not.toContain(cut);
+    }
+  });
+
+  it("is materially shorter than what an owner opens Settings to read", () => {
+    // "Short" has to be a measured property or it is only a name: this line is
+    // the whole of the accompanying text on the surface where an owner is
+    // mid-comparison, and copy creeping back into it is exactly the regression
+    // this shape exists to stop. The ceiling is generous enough for a reword and
+    // far below the two paragraphs it replaced.
+    expect(E2EE_WEB_SAS_ADVISORY.length).toBeLessThanOrEqual(260);
+    expect(E2EE_WEB_SAS_MORE.length).toBeLessThanOrEqual(80);
+    expect(E2EE_WEB_SAS_ADVISORY.length).toBeLessThan(E2EE_WEB_SAS_DETAIL.length);
+  });
+
+  it("ships the pointer at the long form, and names where it is", () => {
+    // A short form whose pointer a caller could drop is a short form that
+    // silently becomes the only account an owner is ever offered.
+    expect(E2EE_WEB_SAS_MORE).toContain("Settings → Security");
+  });
+});
+
+describe("§2.2 the long form keeps both reasons, and keeps them apart", () => {
+  it("states §13.5's duty at full strength", () => {
+    const lower = E2EE_WEB_SAS_DETAIL.toLowerCase();
+    expect(lower).toContain("accidental wrong-node routing");
+    expect(lower).toContain("some network interposition");
+    expect(lower).toContain("while the loaded code is honest");
+    expect(lower).toContain("cannot protect against the hub operator");
+    expect(lower).toContain("compare this code with the one your node's cli shows");
+  });
+
+  it("names the reason that needs no substituted bundle at all", () => {
+    // §2.2's web row: "**Not protected** — the Hub can originate an unsigned NX
+    // session **and** controls the served code". §8.10: NX client→node is "never
+    // authenticated at the Noise level … a Hub can originate an NX session", and
+    // node→client encrypts "to an **anonymous ephemeral initiator** — any active
+    // party, including the Hub". This tier holds no pin with which to tell the
+    // far end apart (§2.3's web bullet, §6.3, §13.1), and that half of the denial
+    // is true even of an honest bundle.
+    const lower = E2EE_WEB_SAS_DETAIL.toLowerCase();
+    expect(lower).toContain("pins no node identity");
+    expect(lower).toContain("your machine or the hub standing in for it");
+  });
+
+  it("does not let the two reasons read as one", () => {
+    // Collapsing them leaves a reader who has no cause to doubt the bundle
+    // concluding the Hub is outside the channel. It is not: one reason needs a
+    // substituted bundle and the other needs nothing, so the sentence counts
+    // them and the no-pin clause is stated before the served-code one.
+    const lower = E2EE_WEB_SAS_DETAIL.toLowerCase();
+    expect(lower).toContain("two separate things it cannot do");
+    expect(lower.indexOf("pins no node identity")).toBeLessThan(
+      lower.indexOf("cannot protect against the hub operator"),
+    );
+  });
+
+  it("is trimmed the same way the inline form is", () => {
+    // §13.5's own rule for this surface: an owner reading Settings wants what
+    // this protects them from and what it does not, not the derivation.
+    const lower = E2EE_WEB_SAS_DETAIL.toLowerCase();
+    expect(E2EE_WEB_SAS_DETAIL).not.toMatch(/\d/u);
+    for (const cut of ["groups of", "bits", "offline", "does not rule out"]) {
+      expect(lower, `the long form still says ${cut}`).not.toContain(cut);
+    }
+  });
+
+  it("says what to do about it, with the command that produces the other end", () => {
+    expect(E2EE_WEB_SAS_COMPARE).toContain("ryco e2ee sessions");
   });
 });
 
@@ -171,53 +238,60 @@ describe("§13.5 the absence of a code is a state with words", () => {
 });
 
 describe("§13.5 the advisory cannot be left out", () => {
-  it("makes the required denial and names what the comparison does catch", () => {
-    const lower = E2EE_WEB_SAS_ADVISORY.toLowerCase();
-    // The advisory-only disclosure duty, verbatim in substance: what a match
-    // catches, and what it cannot protect against.
-    expect(lower).toContain("accidental wrong-node routing");
-    expect(lower).toContain("some network interposition");
-    expect(lower).toContain("while the loaded code is honest");
-    expect(lower).toContain("cannot protect against the hub operator, who serves that code");
-    expect(lower).toContain("does not rule out someone sitting in the middle");
-    // §2.2's web row denies the active-Hub column twice, and the half that needs
-    // no substituted bundle — "the Hub can originate an unsigned NX session" —
-    // is what this comparison is FOR. The clause names the party a match rules
-    // out by construction, which is also why the same sentence has to deny the
-    // Hub: on this tier the Hub always serves the page.
-    expect(lower).toContain("anyone standing in for your node who is not also serving this page");
-    // It is the pointer at the ceremony, and it is here rather than in the trust
-    // notice because this value renders only where the characters do.
-    expect(lower).toContain("compare this code with the one your node's cli shows");
+  it("comes back with the code, in one value, in every placement and every accepted format", () => {
+    for (const placement of HOSTED_E2EE_VERIFICATION_PLACEMENTS) {
+      const view = hostedE2eeVerificationView(VALID, placement);
+      expect(view, placement).not.toBeNull();
+      expect(view!.groups, placement).toEqual(["ABCD", "EFGH"]);
+      expect(view!.display, placement).toBe(VALID);
+      // BOTH sentences travel with the characters, at every length. Neither is
+      // defaulted and neither is empty, so a placement cannot ship a code with
+      // one sentence and a gap where the other belongs.
+      expect(view!.advisory.trim().length, `${placement}.advisory`).toBeGreaterThan(0);
+      expect(view!.more.trim().length, `${placement}.more`).toBeGreaterThan(0);
+    }
   });
 
-  it("comes back with the code, in one value, in every view the splitter accepts", () => {
-    const view = hostedE2eeVerificationView(VALID);
-    expect(view).not.toBeNull();
-    expect(view!.groups).toEqual(["ABCD", "EFGH"]);
-    expect(view!.display).toBe(VALID);
-    expect(view!.caption).toBe(E2EE_WEB_SAS_CAPTION);
-    expect(view!.advisory).toBe(E2EE_WEB_SAS_ADVISORY);
+  it("gives each placement its own pair, and no placement the other's", () => {
+    // A builder that returned one pair for every placement would pass every
+    // assertion about the strings above while shipping the long account on the
+    // surface the owner was comparing on, or the pointer-to-here on the page it
+    // points at.
+    const inline = hostedE2eeVerificationView(VALID, "inline")!;
+    const settings = hostedE2eeVerificationView(VALID, "settings")!;
+    expect(inline.advisory).toBe(E2EE_WEB_SAS_ADVISORY);
+    expect(inline.more).toBe(E2EE_WEB_SAS_MORE);
+    expect(settings.advisory).toBe(E2EE_WEB_SAS_DETAIL);
+    expect(settings.more).toBe(E2EE_WEB_SAS_COMPARE);
+    expect(HOSTED_E2EE_VERIFICATION_PLACEMENTS.toSorted()).toEqual(["inline", "settings"]);
   });
 
   it("is required by the type, not merely populated by the constructor", () => {
-    // If `advisory` ever became optional, `{ advisory?: string }` would stop
-    // extending `{ advisory: string }`, `AdvisoryIsRequired` would resolve to
-    // `false`, and this assignment would not compile. The runtime expectation
-    // below is only here so the check is visible in the suite output.
-    type AdvisoryIsRequired = HostedE2eeVerificationView extends { advisory: string }
+    // If either field ever became optional, `{ advisory?: string }` would stop
+    // extending `{ advisory: string }`, the alias would resolve to `false`, and
+    // this assignment would not compile. The runtime expectation below is only
+    // here so the check is visible in the suite output.
+    type BothAreRequired = HostedE2eeVerificationView extends {
+      advisory: string;
+      more: string;
+    }
       ? true
       : false;
-    const advisoryIsRequired: AdvisoryIsRequired = true;
-    expect(advisoryIsRequired).toBe(true);
+    const bothAreRequired: BothAreRequired = true;
+    expect(bothAreRequired).toBe(true);
   });
 
   it("returns nothing at all rather than a code with no advisory", () => {
     // The only way a surface gets the characters is by holding a view, and the
     // only views that exist carry the denial. There is no partial result.
-    expect(hostedE2eeVerificationView(null)).toBeNull();
-    for (const malformed of ["", "ABCDEFGH", "ABCD-EFG", "abcd-efgh", "ABCD EFGH"]) {
-      expect(hostedE2eeVerificationView(malformed), JSON.stringify(malformed)).toBeNull();
+    for (const placement of HOSTED_E2EE_VERIFICATION_PLACEMENTS) {
+      expect(hostedE2eeVerificationView(null, placement), placement).toBeNull();
+      for (const malformed of ["", "ABCDEFGH", "ABCD-EFG", "abcd-efgh", "ABCD EFGH"]) {
+        expect(
+          hostedE2eeVerificationView(malformed, placement),
+          `${placement} ${JSON.stringify(malformed)}`,
+        ).toBeNull();
+      }
     }
   });
 });

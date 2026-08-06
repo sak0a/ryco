@@ -11,23 +11,41 @@
 // the Hub operator, who serves the code that displays it."
 //
 // A duty a caller can discharge separately is a duty a caller can forget, so
-// {@link hostedE2eeVerificationView} returns the groups, the format caption, and
-// that sentence as ONE object with three required fields. There is no exported
-// function that hands back the eight characters alone: rendering the code
-// without the denial requires deleting a field from a returned value rather than
-// omitting a call, which is the difference between a rule and a mechanism.
+// {@link hostedE2eeVerificationView} returns the groups, the display value, the
+// duty, and the pointer at the rest of the account as ONE object with four
+// required fields. There is no exported function that hands back the eight
+// characters alone: rendering the code without the denial requires deleting a
+// field from a returned value rather than omitting a call, which is the
+// difference between a rule and a mechanism.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// THE NUMBERS ARE QUOTED, NEVER WRITTEN
+// TWO LENGTHS, AND NEITHER OF THEM IS A BARE CODE
 // ─────────────────────────────────────────────────────────────────────────────
-// The splitter, the caption, and the displayed-entropy figure all read
-// `E2EE_WEB_SAS_CHARS` — and, for the entropy, `E2EE_CROCKFORD_ALPHABET` —
-// exactly as `apps/mobile`'s §13.4 caption reads the safety-number constants. A
-// §13.5 format change therefore breaks the split and rewrites the sentence in
-// the same edit; it can never leave a stale claim about a length behind. The
-// test reads this module's SOURCE as well as its values, because a runtime
-// substring check cannot tell an interpolated constant from a hardcoded digit
-// that happens to match it.
+// The connection surface used to draw three paragraphs under eight characters,
+// and almost none of it was what an owner needed while comparing them. The copy
+// is now written at two lengths and the LENGTH IS NOT A CALLER'S FREE CHOICE:
+// {@link HostedE2eeVerificationPlacement} is a required argument, both of its
+// branches fill both text fields, and both branches carry §13.5's two clauses in
+// full. So a surface picks where it is drawing, never whether the duty comes
+// with it — and the short branch ships the pointer at the long one in the same
+// object, so the short form is never presented as the whole account.
+//
+// WHAT LEFT THE SHORT FORM AND WHY. The character count and the grouping
+// instruction: the owner is looking at the format while they read it. The bit
+// arithmetic and the window-and-one-attempt justification behind it: §13.5's
+// entropy "is justified by that window and not by an offline work factor", which
+// makes the number a derivation rather than an instruction, and §13.5 forbids
+// using the derivation "to strengthen the claims of §2.4 or §17.5" — so the
+// number could never do the one job a sentence beside the code has. And the
+// trailing "a match does not rule out someone sitting in the middle", which
+// restated the clause immediately before it. None of that is a claim; dropping
+// it removes no protection an owner was told about.
+//
+// WHAT NEITHER FORM MAY LOSE. §2.2's web row denies the active-Hub column for
+// TWO separate reasons — "the Hub can originate an unsigned NX session **and**
+// controls the served code" — and only the second is §13.5's clause. The short
+// form carries §13.5's duty; the long form carries both reasons, kept apart, in
+// the order that makes clear one needs no substituted bundle at all.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 // WHAT THE COPY MAY NOT SAY
@@ -35,15 +53,12 @@
 // §13.5: "Implementations MUST NOT present the `WebSAS` as unforgeable against
 // an active interposer", "MUST NOT present the `WebSAS` as an operator-proof or
 // E2EE-verification guarantee", and "MUST NOT describe a match as proof that no
-// interposer is present". §17.5 adds that its entropy floor "is an online bound
-// rather than an offline one", so the caption states the shipped displayed
-// entropy together with the two things that bound it — `T_HANDSHAKE` and §8.1's
-// one attempt per channel — rather than as a work factor.
+// interposer is present".
 //
-// The advisory mirrors the sentence `apps/server`'s CLI already prints beside
-// the node-side code, so the two halves of the compare-out-of-band flow read as
-// one instruction. It diverges in its final clause only: the CLI ends "a match
-// is not proof that no interposer is present", and the scan in
+// The forms mirror the sentence `apps/server`'s CLI already prints beside the
+// node-side code, so the two halves of the compare-out-of-band flow read as one
+// instruction. They diverge in the CLI's final clause only: it ends "a match is
+// not proof that no interposer is present", and the scan in
 // `HostedRelayTrustNotice.logic.test.ts` is a bare substring match that cannot
 // tell that denial from a claim. This module makes the same denial without the
 // tokens, so no future edit can strand one of them in the affirmative.
@@ -86,56 +101,81 @@ export function e2eeWebSasGroups(display: string): ReadonlyArray<string> {
  * `E2EE_WEB_SAS_CHARS.chars`. Both inputs are shipped constants, so a §13.5
  * format change moves this number in the same edit.
  *
- * IT IS THE SHIPPED VALUE AND NOT `E2EE_WEB_SAS_MIN_DISPLAYED_BITS`, and the
- * difference is the whole reason it exists. The floor is where "a
- * well-resourced attacker becomes relevant" (§13.5's non-normative note) and the
- * shipped format sits about a thousandfold above it; a caption quoting the floor
- * told an owner their one available check cost an attacker a thousandth of what
- * it does, which is a reason to skip the comparison rather than to make it.
- * Understating is the safe direction for a CLAIM about who can read the payload;
- * it is not the safe direction for an instruction about whether to perform a
- * check. `HostedE2eeVerification.logic.test.ts` pins that this stays at or above
- * the floor (§3.2.1 S11).
+ * NO SENTENCE QUOTES IT ANY MORE, AND IT STAYS ANYWAY. The caption that used to
+ * state it was cut because §13.5's entropy "is justified by that window and not
+ * by an offline work factor" — a derivation, not something an owner acts on. The
+ * INVARIANT behind it is not copy: §3.2.1 S11 requires the rendered format to
+ * clear `E2EE_WEB_SAS_MIN_DISPLAYED_BITS`, and a format change that quietly
+ * dropped below the floor would be a real regression whatever the surface says.
+ * `HostedE2eeVerification.logic.test.ts` pins that relationship here, over the
+ * constants, which is where it belonged all along.
  */
 export const E2EE_WEB_SAS_DISPLAYED_BITS =
   E2EE_WEB_SAS_CHARS.chars * Math.log2(E2EE_CROCKFORD_ALPHABET.length);
 
 /**
- * What the surface says about the string itself — format, and what its entropy
- * does and does not buy.
+ * §13.5's advisory-only disclosure duty, in the fewest words that discharge it.
  *
- * Every number is quoted from `relayE2eeConstants.ts`. It is stated together
- * with the two bounds that justify it, because §17.5 is explicit that the
- * entropy here "is justified by that window and not by an offline work factor"
- * and §13.5 forbids using the derivation "to strengthen the claims of §2.4 or
- * §17.5".
- */
-export const E2EE_WEB_SAS_CAPTION =
-  `${E2EE_WEB_SAS_CHARS.chars} characters, in ${E2EE_WEB_SAS_CHARS.groups} groups of ` +
-  `${E2EE_WEB_SAS_CHARS.charsPerGroup}. The length and the grouping are the only check there is, ` +
-  `so read all ${E2EE_WEB_SAS_CHARS.chars} in order. They carry ` +
-  `${E2EE_WEB_SAS_DISPLAYED_BITS} bits, and that number holds only because a handshake is ` +
-  "bounded in time and each channel gets exactly one attempt — it is not an amount of work an " +
-  "attacker has to do offline.";
-
-/**
- * §13.5's advisory-only disclosure duty, in the words the specification bounds
- * it to: what the comparison catches, and what it cannot protect against.
+ * Both clauses, one sentence each side of the semicolon: what a match catches,
+ * and what it cannot protect against. This is the whole of the accompanying text
+ * on the connection surface, and it is the reason the surface may draw the code
+ * at all — a bare code violates a MUST.
  *
- * IT IS ALSO WHERE THE POINTER AT THE COMPARISON LIVES. §2.2's web row denies
- * the active-Hub column for two reasons, and the one that needs no substituted
- * bundle — "the Hub can originate an unsigned NX session" — is the one this
- * comparison is against. So the middle clause names the party the match rules
- * out by construction: an interposer who terminates the channel in the node's
- * place WITHOUT also serving this page. On this tier the Hub always serves the
- * page, which is exactly why the same sentence ends by denying it there.
+ * IT IS ALSO WHERE THE POINTER AT THE COMPARISON LIVES. `HostedRelayTrustNotice`
+ * mounts on surfaces that draw no code and therefore may not mention one, so the
+ * instruction to compare belongs here, in the value that renders only where the
+ * characters do.
  */
 export const E2EE_WEB_SAS_ADVISORY =
+  "Compare this code with the one your node's CLI shows. A match catches accidental wrong-node " +
+  "routing and some network interposition while the loaded code is honest; it cannot protect " +
+  "against the Hub operator, who serves this page.";
+
+/**
+ * Where the rest of the account is, so the short form is never the whole story.
+ *
+ * It ships in the same object as {@link E2EE_WEB_SAS_ADVISORY} and is required
+ * for the same reason: a short form whose pointer a caller could drop is a short
+ * form that silently becomes the only thing an owner is ever offered.
+ */
+export const E2EE_WEB_SAS_MORE = "Settings → Security explains what else this tab cannot check.";
+
+/**
+ * The long form, for the one surface an owner opens to read about this.
+ *
+ * IT NAMES BOTH OF §2.2'S REASONS AND KEEPS THEM APART. The web row is denied
+ * the active-Hub column twice — "the Hub can originate an unsigned NX session
+ * **and** controls the served code" — and the two have different preconditions.
+ * The first needs nothing at all (§8.10: NX client→node is "never authenticated
+ * at the Noise level … a Hub can originate an NX session", and node→client
+ * encrypts "to an **anonymous ephemeral initiator** — any active party,
+ * including the Hub"), and this tier holds no pin of any kind (§2.3's web
+ * bullet, §6.3, §13.1) with which to tell the far end apart. The second is
+ * §2.4's served-code ceiling. Collapsing them into one leaves a reader who
+ * trusts the bundle concluding the Hub is outside the channel; it is not.
+ *
+ * It carries no entropy arithmetic and no format instruction, for the reason the
+ * short form does not: an owner reading Settings wants what this protects them
+ * from and what it does not, not the derivation.
+ */
+export const E2EE_WEB_SAS_DETAIL =
   "Compare this code with the one your node's CLI shows for this session. A match catches " +
-  "accidental wrong-node routing and some network interposition — anyone standing in for your " +
-  "node who is not also serving this page — while the loaded code is honest; it cannot protect " +
-  "against the Hub operator, who serves that code, and a match does not rule out someone sitting " +
-  "in the middle.";
+  "accidental wrong-node routing and some network interposition while the loaded code is honest. " +
+  "Two separate things it cannot do: it cannot tell you whether the far end is your machine or " +
+  "the Hub standing in for it, because this tab pins no node identity; and it cannot protect " +
+  "against the Hub operator, who serves this page and could serve code that completes the same " +
+  "handshake and displays this same code anyway.";
+
+/**
+ * What to do about it, on the surface that has room to say how.
+ *
+ * The long form's counterpart to {@link E2EE_WEB_SAS_MORE}: the short form's
+ * second field points at where to read more, and this one points at the command
+ * that produces the other half of the comparison. Both branches fill the field,
+ * so neither can ship a code with one sentence and a gap.
+ */
+export const E2EE_WEB_SAS_COMPARE =
+  "Run `ryco e2ee sessions` on the machine running the node to read its end of the comparison.";
 
 /**
  * What the surface says when the channel locked but no §13.5 code reached it.
@@ -155,12 +195,25 @@ export const E2EE_WEB_SAS_UNAVAILABLE =
   "your node's CLI.";
 
 /**
+ * Which surface is drawing, and therefore at which length.
+ *
+ * `inline` is the connection surface — the desktop node menu, where an owner is
+ * mid-comparison and has room for one line. `settings` is Settings → Security,
+ * the surface an owner opens to read about this rather than to act.
+ *
+ * IT IS A REQUIRED ARGUMENT WITH NO DEFAULT. A default would make the long form
+ * opt-in, and the surface most likely to forget to opt in is the one an owner
+ * navigated to specifically to read it.
+ */
+export type HostedE2eeVerificationPlacement = "inline" | "settings";
+
+/**
  * Everything a surface needs to render §13.5, and nothing it can render without.
  *
- * All three fields are required. {@link E2EE_WEB_SAS_ADVISORY} in particular is
- * not optional and has no default: a caller holding this object has already been
- * handed the denial, so the only way to draw the code without it is to
- * deliberately drop a field.
+ * All four fields are required. {@link HostedE2eeVerificationView.advisory} in
+ * particular is not optional and has no default: a caller holding this object
+ * has already been handed the denial, so the only way to draw the code without
+ * it is to deliberately drop a field.
  */
 export interface HostedE2eeVerificationView {
   /** The validated groups, in derivation order. */
@@ -170,9 +223,33 @@ export interface HostedE2eeVerificationView {
    * draws, so no renderer picks a separator of its own.
    */
   readonly display: string;
-  readonly caption: string;
+  /** §13.5's duty at this placement's length. Both clauses, either way. */
   readonly advisory: string;
+  /** Where the rest of it is (`inline`), or what to do about it (`settings`). */
+  readonly more: string;
 }
+
+/** The two sentences each placement ships, so neither can travel half-dressed. */
+const PLACEMENT_TEXT = {
+  inline: { advisory: E2EE_WEB_SAS_ADVISORY, more: E2EE_WEB_SAS_MORE },
+  settings: { advisory: E2EE_WEB_SAS_DETAIL, more: E2EE_WEB_SAS_COMPARE },
+} as const satisfies Record<
+  HostedE2eeVerificationPlacement,
+  { readonly advisory: string; readonly more: string }
+>;
+
+/**
+ * Every placement, for the scan that reads them all.
+ *
+ * A placement added to the union becomes a required key of `PLACEMENT_TEXT` and
+ * so stops the repository compiling until someone writes it both sentences; this
+ * makes the same fact checkable at runtime, so the prohibited-phrase scans and
+ * the §13.5 duty assertions cover a new length the day it is added rather than
+ * the day someone remembers to list it.
+ */
+export const HOSTED_E2EE_VERIFICATION_PLACEMENTS = Object.keys(
+  PLACEMENT_TEXT,
+) as ReadonlyArray<HostedE2eeVerificationPlacement>;
 
 /**
  * The §13.5 view for the current channel, or `null` when there is nothing this
@@ -183,14 +260,18 @@ export interface HostedE2eeVerificationView {
  * is showing, and half a comparison is worse than none: the owner would compare
  * something, see it differ, and learn nothing about why.
  */
-export function hostedE2eeVerificationView(code: string | null): HostedE2eeVerificationView | null {
+export function hostedE2eeVerificationView(
+  code: string | null,
+  placement: HostedE2eeVerificationPlacement,
+): HostedE2eeVerificationView | null {
   if (code === null) return null;
   const groups = e2eeWebSasGroups(code);
   if (groups.length === 0) return null;
+  const { advisory, more } = PLACEMENT_TEXT[placement];
   return {
     groups,
     display: groups.join(E2EE_WEB_SAS_CHARS.separator),
-    caption: E2EE_WEB_SAS_CAPTION,
-    advisory: E2EE_WEB_SAS_ADVISORY,
+    advisory,
+    more,
   };
 }

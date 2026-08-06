@@ -53,10 +53,7 @@ import type {
   NodeE2eeSession,
 } from "@ryco/client-runtime/connection";
 import type { HostedConnectionStatusIndicator } from "../../hostedHub/connectionStatus";
-import {
-  hostedE2eeVerificationView,
-  type HostedE2eeVerificationView,
-} from "../hostedHub/HostedE2eeVerification.logic";
+import { hostedE2eeVerificationView } from "../hostedHub/HostedE2eeVerification.logic";
 
 /**
  * Which of the two connection modes this build is running in.
@@ -671,13 +668,13 @@ export const NODE_SESSION_NATIVE_CODE_ABSENT =
  * and the shipped one names only the other.
  *
  * `E2EE_WEB_SAS_ADVISORY` says "Compare this code with the one your node's CLI
- * shows for this session", and it is correct where it ships: a browser holding
- * its own channel's code is told to check it against the node. Rendered on the
- * NODE's live-session list it inverts — the reader is already at the node, so the
- * instruction sends them to compare the node against itself, which always matches
- * and establishes nothing. Its ceiling clause inverts with it: "the Hub operator,
- * who serves that code" is the party serving the BROWSER its page, and in local
- * mode the node is serving this one.
+ * shows", and it is correct where it ships: a browser holding its own channel's
+ * code is told to check it against the node. Rendered on the NODE's live-session
+ * list it inverts — the reader is already at the node, so the instruction sends
+ * them to compare the node against itself, which always matches and establishes
+ * nothing. Its ceiling clause inverts with it: "the Hub operator, who serves this
+ * page" is the party serving the BROWSER its page, and in local mode the node is
+ * serving this one.
  *
  * So the node end gets its own sentence, with §13.5's denial restated in node-end
  * terms and no weaker: the match is against the remote browser's screen, and it
@@ -698,23 +695,35 @@ export const NODE_SESSION_WEB_SAS_UNAVAILABLE =
 /**
  * §13.5's value for a session on the node's own list, as one inseparable object.
  *
- * The format validation, the groups, and the caption are the shipped function's —
- * this is not a second parser, and a value that function refuses is refused here.
- * Only the advisory is replaced, and only because its referent is the other end
- * of the comparison. It is still a required field on the returned object, so
- * drawing these characters without a sentence takes deleting a field.
+ * The format validation, the groups, and the display value are the shipped
+ * function's — this is not a second parser, and a value that function refuses is
+ * refused here. Only the advisory is replaced, and only because its referent is
+ * the other end of the comparison. It is still a required field on the returned
+ * object, so drawing these characters without a sentence takes deleting a field.
+ *
+ * IT IS NO LONGER AN ALIAS OF THE BROWSER-END VIEW, and the difference is the
+ * `more` field rather than a style choice. The browser end ships a short line
+ * plus a pointer at the long account in Settings → Security; the node end has
+ * one form and, in local mode, the reader is already inside Settings → Security,
+ * so a pointer there would send them to the page they are standing on. The
+ * placement argument below is only what satisfies the shipped validator — every
+ * string it chose is discarded.
  */
-export type NodeSessionVerificationView = HostedE2eeVerificationView;
+export interface NodeSessionVerificationView {
+  readonly groups: ReadonlyArray<string>;
+  /** The groups re-joined with the format's own separator. */
+  readonly display: string;
+  readonly advisory: string;
+}
 
 export function nodeSessionVerificationView(
   code: string | null,
 ): NodeSessionVerificationView | null {
-  const view = hostedE2eeVerificationView(code);
+  const view = hostedE2eeVerificationView(code, "inline");
   if (view === null) return null;
   return {
     groups: view.groups,
     display: view.display,
-    caption: view.caption,
     advisory: NODE_SESSION_WEB_SAS_ADVISORY,
   };
 }
