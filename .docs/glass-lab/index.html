@@ -670,10 +670,18 @@
         border-radius: 16px 16px 6px 16px;
         padding: 10px 14px;
       }
-      [data-direction="b"] .bubble,
-      [data-direction="b"] .worked,
+      /* B: content keeps a full-opacity plate on glass — prose and code never
+         sit directly on the wallpaper. */
+      [data-direction="b"] .bubble {
+        background: var(--card);
+      }
+      [data-direction="b"] .md,
+      [data-direction="b"] .worked {
+        background: var(--background);
+        border-radius: var(--r-inner);
+      }
       [data-direction="b"] .md {
-        --plate: 1;
+        padding: 10px 14px;
       }
       .meta {
         align-self: flex-end;
@@ -1308,13 +1316,13 @@
   <body data-theme="dark" data-direction="a" data-reduced="0">
     <header class="lab-top">
       <div class="lab-title">Ryco <span>· Liquid Glass Lab</span></div>
-      <div class="seg" id="dirSeg" role="tablist" aria-label="Design direction">
+      <div class="seg" id="dirSeg" role="group" aria-label="Design direction">
         <button data-dir="a" aria-pressed="true">A · Layered Chrome</button>
         <button data-dir="b" aria-pressed="false">B · Full Vibrancy</button>
         <button data-dir="c" aria-pressed="false">C · Quiet Glass</button>
         <button data-dir="d" aria-pressed="false">D · Liquid</button>
       </div>
-      <div class="seg" id="themeSeg" aria-label="Theme">
+      <div class="seg" id="themeSeg" role="group" aria-label="Theme">
         <button data-th="dark" aria-pressed="true">Dark</button>
         <button data-th="light" aria-pressed="false">Light</button>
       </div>
@@ -2054,6 +2062,10 @@
       const dirCards = [...document.querySelectorAll("#dirCards .dcard")];
       function setDirection(d) {
         body.dataset.direction = d;
+        if (d !== "d") {
+          composer.style.transform = "";
+          composer.style.removeProperty("--bezel-angle");
+        }
         dirButtons.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.dir === d)));
         dirCards.forEach((c) => c.classList.toggle("sel", c.dataset.dir === d));
         applyRefraction();
