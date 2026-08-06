@@ -11,14 +11,32 @@ import { getEffectiveSurfaceTransparency } from "../themes/appearancePreferences
  * rim bends light.
  */
 
+export function isChromiumEngine(): boolean {
+  return typeof navigator !== "undefined" && /Chrom(e|ium)/.test(navigator.userAgent);
+}
+
+function matchesMedia(query: string): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia(query).matches
+  );
+}
+
+/**
+ * The media gates shared by every liquid surface: no glass under reduced
+ * transparency or forced colors, and none on coarse pointers. Engine-neutral —
+ * Safari/Firefox still qualify for the frost tier.
+ */
+export function isLiquidGlassMediaEligible(): boolean {
+  if (typeof window === "undefined") return false;
+  if (matchesMedia("(prefers-reduced-transparency: reduce)")) return false;
+  if (matchesMedia("(forced-colors: active)")) return false;
+  return matchesMedia("(pointer: fine)");
+}
+
 export function isLiquidGlassCapable(): boolean {
-  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
-  if (!/Chrom(e|ium)/.test(navigator.userAgent)) return false;
-  const reduced = (query: string) =>
-    typeof window.matchMedia === "function" && window.matchMedia(query).matches;
-  if (reduced("(prefers-reduced-transparency: reduce)")) return false;
-  if (reduced("(forced-colors: active)")) return false;
-  return window.matchMedia("(pointer: fine)").matches;
+  return isChromiumEngine() && isLiquidGlassMediaEligible();
 }
 
 /**
@@ -238,6 +256,19 @@ function releaseGlintTracker(): void {
   glintListener = null;
 }
 
+/**
+ * Registers a host with the shared pointer glint (one window listener + one
+ * rAF loop for every liquid surface). Returns an unregister function.
+ */
+export function registerLiquidGlassGlintHost(element: HTMLElement): () => void {
+  glintHosts.add(element);
+  ensureGlintTracker();
+  return () => {
+    glintHosts.delete(element);
+    releaseGlintTracker();
+  };
+}
+
 function attachLiquidLayers(element: HTMLElement): () => void {
   const layers: HTMLElement[] = [];
   for (const className of [
@@ -255,13 +286,11 @@ function attachLiquidLayers(element: HTMLElement): () => void {
   if (getComputedStyle(element).position === "static") {
     element.style.position = "relative";
   }
-  glintHosts.add(element);
-  ensureGlintTracker();
+  const unregisterGlint = registerLiquidGlassGlintHost(element);
   return () => {
     for (const layer of layers) layer.remove();
     element.style.position = previousPosition;
-    glintHosts.delete(element);
-    releaseGlintTracker();
+    unregisterGlint();
   };
 }
 

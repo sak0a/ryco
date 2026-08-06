@@ -3,6 +3,9 @@ import { useEffect, useId, useState } from "react";
 import {
   buildLiquidGlassFilter,
   ensureLiquidGlassDefsHost,
+  isChromiumEngine,
+  isLiquidGlassMediaEligible,
+  registerLiquidGlassGlintHost,
   renderDisplacementMap,
 } from "../../lib/liquidGlass";
 
@@ -26,19 +29,6 @@ import {
  */
 
 const DISPLACEMENT_SCALE = -64;
-const POINTER_RANGE_PX = 480;
-
-function isChromiumEngine(): boolean {
-  return typeof navigator !== "undefined" && /Chrom(e|ium)/.test(navigator.userAgent);
-}
-
-function prefersReduced(query: string): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia(query).matches
-  );
-}
 
 export function ComposerLiquidGlass({ hostRef }: { hostRef: React.RefObject<HTMLElement | null> }) {
   const filterId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
@@ -47,13 +37,7 @@ export function ComposerLiquidGlass({ hostRef }: { hostRef: React.RefObject<HTML
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
-    if (
-      prefersReduced("(prefers-reduced-transparency: reduce)") ||
-      prefersReduced("(forced-colors: active)") ||
-      !window.matchMedia("(pointer: fine)").matches
-    ) {
-      return;
-    }
+    if (!isLiquidGlassMediaEligible()) return;
     setEnabled(true);
     setRefract(isChromiumEngine());
   }, []);
@@ -110,29 +94,12 @@ export function ComposerLiquidGlass({ hostRef }: { hostRef: React.RefObject<HTML
     };
   }, [enabled, refract, mapReady, filterId, hostRef]);
 
-  // Pointer-tracked bezel glint, written straight to a CSS variable so no
-  // React render happens per pointermove. Frozen under reduced motion.
+  // Pointer-tracked bezel glint via the shared tracker (one listener and one
+  // rAF loop across every liquid surface; frozen under reduced motion there).
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !enabled) return;
-    if (prefersReduced("(prefers-reduced-motion: reduce)")) return;
-    let frame = 0;
-    const onPointerMove = (event: PointerEvent) => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        const rect = host.getBoundingClientRect();
-        const dx = event.clientX - (rect.left + rect.width / 2);
-        const dy = event.clientY - (rect.top + rect.height / 2);
-        if (Math.hypot(dx, dy) > POINTER_RANGE_PX + rect.width / 2) return;
-        host.style.setProperty("--lg-bezel-angle", `${135 + dx * 0.045 + dy * 0.06}deg`);
-      });
-    };
-    window.addEventListener("pointermove", onPointerMove, { passive: true });
-    return () => {
-      window.removeEventListener("pointermove", onPointerMove);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
+    return registerLiquidGlassGlintHost(host);
   }, [enabled, hostRef]);
 
   if (!enabled) return null;

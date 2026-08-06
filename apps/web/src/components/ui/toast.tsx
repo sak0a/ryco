@@ -554,7 +554,7 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
-                "app-surface absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg border not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 [transition:transform_.5s_cubic-bezier(.22,1,.36,1),opacity_.5s,height_.15s] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+                "app-surface absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg border not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 [transition:transform_var(--app-motion-duration-stack)_var(--app-motion-spring-gentle),opacity_var(--app-motion-duration-stack)_var(--app-motion-spring-gentle),height_var(--app-motion-duration-chip)] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
                 // Base positioning using data-position
                 "data-[position*=right]:right-0 data-[position*=right]:left-auto",
                 "data-[position*=left]:right-auto data-[position*=left]:left-0",

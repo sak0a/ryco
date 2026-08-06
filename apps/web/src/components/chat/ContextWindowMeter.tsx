@@ -155,7 +155,13 @@ export function ContextWindowMeter(props: {
               {formatContextWindowTokens(usage.usedTokens)} context used
             </div>
           )}
-          <MeterBar percent={usage.maxTokens !== null ? normalizedPercentage : null} />
+          <MeterBar
+            percent={
+              usage.maxTokens !== null && usage.usedPercentage !== null
+                ? normalizedPercentage
+                : null
+            }
+          />
           {(usage.totalProcessedTokens ?? null) !== null &&
           (usage.totalProcessedTokens ?? 0) > usage.usedTokens ? (
             <div className="text-xs text-muted-foreground">

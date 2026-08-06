@@ -3437,7 +3437,7 @@ export default function ChatView(props: ChatViewProps) {
       observer.disconnect();
       column.style.removeProperty("--chat-composer-clearance");
     };
-  }, [composerOverlayActive]);
+  }, [composerOverlayActive, activeThreadId]);
   // Same mechanism for the top bar: the header overlays the transcript and
   // publishes its height so the timeline's list header, the search bar, the
   // floating overview, and the (rare) banner stack clear it.
@@ -3459,7 +3459,7 @@ export default function ChatView(props: ChatViewProps) {
       observer.disconnect();
       shell.style.removeProperty("--chat-header-clearance");
     };
-  }, [headerOverlayActive]);
+  }, [headerOverlayActive, activeThreadId]);
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -3479,7 +3479,12 @@ export default function ChatView(props: ChatViewProps) {
           // inset is disabled for the phone tier in index.css).
           // Chrome-layer material: same plate/filter family as the sidebar,
           // so the bar and the sidebar read as one continuous chrome tier.
-          "app-chrome-glass border-b border-sidebar-border phone:pt-safe",
+          // Desktop only — the web phone tier is frozen and keeps its
+          // original header chrome (AGENTS.md).
+          "border-b phone:pt-safe",
+          headerOverlayActive
+            ? "app-chrome-glass border-sidebar-border"
+            : "border-border bg-muted/24",
           // Desktop: the bar floats over the transcript, which scrolls
           // beneath it (the timeline's list header provides the clearance).
           headerOverlayActive && "absolute inset-x-0 top-0 z-20",

@@ -667,13 +667,20 @@ code {
      element's own painting. */
   [data-liquid-glass="true"] {
     position: relative;
-    background: color-mix(in srgb, var(--card) 52%, transparent) !important;
+    /* Variable-driven plate: the !important guards against the host's own
+       utility background, while state tints (the composer drag-over target)
+       re-point --lg-plate-color/alpha instead of fighting the declaration. */
+    background: color-mix(
+      in srgb,
+      var(--lg-plate-color, var(--card)) var(--lg-plate-alpha, 52%),
+      transparent
+    ) !important;
     -webkit-backdrop-filter: var(--composer-liquid-backdrop, blur(24px) saturate(185%)) !important;
     backdrop-filter: var(--composer-liquid-backdrop, blur(24px) saturate(185%)) !important;
   }
 
   .dark [data-liquid-glass="true"] {
-    background: color-mix(in srgb, var(--card) 40%, transparent) !important;
+    --lg-plate-alpha: 40%;
   }
 
   /* Sheen and bezel rings paint above static content; the real children are
