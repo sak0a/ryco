@@ -34,8 +34,6 @@ export interface ComposerBannerStackItem {
   readonly actions?: ReactNode;
   readonly dismissLabel?: string;
   readonly onDismiss?: () => void;
-  /** Extra classes merged onto the item's Alert (e.g. a glass surface). */
-  readonly className?: string;
 }
 
 interface ComposerBannerStackProps {
@@ -218,7 +216,7 @@ function ComposerBannerStackAlert({
   const dismissOnly = item.onDismiss && !item.actions;
 
   return (
-    <Alert variant={item.variant} className={item.className}>
+    <Alert variant={item.variant}>
       {item.icon}
       <AlertTitle>{item.title}</AlertTitle>
       {item.description ? <AlertDescription>{item.description}</AlertDescription> : null}

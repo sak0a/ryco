@@ -100,8 +100,8 @@ import {
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../keybindings";
-import { BotIcon, ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
-import { glassSurfaceClassName } from "./mobile/GlassSurface";
+import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import { BackgroundLivenessChip } from "./chat/BackgroundLivenessChip";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -1538,49 +1538,6 @@ export default function ChatView(props: ChatViewProps) {
       }
     })();
   }, [activeThreadId, onInterrupt, setThreadError]);
-  const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
-    if (activeBackgroundLiveness === null || !activeThread) {
-      return null;
-    }
-    const working = activeBackgroundLiveness === "working";
-    const liveCount = agentPanelModel.liveCount;
-    return {
-      id: `background-liveness:${activeThread.id}`,
-      variant: "info",
-      // The Alert's icon slot keys on an svg child — a raw span falls out of
-      // the grid and renders inline like stray punctuation.
-      icon: <BotIcon aria-hidden className={cn(working && "animate-pulse")} />,
-      className: glassSurfaceClassName("chip"),
-      title: working
-        ? liveCount > 0
-          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working in the background`
-          : "Background work running"
-        : "Monitoring in the background",
-      actions: (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={isStoppingBackgroundWork}
-          onClick={handleStopBackgroundWork}
-        >
-          {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
-        </Button>
-      ),
-    };
-  }, [
-    activeBackgroundLiveness,
-    activeThread,
-    agentPanelModel.liveCount,
-    handleStopBackgroundWork,
-    isStoppingBackgroundWork,
-  ]);
-  const composerBannerItemsWithLiveness = useMemo<ComposerBannerStackItem[]>(
-    () =>
-      backgroundLivenessBannerItem === null
-        ? composerBannerItems
-        : [...composerBannerItems, backgroundLivenessBannerItem],
-    [backgroundLivenessBannerItem, composerBannerItems],
-  );
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -3868,10 +3825,17 @@ export default function ChatView(props: ChatViewProps) {
               />
             ) : null}
             <div className={cn("relative isolate", composerOverlayActive && "pointer-events-auto")}>
-              <ComposerBannerStack
-                className="relative z-0"
-                items={composerBannerItemsWithLiveness}
-              />
+              {activeBackgroundLiveness !== null ? (
+                <div className="mx-auto mb-2 flex w-full min-w-0 max-w-208 items-center px-4">
+                  <BackgroundLivenessChip
+                    liveness={activeBackgroundLiveness}
+                    liveCount={agentPanelModel.liveCount}
+                    stopping={isStoppingBackgroundWork}
+                    onStop={handleStopBackgroundWork}
+                  />
+                </div>
+              ) : null}
+              <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
               {showNewThreadComposerSpacer ? <div aria-hidden className="mb-2 h-5" /> : null}
               <ComposerQueuedMessages
                 messages={queuedMessages}
