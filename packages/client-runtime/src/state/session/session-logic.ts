@@ -983,10 +983,12 @@ function collapseDerivedWorkLogEntries(
           // agent's: id/createdAt/turnId stay pinned to the spawn point so
           // the row renders where the run launched instead of drifting to
           // the newest progress tick, and the stable id keeps React
-          // state/virtualization sane.
+          // state/virtualization sane. turnId pins unconditionally — a
+          // turn-less anchor must stay turn-less instead of adopting a
+          // later completion's synthetic turn and joining its fold group.
           id: existing.id,
           createdAt: existing.createdAt,
-          ...(existing.turnId !== undefined ? { turnId: existing.turnId } : {}),
+          turnId: existing.turnId ?? null,
           ...(existing.taskId !== undefined ? { taskId: existing.taskId } : {}),
           label: existing.label,
           agentSpawn: { workflowId, agentTaskIds },

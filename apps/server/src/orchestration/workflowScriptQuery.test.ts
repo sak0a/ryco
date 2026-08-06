@@ -1,9 +1,10 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import type { ServerSettings } from "@ryco/contracts";
 import { Effect } from "effect";
 import { afterAll, assert, describe, it } from "vite-plus/test";
-import { readWorkflowScript } from "./workflowScriptQuery.ts";
+import { readWorkflowScript, workflowScriptRootsFromSettings } from "./workflowScriptQuery.ts";
 
 // A dedicated sandbox root passed via the roots override, so the test never
 // writes into the real ~/.claude/projects.
@@ -69,5 +70,29 @@ describe("readWorkflowScript containment", () => {
       ),
     );
     assert.equal(result, "root-unavailable");
+  });
+});
+
+describe("workflowScriptRootsFromSettings", () => {
+  it("includes the legacy providers.claudeAgent homePath for unmigrated deployments", () => {
+    const roots = workflowScriptRootsFromSettings({
+      providers: { claudeAgent: { homePath: "~/custom-claude-home" } },
+      providerInstances: {},
+    } as unknown as Pick<ServerSettings, "providerInstances" | "providers">);
+    assert.include(
+      roots,
+      NodePath.join(NodeOS.homedir(), "custom-claude-home", ".claude", "projects"),
+    );
+  });
+
+  it("includes per-instance Claude homePath overrides alongside the default root", () => {
+    const roots = workflowScriptRootsFromSettings({
+      providers: { claudeAgent: {} },
+      providerInstances: {
+        "claude-work": { driver: "claudeAgent", config: { homePath: "/opt/claude-work" } },
+      },
+    } as unknown as Pick<ServerSettings, "providerInstances" | "providers">);
+    assert.include(roots, NodePath.join(NodeOS.homedir(), ".claude", "projects"));
+    assert.include(roots, NodePath.join("/opt/claude-work", ".claude", "projects"));
   });
 });

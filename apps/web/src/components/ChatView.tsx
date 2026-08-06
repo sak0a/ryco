@@ -1521,8 +1521,22 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadId]);
   const handleStopBackgroundWork = useCallback(() => {
     setIsStoppingBackgroundWork(true);
-    onInterrupt();
-  }, [onInterrupt]);
+    void (async () => {
+      try {
+        await onInterrupt();
+      } catch (error) {
+        // Every failure clears the pending state — the interrupt never
+        // reached the server, so liveness would hold "Stopping..." forever.
+        setIsStoppingBackgroundWork(false);
+        if (activeThreadId) {
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to stop background work.",
+          );
+        }
+      }
+    })();
+  }, [activeThreadId, onInterrupt, setThreadError]);
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (activeBackgroundLiveness === null || !activeThread) {
       return null;

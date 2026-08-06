@@ -34,19 +34,26 @@ export function defaultWorkflowScriptRoots(): ReadonlyArray<string> {
  * where the harness persists workflow scripts when HOME is redirected).
  */
 export function workflowScriptRootsFromSettings(
-  settings: Pick<ServerSettings, "providerInstances"> | undefined,
+  settings: Pick<ServerSettings, "providerInstances" | "providers"> | undefined,
 ): ReadonlyArray<string> {
   const roots = [...defaultWorkflowScriptRoots()];
+  const pushHome = (homePath: unknown) => {
+    const trimmed = typeof homePath === "string" ? homePath.trim() : "";
+    if (trimmed.length === 0) {
+      return;
+    }
+    roots.push(NodePath.join(NodePath.resolve(expandHomePath(trimmed)), ".claude", "projects"));
+  };
+  // Legacy single-instance config — still the source of truth for
+  // unmigrated deployments (see ProviderInstanceRegistryHydration). Roots
+  // are a read-only containment allowlist, so including the legacy home
+  // unconditionally also keeps pre-migration scripts readable.
+  pushHome(settings?.providers?.claudeAgent?.homePath);
   for (const instance of Object.values(settings?.providerInstances ?? {})) {
     if (instance.driver !== "claudeAgent") {
       continue;
     }
-    const config = instance.config as { homePath?: unknown } | undefined;
-    const homePath = typeof config?.homePath === "string" ? config.homePath.trim() : "";
-    if (homePath.length === 0) {
-      continue;
-    }
-    roots.push(NodePath.join(NodePath.resolve(expandHomePath(homePath)), ".claude", "projects"));
+    pushHome((instance.config as { homePath?: unknown } | undefined)?.homePath);
   }
   return [...new Set(roots)];
 }
