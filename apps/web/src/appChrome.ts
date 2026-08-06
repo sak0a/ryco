@@ -16,3 +16,15 @@ import { isElectron } from "./env";
 export const COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS = isElectron
   ? "pl-[192px] wco:pl-[calc(env(titlebar-area-x)+7.5rem)]"
   : "pl-[calc(env(safe-area-inset-left)+7.5rem)]";
+
+/**
+ * Pairs with the inset above on the same element.
+ *
+ * The inset swaps between two very different paddings the moment the sidebar
+ * is toggled, while the surface it sits on resizes across the sidebar's 200ms
+ * slide. Left unanimated the breadcrumb and thread title jump to their final
+ * position on the first frame and then wait for the panel to catch up. Match
+ * the sidebar's own timing so the two move as one.
+ */
+export const APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS =
+  "transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none";

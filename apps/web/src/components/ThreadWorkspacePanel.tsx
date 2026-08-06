@@ -20,7 +20,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
-import { COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS } from "../appChrome";
+import {
+  APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
+  COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
+} from "../appChrome";
 import { isElectron } from "../env";
 import {
   getRightPanelMode,
@@ -855,6 +858,7 @@ export default function ThreadWorkspacePanel(props: {
         className={cn(
           "flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-2",
           isPhoneSurface ? "h-14" : "h-12",
+          !isPhoneSurface && APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
           props.reserveChromeInset && COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
           // Maximizing collapses the chat header to zero width, leaving this
           // bar as the frameless desktop window's only top-level chrome. It

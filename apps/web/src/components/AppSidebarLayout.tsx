@@ -128,17 +128,33 @@ export function useAppShellGlobalEffects(): void {
  * collapsing reads as the row compressing rather than being replaced.
  * Surfaces that own that corner reserve room with
  * `COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS`.
+ *
+ * Always mounted on the desktop tier and cross-faded rather than swapped in
+ * and out. Mounting on collapse used to leave the corner empty for the whole
+ * 200ms slide — the floating mark vanished the instant expanding began, while
+ * the sidebar's own mark was still travelling in from off-screen, so the logo
+ * read as blinking out and reappearing. Because this mark sits at exactly the
+ * x its sidebar counterpart lands on, holding it through the slide and fading
+ * it out as that one arrives keeps one continuous logo in the corner.
  */
-function CollapsedAppSidebarChrome() {
+function CollapsedAppSidebarChrome({ sidebarOpen }: { sidebarOpen: boolean }) {
   const { toggleSidebar } = useSidebar();
   const openSettings = useSettingsDialogStore((s) => s.openSettings);
 
   return (
     <div
+      aria-hidden={sidebarOpen ? true : undefined}
+      inert={sidebarOpen ? true : undefined}
       className={cn(
         // The row itself is click-through so it never shadows the header
         // beneath it; only the controls take pointer events.
         "pointer-events-none fixed top-0 z-50 flex items-center gap-0.5 phone:hidden",
+        "transition-opacity ease-linear motion-reduce:transition-none",
+        // Expanding holds the row at full opacity for the first half of the
+        // sidebar's 200ms slide, then fades it out just as the sidebar's own
+        // chrome reaches this spot. Collapsing fades straight in, since the
+        // sidebar mark is still under it at that moment.
+        sidebarOpen ? "opacity-0 delay-100 duration-100" : "opacity-100 duration-100",
         // The left offsets land the mark on exactly the x it occupies in the
         // expanded sidebar header (its padding plus the link's `ml-1`), so
         // collapsing never nudges the logo toward the window edge. In the
@@ -167,38 +183,50 @@ function CollapsedAppSidebarChrome() {
           {APP_BASE_NAME} {APP_STAGE_LABEL} · Version {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              aria-label="Settings"
-              className="pointer-events-auto text-muted-foreground/72 hover:text-foreground"
-              onClick={() => openSettings()}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <SettingsIcon />
-            </Button>
-          }
-        />
-        <TooltipPopup side="bottom">Settings</TooltipPopup>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              aria-label="Show sidebar"
-              className="pointer-events-auto text-muted-foreground/72 hover:text-foreground"
-              onClick={toggleSidebar}
-              size="icon-sm"
-              variant="ghost"
-            >
-              <PanelLeftOpenIcon />
-            </Button>
-          }
-        />
-        <TooltipPopup side="bottom">Show sidebar</TooltipPopup>
-      </Tooltip>
+      {/* Only the mark has a counterpart to hand off to, so only the mark
+          needs to survive the whole slide. These two clear out early instead,
+          before the sidebar's own settings and collapse buttons sweep through
+          this corner on their way in — two sets of the same icons crossing
+          over each other is the part that read as a rendering glitch. */}
+      <div
+        className={cn(
+          "flex items-center gap-0.5 transition-opacity ease-linear motion-reduce:transition-none",
+          sidebarOpen ? "opacity-0 duration-75" : "opacity-100 delay-75 duration-150",
+        )}
+      >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-label="Settings"
+                className="pointer-events-auto text-muted-foreground/72 hover:text-foreground"
+                onClick={() => openSettings()}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <SettingsIcon />
+              </Button>
+            }
+          />
+          <TooltipPopup side="bottom">Settings</TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-label="Show sidebar"
+                className="pointer-events-auto text-muted-foreground/72 hover:text-foreground"
+                onClick={toggleSidebar}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <PanelLeftOpenIcon />
+              </Button>
+            }
+          />
+          <TooltipPopup side="bottom">Show sidebar</TooltipPopup>
+        </Tooltip>
+      </div>
     </div>
   );
 }
@@ -259,7 +287,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         </Sidebar>
       ) : null}
       {children}
-      {isDesktopTier && !sidebarOpen ? <CollapsedAppSidebarChrome /> : null}
+      {isDesktopTier ? <CollapsedAppSidebarChrome sidebarOpen={sidebarOpen} /> : null}
       <LazySettingsDialogMount />
     </SidebarProvider>
   );

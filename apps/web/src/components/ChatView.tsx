@@ -86,7 +86,10 @@ import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { useAppSidebarCollapsed } from "../hooks/useAppSidebarCollapsed";
 import { usePresentationTier } from "../hooks/usePresentationTier";
-import { COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS } from "../appChrome";
+import {
+  APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
+  COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
+} from "../appChrome";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import { BranchToolbar } from "./BranchToolbar";
 import {
@@ -3549,6 +3552,10 @@ export default function ChatView(props: ChatViewProps) {
           // Desktop: the bar floats over the transcript, which scrolls
           // beneath it (the timeline's list header provides the clearance).
           headerOverlayActive && "absolute inset-x-0 top-0 z-20",
+          // Keeps the breadcrumb travelling with the sidebar instead of
+          // snapping to its collapsed position a slide ahead of it. Inert on
+          // the phone tier, which never takes the collapsed inset.
+          APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
           isElectron
             ? cn(
                 "drag-region flex min-h-[52px] items-stretch pr-3 sm:pr-5 wco:min-h-[env(titlebar-area-height)]",

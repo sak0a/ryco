@@ -6,7 +6,10 @@ import { SidebarInset } from "./ui/sidebar";
 import { Button } from "./ui/button";
 import { HostedConnectionControl } from "./hostedHub/HostedConnectionControls";
 import { isElectron } from "../env";
-import { COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS } from "../appChrome";
+import {
+  APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
+  COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
+} from "../appChrome";
 import { useAppSidebarCollapsed } from "../hooks/useAppSidebarCollapsed";
 import { cn } from "~/lib/utils";
 
@@ -21,6 +24,7 @@ export function NoActiveThreadState() {
         <header
           className={cn(
             "border-b border-border pr-3 sm:pr-5",
+            APP_SIDEBAR_CHROME_INSET_TRANSITION_CLASS,
             appSidebarCollapsed ? COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS : "pl-3 sm:pl-5",
             isElectron
               ? "drag-region flex h-[52px] items-center wco:h-[env(titlebar-area-height)]"
