@@ -6,9 +6,12 @@ import { getEffectiveSurfaceTransparency } from "../themes/appearancePreferences
  * reference filters there), so the page behind a surface is refracted at the
  * rim and then frosted while the surface's own content is never filtered.
  *
- * The displacement map is a rounded-rect signed-distance field: X offsets in
- * the red channel, Y in blue, neutral 128 across the center band so only the
- * rim bends light.
+ * The displacement map is physically derived (after kube.io's liquid-glass
+ * write-up): a ray is traced through a convex-squircle bezel profile using
+ * Snell's law, giving a magnitude that is zero at the very edge, peaks just
+ * inside the rim, and dies out toward the plateau — the characteristic lens
+ * ring. Directions follow the rounded-rect SDF gradient (the true edge
+ * normal), X offsets in the red channel, Y in blue, neutral 128 elsewhere.
  */
 
 export function isChromiumEngine(): boolean {
@@ -56,24 +59,70 @@ export function getLiquidGlassDisplacementScale(): number {
   return DISPLACEMENT_SCALE_BY_STEP[getEffectiveSurfaceTransparency()] ?? 0;
 }
 
-/** Rounded-rect SDF displacement map: X in R, Y in B, neutral 128 center. */
+/**
+ * Displacement magnitude by normalized distance-from-edge, ray-traced once
+ * through a convex-circle bezel (height `y = √(1-(1-t)²)`, refractive index
+ * 1.5). A vertical ray hits the tilted surface at incidence
+ * `θ1 = atan(slope)`, bends by `δ = θ1 - asin(sin(θ1)/n)`, and lands
+ * `y·tan(δ)` off its entry point — zero at the sharp edge (no glass depth),
+ * peaking around a fifth of the way in and carrying visible bend across the
+ * whole band. (The squircle profile Apple favors plateaus within the first
+ * few percent of the band, which reads as almost no refraction at our band
+ * widths — the circle is the profile that actually looks like liquid glass.)
+ * Normalized so the profile peak maps to the full channel range.
+ */
+const REFRACTION_SAMPLES = 128;
+const GLASS_REFRACTIVE_INDEX = 1.5;
+
+let refractionProfile: Float32Array | null = null;
+
+function getRefractionProfile(): Float32Array {
+  if (refractionProfile) return refractionProfile;
+  const lut = new Float32Array(REFRACTION_SAMPLES);
+  let peak = 0;
+  for (let i = 0; i < REFRACTION_SAMPLES; i++) {
+    const t = i / (REFRACTION_SAMPLES - 1);
+    const u = 1 - t;
+    const height = Math.sqrt(Math.max(1 - u * u, 1e-9));
+    const slope = u / height;
+    const theta1 = Math.atan(slope);
+    const theta2 = Math.asin(Math.sin(theta1) / GLASS_REFRACTIVE_INDEX);
+    lut[i] = height * Math.tan(theta1 - theta2);
+    peak = Math.max(peak, lut[i] as number);
+  }
+  for (let i = 0; i < REFRACTION_SAMPLES; i++) lut[i] = (lut[i] as number) / peak;
+  refractionProfile = lut;
+  return lut;
+}
+
+/**
+ * Maps are smooth gradients, so large surfaces don't need pixel-exact maps —
+ * cap the generated bitmap and let feImage stretch it back over the element.
+ * Keeps a 1180×790 dialog's map generation ~4× cheaper with no visible loss.
+ */
+const MAX_MAP_PIXELS = 262144;
+
+/** Physically-profiled rounded-rect displacement map: X in R, Y in B. */
 export function renderDisplacementMap(
   width: number,
   height: number,
   radius: number,
   edgeBandPx: number,
 ): string | null {
-  const w = Math.max(2, Math.round(width));
-  const h = Math.max(2, Math.round(height));
+  const scale = Math.min(1, Math.sqrt(MAX_MAP_PIXELS / Math.max(1, width * height)));
+  const w = Math.max(2, Math.round(width * scale));
+  const h = Math.max(2, Math.round(height * scale));
   const canvas = document.createElement("canvas");
   canvas.width = w;
   canvas.height = h;
   const context = canvas.getContext("2d");
   if (!context) return null;
   const image = context.createImageData(w, h);
+  const lut = getRefractionProfile();
   const halfW = w / 2 - 1;
   const halfH = h / 2 - 1;
-  const r = Math.min(radius, halfW, halfH);
+  const r = Math.min(radius * scale, halfW, halfH);
+  const band = Math.max(2, edgeBandPx * scale);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const px = x - w / 2;
@@ -82,13 +131,35 @@ export function renderDisplacementMap(
       const qy = Math.abs(py) - halfH + r;
       const distance =
         Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r;
-      let t = Math.min(Math.max((distance + edgeBandPx) / edgeBandPx, 0), 1);
-      t = t * t * (3 - 2 * t);
-      const length = Math.hypot(px, py) || 1;
       const index = (y * w + x) * 4;
-      image.data[index] = 128 + (px / length) * 127 * t;
+      // Normalized depth into the bezel: 0 at the edge, 1 at the plateau.
+      const t = -distance / band;
+      if (t <= 0 || t >= 1) {
+        image.data[index] = 128;
+        image.data[index + 1] = 128;
+        image.data[index + 2] = 128;
+        image.data[index + 3] = 255;
+        continue;
+      }
+      const magnitude = lut[Math.round(t * (REFRACTION_SAMPLES - 1))] as number;
+      // Outward edge normal from the SDF gradient: radial in the corner
+      // circle, cardinal along the straight edges.
+      let nx: number;
+      let ny: number;
+      if (qx > 0 && qy > 0) {
+        const length = Math.hypot(qx, qy) || 1;
+        nx = (qx / length) * Math.sign(px);
+        ny = (qy / length) * Math.sign(py);
+      } else if (qx > qy) {
+        nx = Math.sign(px);
+        ny = 0;
+      } else {
+        nx = 0;
+        ny = Math.sign(py);
+      }
+      image.data[index] = 128 + nx * magnitude * 127;
       image.data[index + 1] = 128;
-      image.data[index + 2] = 128 + (py / length) * 127 * t;
+      image.data[index + 2] = 128 + ny * magnitude * 127;
       image.data[index + 3] = 255;
     }
   }
@@ -134,6 +205,18 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  */
 const ABERRATION_SPREAD = 0.09;
 
+/**
+ * Above this area (CSS px²) the graph drops to ONE displacement pass — no
+ * chromatic aberration. Chromium re-executes url() reference filters in
+ * `backdrop-filter` on every frame the surface repaints (interior scroll,
+ * hover states), and profiling the settings dialog showed the two extra
+ * per-channel passes are the entire measurable overhead of the liquid
+ * material (3-pass ≈ +34% frame time with dropped frames; 1-pass ≈ frost
+ * cost). On dialog-sized surfaces the rim fringe is invisible anyway; small
+ * popups and the composer keep the full effect.
+ */
+const ABERRATION_AREA_LIMIT = 350_000;
+
 interface LiquidFilterHandles {
   readonly filter: SVGFilterElement;
   readonly setMap: (url: string, width: number, height: number) => void;
@@ -147,11 +230,17 @@ function channelMatrix(channel: 0 | 1 | 2): string {
 }
 
 /**
- * Builds the displacement filter graph: one pass per color channel at
- * slightly different scales, channel-isolated and recombined with screen
- * blends. Returns handles to retarget the map/scale without rebuilding.
+ * Builds the displacement filter graph. With `aberration` (the default), one
+ * pass per color channel at slightly different scales, channel-isolated and
+ * recombined with screen blends; without it, a single displacement pass —
+ * measurably as cheap as a plain frost. Returns handles to retarget the
+ * map/scale without rebuilding.
  */
-export function buildLiquidGlassFilter(id: string): LiquidFilterHandles {
+export function buildLiquidGlassFilter(
+  id: string,
+  options?: { aberration?: boolean },
+): LiquidFilterHandles {
+  const aberration = options?.aberration ?? true;
   const filter = document.createElementNS(SVG_NS, "filter");
   filter.setAttribute("id", id);
   filter.setAttribute("x", "0");
@@ -168,17 +257,18 @@ export function buildLiquidGlassFilter(id: string): LiquidFilterHandles {
   filter.appendChild(feImage);
 
   const displacements: SVGFEDisplacementMapElement[] = [];
-  const channels: Array<0 | 1 | 2> = [0, 1, 2];
+  const channels: Array<0 | 1 | 2> = aberration ? [0, 1, 2] : [0];
   for (const channel of channels) {
     const feDisplacement = document.createElementNS(SVG_NS, "feDisplacementMap");
     feDisplacement.setAttribute("in", "SourceGraphic");
     feDisplacement.setAttribute("in2", "map");
     feDisplacement.setAttribute("xChannelSelector", "R");
     feDisplacement.setAttribute("yChannelSelector", "B");
-    feDisplacement.setAttribute("result", `disp${channel}`);
     filter.appendChild(feDisplacement);
     displacements.push(feDisplacement);
+    if (!aberration) break;
 
+    feDisplacement.setAttribute("result", `disp${channel}`);
     const feIsolate = document.createElementNS(SVG_NS, "feColorMatrix");
     feIsolate.setAttribute("in", `disp${channel}`);
     feIsolate.setAttribute("type", "matrix");
@@ -187,18 +277,20 @@ export function buildLiquidGlassFilter(id: string): LiquidFilterHandles {
     filter.appendChild(feIsolate);
   }
 
-  const blendRG = document.createElementNS(SVG_NS, "feBlend");
-  blendRG.setAttribute("in", "chan0");
-  blendRG.setAttribute("in2", "chan1");
-  blendRG.setAttribute("mode", "screen");
-  blendRG.setAttribute("result", "blendRG");
-  filter.appendChild(blendRG);
+  if (aberration) {
+    const blendRG = document.createElementNS(SVG_NS, "feBlend");
+    blendRG.setAttribute("in", "chan0");
+    blendRG.setAttribute("in2", "chan1");
+    blendRG.setAttribute("mode", "screen");
+    blendRG.setAttribute("result", "blendRG");
+    filter.appendChild(blendRG);
 
-  const blendRGB = document.createElementNS(SVG_NS, "feBlend");
-  blendRGB.setAttribute("in", "blendRG");
-  blendRGB.setAttribute("in2", "chan2");
-  blendRGB.setAttribute("mode", "screen");
-  filter.appendChild(blendRGB);
+    const blendRGB = document.createElementNS(SVG_NS, "feBlend");
+    blendRGB.setAttribute("in", "blendRG");
+    blendRGB.setAttribute("in2", "chan2");
+    blendRGB.setAttribute("mode", "screen");
+    filter.appendChild(blendRGB);
+  }
 
   return {
     filter,
@@ -323,9 +415,10 @@ export function attachLiquidGlassRefraction(element: HTMLElement, radius: number
     return () => {};
   }
   const id = `liquid-glass-${++filterSequence}`;
-  const handles = buildLiquidGlassFilter(id);
-  handles.setScale(-scale);
-  ensureLiquidGlassDefsHost().appendChild(handles.filter);
+  // Built on the first regenerate, once the element's size is known: large
+  // surfaces (dialogs) get the single-pass graph, small ones the full
+  // aberration graph.
+  let handles: LiquidFilterHandles | null = null;
   const detachLayers = attachLiquidLayers(element);
 
   // Chromium drops the whole backdrop-filter when a url() reference filter
@@ -355,8 +448,18 @@ export function attachLiquidGlassRefraction(element: HTMLElement, radius: number
     const width = element.offsetWidth;
     const height = element.offsetHeight;
     if (width < 24 || height < 24) return;
-    const url = renderDisplacementMapCached(width, height, radius, 30);
+    // Bezel width scales with the surface so the lens ring stays readable:
+    // ~a quarter of the smaller dimension, within sane bounds.
+    const band = Math.round(Math.min(52, Math.max(28, Math.min(width, height) * 0.24)));
+    const url = renderDisplacementMapCached(width, height, radius, band);
     if (!url) return;
+    if (!handles) {
+      handles = buildLiquidGlassFilter(id, {
+        aberration: width * height <= ABERRATION_AREA_LIMIT,
+      });
+      handles.setScale(-scale);
+      ensureLiquidGlassDefsHost().appendChild(handles.filter);
+    }
     handles.setMap(url, width, height);
     element.style.backdropFilter = `url(#${id}) ${existing}`;
     // Safari ignores the whole declaration if url() is present, so the
@@ -375,7 +478,7 @@ export function attachLiquidGlassRefraction(element: HTMLElement, radius: number
   return () => {
     observer.disconnect();
     if (frame) window.cancelAnimationFrame(frame);
-    handles.filter.remove();
+    handles?.filter.remove();
     detachLayers();
     element.style.removeProperty("backdrop-filter");
     element.style.removeProperty("-webkit-backdrop-filter");

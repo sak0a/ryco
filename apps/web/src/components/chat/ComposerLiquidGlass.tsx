@@ -18,9 +18,10 @@ import {
  * blends, i.e. the library's chromatic aberration) and then frosted, while
  * the composer's own content is never filtered.
  *
- * The displacement map is a rounded-rect signed-distance field generated on a
- * canvas: X offsets in the red channel, Y in blue, neutral 128 in the center
- * band so only the rim bends light (which also self-masks the aberration).
+ * The displacement map is ray-traced through a convex-squircle bezel profile
+ * (see lib/liquidGlass.ts): X offsets in the red channel, Y in blue, neutral
+ * 128 outside the rim so only the bezel bends light (which also self-masks
+ * the aberration).
  *
  * Degradation contract: Safari/Firefox skip the displacement (blur + bezel
  * only — the design must read complete there); `prefers-reduced-transparency`
@@ -56,7 +57,7 @@ export function ComposerLiquidGlass({ hostRef }: { hostRef: React.RefObject<HTML
       const width = host.offsetWidth;
       const height = host.offsetHeight;
       if (width < 24 || height < 24) return;
-      const url = renderDisplacementMap(width, height, 22, 34);
+      const url = renderDisplacementMap(width, height, 22, 36);
       if (!url) return;
       handles.setMap(url, width, height);
       setMapReady(true);
