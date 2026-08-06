@@ -146,6 +146,12 @@ describe("§13.5 the WebSAS is legible enough to compare", () => {
     // duty at the length the Settings page has room for — drawing it here would
     // restore the block of prose this shape exists to remove, and it would still
     // pass every §13.5 assertion above.
+    //
+    // THIS FILE IS THE STANDARD CLIENT (no `.env` in the harness, so
+    // `isHostedHubMode()` answers false), where Settings → Security is nobody's
+    // to be refused and the pointer is therefore always correct. The hosted role
+    // gate on that pointer lives in `HostedE2eeVerificationHosted.browser.tsx`,
+    // which mocks the mode at module scope because it is read at module scope.
     await page.viewport(320, 568);
     applyWebE2eeVerificationCode(FIRST_CODE);
     mounted = await render(<HostedE2eeVerification />);

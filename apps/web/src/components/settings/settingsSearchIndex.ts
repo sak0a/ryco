@@ -214,6 +214,33 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
     description: "Devices and sessions allowed to connect.",
     keywords: "revoke tokens",
   },
+  // The section §13.5's copy points an owner at — "Settings → Security explains
+  // what else this tab cannot check" — so the terms it sends them looking for
+  // have to resolve here. `SettingsDialog.test.ts` asserts they do.
+  {
+    section: "security",
+    title: "Session code",
+    description: "Compare this browser's channel against the one your node's CLI shows.",
+    keywords: "security verification websas e2ee compare short authentication string",
+  },
+  {
+    section: "security",
+    title: "Enrollment fingerprint",
+    description: "This node's identity, and the prekey and continuity behind it.",
+    keywords: "security e2ee key fingerprint rotate lineage",
+  },
+  {
+    section: "security",
+    title: "Authorized client keys",
+    description: "Approve, reduce, revoke, or delete a client key, and open a pairing window.",
+    keywords: "security e2ee pairing fingerprint refused attempts",
+  },
+  {
+    section: "security",
+    title: "Admission policy",
+    description: "Require E2EE, require approved clients, and advance the policy generation.",
+    keywords: "security e2ee strict fallback plaintext",
+  },
   {
     section: "diagnostics",
     title: "Diagnostics",

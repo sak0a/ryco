@@ -19,8 +19,12 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 }));
 
 // Deliberately NOT mocked into hosted mode, unlike the other hosted browser
-// suites. Nothing this file exercises reads `isHostedHubMode()` — the desktop
-// menu, the phone sheet and the pill all gate on `selectedNode` — while the
+// suites. The desktop menu, the phone sheet and the pill all gate on
+// `selectedNode` rather than on the mode; the one thing under this file that
+// reads `isHostedHubMode()` is §13.5's session code, choosing which length to
+// draw, and the standard-client answer is the one that needs no role at all —
+// `HostedE2eeVerificationHosted.browser.tsx` is where the hosted role gate is
+// pinned. Meanwhile the
 // header layout test mounts `ChatHeader` inside a `SidebarProvider`, and in
 // hosted mode that composition reaches
 // `createPrimaryEnvironmentClient` -> `HostedRelayAttemptFactory.nextUrl()`,

@@ -21,6 +21,11 @@ import {
 import { type SettingsSectionId, useSettingsDialogStore } from "../../settingsDialogStore";
 import { cn } from "../../lib/utils";
 import { SETTINGS_SEARCH_INDEX } from "./settingsSearchIndex";
+import {
+  hostedSettingsRoleFresh,
+  hostedSettingsRoleSnapshot,
+  settingsSectionReachable,
+} from "./settingsSections.logic";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
@@ -62,47 +67,30 @@ export const SETTINGS_DIALOG_SECTION_IDS: ReadonlyArray<SettingsSectionId> = NAV
   (item) => item.id,
 );
 
-const HOSTED_OWNER_SECTIONS = new Set<SettingsSectionId>([
-  "general",
-  "providers",
-  "opinionated-plugins",
-  "mcp-servers",
-  "keybindings",
-  "source-control",
-  // Node-scoped and owner-only, like the rest of this set. In hosted mode the
-  // node's operator routes are unreachable anyway (the relay carries `ryco.rpc`
-  // and there is no HTTP tunnel), so the section renders this browser's own
-  // channel and says where the node-side state lives — but the gate stays
-  // closed for non-owners rather than relying on that.
-  "security",
-  "diagnostics",
-  "statistics",
-]);
-
 /**
- * Sections that exist only in the hosted client. Account management is one:
- * there is no Hub account to manage in the standard (local-server) mode, so the
- * section is filtered out entirely rather than rendered empty.
+ * The section labels this dialog draws, by id.
+ *
+ * Exported so copy that NAMES a section can be held to the label the nav
+ * actually shows: §13.5's `E2EE_WEB_SAS_MORE` sends an owner to
+ * "Settings → Security", and `SettingsDialog.test.ts` reads this map to fail
+ * that pointer if the section is ever renamed underneath it.
  */
-const HOSTED_ONLY_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(["account"]);
+export const SETTINGS_DIALOG_SECTION_LABELS: ReadonlyMap<SettingsSectionId, string> = new Map(
+  NAV_ITEMS.map((item) => [item.id, item.label] as const),
+);
 
-export function settingsSectionAvailable(section: SettingsSectionId, hosted: boolean): boolean {
-  return hosted || !HOSTED_ONLY_SECTIONS.has(section);
-}
-
-export function hostedSettingsSectionAllowed(
-  section: SettingsSectionId,
-  role: "viewer" | "operator" | "owner" | null,
-): boolean {
-  if (section === "connections") return false;
-  if (section === "appearance") return true;
-  // Every signed-in account owns its own credentials, whatever role it holds on
-  // the nodes it can reach — and, unlike the node-scoped sections, the answer
-  // does not depend on a role snapshot being fresh.
-  if (section === "account") return true;
-  if (section === "archived") return role !== null;
-  return role === "owner" && HOSTED_OWNER_SECTIONS.has(section);
-}
+// The gates themselves live in `settingsSections.logic.ts`, because
+// `HostedE2eeVerification` — which sits in the eagerly loaded shell — has to ask
+// the same question before it points a reader at Settings → Security, and this
+// module is behind a dynamic import on purpose. Re-exported here so the two nav
+// surfaces and their tests keep importing them from where they already do.
+export {
+  hostedSettingsRoleFresh,
+  hostedSettingsRoleSnapshot,
+  hostedSettingsSectionAllowed,
+  settingsSectionAvailable,
+  settingsSectionReachable,
+} from "./settingsSections.logic";
 
 const SECTIONS_WITH_RESTORE: ReadonlySet<SettingsSectionId> = new Set([
   "general",
@@ -202,11 +190,10 @@ export function SettingsDialog() {
   const hostedDirectoryStatus = useHostedHubStore((state) => state.directoryStatus);
   const hostedTransportStatus = useHostedHubStore((state) => state.transportStatus);
   const hosted = isHostedHubMode();
-  const roleFresh = hostedDirectoryStatus === "ready" && hostedTransportStatus === "online";
-  const visibleNavItems = NAV_ITEMS.filter(
-    (item) =>
-      settingsSectionAvailable(item.id, hosted) &&
-      (!hosted || hostedSettingsSectionAllowed(item.id, roleFresh ? hostedRole : null)),
+  const roleFresh = hostedSettingsRoleFresh(hostedDirectoryStatus, hostedTransportStatus);
+  const role = hostedSettingsRoleSnapshot(hostedRole, hostedDirectoryStatus, hostedTransportStatus);
+  const visibleNavItems = NAV_ITEMS.filter((item) =>
+    settingsSectionReachable(item.id, { hosted, role }),
   );
   const effectiveSection = visibleNavItems.some((item) => item.id === section)
     ? section
