@@ -119,6 +119,7 @@ import { useUiStateStore } from "../../uiStateStore";
 import { resolveShortcutCommand, shouldIgnoreGlobalNavigationShortcut } from "../../keybindings";
 import { isTerminalFocused } from "../../lib/terminalFocus";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { ComposerLiquidGlass } from "./ComposerLiquidGlass";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashPicker } from "./ComposerStashPicker";
 import { PendingContextHandoffChip } from "./PendingContextHandoffChip";
@@ -2261,9 +2262,9 @@ export const ChatComposer = memo(
               // rather than an affordance. Focus still lifts the shadow — the
               // one state worth signalling — and a drag-over still tints,
               // because that one has to read as a drop target.
-              "rounded-[max(0px,calc(var(--radius-3xl)-2px))] border-0 bg-card/82 shadow-[0_6px_18px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.05)] outline-none transition-[background-color,box-shadow] duration-200 has-focus-visible:shadow-[0_8px_24px_rgba(0,0,0,0.09),0_1px_4px_rgba(0,0,0,0.07)]",
+              "rounded-[max(0px,calc(var(--radius-3xl)-2px))] border-0 bg-[color-mix(in_srgb,var(--card)_var(--app-composer-alpha),transparent)] dark:bg-[color-mix(in_srgb,var(--card)_var(--app-composer-dark-alpha),transparent)] [-webkit-backdrop-filter:var(--app-composer-filter)] [backdrop-filter:var(--app-composer-filter)] shadow-[0_6px_18px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.05)] outline-none transition-[background-color,box-shadow] duration-200 has-focus-visible:shadow-[0_8px_24px_rgba(0,0,0,0.09),0_1px_4px_rgba(0,0,0,0.07)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_28px_rgba(0,0,0,0.4),0_1px_3px_rgba(0,0,0,0.35)] dark:has-focus-visible:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_12px_32px_rgba(0,0,0,0.5),0_1px_4px_rgba(0,0,0,0.4)]",
               isDragOverComposer
-                ? "bg-accent/30 shadow-lg/12 ring-1 ring-inset ring-primary/45"
+                ? "bg-accent/30 shadow-lg/12 ring-1 ring-inset ring-primary/45 [--lg-plate-alpha:72%] [--lg-plate-color:color-mix(in_srgb,var(--accent)_38%,var(--card))]"
                 : null,
               environmentUnavailable ? "opacity-75" : null,
               composerProviderState.composerSurfaceClassName,
@@ -2320,6 +2321,7 @@ export const ChatComposer = memo(
               setIsComposerFocused(true);
             }}
           >
+            <ComposerLiquidGlass hostRef={composerSurfaceRef} />
             {!isComposerCollapsedMobile &&
               (activePendingApproval ? (
                 <div className="rounded-t-[max(0px,calc(var(--radius-3xl)-3px))] border-b border-border/65 bg-muted/20">

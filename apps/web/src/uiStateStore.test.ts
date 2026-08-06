@@ -28,7 +28,6 @@ import {
   setThreadTurnFoldExpanded,
   setThreadWorkEntryExpanded,
   setThreadWorkGroupExpanded,
-  setTokenModeControlStyle,
   setWideComposerControlsAutoCollapse,
   syncProjects,
   syncThreads,
@@ -50,7 +49,6 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
     threadWorkGroupExpandedById: {},
     threadWorkEntryExpandedById: {},
     defaultAdvertisedEndpointKey: null,
-    tokenModeControlStyle: "icon-text",
     wideComposerControlsAutoCollapse: true,
     alwaysUseBuildMode: false,
     ...overrides,
@@ -1108,15 +1106,6 @@ describe("uiStateStore — composer controls", () => {
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!) as Record<string, unknown>;
     expect(parsed).not.toHaveProperty("reasoningIndicatorStyle");
-  });
-
-  it("persists the token mode control style and reads it back", () => {
-    const state = setTokenModeControlStyle(makeUiState(), "icon");
-    persistState(state);
-    const raw = localStorageStub.getItem(PERSISTED_STATE_KEY);
-    expect(raw).not.toBeNull();
-    const parsed = JSON.parse(raw!) as PersistedUiState;
-    expect(parsed.tokenModeControlStyle).toBe("icon");
   });
 
   it("defaults wide composer controls auto-collapse to enabled", () => {

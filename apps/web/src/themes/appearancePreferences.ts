@@ -568,12 +568,73 @@ function buildGlassTierVariables(
   return variables;
 }
 
+/**
+ * The desktop material floors. Translucency without a floor produced the
+ * text-through-menus failure the Glass step used to ship: a plate may thin as
+ * the Material step rises, but it never drops below the alpha that keeps
+ * worst-case body text legible over the backdrop the blur produces. Blur
+ * scales UP as the plate thins — translucency and blur travel together, never
+ * separately.
+ */
+const DESKTOP_POPOVER_PLATE_FLOOR = { light: 66, dark: 60 } as const;
+const DESKTOP_PANEL_PLATE_FLOOR = { light: 76, dark: 70 } as const;
+const DESKTOP_SURFACE_PLATE_FLOOR = { light: 80, dark: 76 } as const;
+
+/**
+ * Desktop blur radii per Material step. Emitted as complete `filter` values so
+ * the Solid step resolves to `none` rather than a zero-radius filter, which
+ * would still force a backdrop root (same single-filter-token rule the phone
+ * tiers follow).
+ */
+interface DesktopGlassBlur {
+  readonly popover: number;
+  readonly panel: number;
+  readonly surface: number;
+}
+
+const DESKTOP_GLASS_BLUR_SOLID: DesktopGlassBlur = { popover: 0, panel: 0, surface: 0 };
+
+const DESKTOP_GLASS_BLUR_PX: Record<string, DesktopGlassBlur> = {
+  default: DESKTOP_GLASS_BLUR_SOLID,
+  light: { popover: 14, panel: 10, surface: 8 },
+  medium: { popover: 18, panel: 14, surface: 12 },
+  high: { popover: 22, panel: 18, surface: 14 },
+  glass: { popover: 26, panel: 22, surface: 16 },
+};
+
+function desktopGlassFilter(blurPx: number): string {
+  if (blurPx <= 0) return "none";
+  return `blur(${blurPx}px) saturate(158%)`;
+}
+
 /** Generate CSS variables for surface transparency and glass-effect opacity values. */
 function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): string {
   const transparency = SURFACE_TRANSPARENCY_STEPS[surfaceTransparency] ?? 0;
   const surfaceOpacity = 100 - transparency * 100;
+  const blur = DESKTOP_GLASS_BLUR_PX[surfaceTransparency] ?? DESKTOP_GLASS_BLUR_SOLID;
+  const popoverPlate = (scheme: "light" | "dark") =>
+    Math.max(DESKTOP_POPOVER_PLATE_FLOOR[scheme], 100 - transparency * 130);
+  const panelPlate = (scheme: "light" | "dark") =>
+    Math.max(DESKTOP_PANEL_PLATE_FLOOR[scheme], 100 - transparency * 95);
+  const surfacePlate = (scheme: "light" | "dark") =>
+    Math.max(DESKTOP_SURFACE_PLATE_FLOOR[scheme], 100 - transparency * 80);
+  // The composer's glass floor: capped below full opacity even at Solid (it
+  // is the surface content scrolls beneath), otherwise tracking the shared
+  // surface plate/blur as the Material step rises.
+  const composerPlate = (scheme: "light" | "dark") =>
+    Math.min(surfacePlate(scheme), scheme === "light" ? 93 : 92);
+  const composerBlur = Math.max(10, blur.surface);
   return [
-    ["--app-surface-opacity", formatPercent(surfaceOpacity)],
+    ["--app-surface-opacity", formatPercent(surfacePlate("light"))],
+    ["--app-surface-dark-opacity", formatPercent(surfacePlate("dark"))],
+    ["--app-surface-filter", desktopGlassFilter(blur.surface)],
+    ["--app-composer-alpha", formatPercent(composerPlate("light"))],
+    ["--app-composer-dark-alpha", formatPercent(composerPlate("dark"))],
+    ["--app-composer-filter", desktopGlassFilter(composerBlur)],
+    ["--app-glass-popover-filter", desktopGlassFilter(blur.popover)],
+    ["--app-glass-panel-filter", desktopGlassFilter(blur.panel)],
+    ["--app-glass-panel-light-alpha", formatPercent(panelPlate("light"))],
+    ["--app-glass-panel-dark-alpha", formatPercent(panelPlate("dark"))],
     ["--app-muted-surface-opacity", formatPercent(100 - transparency * 75)],
     ["--app-dialog-viewport-light-alpha", formatPercent(Math.max(34, 48 - transparency * 50))],
     ["--app-dialog-viewport-dark-alpha", formatPercent(Math.max(16, 28 - transparency * 36))],
@@ -582,10 +643,10 @@ function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): stri
     ["--app-glass-light-start-alpha", formatPercent(transparency * 75)],
     ["--app-glass-light-end-alpha", formatPercent(transparency * 32)],
     ["--app-glass-foreground-alpha", formatPercent(transparency * 18)],
-    ["--app-glass-light-popover-alpha", formatPercent(surfaceOpacity)],
+    ["--app-glass-light-popover-alpha", formatPercent(popoverPlate("light"))],
     ["--app-glass-dark-start-alpha", formatPercent(transparency * 18)],
     ["--app-glass-dark-end-alpha", formatPercent(transparency * 5)],
-    ["--app-glass-dark-popover-alpha", formatPercent(surfaceOpacity)],
+    ["--app-glass-dark-popover-alpha", formatPercent(popoverPlate("dark"))],
     ...GLASS_SURFACE_TIERS.flatMap((tier) =>
       buildGlassTierVariables(
         tier,
@@ -611,6 +672,13 @@ function buildMotionCssVariables(reducedMotion: boolean): string {
     ["--app-motion-duration-sheet", `${200 * scale}ms`],
     ["--app-motion-duration-stack", `${260 * scale}ms`],
     ["--app-motion-duration-chip", `${120 * scale}ms`],
+    // Desktop overlay entrances (popovers, menus, dialogs, toasts). A fourth
+    // step rather than reusing `sheet` so overlay pacing can diverge from
+    // sheet pacing without a rename sweep. Zeroed under reduced motion like
+    // the rest — desktop primitives consume this instead of hardcoding
+    // duration-200, which is what previously exempted them from the OS
+    // setting entirely.
+    ["--app-motion-duration-pop", `${200 * scale}ms`],
   ]
     .map(([name, value]) => `${name}: ${value};`)
     .join(" ");

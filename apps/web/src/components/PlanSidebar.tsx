@@ -117,12 +117,16 @@ const PlanSidebar = memo(function PlanSidebar({
   return (
     <div
       className={cn(
-        "flex min-h-0 flex-col backdrop-blur",
+        "flex min-h-0 flex-col",
         mode === "sidebar" &&
-          "my-3 mr-3 w-[340px] shrink-0 self-start overflow-hidden rounded-lg border border-border/70 bg-card/90 shadow-xl supports-[backdrop-filter]:bg-card/75",
-        mode === "sheet" && "h-full w-full bg-card/90 supports-[backdrop-filter]:bg-card/75",
+          "my-3 mr-3 w-[340px] shrink-0 self-start overflow-hidden rounded-lg border border-border/70 bg-card/90 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-card/75",
+        mode === "sheet" &&
+          "h-full w-full bg-card/90 backdrop-blur supports-[backdrop-filter]:bg-card/75",
+        // Floating mode overlaps the transcript — it joins the shared glass
+        // material (and the liquid refraction enhancer keys on this class),
+        // instead of its old ad-hoc bg-card/backdrop-blur recipe.
         mode === "floating" &&
-          "pointer-events-auto max-h-[min(72vh,42rem)] w-[min(360px,calc(100vw_-_1.5rem))] rounded-lg border border-border/60 bg-card/95 shadow-xl dark:bg-card/90",
+          "selection-glass-surface pointer-events-auto max-h-[min(72vh,42rem)] w-[min(360px,calc(100vw_-_1.5rem))] rounded-lg border",
       )}
       style={mode === "sidebar" ? { maxHeight: "calc(100% - 1.5rem)" } : undefined}
     >

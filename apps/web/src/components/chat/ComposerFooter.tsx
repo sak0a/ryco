@@ -61,7 +61,6 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   const TokenModeIcon = tokenModeOption.icon;
   const interactionModeOption = interactionModeConfig[props.interactionMode];
   const InteractionModeIcon = interactionModeOption.icon;
-  const tokenModeControlStyle = useUiStateStore((state) => state.tokenModeControlStyle);
   const wideComposerControlsAutoCollapse = useUiStateStore(
     (state) => state.wideComposerControlsAutoCollapse,
   );
@@ -298,8 +297,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
           size="xs"
           className={cn(
             "group/composer-label-control gap-1 px-1.5 font-medium text-muted-foreground/80 hover:text-foreground/80 sm:px-1.5",
-            (wideComposerControlsAutoCollapse || tokenModeControlStyle === "icon") &&
-              "min-w-7 justify-center px-1 sm:px-1",
+            wideComposerControlsAutoCollapse && "min-w-7 justify-center px-1 sm:px-1",
             wideComposerControlsAutoCollapse && "[&_[data-slot=select-icon]]:hidden",
           )}
           aria-label={`Token mode: ${tokenModeOption.triggerLabel}`}
@@ -314,10 +312,8 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
             />
           ) : (
             <>
-              {tokenModeControlStyle !== "text" ? <TokenModeIcon className="size-4" /> : null}
-              {tokenModeControlStyle !== "icon" ? (
-                <SelectValue>{tokenModeOption.triggerLabel}</SelectValue>
-              ) : null}
+              <TokenModeIcon className="size-4" />
+              <SelectValue>{tokenModeOption.triggerLabel}</SelectValue>
             </>
           )}
         </SelectTrigger>

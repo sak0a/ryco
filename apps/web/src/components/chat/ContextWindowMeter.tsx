@@ -19,6 +19,25 @@ function formatPercentage(value: number | null): string | null {
   return `${Math.round(value)}%`;
 }
 
+function MeterBar(props: { readonly percent: number | null }) {
+  if (props.percent === null) return null;
+  const percent = Math.max(0, Math.min(100, props.percent));
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        className={
+          percent >= 95
+            ? "h-full rounded-full bg-destructive"
+            : percent >= 80
+              ? "h-full rounded-full bg-warning"
+              : "h-full rounded-full bg-foreground/60"
+        }
+        style={{ width: `${percent}%` }}
+      />
+    </div>
+  );
+}
+
 function UsageLimitRow(props: {
   readonly window: ServerProviderRateLimitWindow;
   readonly fallbackLabel: string;
@@ -30,12 +49,15 @@ function UsageLimitRow(props: {
   const resetText = formatRateLimitResetText(props.window.resetsAt);
 
   return (
-    <div className="flex items-baseline justify-between gap-3 whitespace-nowrap text-xs">
-      <span className="font-medium text-foreground">{label}</span>
-      <span className="text-muted-foreground">
-        {used}% used
-        {resetText ? <span className="ml-1">· {resetText}</span> : null}
-      </span>
+    <div className="space-y-1">
+      <div className="flex items-baseline justify-between gap-3 whitespace-nowrap text-xs">
+        <span className="font-medium text-foreground">{label}</span>
+        <span className="text-muted-foreground">
+          {used}% used
+          {resetText ? <span className="ml-1">· {resetText}</span> : null}
+        </span>
+      </div>
+      <MeterBar percent={used} />
     </div>
   );
 }
@@ -114,7 +136,7 @@ export function ContextWindowMeter(props: {
         surface="glass"
         side="top"
         align="end"
-        className="w-max max-w-none px-3 py-2"
+        className="w-64 max-w-none px-3 py-2"
       >
         <div className="space-y-1.5 leading-tight">
           <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
@@ -133,6 +155,13 @@ export function ContextWindowMeter(props: {
               {formatContextWindowTokens(usage.usedTokens)} context used
             </div>
           )}
+          <MeterBar
+            percent={
+              usage.maxTokens !== null && usage.usedPercentage !== null
+                ? normalizedPercentage
+                : null
+            }
+          />
           {(usage.totalProcessedTokens ?? null) !== null &&
           (usage.totalProcessedTokens ?? 0) > usage.usedTokens ? (
             <div className="text-xs text-muted-foreground">

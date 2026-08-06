@@ -134,7 +134,7 @@ function SelectPopup({
         sideOffset={sideOffset}
       >
         <SelectPrimitive.Popup
-          className="origin-(--transform-origin) text-foreground transition-[scale,opacity] duration-200 ease-out will-change-transform data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0"
+          className="text-foreground transition-opacity duration-(--app-motion-duration-pop) ease-(--app-motion-spring-gentle) data-ending-style:opacity-0"
           data-slot="select-popup"
           {...props}
         >
@@ -144,7 +144,7 @@ function SelectPopup({
           >
             <ChevronUpIcon className="relative size-4.5 sm:size-4" />
           </SelectPrimitive.ScrollUpArrow>
-          <div className="selection-glass-surface relative h-full min-w-(--anchor-width) rounded-lg border text-popover-foreground">
+          <div className="selection-glass-surface relative h-full min-w-(--anchor-width) origin-(--transform-origin) rounded-lg border text-popover-foreground transition-[scale,opacity] duration-(--app-motion-duration-pop) ease-(--app-motion-spring-gentle) in-data-starting-style:scale-98 in-data-starting-style:opacity-0 in-data-ending-style:scale-98 in-data-ending-style:opacity-0">
             <SelectPrimitive.List
               className={cn("max-h-(--available-height) overflow-y-auto p-1", className)}
               data-slot="select-list"

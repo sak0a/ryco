@@ -15,10 +15,12 @@ import {
   Settings2Icon,
   ShieldIcon,
   UserRoundIcon,
+  SearchIcon,
 } from "lucide-react";
 
 import { type SettingsSectionId, useSettingsDialogStore } from "../../settingsDialogStore";
 import { cn } from "../../lib/utils";
+import { SETTINGS_SEARCH_INDEX } from "./settingsSearchIndex";
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { ScrollArea } from "../ui/scroll-area";
@@ -215,6 +217,22 @@ export function SettingsDialog() {
     if (open && section !== effectiveSection) setSection(effectiveSection);
   }, [effectiveSection, hosted, open, roleFresh, section, setSection]);
 
+  const [searchQuery, setSearchQuery] = useState("");
+  useEffect(() => {
+    if (!open) setSearchQuery("");
+  }, [open]);
+  const visibleSectionIds = new Set(visibleNavItems.map((item) => item.id));
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const searchResults =
+    normalizedQuery.length === 0
+      ? []
+      : SETTINGS_SEARCH_INDEX.filter(
+          (entry) =>
+            visibleSectionIds.has(entry.section) &&
+            `${entry.title} ${entry.description} ${entry.keywords ?? ""}`
+              .toLowerCase()
+              .includes(normalizedQuery),
+        );
   const [restoreSignal, setRestoreSignal] = useState(0);
   const handleRestored = useCallback(() => {
     setRestoreSignal((v) => v + 1);
@@ -240,8 +258,24 @@ export function SettingsDialog() {
         surface="glass"
       >
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5">
-          <DialogTitle className="text-base font-semibold">Settings</DialogTitle>
-          <div className="flex items-center gap-2 pr-9">
+          <div className="flex min-w-0 items-center gap-4">
+            <DialogTitle className="shrink-0 text-base font-semibold">Settings</DialogTitle>
+            <div className="relative w-72 max-w-[40vw]">
+              <SearchIcon
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/60"
+              />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search settings…"
+                aria-label="Search settings"
+                className="h-8 w-full rounded-md border border-input bg-muted/40 pr-3 pl-8 text-[13px] outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+              />
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 pr-9">
             {showRestore ? <RestoreDefaultsButton onRestored={handleRestored} /> : null}
           </div>
         </header>
@@ -282,10 +316,49 @@ export function SettingsDialog() {
             })}
           </nav>
 
-          <ScrollArea className="min-h-0 flex-1 min-w-0">
-            <div key={restoreSignal} className="flex flex-col">
-              <SectionPanel section={effectiveSection} />
-            </div>
+          <ScrollArea className="min-h-0 min-w-0 flex-1">
+            {normalizedQuery.length > 0 ? (
+              <div className="p-4">
+                <div className="flex flex-col gap-0.5 rounded-xl border border-border bg-card p-1.5 shadow-sm/4">
+                  {searchResults.length === 0 ? (
+                    <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+                      No settings match “{searchQuery.trim()}”.
+                    </p>
+                  ) : (
+                    searchResults.map((entry) => {
+                      const sectionLabel = visibleNavItems.find(
+                        (item) => item.id === entry.section,
+                      )?.label;
+                      return (
+                        <button
+                          key={`${entry.section}:${entry.title}`}
+                          type="button"
+                          onClick={() => {
+                            setSection(entry.section);
+                            setSearchQuery("");
+                          }}
+                          className="flex flex-col gap-0.5 rounded-md px-3 py-2.5 text-left outline-hidden ring-ring transition-colors hover:bg-accent focus-visible:ring-2"
+                        >
+                          <span className="flex items-baseline gap-2">
+                            <span className="text-sm font-medium">{entry.title}</span>
+                            {sectionLabel ? (
+                              <span className="text-[11px] text-muted-foreground/70">
+                                {sectionLabel}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="text-xs text-muted-foreground">{entry.description}</span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div key={restoreSignal} className="flex flex-col">
+                <SectionPanel section={effectiveSection} />
+              </div>
+            )}
           </ScrollArea>
         </div>
       </DialogPopup>
