@@ -128,7 +128,12 @@ import {
   applyNodeE2eePolicy,
   previewNodeE2eePolicy,
 } from "~/environments/primary";
-import { E2EE_WEB_SAS_ADVISORY } from "../hostedHub/HostedE2eeVerification.logic";
+import {
+  E2EE_WEB_SAS_ADVISORY,
+  E2EE_WEB_SAS_COMPARE,
+  E2EE_WEB_SAS_DETAIL,
+  E2EE_WEB_SAS_MORE,
+} from "../hostedHub/HostedE2eeVerification.logic";
 import { buildDiagnosticsBundle, serializeDiagnosticsBundle } from "./DiagnosticsPanel.logic";
 import { NodeSecuritySettings } from "./NodeSecuritySettings";
 import {
@@ -329,12 +334,27 @@ describe("local mode: the node's operator state, and no alarm about a relay that
     expect(code.textContent).toContain(NODE_SESSION_WEB_SAS_ADVISORY);
 
     // THE READER IS AT THE NODE. The shipped advisory says "Compare this code
-    // with the one your node's CLI shows for this session" — correct from the
-    // browser end, and a comparison of the node against itself here: it always
-    // matches and establishes nothing, while the row one line above told the
-    // owner to check the browser instead. Both sentences were on screen at once.
+    // with the one your node's CLI shows" — correct from the browser end, and a
+    // comparison of the node against itself here: it always matches and
+    // establishes nothing, while the row one line above told the owner to check
+    // the browser instead. Both sentences were on screen at once.
+    //
+    // EVERY BROWSER-END STRING, NOT ONLY THE ONE THAT USED TO BE THE ONLY ONE.
+    // §13.5's copy now ships at two lengths with a pointer each, and each of the
+    // four inverts here for its own reason: the two advisories send the reader to
+    // the wrong screen, `E2EE_WEB_SAS_MORE` points at the page this list is
+    // already part of, and `E2EE_WEB_SAS_COMPARE` names the command that produces
+    // this very list. Asserting only the first would have let the other three
+    // arrive on the node's own session list unnoticed.
     expect(code.textContent).not.toContain("your node's CLI");
-    expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_ADVISORY);
+    for (const browserEnd of [
+      E2EE_WEB_SAS_ADVISORY,
+      E2EE_WEB_SAS_MORE,
+      E2EE_WEB_SAS_DETAIL,
+      E2EE_WEB_SAS_COMPARE,
+    ]) {
+      expect(document.body.textContent, browserEnd).not.toContain(browserEnd);
+    }
     // …and a native session gets the pointer at the long-term value instead of a
     // blank that reads as a missing code.
     expect(document.body.textContent).toContain("Native sessions have no per-session code");

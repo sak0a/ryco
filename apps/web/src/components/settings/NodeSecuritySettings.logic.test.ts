@@ -1,7 +1,10 @@
 import { E2EE_SAFETY_NUMBER_DIGITS, E2EE_WEB_SAS_CHARS } from "@ryco/shared/relayE2eeConstants";
 import { describe, expect, it } from "vite-plus/test";
 
-import { E2EE_WEB_SAS_ADVISORY } from "../hostedHub/HostedE2eeVerification.logic";
+import {
+  E2EE_WEB_SAS_ADVISORY,
+  E2EE_WEB_SAS_DETAIL,
+} from "../hostedHub/HostedE2eeVerification.logic";
 import {
   everyNodeSecurityString,
   formatNodeEpoch,
@@ -719,17 +722,40 @@ describe("§13.5 from the node's end of the comparison", () => {
 
   it("never sends the reader to compare the node against itself", () => {
     // The shipped advisory is written from the BROWSER end — "Compare this code
-    // with the one your node's CLI shows for this session" — and it is correct
-    // there. Rendered on the node's own live-session list it inverts: the reader
-    // is already at the node, so the comparison always matches and establishes
-    // nothing, and the ceiling clause blames "the Hub operator, who serves that
-    // code" for a page the node itself served in local mode.
+    // with the one your node's CLI shows" — and it is correct there. Rendered on
+    // the node's own live-session list it inverts: the reader is already at the
+    // node, so the comparison always matches and establishes nothing, and the
+    // ceiling clause blames "the Hub operator, who serves this page" for a page
+    // the node itself served in local mode.
     const view = nodeSessionVerificationView(CODE);
     expect(view).not.toBeNull();
     expect(view!.advisory).toBe(NODE_SESSION_WEB_SAS_ADVISORY);
+    // NEITHER LENGTH OF THE BROWSER-END SENTENCE, because §13.5's copy now ships
+    // as a short form and a long one and both invert here in the same way.
     expect(view!.advisory).not.toBe(E2EE_WEB_SAS_ADVISORY);
+    expect(view!.advisory).not.toBe(E2EE_WEB_SAS_DETAIL);
     expect(view!.advisory.toLowerCase()).not.toContain("your node's cli");
     expect(view!.advisory.toLowerCase()).toContain("that browser is showing");
+  });
+
+  it("carries no pointer, because the reader is already on the page one would name", () => {
+    // The browser end ships a second required field — a pointer at Settings →
+    // Security, or at the command that reads the node's end. On the node's own
+    // list in local mode the reader is inside Settings → Security and the
+    // command produces this very list, so both would be circular. The node-end
+    // view is a different shape rather than the same shape with a wrong value.
+    //
+    // STATED AS `null` RATHER THAN LEFT OUT. `VerificationCode` draws both ends
+    // from one prop, and an optional field there cannot tell "this end has no
+    // second sentence" from "this caller dropped one" — so the field is present
+    // and empty, and the renderer's type requires it.
+    expect(Object.keys(nodeSessionVerificationView(CODE)!)).toEqual([
+      "groups",
+      "display",
+      "advisory",
+      "more",
+    ]);
+    expect(nodeSessionVerificationView(CODE)!.more).toBeNull();
   });
 
   it("keeps §13.5's denial at full strength in node-end terms", () => {

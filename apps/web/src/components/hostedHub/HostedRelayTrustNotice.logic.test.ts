@@ -1,13 +1,22 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { E2EE_WEB_SAS_CHARS } from "@ryco/shared/relayE2eeConstants";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   HOSTED_E2EE_CHANNEL_STATUSES,
   type WebHostedE2eeChannelStatus,
 } from "../../hostedHub/connectionStatus";
-import { E2EE_WEB_SAS_ADVISORY, E2EE_WEB_SAS_CAPTION } from "./HostedE2eeVerification.logic";
+import {
+  hostedE2eeVerificationView,
+  E2EE_WEB_SAS_ADVISORY,
+  E2EE_WEB_SAS_COMPARE,
+  E2EE_WEB_SAS_DETAIL,
+  E2EE_WEB_SAS_MORE,
+  E2EE_WEB_SAS_UNAVAILABLE,
+  HOSTED_E2EE_VERIFICATION_PLACEMENTS,
+} from "./HostedE2eeVerification.logic";
 import {
   hostedRelayTrustDisclosure,
   HOSTED_RELAY_TRUST_DISCLOSURE_STATES,
@@ -24,15 +33,40 @@ import {
  * would pass "this is end-to-end encrypted" the day someone deleted a "not".
  */
 
-/** Every string a user can read, flattened. */
+/** A well-formed §13.5 rendering, built from the constants rather than typed. */
+const VALID_WEB_SAS = ["ABCD", "EFGH"].join(E2EE_WEB_SAS_CHARS.separator);
+
+/**
+ * Every string a user can read, flattened.
+ *
+ * THE §13.5 COPY IS IN HERE AT EVERY LENGTH IT SHIPS, AND THE LENGTHS ARE
+ * ENUMERATED RATHER THAN LISTED. Splitting one sentence into a short form, a
+ * long form, and the two pointers that carry them made four places a banned
+ * claim could be written where there had been two — and naming those four here
+ * would have left the FIFTH unscanned: a placement added to
+ * `HOSTED_E2EE_VERIFICATION_PLACEMENTS` compiles as soon as it is written two
+ * sentences, and a hand-written roster in this file has no way to notice. Both
+ * fields of every placement are rendered through the shipped builder instead, so
+ * a new length is scanned on the day it exists.
+ */
 function everyDisclosure(): ReadonlyArray<{ readonly where: string; readonly text: string }> {
   return [
     ...HOSTED_RELAY_TRUST_DISCLOSURE_STATES.map((status) => ({
       where: `disclosure(${status})`,
       text: hostedRelayTrustDisclosure(status).body,
     })),
-    { where: "webSasCaption", text: E2EE_WEB_SAS_CAPTION },
-    { where: "webSasAdvisory", text: E2EE_WEB_SAS_ADVISORY },
+    ...HOSTED_E2EE_VERIFICATION_PLACEMENTS.flatMap((placement) => {
+      const view = hostedE2eeVerificationView(VALID_WEB_SAS, placement);
+      // The code is built from the format constants, so a `null` here means the
+      // splitter stopped accepting its own format — a failure worth reading as
+      // itself rather than as an empty scan that passes everything.
+      if (view === null) throw new Error(`no §13.5 view for the ${placement} placement`);
+      return [
+        { where: `webSas(${placement}).advisory`, text: view.advisory },
+        { where: `webSas(${placement}).more`, text: view.more },
+      ];
+    }),
+    { where: "webSasUnavailable", text: E2EE_WEB_SAS_UNAVAILABLE },
   ];
 }
 
@@ -87,6 +121,12 @@ describe("prohibited claims", () => {
     // present" — and "operator-proof" carries the same token.
     "proof",
     "no interposer",
+    // The same MUST NOT written affirmatively. Every clause on this tier is
+    // bounded — by an honest bundle, by the operator, or by the grinding window
+    // — so nothing here may report that a match, a latch, or a lock RULES OUT
+    // anything. The negations the copy does make read "does not rule out", which
+    // this does not match.
+    "rules out",
     // §2.6/§2.4: nothing here may be presented as unconditional.
     "cannot be intercepted",
     "unforgeable",
@@ -327,14 +367,24 @@ describe("docs/hosted-hub-client.md quotes the copy this slice ships", () => {
     }
   });
 
-  it("quotes §13.5's advisory verbatim, where it documents the comparison", () => {
-    // The document now describes the compare-to-CLI flow, and the sentence
-    // bounding what a match is worth is as much a security claim as the
-    // disclosure is. Paraphrasing it here would rebuild the drifting second copy
-    // this slice exists to remove, one section further down the same file.
-    expect(quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-text").get("web-sas-advisory")).toBe(
-      normalizeProse(E2EE_WEB_SAS_ADVISORY),
-    );
+  it("quotes §13.5's copy verbatim, at every length it ships", () => {
+    // The document describes the compare-to-CLI flow, and the sentences bounding
+    // what a match is worth are as much a security claim as the disclosure is.
+    // Paraphrasing them here would rebuild the drifting second copy this slice
+    // exists to remove, one section further down the same file.
+    //
+    // ALL FOUR, because the split into a short and a long form is exactly where
+    // a document falls behind: quoting only the inline line would have let the
+    // long form — the one carrying §2.2's second reason — drift unwatched.
+    const quoted = quotedBlocks(HOSTED_HUB_CLIENT_DOC, "shipped-text");
+    for (const [name, text] of [
+      ["web-sas-advisory", E2EE_WEB_SAS_ADVISORY],
+      ["web-sas-more", E2EE_WEB_SAS_MORE],
+      ["web-sas-detail", E2EE_WEB_SAS_DETAIL],
+      ["web-sas-compare", E2EE_WEB_SAS_COMPARE],
+    ] as const) {
+      expect(quoted.get(name), name).toBe(normalizeProse(text));
+    }
   });
 });
 
@@ -546,10 +596,11 @@ describe("no public file still carries the retired claim", () => {
 
 describe("the disclosure may not point at what the surface under it does not draw", () => {
   it("refers to no session code, on any state", () => {
-    // This notice mounts at five sites across BOTH presentation tiers, and
-    // §13.5's `WebSAS` renders at exactly one of them (the desktop node menu —
-    // `HostedConnectionControls.tsx` mounts `HostedE2eeVerification` there and
-    // nowhere else, and `AGENTS.md` freezes the web phone tier). Copy here that
+    // This notice mounts at six sites across BOTH presentation tiers, and
+    // §13.5's `WebSAS` renders at two of them (the desktop node menu, where
+    // `HostedConnectionControls.tsx` mounts `HostedE2eeVerification`, and
+    // Settings → Security, where `NodeSecuritySettings.tsx` draws this tab's own
+    // channel; `AGENTS.md` freezes the web phone tier). Copy here that
     // presupposed a comparison value on the page read identically on the phone
     // connection sheet, which draws none: it told that reader a §13.5
     // comparison existed and that a hostile Hub could forge it, while handing

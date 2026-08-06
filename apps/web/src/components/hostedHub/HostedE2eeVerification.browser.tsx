@@ -25,7 +25,8 @@ import {
 } from "../settings/DiagnosticsPanel.logic";
 import {
   E2EE_WEB_SAS_ADVISORY,
-  E2EE_WEB_SAS_CAPTION,
+  E2EE_WEB_SAS_DETAIL,
+  E2EE_WEB_SAS_MORE,
   E2EE_WEB_SAS_UNAVAILABLE,
 } from "./HostedE2eeVerification.logic";
 import { HostedE2eeVerification } from "./HostedE2eeVerification";
@@ -121,12 +122,14 @@ describe("§13.5 the WebSAS is legible enough to compare", () => {
     // The duty is on "the web UI text accompanying the `WebSAS`", and text a
     // reader has to open is text most readers never see.
     await expect.element(page.getByText(E2EE_WEB_SAS_ADVISORY)).toBeVisible();
-    await expect.element(page.getByText(E2EE_WEB_SAS_CAPTION)).toBeVisible();
+    // …and the pointer at the long account travels with it, so the short form is
+    // never presented as the whole of what an owner can know.
+    await expect.element(page.getByText(E2EE_WEB_SAS_MORE)).toBeVisible();
     // Structurally, not just visually: nothing between the code and either
     // sentence is a collapsible or a hidden container.
     expect(section()!.querySelector("details")).toBeNull();
     expect(section()!.querySelector("[hidden]")).toBeNull();
-    for (const text of [E2EE_WEB_SAS_ADVISORY, E2EE_WEB_SAS_CAPTION]) {
+    for (const text of [E2EE_WEB_SAS_ADVISORY, E2EE_WEB_SAS_MORE]) {
       const node = [...section()!.querySelectorAll<HTMLElement>("p")].find((paragraph) =>
         paragraph.textContent?.includes(text),
       );
@@ -135,6 +138,37 @@ describe("§13.5 the WebSAS is legible enough to compare", () => {
       expect(box.width, "the sentence has no box").toBeGreaterThan(0);
       expect(box.height, "the sentence has no box").toBeGreaterThan(0);
     }
+  });
+
+  it("draws the short form here and leaves the long account to Settings", async () => {
+    // The owner is mid-comparison on this surface: it gets the one line §13.5
+    // requires plus the pointer, and nothing else. The long form is the same
+    // duty at the length the Settings page has room for — drawing it here would
+    // restore the block of prose this shape exists to remove, and it would still
+    // pass every §13.5 assertion above.
+    //
+    // THIS FILE IS THE STANDARD CLIENT (no `.env` in the harness, so
+    // `isHostedHubMode()` answers false), where Settings → Security is nobody's
+    // to be refused and the pointer is therefore always correct. The hosted role
+    // gate on that pointer lives in `HostedE2eeVerificationHosted.browser.tsx`,
+    // which mocks the mode at module scope because it is read at module scope.
+    await page.viewport(320, 568);
+    applyWebE2eeVerificationCode(FIRST_CODE);
+    mounted = await render(<HostedE2eeVerification />);
+    await expect.element(page.getByText(FIRST_CODE)).toBeVisible();
+
+    expect(document.body.textContent).not.toContain(E2EE_WEB_SAS_DETAIL);
+    // Two sentences under the code, and no third: the whole accompanying text of
+    // this surface is the advisory and the pointer.
+    const paragraphs = [...section()!.querySelectorAll<HTMLElement>("p")].map(
+      (paragraph) => paragraph.textContent ?? "",
+    );
+    expect(paragraphs).toEqual([
+      "Session code",
+      FIRST_CODE,
+      E2EE_WEB_SAS_ADVISORY,
+      E2EE_WEB_SAS_MORE,
+    ]);
   });
 });
 

@@ -226,6 +226,16 @@ function SafetyNumber({ value }: { readonly value: string }) {
  * belongs to the caller's END of the comparison, and the two callers below are
  * the only ones: each is wired to exactly one view builder, so the referent is
  * structural rather than a parameter someone can pass the wrong way round.
+ *
+ * `more` IS REQUIRED AND NULLABLE RATHER THAN OPTIONAL, which is the difference
+ * between a fact and a convention. The node end genuinely has no second sentence
+ * — its reader is already on the page a pointer would name — but written `more?:
+ * string` that absence was indistinguishable from a caller who forgot the field,
+ * and forgetting it on the browser end drops the sentence naming
+ * `ryco e2ee sessions`: the page the node menu's pointer leads to would show a
+ * value to compare and no way to obtain the thing to compare it against. `null`
+ * makes "this end has no second sentence" something a view STATES, and omitting
+ * it a compile error.
  */
 function VerificationCode({
   view,
@@ -234,8 +244,8 @@ function VerificationCode({
 }: {
   readonly view: {
     readonly display: string;
-    readonly caption: string;
     readonly advisory: string;
+    readonly more: string | null;
   } | null;
   readonly unavailable: string;
   readonly testId: string;
@@ -255,8 +265,10 @@ function VerificationCode({
       >
         {view.display}
       </p>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.caption}</p>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{view.advisory}</p>
+      {view.more === null ? null : (
+        <p className="text-[11px] leading-relaxed text-muted-foreground">{view.more}</p>
+      )}
     </div>
   );
 }
@@ -267,11 +279,17 @@ function VerificationCode({
  * The shipped advisory is written from the browser end — "compare this code with
  * the one your node's CLI shows" — and this is the one site in this panel where
  * the reader is at the browser end, so it is correct here and nowhere else.
+ *
+ * IT TAKES THE `settings` LENGTH, WHICH IS THIS PANEL'S WHOLE JOB HERE. The
+ * connection surface draws the one line §13.5 requires and points at this page
+ * for the rest; this is that page, so drawing the same short line would make the
+ * pointer circular and leave §2.2's second reason — that this tab pins no node
+ * identity — stated nowhere the pointer led.
  */
 function OwnChannelVerificationCode({ code }: { readonly code: string | null }) {
   return (
     <VerificationCode
-      view={hostedE2eeVerificationView(code)}
+      view={hostedE2eeVerificationView(code, "settings")}
       unavailable={E2EE_WEB_SAS_UNAVAILABLE}
       testId="node-session-code"
     />

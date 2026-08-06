@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { E2EE_WEB_SAS_MORE } from "../hostedHub/HostedE2eeVerification.logic";
 import { PHONE_SETTINGS_SECTION_IDS } from "../shell/phone/PhoneSettingsSurface";
 import {
   hostedSettingsSectionAllowed,
   settingsSectionAvailable,
+  settingsSectionReachable,
   SETTINGS_DIALOG_SECTION_IDS,
+  SETTINGS_DIALOG_SECTION_LABELS,
 } from "./SettingsDialog";
+import { SETTINGS_SEARCH_INDEX } from "./settingsSearchIndex";
 
 describe("the phone surface mirrors the desktop dialog's section inventory", () => {
   it("navigates to exactly the same sections", () => {
@@ -81,6 +85,54 @@ describe("hosted settings capabilities", () => {
     ] as const) {
       expect(settingsSectionAvailable(section, false)).toBe(true);
       expect(settingsSectionAvailable(section, true)).toBe(true);
+    }
+  });
+
+  it("is one predicate, so a nav and a pointer at a section cannot disagree", () => {
+    // `settingsSectionReachable` is what both navs filter on and what
+    // `HostedE2eeVerification` asks before it draws §13.5's pointer. Written out
+    // per call site it was three copies of the same two clauses, and the copy
+    // that NAMES a section is the caller most likely to be forgotten when the
+    // gate moves.
+    for (const role of ["viewer", "operator", "owner", null] as const) {
+      expect(settingsSectionReachable("security", { hosted: true, role })).toBe(
+        hostedSettingsSectionAllowed("security", role),
+      );
+    }
+    // Local mode has no hosted role at all, and the section is not hosted-only.
+    expect(settingsSectionReachable("security", { hosted: false, role: null })).toBe(true);
+    expect(settingsSectionReachable("account", { hosted: false, role: null })).toBe(false);
+  });
+});
+
+describe("§13.5's pointer names a section this dialog actually has", () => {
+  it("spells the label the nav draws, so a rename fails here", () => {
+    // `E2EE_WEB_SAS_MORE` is the second sentence beside the session code:
+    // "Settings → Security explains what else this tab cannot check." Nothing
+    // else ties that string to the shipped section, so renaming the nav item
+    // would leave the copy naming a section that no longer exists — on the one
+    // surface where an owner is performing a security check.
+    const label = SETTINGS_DIALOG_SECTION_LABELS.get("security");
+    expect(label, "the security section left the dialog").toBeDefined();
+    expect(E2EE_WEB_SAS_MORE).toContain(`Settings → ${label!}`);
+  });
+
+  it("is findable by the search box that replaces the section list", () => {
+    // The dialog's header search swaps the whole panel area for its results, so
+    // an owner who follows the pointer and types what it named would be told
+    // "No settings match “security”" — the search actively denying the
+    // destination the copy had just given them. (`account` and
+    // `opinionated-plugins` are also unindexed; both predate this pointer and
+    // neither is named by shipped security copy, so they are left alone.)
+    const indexed = SETTINGS_SEARCH_INDEX.filter((entry) => entry.section === "security");
+    expect(indexed.length).toBeGreaterThan(0);
+    for (const query of ["security", "session code", "verification", "e2ee", "fingerprint"]) {
+      const matches = indexed.filter((entry) =>
+        `${entry.title} ${entry.description} ${entry.keywords ?? ""}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
+      );
+      expect(matches.length, `nothing in the index matches ${query}`).toBeGreaterThan(0);
     }
   });
 });

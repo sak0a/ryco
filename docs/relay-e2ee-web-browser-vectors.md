@@ -134,7 +134,7 @@ The two §13.5 duties this note previously recorded as owed are now discharged:
 
 | Duty                             | Where it is discharged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| §13.5 "Shown in the web UI"      | `HostedE2eeVerification.tsx`, mounted in the desktop node menu. The renderer returns the code, the format caption, and §13.5's advisory sentence as ONE value (`HostedE2eeVerification.logic.ts`), so a caller cannot draw the characters without the "cannot protect against the Hub operator, who serves that code" denial. A locked channel that reached the surface with no conforming code — the derivation is allowed to fail without costing the channel — draws the absence as a sentence rather than as nothing, so the display duty cannot fail open. |
+| §13.5 "Shown in the web UI"      | `HostedE2eeVerification.tsx` in the desktop node menu, and `NodeSecuritySettings.tsx` in Settings → Security. `hostedE2eeVerificationView` (`HostedE2eeVerification.logic.ts`) returns the display groups, the display value, §13.5's advisory sentence, and the second sentence that goes with it as ONE object of four REQUIRED fields, taking a non-defaultable `placement` that selects the length — so a caller cannot draw the characters without the "cannot protect against the Hub operator, who serves this page" denial, and cannot pick a length that omits it. Both lengths also end on the residual denial ("a match does not rule out someone sitting in the middle"), which is the clause that survives an honest bundle and a trusted operator. A locked channel that reached the surface with no conforming code — the derivation is allowed to fail without costing the channel — draws the absence as a sentence rather than as nothing, so the display duty cannot fail open. |
 | The relay trust notice's wording | `HostedRelayTrustNotice.logic.ts`. The claim is now a selector over the channel state, keyed on the tier-fenced `WebHostedE2eeChannelStatus`, so a new channel state cannot ship without a sentence. The `web-unsigned` copy states §2.3's web bullet and §2.4's served-code ceiling; the `legacy` copy is §12.2's mandatory label.                                                                                                                                                                                                                             |
 
 The glyph and tone at all three connection surfaces now key on
@@ -144,10 +144,17 @@ keyed on `connected` they drew the identical green connected glyph — §2.2's "
 stronger claim for a weaker configuration", arrived at through an icon.
 
 **One §13.5 surface gap remains, and it is a scope ruling rather than an oversight.** The `WebSAS`
-renders in the desktop node menu only. `AGENTS.md` freezes the `apps/web` phone tier — "Do not
-extend the web phone tier" — and mounting a new block inside the phone connection sheet is a new
-phone-tier surface. `apps/mobile` is the intended phone experience and ships the native §13 trust
-surfaces. Unfreezing the web phone tier to add the `WebSAS` is a separate approved change.
+renders at two desktop surfaces — the desktop-width node menu and Settings → Security, which is
+where the menu's pointer leads (`docs/hosted-hub-client.md` documents both) — and at no phone-tier
+surface. `AGENTS.md` freezes the `apps/web` phone tier — "Do not extend the web phone tier" — and
+mounting a new block inside the phone connection sheet is a new phone-tier surface. `apps/mobile` is
+the intended phone experience and ships the native §13 trust surfaces. Unfreezing the web phone tier
+to add the `WebSAS` is a separate approved change.
+
+The menu chooses between the two lengths on `settingsSectionReachable("security", …)`, the same
+predicate the settings navs filter on: Settings → Security is owner-only in hosted mode, so a reader
+who cannot open it is drawn the long form where they are rather than a pointer at a section their
+dialog does not list.
 
 **What makes the phone tier truthful is the copy, and that had to be fixed rather than asserted.**
 This note previously claimed the phone tier "claims nothing the absent code would have qualified".

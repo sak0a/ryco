@@ -1,9 +1,16 @@
+import { isHostedHubMode } from "../../env";
+import { useHostedHubStore } from "../../hostedHub/state";
 import {
   useWebE2eeChannelStatus,
   useWebE2eeVerificationCode,
 } from "../../hostedHub/useWebE2eeSession";
 import {
+  hostedSettingsRoleSnapshot,
+  settingsSectionReachable,
+} from "../settings/settingsSections.logic";
+import {
   E2EE_WEB_SAS_UNAVAILABLE,
+  hostedE2eeVerificationPlacement,
   hostedE2eeVerificationView,
 } from "./HostedE2eeVerification.logic";
 
@@ -22,6 +29,21 @@ import {
  * never see. It renders in the same view as the characters, every time, and it
  * comes out of the same value they do ({@link hostedE2eeVerificationView}).
  *
+ * IT IS THE SHORT FORM WHEREVER THE LONG ONE IS ONE NAVIGATION AWAY. This is the
+ * surface an owner is looking at while they compare eight characters, so it
+ * draws the one line that discharges §13.5 and the pointer at where the rest of
+ * it is, rather than the long account.
+ *
+ * THAT POINTER IS A PROMISE ABOUT THE READER'S OWN SETTINGS DIALOG, so the
+ * promise is checked before it is made. Settings → Security is owner-only in
+ * hosted mode and fails closed while the role snapshot is stale, and this
+ * component has no role gate of its own — it draws for whoever is holding a
+ * locked `web-unsigned` channel. Asking `settingsSectionReachable` the same
+ * question the settings nav asks is what stops a viewer, an operator, or an
+ * owner mid-reconnect being sent to a section that is not in their list; where
+ * the answer is no they get the long form here instead, so §2.2's no-pin reason
+ * is never the thing behind a door they cannot open.
+ *
  * THE ABSENCE OF A CODE IS ALSO A STATE THIS DRAWS. §13.5's duty is a display
  * duty and the derivation may fail without costing the channel, so a locked
  * `web-unsigned` channel can reach this surface holding nothing to compare.
@@ -38,8 +60,17 @@ import {
 export function HostedE2eeVerification() {
   const status = useWebE2eeChannelStatus();
   const code = useWebE2eeVerificationCode();
+  const hostedRole = useHostedHubStore((state) => state.effectiveRole);
+  const directoryStatus = useHostedHubStore((state) => state.directoryStatus);
+  const transportStatus = useHostedHubStore((state) => state.transportStatus);
   if (status !== "web-unsigned") return null;
-  const view = hostedE2eeVerificationView(code);
+  const placement = hostedE2eeVerificationPlacement(
+    settingsSectionReachable("security", {
+      hosted: isHostedHubMode(),
+      role: hostedSettingsRoleSnapshot(hostedRole, directoryStatus, transportStatus),
+    }),
+  );
+  const view = hostedE2eeVerificationView(code, placement);
 
   if (!view) {
     return (
@@ -65,6 +96,9 @@ export function HostedE2eeVerification() {
       aria-label="Session code"
       data-testid="hosted-e2ee-verification"
       data-code="present"
+      // Which length the reachability check picked, so a browser suite can pin
+      // the decision itself rather than infer it from which sentence rendered.
+      data-form={placement}
       className="space-y-2"
     >
       <p className="text-xs font-medium">Session code</p>
@@ -78,8 +112,8 @@ export function HostedE2eeVerification() {
       >
         {view.display}
       </p>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.caption}</p>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{view.advisory}</p>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">{view.more}</p>
     </section>
   );
 }

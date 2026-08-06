@@ -339,29 +339,68 @@ Compare it out of band with the node's own view of the same session:
 ryco e2ee sessions
 ```
 
-The sentence shown beside the code states what a match is worth. It is quoted here for the reason
-the disclosure above is, and the same test holds it to the shipped string:
+The sentence shown beside the code states what a match is worth. It ships at two lengths, both
+quoted here for the reason the disclosure above is, and the same test holds each to the shipped
+string.
+
+Beside the code in the node menu — where an owner is mid-comparison — the accompanying text is one
+line and the pointer at the rest of it:
 
 <!-- shipped-text:web-sas-advisory -->
 
 > Compare this code with the one your node's CLI shows for this session. A match catches accidental
-> wrong-node routing and some network interposition — anyone standing in for your node who is not
-> also serving this page — while the loaded code is honest; it cannot protect against the Hub
-> operator, who serves that code, and a match does not rule out someone sitting in the middle.
+> wrong-node routing and some network interposition while the loaded code is honest; it cannot
+> protect against the Hub operator, who serves this page, and it does not rule out someone sitting
+> in the middle.
 
 <!-- /shipped-text:web-sas-advisory -->
 
+<!-- shipped-text:web-sas-more -->
+
+> Settings → Security explains what else this tab cannot check.
+
+<!-- /shipped-text:web-sas-more -->
+
+In Settings → Security, the same code is drawn with the longer account. It names both of the reasons
+the browser tier is denied the active-Hub column, and keeps them apart: one needs a substituted
+bundle and one needs nothing at all.
+
+<!-- shipped-text:web-sas-detail -->
+
+> Compare this code with the one your node's CLI shows for this session. A match catches accidental
+> wrong-node routing and some network interposition while the loaded code is honest. This tab pins
+> no node identity, so that comparison is the only thing that speaks to whether the far end is your
+> machine or the Hub standing in for it — and it cannot protect against the Hub operator, who serves
+> this page and could serve code that completes the same handshake and displays this same code
+> anyway. A match does not rule out someone sitting in the middle.
+
+<!-- /shipped-text:web-sas-detail -->
+
+<!-- shipped-text:web-sas-compare -->
+
+> Run `ryco e2ee sessions` on the machine running the node to read its end of the comparison.
+
+<!-- /shipped-text:web-sas-compare -->
+
 Read the whole code in order: its fixed length and grouping are the only check it has, and the
-comparison stays advisory for the reason the last clause gives.
+comparison stays advisory for the reason both forms end on — a match does not rule out someone
+sitting in the middle, because an interposer can grind its own ephemeral until the two strings agree
+and what bounds that is the handshake window rather than the derivation. Neither form states the
+character count, the grouping, or the displayed entropy: the entropy is a derivation rather than
+something an owner acts on, and the format is in front of them while they read.
 
 The code is ephemeral display state. It is never logged, never persisted, and never sent to
 analytics, and it must not be captured into qualification evidence, screenshots, or diagnostics. If
 a channel locked encrypted but produced no code, the surface says so rather than rendering nothing —
 an absent comparison value is reported, not silently dropped.
 
-The code renders in the desktop-width node menu. The narrow phone presentation does not draw it, and
-its disclosure deliberately points at no comparison it cannot show; on a phone, use the Ryco mobile
-app.
+The code renders in the desktop-width node menu and again in Settings → Security, which is where the
+menu's pointer leads. That section is owner-only in hosted mode, so the menu asks whether this
+reader can open it before it points there: a viewer, an operator, or an owner whose role snapshot
+has gone stale is shown the longer account in the menu itself, with the `ryco e2ee sessions`
+sentence in place of a pointer at a section their settings list does not have. The narrow phone
+presentation does not draw the code at all, and its disclosure deliberately points at no comparison
+it cannot show; on a phone, use the Ryco mobile app.
 
 ## Reconnect, replay, and delivery uncertainty
 

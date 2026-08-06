@@ -32,9 +32,9 @@ import { type SettingsSectionId, useSettingsDialogStore } from "../../../setting
 import { isHostedHubMode } from "../../../env";
 import { useHostedHubStore } from "../../../hostedHub/state";
 import {
-  hostedSettingsSectionAllowed,
-  settingsSectionAvailable,
-} from "../../settings/SettingsDialog";
+  hostedSettingsRoleSnapshot,
+  settingsSectionReachable,
+} from "../../settings/settingsSections.logic";
 import {
   ArchivedThreadsPanel,
   GeneralSettingsPanel,
@@ -238,12 +238,10 @@ export function PhoneSettingsSurface() {
   const hostedDirectoryStatus = useHostedHubStore((state) => state.directoryStatus);
   const hostedTransportStatus = useHostedHubStore((state) => state.transportStatus);
   const hosted = isHostedHubMode();
-  const roleFresh = hostedDirectoryStatus === "ready" && hostedTransportStatus === "online";
+  const role = hostedSettingsRoleSnapshot(hostedRole, hostedDirectoryStatus, hostedTransportStatus);
   const sectionAllowed = useCallback(
-    (id: SettingsSectionId) =>
-      settingsSectionAvailable(id, hosted) &&
-      (!hosted || hostedSettingsSectionAllowed(id, roleFresh ? hostedRole : null)),
-    [hosted, hostedRole, roleFresh],
+    (id: SettingsSectionId) => settingsSectionReachable(id, { hosted, role }),
+    [hosted, role],
   );
   const generalItems = GENERAL_ITEMS.filter((item) => sectionAllowed(item.id));
   const advancedItems = ADVANCED_ITEMS.filter((item) => sectionAllowed(item.id));
