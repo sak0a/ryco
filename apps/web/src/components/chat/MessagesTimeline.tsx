@@ -27,6 +27,7 @@ import {
   formatSubagentTokenCount,
   type AgentPanelModel,
 } from "../../threadWorkspaceViewModel";
+import { glassSurfaceClassName } from "../mobile/GlassSurface";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
@@ -34,6 +35,7 @@ import {
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   FileDiffIcon,
@@ -1362,29 +1364,45 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
       ? `${livePhase.title} · ${livePhase.activeCount} working`
       : working > 0
         ? `${working} working`
-        : "working"
+        : "Working"
     : failed > 0
       ? `${failed} failed`
-      : "✓ completed";
+      : "Completed";
 
   return (
     <button
       type="button"
       onClick={onOpenAgents}
-      className="-mx-1 flex w-full items-center gap-2 rounded-md border border-border/60 bg-card/50 px-2.5 py-1.5 text-left text-[13px] transition hover:bg-accent/50"
+      aria-label={live ? "Open the Agents panel" : "View agents"}
+      className={cn(
+        glassSurfaceClassName("chip"),
+        "group/agent-cta grid min-h-[36px] w-full grid-cols-[1.25rem_minmax(0,1fr)_auto_1.25rem] items-center gap-x-2 rounded-lg border border-border/50 px-2 text-left transition-colors hover:border-border/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+      )}
     >
-      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", dotClass)} />
-      <BotIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 truncate">
-        <span className="font-medium">{lead}</span>
-        {workflowName ? <span className="text-muted-foreground"> · {workflowName}</span> : null}
+      <span className="flex size-5 items-center justify-center">
+        <BotIcon
+          aria-hidden
+          className="size-3.5 text-muted-foreground/70 transition-colors group-hover/agent-cta:text-foreground"
+        />
       </span>
-      <span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-[.7rem] text-muted-foreground">
+      <span className="flex min-w-0 items-center gap-2">
+        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", dotClass)} />
+        <span className="truncate text-[12px] leading-5">
+          <span className="font-medium text-foreground/90">{lead}</span>
+          {workflowName ? <span className="text-muted-foreground"> · {workflowName}</span> : null}
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2 text-[11px] leading-5 text-muted-foreground">
         <span>{status}</span>
         {totalTokens > 0 ? (
-          <span className="tabular-nums">Σ {formatSubagentTokenCount(totalTokens)}</span>
+          <span className="tabular-nums">{formatSubagentTokenCount(totalTokens)} tok</span>
         ) : null}
-        <span className="text-info-foreground">{live ? "Open Agents ▸" : "View ▸"}</span>
+      </span>
+      <span className="flex size-5 items-center justify-center">
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 text-muted-foreground/60 transition-[color,translate] group-hover/agent-cta:translate-x-0.5 group-hover/agent-cta:text-foreground"
+        />
       </span>
     </button>
   );

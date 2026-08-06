@@ -22,7 +22,7 @@ import {
   ChevronRightIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { readEnvironmentApi } from "../environmentApi";
 import {
@@ -86,8 +86,24 @@ function elapsedBetween(startedAt: string, endIso: string | null): string {
 }
 
 /**
+ * How long a settled agent actually ran. The provider's own duration_ms is
+ * authoritative when reported; activity timestamps are the fallback for
+ * synthesized rows (workflow members) that carry no usage duration.
+ */
+function settledDuration(agent: RuntimeSubagent): string | null {
+  if (agent.usage?.durationMs !== undefined) {
+    return formatElapsedSeconds(agent.usage.durationMs / 1000);
+  }
+  if (agent.startedAt && agent.completedAt) {
+    return elapsedBetween(agent.startedAt, agent.completedAt);
+  }
+  return null;
+}
+
+/**
  * Elapsed time for the current activation. Live agents self-tick via DOM
- * writes (zero React commits per tick); settled agents freeze at completedAt.
+ * writes (zero React commits per tick); settled agents freeze at the run's
+ * actual duration.
  */
 function AgentElapsed({ agent }: { agent: RuntimeSubagent }) {
   const textRef = useRef<HTMLSpanElement>(null);
@@ -108,14 +124,31 @@ function AgentElapsed({ agent }: { agent: RuntimeSubagent }) {
     return () => clearInterval(id);
   }, [live, startedAt]);
 
+  if (!live) {
+    const duration = settledDuration(agent);
+    return duration ? <span className="tabular-nums">{duration}</span> : null;
+  }
   if (!startedAt) {
     return null;
   }
   return (
     <span ref={textRef} className="tabular-nums">
-      {elapsedBetween(startedAt, live ? null : agent.completedAt)}
+      {elapsedBetween(startedAt, null)}
     </span>
   );
+}
+
+/**
+ * Human label for an agent's last tool. The Workflow harness makes agents
+ * deliver their result through an internal tool literally named
+ * "StructuredOutput" — surfacing that verbatim reads like a bug, so it maps
+ * to result language instead.
+ */
+function agentToolHint(name: string, live: boolean): string {
+  if (/^structured[\s_-]?output$/i.test(name)) {
+    return live ? "Delivering result" : "Delivered result";
+  }
+  return live ? `Using ${name}` : name;
 }
 
 /**
@@ -129,7 +162,7 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
   if (live) {
     return (
       agent.progress ??
-      (agent.lastToolName ? `▸ ${agent.lastToolName}` : null) ??
+      (agent.lastToolName ? agentToolHint(agent.lastToolName, true) : null) ??
       agent.result ??
       agent.error
     );
@@ -138,8 +171,13 @@ function agentActivityText(agent: RuntimeSubagent): string | null {
     agent.error ??
     agent.result ??
     agent.progress ??
-    (agent.lastToolName ? `▸ ${agent.lastToolName}` : null)
+    (agent.lastToolName ? agentToolHint(agent.lastToolName, false) : null)
   );
+}
+
+/** Hairline separation between stacked agent rows. */
+function AgentRowList({ children }: { children: ReactNode }) {
+  return <div className="divide-y divide-border/30">{children}</div>;
 }
 
 /** Flat, non-interactive agent status line. No unfold. */
@@ -149,7 +187,7 @@ function AgentRow({ agent }: { agent: RuntimeSubagent }) {
   const modelLabel = formatSubagentModelLabel(agent.model, agent.effort);
 
   return (
-    <div className="rounded-md px-1.5 py-1">
+    <div className="px-1.5 py-2">
       <div className="flex items-start gap-2">
         <span className="flex h-5 items-center">
           <StatusDot status={agent.status} />
@@ -390,7 +428,13 @@ function PhaseSection({ phase }: { phase: AgentPanelWorkflowGroup["phases"][numb
           </span>
         ) : null}
       </button>
-      {open ? phase.members.map((member) => <AgentRow key={member.id} agent={member} />) : null}
+      {open ? (
+        <AgentRowList>
+          {phase.members.map((member) => (
+            <AgentRow key={member.id} agent={member} />
+          ))}
+        </AgentRowList>
+      ) : null}
     </div>
   );
 }
@@ -450,9 +494,11 @@ function LiveWorkflowSection({
       {group.phases.map((phase) => (
         <PhaseSection key={phase.index} phase={phase} />
       ))}
-      {group.unphasedMembers.map((member) => (
-        <AgentRow key={member.id} agent={member} />
-      ))}
+      <AgentRowList>
+        {group.unphasedMembers.map((member) => (
+          <AgentRow key={member.id} agent={member} />
+        ))}
+      </AgentRowList>
       {group.phases.length === 0 && group.unphasedMembers.length === 0 ? (
         <AgentRow agent={group.workflow} />
       ) : null}
@@ -504,9 +550,11 @@ function SettledWorkflowSection({ group }: { group: AgentPanelWorkflowGroup }) {
       </button>
       {open ? (
         <div className="ms-3 border-s border-border/45 ps-2">
-          {members.map((member) => (
-            <AgentRow key={member.id} agent={member} />
-          ))}
+          <AgentRowList>
+            {members.map((member) => (
+              <AgentRow key={member.id} agent={member} />
+            ))}
+          </AgentRowList>
         </div>
       ) : null}
     </section>
@@ -563,9 +611,11 @@ export function AgentsPanel({
               <div className="px-1.5 pt-1 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
                 Direct spawns
               </div>
-              {liveDirect.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
-              ))}
+              <AgentRowList>
+                {liveDirect.map((agent) => (
+                  <AgentRow key={agent.id} agent={agent} />
+                ))}
+              </AgentRowList>
             </section>
           ) : null}
           {settledWorkflows.length > 0 || settledDirect.length > 0 ? (
@@ -576,9 +626,11 @@ export function AgentsPanel({
               {settledWorkflows.map((group) => (
                 <SettledWorkflowSection key={group.workflow.id} group={group} />
               ))}
-              {settledDirect.map((agent) => (
-                <AgentRow key={agent.id} agent={agent} />
-              ))}
+              <AgentRowList>
+                {settledDirect.map((agent) => (
+                  <AgentRow key={agent.id} agent={agent} />
+                ))}
+              </AgentRowList>
             </section>
           ) : null}
         </div>
