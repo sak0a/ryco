@@ -100,7 +100,8 @@ import {
   shouldIgnoreGlobalNavigationShortcut,
   shortcutLabelForCommand,
 } from "../keybindings";
-import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import { BotIcon, ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import { glassSurfaceClassName } from "./mobile/GlassSurface";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -1546,12 +1547,10 @@ export default function ChatView(props: ChatViewProps) {
     return {
       id: `background-liveness:${activeThread.id}`,
       variant: "info",
-      icon: (
-        <span
-          className={cn("size-1.5 rounded-full bg-foreground", working && "animate-pulse")}
-          aria-hidden="true"
-        />
-      ),
+      // The Alert's icon slot keys on an svg child — a raw span falls out of
+      // the grid and renders inline like stray punctuation.
+      icon: <BotIcon aria-hidden className={cn(working && "animate-pulse")} />,
+      className: glassSurfaceClassName("chip"),
       title: working
         ? liveCount > 0
           ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working in the background`
