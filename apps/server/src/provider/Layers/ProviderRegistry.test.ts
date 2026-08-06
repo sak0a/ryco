@@ -1731,10 +1731,17 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
           );
           assert.deepStrictEqual(
             effortDescriptor?.type === "select"
+              ? effortDescriptor.options.map((option) => option.id)
+              : undefined,
+            ["low", "medium", "high", "xhigh", "max", "ultracode", "ultrathink"],
+          );
+          assert.deepStrictEqual(
+            effortDescriptor?.type === "select"
               ? effortDescriptor.options.find((option) => option.isDefault)
               : undefined,
             { id: "high", label: "High", isDefault: true },
           );
+          assert.strictEqual(normalizeClaudeCliEffort("ultracode", "claude-fable-5"), "xhigh");
           // Fast mode is Opus-only — Fable must not expose it.
           assert.strictEqual(
             fable.capabilities.optionDescriptors?.some(
@@ -1791,24 +1798,25 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest(), T
         ),
       );
 
-      it.effect("omits max effort on Sonnet 4.6 and fast mode on Opus 4.5", () =>
+      it.effect("exposes compatible max effort on Sonnet 4.6 and omits fast mode on Opus 4.5", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
             claudeCapabilities(),
           );
-          // Sonnet 4.6 does not support `max` effort on the Claude Code CLI —
-          // requesting it falls back to the default (see ClaudeAdapter.test).
+          // Sonnet 4.6 exposes `max` in the UI and normalizes it to the
+          // SDK/CLI-supported `high` effort (see ClaudeAdapter.test).
           const sonnet = status.models.find((model) => model.slug === "claude-sonnet-4-6");
           const sonnetEffort = sonnet?.capabilities?.optionDescriptors?.find(
             (descriptor) => descriptor.type === "select" && descriptor.id === "effort",
           );
-          assert.strictEqual(
+          assert.deepStrictEqual(
             sonnetEffort?.type === "select"
-              ? sonnetEffort.options.some((option) => option.id === "max")
+              ? sonnetEffort.options.find((option) => option.id === "max")
               : undefined,
-            false,
+            { id: "max", label: "Max" },
           );
+          assert.strictEqual(normalizeClaudeCliEffort("max", "claude-sonnet-4-6"), "high");
           // Fast mode is only available on Opus 4.6+, so 4.5 must not expose it.
           const opus45 = status.models.find((model) => model.slug === "claude-opus-4-5");
           assert.strictEqual(
