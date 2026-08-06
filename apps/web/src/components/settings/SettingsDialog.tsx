@@ -234,22 +234,24 @@ export function SettingsDialog() {
         surface="glass"
       >
         <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-5">
-          <DialogTitle className="text-base font-semibold">Settings</DialogTitle>
-          <div className="relative mx-4 w-full max-w-72 flex-1">
-            <SearchIcon
-              aria-hidden
-              className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/60"
-            />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search settings…"
-              aria-label="Search settings"
-              className="h-8 w-full rounded-md border border-input bg-muted/40 pr-3 pl-8 text-[13px] outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-            />
+          <div className="flex min-w-0 items-center gap-4">
+            <DialogTitle className="shrink-0 text-base font-semibold">Settings</DialogTitle>
+            <div className="relative w-72 max-w-[40vw]">
+              <SearchIcon
+                aria-hidden
+                className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground/60"
+              />
+              <input
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search settings…"
+                aria-label="Search settings"
+                className="h-8 w-full rounded-md border border-input bg-muted/40 pr-3 pl-8 text-[13px] outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2 pr-9">
+          <div className="flex shrink-0 items-center gap-2 pr-9">
             {showRestore ? <RestoreDefaultsButton onRestored={handleRestored} /> : null}
           </div>
         </header>
