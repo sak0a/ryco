@@ -167,6 +167,10 @@
     "./sourceControlContextFormatter": {
       "types": "./src/sourceControlContextFormatter.ts",
       "import": "./src/sourceControlContextFormatter.ts"
+    },
+    "./taskClassification": {
+      "types": "./src/taskClassification.ts",
+      "import": "./src/taskClassification.ts"
     }
   },
   "scripts": {

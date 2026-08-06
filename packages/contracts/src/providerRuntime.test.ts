@@ -221,4 +221,57 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
   });
+
+  it("decodes a task.updated status patch with linkage", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "task.updated",
+      eventId: "event-task-updated",
+      provider: "claudeAgent",
+      threadId: "thread-1",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      payload: {
+        taskId: "task-1",
+        status: "cancelled",
+        endedAt: "2026-08-01T10:05:00.000Z",
+        isBackgrounded: true,
+        taskType: "local_agent",
+        role: "explorer",
+        model: "claude-opus-4-6",
+      },
+    });
+    expect(parsed.type).toBe("task.updated");
+    if (parsed.type !== "task.updated") {
+      throw new Error("expected task.updated");
+    }
+    expect(parsed.payload.status).toBe("cancelled");
+    expect(parsed.payload.role).toBe("explorer");
+  });
+
+  it("decodes a task.progress row carrying typedUsage and workflow linkage", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "task.progress",
+      eventId: "event-task-progress-linkage",
+      provider: "claudeAgent",
+      threadId: "thread-1",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      payload: {
+        taskId: "wf-1:wf:0",
+        description: "member-0",
+        status: "running",
+        typedUsage: { totalTokens: 1200, toolUses: 3 },
+        parentAgentId: "wf-1",
+        agentIndex: 0,
+        phaseIndex: 1,
+        phaseTitle: "Verify",
+        timelineBypass: true,
+      },
+    });
+    expect(parsed.type).toBe("task.progress");
+    if (parsed.type !== "task.progress") {
+      throw new Error("expected task.progress");
+    }
+    expect(parsed.payload.typedUsage?.totalTokens).toBe(1200);
+    expect(parsed.payload.parentAgentId).toBe("wf-1");
+    expect(parsed.payload.timelineBypass).toBe(true);
+  });
 });

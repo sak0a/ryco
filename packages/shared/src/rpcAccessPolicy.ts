@@ -42,6 +42,11 @@ export const RPC_ACCESS_POLICY = {
   [ORCHESTRATION_WS_METHODS.dispatchCommand]: "operator",
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: "viewer",
   [ORCHESTRATION_WS_METHODS.getTurnDiff]: "viewer",
+  // File-content reads match projectsReadFile/filesystemBrowse: operator,
+  // not viewer — scripts and task outputs can carry prompts and secrets.
+  [ORCHESTRATION_WS_METHODS.getTaskOutput]: "operator",
+  [ORCHESTRATION_WS_METHODS.getWorkflowScript]: "operator",
+  [ORCHESTRATION_WS_METHODS.stopBackgroundTask]: "operator",
   [ORCHESTRATION_WS_METHODS.replayEvents]: "viewer",
   [ORCHESTRATION_WS_METHODS.replayEventsPage]: "viewer",
   [ORCHESTRATION_WS_METHODS.searchThreadMessages]: "viewer",

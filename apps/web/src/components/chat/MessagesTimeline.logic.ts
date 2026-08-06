@@ -5,6 +5,7 @@ import {
   type TimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
+import type { AgentPanelModel } from "../../threadWorkspaceViewModel";
 import { deriveDisplayedUserMessageState } from "../../lib/terminalContext";
 import {
   type ChatAttachment,
@@ -167,6 +168,9 @@ export interface TimelineStreamingState {
   isWorking: boolean;
   isRevertingCheckpoint: boolean;
   openDiffTurnId: TurnId | null;
+  /** Shared agent fold, read at render time by spawn CTA rows (the CTA
+   * itself never carries a roster; the Agents panel is the only roster). */
+  agentPanelModel: AgentPanelModel;
 }
 
 /**
@@ -201,6 +205,7 @@ export interface TimelineStableState {
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
+  onOpenAgents: () => void;
   onOpenMessageActions: (request: TimelineMessageActionsRequest) => void;
   onInspectContextHandoff?: (
     marker: ContextHandoffTimelineEntry,
@@ -220,6 +225,7 @@ export function buildTimelineStreamingState(input: TimelineStreamingState): Time
     isWorking: input.isWorking,
     isRevertingCheckpoint: input.isRevertingCheckpoint,
     openDiffTurnId: input.openDiffTurnId,
+    agentPanelModel: input.agentPanelModel,
   };
 }
 
@@ -246,6 +252,7 @@ export function buildTimelineStableState(input: TimelineStableState): TimelineSt
     onImageExpand: input.onImageExpand,
     onOpenTurnDiff: input.onOpenTurnDiff,
     onCloseDiff: input.onCloseDiff,
+    onOpenAgents: input.onOpenAgents,
     onOpenMessageActions: input.onOpenMessageActions,
     ...(input.onInspectContextHandoff
       ? { onInspectContextHandoff: input.onInspectContextHandoff }
@@ -572,6 +579,12 @@ function deriveTurnFolds(input: {
 
     const hiddenEntryIds = new Set<string>();
     for (const entry of group.entries) {
+      // Agent-spawn CTA rows never fold: workflows outlive their launching
+      // turn (dynamic spawns, background execution), and folding the CTA
+      // when the turn settles makes a still-running fleet invisible.
+      if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
+        continue;
+      }
       if (isRunning || entry.id !== group.terminalEntry?.id) {
         hiddenEntryIds.add(entry.id);
       }
@@ -793,12 +806,36 @@ export function deriveMessagesTimelineRows(input: {
       } else {
         const groupId = `work-group:${timelineEntry.id}`;
         const expanded = input.workGroupExpandedById?.[groupId] ?? false;
-        const hiddenEntries = groupedEntries.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
-        const visibleEntries = groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES);
-        const renderedEntries = expanded ? [...hiddenEntries, ...visibleEntries] : visibleEntries;
+        // Agent-spawn CTA rows are always visible: a running fleet must
+        // never hide behind a "+N tool calls" toggle. Selection is by
+        // membership (spawn OR recent-tail), preserving the group's
+        // chronological order in both collapsed and expanded states.
+        const overflowCandidates = groupedEntries.filter((entry) => entry.agentSpawn === undefined);
+        const hiddenEntries = overflowCandidates.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
+        // Spawn rows alone can push the group over the threshold while
+        // nothing is actually hidden; render the single grouped row then,
+        // so crossing the threshold never changes the row shape without a
+        // toggle to explain it.
+        if (hiddenEntries.length === 0) {
+          nextRows.push({
+            kind: "work",
+            id: timelineEntry.id,
+            createdAt: timelineEntry.createdAt,
+            groupedEntries,
+          });
+          index = cursor - 1;
+          continue;
+        }
+        const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
+        const visibleEntries = groupedEntries.filter(
+          (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
+        );
+        const renderedEntries = expanded ? groupedEntries : visibleEntries;
 
         // The recap leads the group: it reads as the heading of the run it
-        // folds, and expanding it reveals the rows directly beneath.
+        // folds, and expanding it reveals the rows directly beneath. Every
+        // field on the toggle describes the HIDDEN set — a visible spawn
+        // row must not flip its wording.
         nextRows.push({
           kind: "work-toggle",
           id: `work-toggle:${timelineEntry.id}`,
@@ -806,7 +843,7 @@ export function deriveMessagesTimelineRows(input: {
           groupId,
           hiddenCount: hiddenEntries.length,
           expanded,
-          onlyToolEntries: groupedEntries.every((entry) => entry.tone === "tool"),
+          onlyToolEntries: hiddenEntries.every((entry) => entry.tone === "tool"),
           summary: summarizeToolCallGroup(hiddenEntries),
         });
         for (const workEntry of renderedEntries) {

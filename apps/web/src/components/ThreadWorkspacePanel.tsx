@@ -4,6 +4,7 @@ import { type ScopedThreadRef, type ThreadId } from "@ryco/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import {
   ArrowLeftIcon,
+  BotIcon,
   FileTextIcon,
   FolderIcon,
   GlobeIcon,
@@ -24,6 +25,7 @@ import {
 } from "../rightPanelRouteSearch";
 import {
   buildOpenAgentSearch,
+  buildOpenAgentsSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
   buildOpenTerminalSearch,
@@ -31,11 +33,14 @@ import {
   stripWorkspacePanelSearchParams,
 } from "../workspaceRouteSearch";
 import {
+  derivePhase,
+  deriveThreadAgentPanelModel,
   deriveThreadSubagents,
   findThreadSubagent,
   type ThreadSubagentStatus,
   type ThreadSubagentView,
 } from "../threadWorkspaceViewModel";
+import { AgentsPanel } from "./AgentsPanel";
 import { buildTabs, type WorkspaceTab } from "../threadWorkspaceTabs";
 import { readEnvironmentApi } from "../environmentApi";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -107,6 +112,9 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
   }
   if (props.tab.key === "terminal") {
     return <TerminalIcon className={className} />;
+  }
+  if (props.tab.key === "agents") {
+    return <BotIcon className={className} />;
   }
   return <FileTextIcon className={className} />;
 }
@@ -537,11 +545,14 @@ function WorkspaceLauncher(props: {
   tabs: ReadonlyArray<WorkspaceTab>;
   activeThread: Thread | null | undefined;
   onSelectTab: (tab: WorkspaceTab) => void;
+  /** The frozen phone tier has no Agents workspace (AGENTS.md). */
+  showAgents: boolean;
 }) {
   const keybindings = useServerKeybindings();
   const filesTab: WorkspaceTab = { key: "files", label: "Files", mode: "files" };
   const reviewTab: WorkspaceTab = { key: "review", label: "Review", mode: "review" };
   const terminalTab: WorkspaceTab = { key: "terminal", label: "Terminal", mode: "terminal" };
+  const agentsTab: WorkspaceTab = { key: "agents", label: "Agents", mode: "agents" };
   const filesShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "workspace.files"),
     [keybindings],
@@ -592,6 +603,14 @@ function WorkspaceLauncher(props: {
             shortcutLabel={terminalShortcutLabel}
             onClick={() => props.onSelectTab(terminalTab)}
           />
+          {props.showAgents ? (
+            <LauncherCard
+              label="Agents"
+              description="Watch subagents and workflows run"
+              icon={BotIcon}
+              onClick={() => props.onSelectTab(agentsTab)}
+            />
+          ) : null}
           {agentTabs.length > 0 ? (
             <div className="space-y-2 pt-1">
               {agentTabs.map((tab) => (
@@ -658,25 +677,48 @@ export default function ThreadWorkspacePanel(props: {
     search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
   const activeAgent = useMemo(() => findThreadSubagent(subagents, agentKey), [agentKey, subagents]);
   const activeMode = getRightPanelMode(search) ?? props.panelMode;
+  // Shared by the Agents workspace tab and the launcher badge; pure fold,
+  // memoized by activity-list identity.
+  const agentPanelModel = useMemo(
+    () =>
+      deriveThreadAgentPanelModel({
+        activities: activeThread?.activities ?? [],
+        sessionLive: derivePhase(activeThread?.session ?? null) !== "disconnected",
+      }),
+    [activeThread?.activities, activeThread?.session],
+  );
   const openedPanelModes = useMemo(() => {
-    if (activeMode === "files" || activeMode === "review" || activeMode === "terminal") {
+    if (
+      activeMode === "files" ||
+      activeMode === "review" ||
+      activeMode === "terminal" ||
+      activeMode === "agents"
+    ) {
       return props.openedPanelModes.includes(activeMode)
         ? props.openedPanelModes
         : [...props.openedPanelModes, activeMode];
     }
     return props.openedPanelModes;
   }, [activeMode, props.openedPanelModes]);
-  const tabs = useMemo(
-    () =>
-      buildTabs({
-        subagents,
-        activeAgentKey: agentKey,
-        openedAgentKeys: props.openedAgentKeys,
-        openedPanelModes,
-      }),
-    [agentKey, openedPanelModes, props.openedAgentKeys, subagents],
-  );
-  const activeTabKey = activeMode === "agent" ? agentKey : activeMode;
+  const tabs = useMemo(() => {
+    const built = buildTabs({
+      subagents,
+      activeAgentKey: agentKey,
+      openedAgentKeys: props.openedAgentKeys,
+      openedPanelModes,
+    });
+    // No Agents workspace tab on the frozen phone tier.
+    return isPhoneSurface ? built.filter((tab) => tab.mode !== "agents") : built;
+  }, [agentKey, isPhoneSurface, openedPanelModes, props.openedAgentKeys, subagents]);
+  // A phone agents deep link falls back to the launcher with the agents tab
+  // filtered out — no tab is active then, so aria-labelledby never points
+  // at a tab id that is not in the DOM.
+  const activeTabKey =
+    activeMode === "agent"
+      ? agentKey
+      : isPhoneSurface && activeMode === "agents"
+        ? null
+        : activeMode;
 
   const navigateSearch = useCallback(
     (buildSearch: (previous: Record<string, unknown>) => Record<string, unknown>) => {
@@ -714,6 +756,10 @@ export default function ThreadWorkspacePanel(props: {
       }
       if (tab.mode === "terminal") {
         navigateSearch((previous) => buildOpenTerminalSearch(previous));
+        return;
+      }
+      if (tab.mode === "agents") {
+        navigateSearch((previous) => buildOpenAgentsSearch(previous));
         return;
       }
       if (tab.mode === "agent") {
@@ -919,10 +965,23 @@ export default function ThreadWorkspacePanel(props: {
           <PreviewPanel mode={props.mode} />
         ) : activeMode === "terminal" ? (
           <WorkspaceTerminalPanel />
+        ) : activeMode === "agents" && !isPhoneSurface ? (
+          // The Agents workspace stays off the frozen phone tier; a phone
+          // route that lands here falls back to the launcher.
+          <AgentsPanel
+            model={agentPanelModel}
+            environmentId={routeThreadRef?.environmentId ?? null}
+            threadId={routeThreadRef ? (routeThreadRef.threadId as ThreadId) : null}
+          />
         ) : activeMode === "agent" ? (
           <AgentThreadPanel subagent={activeAgent} agentKey={agentKey} />
         ) : (
-          <WorkspaceLauncher tabs={tabs} activeThread={activeThread} onSelectTab={selectTab} />
+          <WorkspaceLauncher
+            tabs={tabs}
+            activeThread={activeThread}
+            onSelectTab={selectTab}
+            showAgents={!isPhoneSurface}
+          />
         )}
       </div>
     </div>

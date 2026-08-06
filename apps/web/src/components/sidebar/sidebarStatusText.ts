@@ -13,6 +13,9 @@ const THREAD_STATUS_TEXT_CLASSNAMES: Record<ThreadStatusPill["label"], string> =
   "Awaiting Input": "sidebar-status-text sidebar-status-text--awaiting-input",
   Completed: "sidebar-status-text sidebar-status-text--done",
   Connecting: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",
+  // Steady label, no duty-cycled shimmer: monitoring is calm background
+  // presence, not active progress.
+  Monitoring: "sidebar-status-text sidebar-status-text--in-progress",
   "Pending Approval": "sidebar-status-text sidebar-status-text--pending-approval",
   "Plan Ready": "sidebar-status-text sidebar-status-text--plan-ready",
   Working: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",

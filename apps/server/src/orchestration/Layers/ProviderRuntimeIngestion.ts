@@ -22,12 +22,14 @@ import {
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
 import { readEnv } from "@ryco/shared/runtimeEnv";
+import { classifyTaskAgentKind } from "@ryco/shared/taskClassification";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ProviderRuntimeIngestionService,
@@ -37,6 +39,54 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { increment, providerRuntimeStaleEventsTotal } from "../../observability/Metrics.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
+const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
+
+// Fallback when the in-memory description cache no longer has the task name
+// (server restart, session-exit sweep, TTL/capacity eviction): earlier
+// task.started/task.progress activities for the task are persisted with it.
+function findTaskTitleInActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity> | undefined,
+  taskId: string,
+): string | undefined {
+  if (!activities) {
+    return undefined;
+  }
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
+    if (
+      !activity ||
+      (activity.kind !== "task.started" &&
+        activity.kind !== "task.progress" &&
+        activity.kind !== "task.updated")
+    ) {
+      continue;
+    }
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as { taskId?: unknown; title?: unknown; detail?: unknown })
+        : undefined;
+    if (payload?.taskId !== taskId) {
+      continue;
+    }
+    // task.started and task.updated both persist their description as
+    // `detail` — a task whose first description arrives via an update must
+    // not complete untitled.
+    const title =
+      typeof payload.title === "string"
+        ? payload.title
+        : activity.kind !== "task.progress" && typeof payload.detail === "string"
+          ? payload.detail
+          : undefined;
+    if (title && title.trim().length > 0) {
+      return title;
+    }
+  }
+  return undefined;
+}
+
+const TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY = 10_000;
+const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120);
+
 const providerCommandId = (
   event: ProviderRuntimeEvent,
   tag: string,
@@ -371,8 +421,55 @@ function requestKindFromCanonicalRequestType(
   }
 }
 
+/**
+ * Copies the optional TaskAgentLinkage bundle from a task.* runtime payload
+ * into the persisted activity payload. Identity fields ride on every row so
+ * client folds survive activity retention; absent fields stay absent.
+ */
+function taskLinkageActivityFields(payload: Record<string, unknown>): Record<string, unknown> {
+  const fields: Record<string, unknown> = {
+    // Server-stamped classification: persisted rows are self-describing, so
+    // clients trust the stamp instead of re-deriving agent-vs-background
+    // from taskType denylists and marker heuristics (legacy rows without a
+    // stamp keep the client fallback).
+    agentKind: classifyTaskAgentKind({
+      taskType: typeof payload.taskType === "string" ? payload.taskType : undefined,
+      agentId: typeof payload.agentId === "string" ? payload.agentId : undefined,
+    }),
+  };
+  for (const key of [
+    "taskType",
+    "agentId",
+    "title",
+    "role",
+    "model",
+    "effort",
+    "toolUseId",
+    "parentAgentId",
+    "workflowName",
+    "agentIndex",
+    "phaseIndex",
+    "phaseTitle",
+    "phases",
+    "attempt",
+    "runHandles",
+    "outputFile",
+    "agentPath",
+    "timelineBypass",
+    "typedUsage",
+    "status",
+    "error",
+  ] as const) {
+    if (payload[key] !== undefined) {
+      fields[key] = payload[key];
+    }
+  }
+  return fields;
+}
+
 function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
+  taskTitle?: string,
 ): ReadonlyArray<OrchestrationThreadActivity> {
   const maybeSequence = (() => {
     const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
@@ -562,10 +659,10 @@ function runtimeEventToActivities(
                 : "Task started",
           payload: {
             taskId: event.payload.taskId,
-            ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
             ...(event.payload.description
               ? { detail: truncateDetail(event.payload.description) }
               : {}),
+            ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -574,19 +671,95 @@ function runtimeEventToActivities(
     }
 
     case "task.progress": {
+      const description = event.payload.description.trim();
       return [
         {
-          id: event.eventId,
+          // Stable per-task id: progress is "latest state", not history, so
+          // each tick REPLACES the last via the activity upsert (PK + the
+          // replace-by-id apply in projector and client reducer). Keeps one
+          // progress row per task instead of thousands, so a large fleet's
+          // ticks can no longer evict its own start/terminal rows out of
+          // the 500-row retention window. Thread-scoped: activity_id is a
+          // GLOBAL primary key and Claude task ids are session-local, so a
+          // bare taskId could collide across threads and steal another
+          // thread's row.
+          id: EventId.make(`task-progress:${event.threadId}:${event.payload.taskId}`),
           createdAt: event.createdAt,
           tone: "info",
           kind: "task.progress",
-          summary: "Reasoning update",
+          summary: description.length > 0 ? truncateDetail(description, 120) : "Reasoning update",
           payload: {
             taskId: event.payload.taskId,
+            ...(description.length > 0 ? { title: truncateDetail(description, 120) } : {}),
             detail: truncateDetail(event.payload.summary ?? event.payload.description),
             ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+            ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "task.updated": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: event.payload.status === "failed" ? "error" : "info",
+          kind: "task.updated",
+          summary:
+            event.payload.status === "failed"
+              ? "Task failed"
+              : event.payload.status
+                ? `Task ${event.payload.status}`
+                : "Task updated",
+          payload: {
+            taskId: event.payload.taskId,
+            ...(event.payload.description
+              ? { detail: truncateDetail(event.payload.description) }
+              : {}),
+            ...(event.payload.endedAt ? { endedAt: event.payload.endedAt } : {}),
+            ...(event.payload.isBackgrounded !== undefined
+              ? { isBackgrounded: event.payload.isBackgrounded }
+              : {}),
+            ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
+    case "tool.progress": {
+      // Only agent-owned heartbeats are persisted: they feed the owning
+      // agent's activity line. Parent-conversation tool progress stays
+      // ephemeral (item lifecycle already covers it).
+      if (event.payload.taskId === undefined) {
+        return [];
+      }
+      return [
+        {
+          // Same stable-id treatment as task.progress: a heartbeat is
+          // "what is this agent doing right now", so one row per task
+          // (thread-scoped for the same global-PK collision reason).
+          id: EventId.make(`tool-progress:${event.threadId}:${event.payload.taskId}`),
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "tool.progress",
+          summary: event.payload.toolName ?? "Tool progress",
+          payload: {
+            taskId: event.payload.taskId,
+            ...(event.payload.toolName ? { toolName: event.payload.toolName } : {}),
+            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.elapsedSeconds !== undefined
+              ? { elapsedSeconds: event.payload.elapsedSeconds }
+              : {}),
+            ...(event.payload.parentToolUseId
+              ? { parentToolUseId: event.payload.parentToolUseId }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -610,8 +783,17 @@ function runtimeEventToActivities(
           payload: {
             taskId: event.payload.taskId,
             status: event.payload.status,
-            ...(event.payload.summary ? { detail: truncateDetail(event.payload.summary) } : {}),
+            ...(taskTitle ? { title: truncateDetail(taskTitle, 120) } : {}),
+            // Mirrors task.progress: clients label from summary and keep
+            // detail for the expanded body.
+            ...(event.payload.summary
+              ? {
+                  summary: truncateDetail(event.payload.summary),
+                  detail: truncateDetail(event.payload.summary),
+                }
+              : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+            ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -746,6 +928,10 @@ function runtimeEventToActivities(
             ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.parentToolUseId
+              ? { parentToolUseId: event.payload.parentToolUseId }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -771,6 +957,10 @@ function runtimeEventToActivities(
             ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.parentToolUseId
+              ? { parentToolUseId: event.payload.parentToolUseId }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -796,6 +986,10 @@ function runtimeEventToActivities(
             ...(event.providerRefs ? { providerRefs: event.providerRefs } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.parentToolUseId
+              ? { parentToolUseId: event.payload.parentToolUseId }
+              : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -811,6 +1005,7 @@ function runtimeEventToActivities(
 }
 
 const make = Effect.gen(function* () {
+  const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
@@ -848,6 +1043,25 @@ const make = Effect.gen(function* () {
     timeToLive: BUFFERED_PROPOSED_PLAN_BY_ID_TTL,
     lookup: () => Effect.succeed({ text: "", createdAt: "" }),
   });
+
+  const taskDescriptionByTaskKey = yield* Cache.make<string, string>({
+    capacity: TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY,
+    timeToLive: TASK_DESCRIPTION_BY_TASK_TTL,
+    lookup: () => Effect.succeed(""),
+  });
+
+  const rememberTaskDescription = (threadId: ThreadId, taskId: string, description: string) =>
+    Cache.set(taskDescriptionByTaskKey, providerTaskKey(threadId, taskId), description);
+
+  // Entries are left in place after completion so replayed or duplicate
+  // terminal events stay titled; TTL, capacity, and the session-exit sweep
+  // bound the cache.
+  const lookupTaskDescription = (threadId: ThreadId, taskId: string) =>
+    Cache.getOption(taskDescriptionByTaskKey, providerTaskKey(threadId, taskId)).pipe(
+      Effect.map((description) =>
+        Option.filter(description, (value) => value.length > 0).pipe(Option.getOrUndefined),
+      ),
+    );
 
   const resolveThreadDetail = Effect.fn("resolveThreadDetail")(function* (threadId: ThreadId) {
     return yield* projectionSnapshotQuery
@@ -1602,6 +1816,13 @@ const make = Effect.gen(function* () {
             : Effect.void,
         { concurrency: 1 },
       ).pipe(Effect.asVoid);
+      const taskDescriptionKeys = Array.from(yield* Cache.keys(taskDescriptionByTaskKey));
+      yield* Effect.forEach(
+        taskDescriptionKeys,
+        (key) =>
+          key.startsWith(prefix) ? Cache.invalidate(taskDescriptionByTaskKey, key) : Effect.void,
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid);
       yield* clearLiveAssistantDeltaBuffersForThread(threadId);
     });
 
@@ -2285,7 +2506,63 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const activities = runtimeEventToActivities(event);
+      if (
+        event.type === "task.started" ||
+        event.type === "task.progress" ||
+        event.type === "task.updated"
+      ) {
+        const description = event.payload.description?.trim();
+        if (description) {
+          yield* rememberTaskDescription(thread.id, event.payload.taskId, description);
+        }
+      }
+      // Sidebar background liveness: fed from the same lifecycle stream,
+      // read by the shell query at mapping time (no persistence).
+      switch (event.type) {
+        case "task.started":
+        case "task.progress":
+        case "task.updated":
+        case "task.completed": {
+          const payload = event.payload as {
+            taskId: string;
+            taskType?: string;
+            status?: string;
+            agentId?: string;
+          };
+          threadBackgroundLiveness.recordTaskLiveness({
+            threadId: thread.id,
+            taskId: payload.taskId,
+            taskType: payload.taskType,
+            status: payload.status,
+            agentId: payload.agentId,
+            kind:
+              event.type === "task.started"
+                ? "started"
+                : event.type === "task.progress"
+                  ? "progress"
+                  : event.type === "task.updated"
+                    ? "updated"
+                    : "completed",
+          });
+          break;
+        }
+        case "session.exited":
+          threadBackgroundLiveness.clearThreadLiveness(thread.id);
+          break;
+        default:
+          break;
+      }
+
+      let taskTitle: string | undefined;
+      if (event.type === "task.completed") {
+        taskTitle = yield* lookupTaskDescription(thread.id, event.payload.taskId);
+        if (!taskTitle) {
+          const detailedThread = yield* getLoadedThreadDetail();
+          taskTitle = findTaskTitleInActivities(detailedThread?.activities, event.payload.taskId);
+        }
+      }
+
+      const activities = runtimeEventToActivities(event, taskTitle);
       yield* Effect.forEach(activities, (activity) =>
         orchestrationEngine.dispatch({
           type: "thread.activity.append",

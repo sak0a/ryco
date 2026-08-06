@@ -22,6 +22,12 @@ import {
   formatElapsed,
   type ContextHandoffTimelineEntry,
 } from "../../session-logic";
+import {
+  emptyAgentPanelModel,
+  formatSubagentTokenCount,
+  type AgentPanelModel,
+} from "../../threadWorkspaceViewModel";
+import { glassSurfaceClassName } from "../mobile/GlassSurface";
 import { type TurnDiffSummary } from "../../types";
 import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
@@ -29,6 +35,7 @@ import {
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
   FileDiffIcon,
@@ -143,6 +150,8 @@ const TIMELINE_LIST_FOOTER = (
   <div className="h-[var(--chat-composer-clearance,0.75rem)] sm:h-[var(--chat-composer-clearance,1rem)]" />
 );
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
+const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
+const NOOP_OPEN_AGENTS = () => {};
 const EMPTY_THREAD_MESSAGE_SEARCH_OCCURRENCES_BY_MESSAGE_ID: ReadonlyMap<
   MessageId,
   ReadonlyArray<ThreadMessageSearchOccurrence>
@@ -157,6 +166,8 @@ const MESSAGE_ACTION_BUTTON_CLASS_NAME =
 // ---------------------------------------------------------------------------
 
 interface MessagesTimelineProps {
+  agentPanelModel?: AgentPanelModel;
+  onOpenAgents?: () => void;
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnId?: TurnId | null;
@@ -202,6 +213,8 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export const MessagesTimeline = memo(function MessagesTimeline({
+  agentPanelModel = EMPTY_AGENT_PANEL_MODEL,
+  onOpenAgents = NOOP_OPEN_AGENTS,
   isWorking,
   activeTurnInProgress,
   activeTurnId,
@@ -460,8 +473,16 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         isWorking,
         isRevertingCheckpoint,
         openDiffTurnId,
+        agentPanelModel,
       }),
-    [activeTurnInProgress, activeTurnId, isWorking, isRevertingCheckpoint, openDiffTurnId],
+    [
+      activeTurnInProgress,
+      activeTurnId,
+      agentPanelModel,
+      isWorking,
+      isRevertingCheckpoint,
+      openDiffTurnId,
+    ],
   );
 
   // Stable context — identity preserved across streaming transitions so rows
@@ -486,6 +507,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         onImageExpand,
         onOpenTurnDiff,
         onCloseDiff: onCloseDiff ?? NOOP_CLOSE_DIFF,
+        onOpenAgents,
         onOpenMessageActions,
         ...(onInspectContextHandoff ? { onInspectContextHandoff } : {}),
       }),
@@ -506,6 +528,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onImageExpand,
       onOpenTurnDiff,
       onCloseDiff,
+      onOpenAgents,
       onOpenMessageActions,
       onInspectContextHandoff,
     ],
@@ -1226,6 +1249,9 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }) {
   const { activeTurnId, isWorking } = use(TimelineStreamingCtx);
   const { workspaceRoot } = use(TimelineStableCtx);
+  // The frozen phone tier has no Agents workspace, so spawn CTAs render as
+  // plain work rows there instead of dead-end navigation affordances.
+  const isPhoneTier = usePresentationTier() === "phone";
   const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
   const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
 
@@ -1245,6 +1271,10 @@ const WorkGroupSection = memo(function WorkGroupSection({
             activeTurnId !== null &&
             activeTurnId !== undefined &&
             workEntry.turnId === activeTurnId;
+
+          if (workEntry.agentSpawn && !isPhoneTier) {
+            return <AgentSpawnCtaRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />;
+          }
 
           if (isFileEditWorkEntry(workEntry) && (workEntry.changedFiles?.length ?? 0) > 0) {
             return (
@@ -1267,6 +1297,117 @@ const WorkGroupSection = memo(function WorkGroupSection({
         })}
       </div>
     </div>
+  );
+});
+
+/**
+ * Spawn CTA: one anchored row per workflow run (or per-turn direct-spawn
+ * batch). Live status is derived from the shared agent panel model at render
+ * time — the row itself never carries a roster; the Agents panel is the only
+ * roster. Freezes to past tense when every member settles. Static dot, no
+ * animation.
+ */
+const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: TimelineWorkEntry }) {
+  const { workEntry } = props;
+  const { agentPanelModel } = use(TimelineStreamingCtx);
+  const { onOpenAgents } = use(TimelineStableCtx);
+  const spawn = workEntry.agentSpawn;
+  if (!spawn) {
+    return null;
+  }
+
+  const memberIds = new Set(spawn.agentTaskIds);
+  const workflowGroup = spawn.workflowId
+    ? agentPanelModel.workflows.find((group) => group.workflow.id === spawn.workflowId)
+    : undefined;
+  const agents = workflowGroup
+    ? [...workflowGroup.phases.flatMap((phase) => phase.members), ...workflowGroup.unphasedMembers]
+    : agentPanelModel.directAgents.filter((agent) => memberIds.has(agent.id));
+  const agentCount = Math.max(
+    agents.length,
+    Math.max(memberIds.size - (spawn.workflowId ? 1 : 0), 0),
+  );
+
+  const running = agents.filter(
+    (agent) => agent.status === "running" || agent.status === "pending",
+  ).length;
+  const waiting = agents.filter((agent) => agent.status === "waiting").length;
+  const failed = agents.filter((agent) => agent.status === "failed").length;
+  // The coordinator's own status is authoritative for workflows: dynamic
+  // spawns mean the member list can be momentarily all-settled while the
+  // run is still mid-flight. A workflow is live until the coordinator
+  // itself reaches a terminal state.
+  const coordinatorStatus = workflowGroup?.workflow.status;
+  const coordinatorSettled =
+    coordinatorStatus === "completed" ||
+    coordinatorStatus === "failed" ||
+    coordinatorStatus === "cancelled" ||
+    coordinatorStatus === "interrupted";
+  const live = workflowGroup !== undefined ? !coordinatorSettled : running + waiting > 0;
+  // Same rule as the panel footer: providers may aggregate member usage into
+  // the coordinator, so count the coordinator only when no members exist.
+  const totalTokens = agents.reduce(
+    (sum, agent) => sum + (agent.usage?.totalTokens ?? 0),
+    spawn.workflowId && agents.length === 0 ? (workflowGroup?.workflow.usage?.totalTokens ?? 0) : 0,
+  );
+
+  const livePhase = workflowGroup?.phases.find((phase) => phase.state === "running");
+  const workflowName =
+    workflowGroup?.workflow.workflowName ?? workflowGroup?.workflow.title ?? null;
+
+  // One steady in-flight presentation: waiting and stalled agents read as
+  // working; only settled states differentiate.
+  const working = running + waiting;
+  const dotClass = live ? "bg-info" : failed > 0 ? "bg-destructive" : "bg-success";
+  const lead = live
+    ? `Kicked off ${agentCount} subagent${agentCount === 1 ? "" : "s"}`
+    : `Ran ${agentCount} subagent${agentCount === 1 ? "" : "s"}`;
+  const status = live
+    ? livePhase
+      ? `${livePhase.title} · ${livePhase.activeCount} working`
+      : working > 0
+        ? `${working} working`
+        : "Working"
+    : failed > 0
+      ? `${failed} failed`
+      : "Completed";
+
+  return (
+    <button
+      type="button"
+      onClick={onOpenAgents}
+      aria-label={live ? "Open the Agents panel" : "View agents"}
+      className={cn(
+        glassSurfaceClassName("chip"),
+        "group/agent-cta grid min-h-[36px] w-full grid-cols-[1.25rem_minmax(0,1fr)_auto_1.25rem] items-center gap-x-2 rounded-lg border border-border/50 px-2 text-left transition-colors hover:border-border/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
+      )}
+    >
+      <span className="flex size-5 items-center justify-center">
+        <BotIcon
+          aria-hidden
+          className="size-3.5 text-muted-foreground/70 transition-colors group-hover/agent-cta:text-foreground"
+        />
+      </span>
+      <span className="flex min-w-0 items-center gap-2">
+        <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", dotClass)} />
+        <span className="truncate text-[12px] leading-5">
+          <span className="font-medium text-foreground/90">{lead}</span>
+          {workflowName ? <span className="text-muted-foreground"> · {workflowName}</span> : null}
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2 text-[11px] leading-5 text-muted-foreground">
+        <span>{status}</span>
+        {totalTokens > 0 ? (
+          <span className="tabular-nums">{formatSubagentTokenCount(totalTokens)} tok</span>
+        ) : null}
+      </span>
+      <span className="flex size-5 items-center justify-center">
+        <ChevronRightIcon
+          aria-hidden
+          className="size-3.5 text-muted-foreground/60 transition-[color,translate] group-hover/agent-cta:translate-x-0.5 group-hover/agent-cta:text-foreground"
+        />
+      </span>
+    </button>
   );
 });
 
@@ -1917,6 +2058,11 @@ function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
       return HammerIcon;
     case "collab_agent_tool_call":
       return BotIcon;
+  }
+
+  // Subagent lifecycle rows (grouped by taskId) get agent identity chrome.
+  if (workEntry.taskId) {
+    return BotIcon;
   }
 
   return workToneIcon(workEntry.tone);

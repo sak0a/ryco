@@ -32,6 +32,9 @@ import {
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
+  getWorkflowScript: "orchestration.getWorkflowScript",
+  getTaskOutput: "orchestration.getTaskOutput",
+  stopBackgroundTask: "orchestration.stopBackgroundTask",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreadMessages: "orchestration.searchThreadMessages",
@@ -745,6 +748,12 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  /**
+   * Native background work alive after the turn settles: "working" while
+   * subagents/workflows run, "monitoring" when watch loops are the only
+   * live work. Optional so old servers/clients interop; absent = none.
+   */
+  backgroundLiveness: Schema.optional(Schema.NullOr(Schema.Literals(["working", "monitoring"]))),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -1948,10 +1957,156 @@ export const OrchestrationReplayEventsPageResult = Schema.Struct({
 });
 export type OrchestrationReplayEventsPageResult = typeof OrchestrationReplayEventsPageResult.Type;
 
+export const OrchestrationGetWorkflowScriptInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Absolute path from the workflow's runHandles.scriptPath. The server
+   * re-derives containment; the client value is a hint, never trusted. */
+  scriptPath: TrimmedNonEmptyString,
+});
+export type OrchestrationGetWorkflowScriptInput = typeof OrchestrationGetWorkflowScriptInput.Type;
+
+export const OrchestrationGetWorkflowScriptResult = Schema.Struct({
+  scriptPath: TrimmedNonEmptyString,
+  contents: Schema.String,
+  truncated: Schema.Boolean,
+});
+export type OrchestrationGetWorkflowScriptResult = typeof OrchestrationGetWorkflowScriptResult.Type;
+
+export const WORKFLOW_SCRIPT_ERROR_MESSAGES = {
+  "invalid-path": "Workflow scripts must be absolute .js paths.",
+  "root-unavailable": "Script root unavailable.",
+  "not-found": "Script not found.",
+  "outside-root": "Script path is outside the workflow scripts root.",
+  "not-js": "Resolved script is not a .js file.",
+  "not-regular-file": "Script is not a regular file.",
+  "changed-during-read": "Script changed between resolution and open.",
+  "read-failed": "Script read failed.",
+} as const;
+
+export class OrchestrationGetWorkflowScriptError extends Schema.TaggedErrorClass<OrchestrationGetWorkflowScriptError>()(
+  "OrchestrationGetWorkflowScriptError",
+  {
+    reason: Schema.Literals([
+      "invalid-path",
+      "root-unavailable",
+      "not-found",
+      "outside-root",
+      "not-js",
+      "not-regular-file",
+      "changed-during-read",
+      "read-failed",
+    ]),
+    /** Always the client-supplied path: failures never echo the server-side
+     * resolved path (or a raw cause) — those stay in server logs. */
+    scriptPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return WORKFLOW_SCRIPT_ERROR_MESSAGES[this.reason];
+  }
+}
+
+export const OrchestrationGetTaskOutputInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Absolute path from the task's outputFile linkage field. The server
+   * re-derives containment; the client value is a hint, never trusted. */
+  outputPath: TrimmedNonEmptyString,
+  /** Byte offset from a previous read's nextOffset to poll appended output;
+   * omit to tail (start near the end of large files). */
+  offset: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationGetTaskOutputInput = typeof OrchestrationGetTaskOutputInput.Type;
+
+export const OrchestrationGetTaskOutputResult = Schema.Struct({
+  outputPath: TrimmedNonEmptyString,
+  chunk: Schema.String,
+  /** Byte offset to pass back as `offset` to continue reading appended output. */
+  nextOffset: NonNegativeInt,
+  /** Total file size in bytes at read time. */
+  size: NonNegativeInt,
+  /** True when this read skipped earlier bytes (tail mode on a large file). */
+  truncatedHead: Schema.Boolean,
+});
+export type OrchestrationGetTaskOutputResult = typeof OrchestrationGetTaskOutputResult.Type;
+
+export const TASK_OUTPUT_ERROR_MESSAGES = {
+  "invalid-path": "Task output must be an absolute path.",
+  "root-unavailable": "Task output root unavailable.",
+  "not-found": "Task output not found.",
+  "outside-root": "Task output path is outside the task output roots.",
+  "not-regular-file": "Task output is not a regular file.",
+  "changed-during-read": "Task output changed between resolution and open.",
+  "read-failed": "Task output read failed.",
+} as const;
+
+export class OrchestrationGetTaskOutputError extends Schema.TaggedErrorClass<OrchestrationGetTaskOutputError>()(
+  "OrchestrationGetTaskOutputError",
+  {
+    reason: Schema.Literals([
+      "invalid-path",
+      "root-unavailable",
+      "not-found",
+      "outside-root",
+      "not-regular-file",
+      "changed-during-read",
+      "read-failed",
+    ]),
+    /** Always the client-supplied path: failures never echo the server-side
+     * resolved path (or a raw cause) — those stay in server logs. */
+    outputPath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return TASK_OUTPUT_ERROR_MESSAGES[this.reason];
+  }
+}
+
+export const OrchestrationStopBackgroundTaskInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Provider-runtime task id from the task.* linkage fields. */
+  taskId: TrimmedNonEmptyString,
+});
+export type OrchestrationStopBackgroundTaskInput = typeof OrchestrationStopBackgroundTaskInput.Type;
+
+export const OrchestrationStopBackgroundTaskResult = Schema.Struct({});
+export type OrchestrationStopBackgroundTaskResult =
+  typeof OrchestrationStopBackgroundTaskResult.Type;
+
+export const STOP_BACKGROUND_TASK_ERROR_MESSAGES = {
+  unsupported: "This provider cannot stop individual background tasks.",
+  "session-not-found": "No live provider session for this thread.",
+  "stop-failed": "Stopping the background task failed.",
+} as const;
+
+export class OrchestrationStopBackgroundTaskError extends Schema.TaggedErrorClass<OrchestrationStopBackgroundTaskError>()(
+  "OrchestrationStopBackgroundTaskError",
+  {
+    reason: Schema.Literals(["unsupported", "session-not-found", "stop-failed"]),
+    threadId: Schema.String,
+    taskId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return STOP_BACKGROUND_TASK_ERROR_MESSAGES[this.reason];
+  }
+}
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  getWorkflowScript: {
+    input: OrchestrationGetWorkflowScriptInput,
+    output: OrchestrationGetWorkflowScriptResult,
+  },
+  getTaskOutput: {
+    input: OrchestrationGetTaskOutputInput,
+    output: OrchestrationGetTaskOutputResult,
+  },
+  stopBackgroundTask: {
+    input: OrchestrationStopBackgroundTaskInput,
+    output: OrchestrationStopBackgroundTaskResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,

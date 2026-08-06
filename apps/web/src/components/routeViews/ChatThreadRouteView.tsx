@@ -27,6 +27,7 @@ import {
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
   buildOpenAgentSearch,
+  buildOpenAgentsSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
   buildOpenTerminalSearch,
@@ -87,6 +88,7 @@ export function ChatThreadRouteView({
     hasOpenedDiff: diffOpen,
     hasOpenedPreview: previewOpen,
     hasOpenedTerminal: rightPanelMode === "terminal",
+    hasOpenedAgents: rightPanelMode === "agents",
     openedAgentKeys: activeAgentKey ? [activeAgentKey] : [],
   }));
   const hasOpenedDiff =
@@ -101,6 +103,10 @@ export function ChatThreadRouteView({
     diffPanelMountState.threadKey === currentThreadKey
       ? diffPanelMountState.hasOpenedTerminal
       : rightPanelMode === "terminal";
+  const hasOpenedAgents =
+    diffPanelMountState.threadKey === currentThreadKey
+      ? diffPanelMountState.hasOpenedAgents
+      : rightPanelMode === "agents";
   const openedAgentKeys = useMemo(() => {
     const keys =
       diffPanelMountState.threadKey === currentThreadKey
@@ -124,8 +130,11 @@ export function ChatThreadRouteView({
     if (hasOpenedTerminal || rightPanelMode === "terminal") {
       modes.push("terminal");
     }
+    if (hasOpenedAgents || rightPanelMode === "agents") {
+      modes.push("agents");
+    }
     return modes;
-  }, [hasOpenedDiff, hasOpenedPreview, hasOpenedTerminal, rightPanelMode]);
+  }, [hasOpenedAgents, hasOpenedDiff, hasOpenedPreview, hasOpenedTerminal, rightPanelMode]);
   const markRightPanelOpened = useCallback(
     (panelMode: RightPanelMode) => {
       setLastOpenedRightPanelMode(panelMode);
@@ -142,6 +151,10 @@ export function ChatThreadRouteView({
             (previous.threadKey === currentThreadKey
               ? previous.hasOpenedTerminal
               : rightPanelMode === "terminal") || panelMode === "terminal",
+          hasOpenedAgents:
+            (previous.threadKey === currentThreadKey
+              ? previous.hasOpenedAgents
+              : rightPanelMode === "agents") || panelMode === "agents",
           openedAgentKeys:
             previous.threadKey === currentThreadKey ? previous.openedAgentKeys : openedAgentKeys,
         };
@@ -150,6 +163,7 @@ export function ChatThreadRouteView({
           previous.hasOpenedDiff === nextState.hasOpenedDiff &&
           previous.hasOpenedPreview === nextState.hasOpenedPreview &&
           previous.hasOpenedTerminal === nextState.hasOpenedTerminal &&
+          previous.hasOpenedAgents === nextState.hasOpenedAgents &&
           previous.openedAgentKeys === nextState.openedAgentKeys
         ) {
           return previous;
@@ -187,6 +201,9 @@ export function ChatThreadRouteView({
       if (lastOpenedRightPanelMode === "terminal" && hasOpenedTerminal) {
         return buildOpenTerminalSearch(previous);
       }
+      if (lastOpenedRightPanelMode === "agents" && hasOpenedAgents) {
+        return buildOpenAgentsSearch(previous);
+      }
       if (hasOpenedPreview) {
         return buildOpenFilesSearch(previous);
       }
@@ -195,6 +212,9 @@ export function ChatThreadRouteView({
       }
       if (hasOpenedTerminal) {
         return buildOpenTerminalSearch(previous);
+      }
+      if (hasOpenedAgents) {
+        return buildOpenAgentsSearch(previous);
       }
       if (lastAgentKey) {
         return buildOpenAgentSearch(previous, lastAgentKey);
@@ -207,6 +227,7 @@ export function ChatThreadRouteView({
       search: nextSearch,
     });
   }, [
+    hasOpenedAgents,
     hasOpenedDiff,
     hasOpenedPreview,
     hasOpenedTerminal,
@@ -239,6 +260,8 @@ export function ChatThreadRouteView({
             previous.threadKey === currentThreadKey
               ? previous.hasOpenedTerminal
               : hasOpenedTerminal,
+          hasOpenedAgents:
+            previous.threadKey === currentThreadKey ? previous.hasOpenedAgents : hasOpenedAgents,
           openedAgentKeys: nextOpenedAgentKeys,
         }));
 
@@ -260,6 +283,9 @@ export function ChatThreadRouteView({
               if (hasOpenedTerminal) {
                 return buildOpenTerminalSearch(previous);
               }
+              if (hasOpenedAgents) {
+                return buildOpenAgentsSearch(previous);
+              }
               return buildOpenWorkspaceSearch(previous);
             },
           });
@@ -273,12 +299,15 @@ export function ChatThreadRouteView({
         input.mode === "files" ? false : hasOpenedPreview || rightPanelMode === "files";
       const nextHasOpenedTerminal =
         input.mode === "terminal" ? false : hasOpenedTerminal || rightPanelMode === "terminal";
+      const nextHasOpenedAgents =
+        input.mode === "agents" ? false : hasOpenedAgents || rightPanelMode === "agents";
       setDiffPanelMountState((previous) => {
         const nextState = {
           threadKey: currentThreadKey,
           hasOpenedDiff: nextHasOpenedDiff,
           hasOpenedPreview: nextHasOpenedPreview,
           hasOpenedTerminal: nextHasOpenedTerminal,
+          hasOpenedAgents: nextHasOpenedAgents,
           openedAgentKeys:
             previous.threadKey === currentThreadKey ? previous.openedAgentKeys : openedAgentKeys,
         };
@@ -287,6 +316,7 @@ export function ChatThreadRouteView({
           previous.hasOpenedDiff === nextState.hasOpenedDiff &&
           previous.hasOpenedPreview === nextState.hasOpenedPreview &&
           previous.hasOpenedTerminal === nextState.hasOpenedTerminal &&
+          previous.hasOpenedAgents === nextState.hasOpenedAgents &&
           previous.openedAgentKeys === nextState.openedAgentKeys
         ) {
           return previous;
@@ -308,6 +338,9 @@ export function ChatThreadRouteView({
         if (input.mode !== "terminal" && nextHasOpenedTerminal) {
           return buildOpenTerminalSearch(previous);
         }
+        if (input.mode !== "agents" && nextHasOpenedAgents) {
+          return buildOpenAgentsSearch(previous);
+        }
         return buildOpenWorkspaceSearch(previous);
       };
       void navigate({
@@ -319,6 +352,7 @@ export function ChatThreadRouteView({
     [
       currentThreadKey,
       activeAgentKey,
+      hasOpenedAgents,
       hasOpenedDiff,
       hasOpenedPreview,
       hasOpenedTerminal,
@@ -350,6 +384,7 @@ export function ChatThreadRouteView({
               hasOpenedDiff,
               hasOpenedPreview,
               hasOpenedTerminal,
+              hasOpenedAgents,
               openedAgentKeys: baseAgentKeys,
             };
       }
@@ -362,6 +397,10 @@ export function ChatThreadRouteView({
           previous.threadKey === currentThreadKey
             ? previous.hasOpenedTerminal
             : rightPanelMode === "terminal",
+        hasOpenedAgents:
+          previous.threadKey === currentThreadKey
+            ? previous.hasOpenedAgents
+            : rightPanelMode === "agents",
         openedAgentKeys: [...baseAgentKeys, activeAgentKey],
       };
     });
@@ -369,6 +408,7 @@ export function ChatThreadRouteView({
     activeAgentKey,
     currentThreadKey,
     diffOpen,
+    hasOpenedAgents,
     hasOpenedDiff,
     hasOpenedPreview,
     hasOpenedTerminal,
@@ -420,6 +460,20 @@ export function ChatThreadRouteView({
     hasOpenedPreview ||
     rightPanelMode === "terminal" ||
     hasOpenedTerminal ||
+    rightPanelMode === "agents" ||
+    hasOpenedAgents ||
+    rightPanelMode === "agent" ||
+    openedAgentKeys.length > 0;
+  // The frozen phone tier has no Agents workspace: agents state neither
+  // mounts nor retains the phone work surface.
+  const shouldRenderPhoneRightPanelContent =
+    rightPanelOpen ||
+    rightPanelMode === "review" ||
+    hasOpenedDiff ||
+    rightPanelMode === "files" ||
+    hasOpenedPreview ||
+    rightPanelMode === "terminal" ||
+    hasOpenedTerminal ||
     rightPanelMode === "agent" ||
     openedAgentKeys.length > 0;
   const mountedRightPanelMode: RightPanelMode | null = rightPanelOpen
@@ -446,7 +500,7 @@ export function ChatThreadRouteView({
           />
         </SidebarInset>
         <PhoneWorkSurfaceSheet label="Workspace" open={rightPanelOpen} onClose={closeRightPanel}>
-          {shouldRenderRightPanelContent ? (
+          {shouldRenderPhoneRightPanelContent ? (
             <LazyRightPanel
               mode="phone"
               panelMode={mountedRightPanelMode}

@@ -16,6 +16,7 @@ import { RepositoryIdentityResolver } from "../../project/Services/RepositoryIde
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
+import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
@@ -26,6 +27,7 @@ const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(val
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provideMerge(RepositoryIdentityResolverLive),
     Layer.provideMerge(SqlitePersistenceMemory),
   ),
@@ -446,6 +448,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          backgroundLiveness: null,
         },
       ]);
 
@@ -1758,6 +1761,7 @@ it.effect(
   () => {
     const resolveCalls: string[] = [];
     const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provide(ThreadBackgroundLiveness.layer),
       Layer.provideMerge(
         Layer.succeed(RepositoryIdentityResolver, {
           resolve: (cwd: string) =>

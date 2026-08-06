@@ -42,7 +42,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
-import { deriveThreadSubagents } from "../threadWorkspaceViewModel";
+import { deriveThreadAgentPanelModel, deriveThreadSubagents } from "../threadWorkspaceViewModel";
 import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
   derivePhase,
@@ -58,6 +58,7 @@ import {
 import { type LegendListRef } from "@legendapp/list/react";
 import {
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadSummaryByRef,
   selectSidebarThreadsForProjectRef,
   selectThreadsAcrossEnvironments,
   useStore,
@@ -96,6 +97,7 @@ import {
   shortcutLabelForCommand,
 } from "../keybindings";
 import { ChevronDownIcon, TriangleAlertIcon, WifiOffIcon } from "lucide-react";
+import { BackgroundLivenessChip } from "./chat/BackgroundLivenessChip";
 import { cn, randomUUID } from "~/lib/utils";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
@@ -1366,6 +1368,17 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveThreadSubagents(threadActivities),
     [threadActivities],
   );
+  // Native subagent fold: memoized by activity-list identity, shared by the
+  // Agents surface, timeline spawn CTAs, and the background-liveness banner.
+  const agentSessionLive = phase !== "disconnected";
+  const agentPanelModel = useMemo(
+    () =>
+      deriveThreadAgentPanelModel({
+        activities: threadActivities,
+        sessionLive: agentSessionLive,
+      }),
+    [agentSessionLive, threadActivities],
+  );
   const {
     activePendingUserInput,
     activePendingDraftAnswers,
@@ -1480,6 +1493,47 @@ export default function ChatView(props: ChatViewProps) {
     );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  // Background work (subagent fleets, workflow runs, watch loops) can outlive
+  // the turn; once it settles, the composer stop button is gone, so this
+  // banner is the only visible stop affordance. Stop routes through the
+  // stop-everything interrupt: it kills every live background task before
+  // interrupting the parent turn.
+  const activeThreadSummary = useStore((store) =>
+    selectSidebarThreadSummaryByRef(store, activeThreadRef),
+  );
+  const activeBackgroundLiveness =
+    !isWorking && activeThread ? (activeThreadSummary?.backgroundLiveness ?? null) : null;
+  const [isStoppingBackgroundWork, setIsStoppingBackgroundWork] = useState(false);
+  useEffect(() => {
+    // "Stopping..." holds until the liveness clears; the interrupt command
+    // returning only means the request was accepted.
+    if (activeBackgroundLiveness === null) {
+      setIsStoppingBackgroundWork(false);
+    }
+  }, [activeBackgroundLiveness]);
+  useEffect(() => {
+    // Per-thread state: switching threads while A's stop is pending must not
+    // disable B's Stop button.
+    setIsStoppingBackgroundWork(false);
+  }, [activeThreadId]);
+  const handleStopBackgroundWork = useCallback(() => {
+    setIsStoppingBackgroundWork(true);
+    void (async () => {
+      try {
+        await onInterrupt();
+      } catch (error) {
+        // Every failure clears the pending state — the interrupt never
+        // reached the server, so liveness would hold "Stopping..." forever.
+        setIsStoppingBackgroundWork(false);
+        if (activeThreadId) {
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to stop background work.",
+          );
+        }
+      }
+    })();
+  }, [activeThreadId, onInterrupt, setThreadError]);
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -1730,6 +1784,7 @@ export default function ChatView(props: ChatViewProps) {
     onToggleWorkspacePanel,
     onOpenTurnDiff,
     onCloseDiff,
+    onOpenAgentsPanel,
     onOpenSubagentPanel,
   } = useChatWorkspacePanels({
     navigate,
@@ -3578,6 +3633,8 @@ export default function ChatView(props: ChatViewProps) {
             {showNewThreadSurface ? null : isActiveThreadIdFresh ? (
               <MessagesTimeline
                 key={activeThread.id}
+                agentPanelModel={agentPanelModel}
+                onOpenAgents={onOpenAgentsPanel}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnId={activeLatestTurn?.turnId ?? null}
@@ -3764,6 +3821,18 @@ export default function ChatView(props: ChatViewProps) {
               />
             ) : null}
             <div className={cn("relative isolate", composerOverlayActive && "pointer-events-auto")}>
+              {/* Background-liveness stays off the frozen phone tier along
+                  with the rest of the Agents surface (AGENTS.md). */}
+              {activeBackgroundLiveness !== null && presentationTier !== "phone" ? (
+                <div className="mx-auto mb-2 flex w-full min-w-0 max-w-208 items-center px-4">
+                  <BackgroundLivenessChip
+                    liveness={activeBackgroundLiveness}
+                    liveCount={agentPanelModel.liveCount}
+                    stopping={isStoppingBackgroundWork}
+                    onStop={handleStopBackgroundWork}
+                  />
+                </div>
+              ) : null}
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
               {showNewThreadComposerSpacer ? <div aria-hidden className="mb-2 h-5" /> : null}
               <ComposerQueuedMessages

@@ -48,6 +48,7 @@ import { ProjectionThreadSession } from "../../persistence/Services/ProjectionTh
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
 import { RepositoryIdentityResolver } from "../../project/Services/RepositoryIdentityResolver.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
+import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { pruneStaleContextWindowActivities } from "../contextWindowActivities.ts";
 import {
   ProjectionSnapshotQuery,
@@ -305,6 +306,7 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 }
 
 const makeProjectionSnapshotQuery = Effect.gen(function* () {
+  const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const sql = yield* SqlClient.SqlClient;
   const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
   const repositoryIdentityResolutionConcurrency = 4;
@@ -922,6 +924,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           sequence ASC,
           created_at ASC,
           activity_id ASC
+      `,
+  });
+
+  // Payload-only projection for task rows: the linkage bundle (runHandles,
+  // outputFile) rides exclusively on task.* kinds, so path authorization
+  // never needs messages, plans, or checkpoints.
+  const listThreadTaskPayloadRows = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: Schema.Struct({ payload: Schema.fromJsonString(Schema.Unknown) }),
+    execute: ({ threadId }) =>
+      sql`
+        SELECT payload_json AS "payload"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND kind LIKE 'task.%'
       `,
   });
 
@@ -1720,6 +1737,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       hasPendingApprovals: row.pendingApprovalCount > 0,
                       hasPendingUserInput: row.pendingUserInputCount > 0,
                       hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                      backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
+                        row.threadId,
+                      ),
                     }),
                   ),
                 updatedAt: updatedAt ?? new Date(0).toISOString(),
@@ -1887,6 +1907,40 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       });
     });
 
+  const listThreadTaskPathRefs: NonNullable<
+    ProjectionSnapshotQueryShape["listThreadTaskPathRefs"]
+  > = (threadId) =>
+    listThreadTaskPayloadRows({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadTaskPathRefs:query",
+          "ProjectionSnapshotQuery.listThreadTaskPathRefs:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => {
+        const scriptPaths = new Set<string>();
+        const outputPaths = new Set<string>();
+        for (const row of rows) {
+          const payload = row.payload;
+          if (payload === null || typeof payload !== "object") {
+            continue;
+          }
+          const record = payload as Record<string, unknown>;
+          const runHandles = record.runHandles;
+          if (runHandles !== null && typeof runHandles === "object") {
+            const scriptPath = (runHandles as { scriptPath?: unknown }).scriptPath;
+            if (typeof scriptPath === "string") {
+              scriptPaths.add(scriptPath);
+            }
+          }
+          if (typeof record.outputFile === "string") {
+            outputPaths.add(record.outputFile);
+          }
+        }
+        return { scriptPaths: [...scriptPaths], outputPaths: [...outputPaths] };
+      }),
+    );
+
   const getThreadShellById: ProjectionSnapshotQueryShape["getThreadShellById"] = (threadId) =>
     Effect.gen(function* () {
       const [threadRow, latestTurnRow, sessionRow] = yield* Effect.all([
@@ -1942,6 +1996,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
+        backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
+          threadRow.value.threadId,
+        ),
       } satisfies OrchestrationThreadShell);
     });
 
@@ -2146,6 +2203,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadShellById,
     getWorktreeShellById,
     getThreadDetailById,
+    listThreadTaskPathRefs,
     searchThreadMessages,
   } satisfies ProjectionSnapshotQueryShape;
 });
