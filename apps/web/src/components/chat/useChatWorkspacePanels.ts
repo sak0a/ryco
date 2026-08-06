@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import type { EnvironmentId, ThreadId, TurnId } from "@ryco/contracts";
 import { useEvent } from "../../hooks/useEvent";
+import { usePresentationTier } from "../../hooks/usePresentationTier";
 import type { DraftId } from "../../composerDraftStore";
 import type { ThreadSubagentView } from "../../threadWorkspaceViewModel";
 import {
@@ -78,6 +79,7 @@ export function useChatWorkspacePanels(
     onTerminalPanelOpen,
     onAgentPanelOpen,
   } = input;
+  const isPhoneTier = usePresentationTier() === "phone";
 
   const onOpenReviewPanel = useEvent(() => {
     if (!isServerThread) {
@@ -231,6 +233,11 @@ export function useChatWorkspacePanels(
     });
   }, [environmentId, isServerThread, navigate, threadId]);
   const onOpenAgentsPanel = useEvent(() => {
+    // The frozen phone tier has no Agents workspace (AGENTS.md) — never
+    // route phone callers into it.
+    if (isPhoneTier) {
+      return;
+    }
     const nextSearch = (previous: Record<string, unknown>) => buildOpenAgentsSearch(previous);
     if (routeKind === "draft" && draftId) {
       void navigate({

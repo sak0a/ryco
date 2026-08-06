@@ -310,6 +310,10 @@ type WorkflowScriptState =
   | { readonly state: "loaded"; readonly contents: string; readonly truncated: boolean }
   | { readonly state: "failed" };
 
+/** A hung RPC must resolve to the failed state (with its retry affordance),
+ * not an indefinite "Loading…". */
+const SCRIPT_FETCH_TIMEOUT_MS = 15_000;
+
 /**
  * Read-only workflow script viewer, fetched through the contained
  * getWorkflowScript RPC (never a raw filesystem read from the client).
@@ -326,16 +330,24 @@ function WorkflowScriptView({
   onClose: () => void;
 }) {
   const [result, setResult] = useState<WorkflowScriptState>({ state: "loading" });
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     setResult({ state: "loading" });
     const getWorkflowScript = readEnvironmentApi(environmentId)?.orchestration.getWorkflowScript;
     if (!getWorkflowScript) {
       setResult({ state: "failed" });
       return;
     }
-    getWorkflowScript({ threadId, scriptPath })
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error("workflow script fetch timed out")),
+        SCRIPT_FETCH_TIMEOUT_MS,
+      );
+    });
+    Promise.race([getWorkflowScript({ threadId, scriptPath }), timeout])
       .then((value) => {
         if (!cancelled) {
           setResult({ state: "loaded", contents: value.contents, truncated: value.truncated });
@@ -345,11 +357,19 @@ function WorkflowScriptView({
         if (!cancelled) {
           setResult({ state: "failed" });
         }
+      })
+      .finally(() => {
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+        }
       });
     return () => {
       cancelled = true;
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
     };
-  }, [environmentId, threadId, scriptPath]);
+  }, [environmentId, threadId, scriptPath, attempt]);
 
   return (
     <div className="mx-1.5 mb-1 rounded-md border border-border/60 bg-background/60">
@@ -374,7 +394,16 @@ function WorkflowScriptView({
             {result.truncated ? "\n… (truncated)" : ""}
           </pre>
         ) : result.state === "failed" ? (
-          <p className="text-xs text-destructive-foreground">Could not load the script.</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-destructive-foreground">Could not load the script.</p>
+            <button
+              type="button"
+              onClick={() => setAttempt((value) => value + 1)}
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              Retry
+            </button>
+          </div>
         ) : (
           <p className="text-xs text-muted-foreground">Loading…</p>
         )}
@@ -508,10 +537,23 @@ function LiveWorkflowSection({
 
 /**
  * Settled workflow: one summary line. Click toggles the member list — the
- * only expansion in the panel, at run granularity.
+ * only expansion in the panel, at run granularity. The script stays
+ * reachable after the run settles: runHandles survive the fold, and a
+ * finished run is exactly when reading its script matters.
  */
-function SettledWorkflowSection({ group }: { group: AgentPanelWorkflowGroup }) {
+function SettledWorkflowSection({
+  group,
+  environmentId,
+  threadId,
+}: {
+  group: AgentPanelWorkflowGroup;
+  environmentId: EnvironmentId | null;
+  threadId: ThreadId | null;
+}) {
   const [open, setOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const scriptPath = group.workflow.runHandles?.scriptPath;
+  const canShowScript = scriptPath !== undefined && environmentId !== null && threadId !== null;
   const members = workflowMembers(group);
   const failed = members.filter((member) => member.status === "failed").length;
   // Coordinator usage may already aggregate members (panel-footer rule):
@@ -526,17 +568,38 @@ function SettledWorkflowSection({ group }: { group: AgentPanelWorkflowGroup }) {
       : null;
   return (
     <section>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-accent/40"
-        aria-expanded={open}
-      >
-        <StatusDot status={failed > 0 ? "failed" : group.workflow.status} />
-        <span className="truncate text-sm">
-          {group.workflow.workflowName ?? group.workflow.title}
-        </span>
-        <span className="ml-auto flex items-center gap-1.5 font-mono text-[.7rem] text-muted-foreground/80">
+      <div className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent/40">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          aria-expanded={open}
+        >
+          <StatusDot status={failed > 0 ? "failed" : group.workflow.status} />
+          <span className="truncate text-sm">
+            {group.workflow.workflowName ?? group.workflow.title}
+          </span>
+        </button>
+        {canShowScript ? (
+          <button
+            type="button"
+            onClick={() => setScriptOpen((value) => !value)}
+            className={cn(
+              "shrink-0 rounded-sm border border-border/60 px-1 font-mono text-[.65rem] text-muted-foreground hover:text-foreground",
+              scriptOpen && "text-foreground",
+            )}
+            aria-expanded={scriptOpen}
+          >
+            {"{}"} script
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="flex shrink-0 items-center gap-1.5 font-mono text-[.7rem] text-muted-foreground/80"
+          aria-expanded={open}
+          tabIndex={-1}
+        >
           {failed > 0 ? <span className="text-destructive-foreground">{failed} failed</span> : null}
           <span>{members.length} agents</span>
           <span className="tabular-nums">· {formatSubagentTokenCount(totalTokens)} tok</span>
@@ -546,8 +609,16 @@ function SettledWorkflowSection({ group }: { group: AgentPanelWorkflowGroup }) {
           ) : (
             <ChevronRightIcon aria-hidden className="size-3" />
           )}
-        </span>
-      </button>
+        </button>
+      </div>
+      {scriptOpen && canShowScript ? (
+        <WorkflowScriptView
+          environmentId={environmentId}
+          threadId={threadId}
+          scriptPath={scriptPath}
+          onClose={() => setScriptOpen(false)}
+        />
+      ) : null}
       {open ? (
         <div className="ms-3 border-s border-border/45 ps-2">
           <AgentRowList>
@@ -624,7 +695,12 @@ export function AgentsPanel({
                 Earlier
               </div>
               {settledWorkflows.map((group) => (
-                <SettledWorkflowSection key={group.workflow.id} group={group} />
+                <SettledWorkflowSection
+                  key={group.workflow.id}
+                  group={group}
+                  environmentId={environmentId}
+                  threadId={threadId}
+                />
               ))}
               <AgentRowList>
                 {settledDirect.map((agent) => (

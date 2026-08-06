@@ -710,6 +710,21 @@ export function emptyAgentPanelModel(): AgentPanelModel {
 }
 
 /**
+ * The one fold-and-derive composition every Agents surface uses (chat view,
+ * workspace panel, launcher badge). A single helper so callers can never
+ * drift on fold options. sessionLive derives interruption for agents
+ * orphaned by session death.
+ */
+export function deriveThreadAgentPanelModel(input: {
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly sessionLive: boolean;
+}): AgentPanelModel {
+  return deriveAgentPanelModel({
+    agents: foldSubagentActivities(input.activities, { sessionLive: input.sessionLive }),
+  });
+}
+
+/**
  * Source-neutral view model. When the orchestration-v2 subagent projection
  * exists for the thread, pass it as v2Projection and it wins outright — the
  * two sources are never merged (duplicate-agents failure mode). Until v2

@@ -427,6 +427,18 @@ export function DraftChatThreadRouteView({
     hasOpenedAgents ||
     rightPanelMode === "agent" ||
     openedAgentKeys.length > 0;
+  // The frozen phone tier has no Agents workspace: agents state neither
+  // mounts nor retains the phone work surface.
+  const shouldRenderPhoneRightPanelContent =
+    rightPanelOpen ||
+    rightPanelMode === "review" ||
+    hasOpenedDiff ||
+    rightPanelMode === "files" ||
+    hasOpenedPreview ||
+    rightPanelMode === "terminal" ||
+    hasOpenedTerminal ||
+    rightPanelMode === "agent" ||
+    openedAgentKeys.length > 0;
   const mountedRightPanelMode: RightPanelMode | null = rightPanelOpen
     ? rightPanelMode
     : lastOpenedRightPanelMode;
@@ -451,7 +463,7 @@ export function DraftChatThreadRouteView({
           />
         </SidebarInset>
         <PhoneWorkSurfaceSheet label="Workspace" open={rightPanelOpen} onClose={closeRightPanel}>
-          {shouldRenderRightPanelContent ? (
+          {shouldRenderPhoneRightPanelContent ? (
             <LazyRightPanel
               mode="phone"
               panelMode={mountedRightPanelMode}

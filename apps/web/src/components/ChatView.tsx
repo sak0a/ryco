@@ -42,11 +42,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
-import {
-  deriveAgentPanelModel,
-  deriveThreadSubagents,
-  foldSubagentActivities,
-} from "../threadWorkspaceViewModel";
+import { deriveThreadAgentPanelModel, deriveThreadSubagents } from "../threadWorkspaceViewModel";
 import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
   derivePhase,
@@ -1374,12 +1370,12 @@ export default function ChatView(props: ChatViewProps) {
   );
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, timeline spawn CTAs, and the background-liveness banner.
-  // sessionLive derives interruption for agents orphaned by session death.
   const agentSessionLive = phase !== "disconnected";
   const agentPanelModel = useMemo(
     () =>
-      deriveAgentPanelModel({
-        agents: foldSubagentActivities(threadActivities, { sessionLive: agentSessionLive }),
+      deriveThreadAgentPanelModel({
+        activities: threadActivities,
+        sessionLive: agentSessionLive,
       }),
     [agentSessionLive, threadActivities],
   );
@@ -3825,7 +3821,9 @@ export default function ChatView(props: ChatViewProps) {
               />
             ) : null}
             <div className={cn("relative isolate", composerOverlayActive && "pointer-events-auto")}>
-              {activeBackgroundLiveness !== null ? (
+              {/* Background-liveness stays off the frozen phone tier along
+                  with the rest of the Agents surface (AGENTS.md). */}
+              {activeBackgroundLiveness !== null && presentationTier !== "phone" ? (
                 <div className="mx-auto mb-2 flex w-full min-w-0 max-w-208 items-center px-4">
                   <BackgroundLivenessChip
                     liveness={activeBackgroundLiveness}

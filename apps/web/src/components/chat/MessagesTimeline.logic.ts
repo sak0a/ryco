@@ -812,6 +812,20 @@ export function deriveMessagesTimelineRows(input: {
         // chronological order in both collapsed and expanded states.
         const overflowCandidates = groupedEntries.filter((entry) => entry.agentSpawn === undefined);
         const hiddenEntries = overflowCandidates.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
+        // Spawn rows alone can push the group over the threshold while
+        // nothing is actually hidden; render the single grouped row then,
+        // so crossing the threshold never changes the row shape without a
+        // toggle to explain it.
+        if (hiddenEntries.length === 0) {
+          nextRows.push({
+            kind: "work",
+            id: timelineEntry.id,
+            createdAt: timelineEntry.createdAt,
+            groupedEntries,
+          });
+          index = cursor - 1;
+          continue;
+        }
         const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
         const visibleEntries = groupedEntries.filter(
           (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
@@ -819,19 +833,19 @@ export function deriveMessagesTimelineRows(input: {
         const renderedEntries = expanded ? groupedEntries : visibleEntries;
 
         // The recap leads the group: it reads as the heading of the run it
-        // folds, and expanding it reveals the rows directly beneath.
-        if (hiddenEntries.length > 0) {
-          nextRows.push({
-            kind: "work-toggle",
-            id: `work-toggle:${timelineEntry.id}`,
-            createdAt: timelineEntry.createdAt,
-            groupId,
-            hiddenCount: hiddenEntries.length,
-            expanded,
-            onlyToolEntries: groupedEntries.every((entry) => entry.tone === "tool"),
-            summary: summarizeToolCallGroup(hiddenEntries),
-          });
-        }
+        // folds, and expanding it reveals the rows directly beneath. Every
+        // field on the toggle describes the HIDDEN set — a visible spawn
+        // row must not flip its wording.
+        nextRows.push({
+          kind: "work-toggle",
+          id: `work-toggle:${timelineEntry.id}`,
+          createdAt: timelineEntry.createdAt,
+          groupId,
+          hiddenCount: hiddenEntries.length,
+          expanded,
+          onlyToolEntries: hiddenEntries.every((entry) => entry.tone === "tool"),
+          summary: summarizeToolCallGroup(hiddenEntries),
+        });
         for (const workEntry of renderedEntries) {
           nextRows.push({
             kind: "work",

@@ -1249,6 +1249,9 @@ const WorkGroupSection = memo(function WorkGroupSection({
 }) {
   const { activeTurnId, isWorking } = use(TimelineStreamingCtx);
   const { workspaceRoot } = use(TimelineStableCtx);
+  // The frozen phone tier has no Agents workspace, so spawn CTAs render as
+  // plain work rows there instead of dead-end navigation affordances.
+  const isPhoneTier = usePresentationTier() === "phone";
   const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
   const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
 
@@ -1269,7 +1272,7 @@ const WorkGroupSection = memo(function WorkGroupSection({
             activeTurnId !== undefined &&
             workEntry.turnId === activeTurnId;
 
-          if (workEntry.agentSpawn) {
+          if (workEntry.agentSpawn && !isPhoneTier) {
             return <AgentSpawnCtaRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />;
           }
 
