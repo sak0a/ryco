@@ -69,6 +69,13 @@ export interface ProviderAdapterShape<TError> {
   readonly interruptTurn: (threadId: ThreadId, turnId?: TurnId) => Effect.Effect<void, TError>;
 
   /**
+   * Stop one live background task without interrupting the turn. Optional:
+   * only providers whose runtime tracks individually stoppable tasks
+   * implement it; callers must feature-detect.
+   */
+  readonly stopBackgroundTask?: (threadId: ThreadId, taskId: string) => Effect.Effect<void, TError>;
+
+  /**
    * Respond to an interactive approval request.
    */
   readonly respondToRequest: (

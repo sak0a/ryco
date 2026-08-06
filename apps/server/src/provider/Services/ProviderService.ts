@@ -106,6 +106,15 @@ export interface ProviderServiceShape {
   ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Stop one live background task without interrupting the turn. Fails with
+   * ProviderUnsupportedError when the routed adapter cannot stop tasks
+   * individually.
+   */
+  readonly stopBackgroundTask: (
+    input: ProviderStopBackgroundTaskInput,
+  ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
    * Respond to a provider approval request.
    */
   readonly respondToRequest: (

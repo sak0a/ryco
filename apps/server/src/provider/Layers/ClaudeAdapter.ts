@@ -70,6 +70,7 @@ import {
   Exit,
   FileSystem,
   Fiber,
+  Option,
   Path,
   Queue,
   Random,
@@ -4067,6 +4068,38 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     },
   );
 
+  const stopBackgroundTask: NonNullable<ClaudeAdapterShape["stopBackgroundTask"]> = Effect.fn(
+    "stopBackgroundTask",
+  )(function* (threadId, taskId) {
+    const context = yield* requireSession(threadId);
+    if (!context.query.stopTask) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "task/stop",
+        detail: "This Claude session does not support stopping individual tasks.",
+      });
+    }
+    // Idempotent: a task that already settled (or was never tracked) is a
+    // successful no-op — the caller races task completion by design.
+    if (!context.liveTaskIds.has(taskId)) {
+      return;
+    }
+    // Bounded like the interrupt sweep: a wedged child's stopTask promise
+    // may never settle, and a user-facing button must not hang forever.
+    const outcome = yield* Effect.tryPromise({
+      // Invoke through the query object: SDK methods rely on `this`.
+      try: () => context.query.stopTask!(taskId),
+      catch: (cause) => toRequestError(threadId, "task/stop", cause),
+    }).pipe(Effect.timeoutOption("5 seconds"));
+    if (Option.isNone(outcome)) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "task/stop",
+        detail: `Timed out stopping task ${taskId}.`,
+      });
+    }
+  });
+
   const readThread: ClaudeAdapterShape["readThread"] = Effect.fn("readThread")(
     function* (threadId) {
       const context = yield* requireSession(threadId);
@@ -4168,6 +4201,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     startSession,
     sendTurn,
     interruptTurn,
+    stopBackgroundTask,
     readThread,
     rollbackThread,
     respondToRequest,

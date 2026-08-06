@@ -33,6 +33,8 @@ import {
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
   getWorkflowScript: "orchestration.getWorkflowScript",
+  getTaskOutput: "orchestration.getTaskOutput",
+  stopBackgroundTask: "orchestration.stopBackgroundTask",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreadMessages: "orchestration.searchThreadMessages",
@@ -2003,6 +2005,91 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedErrorClass
   }
 }
 
+export const OrchestrationGetTaskOutputInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Absolute path from the task's outputFile linkage field. The server
+   * re-derives containment; the client value is a hint, never trusted. */
+  outputPath: TrimmedNonEmptyString,
+  /** Byte offset from a previous read's nextOffset to poll appended output;
+   * omit to tail (start near the end of large files). */
+  offset: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationGetTaskOutputInput = typeof OrchestrationGetTaskOutputInput.Type;
+
+export const OrchestrationGetTaskOutputResult = Schema.Struct({
+  outputPath: TrimmedNonEmptyString,
+  chunk: Schema.String,
+  /** Byte offset to pass back as `offset` to continue reading appended output. */
+  nextOffset: NonNegativeInt,
+  /** Total file size in bytes at read time. */
+  size: NonNegativeInt,
+  /** True when this read skipped earlier bytes (tail mode on a large file). */
+  truncatedHead: Schema.Boolean,
+});
+export type OrchestrationGetTaskOutputResult = typeof OrchestrationGetTaskOutputResult.Type;
+
+export const TASK_OUTPUT_ERROR_MESSAGES = {
+  "invalid-path": "Task output must be an absolute path.",
+  "root-unavailable": "Task output root unavailable.",
+  "not-found": "Task output not found.",
+  "outside-root": "Task output path is outside the task output roots.",
+  "not-regular-file": "Task output is not a regular file.",
+  "changed-during-read": "Task output changed between resolution and open.",
+  "read-failed": "Task output read failed.",
+} as const;
+
+export class OrchestrationGetTaskOutputError extends Schema.TaggedErrorClass<OrchestrationGetTaskOutputError>()(
+  "OrchestrationGetTaskOutputError",
+  {
+    reason: Schema.Literals([
+      "invalid-path",
+      "root-unavailable",
+      "not-found",
+      "outside-root",
+      "not-regular-file",
+      "changed-during-read",
+      "read-failed",
+    ]),
+    outputPath: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return TASK_OUTPUT_ERROR_MESSAGES[this.reason];
+  }
+}
+
+export const OrchestrationStopBackgroundTaskInput = Schema.Struct({
+  threadId: ThreadId,
+  /** Provider-runtime task id from the task.* linkage fields. */
+  taskId: TrimmedNonEmptyString,
+});
+export type OrchestrationStopBackgroundTaskInput = typeof OrchestrationStopBackgroundTaskInput.Type;
+
+export const OrchestrationStopBackgroundTaskResult = Schema.Struct({});
+export type OrchestrationStopBackgroundTaskResult =
+  typeof OrchestrationStopBackgroundTaskResult.Type;
+
+export const STOP_BACKGROUND_TASK_ERROR_MESSAGES = {
+  unsupported: "This provider cannot stop individual background tasks.",
+  "session-not-found": "No live provider session for this thread.",
+  "stop-failed": "Stopping the background task failed.",
+} as const;
+
+export class OrchestrationStopBackgroundTaskError extends Schema.TaggedErrorClass<OrchestrationStopBackgroundTaskError>()(
+  "OrchestrationStopBackgroundTaskError",
+  {
+    reason: Schema.Literals(["unsupported", "session-not-found", "stop-failed"]),
+    threadId: Schema.String,
+    taskId: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return STOP_BACKGROUND_TASK_ERROR_MESSAGES[this.reason];
+  }
+}
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
@@ -2011,6 +2098,14 @@ export const OrchestrationRpcSchemas = {
   getWorkflowScript: {
     input: OrchestrationGetWorkflowScriptInput,
     output: OrchestrationGetWorkflowScriptResult,
+  },
+  getTaskOutput: {
+    input: OrchestrationGetTaskOutputInput,
+    output: OrchestrationGetTaskOutputResult,
+  },
+  stopBackgroundTask: {
+    input: OrchestrationStopBackgroundTaskInput,
+    output: OrchestrationStopBackgroundTaskResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,
