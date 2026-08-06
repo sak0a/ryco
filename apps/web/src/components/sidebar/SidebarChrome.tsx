@@ -1,37 +1,34 @@
 import { PanelLeftCloseIcon, SettingsIcon } from "lucide-react";
 import React, { memo, useCallback } from "react";
 import { Link } from "@tanstack/react-router";
-import { APP_STAGE_LABEL, APP_VERSION } from "../../branding";
+import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import { SidebarFooter, SidebarHeader, useSidebar } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 
-function RycoWordmark() {
+/**
+ * The Ryco "R" mark, from `assets/logo_letter_only.svg`.
+ *
+ * Re-cut to a viewBox tight around the glyph: the source art floats the letter
+ * inside a square canvas roughly three times its size, so the original box
+ * would render it at a third of the requested height. The source fill
+ * (`rgb(21,21,21)`) is dropped for `currentColor` so the theme's foreground
+ * token carries the mark — near-black in light mode, near-white in dark —
+ * instead of a hardcoded near-black that would vanish on the dark sidebar.
+ */
+function RycoLetterMark() {
   return (
     <svg
       aria-label="Ryco"
-      className="h-3 w-auto shrink-0 text-foreground"
-      viewBox="650 1050 2150 800"
+      className="h-4.5 w-auto shrink-0 text-foreground"
+      viewBox="414.46 386.67 425.09 480.61"
       xmlns="http://www.w3.org/2000/svg"
       fill="currentColor"
     >
-      <g transform="matrix(0.718921,0,0,1,443.224836,208.15748)">
-        <g transform="matrix(1.390973,0,0,1,-106.34474,0)">
-          <g transform="matrix(1080.539877,0,0,1080.539877,272,1401.377914)">
-            <path d="M0.055,-0.494L0.055,-0L0.104,-0L0.104,-0.288C0.104,-0.378 0.175,-0.452 0.267,-0.453C0.296,-0.453 0.325,-0.446 0.351,-0.43L0.373,-0.47C0.34,-0.49 0.304,-0.5 0.267,-0.499C0.204,-0.499 0.134,-0.473 0.103,-0.406L0.101,-0.494L0.055,-0.494Z" />
-          </g>
-          <g transform="matrix(1080.539877,0,0,1080.539877,729.068368,1401.377914)">
-            <path d="M0.424,-0.494L0.3,-0.203L0.243,-0.059L0.185,-0.202L0.07,-0.494L0.017,-0.494L0.215,-0.006L0.124,0.206L0.176,0.206L0.477,-0.494L0.424,-0.494Z" />
-          </g>
-          <g transform="matrix(1080.539877,0,0,1080.539877,1287.707485,1401.377914)">
-            <path d="M0.427,-0.102C0.387,-0.062 0.333,-0.041 0.28,-0.041C0.168,-0.041 0.074,-0.114 0.074,-0.247C0.074,-0.38 0.168,-0.453 0.28,-0.453C0.333,-0.453 0.388,-0.434 0.428,-0.394L0.46,-0.425C0.41,-0.474 0.345,-0.499 0.28,-0.499C0.137,-0.499 0.026,-0.403 0.026,-0.247C0.026,-0.091 0.141,0.005 0.28,0.005C0.345,0.005 0.41,-0.019 0.46,-0.069L0.427,-0.102Z" />
-          </g>
-          <g transform="matrix(1080.539877,0,0,1080.539877,1844.185521,1401.377914)">
-            <path d="M0.283,0.007C0.422,0.007 0.534,-0.089 0.534,-0.246C0.534,-0.403 0.422,-0.503 0.283,-0.503C0.144,-0.503 0.032,-0.403 0.032,-0.246C0.032,-0.089 0.144,0.007 0.283,0.007ZM0.283,-0.041C0.171,-0.041 0.08,-0.118 0.08,-0.246C0.08,-0.374 0.171,-0.457 0.283,-0.457C0.395,-0.457 0.486,-0.374 0.486,-0.246C0.486,-0.118 0.395,-0.041 0.283,-0.041Z" />
-          </g>
-        </g>
+      <g transform="matrix(0.125617,0,0,-0.125617,-180.839814,1610.932617)">
+        <path d="M6035,9744C5514,9700 5112,9433 4886,8982C4838,8886 4786,8729 4764,8610L4746,8515L4742,7231L4739,5947L4758,5928L4796,5962C4818,5981 4975,6121 5147,6273L5459,6550L5462,7502L5465,8455L5491,8532C5576,8779 5754,8952 6002,9028L6055,9044L6605,9048C6908,9050 7178,9049 7206,9045L7258,9039L7364,8975L7392,8930C7407,8905 7424,8863 7429,8835L7438,8786L7429,8725C7424,8692 7406,8636 7389,8601L7358,8538L7295,8474L7233,8411L7161,8376L7088,8341L7032,8335C6708,8298 6509,8207 6296,7996C6187,7889 6155,7846 5901,7472L5708,7188L5714,7167C5717,7155 5741,7123 5768,7095C5794,7068 5840,7016 5870,6980C5919,6922 6037,6786 6370,6405C6428,6340 6528,6225 6594,6150C6659,6076 6732,5994 6757,5968L6801,5920L7710,5920L7710,5933C7710,5939 7666,5997 7612,6061C7503,6191 7498,6197 7009,6774C6599,7259 6590,7270 6590,7283C6590,7305 6683,7421 6753,7486L6827,7555L6975,7629L7040,7640C7076,7646 7148,7659 7200,7670C7628,7751 8003,8123 8102,8563L8123,8655L8122,8795L8122,8935L8097,9030C8048,9217 7971,9350 7832,9482C7695,9612 7569,9680 7385,9723L7295,9743L6685,9745C6350,9746 6057,9746 6035,9744Z" />
       </g>
     </svg>
   );
@@ -94,25 +91,25 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     </div>
   );
 
-  const wordmark = (
+  const brandRow = (
     <div className="@container/sidebar-header flex w-full min-w-0 items-center gap-2">
       <Tooltip>
         <TooltipTrigger
           render={
             <Link
               aria-label="Go to threads"
-              className="ml-1 flex min-w-0 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+              className="ml-1 flex min-w-0 cursor-pointer items-center rounded-md outline-hidden ring-ring transition-opacity hover:opacity-80 focus-visible:ring-2"
               to="/"
             >
-              <RycoWordmark />
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {APP_STAGE_LABEL}
-              </span>
+              <RycoLetterMark />
             </Link>
           }
         />
+        {/* The release stage moved off the header with the wordmark badge, so
+            the tooltip carries it — a Dev or Nightly build still has to be
+            identifiable without opening settings. */}
         <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
+          {APP_BASE_NAME} {APP_STAGE_LABEL} · Version {APP_VERSION}
         </TooltipPopup>
       </Tooltip>
       {actionButtons}
@@ -121,10 +118,10 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
   return isElectron ? (
     <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px] wco:h-[env(titlebar-area-height)] wco:pl-[calc(env(titlebar-area-x)+1em)]">
-      {wordmark}
+      {brandRow}
     </SidebarHeader>
   ) : (
-    <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">{wordmark}</SidebarHeader>
+    <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">{brandRow}</SidebarHeader>
   );
 });
 
