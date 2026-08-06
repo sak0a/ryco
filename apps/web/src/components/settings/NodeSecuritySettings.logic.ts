@@ -708,12 +708,20 @@ export const NODE_SESSION_WEB_SAS_UNAVAILABLE =
  * so a pointer there would send them to the page they are standing on. The
  * placement argument below is only what satisfies the shipped validator — every
  * string it chose is discarded.
+ *
+ * THE ABSENCE IS STATED, NOT OMITTED. `more` is `null` here rather than missing,
+ * because `VerificationCode` renders both ends: an optional field made "this end
+ * has none" and "this caller forgot one" the same shape at the boundary, and the
+ * field the browser end would then silently lose is the one naming
+ * `ryco e2ee sessions`.
  */
 export interface NodeSessionVerificationView {
   readonly groups: ReadonlyArray<string>;
   /** The groups re-joined with the format's own separator. */
   readonly display: string;
   readonly advisory: string;
+  /** Always `null`: the reader is already on the page a pointer would name. */
+  readonly more: null;
 }
 
 export function nodeSessionVerificationView(
@@ -725,6 +733,7 @@ export function nodeSessionVerificationView(
     groups: view.groups,
     display: view.display,
     advisory: NODE_SESSION_WEB_SAS_ADVISORY,
+    more: null,
   };
 }
 

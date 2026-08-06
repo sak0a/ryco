@@ -744,11 +744,18 @@ describe("§13.5 from the node's end of the comparison", () => {
     // list in local mode the reader is inside Settings → Security and the
     // command produces this very list, so both would be circular. The node-end
     // view is a different shape rather than the same shape with a wrong value.
+    //
+    // STATED AS `null` RATHER THAN LEFT OUT. `VerificationCode` draws both ends
+    // from one prop, and an optional field there cannot tell "this end has no
+    // second sentence" from "this caller dropped one" — so the field is present
+    // and empty, and the renderer's type requires it.
     expect(Object.keys(nodeSessionVerificationView(CODE)!)).toEqual([
       "groups",
       "display",
       "advisory",
+      "more",
     ]);
+    expect(nodeSessionVerificationView(CODE)!.more).toBeNull();
   });
 
   it("keeps §13.5's denial at full strength in node-end terms", () => {

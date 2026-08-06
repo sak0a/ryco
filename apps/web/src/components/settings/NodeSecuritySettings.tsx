@@ -227,10 +227,15 @@ function SafetyNumber({ value }: { readonly value: string }) {
  * the only ones: each is wired to exactly one view builder, so the referent is
  * structural rather than a parameter someone can pass the wrong way round.
  *
- * `more` is the one optional field, and only because the node end genuinely has
- * none: the browser-end view always carries it (the type makes it required
- * there), while a session on the node's own list has one form of its sentence
- * and no second surface to send its reader to.
+ * `more` IS REQUIRED AND NULLABLE RATHER THAN OPTIONAL, which is the difference
+ * between a fact and a convention. The node end genuinely has no second sentence
+ * — its reader is already on the page a pointer would name — but written `more?:
+ * string` that absence was indistinguishable from a caller who forgot the field,
+ * and forgetting it on the browser end drops the sentence naming
+ * `ryco e2ee sessions`: the page the node menu's pointer leads to would show a
+ * value to compare and no way to obtain the thing to compare it against. `null`
+ * makes "this end has no second sentence" something a view STATES, and omitting
+ * it a compile error.
  */
 function VerificationCode({
   view,
@@ -240,7 +245,7 @@ function VerificationCode({
   readonly view: {
     readonly display: string;
     readonly advisory: string;
-    readonly more?: string;
+    readonly more: string | null;
   } | null;
   readonly unavailable: string;
   readonly testId: string;
@@ -261,7 +266,7 @@ function VerificationCode({
         {view.display}
       </p>
       <p className="text-[11px] leading-relaxed text-muted-foreground">{view.advisory}</p>
-      {view.more === undefined ? null : (
+      {view.more === null ? null : (
         <p className="text-[11px] leading-relaxed text-muted-foreground">{view.more}</p>
       )}
     </div>
