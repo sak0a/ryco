@@ -84,10 +84,10 @@ import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { PREFERS_REDUCED_MOTION_QUERY } from "../lib/perf/motion";
 import { useDelayedUnmount } from "../hooks/useDelayedUnmount";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { useAppSidebarCollapsed } from "../hooks/useAppSidebarCollapsed";
 import { usePresentationTier } from "../hooks/usePresentationTier";
 import { COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS } from "../appChrome";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
-import { useSidebar } from "./ui/sidebar";
 import { BranchToolbar } from "./BranchToolbar";
 import {
   hasOpenDialogShortcutTarget,
@@ -522,7 +522,7 @@ export default function ChatView(props: ChatViewProps) {
   // With the thread sidebar collapsed this header owns the workspace's
   // top-left corner, so it reserves the room the shell's floating
   // show-sidebar control (and the native window controls) need there.
-  const appSidebarCollapsed = useSidebar().state === "collapsed" && presentationTier === "desktop";
+  const appSidebarCollapsed = useAppSidebarCollapsed();
   // Ref mirror for effects that must observe the tier without re-running on
   // tier flips (rotation preserves route, draft, and panel state).
   const presentationTierRef = useRef(presentationTier);

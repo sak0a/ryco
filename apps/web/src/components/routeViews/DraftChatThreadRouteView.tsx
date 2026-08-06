@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DraftId } from "../../composerDraftStore";
 import { useDraftSession } from "../../composerDraftSelectors";
+import { useAppSidebarCollapsed } from "../../hooks/useAppSidebarCollapsed";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useRightPanelMaximized } from "../../hooks/useRightPanelMaximized";
@@ -29,7 +30,7 @@ import { threadIsPromotedAndPersisted } from "../ChatView.logic";
 import { LazyRightPanel, RightPanelInlineSidebar, closeRightPanelSearch } from "../ChatRightPanel";
 import { RightPanelSheet } from "../RightPanelSheet";
 import { PhoneWorkSurfaceSheet } from "../shell/phone/PhoneWorkSurface";
-import { SidebarInset, useSidebar } from "../ui/sidebar";
+import { SidebarInset } from "../ui/sidebar";
 import { cn } from "~/lib/utils";
 
 export function DraftChatThreadRouteView({
@@ -72,13 +73,14 @@ export function DraftChatThreadRouteView({
     search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const presentationTier = usePresentationTier();
-  const appSidebarCollapsed = useSidebar().state === "collapsed" && presentationTier === "desktop";
+  const appSidebarCollapsed = useAppSidebarCollapsed();
   // Maximizing only means anything for the inline split — the sheet and the
   // phone work surface already cover the viewport.
   const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } =
     useRightPanelMaximized({
       threadKey: draftId,
-      available: rightPanelOpen && !shouldUseDiffSheet && presentationTier !== "phone",
+      open: rightPanelOpen,
+      canMaximize: !shouldUseDiffSheet && presentationTier !== "phone",
     });
   const [rightPanelMountState, setRightPanelMountState] = useState(() => ({
     draftId,

@@ -21,6 +21,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
 import { COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS } from "../appChrome";
+import { isElectron } from "../env";
 import {
   getRightPanelMode,
   parseRightPanelRouteSearch,
@@ -855,6 +856,14 @@ export default function ThreadWorkspacePanel(props: {
           "flex shrink-0 items-center gap-1 border-b border-border bg-card/40 px-2",
           isPhoneSurface ? "h-14" : "h-12",
           props.reserveChromeInset && COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS,
+          // Maximizing collapses the chat header to zero width, leaving this
+          // bar as the frameless desktop window's only top-level chrome. It
+          // has to carry the title-bar duties the header would have: a drag
+          // surface (global CSS exempts the buttons inside it) and clearance
+          // for the window controls the overlay platforms draw on the right.
+          maximized &&
+            isElectron &&
+            "drag-region wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
         )}
       >
         {isPhoneSurface ? (

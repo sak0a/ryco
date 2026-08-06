@@ -8,6 +8,7 @@ import {
   useDraftThreadExistsByRef,
   useEnvironmentHasDraftThreads,
 } from "../../composerDraftSelectors";
+import { useAppSidebarCollapsed } from "../../hooks/useAppSidebarCollapsed";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useRightPanelMaximized } from "../../hooks/useRightPanelMaximized";
@@ -39,7 +40,7 @@ import { threadHasStarted } from "../ChatView.logic";
 import { LazyRightPanel, RightPanelInlineSidebar, closeRightPanelSearch } from "../ChatRightPanel";
 import { RightPanelSheet } from "../RightPanelSheet";
 import { PhoneWorkSurfaceSheet } from "../shell/phone/PhoneWorkSurface";
-import { SidebarInset, useSidebar } from "~/components/ui/sidebar";
+import { SidebarInset } from "~/components/ui/sidebar";
 import { cn } from "~/lib/utils";
 
 export function ChatThreadRouteView({
@@ -84,14 +85,15 @@ export function ChatThreadRouteView({
     search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const presentationTier = usePresentationTier();
-  const appSidebarCollapsed = useSidebar().state === "collapsed" && presentationTier === "desktop";
+  const appSidebarCollapsed = useAppSidebarCollapsed();
   const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   // Maximizing only means anything for the inline split — the sheet and the
   // phone work surface already cover the viewport.
   const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } =
     useRightPanelMaximized({
       threadKey: currentThreadKey,
-      available: rightPanelOpen && !shouldUseDiffSheet && presentationTier !== "phone",
+      open: rightPanelOpen,
+      canMaximize: !shouldUseDiffSheet && presentationTier !== "phone",
     });
   const [diffPanelMountState, setDiffPanelMountState] = useState(() => ({
     threadKey: currentThreadKey,
