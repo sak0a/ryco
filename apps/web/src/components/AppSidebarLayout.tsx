@@ -139,11 +139,14 @@ function CollapsedAppSidebarChrome() {
         // The row itself is click-through so it never shadows the header
         // beneath it; only the controls take pointer events.
         "pointer-events-none fixed top-0 z-50 flex items-center gap-0.5 phone:hidden",
+        // The left offsets land the mark on exactly the x it occupies in the
+        // expanded sidebar header (its padding plus the link's `ml-1`), so
+        // collapsing never nudges the logo toward the window edge. In the
+        // desktop shell that also clears the macOS traffic lights, or the
+        // Window Controls Overlay origin on platforms that publish one.
         isElectron
-          ? // Clears the macOS traffic lights, or the Window Controls Overlay
-            // origin on the platforms that publish one.
-            "left-[86px] h-[52px] wco:left-[calc(env(titlebar-area-x)+0.5rem)] wco:h-[env(titlebar-area-height)]"
-          : "top-[env(safe-area-inset-top)] left-[calc(env(safe-area-inset-left)+0.5rem)] h-[52px]",
+          ? "left-[94px] h-[52px] wco:left-[calc(env(titlebar-area-x)+1.25rem)] wco:h-[env(titlebar-area-height)]"
+          : "top-[env(safe-area-inset-top)] left-[calc(env(safe-area-inset-left)+1.25rem)] h-[52px]",
       )}
     >
       <Tooltip>
@@ -151,7 +154,9 @@ function CollapsedAppSidebarChrome() {
           render={
             <Link
               aria-label="Go to threads"
-              className="pointer-events-auto mr-1 flex cursor-pointer items-center rounded-md text-foreground outline-hidden ring-ring transition-opacity hover:opacity-80 focus-visible:ring-2"
+              // Sets the brand apart from the controls beside it; the two
+              // controls stay tight to each other since they belong together.
+              className="pointer-events-auto mr-2.5 flex cursor-pointer items-center rounded-md text-foreground outline-hidden ring-ring transition-opacity hover:opacity-80 focus-visible:ring-2"
               to="/"
             >
               <RycoLetterMark className="h-4.5" />
