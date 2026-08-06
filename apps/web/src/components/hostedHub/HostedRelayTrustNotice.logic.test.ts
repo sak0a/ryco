@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { E2EE_WEB_SAS_CHARS } from "@ryco/shared/relayE2eeConstants";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -8,11 +9,13 @@ import {
   type WebHostedE2eeChannelStatus,
 } from "../../hostedHub/connectionStatus";
 import {
+  hostedE2eeVerificationView,
   E2EE_WEB_SAS_ADVISORY,
   E2EE_WEB_SAS_COMPARE,
   E2EE_WEB_SAS_DETAIL,
   E2EE_WEB_SAS_MORE,
   E2EE_WEB_SAS_UNAVAILABLE,
+  HOSTED_E2EE_VERIFICATION_PLACEMENTS,
 } from "./HostedE2eeVerification.logic";
 import {
   hostedRelayTrustDisclosure,
@@ -30,14 +33,21 @@ import {
  * would pass "this is end-to-end encrypted" the day someone deleted a "not".
  */
 
+/** A well-formed §13.5 rendering, built from the constants rather than typed. */
+const VALID_WEB_SAS = ["ABCD", "EFGH"].join(E2EE_WEB_SAS_CHARS.separator);
+
 /**
  * Every string a user can read, flattened.
  *
- * THE §13.5 COPY IS IN HERE AT EVERY LENGTH IT SHIPS. Splitting one sentence
- * into a short form, a long form, and the two pointers that carry them made four
- * places a banned claim could be written where there had been two, and a scan
- * that only knew the old constant would have gone on passing while the new ones
- * said anything at all.
+ * THE §13.5 COPY IS IN HERE AT EVERY LENGTH IT SHIPS, AND THE LENGTHS ARE
+ * ENUMERATED RATHER THAN LISTED. Splitting one sentence into a short form, a
+ * long form, and the two pointers that carry them made four places a banned
+ * claim could be written where there had been two — and naming those four here
+ * would have left the FIFTH unscanned: a placement added to
+ * `HOSTED_E2EE_VERIFICATION_PLACEMENTS` compiles as soon as it is written two
+ * sentences, and a hand-written roster in this file has no way to notice. Both
+ * fields of every placement are rendered through the shipped builder instead, so
+ * a new length is scanned on the day it exists.
  */
 function everyDisclosure(): ReadonlyArray<{ readonly where: string; readonly text: string }> {
   return [
@@ -45,10 +55,17 @@ function everyDisclosure(): ReadonlyArray<{ readonly where: string; readonly tex
       where: `disclosure(${status})`,
       text: hostedRelayTrustDisclosure(status).body,
     })),
-    { where: "webSasAdvisory", text: E2EE_WEB_SAS_ADVISORY },
-    { where: "webSasMore", text: E2EE_WEB_SAS_MORE },
-    { where: "webSasDetail", text: E2EE_WEB_SAS_DETAIL },
-    { where: "webSasCompare", text: E2EE_WEB_SAS_COMPARE },
+    ...HOSTED_E2EE_VERIFICATION_PLACEMENTS.flatMap((placement) => {
+      const view = hostedE2eeVerificationView(VALID_WEB_SAS, placement);
+      // The code is built from the format constants, so a `null` here means the
+      // splitter stopped accepting its own format — a failure worth reading as
+      // itself rather than as an empty scan that passes everything.
+      if (view === null) throw new Error(`no §13.5 view for the ${placement} placement`);
+      return [
+        { where: `webSas(${placement}).advisory`, text: view.advisory },
+        { where: `webSas(${placement}).more`, text: view.more },
+      ];
+    }),
     { where: "webSasUnavailable", text: E2EE_WEB_SAS_UNAVAILABLE },
   ];
 }
@@ -104,6 +121,12 @@ describe("prohibited claims", () => {
     // present" — and "operator-proof" carries the same token.
     "proof",
     "no interposer",
+    // The same MUST NOT written affirmatively. Every clause on this tier is
+    // bounded — by an honest bundle, by the operator, or by the grinding window
+    // — so nothing here may report that a match, a latch, or a lock RULES OUT
+    // anything. The negations the copy does make read "does not rule out", which
+    // this does not match.
+    "rules out",
     // §2.6/§2.4: nothing here may be presented as unconditional.
     "cannot be intercepted",
     "unforgeable",
@@ -573,10 +596,11 @@ describe("no public file still carries the retired claim", () => {
 
 describe("the disclosure may not point at what the surface under it does not draw", () => {
   it("refers to no session code, on any state", () => {
-    // This notice mounts at five sites across BOTH presentation tiers, and
-    // §13.5's `WebSAS` renders at exactly one of them (the desktop node menu —
-    // `HostedConnectionControls.tsx` mounts `HostedE2eeVerification` there and
-    // nowhere else, and `AGENTS.md` freezes the web phone tier). Copy here that
+    // This notice mounts at six sites across BOTH presentation tiers, and
+    // §13.5's `WebSAS` renders at two of them (the desktop node menu, where
+    // `HostedConnectionControls.tsx` mounts `HostedE2eeVerification`, and
+    // Settings → Security, where `NodeSecuritySettings.tsx` draws this tab's own
+    // channel; `AGENTS.md` freezes the web phone tier). Copy here that
     // presupposed a comparison value on the page read identically on the phone
     // connection sheet, which draws none: it told that reader a §13.5
     // comparison existed and that a hostile Hub could forge it, while handing

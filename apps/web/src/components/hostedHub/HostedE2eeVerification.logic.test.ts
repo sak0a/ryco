@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   e2eeWebSasGroups,
+  hostedE2eeVerificationPlacement,
   hostedE2eeVerificationView,
   E2EE_WEB_SAS_ADVISORY,
   E2EE_WEB_SAS_COMPARE,
@@ -115,9 +116,19 @@ describe("§3.2.1 S11 is an invariant over the constants, not a sentence", () =>
   });
 });
 
-describe("§13.5 the inline form is short, and still discharges the duty", () => {
-  it("carries both clauses of the advisory-only disclosure duty", () => {
-    const lower = E2EE_WEB_SAS_ADVISORY.toLowerCase();
+describe("§13.5's disclosure duty, at every length that ships", () => {
+  // DRIVEN FROM THE ROSTER, NOT FROM A LIST OF CONSTANT NAMES. The union and
+  // `PLACEMENT_TEXT` already force a new placement to be written both sentences;
+  // what they cannot force is that anyone checks what those sentences SAY. Named
+  // constants here meant a third length would ship duty-unchecked until someone
+  // remembered to add a row — so every assertion below runs over
+  // `HOSTED_E2EE_VERIFICATION_PLACEMENTS`, and a length added to it inherits
+  // them on the day it compiles. (`HostedRelayTrustNotice.logic.test.ts` builds
+  // its prohibited-claims corpus from the same roster.)
+  it.each(HOSTED_E2EE_VERIFICATION_PLACEMENTS)("carries both clauses at %s", (placement) => {
+    const view = hostedE2eeVerificationView(VALID, placement);
+    expect(view, placement).not.toBeNull();
+    const lower = view!.advisory.toLowerCase();
     // "MUST state that the comparison catches accidental wrong-node routing and
     // some network interposition while the loaded code is honest, and **cannot**
     // protect against the Hub operator, who serves the code that displays it."
@@ -126,20 +137,34 @@ describe("§13.5 the inline form is short, and still discharges the duty", () =>
     expect(lower).toContain("accidental wrong-node routing");
     expect(lower).toContain("some network interposition");
     expect(lower).toContain("while the loaded code is honest");
+    // THE REFERENT IS PART OF THE CLAUSE. §13.5 names the party as the one "who
+    // serves the code that displays it"; pinned as the bare phrase, the ceiling
+    // could be truncated to "…against the Hub operator." — which is the §2.4
+    // reason deleted and the sentence still green.
     expect(lower).toContain("cannot protect against the hub operator, who serves this page");
-    // It is the pointer at the ceremony, and it is here rather than in the trust
-    // notice because this value renders only where the characters do.
-    expect(lower).toContain("compare this code with the one your node's cli shows");
+    // The pointer at the ceremony, and the session it is scoped to: §13.5 makes
+    // the string session-bound and `ryco e2ee sessions` prints a row per
+    // channel, so an owner is checking one row rather than scanning a list.
+    expect(lower).toContain(
+      "compare this code with the one your node's cli shows for this session",
+    );
+    // §13.5's residual, which holds when every other clause has been discounted:
+    // an interposer that is not the Hub and serves no page can still grind its
+    // own ephemeral until the two strings match, so "the interposition it
+    // catches is bounded by the grinding model above". Both forms make the
+    // denial the CLI makes, in words the prohibited-claims scan can allow.
+    expect(lower).toContain("does not rule out someone sitting in the middle");
   });
 
-  it("no longer states the format, the arithmetic, or the hedge", () => {
-    // The three things the owner did not need while comparing eight characters:
-    // the character count and grouping (visible in the code itself), the bit
-    // total and the window-and-one-attempt justification behind it, and the
-    // trailing "a match does not rule out someone sitting in the middle", which
-    // restated the clause immediately before it.
-    const lower = E2EE_WEB_SAS_ADVISORY.toLowerCase();
-    expect(E2EE_WEB_SAS_ADVISORY).not.toMatch(/\d/u);
+  it.each(HOSTED_E2EE_VERIFICATION_PLACEMENTS)("states no derivation at %s", (placement) => {
+    // What the owner did not need while comparing eight characters: the
+    // character count and grouping (visible in the code itself), and the bit
+    // total with the window-and-one-attempt justification behind it — §13.5
+    // forbids using that derivation "to strengthen the claims of §2.4 or §17.5",
+    // so it could never do the one job a sentence beside the code has.
+    const view = hostedE2eeVerificationView(VALID, placement)!;
+    const lower = view.advisory.toLowerCase();
+    expect(view.advisory, placement).not.toMatch(/\d/u);
     for (const cut of [
       "groups of",
       "in order",
@@ -147,19 +172,35 @@ describe("§13.5 the inline form is short, and still discharges the duty", () =>
       "bounded in time",
       "one attempt",
       "offline",
-      "does not rule out",
     ]) {
-      expect(lower, `the inline form still says ${cut}`).not.toContain(cut);
+      expect(lower, `${placement} still says ${cut}`).not.toContain(cut);
     }
   });
 
+  it.each(HOSTED_E2EE_VERIFICATION_PLACEMENTS)(
+    "never attributes the tab's blindness to the match at %s",
+    (placement) => {
+      // §13.5's ceremony IS how an owner gets evidence about the far end, so no
+      // length may tell them the comparison cannot speak to it. The true
+      // statement belongs to the tab (`HostedRelayTrustNotice`: "This tab pins
+      // no node identity, so it cannot tell whether the far end … is your
+      // machine or the Hub standing in for it"); moved onto the match it reads
+      // as an instruction to skip the check.
+      const lower = hostedE2eeVerificationView(VALID, placement)!.advisory.toLowerCase();
+      expect(lower, placement).not.toContain("it cannot tell you whether the far end");
+    },
+  );
+});
+
+describe("§13.5 the inline form is short, and still discharges the duty", () => {
   it("is materially shorter than what an owner opens Settings to read", () => {
     // "Short" has to be a measured property or it is only a name: this line is
     // the whole of the accompanying text on the surface where an owner is
     // mid-comparison, and copy creeping back into it is exactly the regression
     // this shape exists to stop. The ceiling is generous enough for a reword and
-    // far below the two paragraphs it replaced.
-    expect(E2EE_WEB_SAS_ADVISORY.length).toBeLessThanOrEqual(260);
+    // still well under the sentence it replaced, which ran to 375 characters
+    // above a caption and a paragraph the surface no longer draws at all.
+    expect(E2EE_WEB_SAS_ADVISORY.length).toBeLessThanOrEqual(320);
     expect(E2EE_WEB_SAS_MORE.length).toBeLessThanOrEqual(80);
     expect(E2EE_WEB_SAS_ADVISORY.length).toBeLessThan(E2EE_WEB_SAS_DETAIL.length);
   });
@@ -167,19 +208,37 @@ describe("§13.5 the inline form is short, and still discharges the duty", () =>
   it("ships the pointer at the long form, and names where it is", () => {
     // A short form whose pointer a caller could drop is a short form that
     // silently becomes the only account an owner is ever offered.
+    // `SettingsDialog.test.ts` holds this string to the label the nav draws, so
+    // renaming the section fails there rather than stranding the reader here.
     expect(E2EE_WEB_SAS_MORE).toContain("Settings → Security");
   });
 });
 
-describe("§2.2 the long form keeps both reasons, and keeps them apart", () => {
-  it("states §13.5's duty at full strength", () => {
-    const lower = E2EE_WEB_SAS_DETAIL.toLowerCase();
-    expect(lower).toContain("accidental wrong-node routing");
-    expect(lower).toContain("some network interposition");
-    expect(lower).toContain("while the loaded code is honest");
-    expect(lower).toContain("cannot protect against the hub operator");
-    expect(lower).toContain("compare this code with the one your node's cli shows");
+describe("the short form is drawn only where its pointer resolves", () => {
+  it("asks for the long form when Settings → Security is not this reader's to open", () => {
+    // The pointer promises a section that is owner-only in hosted mode and
+    // fails closed on a stale role snapshot, while `HostedE2eeVerification`
+    // draws for anyone holding a locked `web-unsigned` channel. Sending a viewer
+    // or an operator to a section their dialog does not list is a false
+    // instruction, and it puts §2.2's no-pin reason — which only the long form
+    // states — out of reach. So the answer picks the length.
+    expect(hostedE2eeVerificationPlacement(true)).toBe("inline");
+    expect(hostedE2eeVerificationPlacement(false)).toBe("settings");
+
+    // …and the long form is a complete substitute rather than a truncation: it
+    // carries both §13.5 clauses (asserted over the roster above) and its second
+    // field is actionable where a pointer would not be.
+    const unreachable = hostedE2eeVerificationView(VALID, hostedE2eeVerificationPlacement(false))!;
+    expect(unreachable.advisory).toBe(E2EE_WEB_SAS_DETAIL);
+    expect(unreachable.more).toBe(E2EE_WEB_SAS_COMPARE);
+    expect(unreachable.more).not.toContain("Settings");
   });
+});
+
+describe("§2.2 the long form keeps both reasons, and keeps them apart", () => {
+  // §13.5's two clauses are asserted for this form with every other length, in
+  // the roster-driven block above; what is left here is what only the long form
+  // owes — §2.2's second reason, stated separately and in the right order.
 
   it("names the reason that needs no substituted bundle at all", () => {
     // §2.2's web row: "**Not protected** — the Hub can originate an unsigned NX
@@ -197,23 +256,22 @@ describe("§2.2 the long form keeps both reasons, and keeps them apart", () => {
   it("does not let the two reasons read as one", () => {
     // Collapsing them leaves a reader who has no cause to doubt the bundle
     // concluding the Hub is outside the channel. It is not: one reason needs a
-    // substituted bundle and the other needs nothing, so the sentence counts
-    // them and the no-pin clause is stated before the served-code one.
+    // substituted bundle and the other needs nothing, so they are stated as two
+    // clauses and the no-pin one comes first.
     const lower = E2EE_WEB_SAS_DETAIL.toLowerCase();
-    expect(lower).toContain("two separate things it cannot do");
     expect(lower.indexOf("pins no node identity")).toBeLessThan(
       lower.indexOf("cannot protect against the hub operator"),
     );
   });
 
-  it("is trimmed the same way the inline form is", () => {
-    // §13.5's own rule for this surface: an owner reading Settings wants what
-    // this protects them from and what it does not, not the derivation.
-    const lower = E2EE_WEB_SAS_DETAIL.toLowerCase();
-    expect(E2EE_WEB_SAS_DETAIL).not.toMatch(/\d/u);
-    for (const cut of ["groups of", "bits", "offline", "does not rule out"]) {
-      expect(lower, `the long form still says ${cut}`).not.toContain(cut);
-    }
+  it("does not close the list of limits it states", () => {
+    // "Two separate things it cannot do:" ended the list at two, and both of
+    // them were the Hub — while §13.5's residual belongs to an interposer that
+    // is neither the Hub nor the party serving the page. An enumerating frame
+    // therefore asserted a completeness the section denies, in the one place a
+    // reader goes to learn the limits.
+    expect(E2EE_WEB_SAS_DETAIL.toLowerCase()).not.toContain("two separate things");
+    expect(E2EE_WEB_SAS_DETAIL).not.toMatch(/\b(?:two|three|both) (?:separate )?things\b/iu);
   });
 
   it("says what to do about it, with the command that produces the other end", () => {
