@@ -42,7 +42,11 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
-import { deriveThreadSubagents } from "../threadWorkspaceViewModel";
+import {
+  deriveAgentPanelModel,
+  deriveThreadSubagents,
+  foldSubagentActivities,
+} from "../threadWorkspaceViewModel";
 import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
   derivePhase,
@@ -58,6 +62,7 @@ import {
 import { type LegendListRef } from "@legendapp/list/react";
 import {
   selectProjectsAcrossEnvironments,
+  selectSidebarThreadSummaryByRef,
   selectSidebarThreadsForProjectRef,
   selectThreadsAcrossEnvironments,
   useStore,
@@ -1366,6 +1371,17 @@ export default function ChatView(props: ChatViewProps) {
     () => deriveThreadSubagents(threadActivities),
     [threadActivities],
   );
+  // Native subagent fold: memoized by activity-list identity, shared by the
+  // Agents surface, timeline spawn CTAs, and the background-liveness banner.
+  // sessionLive derives interruption for agents orphaned by session death.
+  const agentSessionLive = phase !== "disconnected";
+  const agentPanelModel = useMemo(
+    () =>
+      deriveAgentPanelModel({
+        agents: foldSubagentActivities(threadActivities, { sessionLive: agentSessionLive }),
+      }),
+    [agentSessionLive, threadActivities],
+  );
   const {
     activePendingUserInput,
     activePendingDraftAnswers,
@@ -1480,6 +1496,78 @@ export default function ChatView(props: ChatViewProps) {
     );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  // Background work (subagent fleets, workflow runs, watch loops) can outlive
+  // the turn; once it settles, the composer stop button is gone, so this
+  // banner is the only visible stop affordance. Stop routes through the
+  // stop-everything interrupt: it kills every live background task before
+  // interrupting the parent turn.
+  const activeThreadSummary = useStore((store) =>
+    selectSidebarThreadSummaryByRef(store, activeThreadRef),
+  );
+  const activeBackgroundLiveness =
+    !isWorking && activeThread ? (activeThreadSummary?.backgroundLiveness ?? null) : null;
+  const [isStoppingBackgroundWork, setIsStoppingBackgroundWork] = useState(false);
+  useEffect(() => {
+    // "Stopping..." holds until the liveness clears; the interrupt command
+    // returning only means the request was accepted.
+    if (activeBackgroundLiveness === null) {
+      setIsStoppingBackgroundWork(false);
+    }
+  }, [activeBackgroundLiveness]);
+  useEffect(() => {
+    // Per-thread state: switching threads while A's stop is pending must not
+    // disable B's Stop button.
+    setIsStoppingBackgroundWork(false);
+  }, [activeThreadId]);
+  const handleStopBackgroundWork = useCallback(() => {
+    setIsStoppingBackgroundWork(true);
+    onInterrupt();
+  }, [onInterrupt]);
+  const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (activeBackgroundLiveness === null || !activeThread) {
+      return null;
+    }
+    const working = activeBackgroundLiveness === "working";
+    const liveCount = agentPanelModel.liveCount;
+    return {
+      id: `background-liveness:${activeThread.id}`,
+      variant: "info",
+      icon: (
+        <span
+          className={cn("size-1.5 rounded-full bg-foreground", working && "animate-pulse")}
+          aria-hidden="true"
+        />
+      ),
+      title: working
+        ? liveCount > 0
+          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working in the background`
+          : "Background work running"
+        : "Monitoring in the background",
+      actions: (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={isStoppingBackgroundWork}
+          onClick={handleStopBackgroundWork}
+        >
+          {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
+        </Button>
+      ),
+    };
+  }, [
+    activeBackgroundLiveness,
+    activeThread,
+    agentPanelModel.liveCount,
+    handleStopBackgroundWork,
+    isStoppingBackgroundWork,
+  ]);
+  const composerBannerItemsWithLiveness = useMemo<ComposerBannerStackItem[]>(
+    () =>
+      backgroundLivenessBannerItem === null
+        ? composerBannerItems
+        : [...composerBannerItems, backgroundLivenessBannerItem],
+    [backgroundLivenessBannerItem, composerBannerItems],
+  );
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -1730,6 +1818,7 @@ export default function ChatView(props: ChatViewProps) {
     onToggleWorkspacePanel,
     onOpenTurnDiff,
     onCloseDiff,
+    onOpenAgentsPanel,
     onOpenSubagentPanel,
   } = useChatWorkspacePanels({
     navigate,
@@ -3578,6 +3667,8 @@ export default function ChatView(props: ChatViewProps) {
             {showNewThreadSurface ? null : isActiveThreadIdFresh ? (
               <MessagesTimeline
                 key={activeThread.id}
+                agentPanelModel={agentPanelModel}
+                onOpenAgents={onOpenAgentsPanel}
                 isWorking={isWorking}
                 activeTurnInProgress={isWorking || !latestTurnSettled}
                 activeTurnId={activeLatestTurn?.turnId ?? null}
@@ -3764,7 +3855,10 @@ export default function ChatView(props: ChatViewProps) {
               />
             ) : null}
             <div className={cn("relative isolate", composerOverlayActive && "pointer-events-auto")}>
-              <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+              <ComposerBannerStack
+                className="relative z-0"
+                items={composerBannerItemsWithLiveness}
+              />
               {showNewThreadComposerSpacer ? <div aria-hidden className="mb-2 h-5" /> : null}
               <ComposerQueuedMessages
                 messages={queuedMessages}

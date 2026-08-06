@@ -4,6 +4,7 @@ import { type ScopedThreadRef, type ThreadId } from "@ryco/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@ryco/shared/projectScripts";
 import {
   ArrowLeftIcon,
+  BotIcon,
   FileTextIcon,
   FolderIcon,
   GlobeIcon,
@@ -24,6 +25,7 @@ import {
 } from "../rightPanelRouteSearch";
 import {
   buildOpenAgentSearch,
+  buildOpenAgentsSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
   buildOpenTerminalSearch,
@@ -31,11 +33,15 @@ import {
   stripWorkspacePanelSearchParams,
 } from "../workspaceRouteSearch";
 import {
+  deriveAgentPanelModel,
+  derivePhase,
   deriveThreadSubagents,
   findThreadSubagent,
+  foldSubagentActivities,
   type ThreadSubagentStatus,
   type ThreadSubagentView,
 } from "../threadWorkspaceViewModel";
+import { AgentsPanel } from "./AgentsPanel";
 import { buildTabs, type WorkspaceTab } from "../threadWorkspaceTabs";
 import { readEnvironmentApi } from "../environmentApi";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -107,6 +113,9 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
   }
   if (props.tab.key === "terminal") {
     return <TerminalIcon className={className} />;
+  }
+  if (props.tab.key === "agents") {
+    return <BotIcon className={className} />;
   }
   return <FileTextIcon className={className} />;
 }
@@ -542,6 +551,7 @@ function WorkspaceLauncher(props: {
   const filesTab: WorkspaceTab = { key: "files", label: "Files", mode: "files" };
   const reviewTab: WorkspaceTab = { key: "review", label: "Review", mode: "review" };
   const terminalTab: WorkspaceTab = { key: "terminal", label: "Terminal", mode: "terminal" };
+  const agentsTab: WorkspaceTab = { key: "agents", label: "Agents", mode: "agents" };
   const filesShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "workspace.files"),
     [keybindings],
@@ -591,6 +601,12 @@ function WorkspaceLauncher(props: {
             icon={TerminalIcon}
             shortcutLabel={terminalShortcutLabel}
             onClick={() => props.onSelectTab(terminalTab)}
+          />
+          <LauncherCard
+            label="Agents"
+            description="Watch subagents and workflows run"
+            icon={BotIcon}
+            onClick={() => props.onSelectTab(agentsTab)}
           />
           {agentTabs.length > 0 ? (
             <div className="space-y-2 pt-1">
@@ -658,8 +674,25 @@ export default function ThreadWorkspacePanel(props: {
     search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
   const activeAgent = useMemo(() => findThreadSubagent(subagents, agentKey), [agentKey, subagents]);
   const activeMode = getRightPanelMode(search) ?? props.panelMode;
+  // Shared by the Agents workspace tab and the launcher badge; pure fold,
+  // memoized by activity-list identity. sessionLive derives interruption for
+  // agents orphaned by session death.
+  const agentPanelModel = useMemo(
+    () =>
+      deriveAgentPanelModel({
+        agents: foldSubagentActivities(activeThread?.activities ?? [], {
+          sessionLive: derivePhase(activeThread?.session ?? null) !== "disconnected",
+        }),
+      }),
+    [activeThread?.activities, activeThread?.session],
+  );
   const openedPanelModes = useMemo(() => {
-    if (activeMode === "files" || activeMode === "review" || activeMode === "terminal") {
+    if (
+      activeMode === "files" ||
+      activeMode === "review" ||
+      activeMode === "terminal" ||
+      activeMode === "agents"
+    ) {
       return props.openedPanelModes.includes(activeMode)
         ? props.openedPanelModes
         : [...props.openedPanelModes, activeMode];
@@ -714,6 +747,10 @@ export default function ThreadWorkspacePanel(props: {
       }
       if (tab.mode === "terminal") {
         navigateSearch((previous) => buildOpenTerminalSearch(previous));
+        return;
+      }
+      if (tab.mode === "agents") {
+        navigateSearch((previous) => buildOpenAgentsSearch(previous));
         return;
       }
       if (tab.mode === "agent") {
@@ -919,6 +956,12 @@ export default function ThreadWorkspacePanel(props: {
           <PreviewPanel mode={props.mode} />
         ) : activeMode === "terminal" ? (
           <WorkspaceTerminalPanel />
+        ) : activeMode === "agents" ? (
+          <AgentsPanel
+            model={agentPanelModel}
+            environmentId={routeThreadRef?.environmentId ?? null}
+            threadId={routeThreadRef ? (routeThreadRef.threadId as ThreadId) : null}
+          />
         ) : activeMode === "agent" ? (
           <AgentThreadPanel subagent={activeAgent} agentKey={agentKey} />
         ) : (

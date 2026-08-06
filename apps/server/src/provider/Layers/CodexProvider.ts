@@ -64,6 +64,8 @@ function formatReasoningEffortLabel(
 function codexAccountAuthLabel(account: CodexSchema.V2GetAccountResponse["account"]) {
   if (!account) return undefined;
   if (account.type === "apiKey") return "OpenAI API Key";
+  if (account.type === "amazonBedrock") return "Amazon Bedrock";
+  if (account.type !== "chatgpt") return undefined;
 
   switch (account.planType) {
     case "free":

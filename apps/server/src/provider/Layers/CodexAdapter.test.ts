@@ -722,6 +722,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         turnId: asTurnId("turn-1"),
         itemId: asItemId("msg_1"),
         payload: {
+          completedAtMs: 1_778_000_000_000,
           threadId: "thread-1",
           turnId: "turn-1",
           item: {
@@ -766,6 +767,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         turnId: asTurnId("turn-1"),
         itemId: asItemId("plan_1"),
         payload: {
+          completedAtMs: 1_778_000_000_000,
           threadId: "thread-1",
           turnId: "turn-1",
           item: {

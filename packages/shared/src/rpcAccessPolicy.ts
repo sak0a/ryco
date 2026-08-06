@@ -42,6 +42,7 @@ export const RPC_ACCESS_POLICY = {
   [ORCHESTRATION_WS_METHODS.dispatchCommand]: "operator",
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff]: "viewer",
   [ORCHESTRATION_WS_METHODS.getTurnDiff]: "viewer",
+  [ORCHESTRATION_WS_METHODS.getWorkflowScript]: "viewer",
   [ORCHESTRATION_WS_METHODS.replayEvents]: "viewer",
   [ORCHESTRATION_WS_METHODS.replayEventsPage]: "viewer",
   [ORCHESTRATION_WS_METHODS.searchThreadMessages]: "viewer",

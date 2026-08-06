@@ -13,6 +13,10 @@ import {
 } from "@ryco/contracts";
 
 import { normalizeDispatchCommand } from "../orchestration/Normalizer.ts";
+import {
+  readWorkflowScript,
+  workflowScriptRootsFromSettings,
+} from "../orchestration/workflowScriptQuery.ts";
 import { observeRpcEffect, observeRpcStreamEffect } from "../observability/RpcInstrumentation.ts";
 import {
   isServerPerfProfileEnabled,
@@ -31,6 +35,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     dispatchNormalizedCommand,
     dispatchWorktreeCommand,
     serverCommandId,
+    serverSettings,
     terminalManager,
     checkpointDiffQuery,
     orchestrationEngine,
@@ -108,6 +113,22 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
             ),
           ),
         ),
+        { "rpc.aggregate": "orchestration" },
+      ),
+    [ORCHESTRATION_WS_METHODS.getWorkflowScript]: (input) =>
+      observeRpcEffect(
+        ORCHESTRATION_WS_METHODS.getWorkflowScript,
+        Effect.gen(function* () {
+          // Settings only widen the containment roots; a settings failure
+          // must not block reads under the default home root.
+          const settings = yield* serverSettings.getSettings.pipe(
+            Effect.catch(() => Effect.succeed(undefined)),
+          );
+          return yield* readWorkflowScript({
+            scriptPath: input.scriptPath,
+            roots: workflowScriptRootsFromSettings(settings),
+          });
+        }),
         { "rpc.aggregate": "orchestration" },
       ),
     [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>

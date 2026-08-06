@@ -175,6 +175,12 @@ export interface SidebarThreadSummary {
   manualPosition?: number | undefined;
   latestUserMessageAt: string | null;
   hasPendingApprovals: boolean;
+  /**
+   * Native background work alive after the turn settles: "working" while
+   * subagents/workflows run, "monitoring" when watch loops are the only
+   * live work. Absent/null = none (older servers omit the field).
+   */
+  backgroundLiveness?: "working" | "monitoring" | null | undefined;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
 }

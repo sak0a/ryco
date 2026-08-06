@@ -64,6 +64,7 @@ describe("Codex app-server schema compatibility", () => {
         id: "thread-1",
         modelProvider: "openai",
         preview: "",
+        sessionId: "thread-1",
         source: "appServer",
         status: { type: "idle" },
         turns: [],

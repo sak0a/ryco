@@ -100,6 +100,8 @@ import type {
   OrchestrationSearchThreadMessagesResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
+  OrchestrationGetWorkflowScriptInput,
+  OrchestrationGetWorkflowScriptResult,
   OrchestrationReplayEventsInput,
   OrchestrationReplayEventsPageInput,
   OrchestrationReplayEventsPageResult,
@@ -538,6 +540,10 @@ export interface EnvironmentApi {
   };
   orchestration: {
     dispatchCommand: (command: ClientOrchestrationCommand) => Promise<{ sequence: number }>;
+    /** Optional so clients can feature-detect against older environments. */
+    getWorkflowScript?: (
+      input: OrchestrationGetWorkflowScriptInput,
+    ) => Promise<OrchestrationGetWorkflowScriptResult>;
     getTurnDiff: (input: OrchestrationGetTurnDiffInput) => Promise<OrchestrationGetTurnDiffResult>;
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,

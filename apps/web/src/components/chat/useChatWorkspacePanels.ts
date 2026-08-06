@@ -6,6 +6,7 @@ import type { DraftId } from "../../composerDraftStore";
 import type { ThreadSubagentView } from "../../threadWorkspaceViewModel";
 import {
   buildOpenAgentSearch,
+  buildOpenAgentsSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
   buildOpenTerminalSearch,
@@ -38,6 +39,7 @@ export interface UseChatWorkspacePanelsResult {
   onToggleWorkspacePanel: () => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
+  onOpenAgentsPanel: () => void;
   onOpenSubagentPanel: (subagent: ThreadSubagentView) => void;
 }
 
@@ -228,6 +230,30 @@ export function useChatWorkspacePanels(
       search: (previous) => CLOSE_WORKSPACE_PANEL_SEARCH(previous),
     });
   }, [environmentId, isServerThread, navigate, threadId]);
+  const onOpenAgentsPanel = useEvent(() => {
+    const nextSearch = (previous: Record<string, unknown>) => buildOpenAgentsSearch(previous);
+    if (routeKind === "draft" && draftId) {
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: true,
+        search: nextSearch,
+      });
+      return;
+    }
+    if (!isServerThread) {
+      return;
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: nextSearch,
+    });
+  });
   const onOpenSubagentPanel = useCallback(
     (subagent: ThreadSubagentView) => {
       onAgentPanelOpen?.();
@@ -266,6 +292,7 @@ export function useChatWorkspacePanels(
     onToggleWorkspacePanel,
     onOpenTurnDiff,
     onCloseDiff,
+    onOpenAgentsPanel,
     onOpenSubagentPanel,
   };
 }

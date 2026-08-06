@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
-import { ProviderRuntimeEvent } from "./providerRuntime.ts";
+import { classifyTaskAgentKind, ProviderRuntimeEvent } from "./providerRuntime.ts";
 
 const decodeRuntimeEvent = Schema.decodeUnknownSync(ProviderRuntimeEvent);
 
@@ -220,5 +220,77 @@ describe("ProviderRuntimeEvent", () => {
     }
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
+  });
+
+  it("decodes a task.updated status patch with linkage", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "task.updated",
+      eventId: "event-task-updated",
+      provider: "claudeAgent",
+      threadId: "thread-1",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      payload: {
+        taskId: "task-1",
+        status: "cancelled",
+        endedAt: "2026-08-01T10:05:00.000Z",
+        isBackgrounded: true,
+        taskType: "local_agent",
+        role: "explorer",
+        model: "claude-opus-4-6",
+      },
+    });
+    expect(parsed.type).toBe("task.updated");
+    if (parsed.type !== "task.updated") {
+      throw new Error("expected task.updated");
+    }
+    expect(parsed.payload.status).toBe("cancelled");
+    expect(parsed.payload.role).toBe("explorer");
+  });
+
+  it("decodes a task.progress row carrying typedUsage and workflow linkage", () => {
+    const parsed = decodeRuntimeEvent({
+      type: "task.progress",
+      eventId: "event-task-progress-linkage",
+      provider: "claudeAgent",
+      threadId: "thread-1",
+      createdAt: "2026-08-01T10:00:00.000Z",
+      payload: {
+        taskId: "wf-1:wf:0",
+        description: "member-0",
+        status: "running",
+        typedUsage: { totalTokens: 1200, toolUses: 3 },
+        parentAgentId: "wf-1",
+        agentIndex: 0,
+        phaseIndex: 1,
+        phaseTitle: "Verify",
+        timelineBypass: true,
+      },
+    });
+    expect(parsed.type).toBe("task.progress");
+    if (parsed.type !== "task.progress") {
+      throw new Error("expected task.progress");
+    }
+    expect(parsed.payload.typedUsage?.totalTokens).toBe(1200);
+    expect(parsed.payload.parentAgentId).toBe("wf-1");
+    expect(parsed.payload.timelineBypass).toBe(true);
+  });
+});
+
+describe("classifyTaskAgentKind", () => {
+  it("classifies agent-flavored, watch-loop, and inert types", () => {
+    expect(classifyTaskAgentKind({ taskType: "local_agent" })).toBe("agent");
+    expect(classifyTaskAgentKind({ taskType: "local_workflow" })).toBe("agent");
+    expect(classifyTaskAgentKind({ taskType: undefined })).toBe("agent");
+    expect(classifyTaskAgentKind({ taskType: "brand_new_agent_type" })).toBe("agent");
+    expect(classifyTaskAgentKind({ taskType: "local_bash" })).toBe("background");
+    expect(classifyTaskAgentKind({ taskType: "monitor" })).toBe("background");
+    expect(classifyTaskAgentKind({ taskType: "plan" })).toBe("background");
+  });
+
+  it("agent-owned tasks are background unless themselves agent-flavored", () => {
+    expect(classifyTaskAgentKind({ taskType: "local_bash", agentId: "owner" })).toBe("background");
+    expect(classifyTaskAgentKind({ taskType: undefined, agentId: "owner" })).toBe("background");
+    // Nested agent: outlives its parent, stays in the roster.
+    expect(classifyTaskAgentKind({ taskType: "local_agent", agentId: "owner" })).toBe("agent");
   });
 });

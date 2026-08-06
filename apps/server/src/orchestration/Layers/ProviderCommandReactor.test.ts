@@ -41,6 +41,7 @@ import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryI
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
+import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import {
   providerErrorLabel,
   providerErrorLabelFromInstanceHint,
@@ -330,6 +331,7 @@ describe("ProviderCommandReactor", () => {
 
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+      Layer.provide(ThreadBackgroundLiveness.layer),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(
         Layer.succeed(ProjectAvatarStore, {
@@ -344,6 +346,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(SqlitePersistenceMemory),
     );
     const projectionSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
+      Layer.provide(ThreadBackgroundLiveness.layer),
       Layer.provide(RepositoryIdentityResolverLive),
       Layer.provide(SqlitePersistenceMemory),
     );

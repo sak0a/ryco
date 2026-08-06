@@ -8,6 +8,7 @@ import {
   TurnId,
 } from "@ryco/contracts";
 import { type ContextHandoffTimelineEntry, type WorkLogEntry } from "../../session-logic";
+import { emptyAgentPanelModel } from "../../threadWorkspaceViewModel";
 import { type TurnDiffSummary } from "../../types";
 import {
   buildTimelineStableState,
@@ -1440,6 +1441,7 @@ describe("timeline context split", () => {
     "isWorking",
     "isRevertingCheckpoint",
     "openDiffTurnId",
+    "agentPanelModel",
   ];
   const STABLE_KEYS = [
     "timestampFormat",
@@ -1458,6 +1460,7 @@ describe("timeline context split", () => {
     "onImageExpand",
     "onOpenTurnDiff",
     "onCloseDiff",
+    "onOpenAgents",
     "onOpenMessageActions",
   ];
 
@@ -1468,6 +1471,7 @@ describe("timeline context split", () => {
       isWorking: true,
       isRevertingCheckpoint: false,
       openDiffTurnId: null,
+      agentPanelModel: emptyAgentPanelModel(),
       timestampFormat: "locale",
       routeThreadKey: "environment-local:thread-1",
       markdownCwd: "/repo",
@@ -1484,6 +1488,7 @@ describe("timeline context split", () => {
       onImageExpand: () => {},
       onOpenTurnDiff: () => {},
       onCloseDiff: () => {},
+      onOpenAgents: () => {},
       onOpenMessageActions: () => {},
     };
   }
