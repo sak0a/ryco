@@ -69,6 +69,7 @@ import {
   sortNodes,
 } from "./HostedNodeDisplay.logic";
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
+import { hostedNodeRevokedNotice, HOSTED_NODE_REVOKE_REASON_CODE } from "./HostedNodeRevoke.logic";
 import { HostedPwaControls } from "./HostedPwaControls";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
@@ -1097,6 +1098,16 @@ function HostedNodeDirectory() {
   // printing an "Online" status, a superseded client version, and a heartbeat
   // age that grows for a node that is heartbeating the whole time.
   const [detailNodeId, setDetailNodeId] = useState<string | null>(null);
+  // Set when `revokeNode` RESOLVES, not when a row stops being rendered.
+  //
+  // A revocation is the one action here that cannot be taken back, and the only
+  // evidence it happened used to be the row disappearing — which is evidence the
+  // client is not entitled to. The re-read that removes the row settles its own
+  // failures into `directoryStatus` and leaves `nodes` exactly as it found them,
+  // so a Hub restart or a blip in the second after the commit leaves an
+  // unchanged list, a closed dialog, and nothing said: indistinguishable from
+  // having cancelled.
+  const [revokedNotice, setRevokedNotice] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const nowMs = useRelativeTimeTick(60_000);
 
@@ -1250,8 +1261,28 @@ function HostedNodeDirectory() {
           <Alert variant="warning" role="status">
             <TriangleAlertIcon aria-hidden />
             <AlertDescription>
-              Directory data is stale. Actions are disabled until it refreshes.
+              {/* Names the action it actually describes. `nodeSelectionBlocked`
+                  gates CONNECTING and nothing else — details, Rename and Revoke
+                  are all live in this state, deliberately: a directory whose
+                  poll is failing is not the same thing as a Hub that cannot take
+                  an owner's revocation, and gating the one irreversible control
+                  on a stale read would disable it during exactly the incident it
+                  exists for. What could not stand was the banner saying
+                  otherwise directly above it. */}
+              Directory data is stale. Connecting is unavailable until it refreshes.
             </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+      {revokedNotice ? (
+        <div className="mt-4">
+          {/* `status`, not `alert`: the revocation succeeded, and an assertive
+              live region would interrupt a screen reader mid-sentence to say so.
+              It is not auto-dismissed — the next poll may not remove the row, and
+              a receipt that outlives the thing it is evidence for is the point. */}
+          <Alert variant="warning" role="status">
+            <TriangleAlertIcon aria-hidden />
+            <AlertDescription>{revokedNotice}</AlertDescription>
           </Alert>
         </div>
       ) : null}
@@ -1315,6 +1346,7 @@ function HostedNodeDirectory() {
         directoryStatus={status}
         browserStatus={browserStatus}
         canRename={isOwner}
+        canRevoke={isOwner}
         onOpenChange={(open) => {
           if (!open) setDetailNodeId(null);
         }}
@@ -1322,6 +1354,36 @@ function HostedNodeDirectory() {
         onRename={async (node, label) => {
           await hostedHubApi.renameNode(node.id, label);
           await hostedHubController.refreshDirectory();
+        }}
+        onRevoke={async (node) => {
+          // The Hub answers first, and only then is the list re-read. Nothing
+          // here removes the row ahead of that answer: an optimistic removal
+          // that has to be undone is a worse report of a refused revocation than
+          // a control that stayed busy, and this is the one action in the
+          // directory that cannot be taken back if it did land.
+          //
+          // The row goes away because the node stops being in the directory at
+          // all — `authorizedDirectoryEntry` resolves to nothing once `revokedAt`
+          // is set — so this needs no removal of its own. `refreshDirectory`
+          // settles its own failures into `directoryStatus`, so only the
+          // mutation above can reject here, and only its failure reaches the
+          // confirmation.
+          //
+          // WHICH IS ALSO WHY THE ROW IS NOT THE RECEIPT. That same swallowed
+          // failure leaves `nodes` untouched, so the re-read below is allowed to
+          // return a list that still has this node on it. The acknowledgement is
+          // therefore taken from `revokeNode` resolving — the one fact the
+          // client actually has — and is set before the re-read is even
+          // attempted.
+          await hostedHubApi.revokeNode(node.id, HOSTED_NODE_REVOKE_REASON_CODE);
+          setRevokedNotice(hostedNodeRevokedNotice(node.label));
+          await hostedHubController.refreshDirectory();
+          // Load-bearing exactly when the refresh above failed or came back
+          // stale: `detailNode` is re-resolved from `nodes` every render, so on
+          // the happy path the sheet closes itself. On the unhappy one this is
+          // the only thing standing between the owner and a live Revoke button
+          // on a machine that has just been revoked.
+          setDetailNodeId(null);
         }}
       />
     </Surface>
