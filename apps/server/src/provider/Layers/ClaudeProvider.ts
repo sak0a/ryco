@@ -125,7 +125,7 @@ const CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS = [
   "ultrathink",
 ] as const satisfies ReadonlyArray<ClaudeEffortLevel>;
 
-const CLAUDE_OPUS_4_8_EFFORT_LEVELS = [
+const CLAUDE_ULTRACODE_EFFORT_LEVELS = [
   "low",
   "medium",
   "high",
@@ -149,7 +149,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     shortName: "Fable 5",
     isCustom: false,
     capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_OPUS_ADAPTIVE_EFFORT_LEVELS,
+      effortLevels: CLAUDE_ULTRACODE_EFFORT_LEVELS,
       defaultEffort: "high",
       // Fast mode is an Opus-tier feature; Fable does not support it.
       supportsFastMode: false,
@@ -164,7 +164,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     shortName: "Opus 5",
     isCustom: false,
     capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_OPUS_4_8_EFFORT_LEVELS,
+      effortLevels: CLAUDE_ULTRACODE_EFFORT_LEVELS,
       defaultEffort: "high",
       supportsFastMode: true,
       supportsContextWindow: true,
@@ -177,7 +177,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
     shortName: "Opus 4.8",
     isCustom: false,
     capabilities: buildClaudeOpusCapabilities({
-      effortLevels: CLAUDE_OPUS_4_8_EFFORT_LEVELS,
+      effortLevels: CLAUDE_ULTRACODE_EFFORT_LEVELS,
       defaultEffort: "high",
       supportsFastMode: true,
       supportsContextWindow: true,
@@ -249,6 +249,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
             { value: "low", label: "Low" },
             { value: "medium", label: "Medium" },
             { value: "high", label: "High", isDefault: true },
+            { value: "max", label: "Max" },
             { value: "ultrathink", label: "Ultrathink" },
           ],
           promptInjectedValues: ["ultrathink"],
@@ -386,7 +387,12 @@ export function normalizeClaudeCliEffort(
     return undefined;
   }
   if (effort === "ultracode") {
-    return model === "claude-opus-5" || model === "claude-opus-4-8" ? "xhigh" : undefined;
+    return model === "claude-fable-5" || model === "claude-opus-5" || model === "claude-opus-4-8"
+      ? "xhigh"
+      : undefined;
+  }
+  if (effort === "max" && model === "claude-sonnet-4-6") {
+    return "high";
   }
   return effort;
 }
