@@ -700,9 +700,10 @@ function mapCollabAgentEvent(
           ? (tokenUsage.total as Record<string, unknown>)
           : undefined;
       const count = (value: unknown): number | undefined =>
-        typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+        typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
       // Same validation as every other field: RuntimeTaskUsage.totalTokens
-      // is NonNegativeInt, so NaN/Infinity/negative wire values must miss.
+      // is NonNegativeInt, so NaN/Infinity/negative/fractional wire values
+      // must miss — a fraction would fail schema validation at ingestion.
       const totalTokens = count(total?.totalTokens);
       if (totalTokens === undefined) {
         return [];

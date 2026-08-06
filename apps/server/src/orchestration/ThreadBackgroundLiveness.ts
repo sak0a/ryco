@@ -15,7 +15,7 @@
  *
  * @module ThreadBackgroundLivenessService
  */
-import { INERT_TASK_TYPES, MONITOR_TASK_TYPES } from "@ryco/contracts";
+import { INERT_TASK_TYPES, MONITOR_TASK_TYPES } from "@ryco/shared/taskClassification";
 import { Context, Effect, Layer } from "effect";
 
 export type ThreadBackgroundLiveness = "working" | "monitoring" | null;
@@ -25,11 +25,12 @@ interface ThreadLivenessState {
   readonly monitors: Set<string>;
 }
 
-// Classification sets are the shared contracts copies (MONITOR_TASK_TYPES:
-// watch loops — monitor tasks plus background shells, which in practice are
-// PR babysitting/log tails since pacing sleeps complete inside the turn;
-// INERT_TASK_TYPES: plan-mode bookkeeping) so this registry, ingestion's
-// agentKind stamp, and the client fold can never drift apart.
+// Classification sets are the @ryco/shared/taskClassification copies
+// (MONITOR_TASK_TYPES: watch loops — monitor tasks plus background shells,
+// which in practice are PR babysitting/log tails since pacing sleeps
+// complete inside the turn; INERT_TASK_TYPES: plan-mode bookkeeping) so this
+// registry, ingestion's agentKind stamp, and the client fold can never
+// drift apart.
 
 const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   "completed",
@@ -108,11 +109,11 @@ export function make(): ThreadBackgroundLivenessService["Service"] {
       }
       // A subagent's internal non-agent work (its own shells/monitors) is
       // covered by the owning agent's liveness. Nested agents fall through:
-      // they can outlive their parent.
-      if (
-        input.agentId !== undefined &&
-        (taskType === undefined || MONITOR_TASK_TYPES.has(taskType))
-      ) {
+      // they can outlive their parent. Blank/whitespace agentId counts as
+      // absent — same semantics as classifyTaskAgentKind, so a stamped
+      // "background" row is never dropped here as agent-owned.
+      const agentOwned = input.agentId !== undefined && input.agentId.trim().length > 0;
+      if (agentOwned && (taskType === undefined || MONITOR_TASK_TYPES.has(taskType))) {
         drop(input.threadId, input.taskId);
         return;
       }

@@ -83,6 +83,32 @@ describe("ThreadBackgroundLiveness", () => {
     expect(liveness.getThreadBackgroundLiveness(threadId)).toBeNull();
   });
 
+  it("blank or whitespace agentId counts as absent, matching classifyTaskAgentKind", () => {
+    const liveness = ThreadBackgroundLiveness.make();
+    const threadId = "t-live-blank-agent";
+    // A local_bash with a blank agentId is stamped "background" by the
+    // classifier; the liveness registry must keep it as a monitor rather
+    // than dropping it as agent-owned.
+    liveness.recordTaskLiveness({
+      threadId,
+      taskId: "b1",
+      taskType: "local_bash",
+      status: "running",
+      kind: "progress",
+      agentId: "",
+    });
+    expect(liveness.getThreadBackgroundLiveness(threadId)).toBe("monitoring");
+    liveness.recordTaskLiveness({
+      threadId,
+      taskId: "b2",
+      taskType: undefined,
+      status: "running",
+      kind: "progress",
+      agentId: "   ",
+    });
+    expect(liveness.getThreadBackgroundLiveness(threadId)).toBe("working");
+  });
+
   it("untyped rows count as agents; idle is not live; agent-owned tasks are ignored", () => {
     const liveness = ThreadBackgroundLiveness.make();
     const threadId = "t-live-3";

@@ -1,7 +1,6 @@
 import {
   ApprovalRequestId,
   type AssistantDeliveryMode,
-  classifyTaskAgentKind,
   CommandId,
   DEFAULT_AGENT_TOKEN_MODE,
   EventId,
@@ -23,6 +22,7 @@ import {
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
 import { readEnv } from "@ryco/shared/runtimeEnv";
+import { classifyTaskAgentKind } from "@ryco/shared/taskClassification";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
@@ -53,7 +53,12 @@ function findTaskTitleInActivities(
   }
   for (let index = activities.length - 1; index >= 0; index -= 1) {
     const activity = activities[index];
-    if (!activity || (activity.kind !== "task.started" && activity.kind !== "task.progress")) {
+    if (
+      !activity ||
+      (activity.kind !== "task.started" &&
+        activity.kind !== "task.progress" &&
+        activity.kind !== "task.updated")
+    ) {
       continue;
     }
     const payload =
@@ -63,10 +68,13 @@ function findTaskTitleInActivities(
     if (payload?.taskId !== taskId) {
       continue;
     }
+    // task.started and task.updated both persist their description as
+    // `detail` — a task whose first description arrives via an update must
+    // not complete untitled.
     const title =
       typeof payload.title === "string"
         ? payload.title
-        : activity.kind === "task.started" && typeof payload.detail === "string"
+        : activity.kind !== "task.progress" && typeof payload.detail === "string"
           ? payload.detail
           : undefined;
     if (title && title.trim().length > 0) {
@@ -2498,7 +2506,11 @@ const make = Effect.gen(function* () {
         }
       }
 
-      if (event.type === "task.started" || event.type === "task.progress") {
+      if (
+        event.type === "task.started" ||
+        event.type === "task.progress" ||
+        event.type === "task.updated"
+      ) {
         const description = event.payload.description?.trim();
         if (description) {
           yield* rememberTaskDescription(thread.id, event.payload.taskId, description);

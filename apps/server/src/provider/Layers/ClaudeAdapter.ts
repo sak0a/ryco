@@ -43,7 +43,6 @@ import {
   RuntimeRequestId,
   RuntimeSubagentId,
   RuntimeTaskId,
-  classifyTaskAgentKind,
   type RuntimeSubagentStatus,
   type RuntimeTaskStatus,
   type RuntimeTaskUsage,
@@ -62,6 +61,7 @@ import {
   resolvePromptInjectedEffort,
 } from "@ryco/shared/model";
 import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
+import { classifyTaskAgentKind } from "@ryco/shared/taskClassification";
 import {
   Cause,
   DateTime,
@@ -213,6 +213,13 @@ interface ClaudeSessionContext {
     items: Array<unknown>;
   }>;
   readonly inFlightTools: Map<number, ToolInFlight>;
+  /**
+   * Block indexes of dropped subagent narration, keyed by parent_tool_use_id.
+   * Block indexes are per-message, so a suppressed block's
+   * content_block_stop must be dropped too — index N could otherwise match
+   * the parent's open assistant text block at N and close it mid-stream.
+   */
+  readonly suppressedSubagentBlocks: Map<string, Set<number>>;
   readonly taskAgents: Map<string, ClaudeTaskAgentState>;
   /**
    * Last emitted workflow-member fingerprint per member slot. A coordinator
@@ -895,8 +902,10 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
   }
 
   // For agent/subagent tools, prefer the human-readable description or prompt
-  // over raw JSON. The structured subagent_type is carried separately on the
-  // task.* payloads (role) — the label is display-only.
+  // over raw JSON, but keep the tool identity in front: the summary lands in
+  // pendingApproval.detail, where free text alone reads as an unlabeled quote.
+  // The structured subagent_type is carried separately on the task.* payloads
+  // (role) — the label is display-only.
   const itemType = classifyToolItemType(toolName);
   if (itemType === "collab_agent_tool_call") {
     const description =
@@ -904,7 +913,7 @@ function summarizeToolRequest(toolName: string, input: Record<string, unknown>):
     const prompt = typeof input.prompt === "string" ? input.prompt.trim() : undefined;
     const label = description || (prompt ? prompt.slice(0, 200) : undefined);
     if (label) {
-      return label;
+      return `${toolName}: ${label}`;
     }
   }
 
@@ -2118,11 +2127,32 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         event.content_block.type !== "tool_use" &&
         event.content_block.type !== "server_tool_use" &&
         event.content_block.type !== "mcp_tool_use";
+      if (dropStart) {
+        let suppressed = context.suppressedSubagentBlocks.get(streamParentToolUseId);
+        if (!suppressed) {
+          suppressed = new Set();
+          context.suppressedSubagentBlocks.set(streamParentToolUseId, suppressed);
+        }
+        suppressed.add(event.index);
+        return;
+      }
       const dropDelta =
         event.type === "content_block_delta" &&
         (event.delta.type === "text_delta" || event.delta.type === "thinking_delta");
-      if (dropStart || dropDelta) {
+      if (dropDelta) {
         return;
+      }
+      // The stop frame of a dropped narration block must be dropped too:
+      // block indexes are per-message, so it would otherwise complete the
+      // parent's assistant block (or in-flight tool) at the same index.
+      if (event.type === "content_block_stop") {
+        const suppressed = context.suppressedSubagentBlocks.get(streamParentToolUseId);
+        if (suppressed?.delete(event.index)) {
+          if (suppressed.size === 0) {
+            context.suppressedSubagentBlocks.delete(streamParentToolUseId);
+          }
+          return;
+        }
       }
     }
 
@@ -2764,6 +2794,101 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         payload: message,
       },
     };
+
+    // Authoritative live-set reconciliation (CC ≥ 2.1.203; the pinned SDK
+    // typings don't carry the subtype yet, hence the runtime check before
+    // the typed switch). Ordering against per-task events is unspecified,
+    // so membership is replaced wholesale: tracked ids missing from the set
+    // settle as stopped — a dropped task_notification otherwise leaves them
+    // Working forever and un-stoppable — and unknown ids in the set get a
+    // synthesized start so a partial stream still yields a roster entry.
+    if ((message.subtype as string) === "background_tasks_changed") {
+      const wire = message as unknown as { background_tasks?: unknown; tasks?: unknown };
+      const rawEntries = Array.isArray(wire.background_tasks)
+        ? wire.background_tasks
+        : Array.isArray(wire.tasks)
+          ? wire.tasks
+          : [];
+      const liveSet = new Map<string, { taskType?: string; description?: string }>();
+      for (const entry of rawEntries) {
+        if (entry === null || typeof entry !== "object") {
+          continue;
+        }
+        const record = entry as Record<string, unknown>;
+        const id =
+          typeof record.id === "string" && record.id.length > 0
+            ? record.id
+            : typeof record.task_id === "string" && record.task_id.length > 0
+              ? record.task_id
+              : undefined;
+        if (id === undefined) {
+          continue;
+        }
+        const taskType =
+          typeof record.type === "string" && record.type.length > 0
+            ? record.type
+            : typeof record.task_type === "string" && record.task_type.length > 0
+              ? record.task_type
+              : undefined;
+        const description =
+          typeof record.description === "string" && record.description.trim().length > 0
+            ? record.description.trim()
+            : undefined;
+        liveSet.set(id, {
+          ...(taskType !== undefined ? { taskType } : {}),
+          ...(description !== undefined ? { description } : {}),
+        });
+      }
+
+      for (const taskId of [...context.liveTaskIds]) {
+        if (liveSet.has(taskId)) {
+          continue;
+        }
+        context.liveTaskIds.delete(taskId);
+        const settleStamp = yield* makeEventStamp();
+        yield* offerRuntimeEventForContext(context, {
+          ...base,
+          eventId: settleStamp.eventId,
+          createdAt: settleStamp.createdAt,
+          type: "task.completed",
+          payload: {
+            taskId: RuntimeTaskId.make(taskId),
+            status: "stopped",
+            ...taskLinkageFor(context.taskAgents, taskId),
+          },
+        });
+        const subagent = context.subagentByTaskId.get(taskId);
+        if (subagent) {
+          yield* emitClaudeSubagentCompleted(context, {
+            subagent,
+            status: "stopped",
+            raw: message,
+          });
+        }
+      }
+
+      for (const [taskId, info] of liveSet) {
+        if (context.liveTaskIds.has(taskId)) {
+          continue;
+        }
+        context.liveTaskIds.add(taskId);
+        const startStamp = yield* makeEventStamp();
+        yield* offerRuntimeEventForContext(context, {
+          ...base,
+          eventId: startStamp.eventId,
+          createdAt: startStamp.createdAt,
+          type: "task.started",
+          payload: {
+            taskId: RuntimeTaskId.make(taskId),
+            description: info.description ?? "Background task",
+            ...(info.taskType !== undefined ? { taskType: info.taskType } : {}),
+            ...(info.description !== undefined ? { title: info.description } : {}),
+            ...taskLinkageFor(context.taskAgents, taskId),
+          },
+        });
+      }
+      return;
+    }
 
     switch (message.subtype) {
       case "init":
@@ -3845,6 +3970,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         pendingUserInputs,
         turns: [],
         inFlightTools,
+        suppressedSubagentBlocks: new Map(),
         taskAgents: new Map(),
         workflowMemberFingerprints: new Map(),
         liveTaskIds: new Set(),

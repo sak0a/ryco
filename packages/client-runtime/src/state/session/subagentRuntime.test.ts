@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
-import { classifyTaskAgentKind, type OrchestrationThreadActivity } from "@ryco/contracts";
+import { type OrchestrationThreadActivity } from "@ryco/contracts";
+import { classifyTaskAgentKind } from "@ryco/shared/taskClassification";
 import {
   deriveAgentPanelModel,
   foldSubagentActivities,
@@ -11,6 +12,12 @@ import {
   workflowCardMembers,
 } from "./subagentRuntime.ts";
 
+// Timestamps derive from a base epoch so every fixture stays a VALID ISO
+// string past 59 rows — interpolating the sequence into the seconds field
+// produced `10:00:137.000Z`, which Date.parse rejects.
+const BASE_EPOCH_MS = Date.parse("2026-08-01T10:00:00.000Z");
+const stampFor = (index: number) => new Date(BASE_EPOCH_MS + index * 1000).toISOString();
+
 let sequence = 0;
 /**
  * Fixtures model POST-INGESTION rows: ingestion stamps agentKind on every
@@ -20,7 +27,7 @@ let sequence = 0;
 function activity(
   kind: string,
   payload: Record<string, unknown>,
-  at = `2026-08-01T10:00:${String(sequence).padStart(2, "0")}.000Z`,
+  at = stampFor(sequence),
 ): OrchestrationThreadActivity {
   sequence += 1;
   const stamped =
@@ -57,7 +64,7 @@ function legacyActivity(
     summary: kind,
     payload,
     turnId: null,
-    createdAt: `2026-08-01T10:00:${String(sequence).padStart(2, "0")}.000Z`,
+    createdAt: stampFor(sequence),
   } as unknown as OrchestrationThreadActivity;
 }
 
