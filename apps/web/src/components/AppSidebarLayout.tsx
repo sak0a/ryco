@@ -1,8 +1,11 @@
 import { Schema } from "effect";
-import { PanelLeftOpenIcon } from "lucide-react";
+import { PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 
 import ThreadSidebar from "./Sidebar";
+import { RycoLetterMark } from "./RycoLetterMark";
+import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isElectron } from "../env";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 import { usePresentationTier } from "../hooks/usePresentationTier";
@@ -115,22 +118,27 @@ export function useAppShellGlobalEffects(): void {
 }
 
 /**
- * The way back from a collapsed thread sidebar.
+ * What survives a collapsed thread sidebar.
  *
- * Offcanvas collapse takes the sidebar — and with it the collapse button in
- * its header — off screen, and the resize rail is deliberately inert in that
- * state. Rather than make every workspace surface host its own re-open
- * affordance, the shell floats one over the corner the sidebar vacated.
- * Surfaces that own that corner reserve room for it with
+ * Offcanvas collapse takes the whole sidebar — brand mark, settings, and the
+ * collapse button itself — off screen, and the resize rail is deliberately
+ * inert in that state. Rather than make every workspace surface host its own
+ * copy of that chrome, the shell floats the essentials over the corner the
+ * sidebar vacated, in the same order they sit in the sidebar header so
+ * collapsing reads as the row compressing rather than being replaced.
+ * Surfaces that own that corner reserve room with
  * `COLLAPSED_APP_SIDEBAR_CHROME_INSET_CLASS`.
  */
-function AppSidebarExpandControl() {
+function CollapsedAppSidebarChrome() {
   const { toggleSidebar } = useSidebar();
+  const openSettings = useSettingsDialogStore((s) => s.openSettings);
 
   return (
     <div
       className={cn(
-        "pointer-events-none fixed top-0 z-50 flex items-center phone:hidden",
+        // The row itself is click-through so it never shadows the header
+        // beneath it; only the controls take pointer events.
+        "pointer-events-none fixed top-0 z-50 flex items-center gap-0.5 phone:hidden",
         isElectron
           ? // Clears the macOS traffic lights, or the Window Controls Overlay
             // origin on the platforms that publish one.
@@ -138,6 +146,38 @@ function AppSidebarExpandControl() {
           : "top-[env(safe-area-inset-top)] left-[calc(env(safe-area-inset-left)+0.5rem)] h-[52px]",
       )}
     >
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Link
+              aria-label="Go to threads"
+              className="pointer-events-auto mr-1 flex cursor-pointer items-center rounded-md text-foreground outline-hidden ring-ring transition-opacity hover:opacity-80 focus-visible:ring-2"
+              to="/"
+            >
+              <RycoLetterMark className="h-4.5" />
+            </Link>
+          }
+        />
+        <TooltipPopup side="bottom">
+          {APP_BASE_NAME} {APP_STAGE_LABEL} · Version {APP_VERSION}
+        </TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              aria-label="Settings"
+              className="pointer-events-auto text-muted-foreground/72 hover:text-foreground"
+              onClick={() => openSettings()}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <SettingsIcon />
+            </Button>
+          }
+        />
+        <TooltipPopup side="bottom">Settings</TooltipPopup>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={
@@ -214,7 +254,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
         </Sidebar>
       ) : null}
       {children}
-      {isDesktopTier && !sidebarOpen ? <AppSidebarExpandControl /> : null}
+      {isDesktopTier && !sidebarOpen ? <CollapsedAppSidebarChrome /> : null}
       <LazySettingsDialogMount />
     </SidebarProvider>
   );
