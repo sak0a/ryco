@@ -927,6 +927,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       `,
   });
 
+  // Payload-only projection for task rows: the linkage bundle (runHandles,
+  // outputFile) rides exclusively on task.* kinds, so path authorization
+  // never needs messages, plans, or checkpoints.
+  const listThreadTaskPayloadRows = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: Schema.Struct({ payload: Schema.fromJsonString(Schema.Unknown) }),
+    execute: ({ threadId }) =>
+      sql`
+        SELECT payload_json AS "payload"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND kind LIKE 'task.%'
+      `,
+  });
+
   const getThreadSessionRowByThread = SqlSchema.findOneOption({
     Request: ThreadIdLookupInput,
     Result: ProjectionThreadSessionDbRowSchema,
@@ -1892,6 +1907,40 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       });
     });
 
+  const listThreadTaskPathRefs: NonNullable<
+    ProjectionSnapshotQueryShape["listThreadTaskPathRefs"]
+  > = (threadId) =>
+    listThreadTaskPayloadRows({ threadId }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadTaskPathRefs:query",
+          "ProjectionSnapshotQuery.listThreadTaskPathRefs:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => {
+        const scriptPaths = new Set<string>();
+        const outputPaths = new Set<string>();
+        for (const row of rows) {
+          const payload = row.payload;
+          if (payload === null || typeof payload !== "object") {
+            continue;
+          }
+          const record = payload as Record<string, unknown>;
+          const runHandles = record.runHandles;
+          if (runHandles !== null && typeof runHandles === "object") {
+            const scriptPath = (runHandles as { scriptPath?: unknown }).scriptPath;
+            if (typeof scriptPath === "string") {
+              scriptPaths.add(scriptPath);
+            }
+          }
+          if (typeof record.outputFile === "string") {
+            outputPaths.add(record.outputFile);
+          }
+        }
+        return { scriptPaths: [...scriptPaths], outputPaths: [...outputPaths] };
+      }),
+    );
+
   const getThreadShellById: ProjectionSnapshotQueryShape["getThreadShellById"] = (threadId) =>
     Effect.gen(function* () {
       const [threadRow, latestTurnRow, sessionRow] = yield* Effect.all([
@@ -2154,6 +2203,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadShellById,
     getWorktreeShellById,
     getThreadDetailById,
+    listThreadTaskPathRefs,
     searchThreadMessages,
   } satisfies ProjectionSnapshotQueryShape;
 });

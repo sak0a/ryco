@@ -140,6 +140,24 @@ export interface ProjectionSnapshotQueryShape {
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
 
   /**
+   * Read only the file-path references carried by a thread's task activities
+   * (workflow `runHandles.scriptPath` and task `outputFile`). Deliberately
+   * narrow: the task-output RPC re-authorizes on every poll of a running
+   * task, and that must not materialize the full thread detail each time.
+   * Optional so existing test doubles stay valid; callers fall back to
+   * `getThreadDetailById`.
+   */
+  readonly listThreadTaskPathRefs?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<
+    {
+      readonly scriptPaths: ReadonlyArray<string>;
+      readonly outputPaths: ReadonlyArray<string>;
+    },
+    ProjectionRepositoryError
+  >;
+
+  /**
    * Search active projected user/assistant messages across threads.
    */
   readonly searchThreadMessages: (

@@ -2831,9 +2831,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         }
         const record = entry as Record<string, unknown>;
         const id =
-          typeof record.id === "string" && record.id.length > 0
+          typeof record.id === "string" && record.id.trim().length > 0
             ? record.id
-            : typeof record.task_id === "string" && record.task_id.length > 0
+            : typeof record.task_id === "string" && record.task_id.trim().length > 0
               ? record.task_id
               : undefined;
         if (id === undefined) {
@@ -3119,7 +3119,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         const patch = message.patch;
         const status =
           patch.status !== undefined ? CLAUDE_TASK_PATCH_STATUS[patch.status] : undefined;
-        if (status === "completed" || status === "failed" || status === "cancelled") {
+        // Every terminal RuntimeTaskStatus clears local liveness, so a
+        // patch-terminated task can never draw a redundant stop request.
+        // ("interrupted" has no patch mapping today; covering it costs
+        // nothing and survives a future mapping.)
+        if (
+          status === "completed" ||
+          status === "failed" ||
+          status === "cancelled" ||
+          status === "interrupted"
+        ) {
           context.liveTaskIds.delete(message.task_id);
           context.backgroundedTaskIds.delete(message.task_id);
         }

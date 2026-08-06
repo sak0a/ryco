@@ -60,42 +60,67 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
    * task-output reads are authorized against this set, binding each read to
    * the requested thread — global root containment alone would let any
    * caller read any script or output under the Claude projects roots by
-   * guessing absolute paths.
+   * guessing absolute paths. Failures resolve to empty sets: fail closed.
+   *
+   * getTaskOutput polls while a task runs, so the narrow payload-only
+   * projection is preferred; the full thread detail is only a fallback for
+   * query implementations that don't provide it.
    */
-  const referencedTaskPaths = (threadId: ThreadId) =>
-    projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
-      Effect.map(
-        Option.map((thread) => {
-          const scriptPaths = new Set<string>();
-          const outputPaths = new Set<string>();
-          for (const activity of thread.activities) {
-            const payload = activity.payload;
-            if (payload === null || typeof payload !== "object") {
-              continue;
-            }
-            const record = payload as Record<string, unknown>;
-            const runHandles = record.runHandles;
-            if (runHandles !== null && typeof runHandles === "object") {
-              const scriptPath = (runHandles as { scriptPath?: unknown }).scriptPath;
-              if (typeof scriptPath === "string") {
-                scriptPaths.add(scriptPath);
-              }
-            }
-            if (typeof record.outputFile === "string") {
-              outputPaths.add(record.outputFile);
-            }
-          }
-          return { scriptPaths, outputPaths };
-        }),
-      ),
+  const referencedTaskPaths = (
+    threadId: ThreadId,
+  ): Effect.Effect<{
+    readonly scriptPaths: ReadonlySet<string>;
+    readonly outputPaths: ReadonlySet<string>;
+  }> => {
+    const narrow = projectionSnapshotQuery.listThreadTaskPathRefs;
+    const refs = narrow
+      ? narrow(threadId).pipe(
+          Effect.map((result) => ({
+            scriptPaths: new Set(result.scriptPaths),
+            outputPaths: new Set(result.outputPaths),
+          })),
+        )
+      : projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
+          Effect.map(
+            Option.match({
+              onNone: () => ({ scriptPaths: new Set<string>(), outputPaths: new Set<string>() }),
+              onSome: (thread) => {
+                const scriptPaths = new Set<string>();
+                const outputPaths = new Set<string>();
+                for (const activity of thread.activities) {
+                  const payload = activity.payload;
+                  if (payload === null || typeof payload !== "object") {
+                    continue;
+                  }
+                  const record = payload as Record<string, unknown>;
+                  const runHandles = record.runHandles;
+                  if (runHandles !== null && typeof runHandles === "object") {
+                    const scriptPath = (runHandles as { scriptPath?: unknown }).scriptPath;
+                    if (typeof scriptPath === "string") {
+                      scriptPaths.add(scriptPath);
+                    }
+                  }
+                  if (typeof record.outputFile === "string") {
+                    outputPaths.add(record.outputFile);
+                  }
+                }
+                return { scriptPaths, outputPaths };
+              },
+            }),
+          ),
+        );
+    return refs.pipe(
       Effect.tapError((cause) =>
         Effect.logWarning("thread lookup for task-path authorization failed", {
           threadId,
           cause,
         }),
       ),
-      Effect.catch(() => Effect.succeed(Option.none())),
+      Effect.catch(() =>
+        Effect.succeed({ scriptPaths: new Set<string>(), outputPaths: new Set<string>() }),
+      ),
     );
+  };
 
   return defineWsHandlers({
     [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
@@ -176,15 +201,12 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
         ownerEffect(
           ORCHESTRATION_WS_METHODS.getWorkflowScript,
           Effect.gen(function* () {
-          // Thread binding first: the requested thread must exist and its
-          // persisted activities must reference this exact script path.
-          // "not-found" deliberately does not distinguish unknown threads,
-          // unreferenced paths, and missing files (anti-probing).
+          // Thread binding first: the requested thread's persisted
+          // activities must reference this exact script path. "not-found"
+          // deliberately does not distinguish unknown threads, unreferenced
+          // paths, and missing files (anti-probing).
           const referenced = yield* referencedTaskPaths(input.threadId);
-          if (
-            Option.isNone(referenced) ||
-            !referenced.value.scriptPaths.has(input.scriptPath)
-          ) {
+          if (!referenced.scriptPaths.has(input.scriptPath)) {
             return yield* new OrchestrationGetWorkflowScriptError({
               reason: "not-found",
               scriptPath: input.scriptPath,
@@ -212,10 +234,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
           // Same thread binding as getWorkflowScript, against the task
           // `outputFile` handles the thread's activities reference.
           const referenced = yield* referencedTaskPaths(input.threadId);
-          if (
-            Option.isNone(referenced) ||
-            !referenced.value.outputPaths.has(input.outputPath)
-          ) {
+          if (!referenced.outputPaths.has(input.outputPath)) {
             return yield* new OrchestrationGetTaskOutputError({
               reason: "not-found",
               outputPath: input.outputPath,
