@@ -253,9 +253,7 @@ export interface WsRpcClient {
     readonly getTurnDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTurnDiff>;
     readonly getWorkflowScript: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getWorkflowScript>;
     readonly getTaskOutput: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getTaskOutput>;
-    readonly stopBackgroundTask: RpcUnaryMethod<
-      typeof ORCHESTRATION_WS_METHODS.stopBackgroundTask
-    >;
+    readonly stopBackgroundTask: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.stopBackgroundTask>;
     readonly getFullThreadDiff: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff>;
     readonly searchThreadMessages: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.searchThreadMessages

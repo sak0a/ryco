@@ -147,9 +147,7 @@ export interface ProjectionSnapshotQueryShape {
    * Optional so existing test doubles stay valid; callers fall back to
    * `getThreadDetailById`.
    */
-  readonly listThreadTaskPathRefs?: (
-    threadId: ThreadId,
-  ) => Effect.Effect<
+  readonly listThreadTaskPathRefs?: (threadId: ThreadId) => Effect.Effect<
     {
       readonly scriptPaths: ReadonlyArray<string>;
       readonly outputPaths: ReadonlyArray<string>;

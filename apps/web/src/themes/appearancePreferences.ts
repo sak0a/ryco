@@ -624,6 +624,14 @@ function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): stri
   const composerPlate = (scheme: "light" | "dark") =>
     Math.min(surfacePlate(scheme), scheme === "light" ? 93 : 92);
   const composerBlur = Math.max(10, blur.surface);
+  // The toast's glass floor: notifications float over arbitrary content, so
+  // like the composer they stay translucent and blurred even at Solid — at
+  // popover weight, because they are transient overlays rather than panes.
+  // The Solid caps are chosen so muted body text keeps ~AA contrast over a
+  // worst-case uniform backdrop; the blur carries the glass read.
+  const toastPlate = (scheme: "light" | "dark") =>
+    Math.min(popoverPlate(scheme), scheme === "light" ? 92 : 88);
+  const toastBlur = Math.max(20, blur.popover);
   return [
     ["--app-surface-opacity", formatPercent(surfacePlate("light"))],
     ["--app-surface-dark-opacity", formatPercent(surfacePlate("dark"))],
@@ -631,6 +639,9 @@ function buildSurfaceTransparencyCssVariables(surfaceTransparency: string): stri
     ["--app-composer-alpha", formatPercent(composerPlate("light"))],
     ["--app-composer-dark-alpha", formatPercent(composerPlate("dark"))],
     ["--app-composer-filter", desktopGlassFilter(composerBlur)],
+    ["--app-toast-alpha", formatPercent(toastPlate("light"))],
+    ["--app-toast-dark-alpha", formatPercent(toastPlate("dark"))],
+    ["--app-toast-filter", desktopGlassFilter(toastBlur)],
     ["--app-glass-popover-filter", desktopGlassFilter(blur.popover)],
     ["--app-glass-panel-filter", desktopGlassFilter(blur.panel)],
     ["--app-glass-panel-light-alpha", formatPercent(panelPlate("light"))],

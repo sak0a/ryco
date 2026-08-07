@@ -18,6 +18,7 @@ import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DiagnosticsSupportSections } from "./DiagnosticsPanel";
+import { NotificationsTestSection } from "./NotificationsTestSection";
 import { SettingsPageContainer, SettingsSection } from "./settingsLayout";
 import {
   durationBucketSeries,
@@ -680,6 +681,10 @@ export function DiagnosticsSettings({
       <DiagnosticsWarnings snapshot={snapshot} error={error} />
 
       {import.meta.env.DEV ? <TierPreviewSection /> : null}
+
+      {/* Not on `phone-legacy`: that presentation is the frozen web-phone
+          tier, which must not gain new controls. */}
+      {presentation === "phone-legacy" ? null : <NotificationsTestSection />}
 
       {presentation === "phone-legacy" ? (
         <LegacyDiagnosticsSections

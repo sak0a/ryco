@@ -8332,12 +8332,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         });
       });
 
-      // Desktop placement is unchanged: inset 32px + header offset 52px.
+      // Desktop placement sits at the viewport's top edge, over the header
+      // chrome (system-notification style).
       await mounted.setViewport(DEFAULT_VIEWPORT);
       await vi.waitFor(() => {
         const toastViewport = document.querySelector<HTMLElement>('[data-slot="toast-viewport"]');
         expect(toastViewport).not.toBeNull();
-        expect(getComputedStyle(toastViewport!).top).toBe("84px");
+        expect(getComputedStyle(toastViewport!).top).toBe("12px");
       });
     } finally {
       if (toastId !== null) {

@@ -66,6 +66,10 @@ function updateProviderUpdateToast(input: {
       title: input.view.title,
       description: input.view.description,
       timeout: 0,
+      // `update` is a shallow merge over the prompt toast, so the "Update"
+      // action must be cleared explicitly once the run starts; the fresh
+      // `data` object already drops the "Settings" secondary action.
+      actionProps: undefined,
       data: {
         hideCopyButton: true,
         ...(input.view.dismissAfterVisibleMs !== undefined
