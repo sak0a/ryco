@@ -86,6 +86,10 @@ interface Wire {
   readonly sent: Uint8Array[];
   /** Reservations taken, spent, and released — the §9.3 accounting. */
   admitted: number;
+  readonly admittedBytes: number[];
+  maxOutstandingBytes: number;
+  outstandingBytes: number;
+  peakOutstandingBytes: number;
   spent: number;
   released: number;
   /** Refuse admission entirely: ordinary backpressure (§11.4). */
@@ -112,6 +116,10 @@ function makeHost(limits: RelayLimitsType = RELAY_INITIAL_LIMITS): {
   const wire: Wire = {
     sent: [],
     admitted: 0,
+    admittedBytes: [],
+    maxOutstandingBytes: Number.POSITIVE_INFINITY,
+    outstandingBytes: 0,
+    peakOutstandingBytes: 0,
     spent: 0,
     released: 0,
     refuseAdmission: false,
@@ -126,17 +134,30 @@ function makeHost(limits: RelayLimitsType = RELAY_INITIAL_LIMITS): {
   const host: RelayE2eeHost = {
     limits,
     admit: (messageBytes): RelayE2eeReservation | undefined => {
-      if (wire.refuseAdmission || messageBytes <= 0) return undefined;
+      if (
+        wire.refuseAdmission ||
+        messageBytes <= 0 ||
+        wire.outstandingBytes + messageBytes > wire.maxOutstandingBytes
+      )
+        return undefined;
       wire.admitted += 1;
+      wire.admittedBytes.push(messageBytes);
+      wire.outstandingBytes += messageBytes;
+      wire.peakOutstandingBytes = Math.max(wire.peakOutstandingBytes, wire.outstandingBytes);
       wire.onAdmit?.();
       let settled = false;
+      const settle = (): boolean => {
+        if (settled) return false;
+        settled = true;
+        wire.outstandingBytes -= messageBytes;
+        return true;
+      };
       return {
         // Mirrors the engine's own reservation: capacity is spent on the
         // attempt, so a refusal settles too and only a record that never
         // reached the send path at all can be released.
         send: (message) => {
-          if (settled) return false;
-          settled = true;
+          if (!settle()) return false;
           if (wire.throwOnSend) throw new Error("relay send failed unreadably");
           if (wire.refuseSend) return false;
           wire.spent += 1;
@@ -144,8 +165,7 @@ function makeHost(limits: RelayLimitsType = RELAY_INITIAL_LIMITS): {
           return true;
         },
         release: () => {
-          if (settled) return;
-          settled = true;
+          if (!settle()) return;
           wire.released += 1;
         },
       };
@@ -207,7 +227,10 @@ function makePeer(
     ...(options.send === undefined ? {} : { testOnlySyntheticSendState: options.send }),
     ...(options.receive === undefined ? {} : { testOnlySyntheticReceiveState: options.receive }),
   });
-  const machine = new E2eeCloseMachine({ sessionBindingHash, sendDirection: "n2c" });
+  const machine = new E2eeCloseMachine({
+    sessionBindingHash,
+    sendDirection: "n2c",
+  });
   const position = (state: { epoch: bigint | undefined; counter: bigint | undefined }) => {
     if (state.epoch === undefined || state.counter === undefined) {
       throw new Error("peer direction is exhausted");
@@ -268,6 +291,7 @@ function makeChannel(
     readonly limits?: RelayLimitsType;
     readonly send?: E2eeSyntheticDirectionState;
     readonly receive?: E2eeSyntheticDirectionState;
+    readonly onOwnedApplicationPlaintext?: (plaintext: Uint8Array) => void;
   } = {},
 ) {
   const { host, wire, advance } = makeHost(options.limits);
@@ -280,17 +304,34 @@ function makeChannel(
     onDiagnostic: (value) => diagnostics.push(value),
     ...(options.send === undefined ? {} : { testOnlySyntheticSendState: options.send }),
     ...(options.receive === undefined ? {} : { testOnlySyntheticReceiveState: options.receive }),
+    ...(options.onOwnedApplicationPlaintext === undefined
+      ? {}
+      : {
+          testOnlyOnOwnedApplicationPlaintext: options.onOwnedApplicationPlaintext,
+        }),
   });
   return { channel, host, wire, advance, diagnostics };
 }
 
-function envelopeHeader(envelope: Uint8Array): { epoch: bigint; counter: bigint } {
+function envelopeHeader(envelope: Uint8Array): {
+  epoch: bigint;
+  counter: bigint;
+} {
   const decoded = decodeE2eeEnvelope(envelope);
   if (decoded.kind !== "ok") throw new Error("malformed envelope");
   return { epoch: decoded.value.epoch, counter: decoded.value.counter };
 }
 
 const RPC = new TextEncoder().encode('{"method":"noop"}');
+
+async function submitAndDrain(
+  channel: ReturnType<typeof makeChannel>["channel"],
+  message: Uint8Array,
+): Promise<boolean> {
+  const admitted = channel.submit(message);
+  await tick();
+  return admitted;
+}
 
 // ─── §9.3 admission, the pair, and the AEAD ──────────────────────────────────
 
@@ -299,7 +340,7 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     const { channel, wire } = makeChannel();
     wire.refuseAdmission = true;
 
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(await submitAndDrain(channel, RPC)).toBe(false);
 
     expect(wire.sent).toEqual([]);
     expect(wire.admitted).toBe(0);
@@ -310,7 +351,7 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     expect(wire.closes).toEqual([]);
 
     wire.refuseAdmission = false;
-    expect(await channel.emit(RPC)).toBe(true);
+    expect(await submitAndDrain(channel, RPC)).toBe(true);
     // THE NEXT SUCCESSFUL RECORD TAKES THE SAME PAIR. A rollback that reused a
     // nonce with different plaintext is a total break of the AEAD, so the pair
     // must never have been assigned at all.
@@ -318,11 +359,85 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     expect(channel.sendPosition()).toEqual({ epoch: 0n, counter: 1n });
   });
 
-  it("releases an admitted reservation the record never spends", async () => {
+  it("reserves and copies synchronously before queued protection reads plaintext", async () => {
+    const { channel, wire } = makeChannel();
+    const peer = makePeer();
+    const message = new Uint8Array([0x10, 0x20, 0x30, 0x40]);
+    const expected = Uint8Array.from(message);
+
+    expect(channel.submit(message)).toBe(true);
+    expect(wire.admitted).toBe(1);
+    expect(wire.admittedBytes).toEqual([E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength]);
+    expect(wire.sent).toEqual([]);
+    message.fill(0xff);
+    await tick();
+
+    expect(peer.authenticate(wire.sent[0]!).body).toEqual(expected);
+  });
+
+  it("bounds queued plaintext, wipes every owned copy, and preserves nonce continuity", async () => {
+    const owned: Uint8Array[] = [];
+    const { channel, wire } = makeChannel({
+      onOwnedApplicationPlaintext: (plaintext) => owned.push(plaintext),
+    });
+    const charge = E2EE_ENVELOPE_OVERHEAD_BYTES + RPC.byteLength;
+    wire.maxOutstandingBytes = charge * 3;
+
+    const admitted = Array.from({ length: 10 }, () => channel.submit(RPC));
+
+    expect(admitted).toEqual([true, true, true, false, false, false, false, false, false, false]);
+    expect(wire.outstandingBytes).toBe(charge * 3);
+    expect(wire.peakOutstandingBytes).toBe(charge * 3);
+    expect(owned).toHaveLength(3);
+    expect(owned.every((plaintext) => plaintext.some((byte) => byte !== 0))).toBe(true);
+
+    await tick();
+
+    expect(wire.outstandingBytes).toBe(0);
+    expect(owned.every((plaintext) => plaintext.every((byte) => byte === 0))).toBe(true);
+    expect(wire.sent.map(envelopeHeader)).toEqual([
+      { epoch: 0n, counter: 0n },
+      { epoch: 0n, counter: 1n },
+      { epoch: 0n, counter: 2n },
+    ]);
+
+    expect(await submitAndDrain(channel, RPC)).toBe(true);
+    expect(envelopeHeader(wire.sent[3]!)).toEqual({ epoch: 0n, counter: 3n });
+  });
+
+  it("releases a queued record reservation when the channel closes before protection", async () => {
+    const { channel, wire } = makeChannel();
+
+    expect(channel.submit(RPC)).toBe(true);
+    expect(wire.admitted).toBe(1);
+    channel.dispose({});
+
+    expect(wire.released).toBe(1);
+    await tick();
+    expect(wire.sent).toEqual([]);
+    expect(channel.sendPosition()).toEqual({ epoch: 0n, counter: 0n });
+  });
+
+  it("refuses a reentrant close race after admission without consuming a nonce", async () => {
+    const { channel, wire } = makeChannel();
+    wire.onAdmit = () => {
+      wire.onAdmit = undefined;
+      void channel.beginClose();
+    };
+
+    expect(channel.submit(RPC)).toBe(false);
+    expect(wire.released).toBe(1);
+    await tick();
+
+    expect(wire.sent).toHaveLength(1);
+    expect(envelopeHeader(wire.sent[0]!)).toEqual({ epoch: 0n, counter: 0n });
+  });
+
+  it("settles an admitted reservation the record send path never spends", async () => {
     const { channel, wire } = makeChannel();
     wire.refuseSend = true;
 
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(await submitAndDrain(channel, RPC)).toBe(true);
 
     // The reservation was taken and the record was built; the send path took no
     // byte of it. Nothing is left holding relay capacity.
@@ -341,7 +456,7 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     const { channel, wire } = makeChannel();
     wire.onAdmit = () => channel.dispose({});
 
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(await submitAndDrain(channel, RPC)).toBe(false);
 
     expect(wire.admitted).toBe(1);
     expect(wire.released).toBe(1);
@@ -349,19 +464,17 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     expect(wire.sent).toEqual([]);
   });
 
-  it("leaves the channel alone when the send path declines a record in this state", async () => {
-    // §10.2's application-phase gate, reached from the RECORD SESSION rather
-    // than from the close machine: this `emit` was admitted while the machine
-    // was still open and ordered behind the `E2EEClose`, so by the time it is
-    // protected the send path is closing and declines it. That is §11.4's "leave
-    // the channel exactly as they found it" — the opposite of §11.3's erase,
-    // record **Failed**, and tear the connection down non-retryably.
+  it("refuses application admission synchronously once close is requested", async () => {
+    // `beginClose` closes the admission gate before its asynchronous protection
+    // work starts, so a same-turn keepalive cannot reserve, copy, or overtake
+    // the `E2EEClose`.
     const { channel, wire, diagnostics } = makeChannel();
 
     const closing = channel.beginClose();
-    const sending = channel.emit(RPC);
+    const sending = channel.submit(RPC);
 
-    expect(await sending).toBe(false);
+    expect(sending).toBe(false);
+    await tick();
     expect(wire.sent).toHaveLength(1);
     expect(wire.closes).toEqual([]);
     expect(channel.verdict()).toBeUndefined();
@@ -373,12 +486,13 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     // §9.3's `ambiguous` branch: the pair is spent and this endpoint can
     // establish nothing about delivery. §11.4 and §11.3 Q10 are BOTH wrong for
     // it — it is neither retryable backpressure nor a failure this sender may
-    // resolve by tearing the channel down — so `emit` refuses the message and
-    // changes nothing else.
+    // resolve by tearing the channel down — so the queued send changes nothing
+    // else after its synchronous admission.
     const { channel, wire, diagnostics } = makeChannel();
     wire.throwOnSend = true;
 
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(channel.submit(RPC)).toBe(true);
+    await tick();
 
     expect(wire.closes).toEqual([]);
     expect(channel.verdict()).toBeUndefined();
@@ -391,7 +505,8 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
   it("serializes concurrent sends so no two records observe the same pair", async () => {
     const { channel, wire } = makeChannel();
 
-    const results = await Promise.all([channel.emit(RPC), channel.emit(RPC), channel.emit(RPC)]);
+    const results = [channel.submit(RPC), channel.submit(RPC), channel.submit(RPC)];
+    await tick();
 
     expect(results).toEqual([true, true, true]);
     expect(wire.sent.map(envelopeHeader)).toEqual([
@@ -406,7 +521,8 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     const { channel, wire, diagnostics } = makeChannel();
     wire.refuseSend = true;
 
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(channel.submit(RPC)).toBe(true);
+    await tick();
 
     // §11.3 Q10: the peer's expected-next pair is still the consumed one, so an
     // `E2EEError` would itself create the gap being avoided.
@@ -414,10 +530,13 @@ describe("relay E2EE client channel: §9.3 admission before assignment", () => {
     expect(diagnostics).toEqual([{ phase: "post_key", row: "Q10", verdict: "failed" }]);
     // The outer close IS emitted, and it is the non-retryable §11.1 one.
     expect(wire.closes).toEqual([relayE2eeFailure("send_path_unusable")]);
-    expect(wire.closes[0]).toMatchObject({ kind: "protocol", retryable: false });
+    expect(wire.closes[0]).toMatchObject({
+      kind: "protocol",
+      retryable: false,
+    });
 
     wire.refuseSend = false;
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(channel.submit(RPC)).toBe(false);
     expect(wire.sent).toEqual([]);
   });
 });
@@ -438,12 +557,12 @@ describe("relay E2EE client channel: §4.5 plaintext ceiling", () => {
 
     // One byte over the ceiling is `e2ee_message_too_large` (§11.4): nothing
     // encrypted, nothing transmitted, no pair consumed, channel usable.
-    expect(await channel.emit(new Uint8Array(budget.plaintextCeiling + 1))).toBe(false);
+    expect(channel.submit(new Uint8Array(budget.plaintextCeiling + 1))).toBe(false);
     expect(wire.sent).toEqual([]);
     expect(wire.admitted).toBe(0);
     expect(channel.sendPosition()).toEqual({ epoch: 0n, counter: 0n });
 
-    expect(await channel.emit(new Uint8Array(budget.plaintextCeiling))).toBe(true);
+    expect(await submitAndDrain(channel, new Uint8Array(budget.plaintextCeiling))).toBe(true);
     expect(wire.sent).toHaveLength(1);
   });
 
@@ -484,7 +603,7 @@ describe("relay E2EE client channel: §9.4 epoch schedule", () => {
       },
     });
 
-    expect(await channel.emit(RPC)).toBe(true);
+    expect(await submitAndDrain(channel, RPC)).toBe(true);
     expect(envelopeHeader(wire.sent[0]!)).toEqual({
       epoch: 0n,
       counter: BigInt(E2EE_REKEY_MAX_RECORDS - 1),
@@ -493,7 +612,7 @@ describe("relay E2EE client channel: §9.4 epoch schedule", () => {
     // counter + 1, and the sender cannot enter the epoch early.
     expect(channel.sendPosition()).toEqual({ epoch: 1n, counter: 0n });
 
-    expect(await channel.emit(RPC)).toBe(true);
+    expect(await submitAndDrain(channel, RPC)).toBe(true);
     expect(envelopeHeader(wire.sent[1]!)).toEqual({ epoch: 1n, counter: 0n });
   });
 
@@ -502,7 +621,9 @@ describe("relay E2EE client channel: §9.4 epoch schedule", () => {
     // threshold: the `E2EEClose` is a control record, it counts toward both §9.4
     // thresholds like every other record, and it therefore completes the epoch.
     const { channel, wire } = makeChannel({
-      send: { epochBytes: E2EE_REKEY_MAX_BYTES - E2EE_CLOSE_RECORD_PLAINTEXT_BYTES },
+      send: {
+        epochBytes: E2EE_REKEY_MAX_BYTES - E2EE_CLOSE_RECORD_PLAINTEXT_BYTES,
+      },
     });
 
     void channel.beginClose();
@@ -516,13 +637,16 @@ describe("relay E2EE client channel: §9.4 epoch schedule", () => {
       send: { epoch: E2EE_EPOCH_MAX, counter: E2EE_COUNTER_MAX - 1n },
     });
 
-    expect(await channel.emit(RPC)).toBe(true);
+    expect(await submitAndDrain(channel, RPC)).toBe(true);
     const header = envelopeHeader(wire.sent[0]!);
     // Exact over the full field range: `2^32 − 1` and `2^64 − 2` survive as
     // bigints, which a JS `number` could not represent.
     expect(header.epoch).toBe(E2EE_EPOCH_MAX);
     expect(header.counter).toBe(E2EE_COUNTER_MAX - 1n);
-    expect(channel.sendPosition()).toEqual({ epoch: E2EE_EPOCH_MAX, counter: E2EE_COUNTER_MAX });
+    expect(channel.sendPosition()).toEqual({
+      epoch: E2EE_EPOCH_MAX,
+      counter: E2EE_COUNTER_MAX,
+    });
   });
 });
 
@@ -542,7 +666,7 @@ describe("relay E2EE client channel: §9.6 post-application reserve", () => {
 
     // Exactly the reserve remains, so the endpoint MUST initiate §10's close at
     // this point rather than protect the record.
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(channel.submit(RPC)).toBe(true);
     await tick();
 
     expect(wire.sent).toHaveLength(1);
@@ -629,7 +753,9 @@ describe("relay E2EE client channel: §9.2 receiver sequencing", () => {
   it("rejects a zero-length post-strip payload", async () => {
     const { channel, diagnostics } = makeChannel();
 
-    expect(await channel.intercept(new Uint8Array(0))).toEqual({ kind: "rejected" });
+    expect(await channel.intercept(new Uint8Array(0))).toEqual({
+      kind: "rejected",
+    });
     expect(diagnostics).toEqual([{ phase: "post_key", row: "Q6", verdict: "failed" }]);
   });
 });
@@ -763,7 +889,10 @@ describe("relay E2EE client channel: §10 authenticated close", () => {
     // responder's own anchor and completes its exchange too.
     const confirmation = peerReceive(peer, wire.sent[1]!);
     expect(confirmation.record.innerType).toBe(E2EE_INNER_TYPE_CLOSE_ACK);
-    expect(confirmation.outcome).toMatchObject({ kind: "close_ack", exchangeComplete: true });
+    expect(confirmation.outcome).toMatchObject({
+      kind: "close_ack",
+      exchangeComplete: true,
+    });
     expect(peer.machine.verdict).toBe("clean");
 
     // Two records from this endpoint — its close and its final confirmation —
@@ -906,14 +1035,14 @@ describe("relay E2EE client channel: §10 authenticated close", () => {
     // §10.2: the keepalive `Ping` is an application RPC record. Protecting one
     // here would move the peer's expected-receive state past this endpoint's
     // §10.1.1 anchor and break the close it is participating in.
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(channel.submit(RPC)).toBe(false);
     expect(wire.sent).toHaveLength(afterClose);
   });
 
   it("declares the pair the close record is actually protected at, under a same-turn send", async () => {
     // §10.1 fields 0–1 MUST byte-equal the carrying envelope's header. The
-    // engine drives both of these fire-and-forget on one turn — `send()` is
-    // `void emit(...)` and `close()` is `void beginClose()` — so a driver that
+    // engine drives both of these on one turn — `send()` calls synchronous
+    // `submit(...)` and `close()` starts `beginClose()` — so a driver that
     // read its next-send position outside the record session's own send
     // serialization would build the close body against a pair the RPC record
     // takes first, and would seal that nonconforming record onto the relay
@@ -921,9 +1050,9 @@ describe("relay E2EE client channel: §10 authenticated close", () => {
     const { channel, wire } = makeChannel();
     const peer = makePeer();
 
-    const sending = channel.emit(RPC);
+    const sending = channel.submit(RPC);
     const closing = channel.beginClose();
-    expect(await sending).toBe(true);
+    expect(sending).toBe(true);
     await tick();
 
     expect(wire.sent).toHaveLength(2);
@@ -973,7 +1102,9 @@ describe("relay E2EE client channel: §10 authenticated close", () => {
     await tick();
 
     expect(wire.sent.map(envelopeHeader)).toEqual([{ epoch: 0n, counter: 0n }]);
-    expect(peerReceive(peer, wire.sent[0]!).outcome).toMatchObject({ kind: "close_ack" });
+    expect(peerReceive(peer, wire.sent[0]!).outcome).toMatchObject({
+      kind: "close_ack",
+    });
     await channel.intercept(
       await peer.transmit(
         peer.machine.buildCloseAck({
@@ -1307,24 +1438,23 @@ describe("relay E2EE client channel: §11.3 receive rows", () => {
     expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
   });
 
-  it("orders the one terminal E2EEError behind an application record admitted before it", async () => {
-    // §11.5 counts the post-key observable at "at most one length-uniform
-    // encrypted record". The condition is detected on the receive path while an
-    // application record is already inside `protect`, so the terminal record's
-    // §11.3 preconditions — a usable send path, and the close machine's single
-    // terminal allowance — are read after that record has taken its pair, not
-    // before.
-    const { channel, wire, diagnostics } = makeChannel();
+  it("cancels admitted plaintext not yet protected when a fatal condition wins", async () => {
+    const owned: Uint8Array[] = [];
+    const { channel, wire, diagnostics } = makeChannel({
+      onOwnedApplicationPlaintext: (plaintext) => owned.push(plaintext),
+    });
 
-    const sending = channel.emit(RPC);
+    const sending = channel.submit(RPC);
     const intercepted = channel.intercept(new TextEncoder().encode('{"legacy":true}'));
-    expect(await sending).toBe(true);
+    expect(sending).toBe(true);
     expect(await intercepted).toEqual({ kind: "rejected" });
 
-    expect(wire.sent.map(envelopeHeader)).toEqual([
-      { epoch: 0n, counter: 0n },
-      { epoch: 0n, counter: 1n },
-    ]);
+    // The fatal receive closes synchronously before queued protection starts.
+    // Its terminal control therefore takes the still-unused first nonce, while
+    // the accepted application copy is wiped without reaching encryption.
+    expect(wire.sent.map(envelopeHeader)).toEqual([{ epoch: 0n, counter: 0n }]);
+    expect(owned).toHaveLength(1);
+    expect(owned[0]!.every((byte) => byte === 0)).toBe(true);
     expect(diagnostics).toEqual([{ phase: "post_key", row: "Q6", verdict: "failed" }]);
     expect(wire.closes).toEqual([relayE2eeFailure("fatal_post_key")]);
   });
@@ -1349,7 +1479,7 @@ describe("relay E2EE client channel: §11.3 receive rows", () => {
     expect(await channel.intercept(new TextEncoder().encode('{"legacy":true}'))).toEqual({
       kind: "rejected",
     });
-    expect(await channel.emit(RPC)).toBe(false);
+    expect(channel.submit(RPC)).toBe(false);
     await channel.beginClose();
 
     expect(wire.sent).toEqual([]);
@@ -1395,9 +1525,12 @@ describe("relay E2EE production admission surface", () => {
     // channel was asked to protect.
     const application = makeChannel();
     application.wire.refuseAdmission = true;
-    expect(await application.channel.emit(RPC)).toBe(false);
+    expect(application.channel.submit(RPC)).toBe(false);
     expect(application.wire.sent).toEqual([]);
-    expect(application.channel.sendPosition()).toEqual({ epoch: 0n, counter: 0n });
+    expect(application.channel.sendPosition()).toEqual({
+      epoch: 0n,
+      counter: 0n,
+    });
 
     const close = makeChannel();
     close.wire.refuseAdmission = true;

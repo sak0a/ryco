@@ -1,11 +1,20 @@
+import { RELAY_INITIAL_LIMITS, type RelayChannelId, type RelayFrame } from "@ryco/contracts";
 import type { DpopSignerService } from "@ryco/client-runtime/platform";
-import { encodeBase64Url } from "@ryco/client-runtime/relay";
+import {
+  encodeBase64Url,
+  RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
+  type RelayE2eeChannel,
+} from "@ryco/client-runtime/relay";
+import { encodeRelayFrame } from "@ryco/shared/relayCodec";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 // Native modules are stubbed so the adapter loads under the Node test runner,
 // matching the pattern in `src/platform/platform.test.ts`.
 vi.mock("react-native", () => ({
-  AppState: { currentState: "active", addEventListener: () => ({ remove: () => {} }) },
+  AppState: {
+    currentState: "active",
+    addEventListener: () => ({ remove: () => {} }),
+  },
 }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: async () => null,
@@ -23,6 +32,8 @@ import {
 const RELAY_URL = "wss://hub.example.test/v1/relay/client";
 const TOKEN = "session-token-value";
 const PROOF = "proof.header.signature";
+const CHANNEL_ID = "ch_cccccccccccccccccccccc" as RelayChannelId;
+const VERSION = { protocolMajor: 1, protocolMinor: 2 } as const;
 
 /** A relay ticket is 32 random bytes, base64url. */
 const TICKET = encodeBase64Url(new Uint8Array(32).fill(9));
@@ -91,13 +102,20 @@ interface Harness {
   readonly facade: MobileHostedRelaySocket;
   readonly sockets: FakeSocket[];
   readonly sign: ReturnType<typeof vi.fn>;
-  readonly events: Array<{ type: string; code?: number; reason?: string; data?: unknown }>;
+  readonly events: Array<{
+    type: string;
+    code?: number;
+    reason?: string;
+    data?: unknown;
+  }>;
 }
 
 function build(overrides: Partial<MobileHostedRelaySocketOptions> = {}): Harness {
   const sockets: FakeSocket[] = [];
   const sign = vi.fn(async () => PROOF);
-  const signer: DpopSignerService = { sign: sign as unknown as DpopSignerService["sign"] };
+  const signer: DpopSignerService = {
+    sign: sign as unknown as DpopSignerService["sign"],
+  };
   const facade = new MobileHostedRelaySocket({
     url: RELAY_URL,
     ticket: TICKET,
@@ -114,7 +132,12 @@ function build(overrides: Partial<MobileHostedRelaySocketOptions> = {}): Harness
     },
     ...overrides,
   });
-  const events: Array<{ type: string; code?: number; reason?: string; data?: unknown }> = [];
+  const events: Array<{
+    type: string;
+    code?: number;
+    reason?: string;
+    data?: unknown;
+  }> = [];
   for (const type of ["open", "message", "error", "close"]) {
     facade.addEventListener(type, (event) => events.push(event));
   }
@@ -127,6 +150,37 @@ const settle = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+function emitFrame(socket: FakeSocket, frame: RelayFrame): void {
+  const encoded = encodeRelayFrame(frame);
+  if (!encoded.ok) throw new Error("test frame encoding failed");
+  socket.emit("message", { data: Uint8Array.from(encoded.value).buffer });
+}
+
+async function authenticate(harness: Harness): Promise<FakeSocket> {
+  await settle();
+  const socket = harness.sockets[0]!;
+  socket.setReadyState(1);
+  socket.emit("open");
+  emitFrame(socket, {
+    type: "ready",
+    ...VERSION,
+    limits: RELAY_INITIAL_LIMITS,
+  });
+  emitFrame(socket, {
+    type: "channel.open",
+    ...VERSION,
+    channelId: CHANNEL_ID,
+    capability: "ryco.rpc",
+    effectiveRole: "operator",
+  });
+  emitFrame(socket, {
+    type: "channel.accept",
+    ...VERSION,
+    channelId: CHANNEL_ID,
+  });
+  return socket;
+}
 
 describe("relay attempt validation", () => {
   it("throws and never creates a socket for a URL other than the pinned relay endpoint", () => {
@@ -170,7 +224,11 @@ describe("DPoP upgrade", () => {
     await settle();
 
     expect(harness.sign).toHaveBeenCalledTimes(1);
-    expect(harness.sign).toHaveBeenCalledWith({ method: "GET", url: RELAY_URL, token: TOKEN });
+    expect(harness.sign).toHaveBeenCalledWith({
+      method: "GET",
+      url: RELAY_URL,
+      token: TOKEN,
+    });
   });
 
   it("sets arraybuffer binaryType on the platform socket", async () => {
@@ -314,6 +372,38 @@ describe("engine seam", () => {
     expect(() => harness.facade.send(new Uint8Array([1, 2, 3]))).toThrow(
       "Relay channel is not open.",
     );
+  });
+
+  it("preserves the established E2EE refusal message for an RPC keepalive", async () => {
+    const onFailure = vi.fn();
+    const channel: RelayE2eeChannel = {
+      intercept: async () => ({ kind: "claimed" }),
+      submit: () => false,
+      beginClose: async () => "refused",
+      dispose: () => undefined,
+    };
+    const harness = build({
+      callbacks: { ...callbacks(), onFailure },
+      e2ee: (host) => {
+        host.lockMode("e2ee");
+        return channel;
+      },
+    });
+    await authenticate(harness);
+
+    let thrown: unknown;
+    try {
+      // Native has no DOMException mapping. Effect's keepalive still receives
+      // the same synchronous, stable Error the engine exposes for every caller.
+      harness.facade.send('{"_tag":"Ping"}');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe(RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE);
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(harness.facade.readyState).toBe(harness.facade.OPEN);
   });
 });
 

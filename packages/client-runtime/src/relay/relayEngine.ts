@@ -199,8 +199,8 @@ export type RelayE2eeCloseAttempt = "opened" | "refused";
 export interface RelayE2eeChannel {
   /** §4.3: discriminate, authenticate, and dispatch one inbound payload. */
   readonly intercept: (payload: Uint8Array) => Promise<RelayE2eeInboundDisposition>;
-  /** §4.2: one outbound application RPC message. `false` never closes anything. */
-  readonly emit: (message: Uint8Array) => Promise<boolean>;
+  /** §4.2: synchronously reserve one outbound RPC record before copying it. */
+  readonly submit: (message: Uint8Array) => boolean;
   /** §10: begin the authenticated close; the channel asks for the outer one. */
   readonly beginClose: () => Promise<RelayE2eeCloseAttempt>;
   /** §9.5, §10.4: the channel ended. Idempotent. */
@@ -231,6 +231,9 @@ export type RelayE2eeProvider = (host: RelayE2eeHost) => RelayE2eeChannel;
  */
 export const RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE =
   "Relay E2EE negotiation send buffer is full.";
+
+/** §11.4: an established E2EE record could not reserve aggregate send capacity. */
+export const RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE = "Relay E2EE send is unavailable.";
 
 /**
  * The other three send refusals, named for the same reason.
@@ -292,6 +295,11 @@ interface QueuedPayload {
   readonly reservedBytes: number;
 }
 
+interface OutboundReservationToken {
+  readonly reservedBytes: number;
+  active: boolean;
+}
+
 function failure(reason: RelayCloseReason | "protocol_invalid" | "network"): HostedRelayFailure {
   if (
     [
@@ -317,9 +325,17 @@ function failure(reason: RelayCloseReason | "protocol_invalid" | "network"): Hos
       closeReason: reason as RelayCloseReason,
     };
   if (["revoked", "node_revoked", "grant_revoked"].includes(reason))
-    return { kind: "revoked", retryable: false, closeReason: reason as RelayCloseReason };
+    return {
+      kind: "revoked",
+      retryable: false,
+      closeReason: reason as RelayCloseReason,
+    };
   if (reason === "authorization_failed")
-    return { kind: "authorization-removed", retryable: false, closeReason: reason };
+    return {
+      kind: "authorization-removed",
+      retryable: false,
+      closeReason: reason,
+    };
   if (
     [
       "authentication_failed",
@@ -346,7 +362,11 @@ function failure(reason: RelayCloseReason | "protocol_invalid" | "network"): Hos
     };
   return reason === "network"
     ? { kind: "network", retryable: true }
-    : { kind: "internal", retryable: true, closeReason: reason as RelayCloseReason };
+    : {
+        kind: "internal",
+        retryable: true,
+        closeReason: reason as RelayCloseReason,
+      };
 }
 
 /**
@@ -427,6 +447,8 @@ export class HostedRelayEngine {
   #negotiationBufferedBytes = 0;
   /** §9.3: capacity held by admitted records that have not yet been queued. */
   #outboundReservedBytes = 0;
+  /** Close invalidates every token so a late release cannot debit the next lifecycle. */
+  readonly #outboundReservations = new Set<OutboundReservationToken>();
   /** §9.2 requires envelopes to reach `unprotect` in arrival order. */
   #e2eeInbound: Promise<void> = Promise.resolve();
   /** A §10 close attempt is in flight, or its phase opened. Never both at once. */
@@ -504,8 +526,9 @@ export class HostedRelayEngine {
    * §4.2: the E2EE layer owns the whole send pipeline from the ceiling check to
    * the reservation, so nothing is chunked or queued here. A record it refuses
    * is §11.4 sender-local — no pair consumed, no wire record, channel unaffected
-   * — and §10.2 discards rather than buffers a keepalive `Ping` the close phase
-   * stalls, so a refusal is not an error this seam may raise.
+   * — and is surfaced synchronously with the stable send-unavailable error. A
+   * close-phase keepalive receives that same observable refusal; neither case
+   * fails the channel or falls back to plaintext.
    */
   #emitE2ee(payload: Uint8Array): void {
     const channel = this.#e2ee;
@@ -514,9 +537,14 @@ export class HostedRelayEngine {
     // fatal rather than silent if it ever stops being: §11.3 Q10 is a local send
     // failure no byte of which reached the relay.
     if (!channel) return this.#failE2ee(relayE2eeFailure("send_path_unusable"));
-    void channel
-      .emit(Uint8Array.from(payload))
-      .catch(() => this.#failE2ee(relayE2eeFailure("fatal_post_key")));
+    let admitted: boolean;
+    try {
+      admitted = channel.submit(payload);
+    } catch (cause) {
+      this.#failE2ee(relayE2eeFailure("fatal_post_key"));
+      throw cause;
+    }
+    if (!admitted) throw new Error(RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE);
   }
 
   /** The unchanged legacy send path: the chunk layer, then the relay send queue. */
@@ -543,7 +571,7 @@ export class HostedRelayEngine {
    * only other moment either could be applied is the flush — where there is no
    * caller left to refuse and the disposition degenerates into the two things
    * §4.4 and §11.4 forbid outright: a silent drop on the `e2ee` sink, whose
-   * `emit` refuses an over-ceiling body, and a channel-fatal `transfer_limit` or
+   * `submit` refuses an over-ceiling body, and a channel-fatal `transfer_limit` or
    * `slow_consumer` on the plaintext one.
    *
    * 1. "Each buffered send MUST satisfy the §4.5 per-message bounds at
@@ -648,7 +676,12 @@ export class HostedRelayEngine {
     // emitted over a non-empty queue destroys the very close-machine record or
     // `E2EEError` the peer needs — after the sequence pair for it was spent.
     this.#flushOutbound(true);
-    if (this.#channel) this.#frame({ type: "channel.close", ...VERSION, channelId: this.#channel });
+    if (this.#channel)
+      this.#frame({
+        type: "channel.close",
+        ...VERSION,
+        channelId: this.#channel,
+      });
     this.#finish(code, reason);
   }
 
@@ -692,7 +725,11 @@ export class HostedRelayEngine {
         : (this.#limits?.maxControlFrameBytes ?? RELAY_MAX_CONTROL_FRAME_BYTES);
     if (bytes.byteLength > negotiatedFrameLimit) return this.#fail(failure("frame_too_large"));
     if (frame.type === "ping")
-      return this.#frame({ type: "pong", ...VERSION, nonce: Uint8Array.from(frame.nonce) });
+      return this.#frame({
+        type: "pong",
+        ...VERSION,
+        nonce: Uint8Array.from(frame.nonce),
+      });
     if (frame.type === "error") {
       const classified = failure(
         frame.code === "invalid_encoding" ||
@@ -892,6 +929,9 @@ export class HostedRelayEngine {
         } catch {
           // The send path reports its own failure through `#fail`; the entries
           // it did not reach are zeroed by the loop and dropped with the channel.
+          if (mode === "e2ee" && !this.#closed) {
+            this.#failE2ee(relayE2eeFailure("fatal_post_key"));
+          }
         }
       }
       payload.fill(0);
@@ -966,11 +1006,16 @@ export class HostedRelayEngine {
       return undefined;
     }
     this.#outboundReservedBytes += reserved;
-    let spent = false;
+    const token: OutboundReservationToken = {
+      reservedBytes: reserved,
+      active: true,
+    };
+    this.#outboundReservations.add(token);
     const settle = (): boolean => {
-      if (spent) return false;
-      spent = true;
-      this.#outboundReservedBytes -= reserved;
+      if (!token.active) return false;
+      token.active = false;
+      this.#outboundReservations.delete(token);
+      this.#outboundReservedBytes -= token.reservedBytes;
       return true;
     };
     return {
@@ -1049,7 +1094,11 @@ export class HostedRelayEngine {
       this.#frame({ type: "flow.pause", ...VERSION, channelId: this.#channel });
     } else if (this.#inboundPaused && ownedBytes <= Math.floor(this.#limits.maxQueuedBytes * 0.5)) {
       this.#inboundPaused = false;
-      this.#frame({ type: "flow.resume", ...VERSION, channelId: this.#channel });
+      this.#frame({
+        type: "flow.resume",
+        ...VERSION,
+        channelId: this.#channel,
+      });
     }
   }
 
@@ -1219,11 +1268,15 @@ export class HostedRelayEngine {
     // the reset below erases the evidence, and before the outer close.
     const channel = this.#e2ee;
     this.#e2ee = null;
-    channel?.dispose({ incompleteReassembly: this.#assembler.incompleteMessage });
+    channel?.dispose({
+      incompleteReassembly: this.#assembler.incompleteMessage,
+    });
     this.#assembler.reset();
     this.#outboundQueue = [];
     this.#inboundQueue = [];
     this.#outboundQueuedBytes = 0;
+    for (const reservation of this.#outboundReservations) reservation.active = false;
+    this.#outboundReservations.clear();
     this.#outboundReservedBytes = 0;
     this.#inboundQueuedBytes = 0;
     this.options.callbacks.onRole(null);

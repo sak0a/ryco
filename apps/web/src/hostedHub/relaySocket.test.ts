@@ -2,6 +2,7 @@ import { RELAY_INITIAL_LIMITS, type RelayChannelId } from "@ryco/contracts";
 import {
   encodeBase64Url,
   RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+  RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
   RELAY_MESSAGE_TOO_LARGE_MESSAGE,
   RELAY_PEER_UNSUPPORTED_MESSAGE,
   RELAY_SEND_QUEUE_FULL_MESSAGE,
@@ -87,7 +88,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: originalWindow,
+  });
   vi.restoreAllMocks();
 });
 
@@ -162,7 +166,11 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
       received.push([...new Uint8Array((event as MessageEvent).data)]),
     );
     authenticate(socket);
-    socket.frame({ type: "ping", ...VERSION, nonce: new Uint8Array(8).fill(4) });
+    socket.frame({
+      type: "ping",
+      ...VERSION,
+      nonce: new Uint8Array(8).fill(4),
+    });
     socket.frame({
       type: "data",
       ...VERSION,
@@ -200,7 +208,7 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
     const built: RelayE2eeHost[] = [];
     const channel: RelayE2eeChannel = {
       intercept: async () => ({ kind: "claimed" }),
-      emit: async () => false,
+      submit: () => false,
       beginClose: async () => "refused",
       dispose: () => undefined,
     };
@@ -280,6 +288,7 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
       RELAY_MESSAGE_TOO_LARGE_MESSAGE,
       RELAY_PEER_UNSUPPORTED_MESSAGE,
       RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+      RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
     ]) {
       const mapped = sendException(new Error(message));
       expect(mapped).toBeInstanceOf(DOMException);
@@ -307,6 +316,39 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
     expect(thrown).toBeInstanceOf(DOMException);
     expect((thrown as DOMException).name).toBe("QuotaExceededError");
     expect((thrown as DOMException).message).toBe(RELAY_SEND_QUEUE_FULL_MESSAGE);
+  });
+
+  it("reports an established E2EE keepalive refusal as observable quota backpressure", () => {
+    const onFailure = vi.fn();
+    const channel: RelayE2eeChannel = {
+      intercept: async () => ({ kind: "claimed" }),
+      submit: () => false,
+      beginClose: async () => "refused",
+      dispose: () => undefined,
+    };
+    const { facade, socket } = createRelayHarness({
+      handlers: { ...callbacks(), onFailure },
+      e2ee: (host) => {
+        host.lockMode("e2ee");
+        return channel;
+      },
+    });
+    authenticate(socket);
+
+    let thrown: unknown;
+    try {
+      // Effect's keepalive is an ordinary application RPC write at this seam.
+      // Ignoring the admission result must still produce a synchronous refusal.
+      facade.send('{"_tag":"Ping"}');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(DOMException);
+    expect((thrown as DOMException).name).toBe("QuotaExceededError");
+    expect((thrown as DOMException).message).toBe(RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE);
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(facade.readyState).toBe(WebSocket.OPEN);
   });
 
   it("raises an over-ceiling submission as a quota refusal, not an invalid state", () => {
@@ -385,7 +427,9 @@ describe("BrowserHostedRelaySocket wire compatibility", () => {
     expect(handlers.onFailure).toHaveBeenCalledWith(expect.objectContaining({ kind: "protocol" }));
     // A raw SharedArrayBuffer is an invalid frame (protocol_invalid), which
     // carries no close reason — distinct from the oversized-frame case.
-    const failure = handlers.onFailure.mock.calls.at(-1)?.[0] as { closeReason?: string };
+    const failure = handlers.onFailure.mock.calls.at(-1)?.[0] as {
+      closeReason?: string;
+    };
     expect(failure.closeReason).toBeUndefined();
   });
 

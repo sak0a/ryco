@@ -203,7 +203,7 @@ function unresolvedAttemptChannel(host: RelayE2eeHost): RelayE2eeChannel {
   host.close(relayE2eeUnresolvedAttemptFailure());
   return {
     intercept: async () => ({ kind: "rejected" }),
-    emit: async () => false,
+    submit: () => false,
     beginClose: async () => "refused",
     dispose: () => undefined,
   };

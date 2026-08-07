@@ -440,7 +440,11 @@ async function runPreparationPass(): Promise<boolean> {
     onUnexpectedNode: (evidence) => raiseMobileE2eeUnexpectedNode(evidence),
     onDiagnostic: (diagnostic) => recordMobileE2eeInitiatorDiagnostic(diagnostic),
   };
-  prepared = { key, attempt, agreementSecretKey: credentials.agreementSecretKey };
+  prepared = {
+    key,
+    attempt,
+    agreementSecretKey: credentials.agreementSecretKey,
+  };
   return true;
 }
 
@@ -570,7 +574,7 @@ function unresolvedAttemptChannel(host: RelayE2eeHost): RelayE2eeChannel {
   host.close(relayE2eeUnresolvedAttemptFailure());
   return {
     intercept: async () => ({ kind: "rejected" }),
-    emit: async () => false,
+    submit: () => false,
     beginClose: async () => "refused",
     dispose: () => undefined,
   };
@@ -630,10 +634,10 @@ export function resolveMobileRelayE2eeProvider(): RelayE2eeProvider | undefined 
         sync();
         return disposition;
       },
-      emit: async (message) => {
-        const emitted = await machine.emit(message);
+      submit: (message) => {
+        const submitted = machine.submit(message);
         sync();
-        return emitted;
+        return submitted;
       },
       dispose: (options) => {
         machine.dispose(options);

@@ -57,14 +57,21 @@ vi.mock("expo-secure-store", () => ({
 // modules are stubbed here so the injection can be exercised off-device.
 vi.mock("react-native", () => ({
   Platform: { OS: "ios" },
-  AppState: { currentState: "active", addEventListener: () => ({ remove: () => undefined }) },
+  AppState: {
+    currentState: "active",
+    addEventListener: () => ({ remove: () => undefined }),
+  },
 }));
 vi.mock("expo-network", () => ({
   addNetworkStateListener: () => ({ remove: () => undefined }),
   getNetworkStateAsync: async () => ({ isConnected: true }),
 }));
 vi.mock("expo-sqlite/kv-store", () => ({
-  default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
+  default: {
+    getItem: async () => null,
+    setItem: async () => {},
+    removeItem: async () => {},
+  },
 }));
 vi.mock("../platform/deviceKey", () => ({
   getMobileDeviceIdentityPublicKey: async () => {
@@ -117,7 +124,11 @@ vi.mock("../platform/e2eeRelayProvider", async (importOriginal) => {
   };
 });
 vi.mock("./runtimeConfig", () => ({
-  getMobileHostedConfig: () => ({ hubOrigin: HUB, appUrl: HUB, relyingParty: "hub.example.com" }),
+  getMobileHostedConfig: () => ({
+    hubOrigin: HUB,
+    appUrl: HUB,
+    relyingParty: "hub.example.com",
+  }),
 }));
 
 import {
@@ -307,9 +318,14 @@ describe("an attempt that is not ready fails the channel closed", () => {
     // nothing here failed a cryptographic check, and the non-retryable one drives
     // the hosted transport to `terminal-failure` and stops reconnection — a
     // warm-up race must cost one channel, not the session.
-    expect(context.closes[0]).toMatchObject({ retryable: true, closeReason: "channel_rejected" });
-    await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({ kind: "rejected" });
-    await expect(channel.emit(new Uint8Array([1]))).resolves.toBe(false);
+    expect(context.closes[0]).toMatchObject({
+      retryable: true,
+      closeReason: "channel_rejected",
+    });
+    await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({
+      kind: "rejected",
+    });
+    expect(channel.submit(new Uint8Array([1]))).toBe(false);
     await expect(channel.beginClose()).resolves.toBe("refused");
     // …and it primes itself, so the next attempt has a resolved one.
     await retried;
@@ -417,8 +433,10 @@ describe("§6.3: credential failure is legacy only for an explicitly eligible se
     const context = host();
     const channel = provider!(context.host);
     expect(context.closes).toHaveLength(1);
-    await expect(channel.emit(new Uint8Array([1]))).resolves.toBe(false);
-    await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({ kind: "rejected" });
+    expect(channel.submit(new Uint8Array([1]))).toBe(false);
+    await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({
+      kind: "rejected",
+    });
     await retried;
     expect(custody.prekeyCalls).toBe(2);
     expect(getMobileE2eeSessionState()).toMatchObject({
@@ -478,8 +496,10 @@ describe("§6.3: credential failure is legacy only for an explicitly eligible se
       const context = host();
       const channel = provider!(context.host);
       expect(context.closes).toHaveLength(1);
-      await expect(channel.emit(new Uint8Array([1]))).resolves.toBe(false);
-      await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({ kind: "rejected" });
+      expect(channel.submit(new Uint8Array([1]))).toBe(false);
+      await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({
+        kind: "rejected",
+      });
       await retried;
       expect([custody.prekeyCalls, custody.identityCalls, custody.agreementCalls]).toEqual(
         expectedCalls.map((value) => value * 2),

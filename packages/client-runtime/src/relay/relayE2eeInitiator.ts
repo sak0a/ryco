@@ -182,8 +182,12 @@ export interface RelayE2eeInitiator extends RelayE2eeChannel {
   readonly abort: () => void;
 }
 
-const REJECTED: RelayE2eeInboundDisposition = Object.freeze({ kind: "rejected" } as const);
-const CLAIMED: RelayE2eeInboundDisposition = Object.freeze({ kind: "claimed" } as const);
+const REJECTED: RelayE2eeInboundDisposition = Object.freeze({
+  kind: "rejected",
+} as const);
+const CLAIMED: RelayE2eeInboundDisposition = Object.freeze({
+  kind: "claimed",
+} as const);
 
 /**
  * §3.2.2 L1, asserted where the client can act on it rather than only where the
@@ -837,7 +841,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
 
   return {
     intercept,
-    emit: async (message) => (established === undefined ? false : established.emit(message)),
+    submit: (message) => (established === undefined ? false : established.submit(message)),
     beginClose: async (): Promise<RelayE2eeCloseAttempt> => {
       if (established !== undefined) return established.beginClose();
       // §10 has no meaning outside `e2ee`: there are no session keys to
