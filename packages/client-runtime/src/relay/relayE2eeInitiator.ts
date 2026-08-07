@@ -122,7 +122,24 @@ export interface RelayE2eeInitiatorAttempt {
   readonly pairingOnly: boolean;
   /** §8.2: this client's own fixed local suite-preference order. */
   readonly localSuitePreference: readonly number[];
-  readonly credentials: E2eeClientHandshakeCredentials;
+  readonly credentials:
+    | E2eeClientHandshakeCredentials
+    | Omit<
+        Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>,
+        "agreementSecretKey"
+      >;
+  /**
+   * Native-only, one-operation access to the static agreement scalar.
+   *
+   * Mobile attempts carry only public/certification material while warm. Row K1
+   * invokes this after statement validation and the durable trust hook, and the
+   * callback builds and emits the hello synchronously before the borrower
+   * releases and zeroizes its buffer. Web omits it. The embedded-secret native
+   * shape remains accepted for fixture and compatibility harnesses only.
+   */
+  readonly withNativeAgreementSecretKey?:
+    | (<A>(use: (secretKey: Uint8Array) => A) => Promise<A>)
+    | undefined;
   /**
    * §8.3: the verified pin the selection resolved to, when it resolved to one.
    * It is the PROVENANCE of context elements 9 and 17 — an `unverified` record
@@ -269,8 +286,10 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
   let established: RelayE2eeChannel | undefined;
   let advTimer: unknown;
   let trustCommitTimer: unknown;
+  let keyBorrowTimer: unknown;
   let handshakeTimer: unknown;
   let cancelStatementWait: (() => void) | undefined;
+  let cancelKeyBorrowWait: (() => void) | undefined;
   /**
    * §13.5's node half, retained from the statement §5.2 VALIDATED on this
    * channel — the only source a web client has, since §13.1 gives it no durable
@@ -282,13 +301,18 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
   function clearTimers(): void {
     if (advTimer !== undefined) host.clearTimeout(advTimer);
     if (trustCommitTimer !== undefined) host.clearTimeout(trustCommitTimer);
+    if (keyBorrowTimer !== undefined) host.clearTimeout(keyBorrowTimer);
     if (handshakeTimer !== undefined) host.clearTimeout(handshakeTimer);
     advTimer = undefined;
     trustCommitTimer = undefined;
+    keyBorrowTimer = undefined;
     handshakeTimer = undefined;
     const cancel = cancelStatementWait;
     cancelStatementWait = undefined;
     cancel?.();
+    const cancelBorrow = cancelKeyBorrowWait;
+    cancelKeyBorrowWait = undefined;
+    cancelBorrow?.();
   }
 
   /**
@@ -515,6 +539,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
               ? {}
               : { acceptedPolicyGeneration: attempt.acceptedPolicyGeneration }),
           });
+    let localPreKeyDeadline: number | undefined;
     if (verification !== undefined && verification.kind === "verified") {
       // A usable authenticated statement has selected the no-legacy path. Stop
       // `T_ADV` before invoking app code so a slow durable trust write cannot
@@ -522,6 +547,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       // after that write succeeds and the hello is actually emitted.
       if (advTimer !== undefined) host.clearTimeout(advTimer);
       advTimer = undefined;
+      localPreKeyDeadline = now() + T_TRUST_COMMIT;
       const committed = await awaitStatementHook(verification, true);
       if (!committed || mode !== "negotiating" || helloSent) {
         return mode === "closed" ? REJECTED : CLAIMED;
@@ -553,7 +579,12 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     // client either sends the hello or closes FATAL-PRE, and it may not idle
     // past `T_ADV`, so `T_ADV` is cancelled by the emit below and never by a
     // fallback that does not exist.
-    return sendHello(verification.statement, verification.anchor, verification.selectedSuite);
+    return sendHello(
+      verification.statement,
+      verification.anchor,
+      verification.selectedSuite,
+      localPreKeyDeadline ?? now() + T_TRUST_COMMIT,
+    );
   }
 
   /**
@@ -618,9 +649,108 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     statement: NodeE2eeCapabilityStatement,
     anchor: NodeE2eeCapabilityAnchor,
     selectedSuite: E2eeSuiteId,
-  ): RelayE2eeInboundDisposition {
+    localPreKeyDeadline: number,
+  ): RelayE2eeInboundDisposition | Promise<RelayE2eeInboundDisposition> {
     // The statement hook and this continuation are separated by a microtask.
     // A local close may win in between; no stale success may emit afterward.
+    if (mode !== "negotiating" || helloSent) return REJECTED;
+    const credentials = attempt.credentials;
+    if (credentials.tier === "native" && !("agreementSecretKey" in credentials)) {
+      return borrowAgreementSecretAndSendHello(
+        statement,
+        anchor,
+        selectedSuite,
+        credentials,
+        localPreKeyDeadline,
+      );
+    }
+    return sendHelloWithCredentials(statement, anchor, selectedSuite, credentials);
+  }
+
+  function borrowAgreementSecretAndSendHello(
+    statement: NodeE2eeCapabilityStatement,
+    anchor: NodeE2eeCapabilityAnchor,
+    selectedSuite: E2eeSuiteId,
+    credentials: Omit<
+      Extract<E2eeClientHandshakeCredentials, { readonly tier: "native" }>,
+      "agreementSecretKey"
+    >,
+    localPreKeyDeadline: number,
+  ): Promise<RelayE2eeInboundDisposition> {
+    const borrow = attempt.withNativeAgreementSecretKey;
+    if (borrow === undefined) return Promise.resolve(fatalPre("local"));
+
+    let resolveWait!: (disposition: RelayE2eeInboundDisposition) => void;
+    const wait = new Promise<RelayE2eeInboundDisposition>((resolve) => {
+      resolveWait = resolve;
+    });
+    let finished = false;
+    const cancel = (): void => finish(REJECTED);
+    const finish = (disposition: RelayE2eeInboundDisposition): void => {
+      if (finished) return;
+      finished = true;
+      if (keyBorrowTimer !== undefined) host.clearTimeout(keyBorrowTimer);
+      keyBorrowTimer = undefined;
+      if (cancelKeyBorrowWait === cancel) cancelKeyBorrowWait = undefined;
+      resolveWait(disposition);
+    };
+    cancelKeyBorrowWait = cancel;
+
+    const remaining = localPreKeyDeadline - now();
+    if (remaining <= 0) {
+      fatalPre("local");
+      finish(REJECTED);
+      return wait;
+    }
+    keyBorrowTimer = host.setTimeout(() => {
+      keyBorrowTimer = undefined;
+      if (mode === "negotiating" && !helloSent) fatalPre("local");
+      finish(REJECTED);
+    }, remaining);
+
+    let operation: Promise<RelayE2eeInboundDisposition>;
+    try {
+      operation = borrow((agreementSecretKey) => {
+        // The secure-store read may settle after abort, disposal, sign-out, or
+        // selection replacement. This callback is the first code that sees the
+        // scalar, and it emits nothing unless this exact channel still owns K1.
+        if (finished || mode !== "negotiating" || helloSent) return REJECTED;
+        return sendHelloWithCredentials(statement, anchor, selectedSuite, {
+          ...credentials,
+          agreementSecretKey,
+        });
+      });
+    } catch {
+      fatalPre("local");
+      finish(REJECTED);
+      return wait;
+    }
+    void Promise.resolve(operation).then(
+      (disposition) => {
+        // The production borrower invokes `use` exactly once. Treat a resolved
+        // implementation that never invoked it as local custody failure rather
+        // than cancelling the only remaining deadline and idling forever.
+        if (!finished && mode === "negotiating" && !helloSent) {
+          fatalPre("local");
+          finish(REJECTED);
+          return;
+        }
+        finish(disposition);
+      },
+      () => {
+        if (mode === "negotiating") fatalPre("local");
+        finish(REJECTED);
+      },
+    );
+    return wait;
+  }
+
+  function sendHelloWithCredentials(
+    statement: NodeE2eeCapabilityStatement,
+    anchor: NodeE2eeCapabilityAnchor,
+    selectedSuite: E2eeSuiteId,
+    credentials: E2eeClientHandshakeCredentials,
+  ): RelayE2eeInboundDisposition {
     if (mode !== "negotiating" || helloSent) return REJECTED;
     const client = new E2eeClientHandshake({
       channel: {
@@ -634,7 +764,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       advertised: advertisedMaterial(statement, anchor, attempt.verifiedPin),
       selectedSuite,
       offeredSuites: attempt.localSuitePreference,
-      credentials: attempt.credentials,
+      credentials,
       // §8.3 elements 11–12, committed to the authority the `channel.open`
       // ACTUALLY PRESENTED. §8.3 requires exact equality with elements 13–14 at
       // both endpoints and treats a difference in EITHER direction — a silent
@@ -670,7 +800,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     // held only until the lock reads it. The web tier resolves to no pin, so
     // there is nothing else it could be anchored to; `advertisedMaterial` above
     // reads the pin for elements 9 and 17 for the same reason and finds none.
-    if (attempt.credentials.tier === "web") {
+    if (credentials.tier === "web") {
       webSasNodeIdentityPublicKey = statement.identityPublicKey;
     }
     handshake = client;

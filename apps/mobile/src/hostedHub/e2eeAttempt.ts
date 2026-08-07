@@ -60,11 +60,13 @@ import { getMobileHostedConfig } from "./runtimeConfig";
 //
 //   1. A resolved attempt for this selection → the §4.4 machine, which decides
 //      `e2ee`, `legacy`, or FATAL-PRE from the rows and the classification.
-//   2. No key custody at all — §6.3 admits "no software-key fallback and no
-//      degraded mode", so a device that cannot hold the agreement key simply has
-//      no E2EE — → NO provider, an unchanged legacy channel, and §12.2's label
-//      applied to it in every surface. It is withheld even then from a selection
-//      §12.1 has latched or whose §12.1.1 policy forbids legacy: those close.
+//   2. Certificate or device-identity preparation fails — §6.3 admits no
+//      fallback credential — → NO provider only for an explicitly
+//      legacy-eligible selection. Issuance, renewal, or invalid-record repair may
+//      transiently derive or generate the agreement public key and retains that
+//      existing rule. A valid reusable certificate restores public-only; on that
+//      common path the scalar is first borrowed at K1 after validated evidence,
+//      so its failure is FATAL-PRE and can never create plaintext eligibility.
 //   3. Anything else that is not ready — including an unreadable trust document —
 //      → a channel that closes without releasing anything. NOT a legacy channel:
 //      the classification is exactly what has not been read, and §12.1.1 admits
@@ -106,8 +108,8 @@ interface AttemptSlot {
 interface PreparedAttempt {
   readonly slot: AttemptSlot;
   readonly attempt: RelayE2eeInitiatorAttempt;
-  /** The attempt-owned copy of the X25519 scalar, zeroized on disposal. */
-  readonly agreementSecretKey: Uint8Array;
+  /** Revoked when the warm selection/trust snapshot stops being current. */
+  readonly lifetime: { active: boolean };
 }
 
 let prepared: PreparedAttempt | null = null;
@@ -319,7 +321,7 @@ async function runPreparationPass(): Promise<boolean> {
   // A previous channel authenticated a durable trust advance for this same
   // selection. Until the underlying OS-backed write settles, no attempt may
   // classify the old generation or borrow the old pin. Keep the complete cached
-  // attempt intact for the callback that still owns its scalar, but mark this
+  // attempt intact for the callback that still owns the channel, but mark this
   // preparation complete and let provider resolution close new channels.
   if (pendingTrustCommit(selection) !== undefined) return true;
   const slot = attemptSlot(selection);
@@ -329,7 +331,7 @@ async function runPreparationPass(): Promise<boolean> {
     (strictUnavailableFor !== null && sameAttemptSlot(strictUnavailableFor, slot));
   disposeMobileRelayE2eeAttempt();
   // The old projection belongs to the disposed slot just as surely as its
-  // scalar does. Clear it before any awaited guard or credential operation so
+  // lifetime token does. Clear it before any awaited guard or credential operation so
   // a failure for the new selection cannot leave the previous channel's
   // `verified` or `legacy` claim visible beside a channel that failed closed.
   // A successful pass publishes the complete replacement below; a permitted
@@ -402,11 +404,12 @@ async function runPreparationPass(): Promise<boolean> {
   }
 
   // The selection, the account, or the trust document may all have moved while
-  // the keychain was read. An attempt describes the state it was resolved from,
-  // so one that no longer matches is zeroized and dropped rather than assigned.
+  // credential state was prepared. A reusable certificate stays public-only;
+  // issuance or renewal may transiently derive the agreement public key. An
+  // attempt describes the state it was resolved from, so one that no longer
+  // matches is dropped rather than assigned.
   const live = currentSelection();
   if (live === null || !sameAttemptSlot(attemptSlot(live), slot)) {
-    credentials.agreementSecretKey.fill(0);
     return false;
   }
 
@@ -436,6 +439,7 @@ async function runPreparationPass(): Promise<boolean> {
     ),
   });
 
+  const lifetime = { active: true };
   const attempt: RelayE2eeInitiatorAttempt = {
     hubOrigin: selection.hubOrigin,
     selectionClass: selectionClassOf(guards.classification),
@@ -453,10 +457,20 @@ async function runPreparationPass(): Promise<boolean> {
       accountId: selection.accountId,
       identityPublicKey: credentials.certificate.identityPublicKey,
       agreementPublicKey: credentials.certificate.agreementPublicKey,
-      agreementSecretKey: credentials.agreementSecretKey,
       prekeyTranscript: credentials.certificate.transcript,
       prekeySignature: credentials.certificate.signature,
     },
+    // K1 is the first point that needs the Noise `s`. Keep the warm reconnect
+    // slot public-only and borrow the scalar for the one synchronous hello
+    // construction/send operation after the carrier and durable trust commit.
+    withNativeAgreementSecretKey: (use) =>
+      mobileE2eeAgreementKey.withSecretKey((secretKey) => {
+        const live = currentSelection();
+        if (!lifetime.active || live === null || !sameAttemptSlot(attemptSlot(live), slot)) {
+          throw new Error("Mobile E2EE selection was superseded.");
+        }
+        return use(secretKey);
+      }),
     // §8.3 elements 9 and 17 come from the RESOLVED VERIFIED PIN, never from
     // a statement: "a key merely carried by a self-signed first-contact
     // statement is not a trust anchor". An `unverified` record anchors
@@ -499,7 +513,7 @@ async function runPreparationPass(): Promise<boolean> {
   prepared = {
     slot,
     attempt,
-    agreementSecretKey: credentials.agreementSecretKey,
+    lifetime,
   };
   return true;
 }
@@ -536,7 +550,6 @@ async function resolveGuards(selection: CurrentSelection): Promise<ResolvedGuard
 interface ResolvedCredentials {
   readonly certificate: Awaited<ReturnType<typeof mobileClientE2eePrekey.ensure>>;
   readonly clientIdentityPublicKey: Uint8Array;
-  readonly agreementSecretKey: Uint8Array;
 }
 
 async function resolveCredentials(selection: CurrentSelection): Promise<ResolvedCredentials> {
@@ -545,14 +558,7 @@ async function resolveCredentials(selection: CurrentSelection): Promise<Resolved
     accountId: selection.accountId,
   });
   const clientIdentityPublicKey = await getMobileDeviceIdentityPublicKey();
-  // The scalar has to outlive the borrow: §8.5's hello is built at row K1,
-  // long after `channel.accept`, and the borrow contract is one operation
-  // wide. The copy is this module's, and `disposeMobileRelayE2eeAttempt`
-  // zeroizes it the moment the attempt stops being current.
-  const agreementSecretKey = await mobileE2eeAgreementKey.withSecretKey((secretKey) =>
-    Uint8Array.from(secretKey),
-  );
-  return { certificate, clientIdentityPublicKey, agreementSecretKey };
+  return { certificate, clientIdentityPublicKey };
 }
 
 /**
@@ -603,10 +609,10 @@ function formatStatementFingerprint(identityPublicKey: Uint8Array): string {
   return formatE2eeKeyFingerprint(e2eeKeyFingerprint("node-identity", identityPublicKey));
 }
 
-/** Zeroize and drop the attempt-owned scalar. Idempotent. */
+/** Revoke and drop the public-only warm attempt. Idempotent. */
 export function disposeMobileRelayE2eeAttempt(): void {
   if (prepared === null) return;
-  prepared.agreementSecretKey.fill(0);
+  prepared.lifetime.active = false;
   prepared = null;
 }
 
@@ -640,9 +646,10 @@ function unresolvedAttemptChannel(host: RelayE2eeHost): RelayE2eeChannel {
  * synchronously at `createRelaySocket`.
  *
  * `undefined` means outcome 2 above and nothing else: this device could not
- * build §8.5 credentials for a selection §12.1.1 still permits legacy for, so it
- * has no E2EE at all and the engine runs the unchanged legacy channel. Every
- * other unresolved state — including no selection at all — closes.
+ * prepare the public certificate/identity state for a selection §12.1.1 still
+ * permits legacy for, so the engine runs the unchanged legacy channel. A late
+ * agreement-scalar failure is already past validated evidence and closes inside
+ * the initiator. Every other unresolved state — including no selection — closes.
  */
 export function resolveMobileRelayE2eeProvider(): RelayE2eeProvider | undefined {
   const selection = currentSelection();
@@ -731,9 +738,9 @@ export function inspectMobileRelayE2eeAttemptForTests(): {
   };
 }
 
-/** Test seam: drop the slot without zeroizing a buffer a test may still read. */
+/** Test seam: exercise the production disposal path, then clear other module state. */
 export function resetMobileRelayE2eeAttemptForTests(): void {
-  prepared = null;
+  disposeMobileRelayE2eeAttempt();
   preparing = undefined;
   custodyUnavailableFor = null;
   strictUnavailableFor = null;

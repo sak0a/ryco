@@ -116,6 +116,7 @@ import {
 import {
   configureMobileHostedRuntime,
   ensureMobileHostedSession,
+  invalidateMobileHostedRuntime,
   isMobileHostedModeAvailable,
   resetMobileHostedRuntimeForTests,
 } from "./runtime";
@@ -211,6 +212,22 @@ describe("hosted runtime configuration", () => {
     expect(getHostedRuntimeConfiguration()).toBe(first);
     expect(hoisted.createMobileDpopSigner).toHaveBeenCalledTimes(1);
   });
+
+  it.each(["invalidate", "test-reset"] as const)(
+    "revokes the warm attempt on hosted runtime %s",
+    async (terminal) => {
+      await configureMobileHostedRuntime();
+      const disposals = hoisted.disposeCalls;
+
+      if (terminal === "invalidate") invalidateMobileHostedRuntime();
+      else resetMobileHostedRuntimeForTests();
+
+      // Production disposal revokes a pending borrow's lifetime; the attempt
+      // suite holds an actual read open across both disposal and test reset.
+      expect(hoisted.disposeCalls).toBe(disposals + 1);
+      expect(hoisted.resetSessionCalls).toBeGreaterThan(0);
+    },
+  );
 
   it("watches structured selection snapshots without delimiter or sentinel collisions", async () => {
     hostedHubStore.setState({

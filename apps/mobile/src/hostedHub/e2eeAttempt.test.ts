@@ -40,6 +40,10 @@ const custody = vi.hoisted(() => ({
   prekeyCalls: 0,
   identityCalls: 0,
   agreementCalls: 0,
+  agreementActiveBorrows: 0,
+  agreementReleases: 0,
+  agreementPending: null as Promise<void> | null,
+  onAgreementStart: null as (() => void) | null,
   prekeyPending: null as Promise<void> | null,
   onPrekeyStart: null as (() => void) | null,
 }));
@@ -84,8 +88,18 @@ vi.mock("../platform/e2eeAgreementKey", () => ({
   mobileE2eeAgreementKey: {
     withSecretKey: async (use: (secretKey: Uint8Array) => unknown) => {
       custody.agreementCalls += 1;
+      custody.onAgreementStart?.();
+      if (custody.agreementPending !== null) await custody.agreementPending;
       if (custody.agreementFails) throw new Error("no agreement key");
-      return use(Uint8Array.from(AGREEMENT_SECRET_KEY));
+      const secretKey = Uint8Array.from(AGREEMENT_SECRET_KEY);
+      custody.agreementActiveBorrows += 1;
+      try {
+        return await use(secretKey);
+      } finally {
+        secretKey.fill(0);
+        custody.agreementActiveBorrows -= 1;
+        custody.agreementReleases += 1;
+      }
     },
   },
 }));
@@ -227,6 +241,10 @@ beforeEach(() => {
   custody.prekeyCalls = 0;
   custody.identityCalls = 0;
   custody.agreementCalls = 0;
+  custody.agreementActiveBorrows = 0;
+  custody.agreementReleases = 0;
+  custody.agreementPending = null;
+  custody.onAgreementStart = null;
   custody.prekeyPending = null;
   custody.onPrekeyStart = null;
   relayProvider.attempt = null;
@@ -495,14 +513,6 @@ describe("§6.3: credential failure is legacy only for an explicitly eligible se
       },
       [1, 1, 0],
     ],
-    [
-      "agreement key store",
-      () => {
-        selectNode("node_unexpected_agreement");
-        custody.agreementFails = true;
-      },
-      [1, 1, 1],
-    ],
   ])(
     "fails closed for an unexpected selection when the %s fails",
     async (_name, arrange, expectedCalls) => {
@@ -557,7 +567,7 @@ describe("§6.3: credential failure is legacy only for an explicitly eligible se
     const classify = vi
       .spyOn(mobileE2eeTrustStore, "classify")
       .mockResolvedValue({ class: "unexpected", clause: "ii" });
-    custody.agreementFails = true;
+    custody.identityFails = true;
     await prepareMobileRelayE2eeAttempt();
 
     // The prior claim is gone, while the new selection's trust context remains
@@ -577,14 +587,14 @@ describe("§6.3: credential failure is legacy only for an explicitly eligible se
     const classify = vi
       .spyOn(mobileE2eeTrustStore, "classify")
       .mockResolvedValue({ class: "unexpected", clause: "ii" });
-    custody.agreementFails = true;
+    custody.identityFails = true;
     await prepareMobileRelayE2eeAttempt();
     expect(getMobileE2eeSessionState().event).toMatchObject({
       kind: "unexpected-node",
       evidence: "none",
     });
 
-    custody.agreementFails = false;
+    custody.identityFails = false;
     let rejectPrekey!: (cause: Error) => void;
     custody.prekeyPending = new Promise<void>((_resolve, reject) => {
       rejectPrekey = reject;
@@ -613,13 +623,12 @@ describe("§6.3: credential failure is legacy only for an explicitly eligible se
     classify.mockRestore();
   });
 
-  it("supplies no provider when an eligible selection cannot borrow the agreement key", async () => {
+  it("does not probe the agreement scalar to decide carrier-absent legacy eligibility", async () => {
     selectNode();
     custody.agreementFails = true;
     await prepareMobileRelayE2eeAttempt();
-    expect(resolveMobileRelayE2eeProvider()).toBeUndefined();
-    await prepareMobileRelayE2eeAttempt();
-    expect(getMobileE2eeSessionState().channel).toBe("legacy");
+    expect(resolveMobileRelayE2eeProvider()).not.toBeUndefined();
+    expect(custody.agreementCalls).toBe(0);
   });
 });
 
@@ -655,7 +664,7 @@ describe("§4.4: absence of evidence is never a legacy channel", () => {
     const classify = vi
       .spyOn(mobileE2eeTrustStore, "classify")
       .mockResolvedValue({ class: "latched" });
-    custody.agreementFails = true;
+    custody.identityFails = true;
     await prepareMobileRelayE2eeAttempt();
 
     // §12.1's latch is not something a local custody failure may talk this
@@ -844,18 +853,82 @@ describe("§12.2: the channel claim is per channel, not per preparation", () => 
   });
 });
 
-describe("the attempt-owned agreement scalar", () => {
-  it("is zeroized when the attempt stops being current", async () => {
+describe("the one-operation agreement-scalar borrower", () => {
+  it("keeps the warm attempt public-only and acquires only when K1 asks", async () => {
     selectNode();
     await prepareMobileRelayE2eeAttempt();
-    const provider = resolveMobileRelayE2eeProvider();
-    expect(provider).not.toBeUndefined();
-    disposeMobileRelayE2eeAttempt();
-    // The next resolution has nothing to hand out and fails closed rather than
-    // handing out a machine whose scalar is now zeros.
-    const context = host();
-    resolveMobileRelayE2eeProvider()!(context.host);
-    expect(context.closes.length).toBe(1);
+    resolveMobileRelayE2eeProvider();
+    const attempt = relayProvider.attempt!;
+
+    expect(custody.agreementCalls).toBe(0);
+    expect("agreementSecretKey" in attempt.credentials).toBe(false);
+
+    await attempt.withNativeAgreementSecretKey!(() => undefined);
+
+    expect(custody.agreementCalls).toBe(1);
+    expect(custody.agreementActiveBorrows).toBe(0);
+    expect(custody.agreementReleases).toBe(1);
+  });
+
+  it.each([
+    "dispose",
+    "selection-change",
+    "generation-change",
+    "trust-revision",
+    "sign-out",
+    "reset",
+  ] as const)(
+    "refuses a late scalar read after %s and returns active borrows to zero",
+    async (terminal) => {
+      selectNode("node_borrow_lifecycle", ACCOUNT, 31);
+      await prepareMobileRelayE2eeAttempt();
+      resolveMobileRelayE2eeProvider();
+      const attempt = relayProvider.attempt!;
+      let releaseRead!: () => void;
+      custody.agreementPending = new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      });
+      let reportStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        reportStarted = resolve;
+      });
+      custody.onAgreementStart = reportStarted;
+      const use = vi.fn(() => undefined);
+
+      const borrow = attempt.withNativeAgreementSecretKey!(use);
+      await started;
+      if (terminal === "dispose") disposeMobileRelayE2eeAttempt();
+      else if (terminal === "selection-change") selectNode("node_borrow_other", ACCOUNT, 32);
+      else if (terminal === "generation-change") selectNode("node_borrow_lifecycle", ACCOUNT, 32);
+      else if (terminal === "trust-revision") {
+        await mobileE2eeTrustStore.beginPairing({
+          hubOrigin: HUB,
+          accountId: ACCOUNT,
+          nodeId: "node_borrow_lifecycle",
+        });
+      } else if (terminal === "sign-out") signOut();
+      else resetMobileRelayE2eeAttemptForTests();
+
+      releaseRead();
+      await expect(borrow).rejects.toThrow("superseded");
+
+      expect(use).not.toHaveBeenCalled();
+      expect(custody.agreementActiveBorrows).toBe(0);
+      expect(custody.agreementReleases).toBe(1);
+    },
+  );
+
+  it("reset disposes the prepared attempt before dropping the test slot", async () => {
+    selectNode("node_reset_lifetime");
+    await prepareMobileRelayE2eeAttempt();
+    resolveMobileRelayE2eeProvider();
+    const attempt = relayProvider.attempt!;
+
+    resetMobileRelayE2eeAttemptForTests();
+
+    await expect(attempt.withNativeAgreementSecretKey!(() => undefined)).rejects.toThrow(
+      "superseded",
+    );
   });
 });
 
