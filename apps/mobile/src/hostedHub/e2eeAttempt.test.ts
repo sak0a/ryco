@@ -248,11 +248,15 @@ function authenticatedStatement(policyGeneration = 8) {
   } as const;
 }
 
-async function prepareVerifiedSelection(nodeId: string, generation = 1): Promise<void> {
+async function prepareVerifiedSelection(
+  nodeId: string,
+  generation = 1,
+  accountId = ACCOUNT,
+): Promise<void> {
   await mobileE2eeTrustStore.hydrate();
   const index = await mobileE2eeTrustStore.beginPairing({
     hubOrigin: HUB,
-    accountId: ACCOUNT,
+    accountId,
     nodeId,
   });
   await mobileE2eeTrustStore.promote(
@@ -264,14 +268,14 @@ async function prepareVerifiedSelection(nodeId: string, generation = 1): Promise
         nodeIdentityPublicKey: NODE_PUBLIC_KEY,
         clientIdentityPublicKey: CLIENT_PUBLIC_KEY,
         hubOrigin: HUB,
-        accountId: ACCOUNT,
+        accountId,
       }).display,
       continuityId: "nct_FFFFFFFFFFFFFFFFFFFFFF",
       acceptedPolicyGeneration: 7,
       decidedAt: 1_000,
     }),
   );
-  selectNode(nodeId, ACCOUNT, generation);
+  selectNode(nodeId, accountId, generation);
   await prepareMobileRelayE2eeAttempt();
   resolveMobileRelayE2eeProvider();
 }
@@ -299,6 +303,21 @@ describe("native E2EE is on: every hosted channel is built with the §4.4 machin
     expect(state.channel).toBe("negotiating");
     // A fresh device: nothing verified anywhere on this Hub (§13.1.1).
     expect(state.markerSet).toBe(false);
+  });
+
+  it("does not reuse a prepared attempt for an adversarially colliding tuple", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("c", "a\u0000b", 11);
+    await prepareMobileRelayE2eeAttempt();
+    resolveMobileRelayE2eeProvider();
+    expect(relayProvider.attempt?.accountId).toBe("a\u0000b");
+    expect(custody.prekeyCalls).toBe(1);
+
+    selectNode("b\u0000c", "a", 11);
+    await prepareMobileRelayE2eeAttempt();
+    resolveMobileRelayE2eeProvider();
+    expect(custody.prekeyCalls).toBe(2);
+    expect(relayProvider.attempt?.accountId).toBe("a");
   });
 });
 
@@ -407,6 +426,20 @@ describe("a selection change while a preparation is in flight", () => {
 });
 
 describe("§6.3: credential failure is legacy only for an explicitly eligible selection", () => {
+  it("does not project one tuple's custody exception onto a colliding selection", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("c", "a\u0000b", 15);
+    custody.prekeyFails = true;
+    await prepareMobileRelayE2eeAttempt();
+    expect(resolveMobileRelayE2eeProvider()).toBeUndefined();
+
+    custody.prekeyFails = false;
+    selectNode("b\u0000c", "a", 15);
+    const provider = resolveMobileRelayE2eeProvider();
+    expect(provider).not.toBeUndefined();
+    expect(instantiateCurrentProvider().closes).toHaveLength(1);
+  });
+
   it("supplies no provider for a legacy-eligible selection when legacy is permitted", async () => {
     selectNode();
     custody.prekeyFails = true;
@@ -827,6 +860,42 @@ describe("the attempt-owned agreement scalar", () => {
 });
 
 describe("authenticated statement persistence owns the mobile handshake", () => {
+  it("isolates colliding pending fences and preserves the newer leaf during old cleanup", async () => {
+    await prepareVerifiedSelection("c", 21, "a\u0000b");
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const first = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const record = vi
+      .spyOn(mobileE2eeTrustStore, "recordAuthenticatedStatement")
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+
+    const firstCommit = relayProvider.attempt!.onStatement!(authenticatedStatement() as never);
+    void Promise.resolve(firstCommit).catch(() => undefined);
+    await Promise.resolve();
+    await prepareVerifiedSelection("b\u0000c", 22, "a");
+    const secondCommit = relayProvider.attempt!.onStatement!(authenticatedStatement(9) as never);
+    void Promise.resolve(secondCommit).catch(() => undefined);
+    await Promise.resolve();
+    expect(record).toHaveBeenCalledTimes(2);
+    expect(instantiateCurrentProvider().closes).toHaveLength(1);
+
+    releaseFirst();
+    await expect(firstCommit).rejects.toThrow("superseded");
+    // Settling and pruning the old leaf must not remove the current selection's
+    // independently pending durable mutation.
+    expect(instantiateCurrentProvider().closes).toHaveLength(1);
+
+    releaseSecond();
+    await secondCommit;
+    expect(instantiateCurrentProvider().closes).toHaveLength(0);
+  });
+
   it("fences a provider opened reentrantly by a statement session listener", async () => {
     await prepareVerifiedSelection("node_reentrant_commit");
     let release!: () => void;

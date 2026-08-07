@@ -107,7 +107,7 @@ afterEach(() => {
 });
 
 describe("§12.1 web latch keying", () => {
-  it("keys on the NUL-joined (hubOrigin, accountId, nodeId) triple", () => {
+  it("keys on every field of the (hubOrigin, accountId, nodeId) triple", () => {
     latchWebE2eeSelection(SELECTION);
     expect(isWebE2eeSelectionLatched(SELECTION)).toBe(true);
 
@@ -139,6 +139,132 @@ describe("§12.1 web latch keying", () => {
         nodeId: "c",
       }),
     ).toBe(false);
+  });
+
+  it("represents adversarial tuples injectively without normalization", () => {
+    const pairs: ReadonlyArray<readonly [WebE2eeSelection, WebE2eeSelection]> = [
+      [
+        { hubOrigin: "https://hub.example.test", accountId: "a\u0000b", nodeId: "c" },
+        { hubOrigin: "https://hub.example.test", accountId: "a", nodeId: "b\u0000c" },
+      ],
+      [
+        { hubOrigin: "origin\u0000account", accountId: "node", nodeId: "tail" },
+        { hubOrigin: "origin", accountId: "account\u0000node", nodeId: "tail" },
+      ],
+      [
+        { hubOrigin: "", accountId: "prefix", nodeId: "suffix" },
+        { hubOrigin: "prefix", accountId: "", nodeId: "suffix" },
+      ],
+      [
+        { hubOrigin: "https://hub.example.test", accountId: "\u00e9", nodeId: "node" },
+        { hubOrigin: "https://hub.example.test", accountId: "e\u0301", nodeId: "node" },
+      ],
+      [
+        { hubOrigin: "https://hub.example.test", accountId: "::", nodeId: "a:b" },
+        { hubOrigin: "https://hub.example.test", accountId: ":", nodeId: ":a:b" },
+      ],
+      [
+        {
+          hubOrigin: "h".repeat(128),
+          accountId: "\ud83d\ude00".repeat(64),
+          nodeId: `node_${"n".repeat(43)}`,
+        },
+        {
+          hubOrigin: `${"h".repeat(127)}x`,
+          accountId: `${"\ud83d\ude00".repeat(63)}\ud83d\ude01`,
+          nodeId: `node_${"n".repeat(42)}x`,
+        },
+      ],
+    ];
+
+    for (const [first, second] of pairs) {
+      clearWebE2eeLatches();
+      latchWebE2eeSelection(first);
+      recordWebE2eePolicyGeneration(first, 17);
+      expect(isWebE2eeSelectionLatched(first)).toBe(true);
+      expect(isWebE2eeSelectionLatched(second)).toBe(false);
+      expect(acceptedWebE2eePolicyGeneration(second)).toBeUndefined();
+
+      latchWebE2eeSelection(second);
+      recordWebE2eePolicyGeneration(second, 9);
+      expect(acceptedWebE2eePolicyGeneration(first)).toBe(17);
+      expect(acceptedWebE2eePolicyGeneration(second)).toBe(9);
+    }
+  });
+
+  it("keeps deterministically generated distinct tuples injective", () => {
+    // Bounded xorshift32 keeps the property matrix reproducible while producing
+    // combinations beyond the fixed regression table above.
+    let state = 0x51_2e_2e_11;
+    const next = (): number => {
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      return state >>> 0;
+    };
+    const edgeValues = [
+      "",
+      "\u0000",
+      "prefix",
+      "prefix\u0000suffix",
+      "\u00e9",
+      "e\u0301",
+      "\ud83d\ude00",
+      "a".repeat(256),
+      "\ud83d\ude00".repeat(64),
+      `node_${"n".repeat(43)}`,
+    ] as const;
+    const atoms = [
+      "",
+      "\u0000",
+      ":",
+      "/",
+      "prefix",
+      "suffix",
+      "\u00e9",
+      "e\u0301",
+      "\ud83d\ude00",
+    ] as const;
+    const generatedValue = (iteration: number, field: number): string => {
+      // Over each 30-case cycle every edge is placed, unchanged, into each of
+      // the three tuple fields. The other fields remain seeded combinations.
+      const edgeIndex = Math.floor(iteration / 3) % edgeValues.length;
+      if (field === iteration % 3) return edgeValues[edgeIndex] ?? "";
+      const edge = edgeValues[next() % edgeValues.length] ?? "";
+      const tailLength = next() % 5;
+      let tail = "";
+      for (let index = 0; index < tailLength; index += 1) {
+        tail += atoms[next() % atoms.length] ?? "";
+      }
+      return `${edge}${tail}`;
+    };
+
+    const fields = ["hubOrigin", "accountId", "nodeId"] as const;
+    for (let iteration = 0; iteration < 192; iteration += 1) {
+      const first: WebE2eeSelection = {
+        hubOrigin: generatedValue(iteration, 0),
+        accountId: generatedValue(iteration, 1),
+        nodeId: generatedValue(iteration, 2),
+      };
+      const changedField = fields[iteration % fields.length] ?? "nodeId";
+      const second: WebE2eeSelection = {
+        ...first,
+        [changedField]: `${first[changedField]}\u0000property-${iteration}`,
+      };
+
+      clearWebE2eeLatches();
+      latchWebE2eeSelection(first);
+      recordWebE2eePolicyGeneration(first, 10_000 + iteration);
+      expect(isWebE2eeSelectionLatched(second)).toBe(false);
+      expect(acceptedWebE2eePolicyGeneration(second)).toBeUndefined();
+
+      latchWebE2eeSelection(second);
+      recordWebE2eePolicyGeneration(second, iteration);
+      expect(isWebE2eeSelectionLatched(first)).toBe(true);
+      expect(isWebE2eeSelectionLatched(second)).toBe(true);
+      expect(acceptedWebE2eePolicyGeneration(first)).toBe(10_000 + iteration);
+      expect(acceptedWebE2eePolicyGeneration(second)).toBe(iteration);
+    }
   });
 });
 

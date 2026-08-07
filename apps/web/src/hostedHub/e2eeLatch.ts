@@ -38,18 +38,44 @@ export interface WebE2eeSelection {
   readonly nodeId: string;
 }
 
-const latched = new Set<string>();
-const acceptedPolicyGenerations = new Map<string, number>();
+type NodesByAccount = Map<string, Set<string>>;
+type GenerationsByNode = Map<string, number>;
+type GenerationsByAccount = Map<string, GenerationsByNode>;
 
-/**
- * The triple as one comparable string.
- *
- * NUL-joined rather than concatenated: `accountId` and `nodeId` are Hub-issued
- * (§12.1.1), so a separator either could contain would let one selection's key
- * be spelled by another's fields — and on this tier the Hub picks both.
- */
-function selectionKey(selection: WebE2eeSelection): string {
-  return `${selection.hubOrigin}\u0000${selection.accountId}\u0000${selection.nodeId}`;
+// The nesting is the representation: each field remains a distinct Map key, so
+// no character in a Hub-issued value can be reinterpreted as a tuple boundary.
+const latched = new Map<string, NodesByAccount>();
+const acceptedPolicyGenerations = new Map<string, GenerationsByAccount>();
+
+function latchedNodes(selection: WebE2eeSelection, create: boolean): Set<string> | undefined {
+  let byAccount = latched.get(selection.hubOrigin);
+  if (byAccount === undefined && create) {
+    byAccount = new Map();
+    latched.set(selection.hubOrigin, byAccount);
+  }
+  let nodes = byAccount?.get(selection.accountId);
+  if (nodes === undefined && create && byAccount !== undefined) {
+    nodes = new Set();
+    byAccount.set(selection.accountId, nodes);
+  }
+  return nodes;
+}
+
+function generationNodes(
+  selection: WebE2eeSelection,
+  create: boolean,
+): GenerationsByNode | undefined {
+  let byAccount = acceptedPolicyGenerations.get(selection.hubOrigin);
+  if (byAccount === undefined && create) {
+    byAccount = new Map();
+    acceptedPolicyGenerations.set(selection.hubOrigin, byAccount);
+  }
+  let nodes = byAccount?.get(selection.accountId);
+  if (nodes === undefined && create && byAccount !== undefined) {
+    nodes = new Map();
+    byAccount.set(selection.accountId, nodes);
+  }
+  return nodes;
 }
 
 /**
@@ -66,7 +92,7 @@ function selectionKey(selection: WebE2eeSelection): string {
  * opinion about how often it is called.
  */
 export function latchWebE2eeSelection(selection: WebE2eeSelection): void {
-  latched.add(selectionKey(selection));
+  latchedNodes(selection, true)?.add(selection.nodeId);
 }
 
 /**
@@ -76,7 +102,7 @@ export function latchWebE2eeSelection(selection: WebE2eeSelection): void {
  * and **legacy-eligible** otherwise."
  */
 export function isWebE2eeSelectionLatched(selection: WebE2eeSelection): boolean {
-  return latched.has(selectionKey(selection));
+  return latchedNodes(selection, false)?.has(selection.nodeId) ?? false;
 }
 
 /**
@@ -85,7 +111,7 @@ export function isWebE2eeSelectionLatched(selection: WebE2eeSelection): boolean 
  * the selection; it is not represented as generation zero.
  */
 export function acceptedWebE2eePolicyGeneration(selection: WebE2eeSelection): number | undefined {
-  return acceptedPolicyGenerations.get(selectionKey(selection));
+  return generationNodes(selection, false)?.get(selection.nodeId);
 }
 
 /**
@@ -97,10 +123,10 @@ export function recordWebE2eePolicyGeneration(
   selection: WebE2eeSelection,
   generation: number,
 ): void {
-  const key = selectionKey(selection);
-  const accepted = acceptedPolicyGenerations.get(key);
+  const nodes = generationNodes(selection, true);
+  const accepted = nodes?.get(selection.nodeId);
   if (accepted === undefined || generation > accepted) {
-    acceptedPolicyGenerations.set(key, generation);
+    nodes?.set(selection.nodeId, generation);
   }
 }
 

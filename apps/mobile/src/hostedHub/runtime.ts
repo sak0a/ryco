@@ -175,19 +175,31 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
  */
 function watchSelectionForE2ee(): void {
   if (selectionWatch !== undefined) return;
-  let last = "";
+  interface SelectionSnapshot {
+    readonly accountStatus: ReturnType<typeof hostedHubStore.getState>["accountStatus"];
+    readonly accountId: string | null;
+    readonly nodeId: string | null;
+    readonly generation: number;
+    readonly trustRevision: number;
+  }
+  const sameSnapshot = (left: SelectionSnapshot, right: SelectionSnapshot): boolean =>
+    left.accountStatus === right.accountStatus &&
+    left.accountId === right.accountId &&
+    left.nodeId === right.nodeId &&
+    left.generation === right.generation &&
+    left.trustRevision === right.trustRevision;
+
+  let last: SelectionSnapshot | undefined;
   const evaluate = () => {
     const state = hostedHubStore.getState();
-    // NUL-joined: `accountId` and `nodeId` are Hub-issued (§12.1.1), so a
-    // separator either could contain would let one selection's key be spelled
-    // by another's fields.
-    const next = [
-      state.accountStatus,
-      state.account?.id ?? "",
-      state.selectedNode?.id ?? "",
-      String(mobileE2eeTrustStore.revision()),
-    ].join("\u0000");
-    if (next === last) return;
+    const next: SelectionSnapshot = {
+      accountStatus: state.accountStatus,
+      accountId: state.account?.id ?? null,
+      nodeId: state.selectedNode?.id ?? null,
+      generation: state.generation,
+      trustRevision: mobileE2eeTrustStore.revision(),
+    };
+    if (last !== undefined && sameSnapshot(next, last)) return;
     last = next;
     if (state.accountStatus !== "authenticated" || state.selectedNode === null) {
       disposeMobileRelayE2eeAttempt();
