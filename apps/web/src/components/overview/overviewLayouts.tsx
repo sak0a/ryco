@@ -166,7 +166,7 @@ function buildSections(
       summary: summary.hasDiff ? (
         <DiffStat additions={summary.additions} deletions={summary.deletions} />
       ) : undefined,
-      defaultOpen: true,
+      defaultOpen: false,
       body: (
         <ChangesContent
           changes={props.changes}
@@ -514,7 +514,6 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
               ) : null}
             </>
           }
-          defaultOpen
         >
           <ChangesContent
             changes={props.changes}

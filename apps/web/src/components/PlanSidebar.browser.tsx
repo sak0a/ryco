@@ -281,7 +281,7 @@ describe("PlanSidebar overview panel", () => {
       );
 
       expect(changesButton).not.toBeNull();
-      expect(changesButton!.getAttribute("aria-expanded")).toBe("true");
+      expect(changesButton!.getAttribute("aria-expanded")).toBe("false");
       expect(changesButton!.textContent).toContain("5 files");
       expect(changesButton!.textContent).toContain("+184");
       expect(changesButton!.textContent).toContain("−42");

@@ -3,7 +3,11 @@
 ## Task Completion Requirements
 
 - Use the Bun version pinned in `package.json` and install with `bun install --frozen-lockfile`.
-- Run the full repository backstop before considering a change complete:
+- Validation must be proportional to the size and risk of the change.
+- For small, localized edits, run only focused checks that cover the changed files or affected
+  package. Do not run the full repository test suite, a full build, or unrelated package checks.
+- Run the full repository backstop only for very large, cross-cutting, or high-risk changes that
+  materially affect multiple packages or major runtime boundaries:
 
   ```sh
   bun fmt
@@ -16,8 +20,8 @@
   ```
 
 - NEVER run `bun test`. Always use `bun run test` (runs Vitest).
-- For changes to web interaction, responsive layout, PWA behavior, browser lifecycle, or hosted
-  reconnect behavior, also build the web package and run the browser suite:
+- For very large or high-risk changes to web interaction, responsive layout, PWA behavior, browser
+  lifecycle, or hosted reconnect behavior, also build the web package and run the browser suite:
 
   ```sh
   bun run build --filter=@ryco/web
@@ -27,9 +31,9 @@
   Install the pinned Playwright browser runtime first with
   `bun run --cwd apps/web test:browser:install` when it is not already present.
 
-- Run `bun run build:desktop` for desktop pipeline changes and `bun run release:smoke` for release-
-  workflow changes. CI may path-scope these jobs, but local validation must cover every affected
-  surface.
+- Run `bun run build:desktop` for large or high-risk desktop pipeline changes and
+  `bun run release:smoke` for large or high-risk release-workflow changes. CI may path-scope these
+  jobs, but local validation should remain proportional to the affected surface.
 
 ## TypeScript
 

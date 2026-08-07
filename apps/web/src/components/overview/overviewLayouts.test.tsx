@@ -68,6 +68,7 @@ describe("overview panel layouts", () => {
     expect(markup).toContain("Changes");
     expect(markup).toContain("Diff");
     expect(markup).not.toContain("grid-cols-2");
+    expect(markup).not.toContain('aria-expanded="true"');
   });
 
   it("renders glanceable metric tiles in the hybrid layout", () => {
@@ -76,12 +77,13 @@ describe("overview panel layouts", () => {
     expect(markup).toContain("grid-cols-4");
     expect(markup).toContain("Diff");
     expect(markup).toContain("Plan");
+    expect(markup).not.toContain('aria-expanded="true"');
   });
 
   it("renders expandable lanes in the status board layout", () => {
     setPanelLayout("board");
     const markup = renderToStaticMarkup(<PlanSidebar {...baseProps} />);
-    expect(markup.match(/aria-expanded="true"/g)).toHaveLength(1);
+    expect(markup).not.toContain('aria-expanded="true"');
     expect(markup).toContain('data-slot="overview-section-lane-header"');
     expect(markup).toContain("min-h-10");
     expect(markup).toContain("Changes");

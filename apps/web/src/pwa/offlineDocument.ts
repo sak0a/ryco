@@ -13,7 +13,7 @@ export function renderHostedPwaOfflineDocument(input: { readonly startUrl: strin
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#161616" />
+    <meta name="theme-color" content="#0b0b0c" />
     <title>Ryco is offline</title>
     <style>
       :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
