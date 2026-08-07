@@ -337,6 +337,14 @@
   --app-composer-alpha: 93%;
   --app-composer-dark-alpha: 92%;
   --app-composer-filter: blur(10px) saturate(158%);
+  /* Toasts share the composer's rationale: they float over arbitrary content,
+     so they keep a glass floor even at Solid — at popover weight, since they
+     are transient overlays. Steps above Solid thin with the popover plate.
+     The Solid caps stay high enough that muted body text keeps ~AA contrast
+     over a worst-case uniform backdrop; the blur carries the glass read. */
+  --app-toast-alpha: 92%;
+  --app-toast-dark-alpha: 88%;
+  --app-toast-filter: blur(20px) saturate(158%);
   --app-dialog-viewport-light-alpha: 48%;
   --app-dialog-viewport-dark-alpha: 28%;
   --app-sheet-backdrop-alpha: 32%;
@@ -511,6 +519,9 @@
     --app-composer-alpha: 100% !important;
     --app-composer-dark-alpha: 100% !important;
     --app-composer-filter: none !important;
+    --app-toast-alpha: 100% !important;
+    --app-toast-dark-alpha: 100% !important;
+    --app-toast-filter: none !important;
   }
 }
 
@@ -626,6 +637,32 @@ code {
       var(--popover) var(--app-surface-dark-opacity),
       transparent
     );
+  }
+
+  /* The toast card's material. Unlike .app-surface it never resolves to a
+     solid plate: notifications drop in over arbitrary content, so the alpha
+     is floored below full opacity and the filter never resolves to `none`
+     (same rationale as the composer's glass floor). */
+  .app-toast-surface {
+    background-color: color-mix(in srgb, var(--popover) var(--app-toast-alpha), transparent);
+    -webkit-backdrop-filter: var(--app-toast-filter);
+    backdrop-filter: var(--app-toast-filter);
+  }
+
+  /* `:where(.dark)` keeps this at (0,1,0) so the later forced-colors and
+     no-backdrop-filter fallbacks can out-cascade it by source order — a bare
+     `.dark` prefix would pin dark mode to the translucent plate even under
+     Windows High Contrast. */
+  :where(.dark) .app-toast-surface {
+    background-color: color-mix(in srgb, var(--popover) var(--app-toast-dark-alpha), transparent);
+  }
+
+  /* Without backdrop-filter support a thinned plate is haze, not frost;
+     fall back to the opaque popover plate for legibility. */
+  @supports not (backdrop-filter: blur(1px)) {
+    .app-toast-surface {
+      background-color: var(--popover);
+    }
   }
 
   /* The ambient base layer behind the shell. Derived from --primary at very
@@ -904,7 +941,9 @@ code {
      nested filter would re-blur the shell itself. The nested surface keeps
      its plate paint; only the filter is suppressed. */
   .selection-glass-surface .app-surface,
-  .app-chrome-glass .app-surface {
+  .app-chrome-glass .app-surface,
+  .selection-glass-surface .app-toast-surface,
+  .app-chrome-glass .app-toast-surface {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -964,7 +1003,8 @@ code {
   }
 
   @media (prefers-reduced-transparency: reduce) {
-    .app-surface {
+    .app-surface,
+    .app-toast-surface {
       background-color: var(--popover);
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
@@ -1025,6 +1065,7 @@ code {
 
   @media (forced-colors: active) {
     .app-surface,
+    .app-toast-surface,
     .app-muted-surface,
     .app-muted-before::before,
     .app-chrome-glass {

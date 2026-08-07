@@ -611,4 +611,46 @@ describe("desktop appearance regression", () => {
       }
     }
   });
+
+  it("pins the toast material floor at every step", () => {
+    // Like the composer, the toast keeps translucent, blurred material even at
+    // Solid; steps above Solid thin with the popover plate under the same
+    // legibility floors. The OS reduced-transparency override lives in CSS.
+    const TOAST_SURFACE_VARIABLES: Record<string, ReadonlyArray<string>> = {
+      default: [
+        "--app-toast-alpha: 92%;",
+        "--app-toast-dark-alpha: 88%;",
+        "--app-toast-filter: blur(20px) saturate(158%);",
+      ],
+      light: [
+        "--app-toast-alpha: 89.6%;",
+        "--app-toast-dark-alpha: 88%;",
+        "--app-toast-filter: blur(20px) saturate(158%);",
+      ],
+      medium: [
+        "--app-toast-alpha: 79.2%;",
+        "--app-toast-dark-alpha: 79.2%;",
+        "--app-toast-filter: blur(20px) saturate(158%);",
+      ],
+      high: [
+        "--app-toast-alpha: 71.4%;",
+        "--app-toast-dark-alpha: 71.4%;",
+        "--app-toast-filter: blur(22px) saturate(158%);",
+      ],
+      glass: [
+        "--app-toast-alpha: 66%;",
+        "--app-toast-dark-alpha: 63.6%;",
+        "--app-toast-filter: blur(26px) saturate(158%);",
+      ],
+    };
+    for (const [step, expected] of Object.entries(TOAST_SURFACE_VARIABLES)) {
+      const style = installStyleDocument();
+      setAppearancePreference("surfaceTransparency", step);
+      applyAppearancePreferencesToDocument();
+      const css = style.read();
+      for (const declaration of expected) {
+        expect(css, `step "${step}"`).toContain(declaration);
+      }
+    }
+  });
 });

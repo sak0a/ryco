@@ -17,10 +17,7 @@ import {
 } from "@ryco/contracts";
 
 import { normalizeDispatchCommand } from "../orchestration/Normalizer.ts";
-import {
-  readTaskOutput,
-  taskOutputRootsFromSettings,
-} from "../orchestration/taskOutputQuery.ts";
+import { readTaskOutput, taskOutputRootsFromSettings } from "../orchestration/taskOutputQuery.ts";
 import {
   readWorkflowScript,
   workflowScriptRootsFromSettings,
@@ -201,26 +198,26 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
         ownerEffect(
           ORCHESTRATION_WS_METHODS.getWorkflowScript,
           Effect.gen(function* () {
-          // Thread binding first: the requested thread's persisted
-          // activities must reference this exact script path. "not-found"
-          // deliberately does not distinguish unknown threads, unreferenced
-          // paths, and missing files (anti-probing).
-          const referenced = yield* referencedTaskPaths(input.threadId);
-          if (!referenced.scriptPaths.has(input.scriptPath)) {
-            return yield* new OrchestrationGetWorkflowScriptError({
-              reason: "not-found",
+            // Thread binding first: the requested thread's persisted
+            // activities must reference this exact script path. "not-found"
+            // deliberately does not distinguish unknown threads, unreferenced
+            // paths, and missing files (anti-probing).
+            const referenced = yield* referencedTaskPaths(input.threadId);
+            if (!referenced.scriptPaths.has(input.scriptPath)) {
+              return yield* new OrchestrationGetWorkflowScriptError({
+                reason: "not-found",
+                scriptPath: input.scriptPath,
+              });
+            }
+            // Settings only widen the containment roots; a settings failure
+            // must not block reads under the default home root.
+            const settings = yield* serverSettings.getSettings.pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+            );
+            return yield* readWorkflowScript({
               scriptPath: input.scriptPath,
+              roots: workflowScriptRootsFromSettings(settings),
             });
-          }
-          // Settings only widen the containment roots; a settings failure
-          // must not block reads under the default home root.
-          const settings = yield* serverSettings.getSettings.pipe(
-            Effect.catch(() => Effect.succeed(undefined)),
-          );
-          return yield* readWorkflowScript({
-            scriptPath: input.scriptPath,
-            roots: workflowScriptRootsFromSettings(settings),
-          });
           }),
         ),
         { "rpc.aggregate": "orchestration" },
@@ -231,23 +228,23 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
         ownerEffect(
           ORCHESTRATION_WS_METHODS.getTaskOutput,
           Effect.gen(function* () {
-          // Same thread binding as getWorkflowScript, against the task
-          // `outputFile` handles the thread's activities reference.
-          const referenced = yield* referencedTaskPaths(input.threadId);
-          if (!referenced.outputPaths.has(input.outputPath)) {
-            return yield* new OrchestrationGetTaskOutputError({
-              reason: "not-found",
+            // Same thread binding as getWorkflowScript, against the task
+            // `outputFile` handles the thread's activities reference.
+            const referenced = yield* referencedTaskPaths(input.threadId);
+            if (!referenced.outputPaths.has(input.outputPath)) {
+              return yield* new OrchestrationGetTaskOutputError({
+                reason: "not-found",
+                outputPath: input.outputPath,
+              });
+            }
+            const settings = yield* serverSettings.getSettings.pipe(
+              Effect.catch(() => Effect.succeed(undefined)),
+            );
+            return yield* readTaskOutput({
               outputPath: input.outputPath,
+              offset: input.offset,
+              roots: taskOutputRootsFromSettings(settings),
             });
-          }
-          const settings = yield* serverSettings.getSettings.pipe(
-            Effect.catch(() => Effect.succeed(undefined)),
-          );
-          return yield* readTaskOutput({
-            outputPath: input.outputPath,
-            offset: input.offset,
-            roots: taskOutputRootsFromSettings(settings),
-          });
           }),
         ),
         { "rpc.aggregate": "orchestration" },
@@ -258,47 +255,47 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
         ownerEffect(
           ORCHESTRATION_WS_METHODS.stopBackgroundTask,
           Option.match(providerService, {
-          onNone: () =>
-            // No ProviderService in the environment is a wiring gap, not a
-            // client mistake — log loudly and fail closed.
-            Effect.logError("stopBackgroundTask has no ProviderService in context").pipe(
-              Effect.andThen(
-                Effect.fail(
-                  new OrchestrationStopBackgroundTaskError({
-                    reason: "stop-failed",
-                    threadId: input.threadId,
-                    taskId: input.taskId,
-                  }),
+            onNone: () =>
+              // No ProviderService in the environment is a wiring gap, not a
+              // client mistake — log loudly and fail closed.
+              Effect.logError("stopBackgroundTask has no ProviderService in context").pipe(
+                Effect.andThen(
+                  Effect.fail(
+                    new OrchestrationStopBackgroundTaskError({
+                      reason: "stop-failed",
+                      threadId: input.threadId,
+                      taskId: input.taskId,
+                    }),
+                  ),
                 ),
               ),
-            ),
-          onSome: (service) =>
-            service.stopBackgroundTask({ threadId: input.threadId, taskId: input.taskId }).pipe(
-              Effect.tapError((cause) =>
-                Effect.logWarning("stopBackgroundTask failed", {
-                  threadId: input.threadId,
-                  taskId: input.taskId,
-                  cause,
-                }),
-              ),
-              // The raw provider cause stays in server logs; the wire error
-              // carries only the classified reason.
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationStopBackgroundTaskError({
-                    reason:
-                      cause._tag === "ProviderUnsupportedError"
-                        ? "unsupported"
-                        : cause._tag === "ProviderSessionNotFoundError" ||
-                            cause._tag === "ProviderAdapterSessionNotFoundError" ||
-                            cause._tag === "ProviderAdapterSessionClosedError"
-                          ? "session-not-found"
-                          : "stop-failed",
+            onSome: (service) =>
+              service.stopBackgroundTask({ threadId: input.threadId, taskId: input.taskId }).pipe(
+                Effect.tapError((cause) =>
+                  Effect.logWarning("stopBackgroundTask failed", {
                     threadId: input.threadId,
                     taskId: input.taskId,
+                    cause,
                   }),
+                ),
+                // The raw provider cause stays in server logs; the wire error
+                // carries only the classified reason.
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationStopBackgroundTaskError({
+                      reason:
+                        cause._tag === "ProviderUnsupportedError"
+                          ? "unsupported"
+                          : cause._tag === "ProviderSessionNotFoundError" ||
+                              cause._tag === "ProviderAdapterSessionNotFoundError" ||
+                              cause._tag === "ProviderAdapterSessionClosedError"
+                            ? "session-not-found"
+                            : "stop-failed",
+                      threadId: input.threadId,
+                      taskId: input.taskId,
+                    }),
+                ),
               ),
-            ),
           }).pipe(Effect.as({})),
         ),
         { "rpc.aggregate": "orchestration" },

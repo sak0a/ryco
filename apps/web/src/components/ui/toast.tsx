@@ -97,7 +97,10 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
 /** Dismiss-only: circular control overlapping the card corner (iOS notification–style). */
 const toastCornerDismissClass = "absolute z-20 -top-1.5 -right-1.5";
 const toastCornerOrbClass = cn(
-  "app-surface inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 text-muted-foreground shadow-sm outline-none backdrop-blur-sm",
+  // No `backdrop-blur-*` utility here: it would out-cascade the
+  // `app-toast-surface` filter (utilities layer wins) and defeat the
+  // reduced-transparency / forced-colors overrides with it.
+  "app-toast-surface inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 text-muted-foreground shadow-sm outline-none",
   "transition-[color,background-color,box-shadow] hover:text-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
 );
@@ -492,7 +495,7 @@ function ThreadToastVisibleAutoDismiss({
   return null;
 }
 
-function ToastProvider({ children, position = "top-right", ...props }: ToastProviderProps) {
+function ToastProvider({ children, position = "top-center", ...props }: ToastProviderProps) {
   return (
     <Toast.Provider toastManager={toastManager} {...props}>
       {children}
@@ -501,7 +504,7 @@ function ToastProvider({ children, position = "top-right", ...props }: ToastProv
   );
 }
 
-function Toasts({ position = "top-right" }: { position: ToastPosition }) {
+function Toasts({ position = "top-center" }: { position: ToastPosition }) {
   const { toasts } = Toast.useToastManager<ThreadToastData>();
   const activeThreadRef = useActiveThreadRefFromRoute();
   const isTop = position.startsWith("top");
@@ -523,12 +526,14 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
     <Toast.Portal data-slot="toast-portal">
       <Toast.Viewport
         className={cn(
-          // On the phone tier (where the mobile chat header renders the
-          // session tab strip) the header offset also clears the tab strip;
-          // the desktop tier keeps the original offset.
-          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 phone:[--toast-header-offset:76px] not-phone:[--toast-header-offset:52px] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
-          // Vertical positioning
-          "data-[position*=top]:top-[calc(var(--toast-inset)+var(--toast-header-offset))]",
+          // Top placement: on desktop the toast drops in at the viewport's top
+          // edge, overlaying the header chrome (system-notification style). The
+          // phone tier keeps clearing the app bar + session tab strip instead —
+          // those carry navigation state a covered toast would hide.
+          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-105 phone:[--toast-top:84px] not-phone:[--toast-top:--spacing(3)] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
+          // Vertical positioning. `--toast-inset` deliberately plays no part in
+          // the top offset; it stays for horizontal insets and swipe travel.
+          "data-[position*=top]:top-(--toast-top)",
           "data-[position*=bottom]:bottom-(--toast-inset)",
           // Horizontal positioning
           "data-[position*=left]:left-(--toast-inset)",
@@ -554,7 +559,10 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
-                "app-surface absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-lg border not-dark:bg-clip-padding text-popover-foreground shadow-lg/5 [transition:transform_var(--app-motion-duration-stack)_var(--app-motion-spring-gentle),opacity_var(--app-motion-duration-stack)_var(--app-motion-spring-gentle),height_var(--app-motion-duration-chip)] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-lg)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+                // The snappy spring drives the transform so a new toast drops in
+                // and settles with a slight overshoot; opacity fades on the pop
+                // duration so entrance and exit read as material, not a slide.
+                "app-toast-surface absolute z-[calc(9999-var(--toast-index))] w-full overflow-visible select-none rounded-xl border not-dark:bg-clip-padding text-popover-foreground shadow-xl/5 [transition:transform_var(--app-motion-duration-stack)_var(--app-motion-spring-snappy),opacity_var(--app-motion-duration-pop)_var(--app-motion-spring-gentle),height_var(--app-motion-duration-chip)] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
                 // Base positioning using data-position
                 "data-[position*=right]:right-0 data-[position*=right]:left-auto",
                 "data-[position*=left]:right-auto data-[position*=left]:left-0",
@@ -588,14 +596,21 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                 "data-limited:opacity-0",
                 // Expanded stack
                 "data-position:data-expanded:transform-[translateX(var(--toast-swipe-movement-x))_translateY(var(--toast-calc-offset-y))]",
-                // Starting and ending animations
-                "data-[position*=top]:data-starting-style:transform-[translateY(calc(-100%-var(--toast-inset)))]",
+                // Starting and ending animations. Top toasts materialize: a
+                // short drop with a scale settle rather than a slide from
+                // off-screen; bottom keeps the slide from the viewport edge.
+                "data-starting-style:opacity-0",
+                "data-[position*=top]:data-starting-style:transform-[translateY(-1rem)_scale(0.95)]",
                 "data-[position*=bottom]:data-starting-style:transform-[translateY(calc(100%+var(--toast-inset)))]",
-                "data-[position*=top]:data-[position*=right]:data-starting-style:transform-[translateX(calc(100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
                 "data-ending-style:opacity-0",
-                // Ending animations (direction-aware)
-                "data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateY(calc(100%+var(--toast-inset)))]",
-                "data-[position*=top]:data-[position*=right]:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateX(calc(100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
+                // Ending animations (direction-aware). Top toasts recede up and
+                // shrink slightly while fading; bottom slides back out. The
+                // collapsed stack must exit from the peek transform, not from
+                // `--toast-calc-offset-y` (that is the EXPANDED offset — using
+                // it made a behind toast lurch down from under the front card).
+                "data-[position*=top]:not-data-expanded:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateY(calc(var(--toast-index)*var(--toast-peek)+var(--toast-shrink)*var(--toast-calc-height)-0.5rem))_scale(calc(var(--toast-scale)-0.03))]",
+                "data-[position*=top]:data-expanded:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateY(calc(var(--toast-calc-offset-y)-0.5rem))_scale(0.97)]",
+                "data-[position*=bottom]:data-ending-style:not-data-limited:not-data-swipe-direction:transform-[translateY(calc(100%+var(--toast-inset)))]",
                 "data-ending-style:data-[swipe-direction=left]:transform-[translateX(calc(var(--toast-swipe-movement-x)-100%-var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
                 "data-ending-style:data-[swipe-direction=right]:transform-[translateX(calc(var(--toast-swipe-movement-x)+100%+var(--toast-inset)))_translateY(var(--toast-calc-offset-y))]",
                 "data-ending-style:data-[swipe-direction=up]:transform-[translateY(calc(var(--toast-swipe-movement-y)-100%-var(--toast-inset)))]",
@@ -706,7 +721,7 @@ function AnchoredToasts() {
               >
                 <Toast.Root
                   className={cn(
-                    "app-surface relative overflow-visible text-balance border not-dark:bg-clip-padding text-popover-foreground text-xs transition-[scale,opacity] duration-(--app-motion-duration-pop) before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
+                    "app-toast-surface relative overflow-visible text-balance border not-dark:bg-clip-padding text-popover-foreground text-xs transition-[scale,opacity] duration-(--app-motion-duration-pop) before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
                     tooltipStyle
                       ? "rounded-md shadow-md/5 before:rounded-[calc(var(--radius-md)-1px)]"
                       : "rounded-lg shadow-lg/5 before:rounded-[calc(var(--radius-lg)-1px)]",

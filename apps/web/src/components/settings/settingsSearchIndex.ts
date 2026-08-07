@@ -248,6 +248,12 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
     keywords: "debug performance slow",
   },
   {
+    section: "diagnostics",
+    title: "Test notification",
+    description: "Fire sample notifications to preview the toast design and stacking.",
+    keywords: "toast notifications preview trigger sample",
+  },
+  {
     section: "statistics",
     title: "Statistics",
     description: "Usage activity and history.",
