@@ -35,7 +35,13 @@ const NODE_PUBLIC_KEY = bytes("03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1
  */
 const custody = vi.hoisted(() => ({
   prekeyFails: false,
+  identityFails: false,
   agreementFails: false,
+  prekeyCalls: 0,
+  identityCalls: 0,
+  agreementCalls: 0,
+  prekeyPending: null as Promise<void> | null,
+  onPrekeyStart: null as (() => void) | null,
 }));
 
 vi.mock("expo-secure-store", () => ({
@@ -58,11 +64,16 @@ vi.mock("expo-sqlite/kv-store", () => ({
   default: { getItem: async () => null, setItem: async () => {}, removeItem: async () => {} },
 }));
 vi.mock("../platform/deviceKey", () => ({
-  getMobileDeviceIdentityPublicKey: async () => CLIENT_PUBLIC_KEY,
+  getMobileDeviceIdentityPublicKey: async () => {
+    custody.identityCalls += 1;
+    if (custody.identityFails) throw new Error("no device identity key");
+    return CLIENT_PUBLIC_KEY;
+  },
 }));
 vi.mock("../platform/e2eeAgreementKey", () => ({
   mobileE2eeAgreementKey: {
     withSecretKey: async (use: (secretKey: Uint8Array) => unknown) => {
+      custody.agreementCalls += 1;
       if (custody.agreementFails) throw new Error("no agreement key");
       return use(Uint8Array.from(AGREEMENT_SECRET_KEY));
     },
@@ -70,11 +81,19 @@ vi.mock("../platform/e2eeAgreementKey", () => ({
 }));
 vi.mock("../platform/e2eeClientPrekey", () => ({
   mobileClientE2eePrekey: {
-    ensure: async () => {
+    ensure: async ({ accountId }: { readonly accountId: string }) => {
+      custody.prekeyCalls += 1;
+      custody.onPrekeyStart?.();
+      if (custody.prekeyPending !== null) await custody.prekeyPending;
       if (custody.prekeyFails) throw new Error("no prekey");
+      // §7.1 bounds the UTF-8 account id at 256 bytes. This represents the
+      // named encoder refusing an oversized §7.4 prekey transcript.
+      if (new TextEncoder().encode(accountId).byteLength > 256) {
+        throw new Error("prekey transcript unavailable");
+      }
       return {
         hubOrigin: HUB,
-        accountId: ACCOUNT,
+        accountId,
         identityPublicKey: CLIENT_PUBLIC_KEY,
         agreementPublicKey: AGREEMENT_PUBLIC_KEY,
         transcript: new Uint8Array([1, 2, 3]),
@@ -106,11 +125,11 @@ import {
   resolveMobileRelayE2eeProvider,
 } from "./e2eeAttempt";
 
-function selectNode(nodeId = "node_1"): void {
+function selectNode(nodeId = "node_1", accountId = ACCOUNT): void {
   hostedHubStore.setState({
     accountStatus: "authenticated",
     account: {
-      id: ACCOUNT,
+      id: accountId,
       displayName: "Ada",
       role: "admin",
       createdAt: 0,
@@ -164,8 +183,15 @@ function host(): { readonly host: RelayE2eeHost; readonly closes: unknown[] } {
 }
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   custody.prekeyFails = false;
+  custody.identityFails = false;
   custody.agreementFails = false;
+  custody.prekeyCalls = 0;
+  custody.identityCalls = 0;
+  custody.agreementCalls = 0;
+  custody.prekeyPending = null;
+  custody.onPrekeyStart = null;
   resetMobileRelayE2eeAttemptForTests();
   resetMobileE2eeSessionForTests();
   signOut();
@@ -203,6 +229,7 @@ describe("an attempt that is not ready fails the channel closed", () => {
     // No `prepare` has run: this is the launch race the slot exists to survive.
     const provider = resolveMobileRelayE2eeProvider();
     expect(provider).not.toBeUndefined();
+    const retried = prepareMobileRelayE2eeAttempt();
     const context = host();
     const channel = provider!(context.host);
     // §11.2: "a client executing FATAL-PRE sends nothing and closes." The host's
@@ -217,7 +244,7 @@ describe("an attempt that is not ready fails the channel closed", () => {
     await expect(channel.emit(new Uint8Array([1]))).resolves.toBe(false);
     await expect(channel.beginClose()).resolves.toBe("refused");
     // …and it primes itself, so the next attempt has a resolved one.
-    await prepareMobileRelayE2eeAttempt();
+    await retried;
     expect(typeof resolveMobileRelayE2eeProvider()).toBe("function");
   });
 
@@ -268,23 +295,209 @@ describe("a selection change while a preparation is in flight", () => {
     resolveMobileRelayE2eeProvider()!(context.host);
     expect(context.closes.length).toBe(1);
   });
+
+  it("does not publish stale legacy when a credential rejection lands after sign-out", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_rejected_after_sign_out");
+    let rejectPrekey!: (cause: Error) => void;
+    custody.prekeyPending = new Promise<void>((_resolve, reject) => {
+      rejectPrekey = reject;
+    });
+    let reportStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    custody.onPrekeyStart = reportStarted;
+
+    const inFlight = prepareMobileRelayE2eeAttempt();
+    await started;
+    signOut();
+    rejectPrekey(new Error("secure store unavailable"));
+    await inFlight;
+
+    expect(getMobileE2eeSessionState().selection).toBeNull();
+    expect(getMobileE2eeSessionState().channel).toBe("unavailable");
+    expect(resolveMobileRelayE2eeProvider()).not.toBeUndefined();
+    await prepareMobileRelayE2eeAttempt();
+  });
 });
 
-describe("§6.3: a device that cannot hold the key simply has no E2EE", () => {
-  it("supplies no provider when the prekey certificate cannot be issued", async () => {
+describe("§6.3: credential failure is legacy only for an explicitly eligible selection", () => {
+  it("supplies no provider for a legacy-eligible selection when legacy is permitted", async () => {
     selectNode();
     custody.prekeyFails = true;
     await prepareMobileRelayE2eeAttempt();
     expect(resolveMobileRelayE2eeProvider()).toBeUndefined();
+    await prepareMobileRelayE2eeAttempt();
     // …and §12.2's label is applied to the channel that results.
     expect(getMobileE2eeSessionState().channel).toBe("legacy");
   });
 
-  it("supplies no provider when the agreement key cannot be borrowed", async () => {
+  it("fails closed for a legacy-eligible selection when legacy is forbidden", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_strict_legacy");
+    const strictLegacyPolicy = vi
+      .spyOn(mobileE2eeTrustStore, "strictLegacyPolicy")
+      .mockReturnValue({ kind: "forbidden", recordedAt: 1 });
+    custody.prekeyFails = true;
+    await prepareMobileRelayE2eeAttempt();
+    expect(custody.prekeyCalls).toBe(1);
+
+    const provider = resolveMobileRelayE2eeProvider();
+    expect(provider).not.toBeUndefined();
+    const retried = prepareMobileRelayE2eeAttempt();
+    const context = host();
+    const channel = provider!(context.host);
+    expect(context.closes).toHaveLength(1);
+    await expect(channel.emit(new Uint8Array([1]))).resolves.toBe(false);
+    await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({ kind: "rejected" });
+    await retried;
+    expect(custody.prekeyCalls).toBe(2);
+    expect(getMobileE2eeSessionState()).toMatchObject({
+      channel: "unavailable",
+      selection: { nodeId: "node_strict_legacy" },
+      classification: { class: "legacy-eligible" },
+      event: null,
+    });
+    strictLegacyPolicy.mockRestore();
+  });
+
+  it.each([
+    [
+      "oversized prekey transcript",
+      () => selectNode("node_unexpected_transcript", "a".repeat(257)),
+      [1, 0, 0],
+    ],
+    [
+      "secure device identity store",
+      () => {
+        selectNode("node_unexpected_identity");
+        custody.identityFails = true;
+      },
+      [1, 1, 0],
+    ],
+    [
+      "agreement key store",
+      () => {
+        selectNode("node_unexpected_agreement");
+        custody.agreementFails = true;
+      },
+      [1, 1, 1],
+    ],
+  ])(
+    "fails closed for an unexpected selection when the %s fails",
+    async (_name, arrange, expectedCalls) => {
+      await mobileE2eeTrustStore.hydrate();
+      arrange();
+      const classify = vi
+        .spyOn(mobileE2eeTrustStore, "classify")
+        .mockResolvedValue({ class: "unexpected", clause: "ii" });
+      await prepareMobileRelayE2eeAttempt();
+      expect([custody.prekeyCalls, custody.identityCalls, custody.agreementCalls]).toEqual(
+        expectedCalls,
+      );
+
+      expect(getMobileE2eeSessionState()).toMatchObject({
+        channel: "unavailable",
+        selection: { nodeId: expect.stringContaining("node_unexpected") },
+        classification: { class: "unexpected", clause: "ii" },
+        event: { kind: "unexpected-node", situation: 1, evidence: "none" },
+      });
+
+      const provider = resolveMobileRelayE2eeProvider();
+      expect(provider).not.toBeUndefined();
+      const retried = prepareMobileRelayE2eeAttempt();
+      const context = host();
+      const channel = provider!(context.host);
+      expect(context.closes).toHaveLength(1);
+      await expect(channel.emit(new Uint8Array([1]))).resolves.toBe(false);
+      await expect(channel.intercept(new Uint8Array([1]))).resolves.toEqual({ kind: "rejected" });
+      await retried;
+      expect([custody.prekeyCalls, custody.identityCalls, custody.agreementCalls]).toEqual(
+        expectedCalls.map((value) => value * 2),
+      );
+      expect(getMobileE2eeSessionState().event).toEqual({
+        kind: "unexpected-node",
+        situation: 1,
+        evidence: "none",
+      });
+      classify.mockRestore();
+    },
+  );
+
+  it("clears the previous channel claim when a new selection fails closed", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_previous");
+    await prepareMobileRelayE2eeAttempt();
+    lockMobileE2eeChannelMode("legacy");
+    expect(getMobileE2eeSessionState().channel).toBe("legacy");
+
+    selectNode("node_unexpected_after_previous");
+    const classify = vi
+      .spyOn(mobileE2eeTrustStore, "classify")
+      .mockResolvedValue({ class: "unexpected", clause: "ii" });
+    custody.agreementFails = true;
+    await prepareMobileRelayE2eeAttempt();
+
+    // The prior claim is gone, while the new selection's trust context remains
+    // available to the owner even though credentials could not be built.
+    expect(getMobileE2eeSessionState()).toMatchObject({
+      channel: "unavailable",
+      selection: { nodeId: "node_unexpected_after_previous" },
+      classification: { class: "unexpected", clause: "ii" },
+      event: { kind: "unexpected-node", situation: 1, evidence: "none" },
+    });
+    classify.mockRestore();
+  });
+
+  it("keeps the unexpected ceremony visible while an automatic retry is pending", async () => {
+    await mobileE2eeTrustStore.hydrate();
+    selectNode("node_unexpected_retry");
+    const classify = vi
+      .spyOn(mobileE2eeTrustStore, "classify")
+      .mockResolvedValue({ class: "unexpected", clause: "ii" });
+    custody.agreementFails = true;
+    await prepareMobileRelayE2eeAttempt();
+    expect(getMobileE2eeSessionState().event).toMatchObject({
+      kind: "unexpected-node",
+      evidence: "none",
+    });
+
+    custody.agreementFails = false;
+    let rejectPrekey!: (cause: Error) => void;
+    custody.prekeyPending = new Promise<void>((_resolve, reject) => {
+      rejectPrekey = reject;
+    });
+    let reportStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    custody.onPrekeyStart = reportStarted;
+
+    expect(resolveMobileRelayE2eeProvider()).not.toBeUndefined();
+    const retried = prepareMobileRelayE2eeAttempt();
+    await started;
+
+    // The retry may wait on the secure store indefinitely. It must not erase
+    // the warning during that interval and republish it only after rejection.
+    expect(getMobileE2eeSessionState()).toMatchObject({
+      channel: "unavailable",
+      selection: { nodeId: "node_unexpected_retry" },
+      classification: { class: "unexpected", clause: "ii" },
+      event: { kind: "unexpected-node", situation: 1, evidence: "none" },
+    });
+
+    rejectPrekey(new Error("secure store unavailable"));
+    await retried;
+    classify.mockRestore();
+  });
+
+  it("supplies no provider when an eligible selection cannot borrow the agreement key", async () => {
     selectNode();
     custody.agreementFails = true;
     await prepareMobileRelayE2eeAttempt();
     expect(resolveMobileRelayE2eeProvider()).toBeUndefined();
+    await prepareMobileRelayE2eeAttempt();
     expect(getMobileE2eeSessionState().channel).toBe("legacy");
   });
 });
@@ -300,14 +513,19 @@ describe("§4.4: absence of evidence is never a legacy channel", () => {
       .spyOn(mobileE2eeTrustStore, "classify")
       .mockRejectedValue(new Error("store unavailable"));
     await prepareMobileRelayE2eeAttempt();
-    classify.mockRestore();
+
+    expect(custody.prekeyCalls).toBe(0);
+    expect(custody.identityCalls).toBe(0);
+    expect(custody.agreementCalls).toBe(0);
 
     const provider = resolveMobileRelayE2eeProvider();
     expect(provider).not.toBeUndefined();
     const context = host();
     provider!(context.host);
+    await prepareMobileRelayE2eeAttempt();
     expect(context.closes.length).toBe(1);
     expect(getMobileE2eeSessionState().channel).not.toBe("legacy");
+    classify.mockRestore();
   });
 
   it("withholds the §6.3 legacy answer from a latched selection", async () => {
@@ -318,14 +536,15 @@ describe("§4.4: absence of evidence is never a legacy channel", () => {
       .mockResolvedValue({ class: "latched" });
     custody.agreementFails = true;
     await prepareMobileRelayE2eeAttempt();
-    classify.mockRestore();
 
     // §12.1's latch is not something a local custody failure may talk this
     // client out of: the channel closes instead of running plaintext.
     expect(resolveMobileRelayE2eeProvider()).not.toBeUndefined();
     const context = host();
     resolveMobileRelayE2eeProvider()!(context.host);
+    await prepareMobileRelayE2eeAttempt();
     expect(context.closes.length).toBe(1);
+    classify.mockRestore();
   });
 });
 

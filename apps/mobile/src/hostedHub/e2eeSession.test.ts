@@ -9,6 +9,7 @@ import {
   attachMobileE2eeLocalNodeHandle,
   beginMobileE2eeChannel,
   beginMobileE2eeChannelAttempt,
+  beginMobileE2eeFailClosedSelection,
   clearMobileE2eeTrustEvent,
   getMobileE2eeSessionState,
   lockMobileE2eeChannelMode,
@@ -90,6 +91,32 @@ beforeEach(() => {
 });
 
 describe("the channel's claim", () => {
+  it("keeps unexpected trust context without fabricating unavailable credential material", () => {
+    beginMobileE2eeFailClosedSelection({
+      selection: {
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+        nodeId: "node_unexpected",
+        nodeLabel: "Studio",
+        environmentId: "env_1",
+        localNodeHandle: null,
+      },
+      classification: { class: "unexpected", clause: "ii" },
+      legacyPermitted: true,
+      markerSet: true,
+      pinVerified: false,
+    });
+
+    const state = getMobileE2eeSessionState();
+    expect(state).toMatchObject({
+      channel: "unavailable",
+      selection: { nodeId: "node_unexpected", clientIdentityPublicKey: null },
+      classification: { class: "unexpected", clause: "ii" },
+      event: { kind: "unexpected-node", situation: 1, evidence: "none" },
+    });
+    expect(state.presented).toBeNull();
+  });
+
   it("starts negotiating and claims nothing", () => {
     begin();
     expect(getMobileE2eeSessionState().channel).toBe("negotiating");

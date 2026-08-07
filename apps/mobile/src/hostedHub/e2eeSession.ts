@@ -66,8 +66,8 @@ export interface MobileE2eePresentedNode {
   readonly policyGeneration: number;
 }
 
-/** The selection a channel resolved from, in the form the ceremony needs. */
-export interface MobileE2eeSelection {
+/** The non-secret selection context known before credential custody succeeds. */
+export interface MobileE2eeSelectionContext {
   readonly hubOrigin: string;
   readonly accountId: string;
   readonly nodeId: string;
@@ -80,8 +80,19 @@ export interface MobileE2eeSelection {
    * shape — and the store mints the handle when the owner starts the ceremony.
    */
   readonly localNodeHandle: string | null;
-  /** This device's P-256 identity key, the client half of the §13.4 derivation. */
-  readonly clientIdentityPublicKey: Uint8Array;
+}
+
+/** The selection projection, including credential material only when available. */
+export interface MobileE2eeSelection extends MobileE2eeSelectionContext {
+  /**
+   * This device's public P-256 identity key, the client half of §13.4.
+   *
+   * `null` is a strict, fail-closed credential-custody result. The selection
+   * and its unexpected classification remain owner-visible, but no safety
+   * number or verification decision can be derived until a fresh preparation
+   * obtains the real key. No placeholder key is ever fabricated.
+   */
+  readonly clientIdentityPublicKey: Uint8Array | null;
 }
 
 /**
@@ -238,7 +249,9 @@ export function deriveMobileE2eeIdentityDisplay(input: {
  * once, because §4.4 requires all of it to be resolvable before any payload.
  */
 export function beginMobileE2eeChannel(input: {
-  readonly selection: MobileE2eeSelection;
+  readonly selection: MobileE2eeSelectionContext & {
+    readonly clientIdentityPublicKey: Uint8Array;
+  };
   readonly classification: E2eeTrustClassification;
   readonly legacyPermitted: boolean;
   readonly markerSet: boolean | null;
@@ -254,6 +267,34 @@ export function beginMobileE2eeChannel(input: {
     markerSet: input.markerSet,
     pinVerified: input.pinVerified,
     previouslyVerified: input.previouslyVerified,
+  });
+}
+
+/**
+ * A current selection whose guards resolved but whose credentials did not.
+ *
+ * Transport remains unavailable and therefore releases nothing. The resolved
+ * trust context is still published so an `unexpected` selection keeps its
+ * §13.2.1 surface. Because no node statement was processed, the event carries
+ * the honest `none` evidence and the ceremony withholds every operation that
+ * requires this device's unavailable identity key.
+ */
+export function beginMobileE2eeFailClosedSelection(input: {
+  readonly selection: MobileE2eeSelectionContext;
+  readonly classification: E2eeTrustClassification;
+  readonly legacyPermitted: boolean;
+  readonly markerSet: boolean | null;
+  readonly pinVerified: boolean;
+}): void {
+  const situation = resolveE2eeUnexpectedNodeSituation(input.classification, { kind: "none" });
+  publish({
+    ...INITIAL,
+    selection: { ...input.selection, clientIdentityPublicKey: null },
+    classification: input.classification,
+    legacyPermitted: input.legacyPermitted,
+    markerSet: input.markerSet,
+    pinVerified: input.pinVerified,
+    event: situation === null ? null : { kind: "unexpected-node", situation, evidence: "none" },
   });
 }
 
@@ -373,7 +414,7 @@ export function observeMobileE2eeStatement(verification: NodeE2eeCapabilityVerif
 
 function presentedFor(statement: NodeE2eeCapabilityStatement): MobileE2eePresentedNode | null {
   const selection = state.selection;
-  if (selection === null) return null;
+  if (selection === null || selection.clientIdentityPublicKey === null) return null;
   let display: MobileE2eeIdentityDisplay;
   try {
     display = deriveMobileE2eeIdentityDisplay({

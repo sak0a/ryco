@@ -23,6 +23,7 @@ import { mobileE2eeTrustStore } from "../platform/e2eeTrustStore";
 import {
   beginMobileE2eeChannel,
   beginMobileE2eeChannelAttempt,
+  beginMobileE2eeFailClosedSelection,
   deriveMobileE2eeIdentityDisplay,
   lockMobileE2eeChannelMode,
   markMobileE2eeKeyCustodyUnavailable,
@@ -103,6 +104,8 @@ let preparing: Promise<void> | undefined;
  * session.
  */
 let custodyUnavailableFor: string | null = null;
+/** A resolved strict failure whose owner-visible trust context survives retries. */
+let strictUnavailableFor: string | null = null;
 
 /**
  * The selection an attempt belongs to, as one comparable string.
@@ -237,13 +240,28 @@ async function runPreparationPass(): Promise<boolean> {
   const selection = currentSelection();
   if (selection === null) {
     disposeMobileRelayE2eeAttempt();
+    custodyUnavailableFor = null;
+    strictUnavailableFor = null;
     resetMobileE2eeSession();
     return true;
   }
   const key = slotKey(selection);
   if (prepared?.key === key) return true;
+  const retainsCurrentFailureClaim = custodyUnavailableFor === key || strictUnavailableFor === key;
   disposeMobileRelayE2eeAttempt();
+  // The old projection belongs to the disposed slot just as surely as its
+  // scalar does. Clear it before any awaited guard or credential operation so
+  // a failure for the new selection cannot leave the previous channel's
+  // `verified` or `legacy` claim visible beside a channel that failed closed.
+  // A successful pass publishes the complete replacement below; a permitted
+  // no-custody legacy result publishes its bounded legacy claim explicitly.
+  // A same-slot retry after either resolved failure keeps that bounded claim
+  // while the key stores are retried. Clearing it here would let
+  // `resolveMobileRelayE2eeProvider` erase the legacy label or unexpected-node
+  // ceremony merely by scheduling the retry it promises to perform.
+  if (!retainsCurrentFailureClaim) resetMobileE2eeSession();
   custodyUnavailableFor = null;
+  strictUnavailableFor = null;
 
   // §4.4: the client-anchored guards are resolved HERE, before any channel
   // exists and BEFORE any custody call, and `classify` runs §13.1's marker
@@ -255,21 +273,50 @@ async function runPreparationPass(): Promise<boolean> {
   try {
     guards = await resolveGuards(selection);
   } catch {
-    return false;
+    const live = currentSelection();
+    // A moved selection needs another pass. A current selection whose guards
+    // are unobtainable is already a complete fail-closed result; retry it on
+    // the next channel, not four times inside this preparation.
+    return live !== null && slotKey(live) === key;
   }
 
   // §7.4 / §6.4 and §6.3's key custody. A failure here is outcome 2 — but only
-  // where §12.1.1 still permits a legacy channel at all.
+  // where §12.1.1 classified this exact selection as legacy-eligible and local
+  // policy still permits a legacy channel. `unexpected`, `latched`, and
+  // unobtainable evidence are all strict local classes: no credential failure
+  // may convert any of them into plaintext eligibility.
   let credentials: ResolvedCredentials;
   try {
     credentials = await resolveCredentials(selection);
   } catch {
-    if (slotKey(currentSelection() ?? selection) !== key) return false;
+    const live = currentSelection();
+    if (live === null || slotKey(live) !== key) return false;
     // §6.3: no software fallback and no degraded mode. The device has no E2EE
     // for this selection; the channel runs legacy and every surface says legacy
-    // — unless §12.1 has latched it or §12.1.1's policy forbids legacy, which
-    // no local failure may talk this client out of.
-    if (guards.classification.class === "latched" || !guards.legacyPermitted) return false;
+    // only for the exact legacy-eligible/permitted conjunction. A local failure
+    // cannot talk an unexpected, latched, or policy-forbidden selection out of
+    // its fail-closed result.
+    if (guards.classification.class !== "legacy-eligible" || !guards.legacyPermitted) {
+      strictUnavailableFor = key;
+      beginMobileE2eeFailClosedSelection({
+        selection: {
+          hubOrigin: selection.hubOrigin,
+          accountId: selection.accountId,
+          nodeId: selection.nodeId,
+          nodeLabel: selection.nodeLabel,
+          environmentId: selection.environmentId,
+          localNodeHandle: guards.record?.index.localNodeHandle ?? null,
+        },
+        classification: guards.classification,
+        legacyPermitted: guards.legacyPermitted,
+        markerSet: guards.markerSet,
+        pinVerified: guards.verified !== null,
+      });
+      // This keyed strict result is complete. The unresolved provider retries
+      // once for the next channel; the preparation loop must not hammer secure
+      // storage four times for the same persistent failure.
+      return true;
+    }
     custodyUnavailableFor = key;
     markMobileE2eeKeyCustodyUnavailable();
     return true;
@@ -586,4 +633,5 @@ export function resetMobileRelayE2eeAttemptForTests(): void {
   prepared = null;
   preparing = undefined;
   custodyUnavailableFor = null;
+  strictUnavailableFor = null;
 }

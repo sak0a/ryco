@@ -1363,6 +1363,31 @@ describe("HostedRelayEngine E2EE seams", () => {
       closeReason: "channel_rejected",
     });
   });
+
+  it("releases no plaintext when an unresolved provider closes during channel acceptance", () => {
+    const provider: RelayE2eeProvider = (host) => {
+      host.close(relayE2eeUnresolvedAttemptFailure());
+      return {
+        intercept: async () => ({ kind: "rejected" }),
+        emit: async () => false,
+        beginClose: async () => "refused",
+        dispose: () => undefined,
+      };
+    };
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+
+    authenticate(socket);
+
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(() => engine.send(new TextEncoder().encode('{"mustNotEscape":true}'))).toThrow(
+      "Relay channel is not open.",
+    );
+    expect(sentFrames(socket).filter((frame) => frame.type === "data")).toHaveLength(0);
+    expect(sentFrames(socket).find((frame) => frame.type === "channel.close")).toMatchObject({
+      reason: "channel_rejected",
+    });
+  });
 });
 
 function closeReason(failure: { readonly closeReason?: string }): string | undefined {
