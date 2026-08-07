@@ -22,6 +22,9 @@ affects the glass background and border, while the existing semantic icon remain
 color accent. The floating dismiss orb inherits the toast tone so it reads as part of the same
 material.
 
+The toast plate uses 60% opacity in both light and dark themes. This keeps the semantic color
+recognizable while allowing substantially more of the underlying interface to show through.
+
 Both standard stacked toasts and anchored toasts receive the same treatment. Call sites do not need
 changes because they already provide the toast `type`.
 
