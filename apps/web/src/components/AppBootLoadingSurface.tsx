@@ -1,5 +1,5 @@
 import { APP_DISPLAY_NAME } from "../branding";
-import { BRANDED_APP_LOGO_SRC } from "../brandedLogo";
+import { RycoLetterMark } from "./RycoLetterMark";
 
 export function AppBootLoadingSurface() {
   return (
@@ -8,13 +8,11 @@ export function AppBootLoadingSurface() {
       className="flex min-h-screen items-center justify-center bg-background text-foreground"
       role="status"
     >
+      {/* Deliberately the same mark, size, and pulse as the pre-React boot
+          shell in `index.html`, so handing over from the static shell to React
+          is invisible rather than a swap between two different logos. */}
       <div className="grid size-24 place-items-center">
-        <img
-          alt=""
-          className="size-16 animate-boot-logo-pulse object-contain motion-reduce:animate-none"
-          draggable={false}
-          src={BRANDED_APP_LOGO_SRC}
-        />
+        <RycoLetterMark className="h-16 animate-boot-logo-pulse motion-reduce:animate-none" />
       </div>
     </div>
   );
