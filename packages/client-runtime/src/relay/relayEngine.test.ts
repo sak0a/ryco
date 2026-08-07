@@ -7,7 +7,12 @@ import {
 } from "@ryco/contracts";
 import { decodeRelayFrame, encodeRelayFrame } from "@ryco/shared/relayCodec";
 import {
+  E2EE_ENVELOPE_OVERHEAD_BYTES,
+  e2eeChannelSizeBudget,
+} from "@ryco/shared/relayE2eeConstants";
+import {
   isChunkedPayload,
+  planRelayMessage,
   RELAY_CHUNK_CAPABILITY_PRELUDE,
   splitRelayMessage,
   stripRelayChunkCapabilityPrelude,
@@ -17,11 +22,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { encodeBase64Url } from "./base64url";
 import {
   HostedRelayEngine,
+  RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+  RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
   type HostedRelaySocketCallbacks,
   type RelayE2eeChannel,
   type RelayE2eeHost,
   type RelayE2eeMode,
   type RelayE2eeProvider,
+  type RelayE2eeReservation,
   type RelaySocket,
   type RelayTimers,
   relayE2eeFailure,
@@ -189,7 +197,7 @@ function stubProvider(
         calls.intercepted.push(Uint8Array.from(payload));
         return { kind: "rpc", message: payload };
       },
-      emit: async (message) => {
+      submit: (message) => {
         calls.emitted.push(Uint8Array.from(message));
         return true;
       },
@@ -247,7 +255,11 @@ describe("HostedRelayEngine", () => {
   it("emits the pre-E2EE frame sequence byte for byte when no provider is injected", async () => {
     const { engine, socket, events } = create();
     authenticate(socket);
-    socket.frame({ type: "ping", ...VERSION, nonce: new Uint8Array(8).fill(4) });
+    socket.frame({
+      type: "ping",
+      ...VERSION,
+      nonce: new Uint8Array(8).fill(4),
+    });
     socket.frame({
       type: "data",
       ...VERSION,
@@ -334,7 +346,10 @@ describe("HostedRelayEngine", () => {
     expect(() => engine.send(new Uint8Array(1_025))).toThrow();
     expect(sentFrames(socket).filter((frame) => frame.type === "data")).toHaveLength(before);
     expect(handlers.onFailure).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "protocol", closeReason: "transfer_limit" }),
+      expect.objectContaining({
+        kind: "protocol",
+        closeReason: "transfer_limit",
+      }),
     );
   });
 
@@ -382,7 +397,11 @@ describe("HostedRelayEngine", () => {
   it("responds to canonical heartbeat pings", () => {
     const { socket } = create();
     authenticate(socket);
-    socket.frame({ type: "ping", ...VERSION, nonce: new Uint8Array(8).fill(4) });
+    socket.frame({
+      type: "ping",
+      ...VERSION,
+      nonce: new Uint8Array(8).fill(4),
+    });
     const response = decodeRelayFrame(socket.sent.at(-1)!);
     expect(response.ok && response.value.type === "pong").toBe(true);
   });
@@ -724,19 +743,18 @@ describe("HostedRelayEngine E2EE seams", () => {
     expect(engine.bufferedAmount).toBeGreaterThan(0);
   });
 
-  it("charges a buffered send exactly what the send queue would charge it", () => {
+  it("charges a buffered send for the eventual E2EE envelope layout", () => {
     // §4.4: the buffer is charged "as though the bytes had already been
     // enqueued", against the same aggregate the queue enforces. `admit` IS that
-    // charge for a message of this length, so the two must agree to the byte —
-    // a buffer charged less than the queue will charge is a buffer that can be
-    // accepted at its bound and then fail to drain into the queue it was
-    // measured against.
+    // charge for the eventual envelope, so the two must agree to the byte — a
+    // buffer charged only for plaintext can accept a burst that later fails to
+    // drain after the channel locks E2EE.
     const { provider, host } = stubProvider({}, null);
     const { engine, socket } = create(callbacks(), realTimers(), provider);
     authenticate(socket);
     const message = new Uint8Array(4_000).fill(0x7b);
 
-    const reservation = host().admit(message.byteLength);
+    const reservation = host().admit(E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength);
     const reserved = engine.bufferedAmount;
     reservation?.release();
     expect(engine.bufferedAmount).toBe(0);
@@ -745,6 +763,55 @@ describe("HostedRelayEngine E2EE seams", () => {
 
     expect(reserved).toBeGreaterThan(message.byteLength);
     expect(engine.bufferedAmount).toBe(reserved);
+  });
+
+  it("flushes every accepted negotiating send after an E2EE lock", () => {
+    const reservations: RelayE2eeReservation[] = [];
+    let e2eeHost: RelayE2eeHost | undefined;
+    const submit = vi.fn((message: Uint8Array) => {
+      const reservation = e2eeHost?.admit(E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength);
+      if (reservation === undefined) return false;
+      reservations.push(reservation);
+      return true;
+    });
+    const provider: RelayE2eeProvider = (host) => {
+      e2eeHost = host;
+      return {
+        intercept: async () => ({ kind: "claimed" }),
+        submit,
+        beginClose: async () => "refused",
+        dispose: () => undefined,
+      };
+    };
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 16_384,
+    });
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket, limits);
+
+    let accepted = 0;
+    for (; accepted < 1_000; accepted += 1) {
+      try {
+        engine.send(Uint8Array.of(accepted & 0xff));
+      } catch (error) {
+        expect(error).toEqual(new Error(RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE));
+        break;
+      }
+    }
+    expect(accepted).toBeGreaterThan(1);
+
+    e2eeHost?.lockMode("e2ee");
+
+    expect(submit).toHaveBeenCalledTimes(accepted);
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+    expect(events.onClose).not.toHaveBeenCalled();
+    expect(events.onOpen).toHaveBeenCalledOnce();
+    for (const reservation of reservations) reservation.release();
+    expect(engine.bufferedAmount).toBe(0);
   });
 
   it("keeps the valve shut when the flush itself failed the channel", () => {
@@ -763,7 +830,10 @@ describe("HostedRelayEngine E2EE seams", () => {
 
     host().lockMode("legacy");
 
-    expect(handlers.onFailure).toHaveBeenCalledWith({ kind: "network", retryable: true });
+    expect(handlers.onFailure).toHaveBeenCalledWith({
+      kind: "network",
+      retryable: true,
+    });
     expect(events.onClose).toHaveBeenCalledOnce();
     expect(events.onOpen).not.toHaveBeenCalled();
     expect(handlers.onTransportStatus).not.toHaveBeenCalledWith("online");
@@ -846,10 +916,7 @@ describe("HostedRelayEngine E2EE seams", () => {
     // backpressure, and the flush has no caller to hand a rejection to — so a
     // rejected `emit` must reach `#failE2ee` from the flush exactly as it does
     // from a direct send.
-    const { provider, host } = stubProvider(
-      { emit: async () => Promise.reject(new Error("protect failed")) },
-      null,
-    );
+    const { provider, host } = stubProvider({ submit: () => false }, null);
     const handlers = callbacks();
     const { engine, socket } = create(handlers, realTimers(), provider);
     authenticate(socket);
@@ -867,14 +934,15 @@ describe("HostedRelayEngine E2EE seams", () => {
 
   it("fails the channel when a directly submitted record cannot be protected", async () => {
     const { provider } = stubProvider({
-      emit: async () => Promise.reject(new Error("protect failed")),
+      submit: () => {
+        throw new Error("protect failed");
+      },
     });
     const handlers = callbacks();
     const { engine, socket } = create(handlers, realTimers(), provider);
     authenticate(socket);
 
-    engine.send(new TextEncoder().encode('{"direct":1}'));
-    await flush();
+    expect(() => engine.send(new TextEncoder().encode('{"direct":1}'))).toThrow("protect failed");
 
     expect(handlers.onFailure).toHaveBeenCalledWith({
       kind: "protocol",
@@ -1024,6 +1092,166 @@ describe("HostedRelayEngine E2EE seams", () => {
     expect(host().admit(1_000)).toBeUndefined();
     expect(handlers.onFailure).not.toHaveBeenCalled();
     expect(engine.bufferedAmount).toBeGreaterThan(0);
+  });
+
+  it("bounds rapid established submissions in the aggregate reservation ceiling", () => {
+    const reservations: RelayE2eeReservation[] = [];
+    const provider: RelayE2eeProvider = (host) => {
+      host.lockMode("e2ee");
+      return {
+        intercept: async () => ({ kind: "claimed" }),
+        submit: (message) => {
+          const reservation = host.admit(E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength);
+          if (reservation === undefined) return false;
+          reservations.push(reservation);
+          return true;
+        },
+        beginClose: async () => "refused",
+        dispose: () => undefined,
+      };
+    };
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 8_192,
+    });
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket, limits);
+
+    let refused = false;
+    for (let index = 0; index < 32; index += 1) {
+      try {
+        engine.send(new Uint8Array(900).fill(index));
+      } catch (error) {
+        expect(error).toEqual(new Error(RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE));
+        refused = true;
+        break;
+      }
+    }
+
+    expect(refused).toBe(true);
+    expect(reservations.length).toBeGreaterThan(0);
+    expect(engine.bufferedAmount).toBeLessThanOrEqual(
+      limits.maxQueuedBytes - limits.maxControlFrameBytes,
+    );
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+    expect(events.onClose).not.toHaveBeenCalled();
+
+    for (const reservation of reservations) reservation.release();
+    expect(engine.bufferedAmount).toBe(0);
+  });
+
+  it("accounts chunked established submissions through flow pause and slow socket ownership", async () => {
+    const provider: RelayE2eeProvider = (host) => {
+      host.lockMode("e2ee");
+      return {
+        intercept: async (payload) => ({ kind: "rpc", message: payload }),
+        submit: (message) => {
+          const envelope = new Uint8Array(E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength);
+          const reservation = host.admit(envelope.byteLength);
+          return reservation?.send(envelope) ?? false;
+        },
+        beginClose: async () => "refused",
+        dispose: () => undefined,
+      };
+    };
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 8_192,
+    });
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket, limits);
+    socket.frame({
+      type: "data",
+      ...VERSION,
+      channelId: CHANNEL_ID,
+      sequence: 0 as never,
+      payload: advertisedPayload(new Uint8Array([1])),
+    });
+    await flush();
+    expect(events.onData).toHaveBeenCalled();
+    socket.frame({ type: "flow.pause", ...VERSION, channelId: CHANNEL_ID });
+
+    engine.send(new Uint8Array(3_000));
+    const plan = planRelayMessage(3_000 + E2EE_ENVELOPE_OVERHEAD_BYTES, {
+      maxChunkBytes: limits.maxDataChunkBytes,
+      maxMessageBytes: limits.maxQueuedBytes - limits.maxControlFrameBytes,
+      peerSupportsChunking: true,
+    });
+    if (plan.kind === "error") throw new Error("expected a chunk plan");
+    expect(engine.bufferedAmount).toBe(
+      plan.payloadBytes.reduce((total, payloadBytes) => total + payloadBytes + 32, 0),
+    );
+    engine.send(new Uint8Array(3_000));
+    expect(engine.bufferedAmount).toBe(
+      plan.payloadBytes.reduce((total, payloadBytes) => total + payloadBytes + 32, 0) * 2,
+    );
+    expect(() => engine.send(new Uint8Array(3_000))).toThrow(RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE);
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+
+    socket.frame({ type: "flow.resume", ...VERSION, channelId: CHANNEL_ID });
+    expect(engine.bufferedAmount).toBe(0);
+
+    socket.bufferedAmount = limits.maxQueuedBytes - limits.maxControlFrameBytes;
+    expect(() => engine.send(new Uint8Array(16))).toThrow(RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE);
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+    socket.bufferedAmount = 0;
+    expect(() => engine.send(new Uint8Array(16))).not.toThrow();
+    expect(engine.bufferedAmount).toBe(0);
+
+    const maximum = e2eeChannelSizeBudget(limits).plaintextCeiling;
+    expect(() => engine.send(new Uint8Array(maximum))).toThrow(RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE);
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+  });
+
+  it("invalidates pending reservations so late close-race settlement cannot go negative", () => {
+    const { provider, host } = stubProvider();
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+    const reservations = Array.from({ length: 8 }, () => host().admit(512)).filter(
+      (value): value is RelayE2eeReservation => value !== undefined,
+    );
+    expect(reservations).toHaveLength(8);
+    expect(engine.bufferedAmount).toBeGreaterThan(0);
+
+    host().close();
+    expect(engine.bufferedAmount).toBe(0);
+
+    reservations.forEach((reservation, index) => {
+      if (index % 2 === 0) reservation.release();
+      else expect(reservation.send(new Uint8Array(512))).toBe(false);
+    });
+    expect(engine.bufferedAmount).toBe(0);
+  });
+
+  it("keeps a reentrant control reservation inert after its close invalidates ownership", () => {
+    let reservation: RelayE2eeReservation | undefined;
+    const provider: RelayE2eeProvider = (host) => {
+      host.lockMode("e2ee");
+      return {
+        intercept: async () => ({ kind: "claimed" }),
+        submit: () => true,
+        beginClose: async () => {
+          reservation = host.admit(64);
+          host.close();
+          return "opened";
+        },
+        dispose: () => undefined,
+      };
+    };
+    const { engine, socket } = create(callbacks(), realTimers(), provider);
+    authenticate(socket);
+
+    engine.close();
+    expect(engine.bufferedAmount).toBe(0);
+    reservation?.release();
+    expect(reservation?.send(new Uint8Array(64))).toBe(false);
+    expect(engine.bufferedAmount).toBe(0);
   });
 
   it("reports the assembler's partial reassembly to the channel before resetting it", async () => {
@@ -1362,6 +1590,44 @@ describe("HostedRelayEngine E2EE seams", () => {
       retryable: true,
       closeReason: "channel_rejected",
     });
+  });
+
+  it("releases no plaintext when an unresolved provider closes during channel acceptance", () => {
+    const provider: RelayE2eeProvider = (host) => {
+      host.close(relayE2eeUnresolvedAttemptFailure());
+      return {
+        intercept: async () => ({ kind: "rejected" }),
+        submit: () => false,
+        beginClose: async () => "refused",
+        dispose: () => undefined,
+      };
+    };
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+
+    authenticate(socket);
+
+    expect(events.onOpen).not.toHaveBeenCalled();
+    expect(() => engine.send(new TextEncoder().encode('{"mustNotEscape":true}'))).toThrow(
+      "Relay channel is not open.",
+    );
+    expect(sentFrames(socket).filter((frame) => frame.type === "data")).toHaveLength(0);
+    expect(sentFrames(socket).find((frame) => frame.type === "channel.close")).toMatchObject({
+      reason: "channel_rejected",
+    });
+  });
+
+  it("reports established E2EE admission refusal synchronously without failing the channel", () => {
+    const { provider } = stubProvider({ submit: () => false });
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket);
+
+    expect(() => engine.send(new TextEncoder().encode('{"_tag":"Ping"}'))).toThrow(
+      RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
+    );
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+    expect(events.onClose).not.toHaveBeenCalled();
   });
 });
 

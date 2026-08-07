@@ -31,8 +31,19 @@ import {
   resolveWebRelayE2eeProvider,
   webRelayE2eeAttempt,
 } from "./e2eeAttempt";
-import { clearWebE2eeLatches, isWebE2eeSelectionLatched, latchWebE2eeSelection } from "./e2eeLatch";
-import { resetWebE2eeSession, webE2eeSessionState } from "./e2eeSession";
+import {
+  acceptedWebE2eePolicyGeneration,
+  clearWebE2eeLatches,
+  isWebE2eeSelectionLatched,
+  latchWebE2eeSelection,
+  recordWebE2eePolicyGeneration,
+} from "./e2eeLatch";
+import {
+  clearWebE2eeLocalDiagnostics,
+  resetWebE2eeSession,
+  webE2eeLocalDiagnostics,
+  webE2eeSessionState,
+} from "./e2eeSession";
 
 /** The §7.6 element 5 key, for the §13.5 derivation the node would also run. */
 function decodeStatementIdentityKey(statement: Uint8Array): Uint8Array {
@@ -54,7 +65,11 @@ function decodeStatementIdentityKey(statement: Uint8Array): Uint8Array {
 const HUB_ORIGIN = "https://hub.example.test";
 const ACCOUNT_ID = "acct_0123456789";
 const NODE_ID = "node_AAAAAAAAAAAAAAAAAAAAAA";
-const SELECTION = { hubOrigin: HUB_ORIGIN, accountId: ACCOUNT_ID, nodeId: NODE_ID } as const;
+const SELECTION = {
+  hubOrigin: HUB_ORIGIN,
+  accountId: ACCOUNT_ID,
+  nodeId: NODE_ID,
+} as const;
 
 const originalWindow = globalThis.window;
 const originalIsSecureContext = Object.getOwnPropertyDescriptor(globalThis, "isSecureContext");
@@ -88,11 +103,16 @@ function signIn(): void {
 }
 
 function signOut(): void {
-  hostedHubStore.setState({ accountStatus: "signed-out", account: null, selectedNode: null });
+  hostedHubStore.setState({
+    accountStatus: "signed-out",
+    account: null,
+    selectedNode: null,
+  });
 }
 
 beforeEach(() => {
   clearWebE2eeLatches();
+  clearWebE2eeLocalDiagnostics();
   installSecureContext();
   signIn();
 });
@@ -100,9 +120,13 @@ beforeEach(() => {
 afterEach(() => {
   signOut();
   clearWebE2eeLatches();
+  clearWebE2eeLocalDiagnostics();
   restoreGlobal("isSecureContext", originalIsSecureContext);
   restoreGlobal("crypto", originalCrypto);
-  Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: originalWindow,
+  });
   resetWebRelayE2eeForTests();
   vi.restoreAllMocks();
 });
@@ -128,6 +152,17 @@ describe("§4.4 the web attempt is resolved synchronously, before any payload", 
     expect(webRelayE2eeAttempt(SELECTION).selectionClass).toBe("legacy-eligible");
     latchWebE2eeSelection(SELECTION);
     expect(webRelayE2eeAttempt(SELECTION).selectionClass).toBe("latched");
+  });
+
+  it("carries the current policy-generation high-water and omits an absent one", () => {
+    const first = webRelayE2eeAttempt(SELECTION);
+    expect(first.acceptedPolicyGeneration).toBeUndefined();
+    expect("acceptedPolicyGeneration" in first).toBe(false);
+
+    recordWebE2eePolicyGeneration(SELECTION, 7);
+    expect(webRelayE2eeAttempt(SELECTION).acceptedPolicyGeneration).toBe(7);
+    recordWebE2eePolicyGeneration(SELECTION, 6);
+    expect(webRelayE2eeAttempt(SELECTION).acceptedPolicyGeneration).toBe(7);
   });
 });
 
@@ -229,7 +264,10 @@ describe("§14.5 the startup randomness check gates the provider, not a handshak
     // much as to row K13's. There is no §4.4 machine here to publish it, so a
     // projection left at `unavailable` would render it `Online` with no claim —
     // the state that has no channel, not the one that locked plaintext.
-    expect(webE2eeSessionState()).toEqual({ status: "legacy", verificationCode: null });
+    expect(webE2eeSessionState()).toEqual({
+      status: "legacy",
+      verificationCode: null,
+    });
     resetWebE2eeSession();
   });
 });
@@ -258,7 +296,10 @@ describe("§4 the production wiring establishes an NX session end to end", () =>
     authenticateRelay(harness.socket);
     // §4.4: the machine is built at `channel.accept`, and `negotiating` claims
     // nothing about the channel either way.
-    expect(webE2eeSessionState()).toEqual({ status: "negotiating", verificationCode: null });
+    expect(webE2eeSessionState()).toEqual({
+      status: "negotiating",
+      verificationCode: null,
+    });
 
     const statement = fixtureStatement(USABLE_STATEMENT_CASE);
     deliverRelayPayload(harness.socket, encodeE2eeCapabilityCarrier(statement));
@@ -271,6 +312,17 @@ describe("§4 the production wiring establishes an NX session end to end", () =>
         nodeId: FIXTURE_NODE_ID,
       }),
     ).toBe(true);
+    const fixtureSelection = {
+      hubOrigin: FIXTURE_HUB_ORIGIN,
+      accountId: FIXTURE_ACCOUNT_ID,
+      nodeId: FIXTURE_NODE_ID,
+    };
+    const generation = decodeNodeE2eeCapabilityStatement(statement);
+    expect(generation.kind).toBe("ok");
+    if (generation.kind !== "ok") return;
+    expect(acceptedWebE2eePolicyGeneration(fixtureSelection)).toBe(
+      generation.value.policyGeneration,
+    );
 
     const hello = outboundRelayPayloads(harness.socket).at(-1);
     expect(hello).toBeDefined();
@@ -307,8 +359,144 @@ describe("§4 the production wiring establishes an NX session end to end", () =>
     // what left `web-unsigned` and the code standing until one arrived.
     harness.socket.drop();
     await settleRelay();
-    expect(webE2eeSessionState()).toEqual({ status: "unavailable", verificationCode: null });
+    expect(webE2eeSessionState()).toEqual({
+      status: "unavailable",
+      verificationCode: null,
+    });
     resetWebE2eeSession();
+  });
+
+  it("retains the validated generation across a stalled handshake and reconnect", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(FIXTURE_NOW);
+    defineGlobal("window", { location: { origin: FIXTURE_HUB_ORIGIN } });
+    resetWebRelayE2eeForTests();
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: { id: FIXTURE_ACCOUNT_ID } as never,
+      selectedNode: { id: FIXTURE_NODE_ID } as never,
+    });
+
+    const statement = fixtureStatement(USABLE_STATEMENT_CASE);
+    const decoded = decodeNodeE2eeCapabilityStatement(statement);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") return;
+    const first = createRelayHarness({ e2ee: resolveWebRelayE2eeProvider() });
+    authenticateRelay(first.socket);
+    deliverRelayPayload(first.socket, encodeE2eeCapabilityCarrier(statement));
+    await settleRelay();
+
+    // The node never answers hello. Validation already advanced §5.7, and a
+    // reconnect in the same application session must enforce it immediately.
+    first.socket.drop();
+    await settleRelay();
+    resolveWebRelayE2eeProvider();
+    expect(readWebRelayE2eeAttemptForTests()?.acceptedPolicyGeneration).toBe(
+      decoded.value.policyGeneration,
+    );
+  });
+
+  it("accepts a newer generation and then the repeated high-water", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(FIXTURE_NOW);
+    defineGlobal("window", { location: { origin: FIXTURE_HUB_ORIGIN } });
+    resetWebRelayE2eeForTests();
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: { id: FIXTURE_ACCOUNT_ID } as never,
+      selectedNode: { id: FIXTURE_NODE_ID } as never,
+    });
+    const selection = {
+      hubOrigin: FIXTURE_HUB_ORIGIN,
+      accountId: FIXTURE_ACCOUNT_ID,
+      nodeId: FIXTURE_NODE_ID,
+    };
+    const statement = fixtureStatement(USABLE_STATEMENT_CASE);
+    const decoded = decodeNodeE2eeCapabilityStatement(statement);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") return;
+    latchWebE2eeSelection(selection);
+    recordWebE2eePolicyGeneration(selection, decoded.value.policyGeneration - 1);
+
+    const newer = createRelayHarness({ e2ee: resolveWebRelayE2eeProvider() });
+    authenticateRelay(newer.socket);
+    deliverRelayPayload(newer.socket, encodeE2eeCapabilityCarrier(statement));
+    await settleRelay();
+    expect(outboundRelayPayloads(newer.socket)).toHaveLength(1);
+    expect(acceptedWebE2eePolicyGeneration(selection)).toBe(decoded.value.policyGeneration);
+    newer.socket.drop();
+    await settleRelay();
+
+    const repeated = createRelayHarness({
+      e2ee: resolveWebRelayE2eeProvider(),
+    });
+    authenticateRelay(repeated.socket);
+    deliverRelayPayload(repeated.socket, encodeE2eeCapabilityCarrier(statement));
+    await settleRelay();
+    expect(outboundRelayPayloads(repeated.socket)).toHaveLength(1);
+    expect(acceptedWebE2eePolicyGeneration(selection)).toBe(decoded.value.policyGeneration);
+  });
+
+  it("rejects a valid but lower-generation statement before sending hello", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(FIXTURE_NOW);
+    defineGlobal("window", { location: { origin: FIXTURE_HUB_ORIGIN } });
+    resetWebRelayE2eeForTests();
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: { id: FIXTURE_ACCOUNT_ID } as never,
+      selectedNode: { id: FIXTURE_NODE_ID } as never,
+    });
+    const selection = {
+      hubOrigin: FIXTURE_HUB_ORIGIN,
+      accountId: FIXTURE_ACCOUNT_ID,
+      nodeId: FIXTURE_NODE_ID,
+    };
+    const statement = fixtureStatement(USABLE_STATEMENT_CASE);
+    const decoded = decodeNodeE2eeCapabilityStatement(statement);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") return;
+    latchWebE2eeSelection(selection);
+    recordWebE2eePolicyGeneration(selection, decoded.value.policyGeneration + 1);
+
+    const harness = createRelayHarness({ e2ee: resolveWebRelayE2eeProvider() });
+    authenticateRelay(harness.socket);
+    deliverRelayPayload(harness.socket, encodeE2eeCapabilityCarrier(statement));
+    await settleRelay();
+
+    expect(outboundRelayPayloads(harness.socket)).toEqual([]);
+    expect(relayCloseReasons(harness.socket)).toHaveLength(1);
+    expect(webE2eeLocalDiagnostics()).toEqual(["e2ee_policy_generation_regressed"]);
+    expect(acceptedWebE2eePolicyGeneration(selection)).toBe(decoded.value.policyGeneration + 1);
+  });
+
+  it("re-checks live state before an overlapping stale attempt sends hello", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(FIXTURE_NOW);
+    defineGlobal("window", { location: { origin: FIXTURE_HUB_ORIGIN } });
+    resetWebRelayE2eeForTests();
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: { id: FIXTURE_ACCOUNT_ID } as never,
+      selectedNode: { id: FIXTURE_NODE_ID } as never,
+    });
+    const selection = {
+      hubOrigin: FIXTURE_HUB_ORIGIN,
+      accountId: FIXTURE_ACCOUNT_ID,
+      nodeId: FIXTURE_NODE_ID,
+    };
+    const statement = fixtureStatement(USABLE_STATEMENT_CASE);
+    const decoded = decodeNodeE2eeCapabilityStatement(statement);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") return;
+
+    const stale = createRelayHarness({ e2ee: resolveWebRelayE2eeProvider() });
+    authenticateRelay(stale.socket);
+    latchWebE2eeSelection(selection);
+    recordWebE2eePolicyGeneration(selection, decoded.value.policyGeneration + 1);
+    deliverRelayPayload(stale.socket, encodeE2eeCapabilityCarrier(statement));
+    await settleRelay();
+
+    expect(outboundRelayPayloads(stale.socket)).toEqual([]);
+    expect(relayCloseReasons(stale.socket)).toEqual(["channel_rejected"]);
+    expect(webE2eeLocalDiagnostics()).toEqual(["e2ee_policy_generation_regressed"]);
+    expect(acceptedWebE2eePolicyGeneration(selection)).toBe(decoded.value.policyGeneration + 1);
   });
 
   it("projects `legacy` when the carrier never arrives on a legacy-eligible selection", async () => {
@@ -329,7 +517,10 @@ describe("§4 the production wiring establishes an NX session end to end", () =>
     harness.facade.send(new TextEncoder().encode('{"buffered":1}'));
     await new Promise((resolve) => globalThis.setTimeout(resolve, T_ADV + 250));
 
-    expect(webE2eeSessionState()).toEqual({ status: "legacy", verificationCode: null });
+    expect(webE2eeSessionState()).toEqual({
+      status: "legacy",
+      verificationCode: null,
+    });
     const flushed = outboundRelayPayloads(harness.socket);
     expect(flushed).toHaveLength(1);
     expect(classifyPostStripPayload(flushed[0]!).kind).toBe("legacy-json");

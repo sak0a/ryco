@@ -1,6 +1,7 @@
 import {
   HostedRelayEngine,
   RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+  RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
   RELAY_MESSAGE_TOO_LARGE_MESSAGE,
   RELAY_PEER_UNSUPPORTED_MESSAGE,
   RELAY_SEND_QUEUE_FULL_MESSAGE,
@@ -72,19 +73,19 @@ function classifyInboundMessage(data: unknown): InboundMessage {
  * after which every over-ceiling submission fell through to `InvalidStateError`
  * and a caller branching on the name read a size refusal as an invalid state.
  *
- * `RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE` is
- * docs/relay-e2ee-protocol.md §11.4 `e2ee_send_unavailable`: backpressure like
- * the queue, the channel unaffected, and the caller may submit the same message
- * again. It is reachable from this facade whenever a provider is supplied — the
- * §4.4 `negotiating` window buffers every plaintext send — and the mapping
- * predates that, because the facade maps the engine's contract and not its
- * current caller.
+ * Both E2EE messages are docs/relay-e2ee-protocol.md §11.4
+ * `e2ee_send_unavailable`: backpressure like the queue, the channel unaffected,
+ * and the caller may submit the same message again. The negotiating message is
+ * reachable while §4.4 buffers plaintext; the established-channel message is
+ * the synchronous refusal from its bounded protection queue. Both remain quota
+ * refusals at this browser boundary, including for RPC keepalive writes.
  */
 const QUOTA_EXCEEDED_MESSAGES: ReadonlySet<string> = new Set([
   RELAY_SEND_QUEUE_FULL_MESSAGE,
   RELAY_MESSAGE_TOO_LARGE_MESSAGE,
   RELAY_PEER_UNSUPPORTED_MESSAGE,
   RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
+  RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
 ]);
 
 /**
@@ -174,7 +175,11 @@ export class BrowserHostedRelaySocket extends EventTarget {
             this.#state = WebSocket.CLOSED;
             this.#emit(
               "close",
-              new CloseEvent("close", { code: c, reason: r, wasClean: c === 1000 }),
+              new CloseEvent("close", {
+                code: c,
+                reason: r,
+                wasClean: c === 1000,
+              }),
             );
           },
         },

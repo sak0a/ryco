@@ -42,6 +42,21 @@ interface Manifest {
     readonly file: string;
     readonly deferred: readonly string[];
   }[];
+  readonly portableExecution: {
+    readonly routes: readonly {
+      readonly fixtureId: string;
+      readonly file: string;
+      readonly case: string;
+      readonly runners: readonly string[];
+    }[];
+    readonly exclusions: readonly {
+      readonly fixtureId: string;
+      readonly file: string;
+      readonly case: string;
+      readonly reason: string;
+      readonly ownedBy: string;
+    }[];
+  };
 }
 
 async function readManifest(): Promise<Manifest> {
@@ -70,12 +85,72 @@ describe("relay E2EE fixture corpus", () => {
     expect(second.manifestJson).toBe(first.manifestJson);
   });
 
+  it("keeps deterministic handshake inputs immutable across the IK then NX generation order", async () => {
+    const generated = await generateE2eeFixtureCorpus();
+    const expectedClient = Uint8Array.from({ length: 32 }, (_value, index) => index + 1);
+    const expectedNode = Uint8Array.from({ length: 32 }, (_value, index) => index + 0x21);
+    const expectedHex = (value: Uint8Array): string => Buffer.from(value).toString("hex");
+    for (const file of ["f06-ik-handshake.json", "f07-nx-handshake.json"] as const) {
+      const family = JSON.parse(generated.files.get(file) ?? "") as {
+        readonly testKeyMaterial: {
+          readonly testOnlyClientEphemeralSecretKey: { readonly $bytes: string };
+          readonly testOnlyNodeEphemeralSecretKey: { readonly $bytes: string };
+        };
+        readonly cases: readonly {
+          readonly expected: {
+            readonly noiseHandshakeHash: { readonly $bytes: string };
+            readonly sessionBindingHash: { readonly $bytes: string };
+          };
+        }[];
+      };
+      expect(family.testKeyMaterial.testOnlyClientEphemeralSecretKey.$bytes, file).toBe(
+        expectedHex(expectedClient),
+      );
+      expect(family.testKeyMaterial.testOnlyNodeEphemeralSecretKey.$bytes, file).toBe(
+        expectedHex(expectedNode),
+      );
+      expect(family.cases[0]?.expected.noiseHandshakeHash.$bytes, file).toMatch(/^[0-9a-f]{64}$/);
+      expect(family.cases[0]?.expected.noiseHandshakeHash.$bytes, file).not.toBe(
+        family.cases[0]?.expected.sessionBindingHash.$bytes,
+      );
+    }
+  });
+
   it("records a correct digest for every file the manifest lists", async () => {
     const manifest = await readManifest();
     for (const [name, entry] of Object.entries(manifest.files)) {
       const bytes = await readFile(`${E2EE_FIXTURE_ROOT}${name}`);
       expect(sha256(bytes), name).toBe(entry.sha256);
     }
+  });
+
+  it("routes or explicitly excludes every committed case exactly once", async () => {
+    const manifest = await readManifest();
+    const declared = [
+      ...manifest.portableExecution.routes,
+      ...manifest.portableExecution.exclusions,
+    ];
+    const seen = new Set<string>();
+    for (const entry of declared) {
+      expect(seen.has(entry.fixtureId), entry.fixtureId).toBe(false);
+      seen.add(entry.fixtureId);
+      expect(new TextEncoder().encode(entry.fixtureId).byteLength).toBeLessThanOrEqual(128);
+      if ("runners" in entry) expect(entry.runners.length, entry.fixtureId).toBeGreaterThan(0);
+      else {
+        expect(entry.reason.length, entry.fixtureId).toBeGreaterThan(40);
+        expect(entry.ownedBy.length, entry.fixtureId).toBeGreaterThan(0);
+      }
+    }
+    const committed: string[] = [];
+    for (const [file, metadata] of Object.entries(manifest.files)) {
+      const family = JSON.parse(await readFile(`${E2EE_FIXTURE_ROOT}${file}`, "utf8")) as {
+        readonly cases: readonly { readonly name: string }[];
+      };
+      for (const entry of family.cases) {
+        committed.push(`F${String(metadata.family).padStart(2, "0")}/${entry.name}`);
+      }
+    }
+    expect([...seen].toSorted()).toEqual(committed.toSorted());
   });
 
   it("lists exactly the family files present on disk", async () => {

@@ -220,16 +220,15 @@ Timing and memory-residue observations are welcome as context; they are known an
 | The specification                           | Landed: `docs/relay-e2ee-protocol.md`, normative, ~6,200 lines                |
 | Colocated unit and golden-transcript suite  | Landed: `packages/shared/src/relayE2eeNoise.test.ts`, 46 cases                |
 | Official Noise vectors (§16.3 family F15)   | Landed: `packages/shared/fixtures/e2ee/v1/f15-noise-core-vectors.json`        |
-| Cross-implementation vectors                | Partly landed by F15; see below                                               |
+| Cross-implementation vectors                | Landed: F15 plus Snow replay of Ryco F6/F7; see below                         |
 | Property-based state-machine suite          | Landed: `packages/shared/src/relayE2eeNoiseProperties.test.ts`, 24 properties |
 | Adversarial suite                           | Landed: `packages/shared/src/relayE2eeAttackerRelay.test.ts`, 128 cases       |
 | — of which run on the hostile-relay harness | 16 (section K); the other 112 hand-carry delivery one record at a time        |
 
-That table is deliberately honest: an auditor should know which evidence exists today and which is
-an obligation still being discharged. One row remains short of closed — cross-implementation
-vectors, discharged by F15 for the official inputs but not for this protocol's own §8.4 prologue and
-§8.5/§8.7 payload shapes, as the F15 note below explains. Every other row is landed, and none of
-them is a deliverable the auditor is being asked to produce.
+That table is deliberately honest: an auditor should know which evidence exists today and the
+limits of each item. Every row is landed, and none of them is a deliverable the auditor is being
+asked to produce. Landed automated evidence is not an external audit and does not satisfy the
+separate audit gate in §14.1.
 
 The adversarial row is split into two lines for a reason worth stating before an engagement is
 sized: 128 cases is the size of the adversarial suite, not the size of the harness-driven evidence
@@ -256,12 +255,22 @@ under the `Split()` outputs. Those transport messages are what pin `Split()`: th
 split keys, but each transport ciphertext is produced under one of them, so reproducing them pins
 both outputs and their §6.5 order.
 
-Because cacophony and snow are independent implementations in different languages, F15 also
-discharges most of the cross-implementation row: identical static keys, ephemerals, prologues, and
-payloads produce identical transcripts and `Split()` outputs against two of them. What it does not
-cover is this protocol's own inputs — a §8.4 canonical-CBOR prologue and the §8.5/§8.7 payload
-shapes run against a live third-party implementation — so that row is marked partly landed rather
-than closed.
+Because cacophony and snow are independent implementations in different languages, F15 checks
+identical static keys, ephemerals, prologues, and payloads against both implementations. The
+test-only Rust crate at `packages/shared/test/independent-e2ee/snow` closes the protocol-input gap:
+Snow 0.9.6 consumes the generated F6 IK and F7 NX §8.4 prologues and §8.5/§8.7 payloads, then checks
+both messages byte for byte, payload recovery, the standard Noise handshake hash, and both raw
+`Split()` outputs. Its exact upstream tag, commit, archive digest, dependency lock, and dual-license
+provenance are recorded beside the harness.
+
+The bounds matter. Snow's fixed-ephemeral and raw-split APIs are test-only and must never enter
+production. Snow does not expose `ck_final`, so this harness cannot independently calculate Ryco's
+exporter or validate server confirmation, epoch ratchets, record protection, CBOR carriers,
+certificates, authorization, timeouts, or downgrade policy. A separate import-isolated,
+straight-line TypeScript composition checks `ck_final`, the exporter, canonical CBOR, record
+protection, ratchets, P-256 validation, and the production maximum fixture without importing any
+production `relayE2ee*` module. That composition is useful differential evidence, but it is
+first-party reference code and is not represented as an independent implementation.
 
 **What the landed suite already pins**, all as exact byte literals so that any change to a token
 order, a DH argument, the nonce encoding, the HKDF chain, a protocol name, or the exporter label
@@ -418,17 +427,17 @@ handshake logic has changed since the client and node work landed. The one edit 
 `testOnlyHandshakeHash`, which now reports erasure by reading `h` instead of by reading the status
 flag — a strictly stronger witness of the same rule, described in section 6.
 
-**The two §14.1 evidence obligations that were outstanding are now landed** — the property-based
-state-machine suite and the adversarial suite driven through a hostile-relay harness, both described
-in section 6. Neither was ever a deliverable the auditor was asked to produce; they are the
-evidence the engagement is read alongside, and an auditor should find them in the tree rather than
-be told they are coming. Landed is not the same as exhaustive, and section 6 states each bound where
-it applies: the harness drives 16 of the adversarial suite's 128 cases and the §8 negotiation
+**The §14.1 automated-evidence obligations are now landed** — official vectors, protocol-input
+cross-implementation replay, the property-based state-machine suite, and the adversarial suite
+driven through a hostile-relay harness, all described in section 6. None was ever a deliverable the
+auditor was asked to produce; they are the evidence the engagement is read alongside, and an
+auditor should find them in the tree rather than be told they are coming. Landed is not the same as
+exhaustive, and section 6 states each bound where it applies: Snow cannot expose `ck_final` or the
+Ryco exporter; the harness drives 16 of the adversarial suite's 128 cases and the §8 negotiation
 records do not cross it; erasure is asserted on a buffer for the ephemeral and the handshake hash
 and by code reading for the chaining key, the cipher key, and the static copy; and §14.1's
-nonce-progression obligation is discharged over the encoding here and over byte-exact transcripts in
-F15. The one row still short of closed is the cross-implementation vectors, which F15 discharges for
-the official inputs but not for this protocol's own §8.4 prologue and §8.5/§8.7 payload shapes.
+nonce-progression obligation is discharged over the encoding here and over byte-exact transcripts
+in F15 and F6/F7.
 
 What the audit gates, precisely: §14.1 makes it a precondition for flipping the `requireE2EE` default
 (§12.3), and nothing else. Every tier below that default ships without it. §17.1 carries the

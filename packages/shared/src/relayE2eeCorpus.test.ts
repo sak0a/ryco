@@ -1425,7 +1425,9 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
     // it carried. They are all outputs of ONE operation, so the operation is run
     // here — with this family's own §6.5 stand-in secrets — and every field is
     // checked against what it returned, the envelope included, byte for byte.
-    const session = (): E2eeRecordSession =>
+    const session = (
+      plaintextCeiling = PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL,
+    ): E2eeRecordSession =>
       new E2eeRecordSession({
         secrets: {
           epochSecretC2N: fixtureBytes(F01.testKeyMaterial.testOnlyEpochSecretC2N),
@@ -1438,7 +1440,7 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
         suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
         sessionBindingHash: fixtureBytes(F01.testKeyMaterial.sessionBindingHash),
         sendDirection: F01.testKeyMaterial.sendDirection as E2eeDirection,
-        plaintextCeiling: PLAINTEXT_CEILING_OF_THE_CORPUS_CHANNEL,
+        plaintextCeiling,
       });
 
     const protect = async (
@@ -1506,6 +1508,36 @@ describe("§16.3 F1 payload discrimination and chunk pipeline (§4.2, §4.3, §4
       expect(hex(atRun.envelope!)).toBe(hex(fixtureBytes(at.expected.envelope)));
       expect(at.expected.envelopeBytes).toBe(atRun.envelope!.byteLength);
       expect(at.expected.transmittedRecords).toBe(1);
+
+      const production = caseByName(
+        F01,
+        "production-inner-body-exactly-at-the-plaintext-ceiling-recipe",
+      );
+      const recipe = (production.inputs.body as JsonRecord).$recipe as JsonRecord;
+      expect(recipe.kind).toBe("fill");
+      const productionBody = new Uint8Array(recipe.bytes as number).fill(recipe.byte as number);
+      let productionEnvelope: Uint8Array | undefined;
+      const productionSession = session(production.inputs.plaintextCeiling as number);
+      const productionResult = await productionSession.protect({
+        innerType: production.inputs.innerType as E2eeInnerRecordType,
+        body: productionBody,
+        admit: () => true,
+        transmit: (value) => {
+          productionEnvelope = Uint8Array.from(value);
+          return { kind: "sent" };
+        },
+      });
+      productionSession.erase();
+      expect(productionResult.kind).toBe(production.expected.send);
+      expect(productionEnvelope?.byteLength).toBe(production.expected.envelopeBytes);
+      expect(hex(sha256(productionEnvelope!))).toBe(production.expected.envelopeSha256);
+      expect(hex(productionEnvelope!.subarray(0, 32))).toBe(
+        hex(fixtureBytes(production.expected.envelopePrefix)),
+      );
+      expect(hex(productionEnvelope!.subarray(-32))).toBe(
+        hex(fixtureBytes(production.expected.envelopeSuffix)),
+      );
+      expect(production.expected.transmittedRecords).toBe(1);
 
       const over = caseByName(F01, "inner-body-one-byte-over-the-plaintext-ceiling");
       const overRun = await protect(over);
@@ -1946,6 +1978,11 @@ describe("§16.3 F6 and F7 handshakes (§8)", () => {
       );
       expect(hex(accept.value.contextCommitment), entry.name).toBe(
         hex(fixtureBytes(trace.contextCommitment)),
+      );
+      expect(fixtureBytes(trace.noiseHandshakeHash).byteLength, entry.name).toBe(32);
+      expect(fixtureBytes(trace.noiseChainingKeyFinal).byteLength, entry.name).toBe(32);
+      expect(hex(fixtureBytes(trace.noiseHandshakeHash)), entry.name).not.toBe(
+        hex(fixtureBytes(trace.sessionBindingHash)),
       );
       expect(trace.bothEndpointsDerivedIdenticalSecrets, entry.name).toBe(true);
     }
@@ -3951,8 +3988,8 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 // corpus manifest under `livenessCensus`; the tests at the bottom of this file
 // hold the manifest to the corpus and to itself.
 //
-//   2,123 of 3,287 committed expectation leaves are read by some suite: 64.6%.
-//   1,164 are read by nothing. 17 of the 290 committed cases carry no live
+//   2,133 of 3,297 committed expectation leaves are read by some suite: 64.7%.
+//   1,164 are read by nothing. 17 of the 291 committed cases carry no live
 //   leaf at all — they are named one by one in `E2EE_CORPUS_CASE_LIVENESS`,
 //   each with the reason and the owner of the missing work.
 //
@@ -3976,13 +4013,13 @@ describe("§16.3 F18 node admission policy (§12.4, §12.6)", () => {
 //   obligations that stopped being `unasserted` stopped because their cases went
 //   live.
 //
-// "17 OF 290" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
-// one-leaf threshold it invites the reading that the other 273 assert something
+// "17 OF 291" IS NOT THE INTERESTING NUMBER, AND ON ITS OWN IT MISLEADS: with a
+// one-leaf threshold it invites the reading that the other 274 assert something
 // substantial. The distribution is what shows the shape, and the manifest
 // publishes it as `casesByLiveLeafCount`:
 //
 //   live leaves per case:  0 → 17 · 1 → 17 · 2 → 62 · 3–5 → 86 · 6–10 → 54 ·
-//   11–25 → 38 · 26+ → 16.   96 of 290 cases have at most TWO live leaves;
+//   11–25 → 38 · 26+ → 16.   96 of 291 cases have at most TWO live leaves;
 //   182 have at most five.
 //
 // READ-LIVENESS IS AN UPPER BOUND ON ASSERTION EVERYWHERE EXCEPT F4 AND F17. A
@@ -4198,8 +4235,9 @@ const SECTION_16_3_LEDGER: readonly CoverageObligation[] = [
     family: 1,
     section: "16.3 F1 (§4.2, §4.3, §4.5)",
     spec: "inner body exactly at `plaintextCeiling` (sent) and one byte over (`e2ee_message_too_large`, nothing transmitted)",
-    generated: /^inner-body-(exactly-at|one-byte-over)-the-plaintext-ceiling$/,
-    cases: 2,
+    generated:
+      /^(?:production-)?inner-body-(exactly-at|one-byte-over)-the-plaintext-ceiling(?:-recipe)?$/,
+    cases: 3,
   },
   {
     id: "f1-empty-payload-zero-length-path",
@@ -5759,7 +5797,7 @@ describe("§16.3 coverage ledger", () => {
 // committed case has at least one leaf some suite reads. It does not guarantee
 // that a case's expectations are meaningfully asserted, and it is not evidence
 // that they are. A case can keep its name and one or two live leaves with the
-// rest of its `expected` block inert and satisfy this in full; 96 of the 290
+// rest of its `expected` block inert and satisfy this in full; 96 of the 291
 // committed cases have at most two live leaves. The distribution the census
 // publishes is the honest picture; the floor is the thing a test can enforce.
 //
@@ -5992,7 +6030,7 @@ describe("§16.3 corpus liveness", () => {
   });
 
   it("publishes the SHAPE of per-case liveness, not one reassuring number", () => {
-    // `casesWithNoLiveLeaf: 33 of 290` invites the reading that the other 257
+    // `casesWithNoLiveLeaf: 17 of 291` invites the reading that the other 274
     // assert something substantial. They do not: the rule is a one-leaf floor,
     // and a large fraction of the corpus sits one or two leaves above it. The
     // distribution is published so that shape is visible, and it is recomputed

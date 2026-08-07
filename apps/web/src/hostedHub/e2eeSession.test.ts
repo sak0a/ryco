@@ -3,10 +3,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
   beginWebE2eeChannelAttempt,
+  clearWebE2eeLocalDiagnostics,
   lockWebE2eeChannelMode,
   publishWebE2eeVerificationCode,
+  recordWebE2eePolicyGenerationRegression,
   resetWebE2eeSession,
   subscribeWebE2eeSession,
+  webE2eeLocalDiagnostics,
   webE2eeSessionState,
 } from "./e2eeSession";
 import { clearWebHostedNodeScopedState } from "./environment";
@@ -24,11 +27,28 @@ const CODE = "AAAA-BBBB";
 const UNAVAILABLE = { status: "unavailable", verificationCode: null } as const;
 
 beforeEach(() => {
+  clearWebE2eeLocalDiagnostics();
   resetWebE2eeSession();
 });
 
 afterEach(() => {
+  clearWebE2eeLocalDiagnostics();
   resetWebE2eeSession();
+});
+
+describe("§11.4 web local diagnostics", () => {
+  it("keeps the stable rollback code across channel reset and clears it explicitly", () => {
+    recordWebE2eePolicyGenerationRegression();
+    resetWebE2eeSession();
+    expect(webE2eeLocalDiagnostics()).toEqual(["e2ee_policy_generation_regressed"]);
+    clearWebE2eeLocalDiagnostics();
+    expect(webE2eeLocalDiagnostics()).toEqual([]);
+  });
+
+  it("is bounded to the newest eight local codes", () => {
+    for (let index = 0; index < 12; index += 1) recordWebE2eePolicyGenerationRegression();
+    expect(webE2eeLocalDiagnostics()).toHaveLength(8);
+  });
 });
 
 describe("§13 the projection is per channel", () => {
@@ -40,17 +60,26 @@ describe("§13 the projection is per channel", () => {
     // status half had an assertion.
     lockWebE2eeChannelMode("e2ee");
     publishWebE2eeVerificationCode(CODE);
-    expect(webE2eeSessionState()).toEqual({ status: "web-unsigned", verificationCode: CODE });
+    expect(webE2eeSessionState()).toEqual({
+      status: "web-unsigned",
+      verificationCode: CODE,
+    });
 
     beginWebE2eeChannelAttempt();
-    expect(webE2eeSessionState()).toEqual({ status: "negotiating", verificationCode: null });
+    expect(webE2eeSessionState()).toEqual({
+      status: "negotiating",
+      verificationCode: null,
+    });
   });
 
   it("drops the code again when the channel falls back to plaintext", () => {
     lockWebE2eeChannelMode("e2ee");
     publishWebE2eeVerificationCode(CODE);
     lockWebE2eeChannelMode("legacy");
-    expect(webE2eeSessionState()).toEqual({ status: "legacy", verificationCode: null });
+    expect(webE2eeSessionState()).toEqual({
+      status: "legacy",
+      verificationCode: null,
+    });
   });
 
   it("is dropped by the node-scoped clearing catalog", () => {
@@ -78,7 +107,10 @@ describe("§13.5 the code is refused by any state that cannot have one", () => {
     // guard is exactly what a later caller would remove without noticing.
     lockWebE2eeChannelMode("legacy");
     publishWebE2eeVerificationCode(CODE);
-    expect(webE2eeSessionState()).toEqual({ status: "legacy", verificationCode: null });
+    expect(webE2eeSessionState()).toEqual({
+      status: "legacy",
+      verificationCode: null,
+    });
   });
 
   it("accepts a code while negotiating, which is the ordering the machine uses", () => {
@@ -88,9 +120,15 @@ describe("§13.5 the code is refused by any state that cannot have one", () => {
     // `negotiating`, and gating on `web-unsigned` silently threw the code away.
     beginWebE2eeChannelAttempt();
     publishWebE2eeVerificationCode(CODE);
-    expect(webE2eeSessionState()).toEqual({ status: "negotiating", verificationCode: CODE });
+    expect(webE2eeSessionState()).toEqual({
+      status: "negotiating",
+      verificationCode: CODE,
+    });
     lockWebE2eeChannelMode("e2ee");
-    expect(webE2eeSessionState()).toEqual({ status: "web-unsigned", verificationCode: CODE });
+    expect(webE2eeSessionState()).toEqual({
+      status: "web-unsigned",
+      verificationCode: CODE,
+    });
   });
 });
 

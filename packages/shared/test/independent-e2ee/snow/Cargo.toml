@@ -1,0 +1,16 @@
+[package]
+name = "ryco-independent-e2ee-snow"
+version = "0.0.0"
+edition = "2021"
+rust-version = "1.68"
+publish = false
+license = "MIT"
+
+[dependencies]
+serde_json = "=1.0.143"
+snow = { version = "=0.9.6", features = ["risky-raw-split"] }
+# Keep the graph readable by the repository's Cargo 1.68 toolchain. Snow 0.9.6's
+# own release graph used these versions; newer releases require edition 2024 or
+# a newer rustc before this independent harness can even run.
+ryu = "=1.0.15"
+zeroize = "=1.7.0"

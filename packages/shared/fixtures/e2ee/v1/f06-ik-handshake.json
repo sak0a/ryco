@@ -60,10 +60,10 @@
       "now": 1784160030000
     },
     "testOnlyClientEphemeralSecretKey": {
-      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+      "$bytes": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
     },
     "testOnlyNodeEphemeralSecretKey": {
-      "$bytes": "0000000000000000000000000000000000000000000000000000000000000000"
+      "$bytes": "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40"
     },
     "testOnlyClientNonce": {
       "$bytes": "9f9e9d9c9b9a999897969594939291908f8e8d8c8b8a89888786858483828180"
@@ -154,6 +154,12 @@
         },
         "noiseMessage2": {
           "$bytes": "5869aff450549732cbaaed5e5df9b30a6da31cb0e5742bad5ad4a1a768f1a67bb13e712e2d79ffe5479f893d5255f767e736270d77c4d46aebba6d01338e774bcff68792b06e98786db90b08d6a159910da44b2dba57b8a02f627acd8dca23db4cb8a13714"
+        },
+        "noiseHandshakeHash": {
+          "$bytes": "a6fd89ea80ef2be3cb3a6746ec6810e2fdc83357e51bf99978b6fbaf00722462"
+        },
+        "noiseChainingKeyFinal": {
+          "$bytes": "2344c6e5aa01111955a397724a69184bb766254d265920c2b190e9d3db8d2d3b"
         },
         "message2PayloadPlaintext": {
           "$bytes": "83687279636f2e727063686f70657261746f7258200f4004c97fa0df91b3cb19547a4e0b16f1b37b440f7cb630faf81291b37df779"

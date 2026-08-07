@@ -16,6 +16,7 @@ import {
   T_ADV,
   T_HANDSHAKE,
   T_KEEPALIVE_FLUSH_MARGIN,
+  T_TRUST_COMMIT,
 } from "@ryco/shared/relayE2eeConstants";
 import {
   decodeE2eeClientHello,
@@ -28,7 +29,11 @@ import {
 } from "@ryco/shared/relayE2eeHandshake";
 import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
 import { e2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
-import { E2eeRecordSession, type E2eeSessionSecrets } from "@ryco/shared/relayE2eeSession";
+import {
+  E2eeRecordSession,
+  eraseE2eeSessionSecrets,
+  type E2eeSessionSecrets,
+} from "@ryco/shared/relayE2eeSession";
 import { deriveE2eeWebSas } from "@ryco/shared/relayE2eeVerificationDisplay";
 import {
   e2eeAuthorizationContextCommitment,
@@ -253,6 +258,14 @@ const CREDENTIALS: E2eeClientHandshakeCredentials = {
   prekeyTranscript: CLIENT_PREKEY_TRANSCRIPT,
   prekeySignature: CLIENT_PREKEY_SIGNATURE,
 };
+const BORROWED_CREDENTIALS = {
+  tier: "native",
+  accountId: ACCOUNT_ID,
+  identityPublicKey: CLIENT_IDENTITY_PUBLIC,
+  agreementPublicKey: CLIENT_AGREEMENT_PUBLIC,
+  prekeyTranscript: CLIENT_PREKEY_TRANSCRIPT,
+  prekeySignature: CLIENT_PREKEY_SIGNATURE,
+} as const;
 
 // ─── the harness ─────────────────────────────────────────────────────────────
 
@@ -627,13 +640,13 @@ async function establish(overrides: Partial<RelayE2eeInitiatorAttempt> = {}) {
 // ─── §3.2.2 L1 ───────────────────────────────────────────────────────────────
 
 describe("§3.2.2 L1 — the negotiating window fits inside one keepalive period", () => {
-  it("holds T_ADV + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN <= RPC_KEEPALIVE_INTERVAL", () => {
+  it("holds the advertisement, trust-commit, handshake, and flush windows inside one keepalive period", () => {
     // §3.2.2: "A release in which any of L1–L5 is false is a specification
     // defect." The client is the only endpoint bound by it, and row K15 is
     // reachable ONLY while it holds — under a violating budget the transport
     // declares the peer dead mid-handshake and the specified FATAL-PRE, with
     // §11.5's uniform observable, can never execute (§17.14).
-    expect(T_ADV + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN).toBeLessThanOrEqual(
+    expect(T_ADV + T_TRUST_COMMIT + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN).toBeLessThanOrEqual(
       RPC_KEEPALIVE_INTERVAL,
     );
   });
@@ -654,6 +667,517 @@ describe("§4.4 client transition table — rows K1–K4 (the capability carrier
     expect(test.machine().mode()).toBe("negotiating");
     // §4.4: nothing is released while the hello is in flight.
     expect(test.events.onOpen).not.toHaveBeenCalled();
+  });
+
+  it("K1: borrows the native agreement scalar only after validation and durable trust", async () => {
+    let finishCommit!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      finishCommit = resolve;
+    });
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      onStatement: () => committed,
+      withNativeAgreementSecretKey: async (use) => {
+        lifecycle.acquisitions += 1;
+        lifecycle.active += 1;
+        try {
+          return await use(Uint8Array.from(CLIENT_AGREEMENT_SECRET));
+        } finally {
+          lifecycle.active -= 1;
+          lifecycle.releases += 1;
+        }
+      },
+    });
+
+    expect(lifecycle).toEqual({ acquisitions: 0, active: 0, releases: 0 });
+    deliver(test.socket, CARRIER);
+    await flush();
+    expect(lifecycle).toEqual({ acquisitions: 0, active: 0, releases: 0 });
+    expect(outbound(test.socket)).toEqual([]);
+
+    finishCommit();
+    await flush();
+
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 1 });
+    expect(outbound(test.socket)).toHaveLength(1);
+  });
+
+  it("gives a late K1 borrow only the trust deadline's final millisecond", async () => {
+    let finishCommit!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      finishCommit = resolve;
+    });
+    let releaseRead!: () => void;
+    const readReady = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      onStatement: () => committed,
+      withNativeAgreementSecretKey: async (use) => {
+        lifecycle.acquisitions += 1;
+        await readReady;
+        lifecycle.active += 1;
+        try {
+          return await use(Uint8Array.from(CLIENT_AGREEMENT_SECRET));
+        } finally {
+          lifecycle.active -= 1;
+          lifecycle.releases += 1;
+        }
+      },
+    });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    test.advance(T_TRUST_COMMIT - 1);
+    finishCommit();
+    await flush();
+
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 0 });
+    expect(test.armed()).toBe(1);
+    test.advance(1);
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.armed()).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+
+    releaseRead();
+    await flush();
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 1 });
+    expect(outbound(test.socket)).toEqual([]);
+  });
+
+  it("closes pre-key when the late native agreement-key acquisition fails", async () => {
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      withNativeAgreementSecretKey: async () => {
+        throw new Error("agreement key unavailable");
+      },
+    });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("closes pre-key when the native borrower throws synchronously", async () => {
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      withNativeAgreementSecretKey: () => {
+        throw new Error("synchronous agreement-key failure");
+      },
+    });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("acquires no agreement scalar for an invalid capability carrier", async () => {
+    let acquisitions = 0;
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      withNativeAgreementSecretKey: async (use) => {
+        acquisitions += 1;
+        return await use(Uint8Array.from(CLIENT_AGREEMENT_SECRET));
+      },
+    });
+    const invalidCarrier = Uint8Array.from(CARRIER);
+    invalidCarrier[invalidCarrier.byteLength - 1] ^= 0x01;
+
+    deliver(test.socket, invalidCarrier);
+    await flush();
+
+    expect(acquisitions).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+  });
+
+  it("closes pre-key when a native borrower resolves without invoking K1", async () => {
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      withNativeAgreementSecretKey: async () => ({ kind: "claimed" }) as never,
+    });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.diagnostics).toEqual(["local"]);
+  });
+
+  it("preserves native IK interoperability with one-operation borrowed custody", async () => {
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    const { test, accept } = await establish({
+      credentials: BORROWED_CREDENTIALS,
+      withNativeAgreementSecretKey: async (use) => {
+        lifecycle.acquisitions += 1;
+        lifecycle.active += 1;
+        const secretKey = Uint8Array.from(CLIENT_AGREEMENT_SECRET);
+        try {
+          return use(secretKey);
+        } finally {
+          secretKey.fill(0);
+          lifecycle.active -= 1;
+          lifecycle.releases += 1;
+        }
+      },
+    });
+
+    expect(test.machine().mode()).toBe("e2ee");
+    expect(accept.secrets).toBeDefined();
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 1 });
+    eraseE2eeSessionSecrets(accept.secrets);
+  });
+
+  it("closes FATAL-PRE with zero hello when a restored certificate names another scalar", async () => {
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    const test = harness({
+      credentials: {
+        ...BORROWED_CREDENTIALS,
+        agreementPublicKey: NODE_AGREEMENT_PUBLIC,
+      },
+      withNativeAgreementSecretKey: async (use) => {
+        lifecycle.acquisitions += 1;
+        lifecycle.active += 1;
+        const secretKey = Uint8Array.from(CLIENT_AGREEMENT_SECRET);
+        try {
+          return use(secretKey);
+        } finally {
+          secretKey.fill(0);
+          lifecycle.active -= 1;
+          lifecycle.releases += 1;
+        }
+      },
+    });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 1 });
+  });
+
+  it.each(["abort", "dispose", "close", "timeout"] as const)(
+    "cancels a pending native agreement-key read on %s and ignores its late completion",
+    async (terminal) => {
+      let releaseRead!: () => void;
+      const readReady = new Promise<void>((resolve) => {
+        releaseRead = resolve;
+      });
+      const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+      const test = harness({
+        credentials: BORROWED_CREDENTIALS,
+        withNativeAgreementSecretKey: async (use) => {
+          lifecycle.acquisitions += 1;
+          await readReady;
+          lifecycle.active += 1;
+          try {
+            return await use(Uint8Array.from(CLIENT_AGREEMENT_SECRET));
+          } finally {
+            lifecycle.active -= 1;
+            lifecycle.releases += 1;
+          }
+        },
+      });
+      deliver(test.socket, CARRIER);
+      await flush();
+      expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 0 });
+
+      // The native provider's background transition invokes this same abort.
+      if (terminal === "abort") test.machine().abort();
+      else if (terminal === "dispose") test.machine().dispose();
+      else if (terminal === "close") await test.machine().beginClose();
+      else test.advance(T_TRUST_COMMIT);
+      await flush();
+
+      expect(test.machine().mode()).toBe("closed");
+      expect(test.armed()).toBe(0);
+      expect(outbound(test.socket)).toEqual([]);
+      expect(lifecycle.active).toBe(0);
+
+      releaseRead();
+      await flush();
+
+      expect(outbound(test.socket)).toEqual([]);
+      expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 1 });
+    },
+  );
+
+  it("ignores a pending borrower rejection after the channel is terminal", async () => {
+    let rejectRead!: (cause: Error) => void;
+    const readReady = new Promise<void>((_resolve, reject) => {
+      rejectRead = reject;
+    });
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      withNativeAgreementSecretKey: async (use) => {
+        await readReady;
+        return await use(Uint8Array.from(CLIENT_AGREEMENT_SECRET));
+      },
+    });
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    test.machine().abort();
+    await flush();
+    rejectRead(new Error("late agreement-store rejection"));
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.armed()).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("K1: waits for the authenticated trust commit before sending the hello", async () => {
+    let release!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const test = harness({ onStatement: () => committed });
+    test.engine.send(utf8('{"mustRemainBuffered":true}'));
+
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("negotiating");
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+    expect(test.armed()).toBe(1);
+
+    release();
+    await flush();
+
+    expect(outbound(test.socket)).toHaveLength(1);
+    expect(decodeE2eeClientHello(outbound(test.socket)[0]!).kind).toBe("ok");
+    expect(test.armed()).toBe(1);
+  });
+
+  it("closes pre-key and sends nothing when the trust commit rejects", async () => {
+    const test = harness({
+      onStatement: async () => {
+        throw new Error("durable trust write refused");
+      },
+    });
+    test.engine.send(utf8('{"mustNotEscape":true}'));
+
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+  });
+
+  it("closes pre-key when the statement hook throws synchronously", async () => {
+    const test = harness({
+      onStatement: () => {
+        throw new Error("synchronous trust boundary refusal");
+      },
+    });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("closes at T_TRUST_COMMIT and a late commit cannot resume the channel", async () => {
+    let release!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const test = harness({ onStatement: () => committed });
+    test.engine.send(utf8('{"mustNotEscape":true}'));
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    test.advance(T_TRUST_COMMIT);
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+
+    release();
+    await flush();
+
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+  });
+
+  it("wakes a pending trust wait on abort and ignores its late settlement", async () => {
+    let reject!: (cause: Error) => void;
+    const committed = new Promise<void>((_resolve, rejectPromise) => {
+      reject = rejectPromise;
+    });
+    const test = harness({ onStatement: () => committed });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    test.machine().abort();
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.armed()).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+
+    reject(new Error("late storage refusal"));
+    await flush();
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("wakes a pending trust wait when a graceful close begins", async () => {
+    let reject!: (cause: Error) => void;
+    const committed = new Promise<void>((_resolve, rejectPromise) => {
+      reject = rejectPromise;
+    });
+    const test = harness({ onStatement: () => committed });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    expect(await test.machine().beginClose()).toBe("opened");
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.armed()).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+    expect(closeReasons(test.socket)).toEqual([undefined]);
+
+    reject(new Error("late storage refusal"));
+    await flush();
+    expect(outbound(test.socket)).toEqual([]);
+    expect(closeReasons(test.socket)).toEqual([undefined]);
+  });
+
+  it("wakes a pending trust wait on disposal and ignores late success", async () => {
+    let release!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const test = harness({ onStatement: () => committed });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    test.machine().dispose();
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.armed()).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+
+    release();
+    await flush();
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+  });
+
+  it("emits nothing when abort wins after commit settlement but before its continuation", async () => {
+    let release!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const test = harness({ onStatement: () => committed });
+    test.engine.send(utf8('{"mustNotEscape":true}'));
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    release();
+    // The hook's fulfillment settles the initiator wait. Its async continuation
+    // is now queued behind this test continuation, so abort deterministically
+    // wins the same-tick ordering that previously allowed a stale hello.
+    await Promise.resolve();
+    test.machine().abort();
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.armed()).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.events.onOpen).not.toHaveBeenCalled();
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
+  });
+
+  it("arms a fresh full handshake deadline after a near-deadline trust commit", async () => {
+    let release!: () => void;
+    const committed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const test = harness({ onStatement: () => committed });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    test.advance(T_TRUST_COMMIT - 1);
+    release();
+    await flush();
+    expect(outbound(test.socket)).toHaveLength(1);
+
+    test.advance(T_HANDSHAKE - 1);
+    expect(test.machine().mode()).toBe("negotiating");
+    test.advance(1);
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.diagnostics).toEqual(["P20"]);
+  });
+
+  it("awaits the statement hook before applying an unusable verdict", async () => {
+    let release!: () => void;
+    const observed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const test = harness({ selectionClass: "legacy-eligible", onStatement: () => observed });
+
+    deliver(test.socket, UNUSABLE_CARRIER);
+    await flush();
+
+    expect(test.diagnostics).toEqual([]);
+    expect(test.machine().mode()).toBe("negotiating");
+
+    release();
+    await flush();
+
+    expect(test.diagnostics).toEqual(["K3"]);
+    expect(outbound(test.socket)).toEqual([]);
+  });
+
+  it("closes pre-key when the observer of an unusable verdict rejects", async () => {
+    const test = harness({
+      selectionClass: "legacy-eligible",
+      onStatement: async () => {
+        throw new Error("trust observer refused the verdict");
+      },
+    });
+
+    deliver(test.socket, UNUSABLE_CARRIER);
+    await flush();
+
+    expect(test.machine().mode()).toBe("closed");
+    expect(test.armed()).toBe(0);
+    expect(outbound(test.socket)).toEqual([]);
+    expect(test.diagnostics).toEqual(["local"]);
+    expect(closeReasons(test.socket)).toEqual(["channel_rejected"]);
   });
 
   it("K2: closes FATAL-PRE on an unusable statement while the selection is latched", async () => {

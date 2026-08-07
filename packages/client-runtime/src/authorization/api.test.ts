@@ -95,6 +95,25 @@ const session = {
   csrfToken: "csrf-canary",
 } as const;
 
+function hostedNode(id: string) {
+  return {
+    id,
+    environmentId: "env_aaaaaaaaaaaaaaaaaaaaaa",
+    label: "Studio",
+    platformOs: "linux",
+    platformArch: "arm64",
+    clientVersion: "0.9.0",
+    createdAt: 1,
+    updatedAt: 2,
+    lastAuthenticatedAt: 2,
+    revokedAt: null,
+    revocationReasonCode: null,
+    grant: { id: "grant_aaaaaaaaaaaaaaaaaaaaaa", role: "operator" },
+    effectiveRole: "operator",
+    presence: { online: true, lastHeartbeatAt: 3 },
+  } as const;
+}
+
 /** The minimum registration challenge `validatePasskeyRegistrationOptions` accepts. */
 const registrationOptions = {
   challenge: encodeBase64Url(new Uint8Array([7, 8, 9])),
@@ -248,6 +267,77 @@ describe("HostedHubApi", () => {
     await expect(api.restoreSession()).rejects.toMatchObject({ code: "session_invalid" });
   });
 
+  it("bounds opaque account identifiers by their canonical E2EE UTF-8 limit", async () => {
+    const api = createApi();
+    for (const accountId of ["", "a".repeat(257), "😀".repeat(65)]) {
+      globalThis.fetch = vi.fn(async () =>
+        response({
+          ...session,
+          account: { ...session.account, id: accountId },
+          session: { ...session.session, accountId },
+        }),
+      );
+      await expect(api.restoreSession()).rejects.toMatchObject({ code: "invalid_response" });
+      expect(api.hasSessionMaterial).toBe(false);
+    }
+
+    for (const accountId of ["a".repeat(256), "😀".repeat(64), "acct\u0000opaque", "é", "é"]) {
+      globalThis.fetch = vi.fn(async () =>
+        response({
+          ...session,
+          account: { ...session.account, id: accountId },
+          session: { ...session.session, accountId },
+        }),
+      );
+      const restored = await api.restoreSession();
+      expect(restored.account.id).toBe(accountId);
+      expect(restored.session.accountId).toBe(accountId);
+    }
+  });
+
+  it("validates canonical relay node identifiers at response and request boundaries", async () => {
+    const api = createApi();
+    const invalid = [
+      "",
+      `node_${"n".repeat(21)}`,
+      `node_${"n".repeat(44)}`,
+      `node_${"n".repeat(21)}+`,
+      `node_${"n".repeat(10)}\u0000${"n".repeat(11)}`,
+    ];
+    for (const nodeId of invalid) {
+      globalThis.fetch = vi.fn(async () => response({ nodes: [hostedNode(nodeId)] }));
+      await expect(api.listNodes()).rejects.toMatchObject({ code: "invalid_response" });
+
+      const request = vi.fn(async () =>
+        response({ ticket: "ticket", expiresAt: 1, protocolMajor: 1, protocolMinor: 2 }, 201),
+      );
+      globalThis.fetch = request;
+      await expect(api.issueRelayTicket(nodeId)).rejects.toMatchObject({ code: "invalid_request" });
+      expect(request).not.toHaveBeenCalled();
+    }
+
+    for (const nodeId of [`node_${"n".repeat(22)}`, `node_${"n".repeat(43)}`]) {
+      globalThis.fetch = vi.fn(async () => response({ nodes: [hostedNode(nodeId)] }));
+      await expect(api.listNodes()).resolves.toMatchObject([{ id: nodeId }]);
+    }
+
+    const maxNodeId = `node_${"m".repeat(43)}`;
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+    const request = vi.fn(async () =>
+      response({ ticket: "ticket", expiresAt: 1, protocolMajor: 1, protocolMinor: 2 }, 201),
+    );
+    globalThis.fetch = request;
+    await expect(api.issueRelayTicket(maxNodeId)).resolves.toMatchObject({ ticket: "ticket" });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(request.mock.calls[0]?.[1]?.body))).toEqual({
+      nodeId: maxNodeId,
+      capability: "ryco.rpc",
+      protocolMajor: 1,
+      protocolMinor: 2,
+    });
+  });
+
   it("rejects malformed directory and ticket responses", async () => {
     const api = createApi();
     globalThis.fetch = vi.fn(async () => response(session));
@@ -290,20 +380,7 @@ describe("HostedHubApi", () => {
       response({
         nodes: [
           {
-            id: "node_aaaaaaaaaaaaaaaaaaaaaa",
-            environmentId: "env_aaaaaaaaaaaaaaaaaaaaaa",
-            label: "Studio",
-            platformOs: "linux",
-            platformArch: "arm64",
-            clientVersion: "0.9.0",
-            createdAt: 1,
-            updatedAt: 2,
-            lastAuthenticatedAt: 2,
-            revokedAt: null,
-            revocationReasonCode: null,
-            grant: { id: "grant_aaaaaaaaaaaaaaaaaaaaaa", role: "operator" },
-            effectiveRole: "operator",
-            presence: { online: true, lastHeartbeatAt: 3 },
+            ...hostedNode("node_aaaaaaaaaaaaaaaaaaaaaa"),
             unexpectedSensitiveMetadata: "directory-sensitive-canary",
           },
         ],
@@ -1695,6 +1772,40 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
 
     // The live session still works: the next authenticated call presents the
     // original token, not the one the verify tried to hand over.
+    globalThis.fetch = vi.fn(async () => response({ passkeys: [] }));
+    await expect(api.listPasskeys()).resolves.toEqual([]);
+  });
+
+  it("does not rotate an existing bearer session from a malformed account scope", async () => {
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-canary");
+    let call = 0;
+    globalThis.fetch = vi.fn(async () => {
+      call += 1;
+      return call === 1
+        ? response({ options: registrationOptions })
+        : response(
+            {
+              ...accountAndSession,
+              account: { ...accountAndSession.account, id: "" },
+              session: { ...accountAndSession.session, accountId: "" },
+              token: "native-token-malformed-scope-canary",
+              passkey: { id: PASSKEY_ID, label: "Phone" },
+            },
+            201,
+          );
+    });
+    const api = createBearerApi(service, credentials, {
+      register: vi.fn(async () => ({ id: "added" }) as never),
+    });
+
+    await expect(api.addPasskey({ passkeyLabel: "Phone" })).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+    expect(credentials.current()).toBe("native-token-canary");
+    expect(api.hasSessionMaterial).toBe(true);
+
     globalThis.fetch = vi.fn(async () => response({ passkeys: [] }));
     await expect(api.listPasskeys()).resolves.toEqual([]);
   });

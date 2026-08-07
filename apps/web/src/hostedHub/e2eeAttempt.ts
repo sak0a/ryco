@@ -10,15 +10,19 @@ import {
 import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 
 import {
+  acceptedWebE2eePolicyGeneration,
   clearWebE2eeLatches,
   isWebE2eeSelectionLatched,
   latchWebE2eeSelection,
+  recordWebE2eePolicyGeneration,
   type WebE2eeSelection,
 } from "./e2eeLatch";
 import {
   beginWebE2eeChannelAttempt,
+  clearWebE2eeLocalDiagnostics,
   lockWebE2eeChannelMode,
   publishWebE2eeVerificationCode,
+  recordWebE2eePolicyGenerationRegression,
   resetWebE2eeSession,
 } from "./e2eeSession";
 
@@ -56,10 +60,6 @@ import {
 //     the latch on it — but the latch key is client-local state and element 10 of
 //     the statement context is not, and conflating them would put a Hub-issued
 //     value into the handshake context on a tier §8.3 defines without one.
-//   * `acceptedPolicyGeneration` — §5.7 reads it "from the application-session
-//     memory on web"; nothing in this slice records one, so there is none to
-//     pass, and passing zero would assert an acceptance that never happened.
-//
 // ─────────────────────────────────────────────────────────────────────────────
 // `legacyPermitted` IS TRUE, AND IT IS NOT A CONVENIENCE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,6 +152,7 @@ function currentSelection(): WebE2eeSelection | null {
  * shape by hand would be asserting its own copy.
  */
 export function webRelayE2eeAttempt(selection: WebE2eeSelection): RelayE2eeInitiatorAttempt {
+  const acceptedPolicyGeneration = acceptedWebE2eePolicyGeneration(selection);
   return {
     hubOrigin: selection.hubOrigin,
     // §12.1.1's web mapping, and the ONLY place a web selection is classified:
@@ -166,6 +167,10 @@ export function webRelayE2eeAttempt(selection: WebE2eeSelection): RelayE2eeIniti
     // §8.5: the NX tier carries no client identity, no prekey, and no signature.
     // The literal IS the credential set.
     credentials: { tier: "web" },
+    // §5.7: an application-session high-water, advanced on validation below.
+    // Absence is omitted rather than encoded as zero: zero would claim an
+    // accepted generation when this session has validated none.
+    ...(acceptedPolicyGeneration === undefined ? {} : { acceptedPolicyGeneration }),
     // §12.1's set condition, and the single most consequential line in this file.
     //
     // IT IS THE VALIDATION VERDICT AND NOT THE HANDSHAKE LOCK. §5.2 steps 0–7 are
@@ -178,8 +183,24 @@ export function webRelayE2eeAttempt(selection: WebE2eeSelection): RelayE2eeIniti
     // unlatched, and a Hub that validates the statement and then stalls the
     // handshake would get the retry channel to flush plaintext at `T_ADV`.
     onStatement: (verification) => {
+      if (
+        verification.kind === "invalid" &&
+        verification.reason === "policy_generation_regressed"
+      ) {
+        recordWebE2eePolicyGenerationRegression();
+        return;
+      }
       if (!("statement" in verification)) return;
+      // The verifier input is a channel-accept snapshot. Another channel may
+      // advance this selection while this one waits for its carrier, so the
+      // awaited trust boundary re-checks live state before releasing hello.
+      const accepted = acceptedWebE2eePolicyGeneration(selection);
+      if (accepted !== undefined && verification.statement.policyGeneration < accepted) {
+        recordWebE2eePolicyGenerationRegression();
+        throw new Error("Web E2EE policy generation regressed.");
+      }
       latchWebE2eeSelection(selection);
+      recordWebE2eePolicyGeneration(selection, verification.statement.policyGeneration);
     },
     // §13.5, published only at the `e2ee` lock and only on this tier. The
     // machine derives it; this hands it to the projection and nothing else.
@@ -203,7 +224,7 @@ function unresolvedAttemptChannel(host: RelayE2eeHost): RelayE2eeChannel {
   host.close(relayE2eeUnresolvedAttemptFailure());
   return {
     intercept: async () => ({ kind: "rejected" }),
-    emit: async () => false,
+    submit: () => false,
     beginClose: async () => "refused",
     dispose: () => undefined,
   };
@@ -299,17 +320,24 @@ let sessionWatch: (() => void) | undefined;
  * NODE SELECTION IS DELIBERATELY NOT A TRIGGER. The latch is already keyed per
  * node within one session, so switching nodes needs no clearing — and clearing
  * would RELAX a guard rather than tighten one, since an unlatched selection is
- * legacy-eligible. The only transition that clears is authenticated → not.
+ * legacy-eligible. A reversible `signing-out` transition is not a session end;
+ * only the controller's terminal `signed-out` / `session-expired` states clear.
  */
 export function watchWebHostedSessionForE2ee(): () => void {
   if (sessionWatch !== undefined) return sessionWatch;
-  let authenticated = hostedHubStore.getState().accountStatus === "authenticated";
+  let applicationSessionActive = hostedHubStore.getState().accountStatus === "authenticated";
   const unsubscribe = hostedHubStore.subscribe(() => {
-    const next = hostedHubStore.getState().accountStatus === "authenticated";
-    if (next === authenticated) return;
-    authenticated = next;
-    if (next) return;
+    const status = hostedHubStore.getState().accountStatus;
+    if (status === "authenticated") {
+      applicationSessionActive = true;
+      return;
+    }
+    if (!applicationSessionActive || (status !== "signed-out" && status !== "session-expired")) {
+      return;
+    }
+    applicationSessionActive = false;
     clearWebE2eeLatches();
+    clearWebE2eeLocalDiagnostics();
     resetWebE2eeSession();
   });
   sessionWatch = () => {

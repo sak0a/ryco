@@ -97,6 +97,13 @@ export interface MobileE2eeAgreementKey {
   readonly delete: () => Promise<void>;
 }
 
+/** Test-only lifecycle telemetry. It reports counts/events, never key material. */
+interface AgreementSecretBorrowObserver {
+  readonly acquired: () => void;
+  readonly borrowStarted: () => void;
+  readonly released: () => void;
+}
+
 /**
  * X25519 secret-scalar length (RFC 7748 §5).
  *
@@ -127,6 +134,7 @@ function publicDescriptorFromSecretKey(secretKey: Uint8Array): MobileE2eeAgreeme
 
 export function makeMobileE2eeAgreementKey(
   store: E2eeSecureStore = mobileE2eeSecureStore,
+  testOnlyObserver?: AgreementSecretBorrowObserver,
 ): MobileE2eeAgreementKey {
   const readStored = async (): Promise<string | null> => {
     try {
@@ -248,6 +256,8 @@ export function makeMobileE2eeAgreementKey(
       preflight();
       const secretKey = await loadSecretKey();
       try {
+        testOnlyObserver?.acquired();
+        testOnlyObserver?.borrowStarted();
         // Awaited, not returned: the `finally` below zeroizes this module's
         // buffer, and an unawaited promise would erase the scalar while the
         // borrower still held it — X25519 clamps an all-zero scalar to a fixed,
@@ -255,6 +265,7 @@ export function makeMobileE2eeAgreementKey(
         return await use(secretKey);
       } finally {
         secretKey.fill(0);
+        testOnlyObserver?.released();
       }
     },
     delete: () =>
