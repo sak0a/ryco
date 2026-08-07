@@ -682,7 +682,9 @@ export function DiagnosticsSettings({
 
       {import.meta.env.DEV ? <TierPreviewSection /> : null}
 
-      <NotificationsTestSection />
+      {/* Not on `phone-legacy`: that presentation is the frozen web-phone
+          tier, which must not gain new controls. */}
+      {presentation === "phone-legacy" ? null : <NotificationsTestSection />}
 
       {presentation === "phone-legacy" ? (
         <LegacyDiagnosticsSections

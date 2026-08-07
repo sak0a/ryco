@@ -527,10 +527,14 @@ function Toasts({ position = "top-center" }: { position: ToastPosition }) {
       <Toast.Viewport
         className={cn(
           // Top placement: on desktop the toast drops in at the viewport's top
-          // edge, overlaying the header chrome (system-notification style). The
-          // phone tier keeps clearing the app bar + session tab strip instead —
-          // those carry navigation state a covered toast would hide.
-          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-105 phone:[--toast-top:84px] not-phone:[--toast-top:--spacing(3)] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
+          // edge, overlaying the header chrome (system-notification style).
+          //
+          // The frozen web-phone tier keeps its ORIGINAL geometry untouched —
+          // the same inset + 76px header offset (which clears the app bar and
+          // the session tab strip, both carrying navigation state a covered
+          // toast would hide) and the same 22.5rem cap. Only desktop takes the
+          // new top offset and the wider card.
+          "fixed z-100 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 not-phone:max-w-105 phone:[--toast-top:calc(var(--toast-inset)+76px)] not-phone:[--toast-top:--spacing(3)] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
           // Vertical positioning. `--toast-inset` deliberately plays no part in
           // the top offset; it stays for horizontal insets and swipe travel.
           "data-[position*=top]:top-(--toast-top)",

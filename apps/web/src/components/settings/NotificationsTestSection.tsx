@@ -56,21 +56,29 @@ const PRESETS: ReadonlyArray<NotificationTestPreset> = [
     value: "provider-update",
     label: "Provider update available",
     fire: () => {
-      const promptToastId = toastManager.add({
-        type: "warning",
-        title: "Update Available: Claude Code v2.1.4",
-        description: "Install the update now or review provider settings.",
-        timeout: 0,
-        actionProps: { children: "Update", onClick: () => runSampleProviderUpdate(promptToastId) },
-        data: {
-          hideCopyButton: true,
-          secondaryActionProps: {
-            children: "Settings",
-            onClick: () => useSettingsDialogStore.getState().openSettings("providers"),
+      // Same helper the real prompt goes through, so the preview inherits the
+      // helper-owned stacked action layout instead of drifting from it.
+      const promptToastId = toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Update Available: Claude Code v2.1.4",
+          description: "Install the update now or review provider settings.",
+          timeout: 0,
+          actionProps: {
+            children: "Update",
+            onClick: () => runSampleProviderUpdate(promptToastId),
           },
-          secondaryActionVariant: "outline",
-        },
-      });
+          actionVariant: "default",
+          data: {
+            hideCopyButton: true,
+            secondaryActionProps: {
+              children: "Settings",
+              onClick: () => useSettingsDialogStore.getState().openSettings("providers"),
+            },
+            secondaryActionVariant: "outline",
+          },
+        }),
+      );
     },
   },
   {
