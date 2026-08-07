@@ -403,6 +403,50 @@
       }
     },
     {
+      "name": "production-inner-body-exactly-at-the-plaintext-ceiling-recipe",
+      "sections": [
+        "4.2 step 2",
+        "4.5",
+        "16.4"
+      ],
+      "note": "The production-size boundary is represented by a deterministic fill recipe rather than embedding almost four MiB in the portable corpus. The independent runner rebuilds the whole envelope and verifies its digest plus both boundary slices.",
+      "inputs": {
+        "maxQueuedBytes": 4194304,
+        "maxControlFrameBytes": 262144,
+        "plaintextCeiling": 3932128,
+        "body": {
+          "$recipe": {
+            "kind": "fill",
+            "bytes": 3932128,
+            "byte": 119
+          }
+        },
+        "suite": 1,
+        "direction": "c2n",
+        "innerType": 1,
+        "epoch": 0,
+        "counter": 0,
+        "epochSecret": {
+          "$bytes": "7171717171717171717171717171717171717171717171717171717171717171"
+        },
+        "sessionBindingHash": {
+          "$bytes": "2425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40414243"
+        }
+      },
+      "expected": {
+        "send": "protected",
+        "envelopeBytes": 3932160,
+        "envelopeSha256": "e6c47363e71c8c0c25197ed55faa84674a2fc5b622d5f3fe5a0d9f6534b794a2",
+        "envelopePrefix": {
+          "$bytes": "0101010000000000000000000000008d358f92cf5bad0bd422e817bcb9ed1dc4"
+        },
+        "envelopeSuffix": {
+          "$bytes": "0d10a0a3df8fd2668d57930d20e360cafbaa2c88319365545d61bb2d74bbd023"
+        },
+        "transmittedRecords": 1
+      }
+    },
+    {
       "name": "inner-body-one-byte-over-the-plaintext-ceiling",
       "sections": [
         "4.2 step 2",

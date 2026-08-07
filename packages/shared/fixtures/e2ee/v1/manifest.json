@@ -18,10 +18,10 @@
         "11.4",
         "16.3 F1"
       ],
-      "sha256": "91d095e246249606d412a879202cbfd52a4564dd0756ea55c5a0024dc4ec376e",
+      "sha256": "b41960ba46983cb6c506dbf764b64dac136cc7dc013e4293328d6212b7ff339a",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
-      "cases": 18,
+      "cases": 19,
       "deferred": [
         "The §11 row of each empty-payload case (P6 / Q6) is the §4.4 mode machine's verdict, and no mode machine is reachable from packages/shared/src: the node's lives in apps/server and the client's does not exist. The row is therefore carried here as the §16.2 condition label and the DERIVED expectation is the receive-pipeline result the machine consumes. The transition rows themselves are family F10, whose NODE rows are now generated and driven against the real runtime; its client rows remain deferred. Owned by the client phase.",
         "§16.4 cross-runtime equality: this whole family MUST ALSO run in the web browser test suite, and the complete corpus MUST additionally pass on physical devices on both mobile platforms before the native client ships E2EE support. Neither run exists yet — this repository has no browser test gate over packages/shared and no physical-device harness — so every vector here is currently discharged on the Node gate alone, under the §14.5 RN-realistic adapters. A vector that produces different bytes on any supported runtime is a release-blocking defect, and nothing has yet established that none of these does. Owned by the web phase, and by the native rollout, whose physical-device pass §16.4 makes an explicit acceptance gate rather than an optional extra."
@@ -118,7 +118,7 @@
         "8",
         "16.3 F6"
       ],
-      "sha256": "44ee58c7e921ef91a8b47f1b74c2235236176a2a5edbe1a44b37d4e95149a114",
+      "sha256": "ab030d332a5cd44bc0f3320db4798e695c128b7c06ce716bab86f73f529d8f57",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 1
@@ -130,7 +130,7 @@
         "8",
         "16.3 F7"
       ],
-      "sha256": "7175b9b9642dcb2daaa78a1e838aab7f126bcf4aa58ac85cf6ca5d8adeec3887",
+      "sha256": "9cd8f3bbbebd0f23dafe6a0ad265a004a14bedd6905bbfd5514d80278c35ce3e",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 3,
@@ -147,7 +147,7 @@
         "9.3",
         "16.3 F8"
       ],
-      "sha256": "e3959e0a3c6514e8b395dec8ebfb8a3cc40b17ff155578d0ebe20610b956a839",
+      "sha256": "201a967092f10d84bfed126c9367e7441d26de7ed8e2410bed1acc5f1b312c4f",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 13,
@@ -164,7 +164,7 @@
         "9.6",
         "16.3 F9"
       ],
-      "sha256": "6379330f90e6e57a6dc4b554222061feb91cc692abfb35505a544e26dfcd1933",
+      "sha256": "4873ea3f69b1288d1764e552776266bd5e1c2a779b0139984fc2443535c21763",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 15,
@@ -185,7 +185,7 @@
         "12.5",
         "16.3 F10"
       ],
-      "sha256": "2c019d7bc852ba182aeca1a97b0bc89c079e23e2bfd14e3b023b2eb701c34f95",
+      "sha256": "cd1ee994e74087ae83059f23dbbfaaf325cfbd93bb12a188e53692d4b3e37e59",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 34,
@@ -206,7 +206,7 @@
         "10.4",
         "16.3 F11"
       ],
-      "sha256": "2cab814adf4247967e363c15153390376f3c9864981c831139a1c12d76d5498c",
+      "sha256": "f4ea19c1a52cd7a30127e5f14cce4b99751310db8a6e5a3979ef44834140b240",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 20,
@@ -224,7 +224,7 @@
         "11.5",
         "16.3 F12"
       ],
-      "sha256": "1007e229934fcd119510819769333a92e926af1f9c674ee513bd4aef27a31f20",
+      "sha256": "ecc241aee6f780323156e364ed0d421e7cf2dd7c0ce7140cf7e1d0f7b96e5d40",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 12,
@@ -297,7 +297,7 @@
         "13.6",
         "16.3 F16"
       ],
-      "sha256": "dc2a32ec554ea95fa098a2f7b314267a5428671c8f4288008f0b89db48f2699a",
+      "sha256": "d2077d3cd6eaef0a0b2013fae6c9e4688ade3c2bf8ea15affa13325cf5f2ca72",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 34,
@@ -341,11 +341,2142 @@
         "5.7",
         "16.3 F18"
       ],
-      "sha256": "5ae31fc3d879e2c47ba38523ac2bd3f9b0fff951bfd76b7e3455833f5420a2fa",
+      "sha256": "bb04ff79b4c1b0c8678d1464005b48793afe38c9fe63a0b0dcd39bc15618f27c",
       "origin": "generated",
       "generator": "scripts/generate-e2ee-fixtures.ts",
       "cases": 15
     }
+  },
+  "portableExecution": {
+    "version": 1,
+    "status": "explicit exhaustive routing; physical-device execution remains an operator gate",
+    "limits": {
+      "totalJsonBytes": 2097152,
+      "familyJsonBytes": 262144,
+      "families": 32,
+      "casesPerFamily": 64,
+      "totalCases": 512,
+      "fixtureIdUtf8Bytes": 128,
+      "ordinaryDecodedBytes": 16384,
+      "recipePayloadBytes": 4194304
+    },
+    "routes": [
+      {
+        "fixtureId": "F01/production-inner-body-exactly-at-the-plaintext-ceiling-recipe",
+        "file": "f01-payload-discrimination.json",
+        "case": "production-inner-body-exactly-at-the-plaintext-ceiling-recipe",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F04/valid-node-agreement-prekey-certificate",
+        "file": "f04-prekey-certificates.json",
+        "case": "valid-node-agreement-prekey-certificate",
+        "runners": [
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F04/valid-client-agreement-prekey-certificate",
+        "file": "f04-prekey-certificates.json",
+        "case": "valid-client-agreement-prekey-certificate",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F04/client-certificate-non-canonical-array-header",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-non-canonical-array-header",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F04/client-certificate-indefinite-length-array",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-indefinite-length-array",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F04/client-certificate-trailing-byte",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-trailing-byte",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F04/client-certificate-truncated",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-truncated",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F04/client-certificate-float-element",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-float-element",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F04/client-certificate-wrong-element-count",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-wrong-element-count",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F06/ik-handshake-complete-trace",
+        "file": "f06-ik-handshake.json",
+        "case": "ik-handshake-complete-trace",
+        "runners": [
+          "snow-rust",
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F07/nx-handshake-complete-trace",
+        "file": "f07-nx-handshake.json",
+        "case": "nx-handshake-complete-trace",
+        "runners": [
+          "snow-rust",
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F08/aad-client-to-node",
+        "file": "f08-record-protection.json",
+        "case": "aad-client-to-node",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/aad-node-to-client",
+        "file": "f08-record-protection.json",
+        "case": "aad-node-to-client",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/envelopes-at-counters-zero-and-one-client-to-node",
+        "file": "f08-record-protection.json",
+        "case": "envelopes-at-counters-zero-and-one-client-to-node",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/envelopes-at-counters-zero-and-one-node-to-client",
+        "file": "f08-record-protection.json",
+        "case": "envelopes-at-counters-zero-and-one-node-to-client",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/control-record-consumes-the-shared-sequence",
+        "file": "f08-record-protection.json",
+        "case": "control-record-consumes-the-shared-sequence",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/tampered-header-version-byte",
+        "file": "f08-record-protection.json",
+        "case": "tampered-header-version-byte",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/tampered-header-suite-byte",
+        "file": "f08-record-protection.json",
+        "case": "tampered-header-suite-byte",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/tampered-header-epoch-byte",
+        "file": "f08-record-protection.json",
+        "case": "tampered-header-epoch-byte",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/tampered-header-counter-byte",
+        "file": "f08-record-protection.json",
+        "case": "tampered-header-counter-byte",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/tampered-ciphertext-byte",
+        "file": "f08-record-protection.json",
+        "case": "tampered-ciphertext-byte",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/tampered-aead-tag-byte",
+        "file": "f08-record-protection.json",
+        "case": "tampered-aead-tag-byte",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/wrong-direction-label-fails-authentication",
+        "file": "f08-record-protection.json",
+        "case": "wrong-direction-label-fails-authentication",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F08/wrong-session-binding-hash-fails-authentication",
+        "file": "f08-record-protection.json",
+        "case": "wrong-session-binding-hash-fails-authentication",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F09/epoch-key-schedule-client-to-node",
+        "file": "f09-rekey-boundaries.json",
+        "case": "epoch-key-schedule-client-to-node",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F09/epoch-key-schedule-node-to-client",
+        "file": "f09-rekey-boundaries.json",
+        "case": "epoch-key-schedule-node-to-client",
+        "runners": [
+          "reference-ts"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-off-the-curve",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-off-the-curve",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-x-coordinate-at-the-field-prime",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-x-coordinate-at-the-field-prime",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-y-coordinate-above-the-field-prime",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-y-coordinate-above-the-field-prime",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-is-the-identity",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-is-the-identity",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-compressed-prefix-02",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-compressed-prefix-02",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-compressed-prefix-03",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-compressed-prefix-03",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-hybrid-prefix-06",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-hybrid-prefix-06",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-hybrid-prefix-07",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-hybrid-prefix-07",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-wrong-length",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-wrong-length",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-public-key-valid-control",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-public-key-valid-control",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-signature-asn1-der-instead-of-raw",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-signature-asn1-der-instead-of-raw",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-signature-r-zero",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-signature-r-zero",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-signature-s-zero",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-signature-s-zero",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-signature-r-at-the-group-order",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-signature-r-at-the-group-order",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-signature-s-at-the-group-order",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-signature-s-at-the-group-order",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-signature-r-above-the-group-order",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-signature-r-above-the-group-order",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      },
+      {
+        "fixtureId": "F17/p256-signature-s-above-the-group-order",
+        "file": "f17-key-material-validation.json",
+        "case": "p256-signature-s-above-the-group-order",
+        "runners": [
+          "reference-ts",
+          "mobile-dev-sideload"
+        ]
+      }
+    ],
+    "exclusions": [
+      {
+        "fixtureId": "F01/size-budget-under-the-relay-initial-limits",
+        "file": "f01-payload-discrimination.json",
+        "case": "size-budget-under-the-relay-initial-limits",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/size-budget-of-the-corpus-channel",
+        "file": "f01-payload-discrimination.json",
+        "case": "size-budget-of-the-corpus-channel",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/prelude-then-envelope",
+        "file": "f01-payload-discrimination.json",
+        "case": "prelude-then-envelope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/envelope-without-prelude-no-headroom-path",
+        "file": "f01-payload-discrimination.json",
+        "case": "envelope-without-prelude-no-headroom-path",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/envelope-exactly-at-the-prelude-headroom-boundary",
+        "file": "f01-payload-discrimination.json",
+        "case": "envelope-exactly-at-the-prelude-headroom-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/envelope-one-byte-over-the-prelude-headroom-boundary",
+        "file": "f01-payload-discrimination.json",
+        "case": "envelope-one-byte-over-the-prelude-headroom-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/chunked-envelope-reassembles-to-the-envelope",
+        "file": "f01-payload-discrimination.json",
+        "case": "chunked-envelope-reassembles-to-the-envelope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/prelude-then-legacy-json",
+        "file": "f01-payload-discrimination.json",
+        "case": "prelude-then-legacy-json",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/ciphertext-with-interior-nul-runs",
+        "file": "f01-payload-discrimination.json",
+        "case": "ciphertext-with-interior-nul-runs",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/envelope-with-a-zero-length-inner-body",
+        "file": "f01-payload-discrimination.json",
+        "case": "envelope-with-a-zero-length-inner-body",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/inner-body-exactly-at-the-plaintext-ceiling",
+        "file": "f01-payload-discrimination.json",
+        "case": "inner-body-exactly-at-the-plaintext-ceiling",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/inner-body-one-byte-over-the-plaintext-ceiling",
+        "file": "f01-payload-discrimination.json",
+        "case": "inner-body-one-byte-over-the-plaintext-ceiling",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/empty-post-strip-payload-zero-length-data-payload-in-negotiating",
+        "file": "f01-payload-discrimination.json",
+        "case": "empty-post-strip-payload-zero-length-data-payload-in-negotiating",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/empty-post-strip-payload-zero-length-data-payload-in-e2ee",
+        "file": "f01-payload-discrimination.json",
+        "case": "empty-post-strip-payload-zero-length-data-payload-in-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/empty-post-strip-payload-zero-length-data-payload-in-legacy",
+        "file": "f01-payload-discrimination.json",
+        "case": "empty-post-strip-payload-zero-length-data-payload-in-legacy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-negotiating",
+        "file": "f01-payload-discrimination.json",
+        "case": "empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-negotiating",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-e2ee",
+        "file": "f01-payload-discrimination.json",
+        "case": "empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F01/empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-legacy",
+        "file": "f01-payload-discrimination.json",
+        "case": "empty-post-strip-payload-data-payload-equal-to-the-chunk-capability-prelude-in-legacy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F02/c1-carrier-reassembly-with-the-prelude",
+        "file": "f02-carrier-compatibility.json",
+        "case": "c1-carrier-reassembly-with-the-prelude",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F02/c1-carrier-reassembly-without-the-prelude",
+        "file": "f02-carrier-compatibility.json",
+        "case": "c1-carrier-reassembly-without-the-prelude",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F02/c6-prelude-whitespace-tolerance",
+        "file": "f02-carrier-compatibility.json",
+        "case": "c6-prelude-whitespace-tolerance",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F02/maximum-carrier-at-the-advertisement-floor",
+        "file": "f02-carrier-compatibility.json",
+        "case": "maximum-carrier-at-the-advertisement-floor",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F02/undersized-connection-one-byte-below-the-advertisement-floor",
+        "file": "f02-carrier-compatibility.json",
+        "case": "undersized-connection-one-byte-below-the-advertisement-floor",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/valid-capability-statement",
+        "file": "f03-capability-statement.json",
+        "case": "valid-capability-statement",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/valid-statement-from-a-never-rotated-node",
+        "file": "f03-capability-statement.json",
+        "case": "valid-statement-from-a-never-rotated-node",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/maximum-conforming-statement",
+        "file": "f03-capability-statement.json",
+        "case": "maximum-conforming-statement",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/signing-envelope-length-is-identical-for-a-minimum-and-a-maximum-transcript",
+        "file": "f03-capability-statement.json",
+        "case": "signing-envelope-length-is-identical-for-a-minimum-and-a-maximum-transcript",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/signature-computed-over-the-raw-transcript-instead-of-the-envelope",
+        "file": "f03-capability-statement.json",
+        "case": "signature-computed-over-the-raw-transcript-instead-of-the-envelope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/envelope-built-from-a-digest-of-different-transcript-bytes",
+        "file": "f03-capability-statement.json",
+        "case": "envelope-built-from-a-digest-of-different-transcript-bytes",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/non-canonical-transcript-encoding",
+        "file": "f03-capability-statement.json",
+        "case": "non-canonical-transcript-encoding",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/prekey-cross-signature-lifted-from-another-statement",
+        "file": "f03-capability-statement.json",
+        "case": "prekey-cross-signature-lifted-from-another-statement",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/advertised-identity-fingerprint-disagrees-with-the-advertised-identity-key",
+        "file": "f03-capability-statement.json",
+        "case": "advertised-identity-fingerprint-disagrees-with-the-advertised-identity-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/hub-origin-exactly-at-the-bound",
+        "file": "f03-capability-statement.json",
+        "case": "hub-origin-exactly-at-the-bound",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/hub-origin-one-byte-over-the-bound",
+        "file": "f03-capability-statement.json",
+        "case": "hub-origin-one-byte-over-the-bound",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/suite-registry-exactly-at-max-entries",
+        "file": "f03-capability-statement.json",
+        "case": "suite-registry-exactly-at-max-entries",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/suite-registry-one-entry-over-max-entries",
+        "file": "f03-capability-statement.json",
+        "case": "suite-registry-one-entry-over-max-entries",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/transcript-exactly-at-the-transcript-bound",
+        "file": "f03-capability-statement.json",
+        "case": "transcript-exactly-at-the-transcript-bound",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/transcript-one-byte-over-the-transcript-bound",
+        "file": "f03-capability-statement.json",
+        "case": "transcript-one-byte-over-the-transcript-bound",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/oversized-statement",
+        "file": "f03-capability-statement.json",
+        "case": "oversized-statement",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/oversized-carrier",
+        "file": "f03-capability-statement.json",
+        "case": "oversized-carrier",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/malformed-continuity-id-wrong-prefix",
+        "file": "f03-capability-statement.json",
+        "case": "malformed-continuity-id-wrong-prefix",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/malformed-continuity-id-too-short",
+        "file": "f03-capability-statement.json",
+        "case": "malformed-continuity-id-too-short",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/malformed-continuity-id-out-of-alphabet",
+        "file": "f03-capability-statement.json",
+        "case": "malformed-continuity-id-out-of-alphabet",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/malformed-continuity-id-empty",
+        "file": "f03-capability-statement.json",
+        "case": "malformed-continuity-id-empty",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/continuity-id-unresolved-at-startup",
+        "file": "f03-capability-statement.json",
+        "case": "continuity-id-unresolved-at-startup",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/protocol-range-excludes-the-implemented-version-unlatched",
+        "file": "f03-capability-statement.json",
+        "case": "protocol-range-excludes-the-implemented-version-unlatched",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/protocol-range-excludes-the-implemented-version-latched",
+        "file": "f03-capability-statement.json",
+        "case": "protocol-range-excludes-the-implemented-version-latched",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/protocol-range-excludes-the-implemented-version-fails-the-node-self-check",
+        "file": "f03-capability-statement.json",
+        "case": "protocol-range-excludes-the-implemented-version-fails-the-node-self-check",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/protocol-range-inverted-unlatched",
+        "file": "f03-capability-statement.json",
+        "case": "protocol-range-inverted-unlatched",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/protocol-range-inverted-latched",
+        "file": "f03-capability-statement.json",
+        "case": "protocol-range-inverted-latched",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/protocol-range-minimum-equal-to-the-implemented-version",
+        "file": "f03-capability-statement.json",
+        "case": "protocol-range-minimum-equal-to-the-implemented-version",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/admitted-pattern-set-under-require-approved-client-e2ee",
+        "file": "f03-capability-statement.json",
+        "case": "admitted-pattern-set-under-require-approved-client-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/admitted-pattern-set-ik-only-evaluated-as-web-latched",
+        "file": "f03-capability-statement.json",
+        "case": "admitted-pattern-set-ik-only-evaluated-as-web-latched",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/admitted-pattern-set-ik-only-evaluated-as-web-unlatched",
+        "file": "f03-capability-statement.json",
+        "case": "admitted-pattern-set-ik-only-evaluated-as-web-unlatched",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/admitted-pattern-set-ik-only-evaluated-as-native",
+        "file": "f03-capability-statement.json",
+        "case": "admitted-pattern-set-ik-only-evaluated-as-native",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/admitted-pattern-set-ik-and-nx-evaluated-as-web",
+        "file": "f03-capability-statement.json",
+        "case": "admitted-pattern-set-ik-and-nx-evaluated-as-web",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/empty-suite-intersection",
+        "file": "f03-capability-statement.json",
+        "case": "empty-suite-intersection",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F03/largest-directly-signed-transcripts",
+        "file": "f03-capability-statement.json",
+        "case": "largest-directly-signed-transcripts",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/node-certificate-at-the-maximum-hub-origin-accepted-and-within-S9",
+        "file": "f04-prekey-certificates.json",
+        "case": "node-certificate-at-the-maximum-hub-origin-accepted-and-within-S9",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/node-certificate-cross-signature-lifted-from-another-hub-origin",
+        "file": "f04-prekey-certificates.json",
+        "case": "node-certificate-cross-signature-lifted-from-another-hub-origin",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/node-certificate-carried-identity-fingerprint-disagrees-with-the-identity-key",
+        "file": "f04-prekey-certificates.json",
+        "case": "node-certificate-carried-identity-fingerprint-disagrees-with-the-identity-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/node-certificate-carried-agreement-fingerprint-disagrees-with-the-agreement-key",
+        "file": "f04-prekey-certificates.json",
+        "case": "node-certificate-carried-agreement-fingerprint-disagrees-with-the-agreement-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/node-certificate-prekey-id-substituted-after-signing",
+        "file": "f04-prekey-certificates.json",
+        "case": "node-certificate-prekey-id-substituted-after-signing",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/node-certificate-usage-fields-are-not-carrier-supplied",
+        "file": "f04-prekey-certificates.json",
+        "case": "node-certificate-usage-fields-are-not-carrier-supplied",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-at-the-maximum-namespace-accepted-and-within-S9",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-at-the-maximum-namespace-accepted-and-within-S9",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-not-yet-valid-accepted-exactly-at-the-clock-skew-boundary",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-not-yet-valid-accepted-exactly-at-the-clock-skew-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-not-yet-valid-one-millisecond-beyond-the-clock-skew-boundary",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-not-yet-valid-one-millisecond-beyond-the-clock-skew-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-expiry-accepted-exactly-at-the-clock-skew-boundary",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-expiry-accepted-exactly-at-the-clock-skew-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-expiry-one-millisecond-beyond-the-clock-skew-boundary",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-expiry-one-millisecond-beyond-the-clock-skew-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-lifetime-one-millisecond-over-the-prekey-lifetime",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-lifetime-one-millisecond-over-the-prekey-lifetime",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-wrong-hub-origin-namespace",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-wrong-hub-origin-namespace",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-foreign-account-id-passes-step-5-and-is-caught-elsewhere",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-foreign-account-id-passes-step-5-and-is-caught-elsewhere",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-usage-field-substituted",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-usage-field-substituted",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-invalid-signature",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-invalid-signature",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F04/client-certificate-signed-by-another-device-key",
+        "file": "f04-prekey-certificates.json",
+        "case": "client-certificate-signed-by-another-device-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/valid-chain-of-length-one-with-silent-pin-update",
+        "file": "f05-continuity-chains.json",
+        "case": "valid-chain-of-length-one-with-silent-pin-update",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/valid-chain-with-a-pin-that-already-equals-the-current-key",
+        "file": "f05-continuity-chains.json",
+        "case": "valid-chain-with-a-pin-that-already-equals-the-current-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/valid-chain-with-no-pin-held",
+        "file": "f05-continuity-chains.json",
+        "case": "valid-chain-with-no-pin-held",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/valid-max-length-chain-short-hub-origin",
+        "file": "f05-continuity-chains.json",
+        "case": "valid-max-length-chain-short-hub-origin",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/valid-max-length-chain-max-length-hub-origin",
+        "file": "f05-continuity-chains.json",
+        "case": "valid-max-length-chain-max-length-hub-origin",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/missing-link",
+        "file": "f05-continuity-chains.json",
+        "case": "missing-link",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/reordered-entries",
+        "file": "f05-continuity-chains.json",
+        "case": "reordered-entries",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/truncated-chain-head",
+        "file": "f05-continuity-chains.json",
+        "case": "truncated-chain-head",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/truncated-chain-tail",
+        "file": "f05-continuity-chains.json",
+        "case": "truncated-chain-tail",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/over-length-chain",
+        "file": "f05-continuity-chains.json",
+        "case": "over-length-chain",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/hub-origin-mismatch",
+        "file": "f05-continuity-chains.json",
+        "case": "hub-origin-mismatch",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/chain-continuity-id-disagrees-with-statement-element-18",
+        "file": "f05-continuity-chains.json",
+        "case": "chain-continuity-id-disagrees-with-statement-element-18",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/spliced-key",
+        "file": "f05-continuity-chains.json",
+        "case": "spliced-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/generation-gap",
+        "file": "f05-continuity-chains.json",
+        "case": "generation-gap",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/generation-regression",
+        "file": "f05-continuity-chains.json",
+        "case": "generation-regression",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/invalid-signature",
+        "file": "f05-continuity-chains.json",
+        "case": "invalid-signature",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/mixed-continuity-ids-within-the-chain",
+        "file": "f05-continuity-chains.json",
+        "case": "mixed-continuity-ids-within-the-chain",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/malformed-entry-truncated-transcript",
+        "file": "f05-continuity-chains.json",
+        "case": "malformed-entry-truncated-transcript",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/invalid-identity-key",
+        "file": "f05-continuity-chains.json",
+        "case": "invalid-identity-key",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F05/empty-chain-from-a-never-rotated-node",
+        "file": "f05-continuity-chains.json",
+        "case": "empty-chain-from-a-never-rotated-node",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F07/nx-message-1-payload-must-be-empty",
+        "file": "f07-nx-handshake.json",
+        "case": "nx-message-1-payload-must-be-empty",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F07/nx-responder-static-must-equal-the-advertised-prekey",
+        "file": "f07-nx-handshake.json",
+        "case": "nx-responder-static-must-equal-the-advertised-prekey",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/record-count-threshold-boundary",
+        "file": "f09-rekey-boundaries.json",
+        "case": "record-count-threshold-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/byte-threshold-crossing",
+        "file": "f09-rekey-boundaries.json",
+        "case": "byte-threshold-crossing",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/early-epoch-transition",
+        "file": "f09-rekey-boundaries.json",
+        "case": "early-epoch-transition",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/late-epoch-transition",
+        "file": "f09-rekey-boundaries.json",
+        "case": "late-epoch-transition",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/skipped-epoch-transition",
+        "file": "f09-rekey-boundaries.json",
+        "case": "skipped-epoch-transition",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/post-application-reserve-composition",
+        "file": "f09-rekey-boundaries.json",
+        "case": "post-application-reserve-composition",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/terminal-epoch-sequential-close-out-of-the-close-reserve",
+        "file": "f09-rekey-boundaries.json",
+        "case": "terminal-epoch-sequential-close-out-of-the-close-reserve",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/terminal-epoch-simultaneous-close-out-of-the-close-reserve",
+        "file": "f09-rekey-boundaries.json",
+        "case": "terminal-epoch-simultaneous-close-out-of-the-close-reserve",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/counter-exhaustion-sequential-close-out-of-the-close-reserve",
+        "file": "f09-rekey-boundaries.json",
+        "case": "counter-exhaustion-sequential-close-out-of-the-close-reserve",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/counter-exhaustion-simultaneous-close-out-of-the-close-reserve",
+        "file": "f09-rekey-boundaries.json",
+        "case": "counter-exhaustion-simultaneous-close-out-of-the-close-reserve",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/terminal-epoch-error-record-out-of-the-error-reserve",
+        "file": "f09-rekey-boundaries.json",
+        "case": "terminal-epoch-error-record-out-of-the-error-reserve",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/terminal-epoch-error-record-without-capacity",
+        "file": "f09-rekey-boundaries.json",
+        "case": "terminal-epoch-error-record-without-capacity",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F09/degenerate-state-below-the-post-application-reserve",
+        "file": "f09-rekey-boundaries.json",
+        "case": "degenerate-state-below-the-post-application-reserve",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/legacy-lock-injection-envelope-is-p5",
+        "file": "f10-mode-machine.json",
+        "case": "legacy-lock-injection-envelope-is-p5",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/legacy-lock-injection-client-hello-at-the-node-is-p24",
+        "file": "f10-mode-machine.json",
+        "case": "legacy-lock-injection-client-hello-at-the-node-is-p24",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/legacy-lock-injection-server-accept-at-the-client-is-p24",
+        "file": "f10-mode-machine.json",
+        "case": "legacy-lock-injection-server-accept-at-the-client-is-p24",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/legacy-lock-injection-unknown-first-byte-is-p6",
+        "file": "f10-mode-machine.json",
+        "case": "legacy-lock-injection-unknown-first-byte-is-p6",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/legacy-lock-injection-absent-first-byte-is-p6",
+        "file": "f10-mode-machine.json",
+        "case": "legacy-lock-injection-absent-first-byte-is-p6",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/misdirected-negotiation-record-is-p3",
+        "file": "f10-mode-machine.json",
+        "case": "misdirected-negotiation-record-is-p3",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/over-bound-negotiation-record-is-p3",
+        "file": "f10-mode-machine.json",
+        "case": "over-bound-negotiation-record-is-p3",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n1-legacy-json-under-effective-require-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n1-legacy-json-under-effective-require-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n2-legacy-json-locks-legacy-and-counts-one-peer-legacy-occurrence",
+        "file": "f10-mode-machine.json",
+        "case": "row-n2-legacy-json-locks-legacy-and-counts-one-peer-legacy-occurrence",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n3-client-hello-runs-the-responder-and-enters-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n3-client-hello-runs-the-responder-and-enters-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n4-a-second-hello-on-the-channel",
+        "file": "f10-mode-machine.json",
+        "case": "row-n4-a-second-hello-on-the-channel",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n4-a-hello-with-no-advertisement-emitted",
+        "file": "f10-mode-machine.json",
+        "case": "row-n4-a-hello-with-no-advertisement-emitted",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n5-a-misdirected-negotiation-record-in-negotiating",
+        "file": "f10-mode-machine.json",
+        "case": "row-n5-a-misdirected-negotiation-record-in-negotiating",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n6-an-envelope-before-establishment",
+        "file": "f10-mode-machine.json",
+        "case": "row-n6-an-envelope-before-establishment",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n7-an-unknown-first-byte-in-negotiating",
+        "file": "f10-mode-machine.json",
+        "case": "row-n7-an-unknown-first-byte-in-negotiating",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n7-an-absent-first-byte-in-negotiating",
+        "file": "f10-mode-machine.json",
+        "case": "row-n7-an-absent-first-byte-in-negotiating",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n8-the-handshake-deadline-under-effective-require-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n8-the-handshake-deadline-under-effective-require-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n9-an-authenticated-envelope-is-delivered-to-the-rpc-parser",
+        "file": "f10-mode-machine.json",
+        "case": "row-n9-an-authenticated-envelope-is-delivered-to-the-rpc-parser",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n10-an-envelope-failing-a-step-3-check",
+        "file": "f10-mode-machine.json",
+        "case": "row-n10-an-envelope-failing-a-step-3-check",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n11-legacy-json-after-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n11-legacy-json-after-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n11-a-negotiation-record-after-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n11-a-negotiation-record-after-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n11-an-absent-first-byte-after-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n11-an-absent-first-byte-after-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n12-legacy-json-in-legacy",
+        "file": "f10-mode-machine.json",
+        "case": "row-n12-legacy-json-in-legacy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n13-an-envelope-in-legacy",
+        "file": "f10-mode-machine.json",
+        "case": "row-n13-an-envelope-in-legacy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n13-a-negotiation-record-in-legacy",
+        "file": "f10-mode-machine.json",
+        "case": "row-n13-a-negotiation-record-in-legacy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n14-an-unknown-first-byte-in-legacy",
+        "file": "f10-mode-machine.json",
+        "case": "row-n14-an-unknown-first-byte-in-legacy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n15-an-undersized-connection-under-effective-require-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n15-an-undersized-connection-under-effective-require-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n15-no-conforming-statement-under-effective-require-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "row-n15-no-conforming-statement-under-effective-require-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n16-an-undersized-connection-under-the-compatibility-default",
+        "file": "f10-mode-machine.json",
+        "case": "row-n16-an-undersized-connection-under-the-compatibility-default",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n16-no-conforming-statement-under-the-compatibility-default",
+        "file": "f10-mode-machine.json",
+        "case": "row-n16-no-conforming-statement-under-the-compatibility-default",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/row-n17-legacy-json-on-a-channel-that-never-advertised",
+        "file": "f10-mode-machine.json",
+        "case": "row-n17-legacy-json-on-a-channel-that-never-advertised",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/node-deadline-n8-does-not-fire-under-the-compatibility-default",
+        "file": "f10-mode-machine.json",
+        "case": "node-deadline-n8-does-not-fire-under-the-compatibility-default",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/node-deadline-after-row-n3-is-q8-under-effective-require-e2ee",
+        "file": "f10-mode-machine.json",
+        "case": "node-deadline-after-row-n3-is-q8-under-effective-require-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F10/node-deadline-after-row-n3-is-q8-under-the-compatibility-default",
+        "file": "f10-mode-machine.json",
+        "case": "node-deadline-after-row-n3-is-q8-under-the-compatibility-default",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/sequential-clean-close",
+        "file": "f11-authenticated-close.json",
+        "case": "sequential-clean-close",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/simultaneous-close-passing",
+        "file": "f11-authenticated-close.json",
+        "case": "simultaneous-close-passing",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/simultaneous-close-ack-declaring-current-next-send",
+        "file": "f11-authenticated-close.json",
+        "case": "simultaneous-close-ack-declaring-current-next-send",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/close-anchor-across-an-epoch-boundary",
+        "file": "f11-authenticated-close.json",
+        "case": "close-anchor-across-an-epoch-boundary",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/close-anchor-across-an-epoch-boundary-declaring-counter-plus-one",
+        "file": "f11-authenticated-close.json",
+        "case": "close-anchor-across-an-epoch-boundary-declaring-counter-plus-one",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/strict-rule-violation",
+        "file": "f11-authenticated-close.json",
+        "case": "strict-rule-violation",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/passed-through-rule-violation",
+        "file": "f11-authenticated-close.json",
+        "case": "passed-through-rule-violation",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/commitment-mismatch",
+        "file": "f11-authenticated-close.json",
+        "case": "commitment-mismatch",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/malformed-close-body",
+        "file": "f11-authenticated-close.json",
+        "case": "malformed-close-body",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/truncation-at-close",
+        "file": "f11-authenticated-close.json",
+        "case": "truncation-at-close",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/envelope-beyond-the-machines-expectation",
+        "file": "f11-authenticated-close.json",
+        "case": "envelope-beyond-the-machines-expectation",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/peer-terminal-error-after-a-completed-exchange",
+        "file": "f11-authenticated-close.json",
+        "case": "peer-terminal-error-after-a-completed-exchange",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/legacy-json-during-the-close-phase",
+        "file": "f11-authenticated-close.json",
+        "case": "legacy-json-during-the-close-phase",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/negotiation-record-during-the-close-phase",
+        "file": "f11-authenticated-close.json",
+        "case": "negotiation-record-during-the-close-phase",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/t-close-expiry-sequential-initiator",
+        "file": "f11-authenticated-close.json",
+        "case": "t-close-expiry-sequential-initiator",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/t-close-expiry-sequential-responder",
+        "file": "f11-authenticated-close.json",
+        "case": "t-close-expiry-sequential-responder",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/t-close-expiry-simultaneous-second-wait",
+        "file": "f11-authenticated-close.json",
+        "case": "t-close-expiry-simultaneous-second-wait",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/incomplete-reassembly-with-a-q7-violation",
+        "file": "f11-authenticated-close.json",
+        "case": "incomplete-reassembly-with-a-q7-violation",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/no-keepalive-ping-after-the-first-close-machine-record",
+        "file": "f11-authenticated-close.json",
+        "case": "no-keepalive-ping-after-the-first-close-machine-record",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F11/late-simultaneous-phase-duration",
+        "file": "f11-authenticated-close.json",
+        "case": "late-simultaneous-phase-duration",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/handshake-reject-record",
+        "file": "f12-error-records.json",
+        "case": "handshake-reject-record",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/handshake-reject-is-byte-identical-for-absent-branch-a-record",
+        "file": "f12-error-records.json",
+        "case": "handshake-reject-is-byte-identical-for-absent-branch-a-record",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/handshake-reject-is-byte-identical-for-pending-branch-a-record",
+        "file": "f12-error-records.json",
+        "case": "handshake-reject-is-byte-identical-for-pending-branch-a-record",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/handshake-reject-is-byte-identical-for-revoked-branch-a-record",
+        "file": "f12-error-records.json",
+        "case": "handshake-reject-is-byte-identical-for-revoked-branch-a-record",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/handshake-reject-is-byte-identical-for-context-commitment-mismatch",
+        "file": "f12-error-records.json",
+        "case": "handshake-reject-is-byte-identical-for-context-commitment-mismatch",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/handshake-reject-bytes-do-not-vary-by-cause",
+        "file": "f12-error-records.json",
+        "case": "handshake-reject-bytes-do-not-vary-by-cause",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/error-record-protocol_violation",
+        "file": "f12-error-records.json",
+        "case": "error-record-protocol_violation",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/error-record-internal",
+        "file": "f12-error-records.json",
+        "case": "error-record-internal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/error-record-policy",
+        "file": "f12-error-records.json",
+        "case": "error-record-policy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/node-side-companion-hello-outside-the-advertised-protocol-range",
+        "file": "f12-error-records.json",
+        "case": "node-side-companion-hello-outside-the-advertised-protocol-range",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/node-side-companion-nx-hello-under-require-approved-client-e2ee",
+        "file": "f12-error-records.json",
+        "case": "node-side-companion-nx-hello-under-require-approved-client-e2ee",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F12/every-error-envelope-is-length-identical",
+        "file": "f12-error-records.json",
+        "case": "every-error-envelope-is-length-identical",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F13/node-identity-key-fingerprint",
+        "file": "f13-fingerprints.json",
+        "case": "node-identity-key-fingerprint",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F13/client-identity-key-fingerprint",
+        "file": "f13-fingerprints.json",
+        "case": "client-identity-key-fingerprint",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F13/node-agreement-key-fingerprint",
+        "file": "f13-fingerprints.json",
+        "case": "node-agreement-key-fingerprint",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F13/client-agreement-key-fingerprint",
+        "file": "f13-fingerprints.json",
+        "case": "client-agreement-key-fingerprint",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F14/safety-number-short-account-id",
+        "file": "f14-verification-display.json",
+        "case": "safety-number-short-account-id",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F14/safety-number-max-length-account-id",
+        "file": "f14-verification-display.json",
+        "case": "safety-number-max-length-account-id",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F14/safety-number-is-namespace-bound",
+        "file": "f14-verification-display.json",
+        "case": "safety-number-is-namespace-bound",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F14/web-sas-session-one",
+        "file": "f14-verification-display.json",
+        "case": "web-sas-session-one",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F14/web-sas-session-two",
+        "file": "f14-verification-display.json",
+        "case": "web-sas-session-two",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F14/web-sas-changes-every-session",
+        "file": "f14-verification-display.json",
+        "case": "web-sas-changes-every-session",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/authorization-context-block-native-ik",
+        "file": "f16-authorization-context.json",
+        "case": "authorization-context-block-native-ik",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/authorization-context-block-web-nx",
+        "file": "f16-authorization-context.json",
+        "case": "authorization-context-block-web-nx",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/element-9-node-fingerprint-substitution",
+        "file": "f16-authorization-context.json",
+        "case": "element-9-node-fingerprint-substitution",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/element-10-cross-account-splice",
+        "file": "f16-authorization-context.json",
+        "case": "element-10-cross-account-splice",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/element-11-capability-mismatch-against-element-13",
+        "file": "f16-authorization-context.json",
+        "case": "element-11-capability-mismatch-against-element-13",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/element-12-role-escalation-above-element-14",
+        "file": "f16-authorization-context.json",
+        "case": "element-12-role-escalation-above-element-14",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/element-12-role-reduction-below-element-14",
+        "file": "f16-authorization-context.json",
+        "case": "element-12-role-reduction-below-element-14",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/element-17-continuity-id-substitution-never-rotated-node",
+        "file": "f16-authorization-context.json",
+        "case": "element-17-continuity-id-substitution-never-rotated-node",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/element-17-continuity-id-substitution-max-length-chain",
+        "file": "f16-authorization-context.json",
+        "case": "element-17-continuity-id-substitution-max-length-chain",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/commitment-over-different-bytes-than-the-block",
+        "file": "f16-authorization-context.json",
+        "case": "commitment-over-different-bytes-than-the-block",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/nx-absence-semantics-violated",
+        "file": "f16-authorization-context.json",
+        "case": "nx-absence-semantics-violated",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/suite-list-strip-after-the-hello-was-hashed",
+        "file": "f16-authorization-context.json",
+        "case": "suite-list-strip-after-the-hello-was-hashed",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/identity-rotation-between-advertisement-and-hello",
+        "file": "f16-authorization-context.json",
+        "case": "identity-rotation-between-advertisement-and-hello",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/identity-rotation-at-max-chain-length-prunes-the-oldest-entry",
+        "file": "f16-authorization-context.json",
+        "case": "identity-rotation-at-max-chain-length-prunes-the-oldest-entry",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/prekey-rotation-between-advertisement-and-hello",
+        "file": "f16-authorization-context.json",
+        "case": "prekey-rotation-between-advertisement-and-hello",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/next-channel-carries-the-new-material",
+        "file": "f16-authorization-context.json",
+        "case": "next-channel-carries-the-new-material",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/branch-a-record-absent",
+        "file": "f16-authorization-context.json",
+        "case": "branch-a-record-absent",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/branch-a-record-pending",
+        "file": "f16-authorization-context.json",
+        "case": "branch-a-record-pending",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/branch-a-record-revoked",
+        "file": "f16-authorization-context.json",
+        "case": "branch-a-record-revoked",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/branch-a-record-approved-capability-set-excludes-the-requested-capability",
+        "file": "f16-authorization-context.json",
+        "case": "branch-a-record-approved-capability-set-excludes-the-requested-capability",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/branch-a-record-approved-max-role-below-the-requested-role",
+        "file": "f16-authorization-context.json",
+        "case": "branch-a-record-approved-max-role-below-the-requested-role",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/withdrawal-status-approved-to-revoked",
+        "file": "f16-authorization-context.json",
+        "case": "withdrawal-status-approved-to-revoked",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/withdrawal-max-role-owner-to-viewer-channel-admitted-at-owner",
+        "file": "f16-authorization-context.json",
+        "case": "withdrawal-max-role-owner-to-viewer-channel-admitted-at-owner",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/withdrawal-max-role-owner-to-viewer-channel-admitted-at-viewer",
+        "file": "f16-authorization-context.json",
+        "case": "withdrawal-max-role-owner-to-viewer-channel-admitted-at-viewer",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/withdrawal-capability-set-loses-a-member",
+        "file": "f16-authorization-context.json",
+        "case": "withdrawal-capability-set-loses-a-member",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/widening-re-approval-is-not-a-withdrawal",
+        "file": "f16-authorization-context.json",
+        "case": "widening-re-approval-is-not-a-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/widening-max-role-increase-is-not-a-withdrawal",
+        "file": "f16-authorization-context.json",
+        "case": "widening-max-role-increase-is-not-a-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/widening-capability-set-addition-is-not-a-withdrawal",
+        "file": "f16-authorization-context.json",
+        "case": "widening-capability-set-addition-is-not-a-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/widening-first-approval-of-another-client-is-not-a-withdrawal",
+        "file": "f16-authorization-context.json",
+        "case": "widening-first-approval-of-another-client-is-not-a-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/combined-narrow-and-widen-is-a-withdrawal",
+        "file": "f16-authorization-context.json",
+        "case": "combined-narrow-and-widen-is-a-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/withdrawal-under-a-different-account-scope",
+        "file": "f16-authorization-context.json",
+        "case": "withdrawal-under-a-different-account-scope",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/withdrawal-under-a-different-hub-origin",
+        "file": "f16-authorization-context.json",
+        "case": "withdrawal-under-a-different-hub-origin",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/withdrawal-between-step-6-and-row-n3",
+        "file": "f16-authorization-context.json",
+        "case": "withdrawal-between-step-6-and-row-n3",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F16/nx-channel-is-never-matched-by-an-authorization-withdrawal",
+        "file": "f16-authorization-context.json",
+        "case": "nx-channel-is-never-matched-by-an-authorization-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/x25519-all-zero-shared-secret-u-zero",
+        "file": "f17-key-material-validation.json",
+        "case": "x25519-all-zero-shared-secret-u-zero",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/x25519-all-zero-shared-secret-order-eight",
+        "file": "f17-key-material-validation.json",
+        "case": "x25519-all-zero-shared-secret-order-eight",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/ed25519-public-key-y-at-the-field-prime",
+        "file": "f17-key-material-validation.json",
+        "case": "ed25519-public-key-y-at-the-field-prime",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/ed25519-public-key-y-above-the-field-prime",
+        "file": "f17-key-material-validation.json",
+        "case": "ed25519-public-key-y-above-the-field-prime",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/ed25519-signature-with-a-canonically-encoded-identity-r-control",
+        "file": "f17-key-material-validation.json",
+        "case": "ed25519-signature-with-a-canonically-encoded-identity-r-control",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/ed25519-signature-with-a-non-canonically-encoded-identity-r",
+        "file": "f17-key-material-validation.json",
+        "case": "ed25519-signature-with-a-non-canonically-encoded-identity-r",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/ed25519-signature-scalar-at-the-group-order",
+        "file": "f17-key-material-validation.json",
+        "case": "ed25519-signature-scalar-at-the-group-order",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/ed25519-signature-scalar-above-the-group-order",
+        "file": "f17-key-material-validation.json",
+        "case": "ed25519-signature-scalar-above-the-group-order",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F17/cross-domain-signature-substitution",
+        "file": "f17-key-material-validation.json",
+        "case": "cross-domain-signature-substitution",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/effective-admitted-patterns-by-policy",
+        "file": "f18-node-admission-policy.json",
+        "case": "effective-admitted-patterns-by-policy",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/in-flight-handshake-aborted-by-a-policy-withdrawal",
+        "file": "f18-node-admission-policy.json",
+        "case": "in-flight-handshake-aborted-by-a-policy-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/require-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+        "file": "f18-node-admission-policy.json",
+        "case": "require-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/require-approved-client-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+        "file": "f18-node-admission-policy.json",
+        "case": "require-approved-client-e2ee-false-to-true-over-a-legacy-an-nx-and-an-ik-channel",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/a-suite-leaving-the-registry-closes-the-ik-channel-established-on-it",
+        "file": "f18-node-admission-policy.json",
+        "case": "a-suite-leaving-the-registry-closes-the-ik-channel-established-on-it",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/a-suite-leaving-the-registry-closes-the-nx-channel-established-on-it",
+        "file": "f18-node-admission-policy.json",
+        "case": "a-suite-leaving-the-registry-closes-the-nx-channel-established-on-it",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/a-widening-closes-nothing-and-still-advances-the-policy-generation",
+        "file": "f18-node-admission-policy.json",
+        "case": "a-widening-closes-nothing-and-still-advances-the-policy-generation",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/a-combined-narrow-and-widen-command-is-a-withdrawal",
+        "file": "f18-node-admission-policy.json",
+        "case": "a-combined-narrow-and-widen-command-is-a-withdrawal",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/a-negotiating-channel-is-not-swept-and-then-fails-closed-on-a-refused-hello",
+        "file": "f18-node-admission-policy.json",
+        "case": "a-negotiating-channel-is-not-swept-and-then-fails-closed-on-a-refused-hello",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/a-negotiating-channel-is-not-swept-and-then-fails-closed-on-legacy-json",
+        "file": "f18-node-admission-policy.json",
+        "case": "a-negotiating-channel-is-not-swept-and-then-fails-closed-on-legacy-json",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/a-hello-reaching-step-2-after-the-durable-commit-is-refused-there",
+        "file": "f18-node-admission-policy.json",
+        "case": "a-hello-reaching-step-2-after-the-durable-commit-is-refused-there",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/the-row-n3-race-with-the-live-channel-enumeration-attempted-first",
+        "file": "f18-node-admission-policy.json",
+        "case": "the-row-n3-race-with-the-live-channel-enumeration-attempted-first",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/the-row-n3-race-with-the-in-flight-enumeration-attempted-first",
+        "file": "f18-node-admission-policy.json",
+        "case": "the-row-n3-race-with-the-in-flight-enumeration-attempted-first",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/step-c-counts-broken-out-by-class",
+        "file": "f18-node-admission-policy.json",
+        "case": "step-c-counts-broken-out-by-class",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F18/no-withdrawal-records-a-fallback-occurrence-of-either-class",
+        "file": "f18-node-admission-policy.json",
+        "case": "no-withdrawal-records-a-fallback-occurrence-of-either-class",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F15/cacophony/Noise_IK_25519_ChaChaPoly_SHA256",
+        "file": "f15-noise-core-vectors.json",
+        "case": "cacophony/Noise_IK_25519_ChaChaPoly_SHA256",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F15/cacophony/Noise_NX_25519_ChaChaPoly_SHA256",
+        "file": "f15-noise-core-vectors.json",
+        "case": "cacophony/Noise_NX_25519_ChaChaPoly_SHA256",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F15/snow/Noise_IK_25519_ChaChaPoly_SHA256",
+        "file": "f15-noise-core-vectors.json",
+        "case": "snow/Noise_IK_25519_ChaChaPoly_SHA256",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      },
+      {
+        "fixtureId": "F15/snow/Noise_NX_25519_ChaChaPoly_SHA256",
+        "file": "f15-noise-core-vectors.json",
+        "case": "snow/Noise_NX_25519_ChaChaPoly_SHA256",
+        "reason": "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+        "ownedBy": "the case's existing Node/Hub/platform consuming suite"
+      }
+    ],
+    "runnerOwners": {
+      "snow-rust": "packages/shared/test/independent-e2ee/snow",
+      "reference-ts": "packages/shared/test/independent-e2ee/reference.test.ts",
+      "mobile-dev-sideload": "apps/mobile/src/devtools/e2eeVectorRunner.ts"
+    },
+    "doesNotProve": "This metadata and its automated tests do not prove a physical-device run occurred; the native release gate still requires recorded iOS and Android device results."
   },
   "deferredFamilies": [],
   "partialFamilies": [
@@ -525,7 +2656,7 @@
     "method": "READ-LIVENESS, measured in one run of each consuming suite and unioned. Every family is loaded through `packages/shared/src/relayE2eeCorpusLiveness.ts`, which hands each leaf to the suite behind an accessor that records the read; a leaf is LIVE when some suite read it. The three runs are `bun run --cwd packages/shared test` (the shared corpus suite and the F15 Noise suite) and `bun run --cwd apps/server test src` (the node suite). Re-measuring means re-running those with the recorder in place. The union is not taken on trust: every leaf a suite other than the shared one is the sole reader of is listed path by path in `E2EE_CORPUS_DELEGATED_LEAF_READS`, the shared suite rejects any such path that is not a real leaf or that it reads itself, the named suite asserts it really reads its own paths, and the per-family `liveLeaves` below is then asserted to EQUAL that union. A published figure that drifts above what the suites read fails a test.",
     "whatLiveMeans": "Read-liveness is an UPPER BOUND on assertion. A suite that reads a value and does not compare it, or reads it only to feed it back as an input, marks it live here. It is exact in the direction that matters: a leaf no suite reads cannot be asserted by one, so every INERT leaf below is proof of absent coverage, while a LIVE leaf is only evidence of present coverage.",
     "perCaseClaims": "packages/shared/src/relayE2eeCorpusLiveness.ts — E2EE_CORPUS_CASE_LIVENESS. Every committed case must carry at least one live leaf or appear in that table, which names the suite that reads it or declares it DECORATIVE with a reason and an owner. Each of the three consuming suites checks the claims naming it, in both directions.",
-    "perCaseFloor": "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 290 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
+    "perCaseFloor": "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 291 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
     "assertionLiveness": {
       "currentCorpus": "PARTIAL. Two families have been swept against the corpus as it stands — F4 and F17, the two whose live counts moved this round — and for those two the tight figure now EQUALS the read-liveness figure. Every other family's number in this census is read-liveness and nothing more.",
       "measuredFamilySweep": {
@@ -552,15 +2683,15 @@
       "note": "Mutation-liveness is the tighter measure — it counts a leaf live only when changing it fails a test — and its global figure is 49.4%. It is also STALE: it describes the superseded corpus named in `measuredAgainst`, not the one committed here, so it is not the number to cite about anything below either. There is no current assertion-liveness figure; see `assertionLiveness`."
     },
     "totals": {
-      "cases": 290,
-      "expectedLeaves": 3287,
-      "liveLeaves": 2123,
+      "cases": 291,
+      "expectedLeaves": 3297,
+      "liveLeaves": 2133,
       "inertLeaves": 1164,
-      "livePercent": 64.6,
+      "livePercent": 64.7,
       "casesWithNoLiveLeaf": 17
     },
     "casesByLiveLeafCount": {
-      "note": "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 290` reads, against a one-leaf threshold, as though the other 273 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
+      "note": "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 291` reads, against a one-leaf threshold, as though the other 274 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
       "buckets": [
         {
           "liveLeaves": "0",
@@ -580,7 +2711,7 @@
         },
         {
           "liveLeaves": "6-10",
-          "cases": 54
+          "cases": 55
         },
         {
           "liveLeaves": "11-25",
@@ -598,9 +2729,9 @@
       {
         "family": 1,
         "file": "f01-payload-discrimination.json",
-        "cases": 18,
-        "expectedLeaves": 161,
-        "liveLeaves": 161,
+        "cases": 19,
+        "expectedLeaves": 167,
+        "liveLeaves": 167,
         "inertLeaves": 0,
         "livePercent": 100,
         "casesWithNoLiveLeaf": 0,
@@ -659,22 +2790,22 @@
         "family": 6,
         "file": "f06-ik-handshake.json",
         "cases": 1,
-        "expectedLeaves": 62,
-        "liveLeaves": 26,
+        "expectedLeaves": 64,
+        "liveLeaves": 28,
         "inertLeaves": 36,
-        "livePercent": 41.9,
+        "livePercent": 43.8,
         "casesWithNoLiveLeaf": 0,
-        "residual": "36 of the single trace's 62 leaves inert, 22 of them the `firstProtectedEnvelopes` block: its AADs and §8.9 implicit-finish gate are read, its envelope bytes, positions and per-side received blocks are not. The §8.6 step-6 `admittedAuthority` snapshot (6) is also unread here — F16 carries the same snapshot and drives it.",
+        "residual": "36 of the single trace's 64 leaves inert, 22 of them the `firstProtectedEnvelopes` block: its AADs and §8.9 implicit-finish gate are read, its envelope bytes, positions and per-side received blocks are not. The §8.6 step-6 `admittedAuthority` snapshot (6) is also unread here — F16 carries the same snapshot and drives it.",
         "residualOwner": "the F6/F7 handshake harness"
       },
       {
         "family": 7,
         "file": "f07-nx-handshake.json",
         "cases": 3,
-        "expectedLeaves": 73,
-        "liveLeaves": 31,
+        "expectedLeaves": 75,
+        "liveLeaves": 33,
         "inertLeaves": 42,
-        "livePercent": 42.5,
+        "livePercent": 44,
         "casesWithNoLiveLeaf": 0,
         "residual": "42 leaves inert: the same `firstProtectedEnvelopes` block as F6, plus the §11.5 `observable` of the two negative NX cases.",
         "residualOwner": "the F6/F7 handshake harness"
@@ -818,7 +2949,7 @@
     "ledger": "packages/shared/src/relayE2eeCorpus.test.ts — SECTION_16_3_LEDGER",
     "status": "hand-maintained-transcription",
     "proves": "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. NINE obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live, which is how four of them came off it in this round.",
-    "doesNotProve": "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 290 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+    "doesNotProve": "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 291 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
     "reviewObligation": "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
     "whyNotAutomated": "Parsing §16.3's prose to derive the obligation set automatically was considered and deliberately rejected. The section is discursive English — nested bullets, prose qualifiers, single obligations spread across several sentences, some of them negative — and an extractor over it would be wrong in ways no test could surface. A green check from an unreliable extractor is strictly worse than a known limitation whose reviewer is told, in as many words, to close it.",
     "unassertedObligations": {
