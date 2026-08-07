@@ -38,13 +38,17 @@ import {
 } from "../../../test/maliciousRelay";
 import { webRelayE2eeAttempt } from "../../hostedHub/e2eeAttempt";
 import {
+  acceptedWebE2eePolicyGeneration,
   clearWebE2eeLatches,
   isWebE2eeSelectionLatched,
   latchWebE2eeSelection,
+  recordWebE2eePolicyGeneration,
 } from "../../hostedHub/e2eeLatch";
 import {
   beginWebE2eeChannelAttempt,
+  clearWebE2eeLocalDiagnostics,
   resetWebE2eeSession,
+  webE2eeLocalDiagnostics,
   webE2eeSessionState,
 } from "../../hostedHub/e2eeSession";
 
@@ -101,11 +105,13 @@ function negotiationRecordTypes(socket: MockWebSocket): number[] {
 beforeEach(() => {
   vi.spyOn(Date, "now").mockReturnValue(FIXTURE_NOW);
   clearWebE2eeLatches();
+  clearWebE2eeLocalDiagnostics();
   resetWebE2eeSession();
 });
 
 afterEach(() => {
   clearWebE2eeLatches();
+  clearWebE2eeLocalDiagnostics();
   // §13's projection is module state and outlives a case that locked it.
   resetWebE2eeSession();
   vi.restoreAllMocks();
@@ -126,7 +132,10 @@ function openChannel() {
     e2ee: (host: RelayE2eeHost) =>
       makeRelayE2eeInitiator({
         host,
-        attempt: { ...attempt, onDiagnostic: (entry) => void diagnostics.push(entry.row) },
+        attempt: {
+          ...attempt,
+          onDiagnostic: (entry) => void diagnostics.push(entry.row),
+        },
       }),
   });
   authenticateRelay(harness.socket);
@@ -161,6 +170,10 @@ describe("§16.3 F3 admitted patterns — NX tier confusion (§5.2 step 9, §7.6
     await settleRelay();
 
     expect(channel.diagnostics).toEqual(["P15"]);
+    const decoded = decodeNodeE2eeCapabilityStatement(fixtureStatement(entry.name));
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") return;
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(decoded.value.policyGeneration);
     // Nothing at all left this client: no hello, and — the whole point — not one
     // of the two buffered application sends.
     expect(outboundRelayPayloads(channel.socket)).toEqual([]);
@@ -210,6 +223,26 @@ describe("§16.3 F3 admitted patterns — NX tier confusion (§5.2 step 9, §7.6
     expect(channel.diagnostics).toEqual([]);
     // §12.1: the statement validated, so the selection is latched from here on.
     expect(isWebE2eeSelectionLatched(SELECTION)).toBe(true);
+  });
+});
+
+describe("§5.7 web policy-generation rollback", () => {
+  it("rejects G-1 with the stable local diagnostic and no hello", async () => {
+    const statement = fixtureStatement(USABLE_STATEMENT_CASE);
+    const decoded = decodeNodeE2eeCapabilityStatement(statement);
+    expect(decoded.kind).toBe("ok");
+    if (decoded.kind !== "ok") return;
+    latchWebE2eeSelection(SELECTION);
+    recordWebE2eePolicyGeneration(SELECTION, decoded.value.policyGeneration + 1);
+
+    const channel = openChannel();
+    deliverRelayPayload(channel.socket, encodeE2eeCapabilityCarrier(statement));
+    await settleRelay();
+
+    expect(outboundRelayPayloads(channel.socket)).toEqual([]);
+    expect(channel.diagnostics).toEqual(["P15"]);
+    expect(webE2eeLocalDiagnostics()).toEqual(["e2ee_policy_generation_regressed"]);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(decoded.value.policyGeneration + 1);
   });
 });
 
@@ -272,9 +305,10 @@ describe("§12.1.1 the degenerate web mapping, evaluated at channel.accept", () 
     expect(webRelayE2eeAttempt(SELECTION).selectionClass).toBe("latched");
   });
 
-  it("writes no latch byte to localStorage, sessionStorage, or indexedDB", async () => {
-    // §12.1's fourth MUST NOT and §6.3's storage prohibition, checked against the
-    // real browser APIs across a whole session rather than against a comment.
+  it("writes no latch or generation byte to localStorage, sessionStorage, or indexedDB", async () => {
+    // §12.1/§5.7's application-session state and §6.3's storage prohibition,
+    // checked against the real browser APIs across a whole session rather than
+    // against a comment.
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     const removeItem = vi.spyOn(Storage.prototype, "removeItem");
     const clearStorage = vi.spyOn(Storage.prototype, "clear");
@@ -284,6 +318,7 @@ describe("§12.1.1 the degenerate web mapping, evaluated at channel.accept", () 
     deliverRelayPayload(channel.socket, carrier(USABLE_STATEMENT_CASE));
     await settleRelay();
     expect(isWebE2eeSelectionLatched(SELECTION)).toBe(true);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBeTypeOf("number");
 
     const second = openChannel();
     expect(second.attempt.selectionClass).toBe("latched");
@@ -367,7 +402,12 @@ async function completeNxSession() {
   deliverRelayPayload(harness.socket, accept.record, 1);
   await settleRelay();
 
-  return { harness, codes, accept, nodeIdentityPublicKey: decoded.value.identityPublicKey };
+  return {
+    harness,
+    codes,
+    accept,
+    nodeIdentityPublicKey: decoded.value.identityPublicKey,
+  };
 }
 
 describe("§8 the NX handshake completes in Chromium and yields §13.5's code", () => {

@@ -17,11 +17,10 @@
 // asserts exactly that, and the browser suite spies on the three real storage
 // APIs across a full session and asserts zero writes.
 //
-// IT IS A PRESENCE BIT AND NOT A RECORD. A `Set` rather than a `Map` because the
-// only thing §12.1 admits storing is "this triple has validated a statement in
-// this application session": a value slot is precisely where a fingerprint, a
-// policy generation, or a pin state would eventually be put, and each of those
-// is one of the MUST NOTs above.
+// THE LATCH IS A PRESENCE BIT AND NOT A TRUST RECORD. The separate §5.7 map
+// below holds only the greatest policy-generation integer from a statement this
+// application session already validated. It is neither a fingerprint nor a
+// pin, satisfies no release gate, and has exactly the latch's in-memory lifetime.
 
 /**
  * §12.1's `(hubOrigin, accountId, nodeId)` triple — the in-memory selection a
@@ -40,6 +39,7 @@ export interface WebE2eeSelection {
 }
 
 const latched = new Set<string>();
+const acceptedPolicyGenerations = new Map<string, number>();
 
 /**
  * The triple as one comparable string.
@@ -80,10 +80,37 @@ export function isWebE2eeSelectionLatched(selection: WebE2eeSelection): boolean 
 }
 
 /**
- * End the application session's latches (§12.1: "MUST NOT persist beyond the
- * application session").
+ * §5.7's accepted web policy-generation high-water for this application
+ * session. An absent entry means this session has not validated a statement for
+ * the selection; it is not represented as generation zero.
+ */
+export function acceptedWebE2eePolicyGeneration(selection: WebE2eeSelection): number | undefined {
+  return acceptedPolicyGenerations.get(selectionKey(selection));
+}
+
+/**
+ * Advance §5.7 after successful statement validation. Lower or repeated
+ * generations cannot relax the guard, and unusable-but-valid statements call
+ * this just like usable ones.
+ */
+export function recordWebE2eePolicyGeneration(
+  selection: WebE2eeSelection,
+  generation: number,
+): void {
+  const key = selectionKey(selection);
+  const accepted = acceptedPolicyGenerations.get(key);
+  if (accepted === undefined || generation > accepted) {
+    acceptedPolicyGenerations.set(key, generation);
+  }
+}
+
+/**
+ * End the application session's latch and §5.7 high-water state (§12.1: "MUST
+ * NOT persist beyond the application session").
  *
- * CALLED ON SIGN-OUT ONLY (`e2eeAttempt.ts`, `watchWebHostedSessionForE2ee`).
+ * CALLED ONLY AFTER COMMITTED SIGN-OUT OR SESSION EXPIRY (`e2eeAttempt.ts`,
+ * `watchWebHostedSessionForE2ee`). A reversible `signing-out` state does not
+ * call it.
  * The node-scoped clearing catalog deliberately does NOT call it — see
  * `environment.ts` — because that catalog runs on every node teardown,
  * including the A→B switch `activateHostedNode` performs. Clearing there would
@@ -100,4 +127,5 @@ export function isWebE2eeSelectionLatched(selection: WebE2eeSelection): boolean 
  */
 export function clearWebE2eeLatches(): void {
   latched.clear();
+  acceptedPolicyGenerations.clear();
 }

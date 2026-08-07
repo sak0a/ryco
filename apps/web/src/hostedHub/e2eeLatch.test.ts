@@ -15,12 +15,19 @@ import {
 } from "./e2eeAttempt";
 import * as latchModule from "./e2eeLatch";
 import {
+  acceptedWebE2eePolicyGeneration,
   clearWebE2eeLatches,
   isWebE2eeSelectionLatched,
   latchWebE2eeSelection,
+  recordWebE2eePolicyGeneration,
   type WebE2eeSelection,
 } from "./e2eeLatch";
 import { clearWebHostedNodeScopedState } from "./environment";
+import {
+  clearWebE2eeLocalDiagnostics,
+  recordWebE2eePolicyGenerationRegression,
+  webE2eeLocalDiagnostics,
+} from "./e2eeSession";
 
 // docs/relay-e2ee-protocol.md §12.1's web latch, and §12.1.1's degenerate
 // mapping over it.
@@ -65,13 +72,13 @@ function webSourceFiles(): ReadonlyArray<readonly [string, string]> {
 const UNUSABLE: NodeE2eeCapabilityVerification = {
   kind: "unusable",
   reason: "pattern_not_admitted",
-  statement: {} as never,
+  statement: { policyGeneration: 8 } as never,
 };
 
 /** Genuine first contact: self-signed, no pin anchored it, and it validated. */
 const FIRST_CONTACT: NodeE2eeCapabilityVerification = {
   kind: "verified",
-  statement: {} as never,
+  statement: { policyGeneration: 7 } as never,
   selectedSuite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
   anchor: "none",
 };
@@ -89,11 +96,13 @@ function observeStatement(verification: NodeE2eeCapabilityVerification): void {
 
 beforeEach(() => {
   clearWebE2eeLatches();
+  clearWebE2eeLocalDiagnostics();
   resetWebRelayE2eeForTests();
 });
 
 afterEach(() => {
   clearWebE2eeLatches();
+  clearWebE2eeLocalDiagnostics();
   resetWebRelayE2eeForTests();
 });
 
@@ -162,24 +171,74 @@ describe("§12.1 web latch set condition", () => {
     // §12.1: the latch "MUST NOT be treated as a verified pin, MUST NOT promote
     // any pin state". The attempt built AFTER it is set carries no pin, no
     // policy generation, and no account scope — a latched selection is strictly
-    // stricter, never more trusted.
+    // stricter, never more trusted. The generation is a separate monotone
+    // statement-validation guard, not a pin or a release gate.
     const attempt = webRelayE2eeAttempt(SELECTION);
     expect(attempt.selectionClass).toBe("latched");
     expect(attempt.verifiedPin).toBeUndefined();
-    expect(attempt.acceptedPolicyGeneration).toBeUndefined();
+    expect(attempt.acceptedPolicyGeneration).toBe(7);
     expect(attempt.accountId).toBeUndefined();
   });
 });
 
+describe("§5.7 web application-session policy-generation high-water", () => {
+  it("advances monotonically and never regresses", () => {
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBeUndefined();
+    recordWebE2eePolicyGeneration(SELECTION, 7);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(7);
+    recordWebE2eePolicyGeneration(SELECTION, 6);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(7);
+    recordWebE2eePolicyGeneration(SELECTION, 8);
+    recordWebE2eePolicyGeneration(SELECTION, 8);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(8);
+  });
+
+  it("is isolated by the same selection triple as the latch", () => {
+    recordWebE2eePolicyGeneration(SELECTION, 7);
+    for (const other of [
+      { ...SELECTION, hubOrigin: "https://other.example.test" },
+      { ...SELECTION, accountId: "acct_other" },
+      { ...SELECTION, nodeId: "node_other" },
+    ]) {
+      expect(acceptedWebE2eePolicyGeneration(other)).toBeUndefined();
+    }
+  });
+
+  it("records every validated statement, including unusable, but never invalid", () => {
+    observeStatement(FIRST_CONTACT);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(7);
+    observeStatement(UNUSABLE);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(8);
+    observeStatement(INVALID);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(8);
+  });
+
+  it("refuses stale usable and unusable verdicts from overlapping attempts", () => {
+    const staleUsable = webRelayE2eeAttempt(SELECTION);
+    const staleUnusable = webRelayE2eeAttempt(SELECTION);
+    recordWebE2eePolicyGeneration(SELECTION, 9);
+
+    expect(() => staleUsable.onStatement?.(FIRST_CONTACT)).toThrow(
+      "Web E2EE policy generation regressed.",
+    );
+    expect(() => staleUnusable.onStatement?.(UNUSABLE)).toThrow(
+      "Web E2EE policy generation regressed.",
+    );
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(9);
+  });
+});
+
 describe("§12.1 the latch never leaves memory", () => {
-  it("exports only the three in-memory operations and no serializer", () => {
+  it("exports only the bounded in-memory operations and no serializer", () => {
     // A serializer, a snapshot, or an accessor that returned the container is
     // how "MUST NOT persist beyond the application session" gets undone later.
     // There is deliberately nothing to call.
     expect(Object.keys(latchModule).toSorted()).toEqual([
+      "acceptedWebE2eePolicyGeneration",
       "clearWebE2eeLatches",
       "isWebE2eeSelectionLatched",
       "latchWebE2eeSelection",
+      "recordWebE2eePolicyGeneration",
     ]);
   });
 
@@ -222,8 +281,10 @@ describe("§12.1 the latch ends with the application session and not before", ()
     // `T_ADV`. §12.1 scopes the latch to the APPLICATION SESSION; a node
     // teardown is not one.
     latchWebE2eeSelection(SELECTION);
+    recordWebE2eePolicyGeneration(SELECTION, 7);
     clearWebHostedNodeScopedState(EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa"));
     expect(isWebE2eeSelectionLatched(SELECTION)).toBe(true);
+    expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(7);
     // …and the second selection of an A→B→A round trip is still classified
     // `latched` by the real rule, read off the real attempt.
     expect(webRelayE2eeAttempt(SELECTION).selectionClass).toBe("latched");
@@ -246,7 +307,7 @@ describe("§12.1 the latch ends with the application session and not before", ()
     expect(callers).toEqual(["hostedHub/e2eeAttempt.ts", "hostedHub/e2eeLatch.ts"]);
 
     const doc = latchSource.slice(0, latchSource.indexOf("export function clearWebE2eeLatches"));
-    expect(doc).toContain("CALLED ON SIGN-OUT ONLY");
+    expect(doc).toContain("CALLED ONLY AFTER COMMITTED SIGN-OUT OR SESSION EXPIRY");
     expect(doc).toContain("deliberately does NOT call it");
   });
 
@@ -261,12 +322,33 @@ describe("§12.1 the latch ends with the application session and not before", ()
       // which is the only direction that releases anything.
       hostedHubStore.setState({ selectedNode: null });
       expect(isWebE2eeSelectionLatched(SELECTION)).toBe(true);
+      expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBeUndefined();
 
+      recordWebE2eePolicyGeneration(SELECTION, 7);
+      recordWebE2eePolicyGenerationRegression();
+      hostedHubStore.setState({ selectedNode: { id: "node_other" } as never });
+      expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(7);
+      expect(webE2eeLocalDiagnostics()).toEqual(["e2ee_policy_generation_regressed"]);
+
+      // A failed sign-out restores authenticated and does not end this
+      // application session, so none of its rollback guards may relax.
+      hostedHubStore.setState({ accountStatus: "signing-out" });
+      hostedHubStore.setState({ accountStatus: "authenticated" });
+      expect(isWebE2eeSelectionLatched(SELECTION)).toBe(true);
+      expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBe(7);
+      expect(webE2eeLocalDiagnostics()).toEqual(["e2ee_policy_generation_regressed"]);
+
+      hostedHubStore.setState({ accountStatus: "signing-out" });
       hostedHubStore.setState({ accountStatus: "signed-out" });
       expect(isWebE2eeSelectionLatched(SELECTION)).toBe(false);
+      expect(acceptedWebE2eePolicyGeneration(SELECTION)).toBeUndefined();
+      expect(webE2eeLocalDiagnostics()).toEqual([]);
     } finally {
       stop();
-      hostedHubStore.setState({ accountStatus: "signed-out", selectedNode: null });
+      hostedHubStore.setState({
+        accountStatus: "signed-out",
+        selectedNode: null,
+      });
     }
   });
 });

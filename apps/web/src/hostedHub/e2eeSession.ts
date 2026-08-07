@@ -38,6 +38,12 @@ const UNAVAILABLE: WebE2eeSessionState = Object.freeze({
 let state: WebE2eeSessionState = UNAVAILABLE;
 const listeners = new Set<() => void>();
 
+/** §11.4's bounded, application-session-local web diagnostic set. */
+export type WebE2eeLocalDiagnosticId = "e2ee_policy_generation_regressed";
+
+let diagnostics: readonly WebE2eeLocalDiagnosticId[] = [];
+const DIAGNOSTICS_MAX = 8;
+
 function publish(next: WebE2eeSessionState): void {
   if (next.status === state.status && next.verificationCode === state.verificationCode) return;
   state = next;
@@ -52,6 +58,28 @@ export function webE2eeSessionState(): WebE2eeSessionState {
 export function subscribeWebE2eeSession(listener: () => void): () => void {
   listeners.add(listener);
   return () => void listeners.delete(listener);
+}
+
+/** Stable local-only diagnostics; never serialized or placed on the wire. */
+export function webE2eeLocalDiagnostics(): readonly WebE2eeLocalDiagnosticId[] {
+  return diagnostics;
+}
+
+/** §5.7's named rollback diagnostic, kept across channel reconnects. */
+export function recordWebE2eePolicyGenerationRegression(): void {
+  const next: readonly WebE2eeLocalDiagnosticId[] = [
+    ...diagnostics,
+    "e2ee_policy_generation_regressed",
+  ];
+  diagnostics = next.slice(-DIAGNOSTICS_MAX);
+  for (const listener of listeners) listener();
+}
+
+/** End the diagnostic's application-session lifetime. Called on sign-out. */
+export function clearWebE2eeLocalDiagnostics(): void {
+  if (diagnostics.length === 0) return;
+  diagnostics = [];
+  for (const listener of listeners) listener();
 }
 
 /**
