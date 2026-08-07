@@ -26,3 +26,4 @@ squashfs-root/
 .vercel
 .superpowers/
 .gradle/
+scripts/**/*.d.ts
