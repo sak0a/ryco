@@ -84,7 +84,7 @@ export interface UiThreadState {
    * terminal commands). Session-only — not persisted.
    *
    * `state[threadKey][entryId]` is `undefined` when the row uses its
-   * default state (errored entries default open, others default closed).
+   * default state (all entries default closed).
    */
   threadWorkEntryExpandedById: Record<string, Record<string, boolean>>;
 }
