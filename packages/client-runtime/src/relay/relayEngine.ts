@@ -18,6 +18,7 @@ import {
   e2eeChannelSizeBudget,
   e2eeNegotiationBufferMaxBytes,
   E2EE_CLIENT_HELLO_MAX_BYTES,
+  E2EE_ENVELOPE_OVERHEAD_BYTES,
 } from "@ryco/shared/relayE2eeConstants";
 import {
   planRelayMessage,
@@ -58,6 +59,12 @@ const E2EE_NEGOTIATION_HANDSHAKE_RESERVE_BYTES =
   E2EE_CLIENT_HELLO_MAX_BYTES +
   RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength +
   QUEUE_ENTRY_OVERHEAD_BYTES;
+
+function relayQueueCharge(payloadBytes: readonly number[]): number {
+  let charge = 0;
+  for (const bytes of payloadBytes) charge += bytes + QUEUE_ENTRY_OVERHEAD_BYTES;
+  return charge;
+}
 
 /**
  * Platform socket seam. Implementations must not copy, retain, or re-send any
@@ -582,11 +589,11 @@ export class HostedRelayEngine {
    *    unbuffered legacy channel would have refused it, with that channel's own
    *    message, so a caller sees one refusal shape rather than one per mode.
    * 2. The total is charged "as though the bytes had already been enqueued"
-   *    against "the same aggregate budget the relay send queue enforces" — so
-   *    the charge is the queue's own, every planned payload plus its per-entry
-   *    overhead, tested against the same aggregate `#reserveOutbound` admits
-   *    against, less the one record this state may still owe. A buffer at its
-   *    bound is then always flushable AND always leaves the hello admissible.
+   *    against "the same aggregate budget the relay send queue enforces". The
+   *    mode is still undecided, so the charge is the larger of the legacy
+   *    plaintext layout and the eventual encrypted-envelope layout, including
+   *    every planned payload and its per-entry overhead. A buffer at its bound
+   *    is then flushable through either sink AND leaves the hello admissible.
    *
    * The overflow is §11.4 `e2ee_send_unavailable` and nothing else: no wire
    * record of any kind is produced, the channel is UNAFFECTED and remains
@@ -600,16 +607,27 @@ export class HostedRelayEngine {
   #bufferNegotiating(payload: Uint8Array, limits: RelayLimits): void {
     if (payload.byteLength > e2eeChannelSizeBudget(limits).plaintextCeiling)
       throw new Error(RELAY_MESSAGE_TOO_LARGE_MESSAGE);
-    const plan = planRelayMessage(payload.byteLength, this.#messageLimits(limits));
-    if (plan.kind === "error")
+    const legacyPlan = planRelayMessage(payload.byteLength, this.#messageLimits(limits));
+    if (legacyPlan.kind === "error")
       throw new Error(
-        plan.reason === "peer_unsupported"
+        legacyPlan.reason === "peer_unsupported"
           ? RELAY_PEER_UNSUPPORTED_MESSAGE
           : RELAY_MESSAGE_TOO_LARGE_MESSAGE,
       );
-    let charge = 0;
-    for (const payloadBytes of plan.payloadBytes)
-      charge += payloadBytes + QUEUE_ENTRY_OVERHEAD_BYTES;
+    const e2eePlan = planRelayMessage(
+      E2EE_ENVELOPE_OVERHEAD_BYTES + payload.byteLength,
+      this.#messageLimits(limits),
+    );
+    if (e2eePlan.kind === "error")
+      throw new Error(
+        e2eePlan.reason === "peer_unsupported"
+          ? RELAY_PEER_UNSUPPORTED_MESSAGE
+          : RELAY_MESSAGE_TOO_LARGE_MESSAGE,
+      );
+    const charge = Math.max(
+      relayQueueCharge(legacyPlan.payloadBytes),
+      relayQueueCharge(e2eePlan.payloadBytes),
+    );
     const budget = Math.max(
       0,
       e2eeNegotiationBufferMaxBytes(limits) - E2EE_NEGOTIATION_HANDSHAKE_RESERVE_BYTES,
@@ -998,10 +1016,7 @@ export class HostedRelayEngine {
     if (this.#closed || !this.#channel || !limits) return undefined;
     const plan = planRelayMessage(messageBytes, this.#messageLimits(limits));
     if (plan.kind === "error") return undefined;
-    let reserved = 0;
-    for (const payloadBytes of plan.payloadBytes) {
-      reserved += payloadBytes + QUEUE_ENTRY_OVERHEAD_BYTES;
-    }
+    const reserved = relayQueueCharge(plan.payloadBytes);
     if (this.bufferedAmount + reserved > limits.maxQueuedBytes - limits.maxControlFrameBytes) {
       return undefined;
     }

@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { encodeBase64Url } from "./base64url";
 import {
   HostedRelayEngine,
+  RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE,
   RELAY_E2EE_SEND_UNAVAILABLE_MESSAGE,
   type HostedRelaySocketCallbacks,
   type RelayE2eeChannel,
@@ -742,19 +743,18 @@ describe("HostedRelayEngine E2EE seams", () => {
     expect(engine.bufferedAmount).toBeGreaterThan(0);
   });
 
-  it("charges a buffered send exactly what the send queue would charge it", () => {
+  it("charges a buffered send for the eventual E2EE envelope layout", () => {
     // §4.4: the buffer is charged "as though the bytes had already been
     // enqueued", against the same aggregate the queue enforces. `admit` IS that
-    // charge for a message of this length, so the two must agree to the byte —
-    // a buffer charged less than the queue will charge is a buffer that can be
-    // accepted at its bound and then fail to drain into the queue it was
-    // measured against.
+    // charge for the eventual envelope, so the two must agree to the byte — a
+    // buffer charged only for plaintext can accept a burst that later fails to
+    // drain after the channel locks E2EE.
     const { provider, host } = stubProvider({}, null);
     const { engine, socket } = create(callbacks(), realTimers(), provider);
     authenticate(socket);
     const message = new Uint8Array(4_000).fill(0x7b);
 
-    const reservation = host().admit(message.byteLength);
+    const reservation = host().admit(E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength);
     const reserved = engine.bufferedAmount;
     reservation?.release();
     expect(engine.bufferedAmount).toBe(0);
@@ -763,6 +763,55 @@ describe("HostedRelayEngine E2EE seams", () => {
 
     expect(reserved).toBeGreaterThan(message.byteLength);
     expect(engine.bufferedAmount).toBe(reserved);
+  });
+
+  it("flushes every accepted negotiating send after an E2EE lock", () => {
+    const reservations: RelayE2eeReservation[] = [];
+    let e2eeHost: RelayE2eeHost | undefined;
+    const submit = vi.fn((message: Uint8Array) => {
+      const reservation = e2eeHost?.admit(E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength);
+      if (reservation === undefined) return false;
+      reservations.push(reservation);
+      return true;
+    });
+    const provider: RelayE2eeProvider = (host) => {
+      e2eeHost = host;
+      return {
+        intercept: async () => ({ kind: "claimed" }),
+        submit,
+        beginClose: async () => "refused",
+        dispose: () => undefined,
+      };
+    };
+    const limits = RelayLimits.make({
+      ...RELAY_INITIAL_LIMITS,
+      maxControlFrameBytes: 1_024,
+      maxDataChunkBytes: 1_024,
+      maxQueuedBytes: 16_384,
+    });
+    const handlers = callbacks();
+    const { engine, socket, events } = create(handlers, realTimers(), provider);
+    authenticate(socket, limits);
+
+    let accepted = 0;
+    for (; accepted < 1_000; accepted += 1) {
+      try {
+        engine.send(Uint8Array.of(accepted & 0xff));
+      } catch (error) {
+        expect(error).toEqual(new Error(RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE));
+        break;
+      }
+    }
+    expect(accepted).toBeGreaterThan(1);
+
+    e2eeHost?.lockMode("e2ee");
+
+    expect(submit).toHaveBeenCalledTimes(accepted);
+    expect(handlers.onFailure).not.toHaveBeenCalled();
+    expect(events.onClose).not.toHaveBeenCalled();
+    expect(events.onOpen).toHaveBeenCalledOnce();
+    for (const reservation of reservations) reservation.release();
+    expect(engine.bufferedAmount).toBe(0);
   });
 
   it("keeps the valve shut when the flush itself failed the channel", () => {
