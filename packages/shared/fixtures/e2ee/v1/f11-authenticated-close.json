@@ -1170,7 +1170,7 @@
         "tClose": 1500,
         "tCloseLingerMax": 1000,
         "keepaliveFlushMargin": 500,
-        "rpcKeepaliveInterval": 5000,
+        "rpcKeepaliveInterval": 8000,
         "ownCloseAt": 0,
         "peerCloseDeliveredAt": 1499,
         "peerAckDeliveredAt": 2998,

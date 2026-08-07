@@ -1,5 +1,5 @@
 import { hostedHubStore } from "@ryco/client-runtime/authorization";
-import type { RelayE2eeHost } from "@ryco/client-runtime/relay";
+import type { RelayE2eeHost, RelayE2eeInitiatorAttempt } from "@ryco/client-runtime/relay";
 import { e2eeKeyFingerprint, formatE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import { deriveE2eeSafetyNumber } from "@ryco/shared/relayE2eeVerificationDisplay";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -42,6 +42,9 @@ const custody = vi.hoisted(() => ({
   agreementCalls: 0,
   prekeyPending: null as Promise<void> | null,
   onPrekeyStart: null as (() => void) | null,
+}));
+const relayProvider = vi.hoisted(() => ({
+  attempt: null as RelayE2eeInitiatorAttempt | null,
 }));
 
 vi.mock("expo-secure-store", () => ({
@@ -104,6 +107,15 @@ vi.mock("../platform/e2eeClientPrekey", () => ({
     },
   },
 }));
+vi.mock("../platform/e2eeRelayProvider", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../platform/e2eeRelayProvider")>();
+  return {
+    makeMobileRelayE2eeProvider: (sources: { readonly attempt: RelayE2eeInitiatorAttempt }) => {
+      relayProvider.attempt = sources.attempt;
+      return actual.makeMobileRelayE2eeProvider(sources);
+    },
+  };
+});
 vi.mock("./runtimeConfig", () => ({
   getMobileHostedConfig: () => ({ hubOrigin: HUB, appUrl: HUB, relyingParty: "hub.example.com" }),
 }));
@@ -116,6 +128,7 @@ import {
   getMobileE2eeSessionState,
   lockMobileE2eeChannelMode,
   resetMobileE2eeSessionForTests,
+  subscribeMobileE2eeSession,
 } from "./e2eeSession";
 import {
   disposeMobileRelayE2eeAttempt,
@@ -125,7 +138,11 @@ import {
   resolveMobileRelayE2eeProvider,
 } from "./e2eeAttempt";
 
-function selectNode(nodeId = "node_1", accountId = ACCOUNT): void {
+function selectNode(
+  nodeId = "node_1",
+  accountId = ACCOUNT,
+  generation = hostedHubStore.getState().generation,
+): void {
   hostedHubStore.setState({
     accountStatus: "authenticated",
     account: {
@@ -151,6 +168,7 @@ function selectNode(nodeId = "node_1", accountId = ACCOUNT): void {
       effectiveRole: "admin",
       presence: { online: true, lastHeartbeatAt: null },
     },
+    generation,
   } as never);
 }
 
@@ -182,6 +200,14 @@ function host(): { readonly host: RelayE2eeHost; readonly closes: unknown[] } {
   };
 }
 
+function instantiateCurrentProvider(): { readonly closes: unknown[] } {
+  const context = host();
+  const provider = resolveMobileRelayE2eeProvider();
+  expect(provider).not.toBeUndefined();
+  provider!(context.host);
+  return context;
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
   custody.prekeyFails = false;
@@ -192,10 +218,52 @@ beforeEach(() => {
   custody.agreementCalls = 0;
   custody.prekeyPending = null;
   custody.onPrekeyStart = null;
+  relayProvider.attempt = null;
   resetMobileRelayE2eeAttemptForTests();
   resetMobileE2eeSessionForTests();
   signOut();
 });
+
+function authenticatedStatement(policyGeneration = 8) {
+  return {
+    kind: "verified",
+    anchor: "pin-unchanged",
+    selectedSuite: 1,
+    statement: {
+      identityPublicKey: NODE_PUBLIC_KEY,
+      continuityId: "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      policyGeneration,
+    },
+  } as const;
+}
+
+async function prepareVerifiedSelection(nodeId: string, generation = 1): Promise<void> {
+  await mobileE2eeTrustStore.hydrate();
+  const index = await mobileE2eeTrustStore.beginPairing({
+    hubOrigin: HUB,
+    accountId: ACCOUNT,
+    nodeId,
+  });
+  await mobileE2eeTrustStore.promote(
+    mintE2eeOwnerVerificationDecision({
+      index,
+      nodeIdentityPublicKey: NODE_PUBLIC_KEY,
+      clientIdentityPublicKey: CLIENT_PUBLIC_KEY,
+      comparedSafetyNumber: deriveE2eeSafetyNumber({
+        nodeIdentityPublicKey: NODE_PUBLIC_KEY,
+        clientIdentityPublicKey: CLIENT_PUBLIC_KEY,
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+      }).display,
+      continuityId: "nct_FFFFFFFFFFFFFFFFFFFFFF",
+      acceptedPolicyGeneration: 7,
+      decidedAt: 1_000,
+    }),
+  );
+  selectNode(nodeId, ACCOUNT, generation);
+  await prepareMobileRelayE2eeAttempt();
+  resolveMobileRelayE2eeProvider();
+}
 
 describe("native E2EE is on: every hosted channel is built with the §4.4 machine", () => {
   it("supplies a provider once the attempt for the current selection is resolved", async () => {
@@ -735,5 +803,128 @@ describe("the attempt-owned agreement scalar", () => {
     const context = host();
     resolveMobileRelayE2eeProvider()!(context.host);
     expect(context.closes.length).toBe(1);
+  });
+});
+
+describe("authenticated statement persistence owns the mobile handshake", () => {
+  it("fences a provider opened reentrantly by a statement session listener", async () => {
+    await prepareVerifiedSelection("node_reentrant_commit");
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(mobileE2eeTrustStore, "recordAuthenticatedStatement").mockReturnValue(pending);
+
+    let reentrantCloses: readonly unknown[] | null = null;
+    const unsubscribe = subscribeMobileE2eeSession(() => {
+      reentrantCloses = instantiateCurrentProvider().closes;
+    });
+    const commit = relayProvider.attempt!.onStatement!(authenticatedStatement() as never);
+    unsubscribe();
+
+    expect(reentrantCloses).toHaveLength(1);
+    release();
+    await commit;
+  });
+
+  it("fences same-selection providers until the underlying durable mutation settles", async () => {
+    await prepareVerifiedSelection("node_pending_commit");
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const record = vi
+      .spyOn(mobileE2eeTrustStore, "recordAuthenticatedStatement")
+      .mockReturnValue(pending);
+
+    const commit = relayProvider.attempt!.onStatement!(authenticatedStatement() as never);
+    await Promise.resolve();
+    expect(record).toHaveBeenCalledOnce();
+
+    expect(instantiateCurrentProvider().closes).toHaveLength(1);
+
+    await expect(
+      relayProvider.attempt!.onStatement!(authenticatedStatement(9) as never),
+    ).rejects.toThrow();
+    expect(record).toHaveBeenCalledOnce();
+
+    release();
+    await commit;
+    // The provider function exists in both cases. Construction proves the
+    // settled path is the usable machine rather than the unresolved closer.
+    expect(instantiateCurrentProvider().closes).toHaveLength(0);
+  });
+
+  it("propagates durable rejection and restores the previous complete attempt only afterward", async () => {
+    await prepareVerifiedSelection("node_rejected_commit");
+    let reject!: (cause: Error) => void;
+    const pending = new Promise<void>((_resolve, rejectPromise) => {
+      reject = rejectPromise;
+    });
+    vi.spyOn(mobileE2eeTrustStore, "recordAuthenticatedStatement").mockReturnValue(pending);
+
+    const commit = relayProvider.attempt!.onStatement!(authenticatedStatement() as never);
+    expect(instantiateCurrentProvider().closes).toHaveLength(1);
+    reject(new Error("durable trust write refused"));
+    await expect(commit).rejects.toThrow("durable trust write refused");
+
+    expect(instantiateCurrentProvider().closes).toHaveLength(0);
+  });
+
+  it("makes the committed generation and rotated pin visible before its continuation runs", async () => {
+    const nodeId = "node_commit_before_continue";
+    await prepareVerifiedSelection(nodeId);
+    const rotatedIdentity = bytes(
+      "5866666666666666666666666666666666666666666666666666666666666666",
+    );
+    const expectedFingerprint = formatE2eeKeyFingerprint(
+      e2eeKeyFingerprint("node-identity", rotatedIdentity),
+    );
+
+    let recordAtContinuation: ReturnType<typeof mobileE2eeTrustStore.resolve> = null;
+    await Promise.resolve(
+      relayProvider.attempt!.onStatement!({
+        kind: "verified",
+        anchor: "pin-updated",
+        selectedSuite: 1,
+        statement: {
+          identityPublicKey: rotatedIdentity,
+          continuityId: "nct_FFFFFFFFFFFFFFFFFFFFFF",
+          policyGeneration: 12,
+        },
+      } as never),
+    ).then(() => {
+      // This continuation stands at the exact contract the shared initiator
+      // awaits before it may send hello and arm the handshake deadline.
+      recordAtContinuation = mobileE2eeTrustStore.resolve({
+        kind: "node-id-hint",
+        hubOrigin: HUB,
+        accountId: ACCOUNT,
+        nodeId,
+      });
+    });
+
+    expect(recordAtContinuation).toMatchObject({
+      state: "verified",
+      verifiedFingerprint: expectedFingerprint,
+      acceptedPolicyGeneration: 12,
+    });
+  });
+
+  it("rejects an old continuation across A to B to A lifecycle generations", async () => {
+    await prepareVerifiedSelection("node_generation_a", 11);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.spyOn(mobileE2eeTrustStore, "recordAuthenticatedStatement").mockReturnValue(pending);
+
+    const commit = relayProvider.attempt!.onStatement!(authenticatedStatement() as never);
+    selectNode("node_generation_b", ACCOUNT, 12);
+    selectNode("node_generation_a", ACCOUNT, 13);
+    release();
+
+    await expect(commit).rejects.toThrow();
+    expect(getMobileE2eeSessionState().selection?.nodeId).not.toBe("node_generation_b");
   });
 });

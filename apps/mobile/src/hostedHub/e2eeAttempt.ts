@@ -106,6 +106,12 @@ let preparing: Promise<void> | undefined;
 let custodyUnavailableFor: string | null = null;
 /** A resolved strict failure whose owner-visible trust context survives retries. */
 let strictUnavailableFor: string | null = null;
+/**
+ * Underlying authenticated trust mutations, keyed independently of cache
+ * revision and lifecycle generation. A deadline closes only the channel that
+ * was waiting; it never clears this fence or pretends the OS write was cancelled.
+ */
+const pendingTrustCommits = new Map<string, Promise<void>>();
 
 /**
  * The selection an attempt belongs to, as one comparable string.
@@ -122,9 +128,9 @@ function selectionKey(input: {
   return `${input.hubOrigin}\u0000${input.accountId}\u0000${input.nodeId}`;
 }
 
-/** The selection AND the trust document it was resolved against (see above). */
+/** The selection, lifecycle owner, and trust document it was resolved against. */
 function slotKey(selection: CurrentSelection): string {
-  return `${selectionKey(selection)}\u0000${mobileE2eeTrustStore.revision()}`;
+  return `${selectionKey(selection)}\u0000${selection.generation}\u0000${mobileE2eeTrustStore.revision()}`;
 }
 
 interface CurrentSelection {
@@ -133,6 +139,7 @@ interface CurrentSelection {
   readonly nodeId: string;
   readonly nodeLabel: string;
   readonly environmentId: string | null;
+  readonly generation: number;
 }
 
 /** The hosted selection a channel would be opened for, or `null`. */
@@ -150,7 +157,17 @@ function currentSelection(): CurrentSelection | null {
     nodeId: node.id,
     nodeLabel: node.label,
     environmentId: node.environmentId,
+    generation: state.generation,
   };
+}
+
+function ownsSelection(selection: CurrentSelection): boolean {
+  const live = currentSelection();
+  return (
+    live !== null &&
+    live.generation === selection.generation &&
+    selectionKey(live) === selectionKey(selection)
+  );
 }
 
 /** §12.1.1's coarse class, which is all the §4.4 machine consumes. */
@@ -245,6 +262,12 @@ async function runPreparationPass(): Promise<boolean> {
     resetMobileE2eeSession();
     return true;
   }
+  // A previous channel authenticated a durable trust advance for this same
+  // selection. Until the underlying OS-backed write settles, no attempt may
+  // classify the old generation or borrow the old pin. Keep the complete cached
+  // attempt intact for the callback that still owns its scalar, but mark this
+  // preparation complete and let provider resolution close new channels.
+  if (pendingTrustCommits.has(selectionKey(selection))) return true;
   const key = slotKey(selection);
   if (prepared?.key === key) return true;
   const retainsCurrentFailureClaim = custodyUnavailableFor === key || strictUnavailableFor === key;
@@ -397,13 +420,22 @@ async function runPreparationPass(): Promise<boolean> {
           acceptedPolicyGeneration: verified.acceptedPolicyGeneration,
         }),
     accountId: selection.accountId,
-    onStatement: (verification) => {
-      observeMobileE2eeStatement(verification);
-      void recordAuthenticatedStatement(
+    onStatement: async (verification) => {
+      if (!ownsSelection(selection)) throw new Error("Mobile E2EE selection was superseded.");
+      // Establish the per-selection fence before publishing to session
+      // listeners. A listener may synchronously open another channel; it must
+      // observe the pending mutation and fail closed, never borrow stale trust.
+      const persistence = recordAuthenticatedStatement(
         selection,
         record?.index.localNodeHandle ?? null,
         verification,
       );
+      observeMobileE2eeStatement(verification);
+      await persistence;
+      // The authenticated old selection may still tighten its own durable
+      // record after a deadline or navigation. It cannot resume or project into
+      // a lifecycle generation that did not own this callback.
+      if (!ownsSelection(selection)) throw new Error("Mobile E2EE selection was superseded.");
     },
     onUnexpectedNode: (evidence) => raiseMobileE2eeUnexpectedNode(evidence),
     onDiagnostic: (diagnostic) => recordMobileE2eeInitiatorDiagnostic(diagnostic),
@@ -480,20 +512,31 @@ async function recordAuthenticatedStatement(
   if (localNodeHandle === null) return;
   if (verification.kind !== "verified") return;
   if (verification.anchor === "none") return;
-  await mobileE2eeTrustStore
-    .recordAuthenticatedStatement({
-      index: {
-        hubOrigin: selection.hubOrigin,
-        accountId: selection.accountId,
-        localNodeHandle,
-      },
-      anchor: verification.anchor,
-      identityFingerprint: formatStatementFingerprint(verification.statement.identityPublicKey),
-      identityPublicKey: verification.statement.identityPublicKey,
-      policyGeneration: verification.statement.policyGeneration,
-      observedAt: Date.now(),
-    })
-    .catch(() => undefined);
+  const key = selectionKey(selection);
+  if (pendingTrustCommits.has(key)) {
+    throw new Error("Mobile E2EE trust commit is already pending.");
+  }
+  const operation = mobileE2eeTrustStore.recordAuthenticatedStatement({
+    index: {
+      hubOrigin: selection.hubOrigin,
+      accountId: selection.accountId,
+      localNodeHandle,
+    },
+    anchor: verification.anchor,
+    identityFingerprint: formatStatementFingerprint(verification.statement.identityPublicKey),
+    identityPublicKey: verification.statement.identityPublicKey,
+    policyGeneration: verification.statement.policyGeneration,
+    observedAt: Date.now(),
+  });
+  pendingTrustCommits.set(key, operation);
+  const clear = (): void => {
+    if (pendingTrustCommits.get(key) === operation) pendingTrustCommits.delete(key);
+  };
+  // Attach both arms immediately. A channel deadline does not cancel the store
+  // promise, and a late rejection must remain handled even if its initiator has
+  // already closed and released its own wait.
+  void operation.then(clear, clear);
+  await operation;
 }
 
 /** §7.1's display form of one node identity key. No namespace is involved. */
@@ -549,6 +592,7 @@ export function resolveMobileRelayE2eeProvider(): RelayE2eeProvider | undefined 
   // a Hub-profile change during backoff — so this is unresolved evidence like
   // any other, never a plaintext channel nobody decided on.
   if (selection === null) return unresolvedAttemptChannel;
+  if (pendingTrustCommits.has(selectionKey(selection))) return unresolvedAttemptChannel;
   const key = slotKey(selection);
   // §6.3's one legacy answer, and the only `undefined` this function returns.
   // The preparation is re-primed either way, so the answer is retried on the
@@ -634,4 +678,5 @@ export function resetMobileRelayE2eeAttemptForTests(): void {
   preparing = undefined;
   custodyUnavailableFor = null;
   strictUnavailableFor = null;
+  pendingTrustCommits.clear();
 }

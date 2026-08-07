@@ -3,6 +3,7 @@ import {
   T_ADV,
   T_HANDSHAKE,
   T_KEEPALIVE_FLUSH_MARGIN,
+  T_TRUST_COMMIT,
   RPC_KEEPALIVE_INTERVAL,
 } from "@ryco/shared/relayE2eeConstants";
 import {
@@ -46,9 +47,9 @@ import {
 // than a style: the two endpoints implement the same normative table from
 // opposite sides.
 //
-// WHAT THIS OWNS: one channel's K-row dispatch, its `T_ADV` and `T_HANDSHAKE`
-// deadlines, the single mode lock, and the mapping of every pre-key fatal
-// condition onto §11.2's observable. It verifies no statement (§5.2 lives in
+// WHAT THIS OWNS: one channel's K-row dispatch, its `T_ADV`, `T_TRUST_COMMIT`,
+// and `T_HANDSHAKE` deadlines, the single mode lock, and the mapping of every
+// pre-key fatal condition onto §11.2's observable. It verifies no statement (§5.2 lives in
 // `relayE2eeCapabilityVerify`), derives no key and builds no hello body (§8 lives
 // in `E2eeClientHandshake`), classifies no selection (§12.1.1 is client-anchored
 // state the caller resolves before the channel exists), and protects no record
@@ -133,7 +134,9 @@ export interface RelayE2eeInitiatorAttempt {
   /** §5.7: the highest policy generation already accepted for this node. */
   readonly acceptedPolicyGeneration?: number | undefined;
   /** §5.2's verdict, for the caller's durable trust state. Never a wire effect. */
-  readonly onStatement?: ((verification: NodeE2eeCapabilityVerification) => void) | undefined;
+  readonly onStatement?:
+    | ((verification: NodeE2eeCapabilityVerification) => void | Promise<void>)
+    | undefined;
   /** §13.2.1: the unexpected-node surface, raised locally on rows K23 and K24. */
   readonly onUnexpectedNode?: ((evidence: RelayE2eeUnexpectedNodeEvidence) => void) | undefined;
   readonly onDiagnostic?: ((diagnostic: RelayE2eeInitiatorDiagnostic) => void) | undefined;
@@ -187,14 +190,14 @@ const CLAIMED: RelayE2eeInboundDisposition = Object.freeze({ kind: "claimed" } a
  * specification states it.
  *
  * While `negotiating` an E2EE-capable client writes no plaintext at all, so the
- * longest contiguous silent window is `T_ADV` followed by `T_HANDSHAKE`; L1
- * reserves `T_KEEPALIVE_FLUSH_MARGIN` on top so the `Ping` that window held is
- * flushed and its `Pong` returns before the next tick declares the peer dead. A
- * release in which this is false is a specification defect (§3.2.2), and it is
- * checked at module load because the only alternative is discovering it as a
- * dead transport in the middle of row K15.
+ * longest contiguous silent window is `T_ADV`, followed by the local authenticated
+ * trust commit and `T_HANDSHAKE`; L1 reserves `T_KEEPALIVE_FLUSH_MARGIN` on top
+ * so the `Ping` that window held is flushed and its `Pong` returns before the next
+ * tick declares the peer dead. A release in which this is false is a specification
+ * defect (§3.2.2), and it is checked at module load because the only alternative
+ * is discovering it as a dead transport in the middle of row K15.
  */
-if (T_ADV + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN > RPC_KEEPALIVE_INTERVAL) {
+if (T_ADV + T_TRUST_COMMIT + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN > RPC_KEEPALIVE_INTERVAL) {
   throw new Error("Relay E2EE negotiating window exceeds the pinned keepalive budget.");
 }
 
@@ -261,7 +264,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
   let handshake: E2eeClientHandshake | undefined;
   let established: RelayE2eeChannel | undefined;
   let advTimer: unknown;
+  let trustCommitTimer: unknown;
   let handshakeTimer: unknown;
+  let cancelStatementWait: (() => void) | undefined;
   /**
    * §13.5's node half, retained from the statement §5.2 VALIDATED on this
    * channel — the only source a web client has, since §13.1 gives it no durable
@@ -272,9 +277,14 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
 
   function clearTimers(): void {
     if (advTimer !== undefined) host.clearTimeout(advTimer);
+    if (trustCommitTimer !== undefined) host.clearTimeout(trustCommitTimer);
     if (handshakeTimer !== undefined) host.clearTimeout(handshakeTimer);
     advTimer = undefined;
+    trustCommitTimer = undefined;
     handshakeTimer = undefined;
+    const cancel = cancelStatementWait;
+    cancelStatementWait = undefined;
+    cancel?.();
   }
 
   /**
@@ -478,7 +488,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
    * reserves the tag, so nothing else may legitimately carry it — and it fails
    * validation, which is rows K2/K3 and never K9's legacy lock.
    */
-  function receiveCarrier(statement: Uint8Array | undefined): RelayE2eeInboundDisposition {
+  async function receiveCarrier(
+    statement: Uint8Array | undefined,
+  ): Promise<RelayE2eeInboundDisposition> {
     // Row K4 / §11.2 P4: one carrier per channel. §4.4 admits exactly one
     // handshake attempt per channel and the carrier is the input that starts it.
     if (carrierConsumed) return fatalPre("P4");
@@ -499,7 +511,26 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
               ? {}
               : { acceptedPolicyGeneration: attempt.acceptedPolicyGeneration }),
           });
-    if (verification !== undefined) attempt.onStatement?.(verification);
+    if (verification !== undefined && verification.kind === "verified") {
+      // A usable authenticated statement has selected the no-legacy path. Stop
+      // `T_ADV` before invoking app code so a slow durable trust write cannot
+      // race a plaintext K13 lock. The fresh handshake deadline is armed only
+      // after that write succeeds and the hello is actually emitted.
+      if (advTimer !== undefined) host.clearTimeout(advTimer);
+      advTimer = undefined;
+      const committed = await awaitStatementHook(verification, true);
+      if (!committed || mode !== "negotiating" || helloSent) {
+        return mode === "closed" ? REJECTED : CLAIMED;
+      }
+    } else if (verification !== undefined) {
+      // The web latch needs every defined verdict, including a statement that
+      // validated but was unusable. Its existing K2/K3 disposition happens only
+      // after the observer returns.
+      const observed = await awaitStatementHook(verification, false);
+      if (!observed || mode !== "negotiating" || helloSent) {
+        return mode === "closed" ? REJECTED : CLAIMED;
+      }
+    }
 
     if (verification === undefined || verification.kind !== "verified") {
       // Rows K2 and K3. The statement failed validation, or validated and is
@@ -521,11 +552,72 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     return sendHello(verification.statement, verification.anchor, verification.selectedSuite);
   }
 
+  /**
+   * Deliver one defined statement to the app-owned trust boundary.
+   *
+   * A verified statement receives its own local pre-key deadline. Timeout,
+   * rejection, abort, and disposal settle this machine's wait without pretending
+   * to cancel the underlying storage operation. The operation remains observed,
+   * so a late rejection is never unhandled, while the mode check prevents a late
+   * success from emitting a hello on a closed or superseded channel.
+   */
+  function awaitStatementHook(
+    verification: NodeE2eeCapabilityVerification,
+    boundedTrustCommit: boolean,
+  ): Promise<boolean> {
+    const notify = attempt.onStatement;
+    if (notify === undefined) return Promise.resolve(true);
+
+    let resolveWait!: (committed: boolean) => void;
+    const wait = new Promise<boolean>((resolve) => {
+      resolveWait = resolve;
+    });
+    let finished = false;
+    const cancel = (): void => finish(false);
+    const finish = (committed: boolean): void => {
+      if (finished) return;
+      finished = true;
+      if (trustCommitTimer !== undefined) host.clearTimeout(trustCommitTimer);
+      trustCommitTimer = undefined;
+      if (cancelStatementWait === cancel) cancelStatementWait = undefined;
+      resolveWait(committed);
+    };
+    cancelStatementWait = cancel;
+
+    if (boundedTrustCommit) {
+      trustCommitTimer = host.setTimeout(() => {
+        trustCommitTimer = undefined;
+        if (mode === "negotiating" && !helloSent) fatalPre("local");
+        finish(false);
+      }, T_TRUST_COMMIT);
+    }
+
+    let operation: void | Promise<void>;
+    try {
+      operation = notify(verification);
+    } catch {
+      fatalPre("local");
+      finish(false);
+      return wait;
+    }
+    Promise.resolve(operation).then(
+      () => finish(mode === "negotiating" && !helloSent),
+      () => {
+        if (mode === "negotiating") fatalPre("local");
+        finish(false);
+      },
+    );
+    return wait;
+  }
+
   function sendHello(
     statement: NodeE2eeCapabilityStatement,
     anchor: NodeE2eeCapabilityAnchor,
     selectedSuite: E2eeSuiteId,
   ): RelayE2eeInboundDisposition {
+    // The statement hook and this continuation are separated by a microtask.
+    // A local close may win in between; no stale success may emit afterward.
+    if (mode !== "negotiating" || helloSent) return REJECTED;
     const client = new E2eeClientHandshake({
       channel: {
         hubOrigin: attempt.hubOrigin,
@@ -657,7 +749,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
 
   // ─── §4.4: the state dispatch ──────────────────────────────────────────────
 
-  function negotiating(payload: Uint8Array): RelayE2eeInboundDisposition {
+  async function negotiating(payload: Uint8Array): Promise<RelayE2eeInboundDisposition> {
     const klass = classifyPostStripPayload(payload);
     switch (klass.kind) {
       case "legacy-json": {
