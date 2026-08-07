@@ -8274,6 +8274,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     let toastId: ReturnType<typeof toastManager.add> | null = null;
+    const onClose = vi.fn();
     try {
       // The phone tier renders the compact app bar (the session tab strip
       // moved into the thread kebab sheet), so notices must clear the app bar.
@@ -8291,6 +8292,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
         type: "info",
         // Keep the toast mounted across the viewport sweep below.
         timeout: 0,
+        data: { onClose },
       });
 
       const toastRoot = await waitForElement(
@@ -8339,7 +8341,20 @@ describe("ChatView timeline estimator parity (full app)", () => {
         const toastViewport = document.querySelector<HTMLElement>('[data-slot="toast-viewport"]');
         expect(toastViewport).not.toBeNull();
         expect(getComputedStyle(toastViewport!).top).toBe("12px");
+        expect(getComputedStyle(toastRoot).getPropertyValue("-webkit-app-region")).toBe("no-drag");
+        const closeButton = toastRoot.querySelector<HTMLElement>('[data-slot="toast-close"]');
+        expect(closeButton).not.toBeNull();
+        expect(getComputedStyle(closeButton!).getPropertyValue("-webkit-app-region")).toBe(
+          "no-drag",
+        );
       });
+
+      await page.getByRole("button", { name: "Dismiss notification" }).click();
+      await vi.waitFor(() => {
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(document.body.contains(toastRoot)).toBe(false);
+      });
+      toastId = null;
     } finally {
       if (toastId !== null) {
         toastManager.close(toastId);
@@ -10401,6 +10416,58 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await userEvent.keyboard("{Escape}");
       await vi.waitFor(() => {
         expect(document.querySelector('[data-slot="dialog-popup"]')).toBeNull();
+      });
+    } finally {
+      useSettingsDialogStore.setState({ open: false, section: "general" });
+      await mounted.cleanup();
+    }
+  });
+
+  it("keeps the collapsed desktop sidebar chrome outside the window drag region", async () => {
+    localStorage.setItem("chat_thread_sidebar_open", "false");
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-collapsed-sidebar-chrome" as MessageId,
+        targetText: "collapsed sidebar chrome thread",
+      }),
+    });
+
+    try {
+      const chrome = await waitForElement(
+        () =>
+          document.querySelector<HTMLElement>(
+            '[data-slot="collapsed-app-sidebar-chrome"]:not([inert])',
+          ),
+        "Unable to find the interactive collapsed sidebar chrome.",
+      );
+      expect(getComputedStyle(chrome).getPropertyValue("-webkit-app-region")).toBe("no-drag");
+      expect(chrome.querySelector('a[aria-label="Go to threads"]')).not.toBeNull();
+
+      const settingsButton = chrome.querySelector<HTMLButtonElement>(
+        'button[aria-label="Settings"]',
+      );
+      expect(settingsButton).not.toBeNull();
+      settingsButton!.click();
+      await waitForElement(
+        () => document.querySelector<HTMLElement>('[data-slot="dialog-popup"]'),
+        "Settings did not open from the collapsed sidebar chrome.",
+      );
+      await userEvent.keyboard("{Escape}");
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-slot="dialog-popup"]')).toBeNull();
+      });
+
+      const showSidebarButton = chrome.querySelector<HTMLButtonElement>(
+        'button[aria-label="Show sidebar"]',
+      );
+      expect(showSidebarButton).not.toBeNull();
+      showSidebarButton!.click();
+      await vi.waitFor(() => {
+        expect(
+          document.querySelector('[data-slot="sidebar"][data-state="expanded"]'),
+        ).not.toBeNull();
+        expect(localStorage.getItem("chat_thread_sidebar_open")).toBe("true");
       });
     } finally {
       useSettingsDialogStore.setState({ open: false, section: "general" });

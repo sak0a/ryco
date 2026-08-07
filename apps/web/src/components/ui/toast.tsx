@@ -96,7 +96,9 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
 
 /** Dismiss-only: circular control overlapping the card corner (iOS notification–style). */
 const toastCornerDismissClass = "absolute z-20 -top-1.5 -right-1.5";
+const toastInteractionRegionClass = "[-webkit-app-region:no-drag]";
 const toastCornerOrbClass = cn(
+  toastInteractionRegionClass,
   // No `backdrop-blur-*` utility here: it would out-cascade the
   // `app-toast-surface` filter (utilities layer wins) and defeat the
   // reduced-transparency / forced-colors overrides with it.
@@ -563,6 +565,7 @@ function Toasts({ position = "top-center" }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
+                toastInteractionRegionClass,
                 // The snappy spring drives the transform so a new toast drops in
                 // and settles with a slight overshoot; opacity fades on the pop
                 // duration so entrance and exit read as material, not a slide.
@@ -725,6 +728,7 @@ function AnchoredToasts() {
               >
                 <Toast.Root
                   className={cn(
+                    toastInteractionRegionClass,
                     "app-toast-surface relative overflow-visible text-balance border not-dark:bg-clip-padding text-popover-foreground text-xs transition-[scale,opacity] duration-(--app-motion-duration-pop) before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
                     tooltipStyle
                       ? "rounded-md shadow-md/5 before:rounded-[calc(var(--radius-md)-1px)]"
