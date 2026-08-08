@@ -27,7 +27,7 @@ const LEVEL_ABBREVIATION: Record<LevelKey, string> = {
   low: "Low",
   medium: "Med",
   high: "High",
-  xhigh: "XHi",
+  xhigh: "XHigh",
   max: "Max",
   ultra: "Ultra",
   ultracode: "UCode",
