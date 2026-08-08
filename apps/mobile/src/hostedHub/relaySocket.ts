@@ -241,7 +241,12 @@ export class MobileHostedRelaySocket {
           onError: () => this.#emit({ type: "error" }),
           onClose: (code, reason) => {
             this.#state = CLOSED;
-            this.#emit({ type: "close", code, reason, wasClean: code === 1000 });
+            this.#emit({
+              type: "close",
+              code,
+              reason,
+              wasClean: code === 1000,
+            });
           },
         },
       });
@@ -331,7 +336,12 @@ export class MobileHostedRelaySocket {
       if (this.#state !== CLOSED) {
         this.#emit({ type: "error" });
         this.#state = CLOSED;
-        this.#emit({ type: "close", code: 4401, reason: UPGRADE_FAILED, wasClean: false });
+        this.#emit({
+          type: "close",
+          code: 4401,
+          reason: UPGRADE_FAILED,
+          wasClean: false,
+        });
       }
     }
   }
@@ -358,11 +368,12 @@ export class MobileHostedRelaySocket {
               })();
     // React Native has no DOMException, so the engine's messages are preserved
     // on plain Errors rather than mapped to DOMException names as on web. That
-    // includes `RELAY_E2EE_NEGOTIATION_BUFFER_FULL_MESSAGE`, the §11.4
-    // `e2ee_send_unavailable` this tier CAN reach: it is deliberately the
-    // identity mapping rather than an unmapped case. Re-throwing it as a new
-    // Error would discard the stack and make an ordinary backpressure refusal
-    // — the channel is unaffected and the caller may submit again — look like a
+    // includes both §11.4 `e2ee_send_unavailable` cases — while negotiation is
+    // buffered and while established protection work is at its bounded
+    // ceiling. This is deliberately the identity mapping rather than an
+    // adapter-specific wrapper, including for RPC keepalive writes. Re-throwing
+    // as a new Error would discard the stack and make ordinary backpressure —
+    // the channel is unaffected and the caller may submit again — look like a
     // failure originating here.
     this.#engine.send(Uint8Array.from(bytes));
   }

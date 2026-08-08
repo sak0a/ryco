@@ -214,9 +214,15 @@ export function e2eeChannelSizeBudget(limits: E2eeReadyLimits): E2eeChannelSizeB
 
 /**
  * 1,500 ms. Client advertisement wait, from receipt of `channel.accept`. Fixed
- * by the §3.2.2 L1 keepalive budget together with `T_HANDSHAKE`.
+ * by the §3.2.2 L1 keepalive budget together with `T_TRUST_COMMIT` and
+ * `T_HANDSHAKE`.
  */
 export const T_ADV = 1_500;
+/**
+ * 3,000 ms. Local pre-key deadline for committing an authenticated statement
+ * before the client may emit `E2EEClientHello`.
+ */
+export const T_TRUST_COMMIT = 3_000;
 /** 3,000 ms. Client handshake deadline, from `E2EEClientHello` emit (§4.4 K15). */
 export const T_HANDSHAKE = 3_000;
 /**
@@ -490,9 +496,9 @@ export {
 export const RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES = RELAY_CHUNK_CAPABILITY_PRELUDE.byteLength;
 
 /**
- * 5,000 ms. Period of the pinned RPC client's keepalive fiber (§3.2.2 L1). The
- * pinned client hard-codes it (`Effect.delay("5 seconds")` in `makePinger`,
+ * 8,000 ms. Period of the pinned RPC client's keepalive fiber (§3.2.2 L1). The
+ * pinned client hard-codes it (`Effect.delay("8 seconds")` in `makePinger`,
  * `patches/effect@4.0.0-beta.59.patch`) and exports no constant, so this is the
  * one restated row with no importable definition site.
  */
-export const RPC_KEEPALIVE_INTERVAL = 5_000;
+export const RPC_KEEPALIVE_INTERVAL = 8_000;

@@ -36,11 +36,11 @@
  *   encoding, which is why the 278-byte transcript itself is not transcribed.
  * - F13 `node-identity-key-fingerprint` — the §7.1 display form.
  *
- * NOT COVERED HERE: P-256 (`../platform/ecdsa` and the device-key module already
- * carry on-device coverage); the NX pattern (web tier only); the §3.6 decode and
- * re-encode-equality path; and F15's transport messages, which would need a
- * direct `@noble/ciphers` import — not a dependency of this app — to reproduce,
- * and whose evidence for the §6.5 outputs and their order the F6 case supplies.
+ * NOT COVERED BY THE EMBEDDED SUBSET: P-256, NX, and §3.6 decode/re-encode.
+ * The bounded development-only side-load below adds those cases without
+ * bundling their families in production. F15 transport messages remain outside
+ * this module: they would need a direct `@noble/ciphers` dependency, while F6
+ * already pins the §6.5 outputs and their order.
  *
  * THIS SUBSET DOES NOT DISCHARGE §16.4, which requires the COMPLETE corpus to
  * pass on physical devices on both mobile platforms before the native client
@@ -55,6 +55,8 @@ import {
   e2eeKeyFingerprint,
   formatE2eeKeyFingerprint,
   generateE2eeAgreementKeyPair,
+  validateE2eeClientIdentityPublicKey,
+  validateE2eeClientSignature,
   verifyE2eeSignature,
 } from "@ryco/shared/relayE2eeKeys";
 import {
@@ -69,7 +71,9 @@ import {
   type E2eeSessionSecrets,
 } from "@ryco/shared/relayE2eeSession";
 import {
+  E2EE_NOISE_PATTERN_NX,
   E2EE_NOISE_PATTERN_IK,
+  decodeCanonicalE2eeCbor,
   encodeNodeE2eePrekeyTranscript,
 } from "@ryco/shared/relayE2eeTranscripts";
 import {
@@ -571,8 +575,485 @@ export async function runE2eeVectorSuite(
   return { ok: checks.every((check) => check.ok), checks, globals: e2eeGlobalProvenance };
 }
 
+// ─── complete-corpus development side-load ──────────────────────────────────
+
+const SIDELOAD_LIMITS = {
+  totalJsonBytes: 2 * 1_024 * 1_024,
+  familyJsonBytes: 256 * 1_024,
+  families: 32,
+  casesPerFamily: 64,
+  totalCases: 512,
+  fixtureIdUtf8Bytes: 128,
+  ordinaryDecodedBytes: 16 * 1_024,
+  recipePayloadBytes: 4_194_304,
+} as const;
+const MOBILE_SIDELOAD_RUNNER = "mobile-dev-sideload";
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
+const FAMILY_FILE = /^f\d{2}-[a-z0-9-]+\.json$/u;
+
+export interface E2eeSideloadFamily {
+  readonly file: string;
+  /** Raw UTF-8 JSON. Its digest is over these exact bytes, before parsing. */
+  readonly json: string;
+}
+
+export interface E2eeSideloadInput {
+  /** Raw manifest JSON and its independently transported SHA-256. */
+  readonly manifestJson: string;
+  readonly manifestSha256: string;
+  /** Only selected family payloads. The corpus is never imported by the app. */
+  readonly families: readonly E2eeSideloadFamily[];
+  /** Exact portable routes the caller asks this device to execute. */
+  readonly fixtureIds: readonly string[];
+}
+
+export interface E2eeSideloadResult {
+  readonly fixtureId: string;
+  readonly ok: boolean;
+}
+
+export interface E2eeSideloadDependencies {
+  readonly sha256: (bytes: Uint8Array) => Promise<Uint8Array>;
+}
+
+interface SideloadCase {
+  readonly name: string;
+  readonly inputs: Record<string, unknown>;
+  readonly expected: Record<string, unknown>;
+}
+
+interface SideloadFamilyDocument {
+  readonly testKeyMaterial: Record<string, unknown>;
+  readonly cases: readonly SideloadCase[];
+}
+
+interface SideloadRoute {
+  readonly fixtureId: string;
+  readonly file: string;
+  readonly caseName: string;
+}
+
+class InvalidE2eeSideloadError extends Error {
+  constructor() {
+    super("Invalid E2EE fixture side-load.");
+    this.name = "InvalidE2eeSideloadError";
+  }
+}
+
+function invalidSideload(): never {
+  throw new InvalidE2eeSideloadError();
+}
+
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalidSideload();
+  return value as Record<string, unknown>;
+}
+
+function stringValue(value: unknown): string {
+  if (typeof value !== "string") invalidSideload();
+  return value;
+}
+
+function numberValue(value: unknown): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) invalidSideload();
+  return value;
+}
+
+function bytesValue(value: unknown): Uint8Array {
+  const wrapper = record(value);
+  if (Object.keys(wrapper).length !== 1) invalidSideload();
+  const hex = stringValue(wrapper.$bytes);
+  if (!/^(?:[0-9a-f]{2})*$/u.test(hex)) invalidSideload();
+  if (hex.length / 2 > SIDELOAD_LIMITS.ordinaryDecodedBytes) invalidSideload();
+  return hexToBytes(hex);
+}
+
+function exactBytes(actual: Uint8Array, expected: unknown): boolean {
+  return bytesToHex(actual) === bytesToHex(bytesValue(expected));
+}
+
+function utf8Bytes(value: string): Uint8Array {
+  return new TextEncoder().encode(value);
+}
+
+function equalDigest(actual: Uint8Array, expected: string): boolean {
+  return SHA256_HEX.test(expected) && bytesToHex(actual) === expected;
+}
+
+function validateFixtureValues(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) validateFixtureValues(entry);
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  const object = value as Record<string, unknown>;
+  // No mobile-routed v1 case uses a recipe. F1's reference-only maximum-boundary
+  // recipe is deliberately rejected here; a future mobile recipe route must add
+  // an exact shared schema and executor before admission.
+  if (Object.hasOwn(object, "$recipe")) invalidSideload();
+  if (Object.hasOwn(object, "$bytes")) {
+    bytesValue(object);
+    return;
+  }
+  for (const child of Object.values(object)) validateFixtureValues(child);
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return invalidSideload();
+  }
+}
+
+function parseFamily(value: unknown): SideloadFamilyDocument {
+  const document = record(value);
+  const cases = document.cases;
+  if (!Array.isArray(cases) || cases.length > SIDELOAD_LIMITS.casesPerFamily) invalidSideload();
+  const names = new Set<string>();
+  const parsedCases = cases.map((candidate): SideloadCase => {
+    const entry = record(candidate);
+    const name = stringValue(entry.name);
+    if (names.has(name)) invalidSideload();
+    names.add(name);
+    return { name, inputs: record(entry.inputs), expected: record(entry.expected) };
+  });
+  const material = document.testKeyMaterial;
+  return {
+    testKeyMaterial: material === undefined ? {} : record(material),
+    cases: parsedCases,
+  };
+}
+
+async function defaultSideloadSha256(bytes: Uint8Array): Promise<Uint8Array> {
+  const crypto = await import("expo-crypto");
+  return new Uint8Array(
+    await crypto.digest(crypto.CryptoDigestAlgorithm.SHA256, bytes as unknown as BufferSource),
+  );
+}
+
+const DEFAULT_SIDELOAD_DEPENDENCIES: E2eeSideloadDependencies = {
+  sha256: defaultSideloadSha256,
+};
+
+function checkManifestLimits(limits: Record<string, unknown>): void {
+  for (const [key, expected] of Object.entries(SIDELOAD_LIMITS)) {
+    if (limits[key] !== expected) invalidSideload();
+  }
+}
+
+function parseRoutes(portable: Record<string, unknown>): Map<string, SideloadRoute> {
+  if (portable.version !== 1) invalidSideload();
+  checkManifestLimits(record(portable.limits));
+  if (!Array.isArray(portable.routes)) invalidSideload();
+  const routes = new Map<string, SideloadRoute>();
+  for (const candidate of portable.routes) {
+    const route = record(candidate);
+    const fixtureId = stringValue(route.fixtureId);
+    const file = stringValue(route.file);
+    const caseName = stringValue(route.case);
+    const runners = route.runners;
+    if (!Array.isArray(runners) || !runners.every((runner) => typeof runner === "string")) {
+      invalidSideload();
+    }
+    if (!runners.includes(MOBILE_SIDELOAD_RUNNER)) continue;
+    if (routes.has(fixtureId)) invalidSideload();
+    routes.set(fixtureId, { fixtureId, file, caseName });
+  }
+  return routes;
+}
+
+function eraseNoiseKeys(keys: {
+  readonly epochSecretC2N: Uint8Array;
+  readonly epochSecretN2C: Uint8Array;
+  readonly exporterSecret: Uint8Array;
+}): void {
+  keys.epochSecretC2N.fill(0);
+  keys.epochSecretN2C.fill(0);
+  keys.exporterSecret.fill(0);
+}
+
+function runSideloadedNoise(
+  pattern: typeof E2EE_NOISE_PATTERN_IK | typeof E2EE_NOISE_PATTERN_NX,
+  family: SideloadFamilyDocument,
+  entry: SideloadCase,
+): void {
+  const material = family.testKeyMaterial;
+  const expected = entry.expected;
+  const initiator = new E2eeNoiseHandshake({
+    pattern,
+    role: "initiator",
+    prologue: bytesValue(expected.prologue),
+    ...(pattern === E2EE_NOISE_PATTERN_IK
+      ? {
+          staticSecretKey: bytesValue(material.testOnlyClientAgreementSecretKey),
+          remoteStaticPublicKey: bytesValue(material.nodeAgreementPublicKey),
+        }
+      : {}),
+    testOnlyEphemeralSecretKey: bytesValue(material.testOnlyClientEphemeralSecretKey),
+  });
+  const responder = new E2eeNoiseHandshake({
+    pattern,
+    role: "responder",
+    prologue: bytesValue(expected.prologue),
+    staticSecretKey: bytesValue(material.testOnlyNodeAgreementSecretKey),
+    testOnlyEphemeralSecretKey: bytesValue(material.testOnlyNodeEphemeralSecretKey),
+  });
+  const payload1 = bytesValue(expected.message1PayloadPlaintext);
+  const payload2 = bytesValue(expected.message2PayloadPlaintext);
+  const message1 = initiator.writeMessage(payload1);
+  if (!exactBytes(message1, expected.noiseMessage1)) invalidSideload();
+  if (
+    !exactBytes(
+      responder.readMessage(bytesValue(expected.noiseMessage1)),
+      expected.message1PayloadPlaintext,
+    )
+  ) {
+    invalidSideload();
+  }
+  const message2 = responder.writeMessage(payload2);
+  if (!exactBytes(message2, expected.noiseMessage2)) invalidSideload();
+  if (
+    !exactBytes(
+      initiator.readMessage(bytesValue(expected.noiseMessage2)),
+      expected.message2PayloadPlaintext,
+    )
+  ) {
+    invalidSideload();
+  }
+  const handshakeHash = initiator.testOnlyHandshakeHash;
+  if (handshakeHash === undefined || !exactBytes(handshakeHash, expected.noiseHandshakeHash)) {
+    invalidSideload();
+  }
+  const initiatorKeys = initiator.split();
+  const responderKeys = responder.split();
+  try {
+    for (const [key, expectedKey] of [
+      ["epochSecretC2N", expected.epochSecretC2N],
+      ["epochSecretN2C", expected.epochSecretN2C],
+      ["exporterSecret", expected.exporterSecret],
+    ] as const) {
+      if (!exactBytes(initiatorKeys[key], expectedKey)) invalidSideload();
+      if (bytesToHex(initiatorKeys[key]) !== bytesToHex(responderKeys[key])) invalidSideload();
+    }
+  } finally {
+    eraseNoiseKeys(initiatorKeys);
+    eraseNoiseKeys(responderKeys);
+  }
+}
+
+function runSideloadedNodePrekey(entry: SideloadCase): void {
+  const inputs = entry.inputs;
+  const expected = entry.expected;
+  const identityPublicKey = bytesValue(inputs.identityPublicKey);
+  const transcript = encodeNodeE2eePrekeyTranscript({
+    hubOrigin: stringValue(inputs.hubOrigin),
+    nodeId: stringValue(inputs.nodeId),
+    identityKeyId: stringValue(inputs.identityKeyId),
+    prekeyId: stringValue(inputs.prekeyId),
+    identityPublicKey,
+    agreementPublicKey: bytesValue(inputs.agreementPublicKey),
+    createdAt: numberValue(inputs.createdAt),
+    expiresAt: numberValue(inputs.expiresAt),
+  });
+  if (!exactBytes(transcript, expected.transcript)) invalidSideload();
+  if (transcript.byteLength !== numberValue(expected.transcriptBytes)) invalidSideload();
+  if (
+    !exactBytes(
+      e2eeKeyFingerprint("node-identity", identityPublicKey),
+      expected.identityFingerprint,
+    )
+  ) {
+    invalidSideload();
+  }
+  if (
+    !verifyE2eeSignature({
+      algorithm: E2EE_NODE_IDENTITY_ALGORITHM,
+      publicKey: identityPublicKey,
+      message: transcript,
+      signature: bytesValue(expected.crossSignature),
+    }) ||
+    expected.crossSignatureReconstructionVerifies !== true
+  ) {
+    invalidSideload();
+  }
+}
+
+function runSideloadedF4Decode(entry: SideloadCase): void {
+  const decoded = decodeCanonicalE2eeCbor(bytesValue(entry.inputs.transcript));
+  if (entry.name === "client-certificate-wrong-element-count") {
+    if (decoded.kind !== "ok" || !Array.isArray(decoded.value) || decoded.value.length === 11) {
+      invalidSideload();
+    }
+    return;
+  }
+  const declared = record(entry.inputs.canonicalDecode);
+  if (decoded.kind !== "error" || declared.kind !== "error" || decoded.reason !== declared.reason) {
+    invalidSideload();
+  }
+}
+
+function accepts(run: () => void): boolean {
+  try {
+    run();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runSideloadedP256(entry: SideloadCase): void {
+  if (entry.name.startsWith("p256-public-key-")) {
+    const accepted = accepts(() => {
+      validateE2eeClientIdentityPublicKey(bytesValue(entry.inputs.publicKey));
+    });
+    const declared =
+      entry.expected.validationAccepted === true ||
+      record(entry.expected.validation).rejected === false;
+    if (accepted !== declared) invalidSideload();
+    return;
+  }
+  if (entry.name.startsWith("p256-signature-")) {
+    const accepted = accepts(() => {
+      validateE2eeClientSignature(bytesValue(entry.inputs.signature));
+    });
+    if (accepted || record(entry.expected.encodingValidation).rejected !== true) invalidSideload();
+    return;
+  }
+  invalidSideload();
+}
+
+function executeSideloadedCase(
+  route: SideloadRoute,
+  family: SideloadFamilyDocument,
+  entry: SideloadCase,
+): void {
+  if (route.file === "f06-ik-handshake.json" && entry.name === "ik-handshake-complete-trace") {
+    runSideloadedNoise(E2EE_NOISE_PATTERN_IK, family, entry);
+    return;
+  }
+  if (route.file === "f07-nx-handshake.json" && entry.name === "nx-handshake-complete-trace") {
+    runSideloadedNoise(E2EE_NOISE_PATTERN_NX, family, entry);
+    return;
+  }
+  if (route.file === "f04-prekey-certificates.json") {
+    if (entry.name === "valid-node-agreement-prekey-certificate") runSideloadedNodePrekey(entry);
+    else runSideloadedF4Decode(entry);
+    return;
+  }
+  if (route.file === "f17-key-material-validation.json") {
+    runSideloadedP256(entry);
+    return;
+  }
+  // A manifest route is authorization to run a case, not an implementation of
+  // its oracle. Unsupported routes produce a bounded false verdict.
+  invalidSideload();
+}
+
+/**
+ * Execute caller-supplied portable vectors without ever bundling the corpus.
+ *
+ * Admission failures reject with one stable, data-free error. Once admitted,
+ * each case yields only its already-bounded fixture id and a boolean; caught
+ * primitive errors, payloads, keys, hashes, and stack details never cross this
+ * boundary.
+ */
+export async function runSideloadedE2eeVectors(
+  input: E2eeSideloadInput,
+  dependencies: E2eeSideloadDependencies = DEFAULT_SIDELOAD_DEPENDENCIES,
+): Promise<readonly E2eeSideloadResult[]> {
+  if (
+    typeof input !== "object" ||
+    input === null ||
+    typeof input.manifestJson !== "string" ||
+    typeof input.manifestSha256 !== "string" ||
+    !Array.isArray(input.families) ||
+    !Array.isArray(input.fixtureIds) ||
+    input.families.length > SIDELOAD_LIMITS.families ||
+    input.fixtureIds.length > SIDELOAD_LIMITS.totalCases
+  ) {
+    invalidSideload();
+  }
+  const manifestBytes = utf8Bytes(input.manifestJson);
+  const familyByteLengths = input.families.map((family) => {
+    if (typeof family !== "object" || family === null || typeof family.json !== "string") {
+      return invalidSideload();
+    }
+    return utf8Bytes(family.json).byteLength;
+  });
+  if (
+    manifestBytes.byteLength + familyByteLengths.reduce((total, size) => total + size, 0) >
+      SIDELOAD_LIMITS.totalJsonBytes ||
+    familyByteLengths.some((size) => size > SIDELOAD_LIMITS.familyJsonBytes)
+  ) {
+    invalidSideload();
+  }
+  if (!equalDigest(await dependencies.sha256(manifestBytes), input.manifestSha256)) {
+    invalidSideload();
+  }
+
+  const manifest = record(parseJson(input.manifestJson));
+  if (manifest.formatVersion !== 1) invalidSideload();
+  const files = record(manifest.files);
+  const routes = parseRoutes(record(manifest.portableExecution));
+  const loaded = new Map<string, SideloadFamilyDocument>();
+  let totalCases = 0;
+  for (const supplied of input.families) {
+    if (
+      typeof supplied.file !== "string" ||
+      !FAMILY_FILE.test(supplied.file) ||
+      loaded.has(supplied.file)
+    ) {
+      invalidSideload();
+    }
+    const fileEntry = record(files[supplied.file]);
+    const digest = stringValue(fileEntry.sha256);
+    if (!equalDigest(await dependencies.sha256(utf8Bytes(supplied.json)), digest))
+      invalidSideload();
+    const parsedJson = parseJson(supplied.json);
+    validateFixtureValues(parsedJson);
+    const family = parseFamily(parsedJson);
+    if (fileEntry.cases !== family.cases.length) invalidSideload();
+    totalCases += family.cases.length;
+    if (totalCases > SIDELOAD_LIMITS.totalCases) invalidSideload();
+    loaded.set(supplied.file, family);
+  }
+
+  const seenFixtureIds = new Set<string>();
+  const selected: { route: SideloadRoute; family: SideloadFamilyDocument; entry: SideloadCase }[] =
+    [];
+  for (const fixtureId of input.fixtureIds) {
+    if (
+      typeof fixtureId !== "string" ||
+      utf8Bytes(fixtureId).byteLength > SIDELOAD_LIMITS.fixtureIdUtf8Bytes ||
+      seenFixtureIds.has(fixtureId)
+    ) {
+      invalidSideload();
+    }
+    seenFixtureIds.add(fixtureId);
+    const route = routes.get(fixtureId);
+    if (route === undefined || route.fixtureId !== fixtureId) invalidSideload();
+    const family = loaded.get(route.file);
+    const entry = family?.cases.find((candidate) => candidate.name === route.caseName);
+    if (family === undefined || entry === undefined) invalidSideload();
+    selected.push({ route, family, entry });
+  }
+
+  return selected.map(({ route, family, entry }) => {
+    let ok = true;
+    try {
+      executeSideloadedCase(route, family, entry);
+    } catch {
+      ok = false;
+    }
+    return { fixtureId: route.fixtureId, ok };
+  });
+}
+
 /** The dev-build global the README's device procedure invokes. */
 export const E2EE_VECTOR_RUNNER_GLOBAL = "__rycoRunE2eeVectors";
+/** The caller-supplied corpus runner; installed under the same two dev gates. */
+export const E2EE_SIDELOAD_RUNNER_GLOBAL = "__rycoRunSideloadedE2eeVectors";
 
 /**
  * Expose the runner to the development client's JS console.
@@ -591,5 +1072,11 @@ export function installE2eeVectorRunnerDevHook(host: Record<string, unknown> = g
     enumerable: false,
     writable: true,
     value: runE2eeVectorSuite,
+  });
+  Object.defineProperty(host, E2EE_SIDELOAD_RUNNER_GLOBAL, {
+    configurable: true,
+    enumerable: false,
+    writable: true,
+    value: runSideloadedE2eeVectors,
   });
 }

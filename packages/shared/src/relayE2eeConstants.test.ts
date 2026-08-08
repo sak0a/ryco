@@ -116,6 +116,7 @@ import {
   T_HANDSHAKE,
   T_HANDSHAKE_NODE,
   T_KEEPALIVE_FLUSH_MARGIN,
+  T_TRUST_COMMIT,
   e2eeChannelSizeBudget,
   e2eeNegotiationBufferMaxBytes,
 } from "./relayE2eeConstants.ts";
@@ -200,6 +201,7 @@ const SPEC_CONSTANTS: ReadonlyArray<SpecConstantRow> = [
   ["Negotiation", "E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES", E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES, 8_192],
   ["Negotiation", "E2EE_ACCOUNT_ID_MAX_BYTES", E2EE_ACCOUNT_ID_MAX_BYTES, 256],
   ["Timers", "T_ADV", T_ADV, 1_500],
+  ["Timers", "T_TRUST_COMMIT", T_TRUST_COMMIT, 3_000],
   ["Timers", "T_HANDSHAKE", T_HANDSHAKE, 3_000],
   ["Timers", "T_HANDSHAKE_NODE", T_HANDSHAKE_NODE, 10_000],
   ["Timers", "T_KEEPALIVE_FLUSH_MARGIN", T_KEEPALIVE_FLUSH_MARGIN, 500],
@@ -349,7 +351,7 @@ const SPEC_CONSTANTS: ReadonlyArray<SpecConstantRow> = [
   ["Relay chunking", "RELAY_MAX_DATA_CHUNK_BYTES", RELAY_MAX_DATA_CHUNK_BYTES, 262_144],
   ["Relay chunking", "RELAY_MIN_DATA_CHUNK_BYTES", RELAY_MIN_DATA_CHUNK_BYTES, 1_024],
   ["Relay connection", "RELAY_MAX_CHANNELS", RELAY_MAX_CHANNELS, 8],
-  ["RPC keepalive", "RPC_KEEPALIVE_INTERVAL", RPC_KEEPALIVE_INTERVAL, 5_000],
+  ["RPC keepalive", "RPC_KEEPALIVE_INTERVAL", RPC_KEEPALIVE_INTERVAL, 8_000],
 ];
 
 describe("§3.2 constants, pinned to the literal values the table states", () => {
@@ -468,13 +470,13 @@ describe("size-relationship invariants (§3.2.1 S1–S11)", () => {
 
 describe("liveness and concurrency invariants (§3.2.2 L1–L5)", () => {
   it("L1 — the negotiating window fits inside one keepalive period", () => {
-    expect(T_ADV + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN).toBeLessThanOrEqual(
+    expect(T_ADV + T_TRUST_COMMIT + T_HANDSHAKE + T_KEEPALIVE_FLUSH_MARGIN).toBeLessThanOrEqual(
       RPC_KEEPALIVE_INTERVAL,
     );
   });
 
   it("L2 — the node never times out a handshake the client still considers live", () => {
-    expect(T_ADV + T_HANDSHAKE).toBeLessThanOrEqual(T_HANDSHAKE_NODE);
+    expect(T_ADV + T_TRUST_COMMIT + T_HANDSHAKE).toBeLessThanOrEqual(T_HANDSHAKE_NODE);
   });
 
   it("L3 — the pre-authentication rate limit cannot bite before the structural bound", () => {

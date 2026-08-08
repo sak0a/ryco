@@ -545,7 +545,9 @@ async function confirmE2eeVerification(input: {
   const { session } = input;
   const selection = session.selection;
   const presented = session.presented;
-  if (selection === null || presented === null) return E2EE_VERIFICATION_UNAVAILABLE;
+  if (selection === null || selection.clientIdentityPublicKey === null || presented === null) {
+    return E2EE_VERIFICATION_UNAVAILABLE;
+  }
   try {
     // §13.2 step 2's handle, minted here when the selection has none — the
     // ordinary shape, because a channel that reached first contact resolved to

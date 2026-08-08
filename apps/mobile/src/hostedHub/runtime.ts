@@ -142,10 +142,13 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
     // Every relay channel this app opens is built with the §4.4 mode machine,
     // and the guards it consults were resolved before this call — §4.4 requires
     // them "before it has received any payload", and this call is synchronous.
-    // `resolveMobileRelayE2eeProvider` returns `undefined` in exactly one case,
-    // a device that cannot hold the §6.3 agreement key, which §6.3 says simply
-    // has no E2EE; everything else is either the machine or a channel that fails
-    // closed. It is never a legacy channel because the attempt was late.
+    // `resolveMobileRelayE2eeProvider` returns `undefined` only when credential
+    // preparation failed for an explicitly legacy-eligible selection. Issuing,
+    // renewing, or replacing an invalid certificate may transiently derive or
+    // generate the agreement public key and keeps that existing failure rule.
+    // On the common valid-certificate restore path, preparation is public-only;
+    // the first scalar access is K1 after validated evidence, where failure is
+    // FATAL-PRE and can no longer authorize plaintext.
     createRelaySocket: (input) =>
       new MobileHostedRelaySocket({ ...input, e2ee: resolveMobileRelayE2eeProvider() }),
   });
@@ -160,7 +163,11 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
  * the owner has since decided about it.
  *
  * The relay transport creates its socket the instant a ticket resolves, and
- * resolving an attempt reads a keychain and a secure store. Priming on every
+ * resolving an attempt reads the public certificate, identity, and trust stores.
+ * A valid reusable certificate restores without opening the agreement scalar;
+ * issuance or renewal may transiently derive or generate its public half. No
+ * warm attempt retains the scalar: the handshake still borrows it for one K1
+ * operation. Priming on every
  * change of the `(account, node)` pair is what makes the synchronous read at
  * `createRelaySocket` find a complete attempt rather than fail the channel
  * closed — and the failure IS closed, never a silent fallback, so a miss costs
@@ -175,19 +182,31 @@ export async function configureMobileHostedRuntime(): Promise<boolean> {
  */
 function watchSelectionForE2ee(): void {
   if (selectionWatch !== undefined) return;
-  let last = "";
+  interface SelectionSnapshot {
+    readonly accountStatus: ReturnType<typeof hostedHubStore.getState>["accountStatus"];
+    readonly accountId: string | null;
+    readonly nodeId: string | null;
+    readonly generation: number;
+    readonly trustRevision: number;
+  }
+  const sameSnapshot = (left: SelectionSnapshot, right: SelectionSnapshot): boolean =>
+    left.accountStatus === right.accountStatus &&
+    left.accountId === right.accountId &&
+    left.nodeId === right.nodeId &&
+    left.generation === right.generation &&
+    left.trustRevision === right.trustRevision;
+
+  let last: SelectionSnapshot | undefined;
   const evaluate = () => {
     const state = hostedHubStore.getState();
-    // NUL-joined: `accountId` and `nodeId` are Hub-issued (§12.1.1), so a
-    // separator either could contain would let one selection's key be spelled
-    // by another's fields.
-    const next = [
-      state.accountStatus,
-      state.account?.id ?? "",
-      state.selectedNode?.id ?? "",
-      String(mobileE2eeTrustStore.revision()),
-    ].join("\u0000");
-    if (next === last) return;
+    const next: SelectionSnapshot = {
+      accountStatus: state.accountStatus,
+      accountId: state.account?.id ?? null,
+      nodeId: state.selectedNode?.id ?? null,
+      generation: state.generation,
+      trustRevision: mobileE2eeTrustStore.revision(),
+    };
+    if (last !== undefined && sameSnapshot(next, last)) return;
     last = next;
     if (state.accountStatus !== "authenticated" || state.selectedNode === null) {
       disposeMobileRelayE2eeAttempt();
@@ -252,9 +271,9 @@ export function invalidateMobileHostedRuntime(): void {
   session = undefined;
   selectionWatch?.();
   selectionWatch = undefined;
-  // The attempt holds this device's agreement scalar. A Hub-profile change is
-  // exactly when it stops being the right one, so it is zeroized here rather
-  // than left for the next selection to overwrite.
+  // The warm attempt is public-only, but its lifetime gates the one-operation
+  // K1 scalar borrower. Revoke it on a Hub-profile change so a secure-store read
+  // that settles late cannot emit a hello for the previous profile.
   disposeMobileRelayE2eeAttempt();
   resetMobileE2eeSession();
   invalidateMobileHostedRuntimeConfig();

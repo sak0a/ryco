@@ -1,4 +1,4 @@
-import { EnvironmentId } from "@ryco/contracts";
+import { EnvironmentId, RelayNodeId } from "@ryco/contracts";
 import {
   NATIVE_HANDOFF_APPROVE_PATH_SUFFIX,
   NATIVE_HANDOFF_CANCEL_PATH_SUFFIX,
@@ -22,6 +22,7 @@ import {
   type NativeHandoffStartResponse as NativeHandoffStartResponseType,
 } from "@ryco/contracts/native-handoff";
 import { Schema } from "effect";
+import { assertE2eeAccountId } from "@ryco/shared/relayE2eeTranscripts";
 
 import type {
   DpopSignerService,
@@ -409,6 +410,17 @@ function decodeContract<S extends Schema.Top>(
     }) as S["Type"];
   } catch {
     throw new HostedHubApiError(failure, failure === "invalid_request" ? 400 : 502);
+  }
+}
+
+function e2eeAccountIdValue(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new HostedHubApiError("invalid_response", 502);
+  }
+  try {
+    return assertE2eeAccountId(value);
+  } catch {
+    throw new HostedHubApiError("invalid_response", 502);
   }
 }
 
@@ -1445,8 +1457,8 @@ export class HostedHubApi {
       const node = objectValue(value);
       const grant = objectValue(node.grant);
       const presence = objectValue(node.presence);
+      const nodeId = decodeContract(RelayNodeId, node.id, "invalid_response");
       if (
-        typeof node.id !== "string" ||
         typeof node.environmentId !== "string" ||
         typeof node.label !== "string" ||
         !platformOsValue(node.platformOs) ||
@@ -1468,7 +1480,7 @@ export class HostedHubApi {
         throw new HostedHubApiError("invalid_response", 502);
       }
       return {
-        id: node.id,
+        id: nodeId,
         environmentId: EnvironmentId.make(node.environmentId),
         label: node.label,
         platformOs: node.platformOs,
@@ -1625,9 +1637,10 @@ export class HostedHubApi {
   }
 
   async issueRelayTicket(nodeId: string, signal?: AbortSignal): Promise<HostedRelayTicket> {
+    const validatedNodeId = decodeContract(RelayNodeId, nodeId, "invalid_request");
     const result = await this.#request("/api/relay/tickets", {
       method: "POST",
-      body: { nodeId, capability: "ryco.rpc", protocolMajor: 1, protocolMinor: 2 },
+      body: { nodeId: validatedNodeId, capability: "ryco.rpc", protocolMajor: 1, protocolMinor: 2 },
       csrf: true,
       ...(signal ? { signal } : {}),
     });
@@ -1655,16 +1668,16 @@ export class HostedHubApi {
   #accountAndSession(value: Record<string, unknown>): HostedHubSessionResponse {
     const account = objectValue(value.account);
     const session = objectValue(value.session);
+    const accountId = e2eeAccountIdValue(account.id);
+    const sessionAccountId = e2eeAccountIdValue(session.accountId);
     const recoveryCodes =
       value.recoveryCodes === undefined ? undefined : recoveryCodesValue(value.recoveryCodes);
     if (
-      typeof account.id !== "string" ||
       typeof account.displayName !== "string" ||
       !roleValue(account.role) ||
       !Number.isSafeInteger(account.createdAt) ||
       !nullableNumber(account.disabledAt) ||
       typeof session.id !== "string" ||
-      typeof session.accountId !== "string" ||
       !Number.isSafeInteger(session.createdAt) ||
       !Number.isSafeInteger(session.expiresAt) ||
       !Number.isSafeInteger(session.lastSeenAt) ||
@@ -1677,13 +1690,13 @@ export class HostedHubApi {
     if (
       account.disabledAt !== null ||
       session.revokedAt !== null ||
-      session.accountId !== account.id
+      sessionAccountId !== accountId
     ) {
       throw new HostedHubApiError("session_invalid", 401);
     }
     return {
       account: {
-        id: account.id,
+        id: accountId,
         displayName: account.displayName,
         role: account.role,
         createdAt: account.createdAt,
@@ -1691,7 +1704,7 @@ export class HostedHubApi {
       },
       session: {
         id: session.id,
-        accountId: session.accountId,
+        accountId: sessionAccountId,
         createdAt: session.createdAt,
         expiresAt: session.expiresAt,
         lastSeenAt: session.lastSeenAt,

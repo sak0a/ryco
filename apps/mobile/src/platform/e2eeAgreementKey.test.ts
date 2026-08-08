@@ -23,6 +23,7 @@ vi.mock("./e2eeRuntime", () => ({ assertE2eeRuntimeGlobals: preflight }));
 import * as agreementModule from "./e2eeAgreementKey";
 import {
   makeMobileE2eeAgreementKey,
+  type MobileE2eeAgreementKey,
   MobileE2eeAgreementKeyError,
   type MobileE2eeAgreementKeyErrorCode,
 } from "./e2eeAgreementKey";
@@ -333,6 +334,122 @@ describe("key loss and store failure", () => {
 });
 
 describe("borrow window (§6.3)", () => {
+  it.each([
+    {
+      name: "preflight refusal",
+      seeded: encodeBase64Url(new Uint8Array(32).fill(7)),
+      refuseRuntime: true,
+      code: "agreement_key_runtime_unavailable",
+    },
+    {
+      name: "missing key",
+      seeded: undefined,
+      refuseRuntime: false,
+      code: "agreement_key_not_found",
+    },
+    {
+      name: "corrupt key",
+      seeded: encodeBase64Url(new Uint8Array(16).fill(7)),
+      refuseRuntime: false,
+      code: "agreement_key_corrupt",
+    },
+  ] as const)("keeps observer counters at zero on $name", async (scenario) => {
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    if (scenario.refuseRuntime) {
+      preflight.mockImplementation(() => {
+        throw new Error("runtime unavailable");
+      });
+    }
+    const agreement = makeMobileE2eeAgreementKey(fakeStore({ seeded: scenario.seeded }).store, {
+      acquired: () => {
+        lifecycle.acquisitions += 1;
+      },
+      borrowStarted: () => {
+        lifecycle.active += 1;
+      },
+      released: () => {
+        lifecycle.active -= 1;
+        lifecycle.releases += 1;
+      },
+    });
+
+    await expect(codeOf(agreement.withSecretKey(() => undefined))).resolves.toBe(scenario.code);
+
+    expect(lifecycle).toEqual({ acquisitions: 0, active: 0, releases: 0 });
+  });
+
+  it("reports acquisition, active borrow, and release without exposing key content", async () => {
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    let reportStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      reportStarted = resolve;
+    });
+    const agreement = makeMobileE2eeAgreementKey(fakeStore().store, {
+      acquired: () => {
+        lifecycle.acquisitions += 1;
+      },
+      borrowStarted: () => {
+        lifecycle.active += 1;
+        reportStarted();
+      },
+      released: () => {
+        lifecycle.active -= 1;
+        lifecycle.releases += 1;
+      },
+    });
+    await agreement.generate();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+
+    const borrow = agreement.withSecretKey(async () => pending);
+    await started;
+
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 1, releases: 0 });
+    finish();
+    await borrow;
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 1 });
+  });
+
+  it.each([
+    ["return", (agreement: MobileE2eeAgreementKey) => agreement.withSecretKey(() => undefined)],
+    [
+      "throw",
+      (agreement: MobileE2eeAgreementKey) =>
+        agreement.withSecretKey(() => {
+          throw new Error("borrow failed");
+        }),
+    ],
+    [
+      "reject",
+      (agreement: MobileE2eeAgreementKey) =>
+        agreement.withSecretKey(async () => {
+          await Promise.resolve();
+          throw new Error("borrow rejected");
+        }),
+    ],
+  ])("returns the active-borrow count to zero on %s", async (_name, operation) => {
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    const agreement = makeMobileE2eeAgreementKey(fakeStore().store, {
+      acquired: () => {
+        lifecycle.acquisitions += 1;
+      },
+      borrowStarted: () => {
+        lifecycle.active += 1;
+      },
+      released: () => {
+        lifecycle.active -= 1;
+        lifecycle.releases += 1;
+      },
+    });
+    await agreement.generate();
+
+    await operation(agreement).catch(() => undefined);
+
+    expect(lifecycle).toEqual({ acquisitions: 1, active: 0, releases: 1 });
+  });
+
   it("keeps the scalar live across an asynchronous borrow", async () => {
     // The documented consumer is the Noise IK initiator (§8), which is async, and
     // `use` is typed to return a promise. A borrow that erased the buffer at the

@@ -17,11 +17,10 @@
 // asserts exactly that, and the browser suite spies on the three real storage
 // APIs across a full session and asserts zero writes.
 //
-// IT IS A PRESENCE BIT AND NOT A RECORD. A `Set` rather than a `Map` because the
-// only thing §12.1 admits storing is "this triple has validated a statement in
-// this application session": a value slot is precisely where a fingerprint, a
-// policy generation, or a pin state would eventually be put, and each of those
-// is one of the MUST NOTs above.
+// THE LATCH IS A PRESENCE BIT AND NOT A TRUST RECORD. The separate §5.7 map
+// below holds only the greatest policy-generation integer from a statement this
+// application session already validated. It is neither a fingerprint nor a
+// pin, satisfies no release gate, and has exactly the latch's in-memory lifetime.
 
 /**
  * §12.1's `(hubOrigin, accountId, nodeId)` triple — the in-memory selection a
@@ -39,17 +38,44 @@ export interface WebE2eeSelection {
   readonly nodeId: string;
 }
 
-const latched = new Set<string>();
+type NodesByAccount = Map<string, Set<string>>;
+type GenerationsByNode = Map<string, number>;
+type GenerationsByAccount = Map<string, GenerationsByNode>;
 
-/**
- * The triple as one comparable string.
- *
- * NUL-joined rather than concatenated: `accountId` and `nodeId` are Hub-issued
- * (§12.1.1), so a separator either could contain would let one selection's key
- * be spelled by another's fields — and on this tier the Hub picks both.
- */
-function selectionKey(selection: WebE2eeSelection): string {
-  return `${selection.hubOrigin}\u0000${selection.accountId}\u0000${selection.nodeId}`;
+// The nesting is the representation: each field remains a distinct Map key, so
+// no character in a Hub-issued value can be reinterpreted as a tuple boundary.
+const latched = new Map<string, NodesByAccount>();
+const acceptedPolicyGenerations = new Map<string, GenerationsByAccount>();
+
+function latchedNodes(selection: WebE2eeSelection, create: boolean): Set<string> | undefined {
+  let byAccount = latched.get(selection.hubOrigin);
+  if (byAccount === undefined && create) {
+    byAccount = new Map();
+    latched.set(selection.hubOrigin, byAccount);
+  }
+  let nodes = byAccount?.get(selection.accountId);
+  if (nodes === undefined && create && byAccount !== undefined) {
+    nodes = new Set();
+    byAccount.set(selection.accountId, nodes);
+  }
+  return nodes;
+}
+
+function generationNodes(
+  selection: WebE2eeSelection,
+  create: boolean,
+): GenerationsByNode | undefined {
+  let byAccount = acceptedPolicyGenerations.get(selection.hubOrigin);
+  if (byAccount === undefined && create) {
+    byAccount = new Map();
+    acceptedPolicyGenerations.set(selection.hubOrigin, byAccount);
+  }
+  let nodes = byAccount?.get(selection.accountId);
+  if (nodes === undefined && create && byAccount !== undefined) {
+    nodes = new Map();
+    byAccount.set(selection.accountId, nodes);
+  }
+  return nodes;
 }
 
 /**
@@ -66,7 +92,7 @@ function selectionKey(selection: WebE2eeSelection): string {
  * opinion about how often it is called.
  */
 export function latchWebE2eeSelection(selection: WebE2eeSelection): void {
-  latched.add(selectionKey(selection));
+  latchedNodes(selection, true)?.add(selection.nodeId);
 }
 
 /**
@@ -76,14 +102,41 @@ export function latchWebE2eeSelection(selection: WebE2eeSelection): void {
  * and **legacy-eligible** otherwise."
  */
 export function isWebE2eeSelectionLatched(selection: WebE2eeSelection): boolean {
-  return latched.has(selectionKey(selection));
+  return latchedNodes(selection, false)?.has(selection.nodeId) ?? false;
 }
 
 /**
- * End the application session's latches (§12.1: "MUST NOT persist beyond the
- * application session").
+ * §5.7's accepted web policy-generation high-water for this application
+ * session. An absent entry means this session has not validated a statement for
+ * the selection; it is not represented as generation zero.
+ */
+export function acceptedWebE2eePolicyGeneration(selection: WebE2eeSelection): number | undefined {
+  return generationNodes(selection, false)?.get(selection.nodeId);
+}
+
+/**
+ * Advance §5.7 after successful statement validation. Lower or repeated
+ * generations cannot relax the guard, and unusable-but-valid statements call
+ * this just like usable ones.
+ */
+export function recordWebE2eePolicyGeneration(
+  selection: WebE2eeSelection,
+  generation: number,
+): void {
+  const nodes = generationNodes(selection, true);
+  const accepted = nodes?.get(selection.nodeId);
+  if (accepted === undefined || generation > accepted) {
+    nodes?.set(selection.nodeId, generation);
+  }
+}
+
+/**
+ * End the application session's latch and §5.7 high-water state (§12.1: "MUST
+ * NOT persist beyond the application session").
  *
- * CALLED ON SIGN-OUT ONLY (`e2eeAttempt.ts`, `watchWebHostedSessionForE2ee`).
+ * CALLED ONLY AFTER COMMITTED SIGN-OUT OR SESSION EXPIRY (`e2eeAttempt.ts`,
+ * `watchWebHostedSessionForE2ee`). A reversible `signing-out` state does not
+ * call it.
  * The node-scoped clearing catalog deliberately does NOT call it — see
  * `environment.ts` — because that catalog runs on every node teardown,
  * including the A→B switch `activateHostedNode` performs. Clearing there would
@@ -100,4 +153,5 @@ export function isWebE2eeSelectionLatched(selection: WebE2eeSelection): boolean 
  */
 export function clearWebE2eeLatches(): void {
   latched.clear();
+  acceptedPolicyGenerations.clear();
 }

@@ -109,7 +109,13 @@ function verifiedDocument(): string {
 interface Harness {
   readonly entries: Map<string, string>;
   readonly log: string[];
-  readonly failures: { get: boolean; set: boolean; remove: boolean };
+  readonly failures: {
+    get: boolean;
+    set: boolean;
+    remove: boolean;
+    setPending: Promise<void> | null;
+    setAfterWritePending: Promise<void> | null;
+  };
   readonly secureStore: E2eeSecureStore;
   readonly create: () => MobileE2eeTrustStore;
 }
@@ -118,7 +124,13 @@ function harness(seed?: string): Harness {
   const entries = new Map<string, string>();
   if (seed !== undefined) entries.set(E2EE_TRUST_DOCUMENT_KEY, seed);
   const log: string[] = [];
-  const failures = { get: false, set: false, remove: false };
+  const failures = {
+    get: false,
+    set: false,
+    remove: false,
+    setPending: null as Promise<void> | null,
+    setAfterWritePending: null as Promise<void> | null,
+  };
   let handle = 0;
   const secureStore: E2eeSecureStore = {
     get: async (key) => {
@@ -128,8 +140,10 @@ function harness(seed?: string): Harness {
     },
     set: async (key, value) => {
       log.push(`set:${key}`);
+      if (failures.setPending !== null) await failures.setPending;
       if (failures.set) throw new Error("keychain unavailable");
       entries.set(key, value);
+      if (failures.setAfterWritePending !== null) await failures.setAfterWritePending;
     },
     remove: async (key) => {
       log.push(`remove:${key}`);
@@ -768,6 +782,139 @@ describe("§13.3 rotation and re-verification", () => {
 
     expect(context.log).toEqual([]);
     expect(store.resolve(handleSelection(index))).toEqual(before);
+  });
+
+  it("exposes no generation, latch, or rotated pin before the durable write settles", async () => {
+    const local = harness(verifiedDocument());
+    const store = local.create();
+    await store.hydrate();
+    const before = verifiedPin(store, SEEDED_INDEX);
+    expect(before.latch).toEqual({ kind: "unset" });
+
+    let release!: () => void;
+    local.failures.setPending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mutation = store.recordAuthenticatedStatement({
+      index: SEEDED_INDEX,
+      anchor: "pin-updated",
+      identityPublicKey: ROTATED_NODE_PUBLIC_KEY,
+      identityFingerprint: ROTATED_NODE_FINGERPRINT,
+      policyGeneration: 6,
+      observedAt: 3_000,
+    });
+    await Promise.resolve();
+
+    expect(verifiedPin(store, SEEDED_INDEX)).toEqual(before);
+    const coldDuringWrite = local.create();
+    await coldDuringWrite.hydrate();
+    expect(verifiedPin(coldDuringWrite, SEEDED_INDEX)).toEqual(before);
+
+    release();
+    await mutation;
+    const after = verifiedPin(store, SEEDED_INDEX);
+    expect(after).toMatchObject({
+      verifiedFingerprint: ROTATED_NODE_FINGERPRINT,
+      acceptedPolicyGeneration: 6,
+      latch: { kind: "set", setAt: 3_000 },
+    });
+    const restarted = local.create();
+    await restarted.hydrate();
+    expect(verifiedPin(restarted, SEEDED_INDEX)).toEqual(after);
+  });
+
+  it("keeps the previous complete generation, latch, and pin when the write rejects", async () => {
+    const local = harness(verifiedDocument());
+    const store = local.create();
+    await store.hydrate();
+    const before = verifiedPin(store, SEEDED_INDEX);
+    local.failures.set = true;
+
+    await expect(
+      store.recordAuthenticatedStatement({
+        index: SEEDED_INDEX,
+        anchor: "pin-updated",
+        identityPublicKey: ROTATED_NODE_PUBLIC_KEY,
+        identityFingerprint: ROTATED_NODE_FINGERPRINT,
+        policyGeneration: 6,
+        observedAt: 3_000,
+      }),
+    ).rejects.toMatchObject({ code: "trust_store_unavailable" });
+
+    expect(verifiedPin(store, SEEDED_INDEX)).toEqual(before);
+    const restarted = local.create();
+    await restarted.hydrate();
+    expect(verifiedPin(restarted, SEEDED_INDEX)).toEqual(before);
+  });
+
+  it("recovers the durable generation and pin after a crash before in-memory adoption", async () => {
+    const local = harness(verifiedDocument());
+    const store = local.create();
+    await store.hydrate();
+    const before = verifiedPin(store, SEEDED_INDEX);
+
+    let release!: () => void;
+    local.failures.setAfterWritePending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const mutation = store.recordAuthenticatedStatement({
+      index: SEEDED_INDEX,
+      anchor: "pin-updated",
+      identityPublicKey: ROTATED_NODE_PUBLIC_KEY,
+      identityFingerprint: ROTATED_NODE_FINGERPRINT,
+      policyGeneration: 6,
+      observedAt: 3_000,
+    });
+    await vi.waitFor(() => {
+      expect(local.entries.get(E2EE_TRUST_DOCUMENT_KEY)).not.toBe(verifiedDocument());
+    });
+
+    // The secure-store write has landed, but its promise has not returned to
+    // `commit`, so this process has not adopted the replacement document.
+    expect(verifiedPin(store, SEEDED_INDEX)).toEqual(before);
+    const restarted = local.create();
+    await restarted.hydrate();
+    expect(verifiedPin(restarted, SEEDED_INDEX)).toMatchObject({
+      verifiedFingerprint: ROTATED_NODE_FINGERPRINT,
+      acceptedPolicyGeneration: 6,
+      latch: { kind: "set", setAt: 3_000 },
+    });
+
+    release();
+    await mutation;
+  });
+
+  it("keeps authenticated trust advances isolated to their durable selection", async () => {
+    const store = context.create();
+    await store.hydrate();
+    const first = await pairAndVerify(store, {
+      nodeId: "node-a",
+      acceptedPolicyGeneration: 4,
+    });
+    const second = await pairAndVerify(store, {
+      nodeId: "node-b",
+      acceptedPolicyGeneration: 9,
+    });
+    const secondBefore = verifiedPin(store, second);
+
+    await store.recordAuthenticatedStatement({
+      index: first,
+      anchor: "pin-updated",
+      identityPublicKey: ROTATED_NODE_PUBLIC_KEY,
+      identityFingerprint: ROTATED_NODE_FINGERPRINT,
+      policyGeneration: 6,
+      observedAt: 3_000,
+    });
+
+    expect(verifiedPin(store, first)).toMatchObject({
+      verifiedFingerprint: ROTATED_NODE_FINGERPRINT,
+      acceptedPolicyGeneration: 6,
+    });
+    expect(verifiedPin(store, second)).toEqual(secondBefore);
+    const restarted = context.create();
+    await restarted.hydrate();
+    expect(verifiedPin(restarted, first).verifiedFingerprint).toBe(ROTATED_NODE_FINGERPRINT);
+    expect(verifiedPin(restarted, second)).toEqual(secondBefore);
   });
 
   it("clears the whole selection and the marker on the owner-initiated re-pair", async () => {

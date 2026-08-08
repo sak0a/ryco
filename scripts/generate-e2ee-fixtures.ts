@@ -198,6 +198,32 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
+type IndependentNoiseComposer = (input: {
+  readonly pattern: "IK" | "NX";
+  readonly prologue: Uint8Array;
+  readonly initiatorStaticSecret?: Uint8Array;
+  readonly initiatorEphemeralSecret: Uint8Array;
+  readonly responderStaticSecret: Uint8Array;
+  readonly responderEphemeralSecret: Uint8Array;
+  readonly message1Payload: Uint8Array;
+  readonly message2Payload: Uint8Array;
+}) => {
+  readonly message1: Uint8Array;
+  readonly message2: Uint8Array;
+  readonly handshakeHash: Uint8Array;
+  readonly chainingKeyFinal: Uint8Array;
+};
+
+// Keep the oracle outside the scripts TypeScript project and outside every
+// production module graph. The non-literal dynamic import is intentional: the
+// generator executes it under Bun, while each project typechecks in isolation.
+const independentReferencePath: string = fileURLToPath(
+  new URL("../packages/shared/test/independent-e2ee/reference.ts", import.meta.url),
+);
+const { composeIndependentNoise } = (await import(independentReferencePath)) as unknown as {
+  readonly composeIndependentNoise: IndependentNoiseComposer;
+};
+
 // Deterministic generator for the Ryco relay E2EE vector corpus —
 // docs/relay-e2ee-protocol.md §16.1 (fixture home and generation), §16.2 (file
 // format), and §16.3 (the normative family enumeration).
@@ -213,7 +239,12 @@ import { fileURLToPath } from "node:url";
 // collection. Handshake ephemerals go in through the state machine's
 // `testOnlyEphemeralSecretKey` injection point, which exists for exactly this.
 //
-// EVERY EXPECTED VALUE IS PRODUCED BY THE LANDED IMPLEMENTATION. This generator
+// Every protocol expectation is produced by the landed implementation. P7's
+// explicitly named `noiseChainingKeyFinal` is the one exception: the supported
+// Noise API intentionally does not expose it, so the import-isolated,
+// straight-line test reference derives it and the landed implementation's
+// independently exposed handshake hash must agree before it is emitted.
+// This generator
 // imports `@ryco/shared/relayE2ee*` and never restates a transcript element
 // list, a domain string, a derivation, or a bound. Where §16.3 names a case the
 // shared modules cannot yet decide — the §5.2 statement verifier, the §4.4 mode
@@ -978,13 +1009,16 @@ function freshSessionSecrets() {
   });
 }
 
-function newSession(direction: typeof E2EE_DIRECTION_CLIENT_TO_NODE | "n2c"): E2eeRecordSession {
+function newSession(
+  direction: typeof E2EE_DIRECTION_CLIENT_TO_NODE | "n2c",
+  plaintextCeiling = F1_BUDGET.plaintextCeiling,
+): E2eeRecordSession {
   return new E2eeRecordSession({
     secrets: freshSessionSecrets(),
     suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
     sessionBindingHash: F1_SESSION_BINDING_HASH,
     sendDirection: direction as typeof E2EE_DIRECTION_CLIENT_TO_NODE,
-    plaintextCeiling: F1_BUDGET.plaintextCeiling,
+    plaintextCeiling,
   });
 }
 
@@ -994,12 +1028,15 @@ function newSession(direction: typeof E2EE_DIRECTION_CLIENT_TO_NODE | "n2c"): E2
  * transmit callback actually saw, which is how the corpus asserts that a
  * refused record put NOTHING on the wire.
  */
-async function protectOnce(body: Uint8Array): Promise<{
+async function protectOnce(
+  body: Uint8Array,
+  plaintextCeiling = F1_BUDGET.plaintextCeiling,
+): Promise<{
   readonly result: Awaited<ReturnType<E2eeRecordSession["protect"]>>;
   readonly envelope: Uint8Array | undefined;
   readonly transmitted: number;
 }> {
-  const session = newSession(E2EE_DIRECTION_CLIENT_TO_NODE);
+  const session = newSession(E2EE_DIRECTION_CLIENT_TO_NODE, plaintextCeiling);
   let envelope: Uint8Array | undefined;
   let transmitted = 0;
   const result = await session.protect({
@@ -1330,6 +1367,49 @@ async function buildFamily1(): Promise<FixtureFamily> {
       envelopeBytes: atCeiling.envelope!.byteLength,
       envelope: b(atCeiling.envelope!),
       transmittedRecords: atCeiling.transmitted,
+    },
+  });
+
+  const productionLimits = {
+    maxQueuedBytes: RELAY_MAX_RPC_MESSAGE_BYTES,
+    maxControlFrameBytes: 256 * 1_024,
+  } as const;
+  const productionBudget = e2eeChannelSizeBudget(productionLimits);
+  const productionFill = 0x77;
+  const productionCeiling = await protectOnce(
+    new Uint8Array(productionBudget.plaintextCeiling).fill(productionFill),
+    productionBudget.plaintextCeiling,
+  );
+  const productionEnvelope = productionCeiling.envelope!;
+  cases.push({
+    name: "production-inner-body-exactly-at-the-plaintext-ceiling-recipe",
+    sections: ["4.2 step 2", "4.5", "16.4"],
+    note: "The production-size boundary is represented by a deterministic fill recipe rather than embedding almost four MiB in the portable corpus. The independent runner rebuilds the whole envelope and verifies its digest plus both boundary slices.",
+    inputs: {
+      ...productionLimits,
+      plaintextCeiling: productionBudget.plaintextCeiling,
+      body: {
+        $recipe: {
+          kind: "fill",
+          bytes: productionBudget.plaintextCeiling,
+          byte: productionFill,
+        },
+      },
+      suite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      direction: E2EE_DIRECTION_CLIENT_TO_NODE,
+      innerType: E2EE_INNER_TYPE_RPC,
+      epoch: 0,
+      counter: 0,
+      epochSecret: b(seedOf(0x71)),
+      sessionBindingHash: b(F1_SESSION_BINDING_HASH),
+    },
+    expected: {
+      send: productionCeiling.result.kind,
+      envelopeBytes: productionEnvelope.byteLength,
+      envelopeSha256: sha256Hex(productionEnvelope),
+      envelopePrefix: b(productionEnvelope.subarray(0, 32)),
+      envelopeSuffix: b(productionEnvelope.subarray(-32)),
+      transmittedRecords: productionCeiling.transmitted,
     },
   });
 
@@ -3743,8 +3823,8 @@ function makeClientHandshake(options: {
     credentials: options.tier === "native" ? NATIVE_CREDENTIALS : WEB_CREDENTIALS,
     intendedCapability: options.intendedCapability ?? CHANNEL_OPEN_CAPABILITY,
     intendedRole: options.intendedRole ?? CHANNEL_OPEN_EFFECTIVE_ROLE,
-    testOnlyClientNonce: CLIENT_NONCE,
-    testOnlyEphemeralSecretKey: CLIENT_EPHEMERAL_SECRET,
+    testOnlyClientNonce: copyOf(CLIENT_NONCE),
+    testOnlyEphemeralSecretKey: copyOf(CLIENT_EPHEMERAL_SECRET),
   });
 }
 
@@ -3771,7 +3851,7 @@ function makeNodeHandshake(options: NodeHandshakeOverrides = {}): E2eeNodeHandsh
     lookupClientAuthorization: () =>
       "authorization" in options ? options.authorization : APPROVED_AUTHORIZATION,
     ...(options.enterE2eeMode === undefined ? {} : { enterE2eeMode: options.enterE2eeMode }),
-    testOnlyEphemeralSecretKey: NODE_EPHEMERAL_SECRET,
+    testOnlyEphemeralSecretKey: copyOf(NODE_EPHEMERAL_SECRET),
   });
 }
 
@@ -3835,7 +3915,7 @@ function craftHello(input: {
     staticSecretKey: noiseTier === "native" ? CLIENT_AGREEMENT_SECRET : undefined,
     remoteStaticPublicKey:
       noiseTier === "native" ? (input.nodeAgreementPublicKey ?? NODE_AGREEMENT_PUBLIC) : undefined,
-    testOnlyEphemeralSecretKey: CLIENT_EPHEMERAL_SECRET,
+    testOnlyEphemeralSecretKey: copyOf(CLIENT_EPHEMERAL_SECRET),
   });
   const payload =
     noiseTier === "native"
@@ -3903,6 +3983,8 @@ interface HandshakeTrace {
   readonly serverAcceptRecord: Uint8Array;
   readonly serverAcceptTbs: Uint8Array;
   readonly noiseMessage2: Uint8Array;
+  readonly noiseHandshakeHash: Uint8Array;
+  readonly noiseChainingKeyFinal: Uint8Array;
   readonly acceptPayloadPlaintext: Uint8Array;
   readonly confirmationTranscript: Uint8Array;
   readonly serverConfirmation: Uint8Array;
@@ -3921,6 +4003,63 @@ interface HandshakeTrace {
 
 function copyOf(value: Uint8Array): Uint8Array {
   return Uint8Array.from(value);
+}
+
+function replayNoiseHandshakeHash(input: {
+  readonly tier: E2eeTier;
+  readonly prologue: Uint8Array;
+  readonly message1Payload: Uint8Array;
+  readonly message2Payload: Uint8Array;
+  readonly message1: Uint8Array;
+  readonly message2: Uint8Array;
+}): Uint8Array {
+  const pattern = input.tier === "native" ? E2EE_NOISE_PATTERN_IK : E2EE_NOISE_PATTERN_NX;
+  const initiator = new E2eeNoiseHandshake({
+    pattern,
+    role: "initiator",
+    prologue: input.prologue,
+    ...(input.tier === "native"
+      ? {
+          staticSecretKey: CLIENT_AGREEMENT_SECRET,
+          remoteStaticPublicKey: NODE_AGREEMENT_PUBLIC,
+        }
+      : {}),
+    testOnlyEphemeralSecretKey: copyOf(CLIENT_EPHEMERAL_SECRET),
+  });
+  const responder = new E2eeNoiseHandshake({
+    pattern,
+    role: "responder",
+    prologue: input.prologue,
+    staticSecretKey: NODE_AGREEMENT_SECRET,
+    testOnlyEphemeralSecretKey: copyOf(NODE_EPHEMERAL_SECRET),
+  });
+  try {
+    if (hex(initiator.writeMessage(input.message1Payload)) !== hex(input.message1)) {
+      throw new Error("Fixture Noise replay disagreed on message 1.");
+    }
+    if (hex(responder.readMessage(input.message1)) !== hex(input.message1Payload)) {
+      throw new Error("Fixture Noise replay disagreed on message-1 payload.");
+    }
+    if (hex(responder.writeMessage(input.message2Payload)) !== hex(input.message2)) {
+      throw new Error("Fixture Noise replay disagreed on message 2.");
+    }
+    if (hex(initiator.readMessage(input.message2)) !== hex(input.message2Payload)) {
+      throw new Error("Fixture Noise replay disagreed on message-2 payload.");
+    }
+    const initiatorHash = initiator.testOnlyHandshakeHash;
+    const responderHash = responder.testOnlyHandshakeHash;
+    if (
+      initiatorHash === undefined ||
+      responderHash === undefined ||
+      hex(initiatorHash) !== hex(responderHash)
+    ) {
+      throw new Error("Fixture Noise endpoints disagreed on the final handshake hash.");
+    }
+    return copyOf(initiatorHash);
+  } finally {
+    initiator.destroy();
+    responder.destroy();
+  }
 }
 
 /**
@@ -3973,6 +4112,31 @@ function runHandshakeTrace(options: {
     channelOpenEffectiveRole: channel.channelOpenEffectiveRole,
     nodeAgreementKeyFingerprint: e2eeKeyFingerprint("agreement", nodeAdvertised.agreementPublicKey),
   });
+  const noiseHandshakeHash = replayNoiseHandshakeHash({
+    tier: options.tier,
+    prologue: hello.prologue,
+    message1Payload: helloPayloadPlaintext,
+    message2Payload: acceptPayloadPlaintext,
+    message1: decodedHello.value.noiseMessage1,
+    message2: decodedAccept.value.noiseMessage2,
+  });
+  const independentNoise = composeIndependentNoise({
+    pattern: options.tier === "native" ? "IK" : "NX",
+    prologue: hello.prologue,
+    ...(options.tier === "native" ? { initiatorStaticSecret: CLIENT_AGREEMENT_SECRET } : {}),
+    initiatorEphemeralSecret: CLIENT_EPHEMERAL_SECRET,
+    responderStaticSecret: NODE_AGREEMENT_SECRET,
+    responderEphemeralSecret: NODE_EPHEMERAL_SECRET,
+    message1Payload: helloPayloadPlaintext,
+    message2Payload: acceptPayloadPlaintext,
+  });
+  if (
+    hex(independentNoise.message1) !== hex(decodedHello.value.noiseMessage1) ||
+    hex(independentNoise.message2) !== hex(decodedAccept.value.noiseMessage2) ||
+    hex(independentNoise.handshakeHash) !== hex(noiseHandshakeHash)
+  ) {
+    throw new Error("Independent Noise composition disagreed with the canonical handshake.");
+  }
 
   const trace: HandshakeTrace = {
     tier: options.tier,
@@ -3987,6 +4151,8 @@ function runHandshakeTrace(options: {
     serverAcceptRecord: copyOf(accept.record),
     serverAcceptTbs: copyOf(accept.serverAcceptTbs),
     noiseMessage2: copyOf(decodedAccept.value.noiseMessage2),
+    noiseHandshakeHash,
+    noiseChainingKeyFinal: independentNoise.chainingKeyFinal,
     acceptPayloadPlaintext,
     confirmationTranscript: copyOf(accept.confirmationTranscript),
     serverConfirmation: copyOf(decodedAccept.value.serverConfirmation),
@@ -4223,6 +4389,8 @@ function handshakeIntermediates(trace: HandshakeTrace): Record<string, JsonValue
     message1PayloadPlaintextBytes: trace.helloPayloadPlaintext.byteLength,
     serverAcceptTbs: b(trace.serverAcceptTbs),
     noiseMessage2: b(trace.noiseMessage2),
+    noiseHandshakeHash: b(trace.noiseHandshakeHash),
+    noiseChainingKeyFinal: b(trace.noiseChainingKeyFinal),
     message2PayloadPlaintext: b(trace.acceptPayloadPlaintext),
     exporterSecret: b(trace.exporterSecret),
     serverConfirmationKey: b(trace.serverConfirmationKey),
@@ -9327,8 +9495,8 @@ export const DEFERRED_FAMILIES: readonly {
  * §16.3 says which cases the corpus must carry. Nothing in it, and nothing in
  * the consuming ledger, says whether a committed case ASSERTS anything — and a
  * sweep over every scalar under every `expected` block found that roughly half
- * of them are read by no test at all. A reader who opens this corpus sees 290
- * cases and 3,287 expectations and has no way to learn that without repeating
+ * of them are read by no test at all. A reader who opens this corpus sees 291
+ * cases and 3,297 expectations and has no way to learn that without repeating
  * the sweep, so the measurement is recorded here, per family, as numbers.
  *
  * These are MEASUREMENTS, not invariants — but they are pinned in both
@@ -9351,9 +9519,9 @@ const LIVENESS_CENSUS_FAMILIES: readonly JsonValue[] = [
   {
     family: 1,
     file: "f01-payload-discrimination.json",
-    cases: 18,
-    expectedLeaves: 161,
-    liveLeaves: 161,
+    cases: 19,
+    expectedLeaves: 167,
+    liveLeaves: 167,
     inertLeaves: 0,
     livePercent: 100.0,
     casesWithNoLiveLeaf: 0,
@@ -9419,23 +9587,23 @@ const LIVENESS_CENSUS_FAMILIES: readonly JsonValue[] = [
     family: 6,
     file: "f06-ik-handshake.json",
     cases: 1,
-    expectedLeaves: 62,
-    liveLeaves: 26,
+    expectedLeaves: 64,
+    liveLeaves: 28,
     inertLeaves: 36,
-    livePercent: 41.9,
+    livePercent: 43.8,
     casesWithNoLiveLeaf: 0,
     residual:
-      "36 of the single trace's 62 leaves inert, 22 of them the `firstProtectedEnvelopes` block: its AADs and §8.9 implicit-finish gate are read, its envelope bytes, positions and per-side received blocks are not. The §8.6 step-6 `admittedAuthority` snapshot (6) is also unread here — F16 carries the same snapshot and drives it.",
+      "36 of the single trace's 64 leaves inert, 22 of them the `firstProtectedEnvelopes` block: its AADs and §8.9 implicit-finish gate are read, its envelope bytes, positions and per-side received blocks are not. The §8.6 step-6 `admittedAuthority` snapshot (6) is also unread here — F16 carries the same snapshot and drives it.",
     residualOwner: "the F6/F7 handshake harness",
   },
   {
     family: 7,
     file: "f07-nx-handshake.json",
     cases: 3,
-    expectedLeaves: 73,
-    liveLeaves: 31,
+    expectedLeaves: 75,
+    liveLeaves: 33,
     inertLeaves: 42,
-    livePercent: 42.5,
+    livePercent: 44.0,
     casesWithNoLiveLeaf: 0,
     residual:
       "42 leaves inert: the same `firstProtectedEnvelopes` block as F6, plus the §11.5 `observable` of the two negative NX cases.",
@@ -9691,6 +9859,77 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
     ],
   };
 
+  const portableRunners = (file: string, caseName: string): readonly string[] => {
+    if (
+      file === "f01-payload-discrimination.json" &&
+      caseName === "production-inner-body-exactly-at-the-plaintext-ceiling-recipe"
+    ) {
+      return ["reference-ts"];
+    }
+    if (
+      (file === "f06-ik-handshake.json" && caseName === "ik-handshake-complete-trace") ||
+      (file === "f07-nx-handshake.json" && caseName === "nx-handshake-complete-trace")
+    ) {
+      return ["snow-rust", "reference-ts", "mobile-dev-sideload"];
+    }
+    if (
+      file === "f08-record-protection.json" ||
+      (file === "f09-rekey-boundaries.json" && caseName.startsWith("epoch-key-schedule-"))
+    ) {
+      return ["reference-ts"];
+    }
+    if (file === "f04-prekey-certificates.json") {
+      if (caseName === "valid-node-agreement-prekey-certificate") {
+        return ["mobile-dev-sideload"];
+      }
+      if (caseName === "valid-client-agreement-prekey-certificate") {
+        return ["reference-ts"];
+      }
+      if (
+        caseName.startsWith("client-certificate-") &&
+        /(?:non-canonical|indefinite|trailing|truncated|float|wrong-element)/u.test(caseName)
+      ) {
+        return ["reference-ts", "mobile-dev-sideload"];
+      }
+    }
+    if (file === "f17-key-material-validation.json" && caseName.startsWith("p256-")) {
+      return ["reference-ts", "mobile-dev-sideload"];
+    }
+    return [];
+  };
+  const allPortableCases = [
+    ...families.map((family) => ({
+      file: family.file,
+      family: family.number,
+      cases: family.cases,
+    })),
+    {
+      file: TRANSCODED_FAMILY_FILE,
+      family: 15,
+      cases: (JSON.parse(new TextDecoder().decode(transcoded)) as { cases: FixtureCase[] }).cases,
+    },
+  ].flatMap(({ file, family, cases }) =>
+    cases.map(({ name }) => ({ file, family, caseName: name })),
+  );
+  const portableRoutes = allPortableCases
+    .map(({ file, family, caseName }) => ({
+      fixtureId: `F${String(family).padStart(2, "0")}/${caseName}`,
+      file,
+      case: caseName,
+      runners: portableRunners(file, caseName),
+    }))
+    .filter(({ runners }) => runners.length > 0);
+  const portableExclusions = allPortableCases
+    .filter(({ file, caseName }) => portableRunners(file, caseName).length === 0)
+    .map(({ file, family, caseName }) => ({
+      fixtureId: `F${String(family).padStart(2, "0")}/${caseName}`,
+      file,
+      case: caseName,
+      reason:
+        "Not portable in P7: this case needs a Hub/node state machine, platform UI, timing/concurrency, or a first-party-only semantic oracle beyond the independent primitive composition.",
+      ownedBy: "the case's existing Node/Hub/platform consuming suite",
+    }));
+
   const manifest = {
     formatVersion: 1,
     warning: WARNING,
@@ -9703,6 +9942,29 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
         .toSorted()
         .map((key) => [key, entries[key]!]),
     ),
+    portableExecution: {
+      version: 1,
+      status: "explicit exhaustive routing; physical-device execution remains an operator gate",
+      limits: {
+        totalJsonBytes: 2 * 1_024 * 1_024,
+        familyJsonBytes: 256 * 1_024,
+        families: 32,
+        casesPerFamily: 64,
+        totalCases: 512,
+        fixtureIdUtf8Bytes: 128,
+        ordinaryDecodedBytes: 16 * 1_024,
+        recipePayloadBytes: 4_194_304,
+      },
+      routes: portableRoutes,
+      exclusions: portableExclusions,
+      runnerOwners: {
+        "snow-rust": "packages/shared/test/independent-e2ee/snow",
+        "reference-ts": "packages/shared/test/independent-e2ee/reference.test.ts",
+        "mobile-dev-sideload": "apps/mobile/src/devtools/e2eeVectorRunner.ts",
+      },
+      doesNotProve:
+        "This metadata and its automated tests do not prove a physical-device run occurred; the native release gate still requires recorded iOS and Android device results.",
+    },
     deferredFamilies: DEFERRED_FAMILIES,
     /**
      * Families that are present but incomplete: what each still defers, and to
@@ -9768,7 +10030,7 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       perCaseClaims:
         "packages/shared/src/relayE2eeCorpusLiveness.ts — E2EE_CORPUS_CASE_LIVENESS. Every committed case must carry at least one live leaf or appear in that table, which names the suite that reads it or declares it DECORATIVE with a reason and an owner. Each of the three consuming suites checks the claims naming it, in both directions.",
       perCaseFloor:
-        "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 290 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
+        "WHAT THAT RULE GUARANTEES IS A FLOOR, AND ONLY A FLOOR: each committed case has at least one leaf that some suite reads. It is NOT a guarantee that a case's expectations are meaningfully asserted, and it should not be read as one. A case can keep its name and one or two live leaves while every other field in its `expected` block is inert, and it passes every check here — 96 of the 291 committed cases have at most two live leaves and 182 have at most five. The floor's value is narrower than it looks: hollowing a case out entirely fails, and the emptiness that remains is counted and named instead of silent. For the shape rather than the threshold, read `casesByLiveLeafCount` below.",
       assertionLiveness: {
         currentCorpus:
           "PARTIAL. Two families have been swept against the corpus as it stands — F4 and F17, the two whose live counts moved this round — and for those two the tight figure now EQUALS the read-liveness figure. Every other family's number in this census is read-liveness and nothing more.",
@@ -9802,21 +10064,21 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
         note: "Mutation-liveness is the tighter measure — it counts a leaf live only when changing it fails a test — and its global figure is 49.4%. It is also STALE: it describes the superseded corpus named in `measuredAgainst`, not the one committed here, so it is not the number to cite about anything below either. There is no current assertion-liveness figure; see `assertionLiveness`.",
       },
       totals: {
-        cases: 290,
-        expectedLeaves: 3287,
-        liveLeaves: 2123,
+        cases: 291,
+        expectedLeaves: 3297,
+        liveLeaves: 2133,
         inertLeaves: 1164,
-        livePercent: 64.6,
+        livePercent: 64.7,
         casesWithNoLiveLeaf: 17,
       },
       casesByLiveLeafCount: {
-        note: "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 290` reads, against a one-leaf threshold, as though the other 273 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
+        note: "THE SHAPE, published because the single figure misleads. `casesWithNoLiveLeaf: 17 of 291` reads, against a one-leaf threshold, as though the other 274 assert something substantial. They do not: the per-case rule is a floor of one leaf, and most of the corpus sits just above it. Buckets are counts of CASES by how many of their own expectation leaves any suite reads, over the same union the per-family figures are pinned to.",
         buckets: [
           { liveLeaves: "0", cases: 17 },
           { liveLeaves: "1", cases: 17 },
           { liveLeaves: "2", cases: 62 },
           { liveLeaves: "3-5", cases: 86 },
-          { liveLeaves: "6-10", cases: 54 },
+          { liveLeaves: "6-10", cases: 55 },
           { liveLeaves: "11-25", cases: 38 },
           { liveLeaves: "26+", cases: 16 },
         ],
@@ -9843,7 +10105,7 @@ export async function generateE2eeFixtureCorpus(): Promise<E2eeFixtureCorpus> {
       proves:
         "The ledger enumerates §16.3's obligations in the CONSUMING test, and the tests in that file hold this corpus to it: every obligation written there resolves exactly one way — as a generated case or as a declared deferral, never as neither; no committed case exists that no obligation claims; no family deferral exists that no obligation claims, and none is claimed twice; and every obligation standing for a group states its case count EXACTLY, so the group can neither lose a member nor gain one without the ledger entry moving with it. So a case that is dropped, a case that is added outside the ledger, or a deferral that is quietly deleted, fails a test. One further check crosses into content: an obligation whose every matching case is read by NO suite must carry an `unasserted` field naming what is missing and who owns it. NINE obligations are in that state and say so, checked against the measured union rather than against a declaration, and in both directions — the field must come off when a case goes live, which is how four of them came off it in this round.",
       doesNotProve:
-        "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 290 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
+        "That a committed case ASSERTS anything beyond a single leaf. The ledger constrains NAMES and COUNTS and never content: a case reduced to nothing but its name discharges its obligation exactly as well as one re-derived through the implementation, and 17 of the 291 committed cases are in that state — see `livenessCensus`, which measures it per family and names every one of them. `unasserted` catches only total emptiness: an obligation with one live leaf across its cases and every other field inert passes both checks, and most of this corpus is close to that state — see `livenessCensus.casesByLiveLeafCount`. And: that the ledger is a FAITHFUL transcription of §16.3. The specification is prose and no test in this repository parses it, so an obligation §16.3 states and nobody transcribed into the ledger is invisible to every test — it does not read as missing, it does not exist. Nothing checks that an entry's quoted wording still matches the document either: narrowing an obligation in §16.3, or in the ledger, fails nothing.",
       reviewObligation:
         "When EITHER side changes — an edit to §16.3, or an edit to the ledger — a reviewer MUST diff the ledger against §16.3 by eye, entry against paragraph, and confirm the two enumerate the same set. That review is the only thing standing between a §16.3 obligation and silent non-coverage. Every ledger entry carries a `section` field naming the §16.3 paragraph to open and a `spec` field carrying the specification's own words for the obligation, so the diff is a side-by-side read rather than an interpretation.",
       whyNotAutomated:

@@ -78,11 +78,13 @@ engine the app ships and no Node test runs on it:
 - §14.2's curve, AEAD, and hash implementations, which are BigInt- and
   typed-array-heavy pure JavaScript.
 
-**There is no Detox/Maestro/e2e infrastructure in this repository and Phase 3 is
-not building one.** The evidence below is this written procedure plus the in-app
-runner (`src/devtools/e2eeVectorRunner.ts`), run by the owner on hardware. It is
-**partial** evidence: §16.4's complete-corpus physical-device gate is not
-satisfied by it, and remains open (see below).
+**There is no Detox/Maestro/e2e infrastructure in this repository.** The evidence
+below is this written procedure plus the development-only in-app runner
+(`src/devtools/e2eeVectorRunner.ts`), run by the owner on hardware. The embedded
+smoke suite remains **partial** evidence. A bounded side-load entry point now
+allows selected corpus families to run without entering the app bundle, but a
+recorded complete-corpus pass on both physical platforms is still the §16.4
+release gate (see below).
 
 ### Procedure
 
@@ -141,6 +143,43 @@ satisfied by it, and remains open (see below).
    check is `false` while this one passes, the primitives disagree with the
    corpus on Hermes; capture the failing case name and stop — do not ship E2EE.
 
+### Side-loading selected corpus routes
+
+The development hook also installs `__rycoRunSideloadedE2eeVectors`. The caller,
+not the app, supplies raw manifest JSON, its independently transported SHA-256,
+raw JSON for only the selected families, and exact fixture IDs. For example:
+
+```js
+await __rycoRunSideloadedE2eeVectors({
+  manifestJson,
+  manifestSha256,
+  families: [
+    { file: "f06-ik-handshake.json", json: f06Json },
+    { file: "f07-nx-handshake.json", json: f07Json },
+  ],
+  fixtureIds: ["F06/ik-handshake-complete-trace", "F07/nx-handshake-complete-trace"],
+});
+```
+
+The hash covers the exact UTF-8 bytes in `manifestJson`; each family is likewise
+checked against `manifest.files[file].sha256`. The runner then requires the
+fixture ID, file, case name, and `mobile-dev-sideload` runner to agree with an
+explicit `portableExecution.routes` entry. It accepts at most 2 MiB of JSON in
+total, 256 KiB per family, 32 families, 64 cases per family, 512 cases total,
+128 UTF-8 bytes per fixture ID, and 16 KiB per ordinary decoded byte string.
+The manifest reserves 4,194,304 bytes for recipe payloads. Corpus v1 uses one
+bounded fill recipe for the reference-only F1 production-maximum case; no
+`mobile-dev-sideload` route uses a recipe. The mobile runner therefore refuses
+every `$recipe` object until a mobile-routed recipe and oracle are specified.
+
+Admission failures expose one fixed error and no input. Admitted execution
+returns only `[{ fixtureId, ok }]`; it never returns fixture bytes, hashes, key
+material, decrypted payloads, or primitive errors. A `false` result is a release
+gate failure. The hook has no file/network loader and persists nothing, so the
+operator must transfer these strings through the development debugger or an
+equivalently local development-only channel. Preview and production variants do
+not install either vector hook.
+
 ### What this does and does not prove
 
 It **does** prove, on the shipped engine: that the §14.5 source is installed
@@ -163,14 +202,16 @@ It does **not** prove:
 - **§16.4's device gate.** §16.4 requires the **complete** corpus to pass on
   physical devices on **both** mobile platforms before the native client ships
   E2EE support, and calls it an explicit acceptance gate of the native rollout.
-  This runner carries four transcribed families (F15 IK, F6, F4, F13 — the 844 KB
-  corpus is not bundled, and `e2eeVectorRunner.test.ts` proves the transcribed
-  bytes are still the real fixtures') — no NX pattern, no snow set, no
-  F1/F2/F7/F8/F10/F16/F17, no P-256, and no CBOR **decode** or
-  re-encode-equality case at all. Green here therefore does not satisfy §16.4.
-  What remains: a device harness that can stream or side-load the corpus without
-  bundling it, plus those families. **That gate is open and blocks the native
-  E2EE rollout** — it is not a documented non-goal.
+  The default smoke run still carries only four transcribed families (F15 IK,
+  F6, F4, F13 — the corpus is not bundled, and `e2eeVectorRunner.test.ts` proves
+  those bytes match). The side-load path covers the manifest-selected portable
+  primitive cases without changing that bundle boundary, including IK, NX,
+  canonical-CBOR rejection, and P-256 validation. It does not turn manifest
+  exclusions into runnable tests, prove that every selected route passed on
+  hardware, or supply the state-machine/UI/platform oracles those exclusions
+  name. Green from only the embedded smoke run or a selected side-load therefore
+  does not satisfy §16.4. **The recorded complete-corpus gate remains open and
+  blocks the native E2EE rollout.**
 - **Anything about Android.** Run the same procedure per platform.
 
 §14.5's startup verification is no longer open: `src/platform/e2eeAgreementKey.ts`

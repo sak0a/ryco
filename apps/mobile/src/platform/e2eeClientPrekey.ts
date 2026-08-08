@@ -146,9 +146,10 @@ interface StoredClientE2eePrekey {
 export interface MobileClientE2eePrekey {
   /**
    * §6.4's client remedy, run at application start and before the credentials
-   * are needed: return the stored certificate when it is still bound to this
-   * device's keys, still inside its window, and still verifiable, and re-sign
-   * otherwise.
+   * are needed: return the stored public certificate when it is still bound to
+   * this device identity, inside its window, and verifiable, and re-sign
+   * otherwise. The K1 handshake checks that its agreement public key matches
+   * the one-operation secret borrow; restoring it does not open that scalar.
    */
   readonly ensure: (namespace: ClientE2eePrekeyNamespace) => Promise<ClientE2eePrekeyCertificate>;
 }
@@ -337,28 +338,29 @@ export function makeMobileClientE2eePrekey(
    * The transcript is RE-ENCODED from the record's fields rather than replayed
    * from storage, so the bytes this returns are always a named encoder's output
    * (§7.2) and the stored signature has to verify over them. A record whose
-   * fields no longer agree with the device — a different namespace, a key that
-   * was regenerated, a restored file from another installation — cannot survive
-   * that check even before its validity window is considered.
+   * identity or namespace no longer agrees with this device cannot survive that
+   * check even before its validity window is considered. Agreement-key equality
+   * is deliberately deferred to K1, where `E2eeClientHandshake` checks the
+   * borrowed scalar against this signed public key before emitting a hello. A
+   * mismatch is safe fail-closed, never legacy: recovery requires certificate
+   * expiry/renewal or removal as part of explicit re-enrollment.
    */
   const restore = (
     stored: StoredClientE2eePrekey,
     namespace: ClientE2eePrekeyNamespace,
     identityPublicKey: Uint8Array,
-    agreementPublicKey: Uint8Array,
   ): ClientE2eePrekeyCertificate | null => {
     if (stored.hubOrigin !== namespace.hubOrigin || stored.accountId !== namespace.accountId) {
       return null;
     }
-    if (
-      stored.identityPublicKey !== encodeBase64Url(identityPublicKey) ||
-      stored.agreementPublicKey !== encodeBase64Url(agreementPublicKey)
-    ) {
+    if (stored.identityPublicKey !== encodeBase64Url(identityPublicKey)) {
       return null;
     }
     if (clientE2eePrekeyValidity(stored, now()) !== "usable") return null;
+    let agreementPublicKey: Uint8Array;
     let signature: Uint8Array;
     try {
+      agreementPublicKey = decodeBase64Url(stored.agreementPublicKey);
       signature = decodeBase64Url(stored.signature);
     } catch {
       return null;
@@ -410,12 +412,6 @@ export function makeMobileClientE2eePrekey(
   return {
     ensure: (namespace) =>
       exclusive(async () => {
-        const agreementPublicKey = await ensureAgreementKey().catch((cause: unknown) => {
-          if (cause instanceof MobileE2eeAgreementKeyError) {
-            return prekeyError("e2ee_prekey_custody_failed");
-          }
-          throw cause;
-        });
         const identityPublicKey = await getMobileDeviceIdentityPublicKey().catch(() =>
           prekeyError("e2ee_prekey_custody_failed"),
         );
@@ -423,11 +419,19 @@ export function makeMobileClientE2eePrekey(
         const stored = parseStored(
           await store.get(CLIENT_E2EE_PREKEY_RECORD_KEY).catch(() => null),
         );
-        const restored =
-          stored === null
-            ? null
-            : restore(stored, namespace, identityPublicKey, agreementPublicKey);
-        return restored ?? (await issue(namespace, identityPublicKey, agreementPublicKey));
+        const restored = stored === null ? null : restore(stored, namespace, identityPublicKey);
+        if (restored !== null) return restored;
+
+        // Only constructing or renewing a certificate needs to derive (or
+        // create) the agreement public key. A valid restored certificate stays
+        // public-only until K1 borrows the scalar and verifies the match.
+        const agreementPublicKey = await ensureAgreementKey().catch((cause: unknown) => {
+          if (cause instanceof MobileE2eeAgreementKeyError) {
+            return prekeyError("e2ee_prekey_custody_failed");
+          }
+          throw cause;
+        });
+        return await issue(namespace, identityPublicKey, agreementPublicKey);
       }),
   };
 }

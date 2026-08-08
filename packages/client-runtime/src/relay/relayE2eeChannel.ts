@@ -1,4 +1,7 @@
-import { e2eeChannelSizeBudget } from "@ryco/shared/relayE2eeConstants";
+import {
+  E2EE_ENVELOPE_OVERHEAD_BYTES,
+  e2eeChannelSizeBudget,
+} from "@ryco/shared/relayE2eeConstants";
 import {
   E2EE_ERROR_CODE_PROTOCOL_VIOLATION,
   E2eeCloseMachine,
@@ -62,8 +65,12 @@ import {
 /** §3.4: the client sends `c2n` and receives `n2c`. */
 const CLIENT_SEND_DIRECTION: E2eeDirection = "c2n";
 
-const REJECTED: RelayE2eeInboundDisposition = Object.freeze({ kind: "rejected" } as const);
-const CLAIMED: RelayE2eeInboundDisposition = Object.freeze({ kind: "claimed" } as const);
+const REJECTED: RelayE2eeInboundDisposition = Object.freeze({
+  kind: "rejected",
+} as const);
+const CLAIMED: RelayE2eeInboundDisposition = Object.freeze({
+  kind: "claimed",
+} as const);
 
 /**
  * Every §9 receive failure, mapped onto its §11.3 row for the client-local
@@ -132,6 +139,8 @@ export interface RelayE2eeChannelSources {
   readonly testOnlySyntheticSendState?: E2eeSyntheticDirectionState | undefined;
   /** TEST AND FIXTURE USE ONLY (§16.3 F9). See `testOnlySyntheticSendState`. */
   readonly testOnlySyntheticReceiveState?: E2eeSyntheticDirectionState | undefined;
+  /** TEST ONLY: observes the channel-owned application copy for erasure assertions. */
+  readonly testOnlyOnOwnedApplicationPlaintext?: ((plaintext: Uint8Array) => void) | undefined;
 }
 
 export interface RelayE2eeClientChannel extends RelayE2eeChannel {
@@ -179,7 +188,9 @@ export function makeRelayE2eeClientChannel(
       : { testOnlySyntheticSendState: sources.testOnlySyntheticSendState }),
     ...(sources.testOnlySyntheticReceiveState === undefined
       ? {}
-      : { testOnlySyntheticReceiveState: sources.testOnlySyntheticReceiveState }),
+      : {
+          testOnlySyntheticReceiveState: sources.testOnlySyntheticReceiveState,
+        }),
   });
   const machine = new E2eeCloseMachine({
     sessionBindingHash: sources.sessionBindingHash,
@@ -190,6 +201,21 @@ export function makeRelayE2eeClientChannel(
   let closeTimer: unknown;
   let closeSettled: (() => void) | undefined;
   let closePhaseFinished = false;
+  let acceptingApplicationSubmissions = true;
+  interface PendingApplicationSubmission {
+    readonly plaintext: Uint8Array;
+    readonly reservation: RelayE2eeReservation;
+    settled: boolean;
+  }
+  const pendingApplicationSubmissions = new Set<PendingApplicationSubmission>();
+
+  function settleApplicationSubmission(submission: PendingApplicationSubmission): void {
+    if (submission.settled) return;
+    submission.settled = true;
+    submission.plaintext.fill(0);
+    submission.reservation.release();
+    pendingApplicationSubmissions.delete(submission);
+  }
 
   /**
    * §9.5 on every terminal path.
@@ -200,6 +226,9 @@ export function makeRelayE2eeClientChannel(
    */
   function release(): void {
     session.erase();
+    for (const submission of pendingApplicationSubmissions) {
+      settleApplicationSubmission(submission);
+    }
     if (closeTimer !== undefined) host.clearTimeout(closeTimer);
     closeTimer = undefined;
     closeSettled?.();
@@ -295,19 +324,27 @@ export function makeRelayE2eeClientChannel(
   async function protectRecord(
     innerType: E2eeInnerRecordType,
     body: Uint8Array,
+    reservedAdmission?: RelayE2eeReservation,
+    reservedEnvelopeBytes?: number,
   ): Promise<ProtectOutcome> {
     // §9.5: the section this send waited for may have erased the session. The
     // record session asserts on an erased session before its own funnel can
     // answer, and this is that answer — the send path declines the record and
     // the caller leaves the channel exactly as it found it.
-    if (session.erased) return { kind: "unavailable" };
-    let admission: RelayE2eeReservation | undefined;
+    let admission = reservedAdmission;
     let result: E2eeProtectResult;
     try {
+      if (session.erased) return { kind: "unavailable" };
       result = await session.protect({
         innerType,
         body,
         admit: (envelopeBytes) => {
+          if (admission !== undefined) {
+            if (reservedEnvelopeBytes !== envelopeBytes) {
+              throw new RangeError("Relay E2EE reservation does not match the protected record.");
+            }
+            return true;
+          }
           admission = host.admit(envelopeBytes);
           return admission !== undefined;
         },
@@ -570,7 +607,10 @@ export function makeRelayE2eeClientChannel(
         if (declaration === undefined || position === undefined) return { kind: "degenerate" };
         return {
           kind: "send",
-          record: machine.buildCloseAck({ sendPosition: position, expectedRecv: declaration }),
+          record: machine.buildCloseAck({
+            sendPosition: position,
+            expectedRecv: declaration,
+          }),
         };
       });
       // Backpressure leaves the record owed and the channel untouched (§11.4).
@@ -587,6 +627,7 @@ export function makeRelayE2eeClientChannel(
 
   async function beginClose(): Promise<RelayE2eeCloseAttempt> {
     if (closed || machine.closePhaseActive) return "opened";
+    acceptingApplicationSubmissions = false;
     const settled = new Promise<void>((resolve) => {
       closeSettled = resolve;
     });
@@ -599,7 +640,10 @@ export function makeRelayE2eeClientChannel(
       if (position === undefined || declaration === undefined) return { kind: "degenerate" };
       return {
         kind: "send",
-        record: machine.buildClose({ sendPosition: position, expectedRecv: declaration }),
+        record: machine.buildClose({
+          sendPosition: position,
+          expectedRecv: declaration,
+        }),
       };
     });
     if (outcome === "refused") {
@@ -613,6 +657,7 @@ export function makeRelayE2eeClientChannel(
       // the next attempt replaces it, and a terminal path calling a resolver
       // whose promise nobody awaits is a no-op — while clearing a field a
       // concurrent attempt may already own would strand that attempt.
+      if (!closed && !machine.closePhaseActive) acceptingApplicationSubmissions = true;
       return "refused";
     }
     if (outcome === "transmitted") armCloseWait();
@@ -682,7 +727,11 @@ export function makeRelayE2eeClientChannel(
           // this client's own wire behavior and put a channel the peer terminated
           // next to a commitment mismatch the client caught itself. §11.3's table
           // enumerates no row for it, so it takes the documented escape.
-          diagnostic({ phase: "post_key", row: "local", verdict: machine.verdict });
+          diagnostic({
+            phase: "post_key",
+            row: "local",
+            verdict: machine.verdict,
+          });
           host.close(relayE2eeFailure("fatal_post_key"));
         }
         return REJECTED;
@@ -720,44 +769,73 @@ export function makeRelayE2eeClientChannel(
     });
   }
 
-  async function emit(message: Uint8Array): Promise<boolean> {
+  function submit(message: Uint8Array): boolean {
     if (closed) return false;
     // §10.2: no application RPC record after this endpoint's first
     // close-machine record — the keepalive `Ping` included, which is why the
     // gate is the machine's own and not a check for the close inner types. A
-    // `Ping` the close phase stalls is DISCARDED, not buffered.
-    if (!machine.mayProtectApplicationRecord) return false;
-    const outcome = await serializeSend(() => protectRecord(E2EE_INNER_TYPE_RPC, message));
-    if (outcome.kind === "protected") return true;
-    if (outcome.kind === "close_required") {
-      // §9.6: protecting this record would leave less than the post-application
-      // reserve. Nothing was consumed, and the endpoint MUST initiate §10's
-      // close no later than this point rather than protect it. The close is
-      // driven rather than awaited — this caller is owed only its `false` — so
-      // a throw escaping it has no caller to reach and takes the fail-closed
-      // teardown every other local defect takes.
-      void beginClose().catch(() => failLocal("fatal_post_key"));
+    // `Ping` the close phase stalls is refused synchronously, never buffered.
+    if (!acceptingApplicationSubmissions || !machine.mayProtectApplicationRecord) return false;
+    if (message.byteLength > budget.plaintextCeiling) return false;
+    const reservation = host.admit(E2EE_ENVELOPE_OVERHEAD_BYTES + message.byteLength);
+    if (reservation === undefined) return false;
+    if (closed || !acceptingApplicationSubmissions || !machine.mayProtectApplicationRecord) {
+      reservation.release();
       return false;
     }
-    if (outcome.kind === "unusable") {
-      // §11.3 Q10: no byte reached the relay, so no `E2EEError` may follow — it
-      // would itself create the sequence gap being avoided.
-      failLocal("send_path_unusable");
-      return false;
+
+    let plaintext: Uint8Array;
+    try {
+      plaintext = Uint8Array.from(message);
+    } catch (cause) {
+      reservation.release();
+      throw cause;
     }
-    // `refused` is §11.4 sender-local — `e2ee_message_too_large` or
-    // `e2ee_send_unavailable`: no pair consumed, no wire record, channel
-    // unaffected. Ordinary backpressure MUST NOT be escalated to channel-fatal.
-    // `unavailable` is the send path declining this record in this state, or an
-    // ambiguous delivery §9.3 leaves unattributed; neither is a condition this
-    // sender may resolve by closing the channel, so both refuse the message and
-    // leave the channel exactly as they found it.
-    return false;
+    try {
+      sources.testOnlyOnOwnedApplicationPlaintext?.(plaintext);
+    } catch (cause) {
+      plaintext.fill(0);
+      reservation.release();
+      throw cause;
+    }
+    const submission: PendingApplicationSubmission = {
+      plaintext,
+      reservation,
+      settled: false,
+    };
+    pendingApplicationSubmissions.add(submission);
+    void serializeSend(async () => {
+      try {
+        if (closed) return;
+        const outcome = await protectRecord(
+          E2EE_INNER_TYPE_RPC,
+          submission.plaintext,
+          submission.reservation,
+          E2EE_ENVELOPE_OVERHEAD_BYTES + submission.plaintext.byteLength,
+        );
+        if (outcome.kind === "protected") return;
+        if (outcome.kind === "close_required") {
+          // §9.6: the queue reservation consumed no nonce. The close is ordered
+          // after this declined application record in the same critical section.
+          void beginClose().catch(() => failLocal("fatal_post_key"));
+          return;
+        }
+        if (outcome.kind === "unusable") {
+          // §11.3 Q10: no byte reached the relay, so no `E2EEError` may follow.
+          failLocal("send_path_unusable");
+        }
+      } catch {
+        failLocal("fatal_post_key");
+      } finally {
+        settleApplicationSubmission(submission);
+      }
+    });
+    return true;
   }
 
   return {
     intercept,
-    emit,
+    submit,
     beginClose,
     dispose: (options = {}) => {
       // §10.4's channel-ended input reaches the machine whatever this channel's

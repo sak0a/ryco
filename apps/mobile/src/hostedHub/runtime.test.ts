@@ -14,6 +14,11 @@ const hoisted = vi.hoisted(() => ({
   bootstrap: vi.fn(async () => {}),
   calls: [] as string[],
   profileRaw: null as string | null,
+  trustRevision: 0,
+  trustListeners: new Set<() => void>(),
+  prepareCalls: 0,
+  disposeCalls: 0,
+  resetSessionCalls: 0,
 }));
 
 vi.mock("react-native", () => ({
@@ -52,8 +57,26 @@ vi.mock("../platform/e2eeTrustStore", () => ({
     },
     // The §4.4 attempt is re-resolved on every committed trust decision, so the
     // runtime subscribes to the document as well as to the selection.
-    revision: () => 0,
-    subscribe: () => () => undefined,
+    revision: () => hoisted.trustRevision,
+    subscribe: (listener: () => void) => {
+      hoisted.trustListeners.add(listener);
+      return () => hoisted.trustListeners.delete(listener);
+    },
+  },
+}));
+vi.mock("./e2eeAttempt", () => ({
+  disposeMobileRelayE2eeAttempt: () => {
+    hoisted.disposeCalls += 1;
+  },
+  prepareMobileRelayE2eeAttempt: () => {
+    hoisted.prepareCalls += 1;
+    return Promise.resolve();
+  },
+  resolveMobileRelayE2eeProvider: () => undefined,
+}));
+vi.mock("./e2eeSession", () => ({
+  resetMobileE2eeSession: () => {
+    hoisted.resetSessionCalls += 1;
   },
 }));
 vi.mock("../platform/sessionCredentials", () => ({
@@ -87,11 +110,13 @@ vi.mock("./nodeLifecycle", () => ({
 import {
   getHostedRuntimeConfiguration,
   hostedHubController,
+  hostedHubStore,
 } from "@ryco/client-runtime/authorization";
 
 import {
   configureMobileHostedRuntime,
   ensureMobileHostedSession,
+  invalidateMobileHostedRuntime,
   isMobileHostedModeAvailable,
   resetMobileHostedRuntimeForTests,
 } from "./runtime";
@@ -116,6 +141,11 @@ beforeEach(() => {
   resetMobileHostedRuntimeConfigForTests();
   hoisted.calls.length = 0;
   hoisted.profileRaw = null;
+  hoisted.trustRevision = 0;
+  hoisted.trustListeners.clear();
+  hoisted.prepareCalls = 0;
+  hoisted.disposeCalls = 0;
+  hoisted.resetSessionCalls = 0;
   vi.clearAllMocks();
   hoisted.hydrate.mockResolvedValue(undefined);
   hoisted.readMobileHostedConfig.mockReturnValue(HOSTED_CONFIG);
@@ -181,6 +211,69 @@ describe("hosted runtime configuration", () => {
 
     expect(getHostedRuntimeConfiguration()).toBe(first);
     expect(hoisted.createMobileDpopSigner).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["invalidate", "test-reset"] as const)(
+    "revokes the warm attempt on hosted runtime %s",
+    async (terminal) => {
+      await configureMobileHostedRuntime();
+      const disposals = hoisted.disposeCalls;
+
+      if (terminal === "invalidate") invalidateMobileHostedRuntime();
+      else resetMobileHostedRuntimeForTests();
+
+      // Production disposal revokes a pending borrow's lifetime; the attempt
+      // suite holds an actual read open across both disposal and test reset.
+      expect(hoisted.disposeCalls).toBe(disposals + 1);
+      expect(hoisted.resetSessionCalls).toBeGreaterThan(0);
+    },
+  );
+
+  it("watches structured selection snapshots without delimiter or sentinel collisions", async () => {
+    hostedHubStore.setState({
+      accountStatus: "signed-out",
+      account: null,
+      selectedNode: null,
+      generation: 0,
+    } as never);
+    await configureMobileHostedRuntime();
+    const prepareAtStart = hoisted.prepareCalls;
+
+    const account = (id: string) => ({ id }) as never;
+    const node = (id: string) => ({ id }) as never;
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: account("a\u0000b"),
+      selectedNode: node("c"),
+      generation: 1,
+    } as never);
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: account("a"),
+      selectedNode: node("b\u0000c"),
+      generation: 1,
+    } as never);
+    expect(hoisted.prepareCalls).toBe(prepareAtStart + 2);
+
+    // A repeated notification for the same primitive snapshot is deduplicated.
+    hostedHubStore.setState({ accountStatus: "authenticated" } as never);
+    expect(hoisted.prepareCalls).toBe(prepareAtStart + 2);
+
+    hostedHubStore.setState({ generation: 2 } as never);
+    expect(hoisted.prepareCalls).toBe(prepareAtStart + 3);
+
+    hoisted.trustRevision += 1;
+    for (const listener of hoisted.trustListeners) listener();
+    expect(hoisted.prepareCalls).toBe(prepareAtStart + 4);
+
+    hostedHubStore.setState({
+      accountStatus: "signed-out",
+      account: null,
+      selectedNode: null,
+    } as never);
+    const disposals = hoisted.disposeCalls;
+    hostedHubStore.setState({ account: account("") } as never);
+    expect(hoisted.disposeCalls).toBe(disposals + 1);
   });
 });
 

@@ -3,7 +3,11 @@ import {
   E2EE_PREKEY_LIFETIME,
   E2EE_PREKEY_ROTATION_OVERLAP,
 } from "@ryco/shared/relayE2eeConstants";
-import { e2eeKeyFingerprint, verifyE2eeSignature } from "@ryco/shared/relayE2eeKeys";
+import {
+  deriveE2eeAgreementPublicKey,
+  e2eeKeyFingerprint,
+  verifyE2eeSignature,
+} from "@ryco/shared/relayE2eeKeys";
 import { encodeClientE2eePrekeyTranscript } from "@ryco/shared/relayE2eeTranscripts";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -545,6 +549,93 @@ describe("custody failures", () => {
     expect(sign).not.toHaveBeenCalled();
   });
 
+  it("restores a valid public certificate without reading unavailable agreement custody", async () => {
+    const agreementStore = inMemoryStore();
+    const first = await harness({
+      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+    }).prekey.ensure(NAMESPACE);
+
+    restartApplication();
+    const lifecycle = { acquisitions: 0, active: 0, releases: 0 };
+    const reads = { count: 0 };
+    const unavailableStore: E2eeSecureStore = {
+      get: async () => {
+        reads.count += 1;
+        throw new Error("agreement store unavailable");
+      },
+      set: async () => {},
+      remove: async () => {},
+      destroy: async () => {},
+    };
+    const agreementKey = makeMobileE2eeAgreementKey(unavailableStore, {
+      acquired: () => {
+        lifecycle.acquisitions += 1;
+      },
+      borrowStarted: () => {
+        lifecycle.active += 1;
+      },
+      released: () => {
+        lifecycle.active -= 1;
+        lifecycle.releases += 1;
+      },
+    });
+    const restarted = harness({
+      agreementKey,
+      record: storedRecord(first),
+    });
+
+    const restored = await restarted.prekey.ensure(NAMESPACE);
+
+    expect([...restored.transcript]).toEqual([...first.transcript]);
+    expect(sign).not.toHaveBeenCalled();
+    expect(reads.count).toBe(0);
+    expect(lifecycle).toEqual({ acquisitions: 0, active: 0, releases: 0 });
+
+    await expect(agreementKey.withSecretKey(() => undefined)).rejects.toMatchObject({
+      code: "agreement_key_operation_failed",
+    });
+    expect(reads.count).toBe(1);
+    expect(lifecycle).toEqual({ acquisitions: 0, active: 0, releases: 0 });
+  });
+
+  it("restores a signed old public key but repairs it only after certificate removal", async () => {
+    const originalStore = inMemoryStore();
+    const original = await harness({
+      agreementKey: makeMobileE2eeAgreementKey(originalStore),
+    }).prekey.ensure(NAMESPACE);
+    const replacementStore = inMemoryStore();
+    const replacementKey = makeMobileE2eeAgreementKey(replacementStore);
+    const replacement = await replacementKey.generate();
+    expect([...replacement.publicKey]).not.toEqual([...original.agreementPublicKey]);
+
+    restartApplication();
+    const restarted = harness({
+      agreementKey: replacementKey,
+      record: storedRecord(original),
+    });
+
+    const restored = await restarted.prekey.ensure(NAMESPACE);
+
+    // Restore is deliberately public-only. The production handshake's K1
+    // secret/public self-check fails closed for this mismatch; it cannot turn
+    // key replacement into legacy eligibility.
+    expect([...restored.agreementPublicKey]).toEqual([...original.agreementPublicKey]);
+    await replacementKey.withSecretKey((secretKey) => {
+      expect([...deriveE2eeAgreementPublicKey(secretKey)]).not.toEqual([
+        ...restored.agreementPublicKey,
+      ]);
+    });
+    expect(sign).not.toHaveBeenCalled();
+
+    // Recovery is explicit: expiry follows the renewal path tested above, while
+    // re-enrollment removes this public certificate beside the replaced key.
+    // Only then may `ensure` issue a certificate for the replacement scalar.
+    restarted.items.delete(CLIENT_E2EE_PREKEY_RECORD_KEY);
+    const reissued = await restarted.prekey.ensure(NAMESPACE);
+    expect([...reissued.agreementPublicKey]).toEqual([...replacement.publicKey]);
+    expect(sign).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses its own certificate when the enclave signature does not verify", async () => {
     // The self-check is the check a node runs in §8.6, run here against this
     // device's own certificate: a `derSignatureToRaw` regression, a DER variant
@@ -561,31 +652,30 @@ describe("custody failures", () => {
     expect(items.has(CLIENT_E2EE_PREKEY_RECORD_KEY)).toBe(false);
   });
 
-  it("refuses on a runtime §14.5 condemns, even when the agreement key exists", async () => {
-    // The whole path, composed: a device that already holds an agreement key
-    // never reaches `generate` again, and every other step — the keychain read,
-    // the memoized enclave point, the canonical CBOR, the enclave signature —
-    // draws no randomness. §14.5 requires the refusal here rather than at the
-    // Noise ephemeral draw, where a silent no-op yields an all-zero ephemeral.
+  it("defers a restored certificate's §14.5 refusal to the K1 secret borrow", async () => {
+    // Restoring the signed public certificate draws no randomness and opens no
+    // agreement scalar. K1's one-operation borrow still runs §14.5 before the
+    // Noise handshake can use the key or draw its ephemeral.
     const agreementStore = inMemoryStore();
-    const first = await harness({
-      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
-    }).prekey.ensure(NAMESPACE);
+    const agreementKey = makeMobileE2eeAgreementKey(agreementStore);
+    const first = await harness({ agreementKey }).prekey.ensure(NAMESPACE);
 
     restartApplication();
     preflight.mockImplementation(() => {
       throw new Error("End-to-end encryption requires a cryptographic random source…");
     });
     const restarted = harness({
-      agreementKey: makeMobileE2eeAgreementKey(agreementStore),
+      agreementKey,
       record: storedRecord(first),
     });
 
-    const failure = await failureOf(restarted.prekey.ensure(NAMESPACE));
+    const restored = await restarted.prekey.ensure(NAMESPACE);
 
-    expect(failure).toBeInstanceOf(MobileClientE2eePrekeyError);
-    expect(failure?.code).toBe("e2ee_prekey_custody_failed");
+    expect([...restored.transcript]).toEqual([...first.transcript]);
     expect(sign).not.toHaveBeenCalled();
+    await expect(agreementKey.withSecretKey(() => undefined)).rejects.toMatchObject({
+      code: "agreement_key_runtime_unavailable",
+    });
   });
 
   it("refuses a namespace that cannot be represented in a §7.4 transcript", async () => {
