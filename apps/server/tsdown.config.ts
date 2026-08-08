@@ -5,6 +5,7 @@ const buildSourcemap = parseOptInSourcemapEnv(readEnv("RYCO_SERVER_SOURCEMAP"));
 
 export default defineConfig({
   entry: ["src/bin.ts"],
+  tsconfig: "tsconfig.build.json",
   format: ["esm", "cjs"],
   checks: {
     legacyCjs: false,
