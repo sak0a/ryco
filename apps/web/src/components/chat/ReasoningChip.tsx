@@ -27,7 +27,7 @@ const LEVEL_ABBREVIATION: Record<LevelKey, string> = {
   low: "Low",
   medium: "Med",
   high: "High",
-  xhigh: "XHi",
+  xhigh: "XHigh",
   max: "Max",
   ultra: "Ultra",
   ultracode: "UCode",
@@ -52,6 +52,19 @@ const LEVEL_TINT_CLASSES: Record<LevelKey, string> = {
     "bg-gradient-to-br from-pink-500/20 to-purple-500/25 text-fuchsia-700 ring-1 ring-fuchsia-500/25 dark:text-fuchsia-300",
 };
 
+const LEVEL_MENU_TEXT_CLASSES: Record<LevelKey, string> = {
+  none: "text-slate-600 dark:text-slate-300",
+  minimal: "text-slate-600 dark:text-slate-300",
+  low: "text-slate-600 dark:text-slate-300",
+  medium: "text-blue-600 dark:text-blue-300",
+  high: "text-indigo-600 dark:text-indigo-300",
+  xhigh: "text-violet-600 dark:text-violet-300",
+  max: "text-fuchsia-600 dark:text-fuchsia-300",
+  ultra: "text-fuchsia-600 dark:text-fuchsia-300",
+  ultracode: "text-rose-600 dark:text-rose-300",
+  ultrathink: "text-fuchsia-600 dark:text-fuchsia-300",
+};
+
 function getKnownLevel(value: string | undefined): LevelKey | undefined {
   if (
     value === "none" ||
@@ -68,6 +81,11 @@ function getKnownLevel(value: string | undefined): LevelKey | undefined {
     return value;
   }
   return undefined;
+}
+
+export function getReasoningLevelMenuClassName(value: string): string | undefined {
+  const level = getKnownLevel(value);
+  return level ? LEVEL_MENU_TEXT_CLASSES[level] : undefined;
 }
 
 export interface ReasoningChipProps {
@@ -143,6 +161,8 @@ export const ReasoningChip = memo(function ReasoningChip(props: ReasoningChipPro
             <MenuRadioItem
               key={option.id}
               value={option.id}
+              className={getReasoningLevelMenuClassName(option.id)}
+              data-reasoning-level={option.id}
               disabled={
                 props.ultrathinkInBodyText &&
                 props.descriptor.id === props.primarySelectDescriptorId

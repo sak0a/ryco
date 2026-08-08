@@ -60,6 +60,8 @@ export const runtimeModeOptions = Object.keys(runtimeModeConfig) as RuntimeMode[
  * selectable other than by its own deliberate activation.
  */
 export const CAUTION_RUNTIME_MODE: RuntimeMode = "full-access";
+export const CAUTION_RUNTIME_MODE_CLASS_NAME =
+  "text-orange-700 hover:text-orange-800 dark:text-orange-400 dark:hover:text-orange-300";
 
 export const interactionModeConfig: Record<
   ProviderInteractionMode,

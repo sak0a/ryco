@@ -10,10 +10,7 @@ import {
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import { DEFAULT_UNIFIED_SETTINGS, type GitStatusPollIntervalMs } from "@ryco/contracts/settings";
 import { Equal } from "effect";
-import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
-import aboutLogoBeta from "../../../../../assets/prod/favicon/favicon-96x96.png";
-import aboutLogoDev from "../../../../../assets/dev/favicon/favicon-96x96.png";
-import aboutLogoNightly from "../../../../../assets/nightly/favicon/favicon-96x96.png";
+import { APP_BASE_NAME, APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -55,6 +52,7 @@ import {
   SettingsSection,
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { RycoLetterMark } from "../RycoLetterMark";
 import { useServerAvailableEditors, useServerObservability } from "../../rpc/serverState";
 import { EDITOR_ICONS, getEditorLabel } from "./SettingsPanels.editor";
 
@@ -101,12 +99,6 @@ function AboutVersionTitle() {
 
 const REPOSITORY_URL = "https://github.com/sak0a/ryco";
 
-const ABOUT_LOGO_BY_STAGE = {
-  Beta: aboutLogoBeta,
-  Dev: aboutLogoDev,
-  Nightly: aboutLogoNightly,
-} as const;
-
 function openExternalLink(url: string) {
   void ensureLocalApi()
     .shell.openExternal(url)
@@ -122,10 +114,9 @@ function openExternalLink(url: string) {
 }
 
 function AboutBrandingHeader() {
-  const logoSrc = ABOUT_LOGO_BY_STAGE[APP_STAGE_LABEL] ?? aboutLogoBeta;
   return (
     <div className="flex flex-col items-center gap-2 px-4 pt-6 pb-5 text-center sm:px-5">
-      <img src={logoSrc} alt="" aria-hidden="true" className="size-14 rounded-xl shadow-sm" />
+      <RycoLetterMark className="h-14 text-foreground" />
       <h3 className="text-base font-semibold tracking-tight text-foreground">{APP_BASE_NAME}</h3>
       <div className="space-y-0.5 text-[11px] text-muted-foreground">
         <p>

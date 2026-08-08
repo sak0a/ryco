@@ -516,6 +516,7 @@ function LauncherCard(props: {
   icon: LucideIcon;
   shortcutLabel?: string | null;
   disabled?: boolean;
+  compact?: boolean;
   onClick?: () => void;
 }) {
   const Icon = props.icon;
@@ -524,8 +525,12 @@ function LauncherCard(props: {
       type="button"
       disabled={props.disabled}
       onClick={props.onClick}
+      data-slot="workspace-launcher-card"
       className={cn(
-        "group flex min-h-32 w-full flex-col items-center justify-center rounded-lg border border-border/50 bg-card/35 px-5 py-6 text-center transition-colors",
+        "group flex w-full flex-col items-center justify-center rounded-lg border border-border/50 bg-card/35 text-center transition-colors",
+        props.compact
+          ? "min-h-0 px-1 py-1 @sm/workspace-launcher:px-4 @sm/workspace-launcher:py-3"
+          : "min-h-32 px-5 py-6",
         props.disabled
           ? "cursor-not-allowed opacity-45"
           : "hover:border-border hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -533,14 +538,36 @@ function LauncherCard(props: {
     >
       <Icon
         className={cn(
-          "size-6 text-muted-foreground transition-colors",
+          "text-muted-foreground transition-colors",
+          props.compact ? "size-4 @sm/workspace-launcher:size-6" : "size-6",
           !props.disabled && "group-hover:text-foreground",
         )}
       />
-      <span className="mt-4 text-base font-semibold text-foreground">{props.label}</span>
-      <span className="mt-1 text-sm text-muted-foreground">{props.description}</span>
+      <span
+        className={cn(
+          "font-semibold text-foreground",
+          props.compact
+            ? "mt-1 text-xs @sm/workspace-launcher:mt-3 @sm/workspace-launcher:text-base"
+            : "mt-4 text-base",
+        )}
+      >
+        {props.label}
+      </span>
+      <span
+        className={cn(
+          "text-muted-foreground",
+          props.compact ? "mt-0.5 hidden text-xs @sm/workspace-launcher:block" : "mt-1 text-sm",
+        )}
+      >
+        {props.description}
+      </span>
       {props.shortcutLabel ? (
-        <span className="mt-3 rounded-md bg-muted px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground">
+        <span
+          className={cn(
+            "rounded-md bg-muted px-1.5 py-0.5 font-medium text-[11px] text-muted-foreground",
+            props.compact ? "mt-2 hidden @sm/workspace-launcher:inline-flex" : "mt-3",
+          )}
+        >
           {props.shortcutLabel}
         </span>
       ) : null}
@@ -554,6 +581,7 @@ function WorkspaceLauncher(props: {
   onSelectTab: (tab: WorkspaceTab) => void;
   /** The frozen phone tier has no Agents workspace (AGENTS.md). */
   showAgents: boolean;
+  isPhoneSurface: boolean;
 }) {
   const keybindings = useServerKeybindings();
   const filesTab: WorkspaceTab = { key: "files", label: "Files", mode: "files" };
@@ -573,83 +601,120 @@ function WorkspaceLauncher(props: {
     [keybindings],
   );
   const agentTabs = props.tabs.filter((tab) => tab.mode === "agent");
+  const compact = !props.isPhoneSurface;
+
+  const launcherCards = (
+    <>
+      <LauncherCard
+        label="Files"
+        description="Browse project files"
+        icon={FolderIcon}
+        shortcutLabel={filesShortcutLabel}
+        compact={compact}
+        onClick={() => props.onSelectTab(filesTab)}
+      />
+      <LauncherCard
+        label="Side chat"
+        description="Start a side conversation"
+        icon={MessageSquarePlusIcon}
+        compact={compact}
+        disabled
+      />
+      <LauncherCard
+        label="Browser"
+        description="Open a website"
+        icon={GlobeIcon}
+        compact={compact}
+        disabled
+      />
+      <LauncherCard
+        label="Review"
+        description="View code changes"
+        icon={GitCompareIcon}
+        shortcutLabel={reviewShortcutLabel}
+        compact={compact}
+        onClick={() => props.onSelectTab(reviewTab)}
+      />
+      <LauncherCard
+        label="Terminal"
+        description="Start an interactive shell"
+        icon={TerminalIcon}
+        shortcutLabel={terminalShortcutLabel}
+        compact={compact}
+        onClick={() => props.onSelectTab(terminalTab)}
+      />
+      {props.showAgents ? (
+        <LauncherCard
+          label="Agents"
+          description="Watch subagents and workflows run"
+          icon={BotIcon}
+          compact={compact}
+          onClick={() => props.onSelectTab(agentsTab)}
+        />
+      ) : null}
+    </>
+  );
+
+  const agentTabList =
+    agentTabs.length > 0 ? (
+      <div className="mx-auto w-full max-w-lg space-y-2 pt-1">
+        {agentTabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/50 bg-card/35 px-4 py-3 text-left transition-colors hover:border-border hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => props.onSelectTab(tab)}
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background/50 text-muted-foreground">
+              <SubagentAvatar name={tab.label} className="size-5" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span
+                className={cn(
+                  "block truncate text-sm font-medium",
+                  resolveSidebarStatusTextClassName(statusBucket(tab.status)),
+                )}
+                style={resolveSidebarStatusTextStyle(tab.label, { durationSeconds: 2.2 })}
+              >
+                {tab.label}
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {statusLabel(tab.status)}
+              </span>
+            </span>
+          </button>
+        ))}
+      </div>
+    ) : null;
 
   return (
     <ScrollArea className="h-full">
-      {/* Auto margins center the card stack like items-center/justify-center
-          did, but collapse to zero when the stack is taller than the pane —
-          so short phone viewports scroll from the first card instead of
-          clipping the overflow above the scroll start. */}
-      <div className="flex min-h-full p-5 sm:p-6">
-        <div className="m-auto w-full max-w-lg space-y-4">
-          <LauncherCard
-            label="Files"
-            description="Browse project files"
-            icon={FolderIcon}
-            shortcutLabel={filesShortcutLabel}
-            onClick={() => props.onSelectTab(filesTab)}
-          />
-          <LauncherCard
-            label="Side chat"
-            description="Start a side conversation"
-            icon={MessageSquarePlusIcon}
-            disabled
-          />
-          <LauncherCard label="Browser" description="Open a website" icon={GlobeIcon} disabled />
-          <LauncherCard
-            label="Review"
-            description="View code changes"
-            icon={GitCompareIcon}
-            shortcutLabel={reviewShortcutLabel}
-            onClick={() => props.onSelectTab(reviewTab)}
-          />
-          <LauncherCard
-            label="Terminal"
-            description="Start an interactive shell"
-            icon={TerminalIcon}
-            shortcutLabel={terminalShortcutLabel}
-            onClick={() => props.onSelectTab(terminalTab)}
-          />
-          {props.showAgents ? (
-            <LauncherCard
-              label="Agents"
-              description="Watch subagents and workflows run"
-              icon={BotIcon}
-              onClick={() => props.onSelectTab(agentsTab)}
-            />
-          ) : null}
-          {agentTabs.length > 0 ? (
-            <div className="space-y-2 pt-1">
-              {agentTabs.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border/50 bg-card/35 px-4 py-3 text-left transition-colors hover:border-border hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => props.onSelectTab(tab)}
-                >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background/50 text-muted-foreground">
-                    <SubagentAvatar name={tab.label} className="size-5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span
-                      className={cn(
-                        "block truncate text-sm font-medium",
-                        resolveSidebarStatusTextClassName(statusBucket(tab.status)),
-                      )}
-                      style={resolveSidebarStatusTextStyle(tab.label, { durationSeconds: 2.2 })}
-                    >
-                      {tab.label}
-                    </span>
-                    <span className="mt-0.5 block text-xs text-muted-foreground">
-                      {statusLabel(tab.status)}
-                    </span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : null}
+      {props.isPhoneSurface ? (
+        /* Auto margins center the card stack, but collapse when it is taller
+           than the pane so phone scrolling always starts at the first card. */
+        <div className="flex min-h-full p-5 sm:p-6">
+          <div className="m-auto w-full max-w-lg space-y-4">
+            {launcherCards}
+            {agentTabList}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div
+          className="flex h-full min-h-0 flex-col gap-3 p-4 sm:p-5"
+          data-slot="workspace-launcher"
+        >
+          <div className="@container/workspace-launcher flex min-h-0 flex-1 items-center justify-center">
+            <div
+              className="grid aspect-square grid-cols-2 grid-rows-3 gap-2 @sm/workspace-launcher:gap-3"
+              data-slot="workspace-launcher-grid"
+              style={{ inlineSize: "min(100cqw, 100cqh, 32rem)" }}
+            >
+              {launcherCards}
+            </div>
+          </div>
+          {agentTabList}
+        </div>
+      )}
     </ScrollArea>
   );
 }
@@ -1042,6 +1107,7 @@ export default function ThreadWorkspacePanel(props: {
             activeThread={activeThread}
             onSelectTab={selectTab}
             showAgents={!isPhoneSurface}
+            isPhoneSurface={isPhoneSurface}
           />
         )}
       </div>

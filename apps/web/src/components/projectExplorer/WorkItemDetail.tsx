@@ -82,7 +82,7 @@ import {
   SourceControlTimelineEntry,
   SourceControlTimelineNotice,
 } from "./SourceControlTimeline";
-import { StateBadge, type StateBadgeKind } from "./StateBadge";
+import { changeRequestStateKind, StateBadge, type StateBadgeKind } from "./StateBadge";
 import {
   filterWorkItemActivityEntries,
   isWorkItemTransitionActivity,
@@ -354,7 +354,7 @@ export function WorkItemDetail(props: WorkItemDetailProps) {
 
 type WorkItemLinkedChangeRequest = Pick<
   ChangeRequest,
-  "checkRollup" | "headSha" | "number" | "provider" | "state" | "title" | "url"
+  "checkRollup" | "headSha" | "isDraft" | "number" | "provider" | "state" | "title" | "url"
 >;
 
 function mergeLinkedChangeRequests(
@@ -382,6 +382,7 @@ function mergeLinkedChangeRequests(
       title: link.title,
       url: link.url,
       state: link.state,
+      ...(typeof link.isDraft === "boolean" ? { isDraft: link.isDraft } : {}),
       ...(link.headSha ? { headSha: link.headSha } : {}),
       ...(link.checkRollup ? { checkRollup: link.checkRollup } : {}),
     });
@@ -1121,8 +1122,11 @@ function LinkedPullRequestsSection(props: {
                     <span className="block truncate text-foreground text-xs">
                       #{pr.number} {pr.title}
                     </span>
-                    <span className="mt-1 flex items-center gap-1 text-muted-foreground text-[10px] capitalize">
-                      {pr.state}
+                    <span className="mt-1 flex items-center gap-1 text-[10px]">
+                      <StateBadge
+                        kind={changeRequestStateKind(pr.state, pr.isDraft)}
+                        className="h-4 px-1.5 text-[10px]"
+                      />
                       <PrCheckStatusBadge view={checkStatus} mode="compact" />
                     </span>
                   </button>

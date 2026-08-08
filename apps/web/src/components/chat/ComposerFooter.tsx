@@ -23,6 +23,8 @@ import { ContextWindowMeter } from "./ContextWindowMeter";
 import { PhoneSessionPolicyControl } from "./PhoneSessionPolicySheet";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import {
+  CAUTION_RUNTIME_MODE,
+  CAUTION_RUNTIME_MODE_CLASS_NAME,
   interactionModeConfig,
   interactionModeOptions,
   runtimeModeConfig,
@@ -234,8 +236,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
             "group/composer-label-control gap-1 px-1.5 font-medium sm:px-1.5",
             wideComposerControlsAutoCollapse &&
               "min-w-7 justify-center px-1 sm:px-1 [&_[data-slot=select-icon]]:hidden",
-            props.runtimeMode === "full-access" &&
-              "text-orange-700 hover:text-orange-800 dark:text-orange-400 dark:hover:text-orange-300",
+            props.runtimeMode === CAUTION_RUNTIME_MODE && CAUTION_RUNTIME_MODE_CLASS_NAME,
           )}
           aria-label={`Runtime mode: ${runtimeModeOption.triggerLabel}`}
           title={runtimeModeOption.description}
@@ -262,11 +263,28 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
                 onClick={closeRuntimeModeSelectAfterItemPress}
               >
                 <div className="grid min-w-0 gap-0.5">
-                  <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                    <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 font-medium text-foreground",
+                      mode === CAUTION_RUNTIME_MODE && CAUTION_RUNTIME_MODE_CLASS_NAME,
+                    )}
+                    data-runtime-mode-option-label={mode}
+                  >
+                    <OptionIcon
+                      className={cn(
+                        "size-3.5 shrink-0",
+                        mode !== CAUTION_RUNTIME_MODE && "text-muted-foreground",
+                      )}
+                    />
                     {option.label}
                   </span>
-                  <span className="text-muted-foreground text-xs leading-4">
+                  <span
+                    className={cn(
+                      "text-muted-foreground text-xs leading-4",
+                      mode === CAUTION_RUNTIME_MODE && CAUTION_RUNTIME_MODE_CLASS_NAME,
+                    )}
+                    data-runtime-mode-option-description={mode}
+                  >
                     {option.description}
                   </span>
                 </div>

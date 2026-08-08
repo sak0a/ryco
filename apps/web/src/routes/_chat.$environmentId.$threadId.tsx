@@ -1,7 +1,7 @@
-import { createFileRoute, retainSearchParams } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 
-import { parseRightPanelRouteSearch, type RightPanelRouteSearch } from "../rightPanelRouteSearch";
+import { parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
 import { resolveThreadRouteRef } from "../threadRoutes";
 
 const LazyChatThreadRouteView = lazy(() =>
@@ -25,17 +25,5 @@ function ChatThreadRouteLazyView() {
 
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
   validateSearch: (search) => parseRightPanelRouteSearch(search),
-  search: {
-    middlewares: [
-      retainSearchParams<RightPanelRouteSearch>([
-        "diff",
-        "preview",
-        "workspaceOpen",
-        "workspaceTab",
-        "workspaceAgentKey",
-        "messageId",
-      ]),
-    ],
-  },
   component: ChatThreadRouteLazyView,
 });

@@ -337,14 +337,11 @@
   --app-composer-alpha: 93%;
   --app-composer-dark-alpha: 92%;
   --app-composer-filter: blur(10px) saturate(158%);
-  /* Toasts share the composer's rationale: they float over arbitrary content,
-     so they keep a glass floor even at Solid — at popover weight, since they
-     are transient overlays. Steps above Solid thin with the popover plate.
-     The Solid caps stay high enough that muted body text keeps ~AA contrast
-     over a worst-case uniform backdrop; the blur carries the glass read. */
-  --app-toast-alpha: 92%;
-  --app-toast-dark-alpha: 88%;
-  --app-toast-filter: blur(20px) saturate(158%);
+  /* Toasts use the composer's liquid plate and frost, with semantic color
+     mixed in separately by toast type. */
+  --app-toast-alpha: 52%;
+  --app-toast-dark-alpha: 40%;
+  --app-toast-filter: blur(24px) saturate(185%);
   --app-dialog-viewport-light-alpha: 48%;
   --app-dialog-viewport-dark-alpha: 28%;
   --app-sheet-backdrop-alpha: 32%;
@@ -644,9 +641,44 @@ code {
      is floored below full opacity and the filter never resolves to `none`
      (same rationale as the composer's glass floor). */
   .app-toast-surface {
-    background-color: color-mix(in srgb, var(--popover) var(--app-toast-alpha), transparent);
+    background-color: color-mix(
+      in srgb,
+      var(--app-toast-tone, var(--popover)) var(--app-toast-tone-strength, 0%),
+      color-mix(in srgb, var(--popover) var(--app-toast-alpha), transparent)
+    );
+    border-color: color-mix(
+      in srgb,
+      var(--app-toast-tone, var(--border)) var(--app-toast-tone-border-strength, 0%),
+      var(--border)
+    );
     -webkit-backdrop-filter: var(--app-toast-filter);
     backdrop-filter: var(--app-toast-filter);
+  }
+
+  .app-toast-surface[data-type="success"] {
+    --app-toast-tone: var(--success);
+  }
+
+  .app-toast-surface[data-type="error"] {
+    --app-toast-tone: var(--destructive);
+  }
+
+  .app-toast-surface[data-type="warning"] {
+    --app-toast-tone: var(--warning);
+  }
+
+  .app-toast-surface[data-type="info"] {
+    --app-toast-tone: var(--info);
+  }
+
+  .app-toast-surface:is(
+    [data-type="success"],
+    [data-type="error"],
+    [data-type="warning"],
+    [data-type="info"]
+  ) {
+    --app-toast-tone-strength: 8%;
+    --app-toast-tone-border-strength: 32%;
   }
 
   /* `:where(.dark)` keeps this at (0,1,0) so the later forced-colors and
@@ -654,14 +686,22 @@ code {
      `.dark` prefix would pin dark mode to the translucent plate even under
      Windows High Contrast. */
   :where(.dark) .app-toast-surface {
-    background-color: color-mix(in srgb, var(--popover) var(--app-toast-dark-alpha), transparent);
+    background-color: color-mix(
+      in srgb,
+      var(--app-toast-tone, var(--popover)) var(--app-toast-tone-strength, 0%),
+      color-mix(in srgb, var(--popover) var(--app-toast-dark-alpha), transparent)
+    );
   }
 
   /* Without backdrop-filter support a thinned plate is haze, not frost;
      fall back to the opaque popover plate for legibility. */
   @supports not (backdrop-filter: blur(1px)) {
     .app-toast-surface {
-      background-color: var(--popover);
+      background-color: color-mix(
+        in srgb,
+        var(--app-toast-tone, var(--popover)) var(--app-toast-tone-strength, 0%),
+        var(--popover)
+      );
     }
   }
 
@@ -1005,9 +1045,17 @@ code {
   @media (prefers-reduced-transparency: reduce) {
     .app-surface,
     .app-toast-surface {
-      background-color: var(--popover);
+      background-color: color-mix(
+        in srgb,
+        var(--app-toast-tone, var(--popover)) var(--app-toast-tone-strength, 0%),
+        var(--popover)
+      );
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
+    }
+
+    .app-toast-surface > .liquid-glass-ring {
+      display: none;
     }
 
     .app-chrome-glass {
@@ -1072,6 +1120,14 @@ code {
       background: Canvas;
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
+    }
+
+    .app-toast-surface {
+      border-color: CanvasText;
+    }
+
+    .app-toast-surface > .liquid-glass-ring {
+      display: none;
     }
 
     .selection-glass-surface {

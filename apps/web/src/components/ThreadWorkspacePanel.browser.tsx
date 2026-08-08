@@ -74,6 +74,46 @@ describe("ThreadWorkspacePanel", () => {
     ).toBeLessThanOrEqual(1);
   });
 
+  it("keeps all desktop launcher cards inside a narrow, short workspace", async () => {
+    const host = document.createElement("div");
+    host.style.width = "340px";
+    host.style.height = "420px";
+    host.style.display = "flex";
+    document.body.append(host);
+
+    mounted = await render(
+      <ThreadWorkspacePanel
+        mode="sidebar"
+        panelMode={null}
+        openedPanelModes={[]}
+        openedAgentKeys={[]}
+        onClosePanelTab={vi.fn()}
+      />,
+      { container: host },
+    );
+
+    const launcher = document.querySelector<HTMLElement>('[data-slot="workspace-launcher"]');
+    const grid = document.querySelector<HTMLElement>('[data-slot="workspace-launcher-grid"]');
+    const cards = [
+      ...document.querySelectorAll<HTMLElement>('[data-slot="workspace-launcher-card"]'),
+    ];
+
+    expect(launcher).not.toBeNull();
+    expect(grid).not.toBeNull();
+    expect(cards).toHaveLength(6);
+
+    const launcherRect = launcher!.getBoundingClientRect();
+    const gridRect = grid!.getBoundingClientRect();
+    expect(Math.abs(gridRect.width - gridRect.height)).toBeLessThanOrEqual(1);
+    for (const card of cards) {
+      const rect = card.getBoundingClientRect();
+      expect(rect.left).toBeGreaterThanOrEqual(launcherRect.left - 0.5);
+      expect(rect.top).toBeGreaterThanOrEqual(launcherRect.top - 0.5);
+      expect(rect.right).toBeLessThanOrEqual(launcherRect.right + 0.5);
+      expect(rect.bottom).toBeLessThanOrEqual(launcherRect.bottom + 0.5);
+    }
+  });
+
   it("renders the phone surface bar with a back affordance and 44px tab targets", async () => {
     const host = document.createElement("div");
     host.style.width = "390px";

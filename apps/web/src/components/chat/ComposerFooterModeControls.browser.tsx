@@ -78,6 +78,32 @@ describe("ComposerFooterModeControls", () => {
     expect(document.querySelector('[data-slot="separator"]')).toBeNull();
   });
 
+  it("matches the Full access dropdown label and icon to the composer caution color", async () => {
+    mounted = await render(<ComposerFooterModeControls {...baseProps} />);
+
+    await page.getByLabelText("Runtime mode: Full access").click();
+    const label = await vi.waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        '[data-runtime-mode-option-label="full-access"]',
+      );
+      expect(element).not.toBeNull();
+      return element!;
+    });
+    const icon = label.querySelector<SVGElement>("svg");
+    const description = document.querySelector<HTMLElement>(
+      '[data-runtime-mode-option-description="full-access"]',
+    );
+
+    expect(label.className).toContain("text-orange-700");
+    expect(label.className).toContain("dark:text-orange-400");
+    expect(icon).not.toBeNull();
+    expect(icon!.classList.contains("text-muted-foreground")).toBe(false);
+    expect(getComputedStyle(icon!).color).toBe(getComputedStyle(label).color);
+    expect(description).not.toBeNull();
+    expect(description!.className).toContain("text-orange-700");
+    expect(getComputedStyle(description!).color).toBe(getComputedStyle(label).color);
+  });
+
   it("always renders the token mode control as icon + label when auto-collapse is off", async () => {
     useUiStateStore.getState().setWideComposerControlsAutoCollapse(false);
 

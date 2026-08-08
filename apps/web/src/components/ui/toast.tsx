@@ -96,14 +96,25 @@ function errorDescriptionClampClass(type: unknown, description: unknown): string
 
 /** Dismiss-only: circular control overlapping the card corner (iOS notification–style). */
 const toastCornerDismissClass = "absolute z-20 -top-1.5 -right-1.5";
+const toastInteractionRegionClass = "[-webkit-app-region:no-drag]";
 const toastCornerOrbClass = cn(
+  toastInteractionRegionClass,
   // No `backdrop-blur-*` utility here: it would out-cascade the
   // `app-toast-surface` filter (utilities layer wins) and defeat the
   // reduced-transparency / forced-colors overrides with it.
-  "app-toast-surface inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border/60 text-muted-foreground shadow-sm outline-none",
+  "app-toast-surface relative inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border text-muted-foreground shadow-sm outline-none",
   "transition-[color,background-color,box-shadow] hover:text-foreground",
   "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
 );
+
+function ToastLiquidGlassRings() {
+  return (
+    <>
+      <span aria-hidden="true" className="liquid-glass-ring" />
+      <span aria-hidden="true" className="liquid-glass-ring liquid-glass-ring--overlay" />
+    </>
+  );
+}
 
 function handleToastDismissClick(
   manager: typeof toastManager | typeof anchoredToastManager,
@@ -563,6 +574,7 @@ function Toasts({ position = "top-center" }: { position: ToastPosition }) {
           return (
             <Toast.Root
               className={cn(
+                toastInteractionRegionClass,
                 // The snappy spring drives the transform so a new toast drops in
                 // and settles with a slight overshoot; opacity fades on the pop
                 // duration so entrance and exit read as material, not a slide.
@@ -626,6 +638,7 @@ function Toasts({ position = "top-center" }: { position: ToastPosition }) {
                 "data-expanded:data-ending-style:data-[swipe-direction=down]:transform-[translateY(calc(var(--toast-swipe-movement-y)+100%+var(--toast-inset)))]",
               )}
               data-position={position}
+              data-slot="toast-root"
               key={toast.id}
               style={
                 {
@@ -642,6 +655,7 @@ function Toasts({ position = "top-center" }: { position: ToastPosition }) {
               }
               toast={toast}
             >
+              <ToastLiquidGlassRings />
               <ThreadToastVisibleAutoDismiss
                 dismissAfterVisibleMs={toast.data?.dismissAfterVisibleMs}
                 toastId={toast.id}
@@ -656,6 +670,7 @@ function Toasts({ position = "top-center" }: { position: ToastPosition }) {
                   }
                   type="button"
                 >
+                  <ToastLiquidGlassRings />
                   <XIcon className="size-3" strokeWidth={2.25} />
                 </button>
               </div>
@@ -725,6 +740,7 @@ function AnchoredToasts() {
               >
                 <Toast.Root
                   className={cn(
+                    toastInteractionRegionClass,
                     "app-toast-surface relative overflow-visible text-balance border not-dark:bg-clip-padding text-popover-foreground text-xs transition-[scale,opacity] duration-(--app-motion-duration-pop) before:pointer-events-none before:absolute before:inset-0 before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",
                     tooltipStyle
                       ? "rounded-md shadow-md/5 before:rounded-[calc(var(--radius-md)-1px)]"
@@ -733,6 +749,7 @@ function AnchoredToasts() {
                   data-slot="toast-popup"
                   toast={toast}
                 >
+                  <ToastLiquidGlassRings />
                   {tooltipStyle ? (
                     <Toast.Content className="pointer-events-auto px-2 py-1">
                       <Toast.Title data-slot="toast-title" />
@@ -753,6 +770,7 @@ function AnchoredToasts() {
                           }
                           type="button"
                         >
+                          <ToastLiquidGlassRings />
                           <XIcon className="size-3" strokeWidth={2.25} />
                         </button>
                       </div>

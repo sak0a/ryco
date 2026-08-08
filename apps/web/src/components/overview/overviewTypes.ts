@@ -38,6 +38,7 @@ export interface OverviewPullRequestState {
   title?: string;
   url?: string;
   state?: string;
+  isDraft?: boolean;
   commentsCount?: number;
   /** Count of reviewers who have approved (from change-request participants). */
   reviewsApproved?: number;

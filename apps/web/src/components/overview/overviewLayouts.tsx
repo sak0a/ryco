@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "~/lib/utils";
+import { changeRequestStateKind, StateBadge } from "../projectExplorer/StateBadge";
 
 import type { PanelLayout } from "../../themes/appearancePreferences";
 import {
@@ -166,7 +167,7 @@ function buildSections(
       summary: summary.hasDiff ? (
         <DiffStat additions={summary.additions} deletions={summary.deletions} />
       ) : undefined,
-      defaultOpen: true,
+      defaultOpen: false,
       body: (
         <ChangesContent
           changes={props.changes}
@@ -514,7 +515,6 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
               ) : null}
             </>
           }
-          defaultOpen
         >
           <ChangesContent
             changes={props.changes}
@@ -606,7 +606,9 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
           summary={
             <>
               {props.pullRequest.state ? (
-                <OverviewBadge tone="success">{props.pullRequest.state}</OverviewBadge>
+                <StateBadge
+                  kind={changeRequestStateKind(props.pullRequest.state, props.pullRequest.isDraft)}
+                />
               ) : null}
               {props.pullRequest.hasMergeConflicts ? (
                 <OverviewBadge tone="error">conflict</OverviewBadge>

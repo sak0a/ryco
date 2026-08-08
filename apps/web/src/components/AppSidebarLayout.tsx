@@ -144,11 +144,15 @@ function CollapsedAppSidebarChrome({ sidebarOpen }: { sidebarOpen: boolean }) {
   return (
     <div
       aria-hidden={sidebarOpen ? true : undefined}
+      data-slot="collapsed-app-sidebar-chrome"
       inert={sidebarOpen ? true : undefined}
       className={cn(
         // The row itself is click-through so it never shadows the header
         // beneath it; only the controls take pointer events.
-        "pointer-events-none fixed top-0 z-50 flex items-center gap-0.5 phone:hidden",
+        // Electron hit-tests app drag regions independently of DOM pointer
+        // events. This sibling overlay therefore needs its own no-drag
+        // boundary or the title bar beneath it swallows the controls' clicks.
+        "pointer-events-none fixed top-0 z-50 flex items-center gap-0.5 [-webkit-app-region:no-drag] phone:hidden",
         "transition-opacity ease-linear motion-reduce:transition-none",
         // Expanding holds the row at full opacity for the first half of the
         // sidebar's 200ms slide, then fades it out just as the sidebar's own

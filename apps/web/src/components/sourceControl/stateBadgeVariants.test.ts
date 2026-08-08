@@ -7,7 +7,10 @@ import {
   GitPullRequestIcon,
   XCircleIcon,
 } from "lucide-react";
-import { resolveStateBadgeVariant } from "./stateBadgeVariants";
+import {
+  resolveChangeRequestStateBadgeVariant,
+  resolveStateBadgeVariant,
+} from "./stateBadgeVariants";
 
 describe("resolveStateBadgeVariant", () => {
   it("returns issue-open for an open issue", () => {
@@ -68,5 +71,20 @@ describe("resolveStateBadgeVariant", () => {
     expect(variant.Icon).toBe(GitPullRequestIcon);
     expect(variant.tone).toBe("blue");
     expect(variant.label).toBeNull();
+  });
+
+  it("keeps one text palette for every pull-request state", () => {
+    expect(resolveChangeRequestStateBadgeVariant("open").textClassName).toBe(
+      "text-emerald-700 dark:text-emerald-300",
+    );
+    expect(resolveChangeRequestStateBadgeVariant("open", true).textClassName).toBe(
+      "text-zinc-700 dark:text-zinc-300",
+    );
+    expect(resolveChangeRequestStateBadgeVariant("merged").textClassName).toBe(
+      "text-violet-700 dark:text-violet-300",
+    );
+    expect(resolveChangeRequestStateBadgeVariant("closed").textClassName).toBe(
+      "text-rose-700 dark:text-rose-300",
+    );
   });
 });

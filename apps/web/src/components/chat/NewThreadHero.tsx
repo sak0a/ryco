@@ -2,10 +2,10 @@ import type { EnvironmentId, ProjectId } from "@ryco/contracts";
 import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { BRANDED_APP_LOGO_SRC } from "../../brandedLogo";
 import type { DraftId } from "../../composerDraftStore";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { ProjectSwitcher } from "../ProjectSwitcher";
+import { RycoLetterMark } from "../RycoLetterMark";
 import { canSwitchNewThreadProject, resolveNewThreadHeadline } from "./NewThreadHero.logic";
 
 export interface NewThreadHeroProps {
@@ -51,12 +51,7 @@ export function NewThreadHero({
       className="flex shrink-0 flex-col items-center gap-4 px-6 pb-6 sm:gap-5 sm:pb-8"
       data-testid="new-thread-hero"
     >
-      <img
-        alt=""
-        aria-hidden
-        className="size-10 shrink-0 object-contain sm:size-12"
-        src={BRANDED_APP_LOGO_SRC}
-      />
+      <RycoLetterMark className="h-10 text-foreground sm:h-12" />
       <h1 className="max-w-208 text-balance text-center font-medium text-2xl text-foreground tracking-tight sm:text-3xl">
         {headline.projectName === null ? (
           headline.text

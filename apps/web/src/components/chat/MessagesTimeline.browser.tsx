@@ -196,6 +196,7 @@ describe("MessagesTimeline", () => {
     useUiStateStore.setState({
       threadTurnFoldExpandedById: {},
       threadWorkGroupExpandedById: {},
+      threadWorkEntryExpandedById: {},
     });
     document.body.innerHTML = "";
   });
@@ -797,6 +798,49 @@ describe("MessagesTimeline", () => {
       await expect.element(page.getByText("app.ts")).toBeVisible();
       await expect.element(page.getByText("router.ts")).toBeVisible();
       await expect.element(page.getByText("styles.css")).toBeVisible();
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("keeps failed commands collapsed with only a red failure icon", async () => {
+    const screen = await render(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "failed-command-entry",
+            kind: "work",
+            createdAt: "2026-04-13T12:00:00.000Z",
+            entry: {
+              id: "failed-command",
+              createdAt: "2026-04-13T12:00:00.000Z",
+              label: "Command",
+              command: "bun run missing-script",
+              output: "error: Script not found",
+              exitCode: 1,
+              completed: true,
+              tone: "tool",
+            },
+          },
+        ]}
+      />,
+    );
+
+    try {
+      const row = document.querySelector<HTMLElement>("[data-tool-entry-kind='expandable']");
+      const icon = row?.querySelector<HTMLElement>("[data-work-entry-icon='true']");
+      const label = row?.querySelector<HTMLElement>("[data-work-entry-display-text='true']");
+
+      expect(row).not.toBeNull();
+      expect(row!.getAttribute("aria-expanded")).toBe("false");
+      expect(icon?.querySelector(".lucide-circle-alert")).not.toBeNull();
+      expect(icon?.className).toContain("text-destructive-foreground");
+      expect(label?.className).not.toContain("text-destructive-foreground");
+      await expect.element(page.getByText("error: Script not found")).not.toBeInTheDocument();
+
+      await row!.click();
+      await expect.element(page.getByText("error: Script not found")).toBeVisible();
     } finally {
       await screen.unmount();
     }

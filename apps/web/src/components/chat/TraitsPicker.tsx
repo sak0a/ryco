@@ -29,6 +29,7 @@ import {
 import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { applyDescriptorSelection, replaceDescriptorCurrentValue } from "./traitsMenuLogic";
+import { getReasoningLevelMenuClassName } from "./ReasoningChip";
 import { boundedDisabledReason } from "~/lib/boundedReason";
 import { cn } from "~/lib/utils";
 
@@ -313,6 +314,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                 <MenuRadioItem
                   key={option.id}
                   value={option.id}
+                  className={
+                    descriptor.id === primarySelectDescriptor?.id
+                      ? getReasoningLevelMenuClassName(option.id)
+                      : undefined
+                  }
+                  data-reasoning-level={
+                    descriptor.id === primarySelectDescriptor?.id ? option.id : undefined
+                  }
                   disabled={
                     disabled ||
                     (ultrathinkInBodyText && descriptor.id === primarySelectDescriptor?.id)

@@ -12,6 +12,7 @@ import { useAppSidebarCollapsed } from "../../hooks/useAppSidebarCollapsed";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useRightPanelMaximized } from "../../hooks/useRightPanelMaximized";
+import { useThreadRightPanelRouteState } from "../../hooks/useThreadRightPanelRouteState";
 import { useSettings } from "../../hooks/useSettings";
 import { usePerfMark } from "../../perf/tabSwitchInstrumentation";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
@@ -52,6 +53,26 @@ export function ChatThreadRouteView({
 }) {
   usePerfMark("ChatThreadRouteView");
   const navigate = useNavigate();
+  const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
+  const replaceThreadRightPanelSearch = useCallback(
+    (nextSearch: RightPanelRouteSearch) => {
+      if (!threadRef) {
+        return;
+      }
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(threadRef),
+        replace: true,
+        search: nextSearch,
+      });
+    },
+    [navigate, threadRef],
+  );
+  const threadSearch = useThreadRightPanelRouteState({
+    threadKey: currentThreadKey,
+    search,
+    replaceSearch: replaceThreadRightPanelSearch,
+  });
   const bootstrapComplete = useStore(
     (store) => selectEnvironmentState(store, threadRef?.environmentId ?? null).bootstrapComplete,
   );
@@ -77,16 +98,17 @@ export function ChatThreadRouteView({
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
-  const diffOpen = search.diff === "1";
-  const previewOpen = search.preview === "1";
-  const rightPanelMode: RightPanelMode | null = getRightPanelMode(search);
-  const rightPanelOpen = isRightPanelOpen(search);
+  const diffOpen = threadSearch.diff === "1";
+  const previewOpen = threadSearch.preview === "1";
+  const rightPanelMode: RightPanelMode | null = getRightPanelMode(threadSearch);
+  const rightPanelOpen = isRightPanelOpen(threadSearch);
   const activeAgentKey =
-    search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
+    threadSearch.workspaceTab === "agent" && threadSearch.workspaceAgentKey
+      ? threadSearch.workspaceAgentKey
+      : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const presentationTier = usePresentationTier();
   const appSidebarCollapsed = useAppSidebarCollapsed();
-  const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
   // Maximizing only means anything for the inline split — the sheet and the
   // phone work surface already cover the viewport.
   const { maximized: rightPanelMaximized, toggleMaximized: toggleRightPanelMaximized } =

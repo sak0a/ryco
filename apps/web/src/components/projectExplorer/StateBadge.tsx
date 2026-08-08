@@ -3,6 +3,7 @@ import { cn } from "~/lib/utils";
 import { resolveStateBadgeVariant, type StateBadgeKind } from "../sourceControl/stateBadgeVariants";
 
 export type { StateBadgeKind } from "../sourceControl/stateBadgeVariants";
+export { changeRequestStateKind } from "../sourceControl/stateBadgeVariants";
 
 export const StateBadge = memo(function StateBadge(props: {
   kind: StateBadgeKind;
@@ -70,13 +71,4 @@ function variantByKind(kind: StateBadgeKind) {
 
 function labelFallback(kind: StateBadgeKind): string {
   return kind.startsWith("issue") ? "Issue" : "PR";
-}
-
-export function changeRequestStateKind(
-  state: "open" | "closed" | "merged",
-  isDraft?: boolean,
-): StateBadgeKind {
-  if (state === "merged") return "pr-merged";
-  if (state === "closed") return "pr-closed";
-  return isDraft ? "pr-draft" : "pr-open";
 }

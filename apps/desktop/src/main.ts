@@ -2662,7 +2662,7 @@ function getIconOption(): { icon: string } | Record<string, never> {
 }
 
 function getInitialWindowBackgroundColor(): string {
-  return nativeTheme.shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+  return nativeTheme.shouldUseDarkColors ? "#0b0b0c" : "#ffffff";
 }
 
 function getWindowTitleBarOptions(): WindowTitleBarOptions {

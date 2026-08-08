@@ -2037,6 +2037,7 @@ function isFileReadToolEntry(workEntry: TimelineWorkEntry): boolean {
 }
 
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
+  if (isErroredWorkEntry(workEntry)) return CircleAlertIcon;
   if (workEntry.requestKind === "command") return commandWorkEntryIcon(workEntry);
   if (workEntry.requestKind === "file-read") return SearchIcon;
   if (workEntry.requestKind === "file-change") return PencilIcon;
@@ -2161,6 +2162,7 @@ const WorkEntryRowContent = memo(function WorkEntryRowContent(props: {
   workspaceRoot: string | undefined;
 }) {
   const { workEntry, workspaceRoot } = props;
+  const isErrored = isErroredWorkEntry(workEntry);
   const EntryIcon = workEntryIcon(workEntry);
   const heading = toolWorkEntryHeading(workEntry);
   const preview = workEntryPreview(workEntry, workspaceRoot);
@@ -2177,7 +2179,12 @@ const WorkEntryRowContent = memo(function WorkEntryRowContent(props: {
   return (
     <>
       <span
-        className={cn("flex size-5 items-center justify-center", WORK_ROW_TONE_CLASS_NAME)}
+        className={cn(
+          "flex size-5 items-center justify-center",
+          WORK_ROW_TONE_CLASS_NAME,
+          isErrored &&
+            "text-destructive-foreground group-hover/tool-row:text-destructive-foreground group-focus-visible/tool-row:text-destructive-foreground",
+        )}
         data-work-entry-icon="true"
       >
         <EntryIcon className="size-3.5" />
@@ -2354,7 +2361,7 @@ const ExpandableWorkEntryRow = memo(function ExpandableWorkEntryRow(props: {
     (store) => store.threadWorkEntryExpandedById[routeThreadKey]?.[workEntry.id],
   );
   const setExpanded = useUiStateStore((store) => store.setThreadWorkEntryExpanded);
-  const isOpen = stored ?? isErroredWorkEntry(workEntry);
+  const isOpen = stored ?? false;
   const panelId = workEntryExpandPanelId(workEntry.id);
   const heading = toolWorkEntryHeading(workEntry);
   // The panel animates open/closed via a grid-row transition, so its children

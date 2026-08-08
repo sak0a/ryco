@@ -1,4 +1,5 @@
 import type {
+  ChangeRequestState,
   EnvironmentId,
   ScopedThreadRef,
   SourceControlWorkflowRunListResult,
@@ -167,7 +168,8 @@ export interface ChatOverviewPanelProps {
   activeWorktreeBranch: string | null;
   activeThreadBranch: string | null;
   activeWorktreePrNumber: number | null;
-  activeWorktreePrState: string | null | undefined;
+  activeWorktreePrState: ChangeRequestState | null | undefined;
+  activeWorktreePrIsDraft: boolean | null | undefined;
   activeWorktreeTitle: string | null | undefined;
   activeThreadKey: string | null;
   activeEnvironmentUnavailableState: {
@@ -341,6 +343,7 @@ export function ChatOverviewPanel(
     activeThreadBranch,
     activeWorktreePrNumber,
     activeWorktreePrState,
+    activeWorktreePrIsDraft,
     activeWorktreeTitle,
     postPushWorkflowWatch,
     activeThreadKey,
@@ -637,6 +640,7 @@ export function ChatOverviewPanel(
     const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
     const pullRequestState =
       detail?.state ?? activeWorktreePrState ?? gitPr?.state ?? branchPr?.state ?? null;
+    const pullRequestIsDraft = detail?.isDraft ?? activeWorktreePrIsDraft ?? branchPr?.isDraft;
     const reviewsApproved = detail?.participants
       ? detail.participants.filter((participant) => participant.approved === true).length
       : undefined;
@@ -652,6 +656,7 @@ export function ChatOverviewPanel(
         `Pull request #${overviewPullRequestNumber}`,
       ...(pullRequestUrl ? { url: pullRequestUrl } : {}),
       ...(pullRequestState ? { state: pullRequestState } : {}),
+      ...(typeof pullRequestIsDraft === "boolean" ? { isDraft: pullRequestIsDraft } : {}),
       ...(typeof detail?.commentsCount === "number"
         ? { commentsCount: detail.commentsCount }
         : detail
@@ -672,6 +677,7 @@ export function ChatOverviewPanel(
     };
   }, [
     activeWorktreePrState,
+    activeWorktreePrIsDraft,
     activeWorktreeTitle,
     checksErrorInfo,
     gitStatusQuery.data?.pr,

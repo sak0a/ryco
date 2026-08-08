@@ -18,7 +18,6 @@ import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { type DraftId } from "../../composerDraftStore";
 import type { SidebarThreadSummary } from "../../types";
 import {
-  ChangeRequestStatusIcon,
   prStatusIndicator,
   resolveThreadPr,
   terminalStatusFromRunningIds,
@@ -178,6 +177,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
   });
   const pr = gitStatus ? resolveThreadPr(thread.branch, gitStatus.data) : null;
   const prStatus = prStatusIndicator(pr, gitStatus?.data?.sourceControlProvider);
+  const PrStatusIcon = prStatus?.Icon;
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const canArchiveThread = !draftId && canArchiveSidebarThread(thread);
@@ -426,7 +426,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
         onContextMenu={handleRowContextMenu}
       >
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
-          {prStatus && (
+          {prStatus && PrStatusIcon && (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -436,7 +436,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
                     className={`inline-flex items-center justify-center ${prStatus.colorClass} cursor-pointer rounded-sm outline-hidden focus-visible:ring-1 focus-visible:ring-ring`}
                     onClick={handlePrClick}
                   >
-                    <ChangeRequestStatusIcon className="size-3" />
+                    <PrStatusIcon className="size-3" />
                   </button>
                 }
               />
