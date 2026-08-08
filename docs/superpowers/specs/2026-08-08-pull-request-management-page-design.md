@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-08
 
-**Status:** Design approved; written specification awaiting review
+**Status:** Approved
 
 **Scope:** Canonical read-only pull request domain and full-page desktop inbox
 
