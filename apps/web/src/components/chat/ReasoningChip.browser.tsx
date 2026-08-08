@@ -73,6 +73,19 @@ describe("ReasoningChip", () => {
       />,
     );
     await page.getByLabelText(/reasoning/i).click();
+    await vi.waitFor(() => {
+      const low = document.querySelector<HTMLElement>('[data-reasoning-level="low"]');
+      const medium = document.querySelector<HTMLElement>('[data-reasoning-level="medium"]');
+      const high = document.querySelector<HTMLElement>('[data-reasoning-level="high"]');
+      const ultrathink = document.querySelector<HTMLElement>('[data-reasoning-level="ultrathink"]');
+      expect(low?.className).toContain("text-slate-600");
+      expect(medium?.className).toContain("text-blue-600");
+      expect(high?.className).toContain("text-indigo-600");
+      expect(ultrathink?.className).toContain("text-fuchsia-600");
+      expect(
+        new Set([low, medium, high, ultrathink].map((item) => getComputedStyle(item!).color)).size,
+      ).toBe(4);
+    });
     await page.getByText("Low").click();
     expect(onChangeDescriptors).toHaveBeenCalledOnce();
     const [next] = onChangeDescriptors.mock.calls[0]!;
