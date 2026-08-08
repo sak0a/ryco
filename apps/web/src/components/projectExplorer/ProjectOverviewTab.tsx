@@ -25,6 +25,7 @@ import { workItemStateLabel } from "~/lib/workItemState";
 import { cn } from "~/lib/utils";
 import { AtlassianJiraIcon } from "../Icons";
 import { Button } from "../ui/button";
+import { changeRequestStateKind, StateBadge } from "./StateBadge";
 
 const OVERVIEW_LIST_LIMIT = 20;
 const OVERVIEW_VISIBLE_LIMIT = 5;
@@ -118,7 +119,7 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
           label="Open pull requests"
           value={formatProjectOverviewCount(pullRequests.length)}
           icon={<GitPullRequestIcon className="size-3.5" />}
-          accentClassName="border-blue-500/18 bg-blue-500/8 text-blue-600 dark:text-blue-300"
+          accentClassName="border-emerald-500/18 bg-emerald-500/8 text-emerald-600 dark:text-emerald-300"
           onClick={() => props.onOpenTab("prs")}
         />
         <OverviewMetric
@@ -172,7 +173,7 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
           isLoading={pullRequestListQuery.isLoading}
           items={pullRequests.slice(0, OVERVIEW_VISIBLE_LIMIT)}
           icon={<GitPullRequestIcon className="size-4" />}
-          accentClassName="text-blue-600 dark:text-blue-300"
+          accentClassName="text-emerald-600 dark:text-emerald-300"
           onOpenTab={() => props.onOpenTab("prs")}
           keyForItem={(pullRequest) => `${pullRequest.provider}:${pullRequest.number}`}
           renderItem={(pullRequest) => (
@@ -183,9 +184,10 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
             >
               <span className="shrink-0 text-muted-foreground text-xs">#{pullRequest.number}</span>
               <span className="min-w-0 flex-1 truncate text-sm">{pullRequest.title}</span>
-              <span className="shrink-0 text-[11px] text-muted-foreground">
-                {pullRequest.isDraft ? "draft" : pullRequest.state}
-              </span>
+              <StateBadge
+                kind={changeRequestStateKind(pullRequest.state, pullRequest.isDraft)}
+                className="shrink-0"
+              />
             </button>
           )}
         />

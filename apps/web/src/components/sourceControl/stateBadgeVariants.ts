@@ -30,35 +30,42 @@ export interface StateBadgeVariant {
   readonly badgeClassName: string;
   /** Tailwind classes for the compact sidebar chip. */
   readonly compactClassName: string;
+  /** Tailwind classes for state-colored text or standalone icons. */
+  readonly textClassName: string;
 }
 
-const tones: Record<StateBadgeTone, { badge: string; compact: string }> = {
+const tones: Record<StateBadgeTone, { badge: string; compact: string; text: string }> = {
   emerald: {
     badge: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
     compact: "border-emerald-500/16 bg-emerald-500/10 text-emerald-500 dark:text-emerald-400",
+    text: "text-emerald-700 dark:text-emerald-300",
   },
   violet: {
     badge: "bg-violet-500/12 text-violet-700 dark:text-violet-300",
     compact: "border-violet-500/16 bg-violet-500/10 text-violet-500 dark:text-violet-400",
+    text: "text-violet-700 dark:text-violet-300",
   },
   zinc: {
     badge: "bg-zinc-500/14 text-zinc-700 dark:text-zinc-300",
     compact: "border-zinc-500/16 bg-zinc-500/10 text-zinc-600 dark:text-zinc-400",
+    text: "text-zinc-700 dark:text-zinc-300",
   },
   rose: {
     badge: "bg-rose-500/12 text-rose-700 dark:text-rose-300",
     compact: "border-rose-500/16 bg-rose-500/10 text-rose-500 dark:text-rose-400",
+    text: "text-rose-700 dark:text-rose-300",
   },
   blue: {
     badge: "bg-blue-500/12 text-blue-700 dark:text-blue-300",
     compact: "border-blue-500/16 bg-blue-500/10 text-blue-500 dark:text-blue-400",
+    text: "text-blue-700 dark:text-blue-300",
   },
 };
 
 export interface ResolveStateBadgeVariantInput {
   readonly kind: "issue" | "pr";
   readonly state: "open" | "closed" | "merged" | null;
-  readonly isDraft?: boolean | null;
+  readonly isDraft?: boolean | null | undefined;
 }
 
 export function resolveStateBadgeVariant(input: ResolveStateBadgeVariantInput): StateBadgeVariant {
@@ -87,6 +94,19 @@ export function resolveStateBadgeVariant(input: ResolveStateBadgeVariantInput): 
   return variant("pr-unknown", GitPullRequestIcon, "blue", null);
 }
 
+export function changeRequestStateKind(state: string, isDraft?: boolean | null): StateBadgeKind {
+  return resolveChangeRequestStateBadgeVariant(state, isDraft).kind;
+}
+
+export function resolveChangeRequestStateBadgeVariant(
+  state: string,
+  isDraft?: boolean | null,
+): StateBadgeVariant {
+  const normalizedState =
+    state === "open" || state === "closed" || state === "merged" ? state : null;
+  return resolveStateBadgeVariant({ kind: "pr", state: normalizedState, isDraft });
+}
+
 function variant(
   kind: StateBadgeKind,
   Icon: LucideIcon,
@@ -100,5 +120,6 @@ function variant(
     label,
     badgeClassName: tones[tone].badge,
     compactClassName: tones[tone].compact,
+    textClassName: tones[tone].text,
   };
 }

@@ -3724,6 +3724,7 @@ export default function ChatView(props: ChatViewProps) {
                   activeThreadBranch={activeThread?.branch ?? null}
                   activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
                   activeWorktreePrState={activeWorktreeSummary?.prState}
+                  activeWorktreePrIsDraft={activeWorktreeSummary?.prIsDraft}
                   activeWorktreeTitle={activeWorktreeSummary?.title}
                   postPushWorkflowWatch={postPushWorkflowWatch}
                   activeThreadKey={activeThreadKey}
@@ -4031,6 +4032,7 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadBranch={activeThread?.branch ?? null}
               activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
               activeWorktreePrState={activeWorktreeSummary?.prState}
+              activeWorktreePrIsDraft={activeWorktreeSummary?.prIsDraft}
               activeWorktreeTitle={activeWorktreeSummary?.title}
               postPushWorkflowWatch={postPushWorkflowWatch}
               activeThreadKey={activeThreadKey}
@@ -4106,6 +4108,7 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadBranch={activeThread?.branch ?? null}
               activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
               activeWorktreePrState={activeWorktreeSummary?.prState}
+              activeWorktreePrIsDraft={activeWorktreeSummary?.prIsDraft}
               activeWorktreeTitle={activeWorktreeSummary?.title}
               postPushWorkflowWatch={postPushWorkflowWatch}
               activeThreadKey={activeThreadKey}
@@ -4135,6 +4138,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadBranch={activeThread?.branch ?? null}
             activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
             activeWorktreePrState={activeWorktreeSummary?.prState}
+            activeWorktreePrIsDraft={activeWorktreeSummary?.prIsDraft}
             activeWorktreeTitle={activeWorktreeSummary?.title}
             postPushWorkflowWatch={postPushWorkflowWatch}
             activeThreadKey={activeThreadKey}

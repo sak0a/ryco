@@ -35,6 +35,7 @@ import type { ThreadSubagentView } from "../../threadWorkspaceViewModel";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import ChatMarkdown from "../ChatMarkdown";
 import { SubagentAvatar } from "../sidebar/SubagentAvatar";
+import { changeRequestStateKind, StateBadge } from "../projectExplorer/StateBadge";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -1048,12 +1049,6 @@ export function ReviewsRow({
   );
 }
 
-function pullRequestStateTone(state: string | undefined): BadgeTone {
-  if (state === "merged") return "primary";
-  if (state === "closed") return "error";
-  return "success";
-}
-
 export function PullRequestContent({
   pullRequest,
   showTitle = true,
@@ -1092,9 +1087,7 @@ export function PullRequestHeading({
     <span className="flex items-center gap-2 text-[13px] font-semibold">
       <GitPullRequestIcon className="size-3.5 text-muted-foreground" />#{pullRequest.number}
       {pullRequest.state ? (
-        <OverviewBadge tone={pullRequestStateTone(pullRequest.state)}>
-          {pullRequest.state}
-        </OverviewBadge>
+        <StateBadge kind={changeRequestStateKind(pullRequest.state, pullRequest.isDraft)} />
       ) : null}
     </span>
   );

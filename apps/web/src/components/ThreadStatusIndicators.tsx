@@ -1,6 +1,6 @@
 import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { VcsStatusResult } from "@ryco/contracts";
-import { CloudIcon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
+import { CloudIcon, TerminalIcon, type LucideIcon } from "lucide-react";
 import { useMemo } from "react";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import {
@@ -12,6 +12,7 @@ import { type AppState, selectProjectByRef, useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
+import { resolveChangeRequestStateBadgeVariant } from "./sourceControl/stateBadgeVariants";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
 import type { SidebarThreadSummary } from "../types";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -21,6 +22,7 @@ export interface PrStatusIndicator {
   colorClass: string;
   tooltip: string;
   url: string;
+  Icon: LucideIcon;
 }
 
 export interface TerminalStatusIndicator {
@@ -36,36 +38,14 @@ export function prStatusIndicator(
 ): PrStatusIndicator | null {
   if (!pr) return null;
   const presentation = resolveChangeRequestPresentation(provider);
-
-  if (pr.state === "open") {
-    return {
-      label: `${presentation.shortName} open`,
-      colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      tooltip: `#${pr.number} ${presentation.shortName} open: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  if (pr.state === "closed") {
-    return {
-      label: `${presentation.shortName} closed`,
-      colorClass: "text-zinc-500 dark:text-zinc-400/80",
-      tooltip: `#${pr.number} ${presentation.shortName} closed: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  if (pr.state === "merged") {
-    return {
-      label: `${presentation.shortName} merged`,
-      colorClass: "text-violet-600 dark:text-violet-300/90",
-      tooltip: `#${pr.number} ${presentation.shortName} merged: ${pr.title}`,
-      url: pr.url,
-    };
-  }
-  return null;
-}
-
-export function ChangeRequestStatusIcon({ className }: { className?: string }) {
-  return <GitPullRequestIcon className={className} />;
+  const variant = resolveChangeRequestStateBadgeVariant(pr.state);
+  return {
+    label: `${presentation.shortName} ${pr.state}`,
+    colorClass: variant.textClassName,
+    tooltip: `#${pr.number} ${presentation.shortName} ${pr.state}: ${pr.title}`,
+    url: pr.url,
+    Icon: variant.Icon,
+  };
 }
 
 export function resolveThreadPr(
@@ -166,6 +146,7 @@ export function ThreadRowLeadingStatus({
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
+  const PrStatusIcon = prStatus?.Icon;
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
@@ -179,7 +160,7 @@ export function ThreadRowLeadingStatus({
 
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5">
-      {prStatus ? (
+      {prStatus && PrStatusIcon ? (
         <Tooltip>
           <TooltipTrigger
             render={
@@ -189,7 +170,7 @@ export function ThreadRowLeadingStatus({
               />
             }
           >
-            <ChangeRequestStatusIcon className="size-3" />
+            <PrStatusIcon className="size-3" />
           </TooltipTrigger>
           <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
         </Tooltip>
@@ -227,13 +208,14 @@ export function ThreadStatusDetailLine({ thread }: { thread: SidebarThreadSummar
   if (!prStatus) {
     return null;
   }
+  const PrStatusIcon = prStatus.Icon;
 
   return (
     <p
       data-thread-status-detail="true"
       className="flex items-start gap-1.5 px-2 pb-2 text-xs text-muted-foreground"
     >
-      <ChangeRequestStatusIcon className={`mt-0.5 size-3 shrink-0 ${prStatus.colorClass}`} />
+      <PrStatusIcon className={`mt-0.5 size-3 shrink-0 ${prStatus.colorClass}`} />
       <span className="min-w-0 flex-1 wrap-break-word">{prStatus.tooltip}</span>
     </p>
   );

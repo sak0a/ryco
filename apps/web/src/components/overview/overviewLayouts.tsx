@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "~/lib/utils";
+import { changeRequestStateKind, StateBadge } from "../projectExplorer/StateBadge";
 
 import type { PanelLayout } from "../../themes/appearancePreferences";
 import {
@@ -605,7 +606,9 @@ function StatusBoardLayout(props: OverviewLayoutProps) {
           summary={
             <>
               {props.pullRequest.state ? (
-                <OverviewBadge tone="success">{props.pullRequest.state}</OverviewBadge>
+                <StateBadge
+                  kind={changeRequestStateKind(props.pullRequest.state, props.pullRequest.isDraft)}
+                />
               ) : null}
               {props.pullRequest.hasMergeConflicts ? (
                 <OverviewBadge tone="error">conflict</OverviewBadge>
