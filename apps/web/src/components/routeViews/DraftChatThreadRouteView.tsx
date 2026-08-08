@@ -7,6 +7,7 @@ import { useAppSidebarCollapsed } from "../../hooks/useAppSidebarCollapsed";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { useRightPanelMaximized } from "../../hooks/useRightPanelMaximized";
+import { useThreadRightPanelRouteState } from "../../hooks/useThreadRightPanelRouteState";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import {
   getRightPanelMode,
@@ -14,6 +15,7 @@ import {
   type RightPanelMode,
   type RightPanelRouteSearch,
 } from "../../rightPanelRouteSearch";
+import { copyRightPanelSessionSearch } from "../../rightPanelSessionState";
 import { useStore } from "../../store";
 import { createThreadSelectorAcrossEnvironments } from "../../storeSelectors";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -42,6 +44,23 @@ export function DraftChatThreadRouteView({
 }) {
   const navigate = useNavigate();
   const draftId = DraftId.make(rawDraftId);
+  const rightPanelThreadKey = `draft:${draftId}`;
+  const replaceThreadRightPanelSearch = useCallback(
+    (nextSearch: RightPanelRouteSearch) => {
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: true,
+        search: nextSearch,
+      });
+    },
+    [draftId, navigate],
+  );
+  const threadSearch = useThreadRightPanelRouteState({
+    threadKey: rightPanelThreadKey,
+    search,
+    replaceSearch: replaceThreadRightPanelSearch,
+  });
   const draftSession = useDraftSession(draftId);
   const serverThread = useStore(
     useMemo(
@@ -65,12 +84,14 @@ export function DraftChatThreadRouteView({
     [draftSession?.promotedTo, serverThread, serverThreadStarted],
   );
 
-  const diffOpen = search.diff === "1";
-  const previewOpen = search.preview === "1";
-  const rightPanelMode: RightPanelMode | null = getRightPanelMode(search);
-  const rightPanelOpen = isRightPanelOpen(search);
+  const diffOpen = threadSearch.diff === "1";
+  const previewOpen = threadSearch.preview === "1";
+  const rightPanelMode: RightPanelMode | null = getRightPanelMode(threadSearch);
+  const rightPanelOpen = isRightPanelOpen(threadSearch);
   const activeAgentKey =
-    search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
+    threadSearch.workspaceTab === "agent" && threadSearch.workspaceAgentKey
+      ? threadSearch.workspaceAgentKey
+      : null;
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const presentationTier = usePresentationTier();
   const appSidebarCollapsed = useAppSidebarCollapsed();
@@ -397,12 +418,16 @@ export function DraftChatThreadRouteView({
     if (!canonicalThreadRef) {
       return;
     }
+    copyRightPanelSessionSearch(
+      rightPanelThreadKey,
+      `${canonicalThreadRef.environmentId}:${canonicalThreadRef.threadId}`,
+    );
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(canonicalThreadRef),
       replace: true,
     });
-  }, [canonicalThreadRef, navigate]);
+  }, [canonicalThreadRef, navigate, rightPanelThreadKey]);
 
   useEffect(() => {
     if (draftSession || canonicalThreadRef) {
