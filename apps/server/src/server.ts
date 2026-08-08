@@ -92,6 +92,7 @@ import { AtlassianConnectionRepositoryLive } from "./persistence/Layers/Atlassia
 import { AtlassianResourceRepositoryLive } from "./persistence/Layers/AtlassianResources.ts";
 import { ProjectAtlassianLinkRepositoryLive } from "./persistence/Layers/ProjectAtlassianLinks.ts";
 import { ProjectionWorktreeRepositoryLive } from "./persistence/Layers/ProjectionWorktrees.ts";
+import { ProjectionPullRequestRepositoryLive } from "./persistence/Layers/ProjectionPullRequests.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -301,6 +302,7 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(ProjectionWorktreeRepositoryLive),
+  Layer.provideMerge(ProjectionPullRequestRepositoryLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   // The instance registry is the new routing keystone — text generation,

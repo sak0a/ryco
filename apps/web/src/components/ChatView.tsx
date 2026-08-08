@@ -5,6 +5,7 @@ import {
   type MessageId,
   type ModelSelection,
   type ProjectId,
+  type PullRequestId,
   ProviderInstanceId,
   type ServerProvider,
   type ScopedThreadRef,
@@ -42,6 +43,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
+import { parsePullRequestRouteSearch } from "../pullRequestRouteSearch";
 import { deriveThreadAgentPanelModel, deriveThreadSubagents } from "../threadWorkspaceViewModel";
 import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
@@ -831,6 +833,15 @@ export default function ChatView(props: ChatViewProps) {
   const handleOpenHeaderLinkedItem = useCallback((item: LinkedWorktreeItem) => {
     setHeaderLinkedItem(item);
   }, []);
+  const handleOpenHeaderPullRequest = useCallback(
+    (pullRequestId: PullRequestId) => {
+      void navigate({
+        to: "/pull-requests",
+        search: parsePullRequestRouteSearch({ pr: pullRequestId }),
+      });
+    },
+    [navigate],
+  );
   const handleHeaderLinkedItemDialogOpenChange = useCallback((open: boolean) => {
     if (!open) {
       setHeaderLinkedItem(null);
@@ -3591,6 +3602,7 @@ export default function ChatView(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             worktreeBranch={activeWorktreeSummary?.branch ?? activeThread.branch ?? null}
+            worktreeId={activeWorktreeSummary?.id ?? null}
             worktreeTitle={activeWorktreeSummary?.title ?? null}
             worktreeOrigin={activeWorktreeSummary?.origin ?? null}
             worktreeIssueNumber={activeWorktreeSummary?.issueNumber ?? null}
@@ -3603,6 +3615,7 @@ export default function ChatView(props: ChatViewProps) {
             worktreeWorkItemState={activeWorktreeSummary?.workItemState ?? null}
             worktreeWorkItemStateName={activeWorktreeSummary?.workItemStateName ?? null}
             onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
+            onOpenPullRequest={handleOpenHeaderPullRequest}
             workspacePanelOpen={workspacePanelOpen}
             onToggleWorkspacePanel={onToggleWorkspacePanel}
             overviewSidebarOpen={overviewControlOpen}
@@ -3720,6 +3733,8 @@ export default function ChatView(props: ChatViewProps) {
                 <ChatOverviewPanel
                   environmentId={environmentId}
                   gitCwd={gitCwd}
+                  activeThreadId={activeThread?.id ?? null}
+                  activeWorktreeId={activeWorktreeSummary?.id ?? null}
                   activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
                   activeThreadBranch={activeThread?.branch ?? null}
                   activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
@@ -4028,6 +4043,8 @@ export default function ChatView(props: ChatViewProps) {
             <ChatOverviewPanel
               environmentId={environmentId}
               gitCwd={gitCwd}
+              activeThreadId={activeThread?.id ?? null}
+              activeWorktreeId={activeWorktreeSummary?.id ?? null}
               activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
               activeThreadBranch={activeThread?.branch ?? null}
               activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
@@ -4104,6 +4121,8 @@ export default function ChatView(props: ChatViewProps) {
             <ChatOverviewPanel
               environmentId={environmentId}
               gitCwd={gitCwd}
+              activeThreadId={activeThread?.id ?? null}
+              activeWorktreeId={activeWorktreeSummary?.id ?? null}
               activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
               activeThreadBranch={activeThread?.branch ?? null}
               activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}
@@ -4134,6 +4153,8 @@ export default function ChatView(props: ChatViewProps) {
           <ChatOverviewPanel
             environmentId={environmentId}
             gitCwd={gitCwd}
+            activeThreadId={activeThread?.id ?? null}
+            activeWorktreeId={activeWorktreeSummary?.id ?? null}
             activeWorktreeBranch={activeWorktreeSummary?.branch ?? null}
             activeThreadBranch={activeThread?.branch ?? null}
             activeWorktreePrNumber={activeWorktreeSummary?.prNumber ?? null}

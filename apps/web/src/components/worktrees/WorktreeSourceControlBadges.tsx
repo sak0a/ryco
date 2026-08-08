@@ -1,4 +1,5 @@
 import type { MouseEvent } from "react";
+import type { PullRequestId } from "@ryco/contracts";
 import { AtlassianJiraIcon } from "../Icons";
 import { cn } from "~/lib/utils";
 import { workItemStateLabel } from "~/lib/workItemState";
@@ -7,6 +8,7 @@ import {
   type StateBadgeVariant,
 } from "../sourceControl/stateBadgeVariants";
 import type { LinkedWorktreeItem } from "./LinkedWorktreeItemDialog";
+import { useRelatedPullRequests } from "../pullRequests/useRelatedPullRequests";
 
 export interface WorktreeSourceControlBadgesProps {
   issueNumber?: number | null | undefined;
@@ -19,6 +21,8 @@ export interface WorktreeSourceControlBadgesProps {
   workItemState?: "open" | "in_progress" | "done" | "closed" | "unknown" | null | undefined;
   workItemStateName?: string | null | undefined;
   onOpenLinkedItem?: ((item: LinkedWorktreeItem) => void) | undefined;
+  worktreeId?: string | null | undefined;
+  onOpenPullRequest?: ((pullRequestId: PullRequestId) => void) | undefined;
   className?: string | undefined;
   density?: "compact" | "header" | undefined;
   labelStyle?: "number" | "kind" | undefined;
@@ -26,12 +30,15 @@ export interface WorktreeSourceControlBadgesProps {
 }
 
 export function WorktreeSourceControlBadges(props: WorktreeSourceControlBadgesProps) {
-  const prNumber = props.prNumber ?? null;
+  const relatedPullRequests = useRelatedPullRequests("worktree", props.worktreeId);
+  const canonicalPullRequests = relatedPullRequests.slice(0, 2);
+  const prNumber = relatedPullRequests.length === 0 ? (props.prNumber ?? null) : null;
+  const hasPullRequest = relatedPullRequests.length > 0 || prNumber !== null;
   const issueNumber =
-    props.displayMode === "prefer-pr" && prNumber !== null ? null : (props.issueNumber ?? null);
+    props.displayMode === "prefer-pr" && hasPullRequest ? null : (props.issueNumber ?? null);
   const workItemKey = props.workItemProvider === "jira" ? (props.workItemKey ?? null) : null;
 
-  if (issueNumber === null && prNumber === null && workItemKey === null) {
+  if (issueNumber === null && !hasPullRequest && workItemKey === null) {
     return null;
   }
 
@@ -91,6 +98,43 @@ export function WorktreeSourceControlBadges(props: WorktreeSourceControlBadgesPr
               : undefined
           }
         />
+      ) : null}
+      {canonicalPullRequests.map((item) => {
+        const pullRequest = item.pullRequest;
+        const stateLabel = pullRequest.isDraft ? "Draft" : pullRequest.state;
+        return (
+          <WorktreeSourceControlBadge
+            key={pullRequest.identity.id}
+            variant={resolveStateBadgeVariant({
+              kind: "pr",
+              state: pullRequest.state,
+              isDraft: pullRequest.isDraft,
+            })}
+            number={pullRequest.identity.number}
+            kind="pr"
+            kindLabel="Pull request"
+            displayLabel={
+              props.labelStyle === "kind"
+                ? `PR #${pullRequest.identity.number}`
+                : `#${pullRequest.identity.number}`
+            }
+            density={props.density ?? "compact"}
+            title={`${pullRequest.repository.displayName} #${pullRequest.identity.number} — ${stateLabel}: ${pullRequest.title}`}
+            onClick={
+              props.onOpenPullRequest
+                ? () => props.onOpenPullRequest?.(pullRequest.identity.id)
+                : undefined
+            }
+          />
+        );
+      })}
+      {relatedPullRequests.length > canonicalPullRequests.length ? (
+        <span
+          className="text-[9px] font-semibold text-muted-foreground"
+          title={`${relatedPullRequests.length - canonicalPullRequests.length} more related pull requests`}
+        >
+          +{relatedPullRequests.length - canonicalPullRequests.length}
+        </span>
       ) : null}
     </span>
   );
@@ -160,11 +204,14 @@ function WorktreeSourceControlBadge(props: {
   displayLabel: string;
   density: "compact" | "header";
   onClick?: (() => void) | undefined;
+  title?: string | undefined;
 }) {
   const Icon = props.variant.Icon;
-  const title = props.variant.label
-    ? `${props.kindLabel} #${props.number} — ${props.variant.label}`
-    : `${props.kindLabel} #${props.number}`;
+  const title =
+    props.title ??
+    (props.variant.label
+      ? `${props.kindLabel} #${props.number} — ${props.variant.label}`
+      : `${props.kindLabel} #${props.number}`);
   const baseClass =
     props.density === "header"
       ? "inline-flex h-5 shrink-0 items-center justify-center gap-1 rounded-md border px-1.5 text-[10px] font-semibold tabular-nums leading-none"

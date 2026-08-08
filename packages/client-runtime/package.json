@@ -71,6 +71,10 @@
     "./state/composer": {
       "types": "./src/state/composer/index.ts",
       "import": "./src/state/composer/index.ts"
+    },
+    "./state/pullRequests": {
+      "types": "./src/state/pullRequests/index.ts",
+      "import": "./src/state/pullRequests/index.ts"
     }
   },
   "scripts": {

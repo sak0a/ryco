@@ -1,8 +1,15 @@
 import "../../index.css";
 
+import {
+  applyPullRequestSnapshot,
+  resetPullRequestStore,
+} from "@ryco/client-runtime/state/pullRequests";
+import { EnvironmentId, ThreadId, WorktreeId } from "@ryco/contracts";
+import { encodePullRequestId } from "@ryco/shared/pullRequestIdentity";
+import { DateTime, Option } from "effect";
 import { page } from "vite-plus/test/browser";
 import { render } from "vitest-browser-react";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatHeaderBar } from "./ChatHeaderBar";
 
@@ -13,6 +20,8 @@ describe("ChatHeaderBar", () => {
         unmount?: () => Promise<void>;
       })
     | null = null;
+
+  beforeEach(resetPullRequestStore);
 
   afterEach(async () => {
     if (mounted) {
@@ -63,6 +72,113 @@ describe("ChatHeaderBar", () => {
     );
 
     await expect.element(page.getByText("PR #113")).toBeInTheDocument();
+  });
+
+  it("prefers repository-aware worktree associations and opens the canonical PR", async () => {
+    const environmentId = EnvironmentId.make("local");
+    const worktreeId = WorktreeId.make("worktree-canonical");
+    const pullRequestId = encodePullRequestId({
+      environmentId,
+      provider: "github",
+      host: "github.com",
+      repositoryPath: "ryco/app",
+      number: 42,
+    });
+    const observedAt = DateTime.makeUnsafe("2026-08-08T12:00:00Z");
+    applyPullRequestSnapshot(environmentId, {
+      generation: 1,
+      items: [
+        {
+          pullRequest: {
+            identity: {
+              id: pullRequestId,
+              environmentId,
+              provider: "github",
+              host: "github.com",
+              repositoryPath: "ryco/app",
+              number: 42,
+            },
+            repository: {
+              canonicalKey: "github.com/ryco/app",
+              host: "github.com",
+              path: "ryco/app",
+              displayName: "ryco/app",
+            },
+            title: "Canonical inbox",
+            url: "https://github.com/ryco/app/pull/42",
+            state: "open",
+            isDraft: false,
+            assignees: [],
+            baseRefName: "main",
+            headRefName: "feature/inbox",
+            labels: [],
+            review: { disposition: "unknown", requestedReviewers: [], approvedBy: [] },
+            checks: { status: "unknown", total: 0, passing: 0, failing: 0, pending: 0 },
+            capabilities: {
+              detail: true,
+              comments: true,
+              reviews: true,
+              checks: true,
+              commits: true,
+              files: true,
+              viewerIdentity: false,
+            },
+            freshness: {
+              observedAt,
+              providerUpdatedAt: Option.none(),
+              refreshGeneration: 1,
+            },
+          },
+          associations: [
+            {
+              pullRequestId,
+              subject: { kind: "worktree", worktreeId },
+              relationship: "current-branch",
+              evidence: "branch-reconciliation",
+              createdAt: observedAt,
+              endedAt: Option.none(),
+            },
+            {
+              pullRequestId,
+              subject: { kind: "thread", threadId: ThreadId.make("thread-canonical") },
+              relationship: "created",
+              evidence: "structured-provider-result",
+              createdAt: observedAt,
+              endedAt: Option.none(),
+            },
+          ],
+          viewState: {
+            pullRequestId,
+            isUnread: true,
+            viewedAt: Option.none(),
+            providerUpdatedAtWhenViewed: Option.none(),
+          },
+        },
+      ],
+      coverage: [],
+      lastSuccessAt: Option.some(observedAt),
+    });
+    const onOpenPullRequest = vi.fn();
+
+    mounted = await render(
+      <ChatHeaderBar
+        projectName="Ryco"
+        isGitRepo
+        worktreeId={worktreeId}
+        worktreeBranch="feature/inbox"
+        worktreeTitle="Canonical inbox"
+        worktreeOrigin="manual"
+        worktreePrNumber={113}
+        worktreePrState="closed"
+        sessionTitle="Implementation"
+        onOpenPullRequest={onOpenPullRequest}
+      />,
+    );
+
+    expect(document.body.textContent).toContain("PR #42");
+    expect(document.body.textContent).not.toContain("PR #113");
+    await page.getByRole("button", { name: "ryco/app #42 — open: Canonical inbox" }).click();
+    expect(onOpenPullRequest).toHaveBeenCalledWith(pullRequestId);
   });
 
   it("uses deterministic issue then PR ordering when both links exist", async () => {

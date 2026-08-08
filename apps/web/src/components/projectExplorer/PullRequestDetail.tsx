@@ -5,6 +5,11 @@ import type {
   SourceControlChangeRequestDetail,
   SourceControlChangeRequestFile,
 } from "@ryco/contracts";
+import {
+  selectFederatedPullRequests,
+  usePullRequestStore,
+} from "@ryco/client-runtime/state/pullRequests";
+import { Link } from "@tanstack/react-router";
 import { DateTime, Option } from "effect";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -76,7 +81,7 @@ const compactDateTimeFmt = new Intl.DateTimeFormat(undefined, {
 const numberFmt = new Intl.NumberFormat(undefined);
 const MAX_TIMELINE_COMMIT_ROWS = 12;
 
-type PullRequestTab = "conversation" | "checks" | "commits" | "files";
+export type PullRequestTab = "conversation" | "checks" | "commits" | "files";
 
 interface PullRequestDetailProps {
   environmentId: EnvironmentId | null;
@@ -117,10 +122,39 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
   });
 
   const detail = detailQuery.data;
+  const canonicalItem = usePullRequestStore((state) => {
+    if (!detail || props.environmentId === null) return null;
+    return (
+      selectFederatedPullRequests(state).find(
+        (item) =>
+          item.pullRequest.identity.environmentId === props.environmentId &&
+          item.pullRequest.identity.number === detail.number &&
+          item.pullRequest.url === detail.url,
+      ) ?? null
+    );
+  });
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <SourceControlDetailToolbar onBack={props.onBack} githubUrl={detail?.url} />
+      <SourceControlDetailToolbar onBack={props.onBack} githubUrl={detail?.url}>
+        {canonicalItem ? (
+          <Link
+            to="/pull-requests"
+            search={{
+              view: "latest",
+              q: "",
+              repository: canonicalItem.pullRequest.repository.canonicalKey,
+              pr: canonicalItem.pullRequest.identity.id,
+              tab: "conversation",
+              focus: false,
+              listWidth: 410,
+            }}
+            className="inline-flex h-8 items-center rounded-md px-2 text-muted-foreground text-xs hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Open in Pull Requests
+          </Link>
+        ) : null}
+      </SourceControlDetailToolbar>
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {detailQuery.isLoading ? (
@@ -136,6 +170,7 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
             cwd={props.cwd}
             onSelectLinkedIssue={props.onSelectLinkedIssue}
             onSelectLinkedWorkItem={props.onSelectLinkedWorkItem}
+            enableCheckNotifications
             onSubmitComment={
               detail.provider === "github" && props.environmentId !== null && props.cwd !== null
                 ? (input) => addCommentMutation.mutateAsync(input).then(() => undefined)
@@ -178,7 +213,7 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
   );
 }
 
-function PullRequestDetailBody(props: {
+export function PullRequestDetailBody(props: {
   detail: SourceControlChangeRequestDetail;
   environmentId: EnvironmentId | null;
   cwd: string | null;
@@ -193,9 +228,20 @@ function PullRequestDetailBody(props: {
         readonly content: SourceControlCommentReactionContent;
       }) => Promise<void>)
     | undefined;
+  enableCheckNotifications?: boolean;
+  activeTab?: PullRequestTab;
+  onActiveTabChange?: (tab: PullRequestTab) => void;
 }) {
-  const { detail } = props;
-  const [activeTab, setActiveTab] = useState<PullRequestTab>("conversation");
+  const { detail, onActiveTabChange } = props;
+  const [internalActiveTab, setInternalActiveTab] = useState<PullRequestTab>("conversation");
+  const activeTab = props.activeTab ?? internalActiveTab;
+  const setActiveTab = useCallback(
+    (tab: PullRequestTab) => {
+      setInternalActiveTab(tab);
+      onActiveTabChange?.(tab);
+    },
+    [onActiveTabChange],
+  );
   const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
   const nextQuoteInsertionIdRef = useRef(0);
   const queueQuoteInsertion = useCallback(
@@ -233,17 +279,21 @@ function PullRequestDetailBody(props: {
   const canComment = onSubmitComment !== undefined;
   const onAddCommentReaction = props.onAddCommentReaction;
 
-  usePrCheckPassNotifications([
-    {
-      environmentId: props.environmentId,
-      cwd: props.cwd,
-      provider: detail.provider,
-      number: detail.number,
-      title: detail.title,
-      url: detail.url,
-      status: checkStatus,
-    },
-  ]);
+  usePrCheckPassNotifications(
+    props.enableCheckNotifications
+      ? [
+          {
+            environmentId: props.environmentId,
+            cwd: props.cwd,
+            provider: detail.provider,
+            number: detail.number,
+            title: detail.title,
+            url: detail.url,
+            status: checkStatus,
+          },
+        ]
+      : [],
+  );
 
   return (
     <SourceControlDetailLayout

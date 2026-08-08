@@ -64,7 +64,8 @@ export const PullRequestList = memo(function PullRequestList(props: {
       className={cn(compact ? "divide-y divide-border/25" : "divide-y divide-border/40")}
     >
       {props.items.map((pr) => {
-        const itemKey = `${pr.provider}:${pr.number}`;
+        // The verified provider URL carries repository identity; provider + number does not.
+        const itemKey = pr.url;
         const isSelected = props.selectedKey === itemKey;
         const labels = pr.labels ?? [];
         const visibleLabels = labels.slice(0, 3);

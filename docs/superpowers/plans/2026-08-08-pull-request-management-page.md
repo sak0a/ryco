@@ -627,11 +627,11 @@ reviews, approvals, merges, and phone UI are deferred.
    history, scroll restoration, keyboard guards, and accessibility names.
 10. Run:
 
-   ```sh
-   bun run --cwd apps/web test -- src/components/pullRequests/pullRequestInboxKeyboard.test.ts
-   bun run --cwd apps/web test:browser -- src/components/pullRequests/PullRequestsPage.browser.tsx
-   bun run --cwd apps/web typecheck
-   ```
+```sh
+bun run --cwd apps/web test -- src/components/pullRequests/pullRequestInboxKeyboard.test.ts
+bun run --cwd apps/web test:browser -- src/components/pullRequests/PullRequestsPage.browser.tsx
+bun run --cwd apps/web typecheck
+```
 
 11. Commit: `web: add pull request detail workspace`
 

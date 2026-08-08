@@ -11,6 +11,7 @@ import {
   type ServerProvider,
   type ThreadId,
   SourceControlProviderError,
+  type PullRequestRepositoryCoverage,
   WsRpcGroup,
 } from "@ryco/contracts";
 import { RpcGroup } from "effect/unstable/rpc";
@@ -45,6 +46,10 @@ import { resolveWorktreeCheckoutPath } from "../project/worktreeCheckoutPaths.ts
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
 import { ServerAuth } from "../auth/Services/ServerAuth.ts";
 import { ProjectionWorktreeRepository } from "../persistence/Services/ProjectionWorktrees.ts";
+import {
+  ProjectionPullRequestRepository,
+  PullRequestViewerKey,
+} from "../persistence/Services/ProjectionPullRequests.ts";
 import { refreshWorktreeSourceControlState } from "../sourceControl/refreshWorktreeSourceControlState.ts";
 import * as SourceControlDiscoveryLayer from "../sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "../sourceControl/SourceControlRepositoryService.ts";
@@ -138,6 +143,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const bootstrapCredentials = yield* BootstrapCredentialService;
     const sessions = yield* SessionCredentialService;
     const projectionWorktrees = yield* ProjectionWorktreeRepository;
+    const projectionPullRequests = yield* Effect.serviceOption(ProjectionPullRequestRepository);
     const atlassian = yield* AtlassianConnectionService;
     const workItems = yield* JiraWorkItemService;
     const diagnostics = yield* Diagnostics;
@@ -145,6 +151,16 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const advertisedEndpointRegistry = yield* AdvertisedEndpointRegistry;
     const serverCommandId = (tag: string) => CommandId.make(`server:${tag}:${crypto.randomUUID()}`);
     const linkedSourceControlRefreshAtByProject = new Map<string, number>();
+    const pullRequestCoverageByRepository = new Map<string, PullRequestRepositoryCoverage>();
+    // Direct sessions have a durable credential id that survives WebSocket reconnects.
+    // Relay channel ids are intentionally ephemeral and contain no account identity, so
+    // keep inbox read state stable at the environment + effective-role boundary instead
+    // of resetting it whenever the hosted relay opens a fresh channel.
+    const pullRequestViewerKey = PullRequestViewerKey.make(
+      principal.transport === "direct"
+        ? `session:${currentSessionId}`
+        : `relay-role:${principal.role}`,
+    );
 
     const authorize = (access: WsRpcAccess, method: string) =>
       authorizeRpcPrincipal(principal, access, method);
@@ -678,6 +694,11 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       bootstrapCredentials,
       sessions,
       projectionWorktrees,
+      projectionPullRequests,
+      pullRequestCoverageByRepository,
+      pullRequestViewerKey,
+      repositoryIdentityResolver,
+      serverEnvironment,
       atlassian,
       workItems,
       withAccess,

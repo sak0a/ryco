@@ -1,5 +1,6 @@
 import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
-import type { VcsStatusResult } from "@ryco/contracts";
+import type { PullRequestInboxItem, VcsStatusResult } from "@ryco/contracts";
+import { resolveChangeRequestPresentationForKind } from "@ryco/shared/sourceControl";
 import { CloudIcon, TerminalIcon, type LucideIcon } from "lucide-react";
 import { useMemo } from "react";
 import { usePrimaryEnvironmentId } from "../environments/primary";
@@ -16,6 +17,7 @@ import { resolveChangeRequestStateBadgeVariant } from "./sourceControl/stateBadg
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
 import type { SidebarThreadSummary } from "../types";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { useRelatedPullRequests } from "./pullRequests/useRelatedPullRequests";
 
 export interface PrStatusIndicator {
   label: string;
@@ -44,6 +46,25 @@ export function prStatusIndicator(
     colorClass: variant.textClassName,
     tooltip: `#${pr.number} ${presentation.shortName} ${pr.state}: ${pr.title}`,
     url: pr.url,
+    Icon: variant.Icon,
+  };
+}
+
+export function canonicalPrStatusIndicator(
+  item: PullRequestInboxItem | null,
+  relatedCount = item ? 1 : 0,
+): PrStatusIndicator | null {
+  if (!item) return null;
+  const pullRequest = item.pullRequest;
+  const presentation = resolveChangeRequestPresentationForKind(pullRequest.identity.provider);
+  const variant = resolveChangeRequestStateBadgeVariant(pullRequest.state, pullRequest.isDraft);
+  const stateLabel = pullRequest.isDraft ? "draft" : pullRequest.state;
+  const additional = relatedCount > 1 ? ` · +${relatedCount - 1} related` : "";
+  return {
+    label: `${presentation.shortName} ${stateLabel}`,
+    colorClass: variant.textClassName,
+    tooltip: `${pullRequest.repository.displayName} #${pullRequest.identity.number} ${stateLabel}: ${pullRequest.title}${additional}`,
+    url: pullRequest.url,
     Icon: variant.Icon,
   };
 }
@@ -127,6 +148,7 @@ export function ThreadRowLeadingStatus({
   thread: SidebarThreadSummary;
   alwaysShowStatusLabel?: boolean;
 }) {
+  const relatedPullRequests = useRelatedPullRequests("thread", thread.id);
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const lastVisitedAt = useUiStateStore(
     (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
@@ -145,7 +167,9 @@ export function ThreadRowLeadingStatus({
     cwd: thread.branch != null ? gitCwd : null,
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
-  const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
+  const prStatus =
+    canonicalPrStatusIndicator(relatedPullRequests[0] ?? null, relatedPullRequests.length) ??
+    prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const PrStatusIcon = prStatus?.Icon;
   const threadStatus = resolveThreadStatusPill({
     thread: {
@@ -189,6 +213,7 @@ export function ThreadRowLeadingStatus({
  * reachable by touch. Renders nothing when the thread has no change request.
  */
 export function ThreadStatusDetailLine({ thread }: { thread: SidebarThreadSummary }) {
+  const relatedPullRequests = useRelatedPullRequests("thread", thread.id);
   const threadProjectCwd = useStore(
     useMemo(
       () => (state: AppState) =>
@@ -203,7 +228,9 @@ export function ThreadStatusDetailLine({ thread }: { thread: SidebarThreadSummar
     cwd: thread.branch != null ? gitCwd : null,
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
-  const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
+  const prStatus =
+    canonicalPrStatusIndicator(relatedPullRequests[0] ?? null, relatedPullRequests.length) ??
+    prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
 
   if (!prStatus) {
     return null;

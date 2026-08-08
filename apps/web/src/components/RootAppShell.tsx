@@ -49,6 +49,7 @@ import {
   usePrimaryEnvironmentId,
 } from "../environments/primary";
 import { ServerStateBootstrap } from "./ServerStateBootstrap";
+import { PullRequestInboxBootstrap } from "./pullRequests/PullRequestInboxBootstrap";
 
 export interface RootAppShellProps {
   readonly authGateState: {
@@ -76,6 +77,7 @@ export function RootAppShell({ authGateState }: RootAppShellProps) {
         {localTracingAllowed ? <AuthenticatedTracingBootstrap /> : null}
         {primaryEnvironmentAuthenticated ? <ServerStateBootstrap /> : null}
         <EnvironmentConnectionManagerBootstrap />
+        {primaryEnvironmentAuthenticated ? <PullRequestInboxBootstrap /> : null}
         <ContextMenuActionSheetHost />
         <SshPasswordPromptDialog />
         {authGateState.status === "hosted-static" ? <HostedStaticEnvironmentBootstrap /> : null}

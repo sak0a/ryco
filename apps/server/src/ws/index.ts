@@ -12,6 +12,7 @@ import { makeSourceControlHandlers } from "./sourceControlRpc.ts";
 import { makeProviderHandlers } from "./providerRpc.ts";
 import { makeStatisticsHandlers } from "./statisticsRpc.ts";
 import { makeContextHandoffHandlers } from "./contextHandoffRpc.ts";
+import { makePullRequestHandlers } from "./pullRequestRpc.ts";
 
 export const makeWsRpcLayer = (principal: RpcPrincipal) =>
   WsRpcGroup.toLayer(
@@ -23,6 +24,7 @@ export const makeWsRpcLayer = (principal: RpcPrincipal) =>
         ...makeProviderHandlers(ctx),
         ...makeStatisticsHandlers(ctx),
         ...makeSourceControlHandlers(ctx),
+        ...makePullRequestHandlers(ctx),
         ...makeProjectHandlers(ctx),
         ...makeGitHandlers(ctx),
         ...makeTerminalHandlers(ctx),

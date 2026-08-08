@@ -175,7 +175,7 @@ export function ProjectOverviewTab(props: ProjectOverviewTabProps) {
           icon={<GitPullRequestIcon className="size-4" />}
           accentClassName="text-emerald-600 dark:text-emerald-300"
           onOpenTab={() => props.onOpenTab("prs")}
-          keyForItem={(pullRequest) => `${pullRequest.provider}:${pullRequest.number}`}
+          keyForItem={(pullRequest) => pullRequest.url}
           renderItem={(pullRequest) => (
             <button
               type="button"

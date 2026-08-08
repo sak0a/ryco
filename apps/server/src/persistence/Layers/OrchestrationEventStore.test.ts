@@ -1,6 +1,6 @@
-import { CommandId, EventId, ProjectId } from "@ryco/contracts";
+import { CommandId, EventId, ProjectId, PullRequestId, ThreadId } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
-import { Effect, Layer, Schema, Stream } from "effect";
+import { DateTime, Effect, Layer, Schema, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { PersistenceDecodeError } from "../Errors.ts";
@@ -65,6 +65,58 @@ layer("OrchestrationEventStore", (it) => {
     }),
   );
 
+  it.effect("round trips DateTime values in pull request events", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const viewedAt = DateTime.makeUnsafe("2026-08-08T21:58:59.598Z");
+      const pullRequestId = PullRequestId.make("pr-datetime-roundtrip");
+
+      const appended = yield* eventStore.append({
+        type: "pull-request.viewed",
+        eventId: EventId.make("evt-store-pr-viewed"),
+        aggregateKind: "pull-request",
+        aggregateId: pullRequestId,
+        occurredAt: DateTime.formatIso(viewedAt),
+        commandId: CommandId.make("cmd-store-pr-viewed"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-store-pr-viewed"),
+        metadata: {},
+        payload: {
+          pullRequestId,
+          viewerKey: "session:viewer-a",
+          viewedAt,
+        },
+      });
+
+      assert.equal(appended.type, "pull-request.viewed");
+      if (appended.type !== "pull-request.viewed") {
+        return;
+      }
+      assert.equal(DateTime.formatIso(appended.payload.viewedAt), DateTime.formatIso(viewedAt));
+
+      const storedRows = yield* sql<{ readonly payloadJson: string }>`
+        SELECT payload_json AS "payloadJson"
+        FROM orchestration_events
+        WHERE event_id = ${appended.eventId}
+      `;
+      assert.equal(
+        JSON.parse(storedRows[0]?.payloadJson ?? "{}").viewedAt,
+        DateTime.formatIso(viewedAt),
+      );
+
+      const replayed = yield* eventStore.readPage(appended.sequence - 1, 1);
+      const replayedEvent = replayed.events[0];
+      assert.equal(replayedEvent?.type, "pull-request.viewed");
+      if (replayedEvent?.type === "pull-request.viewed") {
+        assert.equal(
+          DateTime.formatIso(replayedEvent.payload.viewedAt),
+          DateTime.formatIso(viewedAt),
+        );
+      }
+    }),
+  );
+
   it.effect("fails with PersistenceDecodeError when stored json is invalid", () =>
     Effect.gen(function* () {
       const eventStore = yield* OrchestrationEventStore;
@@ -114,6 +166,78 @@ layer("OrchestrationEventStore", (it) => {
           ),
         );
       }
+    }),
+  );
+
+  it.effect("replays settled lifecycle rows written by a newer Ryco build", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = new Date().toISOString();
+      const threadId = ThreadId.make("thread-settlement-compatibility");
+      const maxSequenceRows = yield* sql<{ readonly maxSequence: number | null }>`
+        SELECT MAX(sequence) AS "maxSequence" FROM orchestration_events
+      `;
+      const startSequence = maxSequenceRows[0]?.maxSequence ?? 0;
+
+      const compatibilityEvents = [
+        {
+          eventId: EventId.make("evt-store-thread-settled"),
+          type: "thread.settled",
+          payload: { threadId, settledAt: now, updatedAt: now },
+        },
+        {
+          eventId: EventId.make("evt-store-thread-unsettled"),
+          type: "thread.unsettled",
+          payload: { threadId, reason: "user", updatedAt: now },
+        },
+      ] as const satisfies ReadonlyArray<{
+        readonly eventId: EventId;
+        readonly type: "thread.settled" | "thread.unsettled";
+        readonly payload: object;
+      }>;
+      for (const [index, event] of compatibilityEvents.entries()) {
+        yield* sql`
+          INSERT INTO orchestration_events (
+            event_id,
+            aggregate_kind,
+            stream_id,
+            stream_version,
+            event_type,
+            occurred_at,
+            command_id,
+            causation_event_id,
+            correlation_id,
+            actor_kind,
+            payload_json,
+            metadata_json
+          )
+          VALUES (
+            ${event.eventId},
+            ${"thread"},
+            ${threadId},
+            ${index},
+            ${event.type},
+            ${now},
+            ${null},
+            ${null},
+            ${null},
+            ${"server"},
+            ${JSON.stringify(event.payload)},
+            ${"{}"}
+          )
+        `;
+      }
+
+      const replayed = yield* Stream.runCollect(
+        eventStore.readFromSequence(startSequence, 100),
+      ).pipe(
+        Effect.map((chunk) => Array.from(chunk).filter((event) => event.aggregateId === threadId)),
+      );
+      assert.deepEqual(
+        replayed.map((event) => event.type),
+        ["thread.settled", "thread.unsettled"],
+      );
     }),
   );
 

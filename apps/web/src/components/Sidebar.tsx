@@ -89,6 +89,7 @@ import { SidebarProjectsContent, PROJECT_ROOT_DROP_ID } from "./sidebar/SidebarP
 import { SidebarProjectItem } from "./sidebar/SidebarProjectItem";
 import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrome";
 import { SidebarNewThreadButton } from "./sidebar/SidebarNewThreadButton";
+import { SidebarPullRequestsLink } from "./sidebar/SidebarPullRequestsLink";
 import { resolveNewThreadProjectKey } from "./sidebar/sidebarNewThreadTarget";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
@@ -1087,6 +1088,8 @@ export default function Sidebar() {
         disabled={newThreadTargetProject === null}
         onClick={startNewThreadFromSidebar}
       />
+
+      <SidebarPullRequestsLink />
 
       <SidebarProjectsContent
         showArm64IntelBuildWarning={showArm64IntelBuildWarning}

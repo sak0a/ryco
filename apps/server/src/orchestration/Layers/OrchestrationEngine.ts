@@ -2,6 +2,7 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
   ProjectId,
+  PullRequestId,
   ThreadId,
   WorktreeId,
 } from "@ryco/contracts";
@@ -54,8 +55,8 @@ interface CommandEnvelope {
 }
 
 function commandToAggregateRef(command: OrchestrationCommand): {
-  readonly aggregateKind: "project" | "thread" | "worktree";
-  readonly aggregateId: ProjectId | ThreadId | WorktreeId;
+  readonly aggregateKind: "project" | "thread" | "worktree" | "pull-request";
+  readonly aggregateId: ProjectId | ThreadId | WorktreeId | PullRequestId;
 } {
   switch (command.type) {
     case "project.create":
@@ -104,6 +105,15 @@ function commandToAggregateRef(command: OrchestrationCommand): {
       return {
         aggregateKind: "thread",
         aggregateId: command.threadId,
+      };
+    case "pull-request.observe":
+    case "pull-request.association.record":
+    case "pull-request.association.end":
+    case "pull-request.viewed":
+    case "pull-request.mark-unread":
+      return {
+        aggregateKind: "pull-request",
+        aggregateId: command.pullRequestId,
       };
   }
 }

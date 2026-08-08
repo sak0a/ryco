@@ -1,6 +1,6 @@
 import React, { useCallback, memo, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { type ThreadEnvMode } from "@ryco/contracts";
+import { type PullRequestId, type ThreadEnvMode } from "@ryco/contracts";
 import {
   scopedProjectKey,
   scopedThreadKey,
@@ -57,6 +57,7 @@ import { useSidebarProjectActions } from "./hooks/useSidebarProjectActions";
 import { useSidebarThreadActions } from "./hooks/useSidebarThreadActions";
 import { useSidebarWorktreeActions } from "./hooks/useSidebarWorktreeActions";
 import { useSidebarProjectContextMenu } from "./hooks/useSidebarProjectContextMenu";
+import { parsePullRequestRouteSearch } from "~/pullRequestRouteSearch";
 
 interface SidebarProjectItemProps {
   project: SidebarProjectSnapshot;
@@ -115,6 +116,15 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
   }));
   const { updateSettings } = useUpdateSettings();
   const router = useRouter();
+  const openPullRequest = useCallback(
+    (pullRequestId: PullRequestId) => {
+      void router.navigate({
+        to: "/pull-requests",
+        search: parsePullRequestRouteSearch({ pr: pullRequestId }),
+      });
+    },
+    [router],
+  );
   const { isMobile, setOpenMobile } = useSidebar();
   const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
   const toggleProject = useUiStateStore((state) => state.toggleProject);
@@ -530,6 +540,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
           onNewSession={createThreadInWorktree}
           onOpenInEditor={openWorktreeInEditor}
           onOpenWorktree={openWorktree}
+          onOpenPullRequest={openPullRequest}
           onRenameWorktree={renameWorktree}
           onRestoreWorktree={restoreWorktree}
           renderThread={(thread: SidebarTreeThread, treeThreadKeys, gitStatus) => {

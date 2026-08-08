@@ -116,6 +116,18 @@ export interface WsRpcClient {
     readonly getWorkflowJobLog: RpcUnaryMethod<typeof WS_METHODS.sourceControlGetWorkflowJobLog>;
     readonly rerunWorkflow: RpcUnaryMethod<typeof WS_METHODS.sourceControlRerunWorkflow>;
   };
+  readonly pullRequests: {
+    readonly listInbox: RpcUnaryMethod<typeof WS_METHODS.pullRequestsListInbox>;
+    readonly subscribeInbox: RpcStreamMethod<typeof WS_METHODS.pullRequestsSubscribeInbox>;
+    readonly refresh: RpcUnaryMethod<typeof WS_METHODS.pullRequestsRefresh>;
+    readonly getDetail: RpcUnaryMethod<typeof WS_METHODS.pullRequestsGetDetail>;
+    readonly markViewed: RpcUnaryMethod<typeof WS_METHODS.pullRequestsMarkViewed>;
+    readonly markUnread: RpcUnaryMethod<typeof WS_METHODS.pullRequestsMarkUnread>;
+    readonly attachRelationship: RpcUnaryMethod<typeof WS_METHODS.pullRequestsAttachRelationship>;
+    readonly removeExplicitRelationship: RpcUnaryMethod<
+      typeof WS_METHODS.pullRequestsRemoveExplicitRelationship
+    >;
+  };
   readonly textGeneration: {
     readonly generateIssueContent: RpcUnaryMethod<
       typeof WS_METHODS.textGenerationGenerateIssueContent
@@ -366,6 +378,30 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[WS_METHODS.sourceControlGetWorkflowJobLog](input)),
       rerunWorkflow: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlRerunWorkflow](input)),
+    },
+    pullRequests: {
+      listInbox: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsListInbox](input)),
+      subscribeInbox: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.pullRequestsSubscribeInbox]({}),
+          listener,
+          { ...options, tag: WS_METHODS.pullRequestsSubscribeInbox },
+        ),
+      refresh: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsRefresh](input)),
+      getDetail: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsGetDetail](input)),
+      markViewed: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsMarkViewed](input)),
+      markUnread: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsMarkUnread](input)),
+      attachRelationship: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsAttachRelationship](input)),
+      removeExplicitRelationship: (input) =>
+        transport.request((client) =>
+          client[WS_METHODS.pullRequestsRemoveExplicitRelationship](input),
+        ),
     },
     textGeneration: {
       generateIssueContent: (input) =>

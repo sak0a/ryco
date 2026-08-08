@@ -45,12 +45,14 @@ export function findChangeRequestForBranch(
 }
 
 export function resolveOverviewPullRequestNumber(input: {
+  canonicalPullRequestNumber?: number | null;
   activeWorktreePrNumber: number | null;
   gitStatusPrNumber: number | null;
   overviewBranchPullRequestNumber: number | null;
   postPushWatchPullRequestNumber: number | null;
 }): number | null {
   return (
+    input.canonicalPullRequestNumber ??
     input.activeWorktreePrNumber ??
     input.gitStatusPrNumber ??
     input.overviewBranchPullRequestNumber ??

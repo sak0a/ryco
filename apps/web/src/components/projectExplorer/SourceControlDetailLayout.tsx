@@ -9,6 +9,7 @@ export function SourceControlDetailToolbar(props: {
   onBack: () => void;
   githubUrl?: string | undefined;
   githubLabel?: string | undefined;
+  children?: ReactNode | undefined;
 }) {
   return (
     <div className="flex min-h-12 items-center gap-2 border-border/60 border-b bg-background/55 py-2 pr-14 pl-4">
@@ -16,17 +17,20 @@ export function SourceControlDetailToolbar(props: {
         <ArrowLeftIcon className="size-3.5" />
         Back
       </Button>
-      {props.githubUrl ? (
-        <a
-          href={props.githubUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="ml-auto inline-flex h-8 items-center gap-1 rounded-md px-2 text-muted-foreground text-xs hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <ExternalLinkIcon className="size-3.5" />
-          {props.githubLabel ?? "Open on GitHub"}
-        </a>
-      ) : null}
+      <div className="ml-auto flex items-center gap-1">
+        {props.children}
+        {props.githubUrl ? (
+          <a
+            href={props.githubUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-muted-foreground text-xs hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ExternalLinkIcon className="size-3.5" />
+            {props.githubLabel ?? "Open on GitHub"}
+          </a>
+        ) : null}
+      </div>
     </div>
   );
 }

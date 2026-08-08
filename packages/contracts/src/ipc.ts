@@ -125,6 +125,12 @@ import type {
 import type { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { EditorId } from "./editor.ts";
 import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
+import type {
+  PullRequestAssociationSubject,
+  PullRequestDetailResult,
+  PullRequestId,
+  PullRequestInboxSnapshot,
+} from "./pullRequest.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 import type {
   SourceControlCloneRepositoryInput,
@@ -502,6 +508,25 @@ export interface EnvironmentApi {
     publishRepository: (
       input: SourceControlPublishRepositoryInput,
     ) => Promise<SourceControlPublishRepositoryResult>;
+  };
+  pullRequests?: {
+    listInbox: () => Promise<PullRequestInboxSnapshot>;
+    subscribeInbox: (
+      callback: (snapshot: PullRequestInboxSnapshot) => void,
+      options?: { onResubscribe?: () => void; onError?: () => void },
+    ) => () => void;
+    refresh: () => Promise<PullRequestInboxSnapshot>;
+    getDetail: (pullRequestId: PullRequestId) => Promise<PullRequestDetailResult>;
+    markViewed: (pullRequestId: PullRequestId) => Promise<void>;
+    markUnread: (pullRequestId: PullRequestId) => Promise<void>;
+    attachRelationship: (input: {
+      pullRequestId: PullRequestId;
+      subject: PullRequestAssociationSubject;
+    }) => Promise<PullRequestInboxSnapshot>;
+    removeExplicitRelationship: (input: {
+      pullRequestId: PullRequestId;
+      subject: PullRequestAssociationSubject;
+    }) => Promise<PullRequestInboxSnapshot>;
   };
   vcs: {
     listRefs: (input: VcsListRefsInput) => Promise<VcsListRefsResult>;

@@ -28,6 +28,27 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       cloneRepository: rpcClient.sourceControl.cloneRepository,
       publishRepository: rpcClient.sourceControl.publishRepository,
     },
+    pullRequests: {
+      listInbox: () => rpcClient.pullRequests.listInbox({}),
+      subscribeInbox: (listener, options) =>
+        rpcClient.pullRequests.subscribeInbox(listener, options),
+      refresh: () => rpcClient.pullRequests.refresh({}),
+      getDetail: (pullRequestId) => rpcClient.pullRequests.getDetail({ pullRequestId }),
+      markViewed: (pullRequestId) => rpcClient.pullRequests.markViewed({ pullRequestId }),
+      markUnread: (pullRequestId) => rpcClient.pullRequests.markUnread({ pullRequestId }),
+      attachRelationship: ({ pullRequestId, subject }) =>
+        rpcClient.pullRequests.attachRelationship({
+          pullRequestId,
+          subject,
+          relationship: "explicitly-attached",
+        }),
+      removeExplicitRelationship: ({ pullRequestId, subject }) =>
+        rpcClient.pullRequests.removeExplicitRelationship({
+          pullRequestId,
+          subject,
+          relationship: "explicitly-attached",
+        }),
+    },
     vcs: {
       pull: rpcClient.vcs.pull,
       refreshStatus: rpcClient.vcs.refreshStatus,
