@@ -16,6 +16,7 @@ import { tokenModeOptions, tokenModePresentation } from "../../tokenModePresenta
 import { ASK_MODE_UNSUPPORTED_DESCRIPTION } from "./CompactComposerControlsMenu";
 import {
   CAUTION_RUNTIME_MODE,
+  CAUTION_RUNTIME_MODE_CLASS_NAME,
   interactionModeConfig,
   interactionModeOptions,
   runtimeModeConfig,
@@ -188,8 +189,7 @@ export const PhoneSessionPolicyControl = memo(function PhoneSessionPolicyControl
           // `Button`'s `::after` slop would make this control's target depend
           // on a SIBLING keeping the row 44px tall.
           "min-h-11 shrink-0 gap-1 whitespace-nowrap px-1.5 font-medium text-muted-foreground/80 hover:text-foreground/80",
-          props.runtimeMode === CAUTION_RUNTIME_MODE &&
-            "text-orange-700 hover:text-orange-800 dark:text-orange-400 dark:hover:text-orange-300",
+          props.runtimeMode === CAUTION_RUNTIME_MODE && CAUTION_RUNTIME_MODE_CLASS_NAME,
         )}
         disabled={disabled}
         aria-label={`Session policy: ${interactionOption.triggerLabel}, ${runtimeOption.triggerLabel}`}
