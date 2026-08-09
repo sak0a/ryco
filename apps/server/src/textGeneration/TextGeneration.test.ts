@@ -2,7 +2,7 @@ import { it } from "@effect/vitest";
 import { Effect, PubSub, Result, Stream } from "effect";
 import { describe, expect } from "vite-plus/test";
 
-import { ProviderInstanceId } from "@ryco/contracts";
+import { ProviderInstanceId, PullRequestId } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";
 import type { IssueContentGenerationResult } from "./TextGeneration.ts";
 
@@ -19,6 +19,8 @@ const makeStubTextGeneration = (overrides: Partial<TextGenerationShape>): TextGe
   generateBranchName: () => Effect.die("generateBranchName stub not configured for this test"),
   generateThreadTitle: () => Effect.die("generateThreadTitle stub not configured for this test"),
   generateIssueContent: () => Effect.die("generateIssueContent stub not configured for this test"),
+  generatePullRequestAnalysis: () =>
+    Effect.die("generatePullRequestAnalysis stub not configured for this test"),
   ...overrides,
 });
 
@@ -114,6 +116,50 @@ describe("makeTextGenerationFromRegistry", () => {
         expect(result.failure.operation).toBe("generateBranchName");
         expect(result.failure.detail).toContain("missing_instance");
       }
+    }),
+  );
+
+  it.effect("delegates structured pull request analysis to the selected instance", () =>
+    Effect.gen(function* () {
+      const instanceId = ProviderInstanceId.make("codex_review");
+      const pullRequestId = PullRequestId.make("pr_registry_analysis");
+      const instance = makeStubInstance(
+        instanceId,
+        makeStubTextGeneration({
+          generatePullRequestAnalysis: (input) =>
+            Effect.succeed({
+              pullRequestId: input.pullRequestId,
+              depth: input.depth,
+              summary: "The PR is ready for a focused review.",
+              implementationPhase: "review-ready",
+              attentionReason: "It changes a shared runtime boundary.",
+              suggestedNextAction: "Review the boundary and validation coverage.",
+              risk: "medium",
+              riskEvidence: ["The supplied context crosses packages."],
+              hotspots: [],
+              riskPoints: 8,
+              blockerPoints: 1,
+              reviewImpactPoints: 8,
+              timeSensitivityPoints: 2,
+              implementationCompletenessPoints: 13,
+              unresolvedDiscussionRiskPoints: 1,
+              confidence: 85,
+            }),
+        }),
+      );
+      const tg = makeTextGenerationFromRegistry(makeStubRegistry([instance]));
+
+      const result = yield* tg.generatePullRequestAnalysis({
+        cwd: process.cwd(),
+        pullRequestId,
+        depth: "deep",
+        context: "bounded provider context",
+        modelSelection: createModelSelection(instanceId, "gpt-5.6"),
+      });
+
+      expect(result.pullRequestId).toBe(pullRequestId);
+      expect(result.depth).toBe("deep");
+      expect(result.implementationPhase).toBe("review-ready");
     }),
   );
 

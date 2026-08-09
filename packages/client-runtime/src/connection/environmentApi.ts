@@ -48,6 +48,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
           subject,
           relationship: "explicitly-attached",
         }),
+      listAi: () => rpcClient.pullRequests.listAi({}),
+      subscribeAi: (listener, options) => rpcClient.pullRequests.subscribeAi(listener, options),
+      analyze: (input) => rpcClient.pullRequests.analyze(input),
+      cancelAiRun: (runId) => rpcClient.pullRequests.cancelAiRun({ runId }),
     },
     vcs: {
       pull: rpcClient.vcs.pull,

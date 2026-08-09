@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Option, Path, Random, Schema, Scope, Stream } from "effect";
+import { Effect, FileSystem, Option, Path, Random, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { type CodexSettings, type ModelSelection } from "@ryco/contracts";
@@ -18,8 +18,10 @@ import {
   buildCommitMessagePrompt,
   buildIssueContentPolishPrompt,
   buildIssueContentTitlePrompt,
+  buildPullRequestAnalysisPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  normalizePullRequestAiModelAssessmentOutput,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -71,11 +73,11 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     operation: string,
     prefix: string,
     content: string,
-  ): Effect.Effect<string, TextGenerationError, Scope.Scope> => {
+  ): Effect.Effect<string, TextGenerationError> => {
     return Effect.gen(function* () {
       const tempFileId = yield* Random.nextUUIDv4;
       return yield* fileSystem
-        .makeTempFileScoped({
+        .makeTempFile({
           prefix: `ryco-${prefix}-${process.pid}-${tempFileId}.tmp`,
         })
         .pipe(Effect.tap((filePath) => fileSystem.writeFileString(filePath, content)));
@@ -93,6 +95,11 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
   const safeUnlink = (filePath: string): Effect.Effect<void, never> =>
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void));
+
+  const safeRemoveTempFile = (filePath: string): Effect.Effect<void, never> =>
+    fileSystem
+      .remove(path.dirname(filePath), { recursive: true })
+      .pipe(Effect.catch(() => safeUnlink(filePath)));
 
   const materializeImageAttachments = Effect.fn("materializeImageAttachments")(function* (
     _operation:
@@ -145,7 +152,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "generatePullRequestAnalysis";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -235,7 +243,11 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     });
 
     const cleanup = Effect.all(
-      [schemaPath, outputPath, ...cleanupPaths].map((filePath) => safeUnlink(filePath)),
+      [
+        safeRemoveTempFile(schemaPath),
+        safeRemoveTempFile(outputPath),
+        ...cleanupPaths.map((filePath) => safeUnlink(filePath)),
+      ],
       {
         concurrency: "unbounded",
       },
@@ -415,11 +427,26 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     }
   });
 
+  const generatePullRequestAnalysis: TextGenerationShape["generatePullRequestAnalysis"] = Effect.fn(
+    "CodexTextGeneration.generatePullRequestAnalysis",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestAnalysisPrompt(input);
+    const assessment = yield* runCodexJson({
+      operation: "generatePullRequestAnalysis",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return normalizePullRequestAiModelAssessmentOutput(assessment);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    generatePullRequestAnalysis,
   } satisfies TextGenerationShape;
 });

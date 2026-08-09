@@ -20,8 +20,10 @@ import {
   buildCommitMessagePrompt,
   buildIssueContentPolishPrompt,
   buildIssueContentTitlePrompt,
+  buildPullRequestAnalysisPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  normalizePullRequestAiModelAssessmentOutput,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -91,7 +93,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "generatePullRequestAnalysis";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -133,7 +136,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           resolveClaudeApiModelId(modelSelection),
           ...(cliEffort ? ["--effort", cliEffort] : []),
           ...(Object.keys(settings).length > 0 ? ["--settings", JSON.stringify(settings)] : []),
-          "--dangerously-skip-permissions",
+          ...(operation === "generatePullRequestAnalysis"
+            ? ["--tools", ""]
+            : ["--dangerously-skip-permissions"]),
         ],
         {
           env: claudeEnvironment,
@@ -353,11 +358,26 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     }
   });
 
+  const generatePullRequestAnalysis: TextGenerationShape["generatePullRequestAnalysis"] = Effect.fn(
+    "ClaudeTextGeneration.generatePullRequestAnalysis",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestAnalysisPrompt(input);
+    const assessment = yield* runClaudeJson({
+      operation: "generatePullRequestAnalysis",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return normalizePullRequestAiModelAssessmentOutput(assessment);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    generatePullRequestAnalysis,
   } satisfies TextGenerationShape;
 });

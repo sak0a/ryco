@@ -1,11 +1,14 @@
 import "../../index.css";
 
 import {
+  applyPullRequestAiSnapshot,
   applyPullRequestSnapshot,
   resetPullRequestStore,
 } from "@ryco/client-runtime/state/pullRequests";
 import {
   EnvironmentId,
+  ProviderInstanceId,
+  type PullRequestAiAnalysis,
   type PullRequestDetailResult,
   type PullRequestInboxItem,
   type PullRequestInboxSnapshot,
@@ -237,6 +240,62 @@ function makeDetailResult(item: PullRequestInboxItem): PullRequestDetailResult {
   };
 }
 
+function makeAiAnalysis(item: PullRequestInboxItem): PullRequestAiAnalysis {
+  const analyzedAt = DateTime.makeUnsafe("2026-08-08T13:00:00Z");
+  return {
+    pullRequestId: item.pullRequest.identity.id,
+    viewerKey: "viewer-a",
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6" },
+    promptVersion: 1,
+    schemaVersion: 1,
+    sourceFingerprint: "browser-ai-fingerprint",
+    sourceProviderUpdatedAt: item.pullRequest.freshness.providerUpdatedAt,
+    depth: "deep",
+    priorityScore: 84,
+    priority: "urgent",
+    deterministicPriorityPoints: 44,
+    modelPriorityPoints: 40,
+    priorityExplanation: "The inbox architecture changes review behavior across repositories.",
+    assessment: {
+      pullRequestId: item.pullRequest.identity.id,
+      depth: "deep",
+      summary:
+        "This PR introduces a canonical repository-aware inbox and integrates review state with related Ryco work. The implementation is review-ready, with refresh failure handling as the main area to verify.",
+      implementationPhase: "review-ready",
+      attentionReason:
+        "The change replaces repository-local assumptions in the main review workflow.",
+      suggestedNextAction: "Review refresh failure handling and the canonical identity join.",
+      risk: "medium",
+      riskEvidence: ["Persistence and cross-repository identity are changed together."],
+      hotspots: [
+        {
+          filePath: "apps/web/src/components/pullRequests/PullRequestsPage.tsx",
+          title: "Refresh failure recovery",
+          explanation: "Verify partial environment failures preserve cached results.",
+          risk: "medium",
+        },
+      ],
+      riskPoints: 10,
+      blockerPoints: 3,
+      reviewImpactPoints: 10,
+      timeSensitivityPoints: 3,
+      implementationCompletenessPoints: 13,
+      unresolvedDiscussionRiskPoints: 2,
+      confidence: 86,
+    },
+    mergeReadiness: Option.some({
+      score: 82,
+      confidence: 88,
+      insufficientEvidence: false,
+      factors: [],
+      appliedCaps: [],
+    }),
+    analyzedAt,
+    expiresAt: DateTime.add(analyzedAt, { hours: 24 }),
+    isStale: false,
+  };
+}
+
 function makeTestRouter() {
   const rootRoute = createRootRoute();
   const pullRequestsRoute = createRoute({
@@ -338,5 +397,27 @@ describe("PullRequestsPage", () => {
     await expect
       .element(page.getByText("packages/contracts/src/pullRequest.ts", { exact: true }))
       .toBeVisible();
+  });
+
+  it("turns Priority into a ranked inbox and keeps the AI briefing inside PR detail", async () => {
+    const firstItem = snapshotRef.current!.items[0]!;
+    applyPullRequestAiSnapshot(environmentId, {
+      generation: 1,
+      analyses: [makeAiAnalysis(firstItem)],
+      currentRun: Option.none(),
+      latestRun: Option.none(),
+      lastSuccessAt: Option.some(DateTime.makeUnsafe("2026-08-08T13:00:00Z")),
+    });
+    mounted = await render(<RouterProvider router={makeTestRouter() as never} />);
+
+    await page.getByRole("tab", { name: /Priority/u }).click();
+    await expect.element(page.getByText("Priority intelligence", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("84", { exact: true }).first()).toBeVisible();
+    await expect.element(page.getByText("AI review briefing", { exact: true })).toBeVisible();
+    await expect
+      .element(page.getByText(/introduces a canonical repository-aware inbox/u))
+      .toBeVisible();
+    await expect.element(page.getByText("Merge readiness", { exact: true })).toBeVisible();
+    await expect.element(page.getByText("82", { exact: true })).toBeVisible();
   });
 });

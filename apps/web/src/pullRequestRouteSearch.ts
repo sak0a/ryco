@@ -3,6 +3,7 @@ import { decodePullRequestId } from "@ryco/shared/pullRequestIdentity";
 import { Schema } from "effect";
 
 export const PULL_REQUEST_VIEWS = [
+  "priority",
   "latest",
   "review",
   "assigned",

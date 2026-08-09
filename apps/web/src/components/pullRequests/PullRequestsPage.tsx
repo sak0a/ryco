@@ -1,4 +1,5 @@
 import {
+  applyPullRequestAiSnapshot,
   applyPullRequestSnapshot,
   markPullRequestEnvironmentStale,
   selectFederatedPullRequests,
@@ -6,6 +7,10 @@ import {
 } from "@ryco/client-runtime/state/pullRequests";
 import type {
   EnvironmentId,
+  PullRequestAiAnalysis,
+  PullRequestAiConfiguration,
+  PullRequestAiModelSelection,
+  PullRequestAiRun,
   PullRequestAssociationSubject,
   PullRequestDetailResult,
   PullRequestInboxItem,
@@ -29,6 +34,7 @@ import {
   Minimize2Icon,
   RefreshCwIcon,
   SearchIcon,
+  SparklesIcon,
   UserRoundIcon,
   XCircleIcon,
 } from "lucide-react";
@@ -37,8 +43,13 @@ import * as React from "react";
 
 import { readEnvironmentConnection } from "~/environments/runtime";
 import { usePresentationTier } from "~/hooks/usePresentationTier";
+import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+import { getAppModelOptionsForInstance } from "~/modelSelection";
 import type { PullRequestRouteSearch, PullRequestView } from "~/pullRequestRouteSearch";
+import { getProviderModelCapabilities } from "~/providerModels";
+import { deriveProviderInstanceEntries, sortProviderInstanceEntries } from "~/providerInstances";
+import { useServerProviders } from "~/rpc/serverState";
 import { useStore } from "~/store";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -48,12 +59,17 @@ import { Skeleton } from "../ui/skeleton";
 import { changeRequestStateKind, StateBadge } from "../projectExplorer/StateBadge";
 import { filterPullRequestInbox } from "./pullRequestInboxViewModel";
 import {
+  PullRequestAiInboxControls,
+  type PullRequestAiModelChoice,
+} from "./PullRequestAiInboxControls";
+import {
   PullRequestManagementDetail,
   type PullRequestManagementTab,
   type RelatedRycoWorkCandidate,
 } from "./PullRequestManagementDetail";
 
 const PRIMARY_VIEWS: ReadonlyArray<{ id: PullRequestView; label: string }> = [
+  { id: "priority", label: "Priority" },
   { id: "latest", label: "Latest" },
   { id: "review", label: "Requires my review" },
   { id: "assigned", label: "Assigned to me" },
@@ -108,6 +124,10 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
   const activeEnvironmentId = useStore((state) => state.activeEnvironmentId);
   const environmentStateById = useStore((state) => state.environmentStateById);
   const pullRequestEnvironments = usePullRequestStore((state) => state.environmentById);
+  const pullRequestAiEnvironments = usePullRequestStore((state) => state.aiEnvironmentById);
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  const serverProviders = useServerProviders();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState<ReadonlyArray<string>>([]);
@@ -115,6 +135,7 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [detailRefreshTick, setDetailRefreshTick] = useState(0);
+  const [aiError, setAiError] = useState<string | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -128,6 +149,52 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
   const allItems = useMemo(
     () => selectFederatedPullRequests({ environmentById: pullRequestEnvironments }),
     [pullRequestEnvironments],
+  );
+  const aiAnalysisById = useMemo<Readonly<Record<string, PullRequestAiAnalysis>>>(
+    () =>
+      Object.assign(
+        {},
+        ...Object.values(pullRequestAiEnvironments).map((environment) => environment.analysisById),
+      ),
+    [pullRequestAiEnvironments],
+  );
+  const activeAiRuns = useMemo(
+    () =>
+      Object.values(pullRequestAiEnvironments).flatMap((environment) =>
+        Option.isSome(environment.currentRun) ? [environment.currentRun.value] : [],
+      ),
+    [pullRequestAiEnvironments],
+  );
+  const latestAiRunError = useMemo(
+    () =>
+      Object.values(pullRequestAiEnvironments).flatMap((environment) =>
+        Option.isSome(environment.latestRun) &&
+        (environment.latestRun.value.status === "failed" ||
+          environment.latestRun.value.status === "partially-completed") &&
+        environment.latestRun.value.error
+          ? [environment.latestRun.value.error]
+          : [],
+      )[0] ?? null,
+    [pullRequestAiEnvironments],
+  );
+  const aiModelChoices = useMemo<ReadonlyArray<PullRequestAiModelChoice>>(
+    () =>
+      sortProviderInstanceEntries(deriveProviderInstanceEntries(serverProviders)).flatMap((entry) =>
+        entry.enabled && entry.installed && entry.isAvailable
+          ? getAppModelOptionsForInstance(settings, entry).map((model) => ({
+              key: `${entry.instanceId}::${model.slug}`,
+              label: `${entry.displayName} · ${model.name}`,
+              description: `${entry.driverKind} / ${model.slug}`,
+              selection: { instanceId: entry.instanceId, model: model.slug },
+              capabilities: getProviderModelCapabilities(
+                entry.models,
+                model.slug,
+                entry.driverKind,
+              ),
+            }))
+          : [],
+      ),
+    [serverProviders, settings],
   );
   const relatedLabelBySubject = useMemo(() => {
     const labels = new Map<string, string>();
@@ -146,8 +213,8 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
     return labels;
   }, [environmentStateById]);
   const filteredItems = useMemo(
-    () => filterPullRequestInbox(allItems, search, relatedLabelBySubject),
-    [allItems, relatedLabelBySubject, search],
+    () => filterPullRequestInbox(allItems, search, relatedLabelBySubject, aiAnalysisById),
+    [aiAnalysisById, allItems, relatedLabelBySubject, search],
   );
   const selectedItem = useMemo(
     () => allItems.find((item) => item.pullRequest.identity.id === search.pr) ?? null,
@@ -156,6 +223,12 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
   const selectedPullRequestId = selectedItem?.pullRequest.identity.id;
   const selectedEnvironmentId = selectedItem?.pullRequest.identity.environmentId;
   const selectedPullRequestState = selectedItem?.pullRequest.state;
+  const selectedAiAnalysis = selectedPullRequestId
+    ? (aiAnalysisById[selectedPullRequestId] ?? null)
+    : null;
+  const selectedAiRunning = selectedPullRequestId
+    ? activeAiRuns.some((run) => run.pullRequestIds.includes(selectedPullRequestId))
+    : false;
   const relatedWorkCandidates = useMemo(() => {
     if (!selectedItem) return [];
     const environmentId = selectedItem.pullRequest.identity.environmentId;
@@ -225,6 +298,78 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
     },
     [navigate],
   );
+
+  const updateAiConfiguration = useCallback(
+    (configuration: PullRequestAiConfiguration) => {
+      updateSettings({ pullRequestAi: configuration });
+    },
+    [updateSettings],
+  );
+
+  const updateAiModel = useCallback(
+    (modelSelection: PullRequestAiModelSelection) => {
+      updateAiConfiguration({ ...settings.pullRequestAi, modelSelection });
+    },
+    [settings.pullRequestAi, updateAiConfiguration],
+  );
+
+  const analyzePullRequests = useCallback(
+    async (items: ReadonlyArray<PullRequestInboxItem>, scope: "view" | "single") => {
+      const limitedItems = items.slice(0, settings.pullRequestAi.maxPullRequests);
+      if (limitedItems.length === 0) return;
+      setAiError(null);
+      const byEnvironment = new Map<EnvironmentId, PullRequestInboxItem[]>();
+      for (const item of limitedItems) {
+        const environmentId = item.pullRequest.identity.environmentId;
+        const bucket = byEnvironment.get(environmentId) ?? [];
+        bucket.push(item);
+        byEnvironment.set(environmentId, bucket);
+      }
+      const failures: string[] = [];
+      await Promise.all(
+        [...byEnvironment].map(async ([environmentId, environmentItems]) => {
+          const connection = readEnvironmentConnection(environmentId);
+          if (!connection) {
+            failures.push(`${environmentId}: Environment is disconnected.`);
+            return;
+          }
+          try {
+            await connection.client.pullRequests.analyze({
+              pullRequestIds: environmentItems.map((item) => item.pullRequest.identity.id),
+              modelSelection: settings.pullRequestAi.modelSelection,
+              scope,
+              resourceMode: settings.pullRequestAi.resourceMode,
+              maxDeepAnalyses: scope === "single" ? 1 : settings.pullRequestAi.maxDeepAnalyses,
+            });
+            applyPullRequestAiSnapshot(
+              environmentId,
+              await connection.client.pullRequests.listAi({}),
+            );
+          } catch (error) {
+            failures.push(
+              `${environmentId}: ${error instanceof Error ? error.message : "Analysis failed."}`,
+            );
+          }
+        }),
+      );
+      setAiError(failures[0] ?? null);
+    },
+    [settings.pullRequestAi],
+  );
+
+  const cancelAiRun = useCallback(async (run: PullRequestAiRun) => {
+    const connection = readEnvironmentConnection(run.environmentId);
+    if (!connection) return;
+    try {
+      await connection.client.pullRequests.cancelAiRun({ runId: run.id });
+      applyPullRequestAiSnapshot(
+        run.environmentId,
+        await connection.client.pullRequests.listAi({}),
+      );
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : "Could not cancel analysis.");
+    }
+  }, []);
 
   const applyEnvironmentSnapshot = useCallback(
     async (environmentId: EnvironmentId, refresh: boolean) => {
@@ -464,6 +609,21 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
         repositories={repositories}
         onChange={updateSearch}
       />
+      <PullRequestAiInboxControls
+        configuration={settings.pullRequestAi}
+        models={aiModelChoices}
+        activeRuns={activeAiRuns}
+        analyzedCount={
+          filteredItems.filter((item) => aiAnalysisById[item.pullRequest.identity.id] !== undefined)
+            .length
+        }
+        visibleCount={filteredItems.length}
+        error={aiError ?? latestAiRunError}
+        onModelChange={updateAiModel}
+        onConfigurationChange={updateAiConfiguration}
+        onAnalyze={() => void analyzePullRequests(filteredItems, "view")}
+        onCancel={(run) => void cancelAiRun(run)}
+      />
       {errors.length > 0 ? (
         <div className="mx-3 mt-2 flex shrink-0 items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/7 px-3 py-2 text-amber-800 text-xs dark:text-amber-300">
           <AlertCircleIcon className="size-3.5 shrink-0" />
@@ -493,6 +653,8 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
             loading={loading}
             items={filteredItems}
             selectedId={search.pr}
+            priorityView={search.view === "priority"}
+            analysisById={aiAnalysisById}
             viewerUnsupported={
               search.view === "review" || search.view === "assigned" || search.view === "authored"
             }
@@ -523,6 +685,11 @@ export function PullRequestsPage({ search }: PullRequestsPageProps) {
           onRemoveRelationship={(subject) => updateExplicitRelationship(subject, true)}
           onOpenThread={openRelatedThread}
           onRefreshDetail={() => setDetailRefreshTick((tick) => tick + 1)}
+          aiAnalysis={selectedAiAnalysis}
+          aiRunning={selectedAiRunning}
+          onAnalyze={() => {
+            if (selectedItem) void analyzePullRequests([selectedItem], "single");
+          }}
         />
       </div>
       <CoverageFooter coverage={coverage} />
@@ -617,35 +784,35 @@ function PullRequestViewBar(props: {
         aria-label="Pull request inbox views"
         className="flex min-w-0 items-center gap-0.5"
       >
-        {PRIMARY_VIEWS.filter((view) => view.id === "latest" || viewerIdentitySupported).map(
-          (view) => {
-            const active = props.search.view === view.id;
-            const count = filterPullRequestInbox(props.items, {
-              ...props.search,
-              view: view.id,
-            }).length;
-            return (
-              <button
-                key={view.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => props.onChange({ view: view.id }, false)}
-                className={cn(
-                  "rounded-lg px-2.5 py-1.5 text-xs outline-none transition-[background-color,color,transform] focus-visible:ring-2 focus-visible:ring-ring active:translate-y-px",
-                  active
-                    ? "bg-foreground/[0.075] font-medium text-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]"
-                    : "text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground",
-                )}
-              >
-                {view.label}
-                {count > 0 ? (
-                  <span className="ml-1 font-mono text-[9px] opacity-45">{count}</span>
-                ) : null}
-              </button>
-            );
-          },
-        )}
+        {PRIMARY_VIEWS.filter(
+          (view) => view.id === "priority" || view.id === "latest" || viewerIdentitySupported,
+        ).map((view) => {
+          const active = props.search.view === view.id;
+          const count = filterPullRequestInbox(props.items, {
+            ...props.search,
+            view: view.id,
+          }).length;
+          return (
+            <button
+              key={view.id}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => props.onChange({ view: view.id }, false)}
+              className={cn(
+                "rounded-lg px-2.5 py-1.5 text-xs outline-none transition-[background-color,color,transform] focus-visible:ring-2 focus-visible:ring-ring active:translate-y-px",
+                active
+                  ? "bg-foreground/[0.075] font-medium text-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.08)]"
+                  : "text-muted-foreground hover:bg-foreground/[0.035] hover:text-foreground",
+              )}
+            >
+              {view.label}
+              {count > 0 ? (
+                <span className="ml-1 font-mono text-[9px] opacity-45">{count}</span>
+              ) : null}
+            </button>
+          );
+        })}
         <Select
           value={moreActive ? props.search.view : "more"}
           onValueChange={(value) => {
@@ -851,6 +1018,8 @@ const PullRequestListPane = React.forwardRef<
     readonly loading: boolean;
     readonly items: ReadonlyArray<PullRequestInboxItem>;
     readonly selectedId?: string | undefined;
+    readonly priorityView: boolean;
+    readonly analysisById: Readonly<Record<string, PullRequestAiAnalysis>>;
     readonly viewerUnsupported: boolean;
     readonly onSelect: (id: PullRequestInboxItem["pullRequest"]["identity"]["id"]) => void;
   }
@@ -867,11 +1036,13 @@ const PullRequestListPane = React.forwardRef<
         {props.loading ? (
           <PullRequestListSkeleton />
         ) : props.items.length > 0 ? (
-          props.items.map((item) => (
+          props.items.map((item, index) => (
             <PullRequestRow
               key={item.pullRequest.identity.id}
               item={item}
               selected={item.pullRequest.identity.id === props.selectedId}
+              analysis={props.analysisById[item.pullRequest.identity.id]}
+              rank={props.priorityView ? index + 1 : undefined}
               onSelect={props.onSelect}
             />
           ))
@@ -886,6 +1057,8 @@ const PullRequestListPane = React.forwardRef<
 function PullRequestRow(props: {
   readonly item: PullRequestInboxItem;
   readonly selected: boolean;
+  readonly analysis?: PullRequestAiAnalysis | undefined;
+  readonly rank?: number | undefined;
   readonly onSelect: (id: PullRequestInboxItem["pullRequest"]["identity"]["id"]) => void;
 }) {
   const { pullRequest, associations, viewState } = props.item;
@@ -903,6 +1076,11 @@ function PullRequestRow(props: {
       )}
     >
       <div className="flex items-center gap-2 text-[10px] text-muted-foreground/72">
+        {props.rank !== undefined ? (
+          <span className="flex size-4 shrink-0 items-center justify-center rounded-md bg-foreground/[0.055] font-mono text-[8px] text-foreground/58">
+            {props.rank}
+          </span>
+        ) : null}
         <span className="min-w-0 flex-1 truncate font-medium text-foreground/62">
           {pullRequest.repository.displayName}
         </span>
@@ -920,7 +1098,32 @@ function PullRequestRow(props: {
       >
         {pullRequest.title}
       </h2>
+      {props.rank !== undefined && props.analysis ? (
+        <p className="mt-1 line-clamp-1 text-[10px] leading-relaxed text-muted-foreground/78">
+          {props.analysis.priorityExplanation}
+        </p>
+      ) : null}
       <div className="mt-2 flex min-w-0 items-center gap-1.5">
+        {props.analysis ? (
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-[9px]",
+              props.analysis.priority === "urgent"
+                ? "border-rose-500/20 bg-rose-500/7 text-rose-700 dark:text-rose-300"
+                : props.analysis.priority === "high"
+                  ? "border-amber-500/20 bg-amber-500/7 text-amber-700 dark:text-amber-300"
+                  : "border-sky-500/16 bg-sky-500/6 text-sky-700 dark:text-sky-300",
+            )}
+            title={props.analysis.priorityExplanation}
+          >
+            <SparklesIcon className="size-2.5" /> {props.analysis.priorityScore}
+          </span>
+        ) : null}
+        {props.analysis && Option.isSome(props.analysis.mergeReadiness) ? (
+          <span className="rounded-md border border-border/45 bg-background/25 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">
+            ready {props.analysis.mergeReadiness.value.score}
+          </span>
+        ) : null}
         <StateBadge
           kind={changeRequestStateKind(pullRequest.state, pullRequest.isDraft)}
           className="px-1.5 py-0 text-[9px]"
@@ -1034,6 +1237,9 @@ const PullRequestDetailPane = React.forwardRef<
     readonly onRemoveRelationship: (subject: PullRequestAssociationSubject) => Promise<void>;
     readonly onOpenThread: (threadId: string) => void;
     readonly onRefreshDetail: () => void;
+    readonly aiAnalysis: PullRequestAiAnalysis | null;
+    readonly aiRunning: boolean;
+    readonly onAnalyze: () => void;
   }
 >(function PullRequestDetailPane(props, ref) {
   const item = props.selectedItem;
@@ -1100,6 +1306,9 @@ const PullRequestDetailPane = React.forwardRef<
                 onRemoveRelationship={props.onRemoveRelationship}
                 onOpenThread={props.onOpenThread}
                 onRefreshDetail={props.onRefreshDetail}
+                aiAnalysis={props.aiAnalysis}
+                aiRunning={props.aiRunning}
+                onAnalyze={props.onAnalyze}
               />
             ) : null}
           </div>

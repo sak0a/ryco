@@ -2,7 +2,12 @@ import { DateTime, Option, Schema } from "effect";
 import { describe, expect, it } from "vite-plus/test";
 
 import { EnvironmentId, ThreadId } from "./baseSchemas.ts";
-import { PullRequestAssociation, PullRequestIdentity, PullRequestRecord } from "./pullRequest.ts";
+import {
+  PullRequestAiModelAssessment,
+  PullRequestAssociation,
+  PullRequestIdentity,
+  PullRequestRecord,
+} from "./pullRequest.ts";
 
 const decodeIdentity = Schema.decodeUnknownSync(PullRequestIdentity);
 
@@ -86,5 +91,39 @@ describe("pull request contracts", () => {
       relationship: "created",
       evidence: "structured-provider-result",
     });
+  });
+
+  it("enforces bounded, identity-matched AI assessment fields", () => {
+    const assessment = {
+      pullRequestId: "pr_opaque",
+      depth: "deep",
+      summary: "The implementation is ready for a focused review.",
+      implementationPhase: "review-ready",
+      attentionReason: "It changes a shared persistence boundary.",
+      suggestedNextAction: "Review the migration and recovery behavior.",
+      risk: "medium",
+      riskEvidence: ["The supplied provider context spans persistence and RPC."],
+      hotspots: [],
+      riskPoints: 8,
+      blockerPoints: 2,
+      reviewImpactPoints: 8,
+      timeSensitivityPoints: 3,
+      implementationCompletenessPoints: 13,
+      unresolvedDiscussionRiskPoints: 1,
+      confidence: 84,
+    };
+    expect(Schema.decodeUnknownSync(PullRequestAiModelAssessment)(assessment)).toMatchObject({
+      depth: "deep",
+      confidence: 84,
+    });
+    expect(() =>
+      Schema.decodeUnknownSync(PullRequestAiModelAssessment)({
+        ...assessment,
+        blockerPoints: 11,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(PullRequestAiModelAssessment)({ ...assessment, confidence: 101 }),
+    ).toThrow();
   });
 });

@@ -1,4 +1,5 @@
-import type { PullRequestInboxItem } from "@ryco/contracts";
+import type { PullRequestAiAnalysis, PullRequestInboxItem } from "@ryco/contracts";
+import { sortPullRequestsByAiPriority } from "@ryco/shared/pullRequestIntelligence";
 import { DateTime, Option } from "effect";
 
 import type { PullRequestRouteSearch } from "~/pullRequestRouteSearch";
@@ -10,6 +11,8 @@ function normalized(value: string | undefined): string {
 function matchesView(item: PullRequestInboxItem, view: PullRequestRouteSearch["view"]): boolean {
   const pullRequest = item.pullRequest;
   switch (view) {
+    case "priority":
+      return pullRequest.state === "open";
     case "latest":
       return true;
     case "review":
@@ -46,11 +49,12 @@ export function filterPullRequestInbox(
   items: ReadonlyArray<PullRequestInboxItem>,
   search: PullRequestRouteSearch,
   relatedLabelBySubject?: ReadonlyMap<string, string> | undefined,
+  analysisById?: Readonly<Record<string, PullRequestAiAnalysis | undefined>> | undefined,
 ): ReadonlyArray<PullRequestInboxItem> {
   const query = normalized(search.q);
   const author = normalized(search.author);
   const reviewer = normalized(search.reviewer);
-  return items
+  const filtered = items
     .filter((item) => matchesView(item, search.view))
     .filter((item) => !search.provider || item.pullRequest.identity.provider === search.provider)
     .filter(
@@ -94,4 +98,7 @@ export function filterPullRequestInbox(
         ? byUpdate
         : left.pullRequest.identity.id.localeCompare(right.pullRequest.identity.id);
     });
+  return search.view === "priority"
+    ? sortPullRequestsByAiPriority(filtered, analysisById ?? {})
+    : filtered;
 }

@@ -1,5 +1,6 @@
 import type {
   EnvironmentId,
+  PullRequestAiAnalysis,
   PullRequestAssociationSubject,
   PullRequestDetailResult,
   PullRequestInboxItem,
@@ -57,6 +58,7 @@ import { WorkflowRunsSection } from "../projectExplorer/WorkflowRunsSection";
 import { Button } from "../ui/button";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
+import { PullRequestAiBriefing } from "./PullRequestAiBriefing";
 
 export type PullRequestManagementTab = "conversation" | "checks" | "commits" | "files";
 
@@ -78,6 +80,9 @@ interface PullRequestManagementDetailProps {
   readonly onRemoveRelationship: (subject: PullRequestAssociationSubject) => Promise<void>;
   readonly onOpenThread: (threadId: string) => void;
   readonly onRefreshDetail: () => void;
+  readonly aiAnalysis: PullRequestAiAnalysis | null;
+  readonly aiRunning: boolean;
+  readonly onAnalyze: () => void;
 }
 
 const compactDateFmt = new Intl.DateTimeFormat(undefined, {
@@ -313,6 +318,12 @@ export function PullRequestManagementDetail(props: PullRequestManagementDetailPr
             onClick={() => props.onActiveTabChange("files")}
           />
         </div>
+        <PullRequestAiBriefing
+          analysis={props.aiAnalysis}
+          running={props.aiRunning}
+          onAnalyze={props.onAnalyze}
+          onOpenFiles={() => props.onActiveTabChange("files")}
+        />
       </header>
 
       <ManagementTabs

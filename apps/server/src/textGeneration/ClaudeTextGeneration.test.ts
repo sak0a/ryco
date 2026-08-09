@@ -1,4 +1,9 @@
-import { ClaudeSettings, ProviderInstanceId, TextGenerationError } from "@ryco/contracts";
+import {
+  ClaudeSettings,
+  ProviderInstanceId,
+  PullRequestId,
+  TextGenerationError,
+} from "@ryco/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Result, Schema } from "effect";
@@ -422,6 +427,46 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
 
           expect(generated.title).toBe("Support markdown export");
           expect(generated.body).toBeUndefined();
+        }),
+    ),
+  );
+
+  it.effect("disables every Claude tool for advisory pull request analysis", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            pullRequestId: "pr_test",
+            depth: "shallow",
+            summary: "Adds an explainable pull request priority view.",
+            implementationPhase: "active-implementation",
+            attentionReason: "The change affects inbox ordering.",
+            suggestedNextAction: "Review the ranking inputs.",
+            risk: "medium",
+            riskEvidence: ["Inbox ordering changes."],
+            hotspots: [],
+            riskPoints: 8,
+            blockerPoints: 2,
+            reviewImpactPoints: 7,
+            timeSensitivityPoints: 1,
+            implementationCompletenessPoints: 11,
+            unresolvedDiscussionRiskPoints: 1,
+            confidence: 82,
+          },
+        }),
+        argsMustContain: "--tools",
+        argsMustNotContain: "--dangerously-skip-permissions",
+      },
+      (textGeneration) =>
+        textGeneration.generatePullRequestAnalysis({
+          cwd: process.cwd(),
+          pullRequestId: PullRequestId.make("pr_test"),
+          depth: "shallow",
+          context: "{}",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-sonnet-4-6",
+          },
         }),
     ),
   );

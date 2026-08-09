@@ -10,6 +10,8 @@ import {
 } from "./baseSchemas.ts";
 import { SourceControlProviderKind } from "./sourceControl.ts";
 import { SourceControlChangeRequestDetail } from "./sourceControl.ts";
+import { ProviderOptionSelections } from "./model.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 import { WorktreeId } from "./worktree.ts";
 
 const PullRequestHost = TrimmedNonEmptyString.check(
@@ -228,3 +230,198 @@ export const PullRequestDetailResult = Schema.Struct({
   detail: SourceControlChangeRequestDetail,
 });
 export type PullRequestDetailResult = typeof PullRequestDetailResult.Type;
+
+export const PullRequestAiRunId = TrimmedNonEmptyString.pipe(Schema.brand("PullRequestAiRunId"));
+export type PullRequestAiRunId = typeof PullRequestAiRunId.Type;
+
+export const PullRequestAiScore = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(100),
+);
+export type PullRequestAiScore = typeof PullRequestAiScore.Type;
+
+export const PullRequestAiModelSelection = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(ProviderOptionSelections),
+});
+export type PullRequestAiModelSelection = typeof PullRequestAiModelSelection.Type;
+
+export const PullRequestAiPriority = Schema.Literals(["urgent", "high", "normal", "low"]);
+export type PullRequestAiPriority = typeof PullRequestAiPriority.Type;
+
+export const PullRequestAiRisk = Schema.Literals(["high", "medium", "low", "uncertain"]);
+export type PullRequestAiRisk = typeof PullRequestAiRisk.Type;
+
+export const PullRequestAiImplementationPhase = Schema.Literals([
+  "early-work",
+  "active-implementation",
+  "validation-cleanup",
+  "review-ready",
+  "blocked",
+  "uncertain",
+]);
+export type PullRequestAiImplementationPhase = typeof PullRequestAiImplementationPhase.Type;
+
+export const PullRequestAiAnalysisDepth = Schema.Literals(["shallow", "deep"]);
+export type PullRequestAiAnalysisDepth = typeof PullRequestAiAnalysisDepth.Type;
+
+export const PullRequestAiHotspot = Schema.Struct({
+  filePath: Schema.optional(TrimmedNonEmptyString),
+  title: TrimmedNonEmptyString,
+  explanation: TrimmedNonEmptyString,
+  risk: PullRequestAiRisk,
+});
+export type PullRequestAiHotspot = typeof PullRequestAiHotspot.Type;
+
+const PullRequestAiRiskPoints = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(15),
+);
+const PullRequestAiTenPointScore = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(10),
+);
+const PullRequestAiFivePointScore = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(0),
+  Schema.isLessThanOrEqualTo(5),
+);
+
+/** Structured, provider-neutral output accepted from a configured model. */
+export const PullRequestAiModelAssessment = Schema.Struct({
+  pullRequestId: PullRequestId,
+  depth: PullRequestAiAnalysisDepth,
+  summary: TrimmedNonEmptyString,
+  implementationPhase: PullRequestAiImplementationPhase,
+  attentionReason: TrimmedNonEmptyString,
+  suggestedNextAction: TrimmedNonEmptyString,
+  risk: PullRequestAiRisk,
+  riskEvidence: Schema.Array(TrimmedNonEmptyString),
+  hotspots: Schema.Array(PullRequestAiHotspot),
+  riskPoints: PullRequestAiRiskPoints,
+  blockerPoints: PullRequestAiTenPointScore,
+  reviewImpactPoints: PullRequestAiTenPointScore,
+  timeSensitivityPoints: PullRequestAiFivePointScore,
+  implementationCompletenessPoints: PullRequestAiRiskPoints,
+  unresolvedDiscussionRiskPoints: PullRequestAiFivePointScore,
+  confidence: PullRequestAiScore,
+});
+export type PullRequestAiModelAssessment = typeof PullRequestAiModelAssessment.Type;
+
+export const PullRequestMergeReadinessFactorKind = Schema.Literals([
+  "provider-mergeability",
+  "checks",
+  "review",
+  "lifecycle",
+  "implementation-completeness",
+  "discussion-risk",
+]);
+export type PullRequestMergeReadinessFactorKind = typeof PullRequestMergeReadinessFactorKind.Type;
+
+export const PullRequestMergeReadinessFactor = Schema.Struct({
+  kind: PullRequestMergeReadinessFactorKind,
+  points: PullRequestAiScore,
+  possiblePoints: PullRequestAiScore,
+  known: Schema.Boolean,
+  explanation: TrimmedNonEmptyString,
+});
+export type PullRequestMergeReadinessFactor = typeof PullRequestMergeReadinessFactor.Type;
+
+export const PullRequestMergeReadiness = Schema.Struct({
+  score: PullRequestAiScore,
+  confidence: PullRequestAiScore,
+  insufficientEvidence: Schema.Boolean,
+  factors: Schema.Array(PullRequestMergeReadinessFactor),
+  appliedCaps: Schema.Array(TrimmedNonEmptyString),
+});
+export type PullRequestMergeReadiness = typeof PullRequestMergeReadiness.Type;
+
+export const PullRequestAiAnalysis = Schema.Struct({
+  pullRequestId: PullRequestId,
+  viewerKey: TrimmedNonEmptyString,
+  modelSelection: PullRequestAiModelSelection,
+  promptVersion: PositiveInt,
+  schemaVersion: PositiveInt,
+  sourceFingerprint: TrimmedNonEmptyString,
+  sourceProviderUpdatedAt: Schema.Option(Schema.DateTimeUtc),
+  depth: PullRequestAiAnalysisDepth,
+  priorityScore: PullRequestAiScore,
+  priority: PullRequestAiPriority,
+  deterministicPriorityPoints: PullRequestAiScore,
+  modelPriorityPoints: PullRequestAiScore,
+  priorityExplanation: TrimmedNonEmptyString,
+  assessment: PullRequestAiModelAssessment,
+  mergeReadiness: Schema.Option(PullRequestMergeReadiness),
+  analyzedAt: Schema.DateTimeUtc,
+  expiresAt: Schema.DateTimeUtc,
+  isStale: Schema.Boolean,
+});
+export type PullRequestAiAnalysis = typeof PullRequestAiAnalysis.Type;
+
+export const PullRequestAiResourceMode = Schema.Literals(["economical", "balanced", "thorough"]);
+export type PullRequestAiResourceMode = typeof PullRequestAiResourceMode.Type;
+
+export const PullRequestAiScheduleIntervalMinutes = Schema.Literals([30, 60, 180, 360, 720, 1440]);
+export type PullRequestAiScheduleIntervalMinutes = typeof PullRequestAiScheduleIntervalMinutes.Type;
+
+export const PullRequestAiConfiguration = Schema.Struct({
+  backgroundEnabled: Schema.Boolean,
+  modelSelection: PullRequestAiModelSelection,
+  intervalMinutes: PullRequestAiScheduleIntervalMinutes,
+  maxPullRequests: PositiveInt,
+  maxDeepAnalyses: NonNegativeInt,
+  activeWindowDays: PositiveInt,
+  includeDrafts: Schema.Boolean,
+  resourceMode: PullRequestAiResourceMode,
+});
+export type PullRequestAiConfiguration = typeof PullRequestAiConfiguration.Type;
+
+export const PullRequestAiRunStatus = Schema.Literals([
+  "planned",
+  "ranking",
+  "deep-analysis",
+  "cancelling",
+  "completed",
+  "partially-completed",
+  "cancelled",
+  "failed",
+]);
+export type PullRequestAiRunStatus = typeof PullRequestAiRunStatus.Type;
+
+export const PullRequestAiRunScope = Schema.Literals(["view", "single", "scheduled"]);
+export type PullRequestAiRunScope = typeof PullRequestAiRunScope.Type;
+
+export const PullRequestAiRunProgress = Schema.Struct({
+  planned: NonNegativeInt,
+  ranked: NonNegativeInt,
+  deepPlanned: NonNegativeInt,
+  deepCompleted: NonNegativeInt,
+  cached: NonNegativeInt,
+  failed: NonNegativeInt,
+});
+export type PullRequestAiRunProgress = typeof PullRequestAiRunProgress.Type;
+
+export const PullRequestAiRun = Schema.Struct({
+  id: PullRequestAiRunId,
+  environmentId: EnvironmentId,
+  viewerKey: TrimmedNonEmptyString,
+  scope: PullRequestAiRunScope,
+  pullRequestIds: Schema.Array(PullRequestId),
+  modelSelection: PullRequestAiModelSelection,
+  resourceMode: PullRequestAiResourceMode,
+  status: PullRequestAiRunStatus,
+  progress: PullRequestAiRunProgress,
+  startedAt: Schema.DateTimeUtc,
+  completedAt: Schema.Option(Schema.DateTimeUtc),
+  error: Schema.optional(TrimmedNonEmptyString),
+});
+export type PullRequestAiRun = typeof PullRequestAiRun.Type;
+
+export const PullRequestAiSnapshot = Schema.Struct({
+  generation: NonNegativeInt,
+  analyses: Schema.Array(PullRequestAiAnalysis),
+  currentRun: Schema.Option(PullRequestAiRun),
+  latestRun: Schema.Option(PullRequestAiRun),
+  lastSuccessAt: Schema.Option(Schema.DateTimeUtc),
+});
+export type PullRequestAiSnapshot = typeof PullRequestAiSnapshot.Type;

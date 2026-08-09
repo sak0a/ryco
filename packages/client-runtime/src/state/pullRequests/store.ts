@@ -1,5 +1,8 @@
 import type {
   EnvironmentId,
+  PullRequestAiAnalysis,
+  PullRequestAiRun,
+  PullRequestAiSnapshot,
   PullRequestId,
   PullRequestInboxItem,
   PullRequestInboxSnapshot,
@@ -19,9 +22,19 @@ export interface PullRequestEnvironmentState {
 
 export interface PullRequestState {
   readonly environmentById: Readonly<Record<string, PullRequestEnvironmentState>>;
+  readonly aiEnvironmentById: Readonly<Record<string, PullRequestAiEnvironmentState>>;
 }
 
-const initialState: PullRequestState = { environmentById: {} };
+export interface PullRequestAiEnvironmentState {
+  readonly generation: number;
+  readonly analysisById: Readonly<Record<string, PullRequestAiAnalysis>>;
+  readonly currentRun: Option.Option<PullRequestAiRun>;
+  readonly latestRun: Option.Option<PullRequestAiRun>;
+  readonly stale: boolean;
+  readonly lastSuccessAt: PullRequestAiSnapshot["lastSuccessAt"];
+}
+
+const initialState: PullRequestState = { environmentById: {}, aiEnvironmentById: {} };
 
 export const usePullRequestStore = create<PullRequestState>(() => initialState);
 
@@ -63,6 +76,43 @@ export function markPullRequestEnvironmentStale(environmentId: EnvironmentId): v
   });
 }
 
+export function applyPullRequestAiSnapshot(
+  environmentId: EnvironmentId,
+  snapshot: PullRequestAiSnapshot,
+): boolean {
+  const current = usePullRequestStore.getState().aiEnvironmentById[environmentId];
+  if (current && snapshot.generation < current.generation) return false;
+  usePullRequestStore.setState((state) => ({
+    aiEnvironmentById: {
+      ...state.aiEnvironmentById,
+      [environmentId]: {
+        generation: snapshot.generation,
+        analysisById: Object.fromEntries(
+          snapshot.analyses.map((analysis) => [analysis.pullRequestId, analysis]),
+        ),
+        currentRun: snapshot.currentRun,
+        latestRun: snapshot.latestRun,
+        stale: false,
+        lastSuccessAt: snapshot.lastSuccessAt,
+      },
+    },
+  }));
+  return true;
+}
+
+export function markPullRequestAiEnvironmentStale(environmentId: EnvironmentId): void {
+  usePullRequestStore.setState((state) => {
+    const current = state.aiEnvironmentById[environmentId];
+    if (!current || current.stale) return state;
+    return {
+      aiEnvironmentById: {
+        ...state.aiEnvironmentById,
+        [environmentId]: { ...current, stale: true },
+      },
+    };
+  });
+}
+
 export function resetPullRequestStore(): void {
   usePullRequestStore.setState(initialState, true);
 }
@@ -75,7 +125,7 @@ function updatedAt(item: PullRequestInboxItem): number {
 }
 
 export function selectFederatedPullRequests(
-  state: PullRequestState,
+  state: Pick<PullRequestState, "environmentById">,
 ): ReadonlyArray<PullRequestInboxItem> {
   return Object.values(state.environmentById)
     .flatMap((environment) =>
@@ -92,12 +142,31 @@ export function selectFederatedPullRequests(
     });
 }
 
-export function selectUnreadPullRequestCount(state: PullRequestState): number {
+export function selectUnreadPullRequestCount(
+  state: Pick<PullRequestState, "environmentById">,
+): number {
   return selectFederatedPullRequests(state).filter((item) => item.viewState.isUnread).length;
 }
 
-export function selectPullRequestsForSubject(
+export function selectFederatedPullRequestAiAnalyses(
   state: PullRequestState,
+): Readonly<Record<string, PullRequestAiAnalysis>> {
+  return Object.assign(
+    {},
+    ...Object.values(state.aiEnvironmentById).map((environment) => environment.analysisById),
+  );
+}
+
+export function selectActivePullRequestAiRuns(
+  state: PullRequestState,
+): ReadonlyArray<PullRequestAiRun> {
+  return Object.values(state.aiEnvironmentById).flatMap((environment) =>
+    Option.isSome(environment.currentRun) ? [environment.currentRun.value] : [],
+  );
+}
+
+export function selectPullRequestsForSubject(
+  state: Pick<PullRequestState, "environmentById">,
   subjectKind: "thread" | "worktree",
   subjectId: string,
 ): ReadonlyArray<PullRequestInboxItem> {

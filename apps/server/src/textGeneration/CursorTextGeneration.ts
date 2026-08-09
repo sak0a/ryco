@@ -11,8 +11,10 @@ import {
   buildCommitMessagePrompt,
   buildIssueContentPolishPrompt,
   buildIssueContentTitlePrompt,
+  buildPullRequestAnalysisPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  normalizePullRequestAiModelAssessmentOutput,
 } from "./TextGenerationPrompts.ts";
 import {
   extractJsonObject,
@@ -33,7 +35,8 @@ function mapCursorAcpError(
     | "generatePrContent"
     | "generateBranchName"
     | "generateThreadTitle"
-    | "generateIssueContent",
+    | "generateIssueContent"
+    | "generatePullRequestAnalysis",
   detail: string,
   cause: unknown,
 ): TextGenerationError {
@@ -75,7 +78,8 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "generatePullRequestAnalysis";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -303,11 +307,26 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     }
   });
 
+  const generatePullRequestAnalysis: TextGenerationShape["generatePullRequestAnalysis"] = Effect.fn(
+    "CursorTextGeneration.generatePullRequestAnalysis",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestAnalysisPrompt(input);
+    const assessment = yield* runCursorJson({
+      operation: "generatePullRequestAnalysis",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return normalizePullRequestAiModelAssessmentOutput(assessment);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    generatePullRequestAnalysis,
   } satisfies TextGenerationShape;
 });

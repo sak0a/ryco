@@ -89,6 +89,62 @@ describe("pull request inbox view model", () => {
     ).toEqual(["Newer read", "Older unread"]);
   });
 
+  it("sorts Priority by cached AI score while Latest keeps chronological order", () => {
+    const olderHighPriority = makeItem(41, "ryco/app", "Older high priority");
+    const newerLowPriority = makeItem(42, "ryco/app", "Newer low priority");
+    olderHighPriority.pullRequest.freshness.observedAt =
+      DateTime.makeUnsafe("2026-08-08T10:00:00Z");
+    newerLowPriority.pullRequest.freshness.observedAt = DateTime.makeUnsafe("2026-08-08T12:00:00Z");
+    const analyses = {
+      [olderHighPriority.pullRequest.identity.id]: { priorityScore: 88 },
+      [newerLowPriority.pullRequest.identity.id]: { priorityScore: 35 },
+    } as never;
+
+    expect(
+      filterPullRequestInbox(
+        [newerLowPriority, olderHighPriority],
+        parsePullRequestRouteSearch({ view: "priority" }),
+        undefined,
+        analyses,
+      ).map((item) => item.pullRequest.title),
+    ).toEqual(["Older high priority", "Newer low priority"]);
+    expect(
+      filterPullRequestInbox(
+        [olderHighPriority, newerLowPriority],
+        parsePullRequestRouteSearch({ view: "latest" }),
+        undefined,
+        analyses,
+      ).map((item) => item.pullRequest.title),
+    ).toEqual(["Newer low priority", "Older high priority"]);
+  });
+
+  it("keeps merged and closed history out of the active Priority view", () => {
+    const open = makeItem(40, "ryco/app", "Open work");
+    const mergedBase = makeItem(41, "ryco/app", "Merged history");
+    const closedBase = makeItem(42, "ryco/app", "Closed history");
+    const merged = {
+      ...mergedBase,
+      pullRequest: { ...mergedBase.pullRequest, state: "merged" as const },
+    };
+    const closed = {
+      ...closedBase,
+      pullRequest: { ...closedBase.pullRequest, state: "closed" as const },
+    };
+
+    expect(
+      filterPullRequestInbox(
+        [merged, open, closed],
+        parsePullRequestRouteSearch({ view: "priority" }),
+      ).map((item) => item.pullRequest.title),
+    ).toEqual(["Open work"]);
+    expect(
+      filterPullRequestInbox(
+        [merged, open, closed],
+        parsePullRequestRouteSearch({ view: "latest" }),
+      ),
+    ).toHaveLength(3);
+  });
+
   it("searches joined thread and worktree labels without storing them on the PR", () => {
     const item = makeItem(42, "ryco/app", "Inbox");
     const itemWithAssociation = {

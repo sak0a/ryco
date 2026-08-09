@@ -23,6 +23,38 @@ describe("ServerSettings.enableProviderUpdateChecks", () => {
   });
 });
 
+describe("ServerSettings.pullRequestAi", () => {
+  it("hydrates a sparse persisted model selection with configuration defaults", () => {
+    const decoded = decodeServerSettings({
+      pullRequestAi: {
+        modelSelection: {
+          instanceId: "claudeAgent",
+          model: "claude-opus-4-8",
+        },
+      },
+    });
+
+    expect(decoded.pullRequestAi).toEqual({
+      ...DEFAULT_SERVER_SETTINGS.pullRequestAi,
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-opus-4-8",
+      },
+    });
+  });
+
+  it("defaults the provider instance inside a sparse model selection", () => {
+    expect(
+      decodeServerSettings({
+        pullRequestAi: { modelSelection: { model: "gpt-5.6" } },
+      }).pullRequestAi.modelSelection,
+    ).toEqual({
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6",
+    });
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});

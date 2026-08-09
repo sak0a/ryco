@@ -1,4 +1,4 @@
-import { Cause, Effect, Metric, Option, Schema, Stream } from "effect";
+import { Cause, Effect, Fiber, Metric, Option, Schema, Stream } from "effect";
 import {
   AuthSessionId,
   CommandId,
@@ -50,6 +50,7 @@ import {
   ProjectionPullRequestRepository,
   PullRequestViewerKey,
 } from "../persistence/Services/ProjectionPullRequests.ts";
+import { PullRequestAiCache } from "../persistence/Services/PullRequestAiCache.ts";
 import { refreshWorktreeSourceControlState } from "../sourceControl/refreshWorktreeSourceControlState.ts";
 import * as SourceControlDiscoveryLayer from "../sourceControl/SourceControlDiscovery.ts";
 import { SourceControlRepositoryService } from "../sourceControl/SourceControlRepositoryService.ts";
@@ -144,6 +145,8 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const sessions = yield* SessionCredentialService;
     const projectionWorktrees = yield* ProjectionWorktreeRepository;
     const projectionPullRequests = yield* Effect.serviceOption(ProjectionPullRequestRepository);
+    const pullRequestAiCache = yield* Effect.serviceOption(PullRequestAiCache);
+    const pullRequestAiRunFibers = new Map<string, Fiber.Fiber<void, never>>();
     const atlassian = yield* AtlassianConnectionService;
     const workItems = yield* JiraWorkItemService;
     const diagnostics = yield* Diagnostics;
@@ -695,6 +698,8 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       sessions,
       projectionWorktrees,
       projectionPullRequests,
+      pullRequestAiCache,
+      pullRequestAiRunFibers,
       pullRequestCoverageByRepository,
       pullRequestViewerKey,
       repositoryIdentityResolver,

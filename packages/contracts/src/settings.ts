@@ -6,6 +6,7 @@ import { EditorId } from "./editor.ts";
 import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
 import { AgentTokenMode, DEFAULT_AGENT_TOKEN_MODE, ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
+import { PullRequestAiConfiguration, PullRequestAiModelSelection } from "./pullRequest.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -388,6 +389,20 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+const DEFAULT_PULL_REQUEST_AI_CONFIGURATION = {
+  backgroundEnabled: false,
+  modelSelection: {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  },
+  intervalMinutes: 180,
+  maxPullRequests: 25,
+  maxDeepAnalyses: 8,
+  activeWindowDays: 14,
+  includeDrafts: false,
+  resourceMode: "balanced",
+} as const satisfies PullRequestAiConfiguration;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // When disabled, the server skips provider CLI latest-version resolution
@@ -409,6 +424,60 @@ export const ServerSettings = Schema.Struct({
       }),
     ),
   ),
+  pullRequestAi: Schema.Struct({
+    backgroundEnabled: PullRequestAiConfiguration.fields.backgroundEnabled.pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.backgroundEnabled),
+      ),
+    ),
+    modelSelection: Schema.Struct({
+      instanceId: PullRequestAiModelSelection.fields.instanceId.pipe(
+        Schema.withDecodingDefault(
+          Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.modelSelection.instanceId),
+        ),
+      ),
+      model: PullRequestAiModelSelection.fields.model.pipe(
+        Schema.withDecodingDefault(
+          Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.modelSelection.model),
+        ),
+      ),
+      options: PullRequestAiModelSelection.fields.options,
+    }).pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.modelSelection),
+      ),
+    ),
+    intervalMinutes: PullRequestAiConfiguration.fields.intervalMinutes.pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.intervalMinutes),
+      ),
+    ),
+    maxPullRequests: PullRequestAiConfiguration.fields.maxPullRequests.pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.maxPullRequests),
+      ),
+    ),
+    maxDeepAnalyses: PullRequestAiConfiguration.fields.maxDeepAnalyses.pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.maxDeepAnalyses),
+      ),
+    ),
+    activeWindowDays: PullRequestAiConfiguration.fields.activeWindowDays.pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.activeWindowDays),
+      ),
+    ),
+    includeDrafts: PullRequestAiConfiguration.fields.includeDrafts.pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.includeDrafts),
+      ),
+    ),
+    resourceMode: PullRequestAiConfiguration.fields.resourceMode.pipe(
+      Schema.withDecodingDefault(
+        Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION.resourceMode),
+      ),
+    ),
+  }).pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_PULL_REQUEST_AI_CONFIGURATION))),
 
   // Legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
@@ -518,6 +587,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultAgentTokenMode: Schema.optionalKey(AgentTokenMode),
   addProjectBaseDirectory: Schema.optionalKey(Schema.String),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  pullRequestAi: Schema.optionalKey(PullRequestAiConfiguration),
   observability: Schema.optionalKey(
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),

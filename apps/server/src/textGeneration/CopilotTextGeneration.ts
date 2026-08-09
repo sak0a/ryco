@@ -15,7 +15,11 @@ import { Effect, Schema } from "effect";
 import { resolveCopilotCliPath } from "../provider/Layers/CopilotAdapter.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import type { TextGenerationShape } from "./TextGeneration.ts";
-import { buildThreadTitlePrompt } from "./TextGenerationPrompts.ts";
+import {
+  buildPullRequestAnalysisPrompt,
+  buildThreadTitlePrompt,
+  normalizePullRequestAiModelAssessmentOutput,
+} from "./TextGenerationPrompts.ts";
 import { extractJsonObject, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
 
 const COPILOT_THREAD_TITLE_TIMEOUT_MS = 60_000;
@@ -125,6 +129,62 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
       return { title: sanitizeThreadTitle(parsed.title) };
     });
 
+  const generatePullRequestAnalysis: TextGenerationShape["generatePullRequestAnalysis"] = (input) =>
+    Effect.gen(function* () {
+      const { prompt, outputSchema } = buildPullRequestAnalysisPrompt(input);
+      const client = new CopilotClient(makeClientOptions(copilotSettings, input.cwd, environment));
+      const reasoningEffort = getModelSelectionStringOptionValue(
+        input.modelSelection,
+        "reasoningEffort",
+      );
+      const content = yield* Effect.tryPromise({
+        try: async () => {
+          try {
+            const session = await client.createSession({
+              model: input.modelSelection.model,
+              ...(reasoningEffort
+                ? { reasoningEffort: reasoningEffort as "low" | "medium" | "high" | "xhigh" }
+                : {}),
+              workingDirectory: input.cwd,
+              streaming: false,
+              availableTools: [],
+              onPermissionRequest: () => ({ kind: "reject" }),
+            });
+            const response = await session.sendAndWait(
+              { prompt, mode: "immediate" },
+              COPILOT_THREAD_TITLE_TIMEOUT_MS,
+            );
+            await session.disconnect();
+            return response?.data.content ?? "";
+          } finally {
+            await client.stop();
+          }
+        },
+        catch: (cause) =>
+          new TextGenerationError({
+            operation: "generatePullRequestAnalysis",
+            detail:
+              cause instanceof Error
+                ? `GitHub Copilot PR analysis failed: ${cause.message}`
+                : "GitHub Copilot PR analysis failed.",
+            cause,
+          }),
+      });
+      const assessment = yield* Schema.decodeEffect(Schema.fromJsonString(outputSchema))(
+        extractJsonObject(content),
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generatePullRequestAnalysis",
+              detail: "GitHub Copilot returned invalid PR analysis JSON.",
+              cause,
+            }),
+        ),
+      );
+      return normalizePullRequestAiModelAssessmentOutput(assessment);
+    });
+
   return {
     generateCommitMessage: (input) =>
       codexFallback.generateCommitMessage(withGitFallbackSelection(input)),
@@ -134,5 +194,6 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
     generateThreadTitle,
     generateIssueContent: (input) =>
       codexFallback.generateIssueContent(withGitFallbackSelection(input)),
+    generatePullRequestAnalysis,
   } satisfies TextGenerationShape;
 });

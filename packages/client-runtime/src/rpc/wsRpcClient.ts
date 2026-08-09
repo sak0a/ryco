@@ -127,6 +127,10 @@ export interface WsRpcClient {
     readonly removeExplicitRelationship: RpcUnaryMethod<
       typeof WS_METHODS.pullRequestsRemoveExplicitRelationship
     >;
+    readonly listAi: RpcUnaryMethod<typeof WS_METHODS.pullRequestsListAi>;
+    readonly subscribeAi: RpcStreamMethod<typeof WS_METHODS.pullRequestsSubscribeAi>;
+    readonly analyze: RpcUnaryMethod<typeof WS_METHODS.pullRequestsAnalyze>;
+    readonly cancelAiRun: RpcUnaryMethod<typeof WS_METHODS.pullRequestsCancelAiRun>;
   };
   readonly textGeneration: {
     readonly generateIssueContent: RpcUnaryMethod<
@@ -402,6 +406,17 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) =>
           client[WS_METHODS.pullRequestsRemoveExplicitRelationship](input),
         ),
+      listAi: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsListAi](input)),
+      subscribeAi: (listener, options) =>
+        transport.subscribe((client) => client[WS_METHODS.pullRequestsSubscribeAi]({}), listener, {
+          ...options,
+          tag: WS_METHODS.pullRequestsSubscribeAi,
+        }),
+      analyze: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsAnalyze](input)),
+      cancelAiRun: (input) =>
+        transport.request((client) => client[WS_METHODS.pullRequestsCancelAiRun](input)),
     },
     textGeneration: {
       generateIssueContent: (input) =>

@@ -66,7 +66,7 @@ function mergeModelSelectionOptionsById(input: {
 }
 
 /**
- * Applies a server settings patch while treating textGenerationModelSelection as
+ * Applies a server settings patch while treating model selections as
  * replace-on-provider/model updates. This prevents stale nested options from
  * surviving a reset patch that intentionally omits options.
  */
@@ -75,17 +75,30 @@ export function applyServerSettingsPatch(
   patch: ServerSettingsPatch,
 ): ServerSettings {
   const selectionPatch = patch.textGenerationModelSelection;
+  const pullRequestAiSelectionPatch = patch.pullRequestAi?.modelSelection;
   const next = deepMerge(current, patch);
-  const nextWithReplacements =
+  let nextWithReplacements =
     patch.providerInstances !== undefined
       ? {
           ...next,
           providerInstances: patch.providerInstances,
         }
       : next;
-  if (!selectionPatch) {
-    return nextWithReplacements;
+  if (pullRequestAiSelectionPatch) {
+    nextWithReplacements = {
+      ...nextWithReplacements,
+      pullRequestAi: {
+        ...nextWithReplacements.pullRequestAi,
+        modelSelection: createModelSelection(
+          pullRequestAiSelectionPatch.instanceId,
+          pullRequestAiSelectionPatch.model,
+          pullRequestAiSelectionPatch.options,
+        ),
+      },
+    };
   }
+
+  if (!selectionPatch) return nextWithReplacements;
 
   const instanceId = selectionPatch.instanceId ?? current.textGenerationModelSelection.instanceId;
   const model = selectionPatch.model ?? current.textGenerationModelSelection.model;
