@@ -148,9 +148,9 @@ const TIER_TEXT_ROLES: Record<GlassSurfaceTier, ReadonlyArray<TextRole>> = {
  * by `derives each tier's floor from its own roles` below.
  */
 const TIER_COVERAGE_FLOORS: Record<GlassSurfaceTier, Record<ColorScheme, number>> = {
-  sheet: { light: 90, dark: 96 },
-  chip: { light: 88, dark: 82 },
-  dock: { light: 34, dark: 43 },
+  sheet: { light: 92, dark: 96 },
+  chip: { light: 90, dark: 82 },
+  dock: { light: 51, dark: 60 },
 };
 
 /**

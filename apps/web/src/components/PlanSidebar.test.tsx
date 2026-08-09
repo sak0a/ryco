@@ -12,7 +12,7 @@ describe("PlanSidebar", () => {
   beforeEach(() => {
     Reflect.deleteProperty(globalThis, "localStorage");
   });
-  it("summarizes changes into committed / uncommitted buckets (no per-file rows)", () => {
+  it("summarizes changes as an aggregate diffstat (no per-file rows)", () => {
     const markup = renderToStaticMarkup(
       <PlanSidebar
         activePlan={null}
@@ -46,11 +46,14 @@ describe("PlanSidebar", () => {
     );
 
     expect(markup).toContain("Changes");
-    expect(markup).toContain("Committed");
-    expect(markup).toContain("Uncommitted");
-    // Bucket totals, not per-file rows.
-    expect(markup).toContain("+30");
-    expect(markup).toContain("+7");
+    // Sections mount collapsed (`defaultOpen: false` in buildSections), so the
+    // panel shows the rolled-up diffstat and file count only. The committed /
+    // uncommitted bucket split is asserted at its own layer, in
+    // overviewChanges.logic.test.ts.
+    expect(markup).toContain("+37");
+    expect(markup).toContain("−6");
+    expect(markup).toContain("2 files");
+    // Aggregate totals, never per-file rows.
     expect(markup).not.toContain("PlanSidebar.tsx");
     expect(markup).not.toContain("Overview");
   });
