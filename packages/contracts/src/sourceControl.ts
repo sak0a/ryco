@@ -22,6 +22,16 @@ export type SourceControlProviderInfo = typeof SourceControlProviderInfo.Type;
 export const ChangeRequestState = Schema.Literals(["open", "closed", "merged"]);
 export type ChangeRequestState = typeof ChangeRequestState.Type;
 
+export const SourceControlReviewDisposition = Schema.Literals([
+  "approved",
+  "changes-requested",
+  "review-required",
+  "reviewed",
+  "none",
+  "unknown",
+]);
+export type SourceControlReviewDisposition = typeof SourceControlReviewDisposition.Type;
+
 export const SourceControlChangeRequestMergeability = Schema.Literals([
   "mergeable",
   "conflicting",
@@ -69,6 +79,8 @@ export const ChangeRequest = Schema.Struct({
   isDraft: Schema.optional(Schema.Boolean),
   author: Schema.optional(TrimmedNonEmptyString),
   assignees: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  reviewers: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  reviewDisposition: Schema.optional(SourceControlReviewDisposition),
   labels: Schema.optional(Schema.Array(SourceControlLabel)),
   commentsCount: Schema.optional(Schema.Number),
   headRepositoryNameWithOwner: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

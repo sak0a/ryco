@@ -1,9 +1,11 @@
 import path from "node:path";
 
-import { Duration, Effect, Option, Queue, Stream } from "effect";
+import { DateTime, Duration, Effect, Option, Queue, Stream } from "effect";
 import {
   type GitActionProgressEvent,
   type GitManagerServiceError,
+  type GitRunStackedActionInput,
+  type GitRunStackedActionResult,
   ProjectId,
   WS_METHODS,
 } from "@ryco/contracts";
@@ -11,6 +13,7 @@ import {
 import { resolveManagedWorktreesRoot } from "../config.ts";
 import { observeRpcEffect, observeRpcStream } from "../observability/RpcInstrumentation.ts";
 import { resolveProjectWorktreesDir } from "../project/projectMetadataPaths.ts";
+import { normalizeProviderPullRequest } from "../sourceControl/PullRequestProviderNormalization.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
 
 export const makeGitHandlers = (ctx: WsRpcContext) => {
@@ -33,7 +36,98 @@ export const makeGitHandlers = (ctx: WsRpcContext) => {
     deleteWorktree,
     initializeGitForProject,
     config,
+    projectionPullRequests,
+    dispatchNormalizedCommand,
+    repositoryIdentityResolver,
+    serverEnvironment,
+    sourceControlRegistry,
   } = ctx;
+
+  const recordVerifiedPullRequestAttribution = (
+    input: GitRunStackedActionInput,
+    result: GitRunStackedActionResult,
+  ) => {
+    if (
+      Option.isNone(projectionPullRequests) ||
+      result.pr.number === undefined ||
+      (result.pr.status !== "created" && result.pr.status !== "opened_existing") ||
+      (input.threadId === undefined && input.worktreeId === undefined)
+    ) {
+      return Effect.void;
+    }
+    return Effect.gen(function* () {
+      const repositoryIdentity = yield* repositoryIdentityResolver.resolve(input.cwd);
+      if (repositoryIdentity === null) return;
+      const [environmentId, handle, project] = yield* Effect.all([
+        serverEnvironment.getEnvironmentId,
+        sourceControlRegistry.resolveHandle({ cwd: input.cwd }),
+        projectionSnapshotQuery
+          .getActiveProjectByWorkspaceRoot(input.cwd)
+          .pipe(Effect.catch(() => Effect.succeed(Option.none()))),
+      ]);
+      const detail = yield* handle.provider.getChangeRequestDetail({
+        cwd: input.cwd,
+        ...(handle.context ? { context: handle.context } : {}),
+        reference: String(result.pr.number),
+        fullContent: false,
+      });
+      if (detail.number !== result.pr.number) return;
+      const observedAt = yield* DateTime.now;
+      const normalized = normalizeProviderPullRequest({
+        environmentId,
+        ...(Option.isSome(project) ? { projectId: project.value.id } : {}),
+        cwd: input.cwd,
+        repositoryIdentity,
+        provider: handle.provider.kind,
+        changeRequest: detail,
+        observedAt,
+        refreshGeneration: DateTime.toEpochMillis(observedAt),
+      });
+      const occurredAt = DateTime.formatIso(observedAt);
+      yield* dispatchNormalizedCommand({
+        type: "pull-request.observe",
+        commandId: serverCommandId("pull-request-observe"),
+        pullRequestId: normalized.record.identity.id,
+        record: normalized.record,
+        accessTarget: normalized.accessTarget,
+        occurredAt,
+      });
+      const relationship =
+        result.pr.status === "created" ? ("created" as const) : ("opened-existing" as const);
+      if (input.threadId) {
+        yield* dispatchNormalizedCommand({
+          type: "pull-request.association.record",
+          commandId: serverCommandId("pull-request-association-record"),
+          pullRequestId: normalized.record.identity.id,
+          association: {
+            pullRequestId: normalized.record.identity.id,
+            subject: { kind: "thread", threadId: input.threadId },
+            relationship,
+            evidence: "structured-provider-result",
+            createdAt: observedAt,
+            endedAt: Option.none(),
+          },
+          occurredAt,
+        });
+      }
+      if (input.worktreeId) {
+        yield* dispatchNormalizedCommand({
+          type: "pull-request.association.record",
+          commandId: serverCommandId("pull-request-association-record"),
+          pullRequestId: normalized.record.identity.id,
+          association: {
+            pullRequestId: normalized.record.identity.id,
+            subject: { kind: "worktree", worktreeId: input.worktreeId },
+            relationship,
+            evidence: "structured-provider-result",
+            createdAt: observedAt,
+            endedAt: Option.none(),
+          },
+          occurredAt,
+        });
+      }
+    }).pipe(Effect.ignoreCause({ log: true }));
+  };
 
   return defineWsHandlers({
     [WS_METHODS.subscribeVcsStatus]: (input) =>
@@ -93,6 +187,7 @@ export const makeGitHandlers = (ctx: WsRpcContext) => {
                 onFailure: (cause) => Queue.failCause(queue, cause),
                 onSuccess: (result) =>
                   Effect.gen(function* () {
+                    yield* recordVerifiedPullRequestAttribution(input, result);
                     if (
                       input.worktreeId !== undefined &&
                       result.pr.number !== undefined &&

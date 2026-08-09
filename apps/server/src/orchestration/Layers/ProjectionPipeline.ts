@@ -31,6 +31,10 @@ import {
 } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionThreadRepository } from "../../persistence/Services/ProjectionThreads.ts";
 import { ProjectionWorktreeRepository } from "../../persistence/Services/ProjectionWorktrees.ts";
+import {
+  ProjectionPullRequestRepository,
+  PullRequestViewerKey,
+} from "../../persistence/Services/ProjectionPullRequests.ts";
 import { ProjectionPendingApprovalRepositoryLive } from "../../persistence/Layers/ProjectionPendingApprovals.ts";
 import { ProjectionProjectRepositoryLive } from "../../persistence/Layers/ProjectionProjects.ts";
 import { ProjectionStateRepositoryLive } from "../../persistence/Layers/ProjectionState.ts";
@@ -41,6 +45,7 @@ import { ProjectionThreadSessionRepositoryLive } from "../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadRepositoryLive } from "../../persistence/Layers/ProjectionThreads.ts";
 import { ProjectionWorktreeRepositoryLive } from "../../persistence/Layers/ProjectionWorktrees.ts";
+import { ProjectionPullRequestRepositoryLive } from "../../persistence/Layers/ProjectionPullRequests.ts";
 import { ProjectAvatarStore } from "../../project/Services/ProjectAvatarStore.ts";
 import { ServerConfig } from "../../config.ts";
 import {
@@ -69,6 +74,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
   worktrees: "projection.worktrees",
+  pullRequests: "projection.pull-requests",
 } as const;
 
 type ProjectorName =
@@ -470,6 +476,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
     const projectionTurnRepository = yield* ProjectionTurnRepository;
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository;
     const projectionWorktreeRepository = yield* ProjectionWorktreeRepository;
+    const projectionPullRequestRepository = yield* ProjectionPullRequestRepository;
 
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -984,6 +991,49 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionWorktreeRepository.setManualPosition({
             worktreeId: event.payload.worktreeId,
             position: event.payload.position,
+          });
+          return;
+
+        default:
+          return;
+      }
+    });
+
+    const applyPullRequestsProjection: ProjectorDefinition["apply"] = Effect.fn(
+      "applyPullRequestsProjection",
+    )(function* (event, _attachmentSideEffects) {
+      switch (event.type) {
+        case "pull-request.observed":
+          yield* projectionPullRequestRepository.upsert(event.payload.record);
+          yield* projectionPullRequestRepository.upsertAccessTarget(event.payload.accessTarget);
+          return;
+
+        case "pull-request.association-recorded":
+          yield* projectionPullRequestRepository.recordAssociation(event.payload.association);
+          return;
+
+        case "pull-request.association-ended":
+          yield* projectionPullRequestRepository.endAssociation({
+            pullRequestId: event.payload.pullRequestId,
+            subject: event.payload.subject,
+            relationship: event.payload.relationship,
+            endedAt: event.payload.endedAt,
+          });
+          return;
+
+        case "pull-request.viewed":
+          yield* projectionPullRequestRepository.markViewed({
+            pullRequestId: event.payload.pullRequestId,
+            viewerKey: PullRequestViewerKey.make(event.payload.viewerKey),
+            viewedAt: event.payload.viewedAt,
+          });
+          return;
+
+        case "pull-request.marked-unread":
+          yield* projectionPullRequestRepository.markUnread({
+            pullRequestId: event.payload.pullRequestId,
+            viewerKey: PullRequestViewerKey.make(event.payload.viewerKey),
+            markedAt: event.payload.markedAt,
           });
           return;
 
@@ -1617,6 +1667,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         name: ORCHESTRATION_PROJECTOR_NAMES.worktrees,
         apply: applyWorktreesProjection,
       },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.pullRequests,
+        apply: applyPullRequestsProjection,
+      },
     ];
 
     const runProjectorForEvent = Effect.fn("runProjectorForEvent")(function* (
@@ -1758,5 +1812,6 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionWorktreeRepositoryLive),
+  Layer.provideMerge(ProjectionPullRequestRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
 );

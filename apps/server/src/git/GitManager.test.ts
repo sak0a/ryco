@@ -390,6 +390,8 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
             }),
         ),
       ),
+    generatePullRequestAnalysis: () =>
+      Effect.die("generatePullRequestAnalysis is not used by GitManager tests"),
   };
 }
 

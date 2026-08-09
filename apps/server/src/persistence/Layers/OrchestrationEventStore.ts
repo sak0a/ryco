@@ -8,6 +8,7 @@ import {
   OrchestrationEvent,
   OrchestrationEventMetadata,
   OrchestrationEventType,
+  PullRequestId,
   ProjectId,
   ThreadId,
   WorktreeId,
@@ -26,14 +27,19 @@ import {
   type OrchestrationEventStoreShape,
 } from "../Services/OrchestrationEventStore.ts";
 
-const decodeEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
+const OrchestrationEventJson = Schema.toCodecJson(OrchestrationEvent);
+const encodeEvent = Schema.encodeUnknownEffect(OrchestrationEventJson);
+const decodeEvent = Schema.decodeUnknownEffect(OrchestrationEventJson);
+const decodeEventJsonColumns = Schema.decodeUnknownEffect(
+  Schema.Struct({ payload: Schema.Unknown, metadata: OrchestrationEventMetadata }),
+);
 const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
 const EventMetadataFromJsonString = Schema.fromJsonString(OrchestrationEventMetadata);
 
 const AppendEventRequestSchema = Schema.Struct({
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  streamId: Schema.Union([ProjectId, ThreadId, WorktreeId]),
+  streamId: Schema.Union([ProjectId, ThreadId, WorktreeId, PullRequestId]),
   type: OrchestrationEventType,
   causationEventId: Schema.NullOr(EventId),
   correlationId: Schema.NullOr(CommandId),
@@ -49,7 +55,7 @@ const OrchestrationEventPersistedRowSchema = Schema.Struct({
   eventId: EventId,
   type: OrchestrationEventType,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId, WorktreeId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, WorktreeId, PullRequestId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -180,23 +186,29 @@ const makeEventStore = Effect.gen(function* () {
   });
 
   const append: OrchestrationEventStoreShape["append"] = (event) =>
-    appendEventRow({
-      eventId: event.eventId,
-      aggregateKind: event.aggregateKind,
-      streamId: event.aggregateId,
-      type: event.type,
-      causationEventId: event.causationEventId,
-      correlationId: event.correlationId,
-      actorKind: inferActorKind(event),
-      occurredAt: event.occurredAt,
-      commandId: event.commandId,
-      payloadJson: event.payload,
-      metadataJson: event.metadata,
-    }).pipe(
-      Effect.mapError(
-        toPersistenceSqlOrDecodeError(
-          "OrchestrationEventStore.append:insert",
-          "OrchestrationEventStore.append:decodeRow",
+    encodeEvent({ ...event, sequence: 0 }).pipe(
+      Effect.flatMap(decodeEventJsonColumns),
+      Effect.mapError(toPersistenceDecodeError("OrchestrationEventStore.append:eventToJson")),
+      Effect.flatMap((jsonEvent) =>
+        appendEventRow({
+          eventId: event.eventId,
+          aggregateKind: event.aggregateKind,
+          streamId: event.aggregateId,
+          type: event.type,
+          causationEventId: event.causationEventId,
+          correlationId: event.correlationId,
+          actorKind: inferActorKind(event),
+          occurredAt: event.occurredAt,
+          commandId: event.commandId,
+          payloadJson: jsonEvent.payload,
+          metadataJson: jsonEvent.metadata,
+        }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              "OrchestrationEventStore.append:insert",
+              "OrchestrationEventStore.append:decodeRow",
+            ),
+          ),
         ),
       ),
       Effect.flatMap((row) =>

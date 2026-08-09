@@ -12,7 +12,7 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import { scopedThreadKey, scopeThreadRef } from "@ryco/client-runtime/scoped";
-import { EnvironmentId, ProjectId } from "@ryco/contracts";
+import { EnvironmentId, ProjectId, type PullRequestId } from "@ryco/contracts";
 import { cn } from "../../lib/utils";
 import { useGitStatus, type GitStatusState } from "../../lib/gitStatusState";
 import {
@@ -76,6 +76,7 @@ export interface SidebarWorktreeListProps {
   onNewSession: (worktree: SidebarTreeWorktree) => void;
   onOpenInEditor: (worktree: SidebarTreeWorktree) => void;
   onOpenWorktree: (worktree: SidebarTreeWorktree) => void;
+  onOpenPullRequest?: ((pullRequestId: PullRequestId) => void) | undefined;
   onRenameWorktree: (worktree: SidebarTreeWorktree, title: string) => Promise<void> | void;
   onRestoreWorktree: (worktree: SidebarTreeWorktree) => void;
 }
@@ -157,6 +158,7 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
             onNewSession={props.onNewSession}
             onOpenInEditor={props.onOpenInEditor}
             onOpenLinkedItem={(item) => handleOpenLinkedItem(worktree, item)}
+            onOpenPullRequest={props.onOpenPullRequest}
             onOpenWorktree={props.onOpenWorktree}
             onRenameWorktree={props.onRenameWorktree}
           />
@@ -183,6 +185,7 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
                     worktree={worktree}
                     onDeleteWorktree={props.onDeleteWorktree}
                     onOpenLinkedItem={(item) => handleOpenLinkedItem(worktree, item)}
+                    onOpenPullRequest={props.onOpenPullRequest}
                     onRestoreWorktree={props.onRestoreWorktree}
                   />
                 ))
@@ -232,6 +235,7 @@ function ArchivedWorktreeRow(props: {
   worktree: SidebarTreeWorktree;
   onDeleteWorktree: (worktree: SidebarTreeWorktree) => void;
   onOpenLinkedItem: (item: LinkedWorktreeItem) => void;
+  onOpenPullRequest?: ((pullRequestId: PullRequestId) => void) | undefined;
   onRestoreWorktree: (worktree: SidebarTreeWorktree) => void;
 }) {
   const isProjectRoot = isProjectRootWorktree(props.worktree.worktree, props.projectCwd);
@@ -243,6 +247,7 @@ function ArchivedWorktreeRow(props: {
           {getWorktreeDisplayTitle(props.worktree)}
         </span>
         <WorktreeSourceControlBadges
+          worktreeId={props.worktree.worktree.worktreeId}
           issueNumber={props.worktree.worktree.issueNumber}
           issueState={props.worktree.worktree.issueState}
           prNumber={props.worktree.worktree.prNumber}
@@ -254,6 +259,7 @@ function ArchivedWorktreeRow(props: {
           workItemStateName={props.worktree.worktree.workItemStateName}
           displayMode="prefer-pr"
           onOpenLinkedItem={props.onOpenLinkedItem}
+          onOpenPullRequest={props.onOpenPullRequest}
         />
         <button
           type="button"
@@ -296,6 +302,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
   onNewSession: (worktree: SidebarTreeWorktree) => void;
   onOpenInEditor: (worktree: SidebarTreeWorktree) => void;
   onOpenLinkedItem: (item: LinkedWorktreeItem) => void;
+  onOpenPullRequest?: ((pullRequestId: PullRequestId) => void) | undefined;
   onOpenWorktree: (worktree: SidebarTreeWorktree) => void;
   onRenameWorktree: (worktree: SidebarTreeWorktree, title: string) => Promise<void> | void;
 }) {
@@ -487,6 +494,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                   {displayTitle}
                 </span>
                 <WorktreeSourceControlBadges
+                  worktreeId={props.worktree.worktree.worktreeId}
                   issueNumber={props.worktree.worktree.issueNumber}
                   issueState={props.worktree.worktree.issueState}
                   prNumber={props.worktree.worktree.prNumber}
@@ -498,6 +506,7 @@ const SidebarWorktreeSection = memo(function SidebarWorktreeSection(props: {
                   workItemStateName={props.worktree.worktree.workItemStateName}
                   displayMode="prefer-pr"
                   onOpenLinkedItem={props.onOpenLinkedItem}
+                  onOpenPullRequest={props.onOpenPullRequest}
                 />
               </span>
             )}

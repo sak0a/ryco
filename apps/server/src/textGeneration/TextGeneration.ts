@@ -1,5 +1,12 @@
 import { Context, Effect, Layer } from "effect";
-import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@ryco/contracts";
+import type {
+  ChatAttachment,
+  ModelSelection,
+  ProviderInstanceId,
+  PullRequestAiAnalysisDepth,
+  PullRequestAiModelAssessment,
+  PullRequestId,
+} from "@ryco/contracts";
 import { TextGenerationError } from "@ryco/contracts";
 
 import {
@@ -90,6 +97,15 @@ export interface IssueContentGenerationResult {
   body?: string;
 }
 
+export interface PullRequestAnalysisGenerationInput {
+  cwd: string;
+  pullRequestId: PullRequestId;
+  depth: PullRequestAiAnalysisDepth;
+  /** Bounded, provider-derived context. It is untrusted model input. */
+  context: string;
+  modelSelection: ModelSelection;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -98,6 +114,9 @@ export interface TextGenerationService {
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
   generateIssueContent(input: IssueContentGenerationInput): Promise<IssueContentGenerationResult>;
+  generatePullRequestAnalysis(
+    input: PullRequestAnalysisGenerationInput,
+  ): Promise<PullRequestAiModelAssessment>;
 }
 
 /**
@@ -138,6 +157,11 @@ export interface TextGenerationShape {
   readonly generateIssueContent: (
     input: IssueContentGenerationInput,
   ) => Effect.Effect<IssueContentGenerationResult, TextGenerationError>;
+
+  /** Analyze bounded PR context without exposing mutation-capable tools. */
+  readonly generatePullRequestAnalysis: (
+    input: PullRequestAnalysisGenerationInput,
+  ) => Effect.Effect<PullRequestAiModelAssessment, TextGenerationError>;
 }
 
 /**
@@ -152,7 +176,8 @@ type TextGenerationOp =
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
-  | "generateIssueContent";
+  | "generateIssueContent"
+  | "generatePullRequestAnalysis";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistryShape,
@@ -194,6 +219,10 @@ export const makeTextGenerationFromRegistry = (
   generateIssueContent: (input) =>
     resolveInstance(registry, "generateIssueContent", input.modelSelection.instanceId).pipe(
       Effect.flatMap((textGeneration) => textGeneration.generateIssueContent(input)),
+    ),
+  generatePullRequestAnalysis: (input) =>
+    resolveInstance(registry, "generatePullRequestAnalysis", input.modelSelection.instanceId).pipe(
+      Effect.flatMap((textGeneration) => textGeneration.generatePullRequestAnalysis(input)),
     ),
 });
 

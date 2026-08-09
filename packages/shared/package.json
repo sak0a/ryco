@@ -68,6 +68,14 @@
       "types": "./src/sourceControl.ts",
       "import": "./src/sourceControl.ts"
     },
+    "./pullRequestIdentity": {
+      "types": "./src/pullRequestIdentity.ts",
+      "import": "./src/pullRequestIdentity.ts"
+    },
+    "./pullRequestIntelligence": {
+      "types": "./src/pullRequestIntelligence.ts",
+      "import": "./src/pullRequestIntelligence.ts"
+    },
     "./logging": {
       "types": "./src/logging.ts",
       "import": "./src/logging.ts"

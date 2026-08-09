@@ -57,6 +57,9 @@ import Migration0040 from "./Migrations/040_ProjectionThreadsProjectUpdatedAtInd
 import Migration0041 from "./Migrations/041_ProjectionThreadsSubagentNesting.ts";
 import Migration0042 from "./Migrations/042_ContextHandoffRuntimeSessions.ts";
 import Migration0043 from "./Migrations/043_ContextHandoffDeliveryArtifact.ts";
+import Migration0044 from "./Migrations/044_PullRequestInbox.ts";
+import Migration0045 from "./Migrations/045_PullRequestAiIntelligence.ts";
+import Migration0046 from "./Migrations/046_PullRequestAiActiveRun.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -112,6 +115,9 @@ export const migrationEntries = [
   [41, "ProjectionThreadsSubagentNesting", Migration0041],
   [42, "ContextHandoffRuntimeSessions", Migration0042],
   [43, "ContextHandoffDeliveryArtifact", Migration0043],
+  [44, "PullRequestInbox", Migration0044],
+  [45, "PullRequestAiIntelligence", Migration0045],
+  [46, "PullRequestAiActiveRun", Migration0046],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

@@ -4,7 +4,12 @@ import { Effect, FileSystem, Layer, Path, Result, Schema } from "effect";
 import { createModelSelection } from "@ryco/shared/model";
 import { expect } from "vite-plus/test";
 
-import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@ryco/contracts";
+import {
+  CodexSettings,
+  ProviderInstanceId,
+  PullRequestId,
+  TextGenerationError,
+} from "@ryco/contracts";
 
 import { ServerConfig } from "../config.ts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
@@ -628,6 +633,52 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
 
           expect(generated.title).toBe("Add dark mode support");
           expect(generated.body).toBeUndefined();
+        }),
+    ),
+  );
+
+  it.effect("generates PR analysis and normalizes nullable model hotspot paths", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          pullRequestId: "pr_codex_analysis",
+          depth: "shallow",
+          summary: "Adds explainable pull request prioritization.",
+          implementationPhase: "active-implementation",
+          attentionReason: "The ranking affects inbox order.",
+          suggestedNextAction: "Review the ranking inputs.",
+          risk: "medium",
+          riskEvidence: ["Inbox ordering changes."],
+          hotspots: [
+            {
+              filePath: null,
+              title: "Priority calculation",
+              explanation: "The new score changes which pull request appears first.",
+              risk: "medium",
+            },
+          ],
+          riskPoints: 8,
+          blockerPoints: 2,
+          reviewImpactPoints: 7,
+          timeSensitivityPoints: 1,
+          implementationCompletenessPoints: 11,
+          unresolvedDiscussionRiskPoints: 1,
+          confidence: 82,
+        }),
+        stdinMustContain: "advisory pull request analyst",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generatePullRequestAnalysis({
+            cwd: process.cwd(),
+            pullRequestId: PullRequestId.make("pr_codex_analysis"),
+            depth: "shallow",
+            context: "{}",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+
+          expect(generated.hotspots[0]).not.toHaveProperty("filePath");
+          expect(generated.confidence).toBe(82);
         }),
     ),
   );

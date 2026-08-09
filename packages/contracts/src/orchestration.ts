@@ -29,6 +29,14 @@ import {
   WorktreeId,
   WorktreeOrigin,
 } from "./worktree.ts";
+import {
+  PullRequestAccessTarget,
+  PullRequestAssociation,
+  PullRequestAssociationSubject,
+  PullRequestId,
+  PullRequestRecord,
+  PullRequestRelationshipKind,
+} from "./pullRequest.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -1270,6 +1278,51 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const PullRequestObserveCommand = Schema.Struct({
+  type: Schema.Literal("pull-request.observe"),
+  commandId: CommandId,
+  pullRequestId: PullRequestId,
+  record: PullRequestRecord,
+  accessTarget: PullRequestAccessTarget,
+  occurredAt: IsoDateTime,
+});
+
+const PullRequestAssociationRecordCommand = Schema.Struct({
+  type: Schema.Literal("pull-request.association.record"),
+  commandId: CommandId,
+  pullRequestId: PullRequestId,
+  association: PullRequestAssociation,
+  occurredAt: IsoDateTime,
+});
+
+const PullRequestAssociationEndCommand = Schema.Struct({
+  type: Schema.Literal("pull-request.association.end"),
+  commandId: CommandId,
+  pullRequestId: PullRequestId,
+  subject: PullRequestAssociationSubject,
+  relationship: PullRequestRelationshipKind,
+  endedAt: Schema.DateTimeUtc,
+  occurredAt: IsoDateTime,
+});
+
+const PullRequestViewedCommand = Schema.Struct({
+  type: Schema.Literal("pull-request.viewed"),
+  commandId: CommandId,
+  pullRequestId: PullRequestId,
+  viewerKey: TrimmedNonEmptyString,
+  viewedAt: Schema.DateTimeUtc,
+  occurredAt: IsoDateTime,
+});
+
+const PullRequestMarkUnreadCommand = Schema.Struct({
+  type: Schema.Literal("pull-request.mark-unread"),
+  commandId: CommandId,
+  pullRequestId: PullRequestId,
+  viewerKey: TrimmedNonEmptyString,
+  markedAt: Schema.DateTimeUtc,
+  occurredAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1278,6 +1331,11 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  PullRequestObserveCommand,
+  PullRequestAssociationRecordCommand,
+  PullRequestAssociationEndCommand,
+  PullRequestViewedCommand,
+  PullRequestMarkUnreadCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1296,6 +1354,11 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.deleted",
   "thread.archived",
   "thread.unarchived",
+  // Compatibility events written by Ryco builds with the settled-thread
+  // lifecycle. This branch does not expose settlement commands, but it must
+  // still be able to replay a shared desktop database without discarding it.
+  "thread.settled",
+  "thread.unsettled",
   "thread.meta-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
@@ -1323,10 +1386,20 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.statusBucketOverridden",
   "thread.manualPositionSet",
   "worktree.manualPositionSet",
+  "pull-request.observed",
+  "pull-request.association-recorded",
+  "pull-request.association-ended",
+  "pull-request.viewed",
+  "pull-request.marked-unread",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
-export const OrchestrationAggregateKind = Schema.Literals(["project", "thread", "worktree"]);
+export const OrchestrationAggregateKind = Schema.Literals([
+  "project",
+  "thread",
+  "worktree",
+  "pull-request",
+]);
 export type OrchestrationAggregateKind = typeof OrchestrationAggregateKind.Type;
 export const OrchestrationActorKind = Schema.Literals(["client", "server", "provider"]);
 
@@ -1398,6 +1471,18 @@ export const ThreadArchivedPayload = Schema.Struct({
 
 export const ThreadUnarchivedPayload = Schema.Struct({
   threadId: ThreadId,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadSettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  settledAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadUnsettledPayload = Schema.Struct({
+  threadId: ThreadId,
+  reason: Schema.Literals(["user", "activity"]),
   updatedAt: IsoDateTime,
 });
 
@@ -1615,6 +1700,36 @@ export const WorktreeManualPositionSetPayload = Schema.Struct({
   changedAt: IsoDateTime,
 });
 
+export const PullRequestObservedPayload = Schema.Struct({
+  pullRequestId: PullRequestId,
+  record: PullRequestRecord,
+  accessTarget: PullRequestAccessTarget,
+});
+
+export const PullRequestAssociationRecordedPayload = Schema.Struct({
+  pullRequestId: PullRequestId,
+  association: PullRequestAssociation,
+});
+
+export const PullRequestAssociationEndedPayload = Schema.Struct({
+  pullRequestId: PullRequestId,
+  subject: PullRequestAssociationSubject,
+  relationship: PullRequestRelationshipKind,
+  endedAt: Schema.DateTimeUtc,
+});
+
+export const PullRequestViewedPayload = Schema.Struct({
+  pullRequestId: PullRequestId,
+  viewerKey: TrimmedNonEmptyString,
+  viewedAt: Schema.DateTimeUtc,
+});
+
+export const PullRequestMarkedUnreadPayload = Schema.Struct({
+  pullRequestId: PullRequestId,
+  viewerKey: TrimmedNonEmptyString,
+  markedAt: Schema.DateTimeUtc,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -1628,7 +1743,7 @@ const EventBaseFields = {
   sequence: NonNegativeInt,
   eventId: EventId,
   aggregateKind: OrchestrationAggregateKind,
-  aggregateId: Schema.Union([ProjectId, ThreadId, WorktreeId]),
+  aggregateId: Schema.Union([ProjectId, ThreadId, WorktreeId, PullRequestId]),
   occurredAt: IsoDateTime,
   commandId: Schema.NullOr(CommandId),
   causationEventId: Schema.NullOr(EventId),
@@ -1676,6 +1791,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.unarchived"),
     payload: ThreadUnarchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.settled"),
+    payload: ThreadSettledPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.unsettled"),
+    payload: ThreadUnsettledPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1811,6 +1936,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("worktree.manualPositionSet"),
     payload: WorktreeManualPositionSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("pull-request.observed"),
+    payload: PullRequestObservedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("pull-request.association-recorded"),
+    payload: PullRequestAssociationRecordedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("pull-request.association-ended"),
+    payload: PullRequestAssociationEndedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("pull-request.viewed"),
+    payload: PullRequestViewedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("pull-request.marked-unread"),
+    payload: PullRequestMarkedUnreadPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

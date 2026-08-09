@@ -22,7 +22,7 @@ import {
   AtlassianStartOAuthInput,
   AtlassianStartOAuthResult,
 } from "./atlassian.ts";
-import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
@@ -183,6 +183,17 @@ import {
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import {
+  PullRequestAssociationSubject,
+  PullRequestAiModelSelection,
+  PullRequestAiResourceMode,
+  PullRequestAiRun,
+  PullRequestAiRunId,
+  PullRequestAiSnapshot,
+  PullRequestDetailResult,
+  PullRequestId,
+  PullRequestInboxSnapshot,
+} from "./pullRequest.ts";
+import {
   WorkItemAddCommentInput,
   WorkItemEditCommentInput,
   WorkItemDetail,
@@ -309,6 +320,20 @@ export const WS_METHODS = {
   sourceControlGetWorkflowRunJobs: "sourceControl.getWorkflowRunJobs",
   sourceControlGetWorkflowJobLog: "sourceControl.getWorkflowJobLog",
   sourceControlRerunWorkflow: "sourceControl.rerunWorkflow",
+
+  // Canonical pull request inbox
+  pullRequestsListInbox: "pullRequests.listInbox",
+  pullRequestsSubscribeInbox: "pullRequests.subscribeInbox",
+  pullRequestsGetDetail: "pullRequests.getDetail",
+  pullRequestsRefresh: "pullRequests.refresh",
+  pullRequestsMarkViewed: "pullRequests.markViewed",
+  pullRequestsMarkUnread: "pullRequests.markUnread",
+  pullRequestsAttachRelationship: "pullRequests.attachRelationship",
+  pullRequestsRemoveExplicitRelationship: "pullRequests.removeExplicitRelationship",
+  pullRequestsListAi: "pullRequests.listAi",
+  pullRequestsSubscribeAi: "pullRequests.subscribeAi",
+  pullRequestsAnalyze: "pullRequests.analyze",
+  pullRequestsCancelAiRun: "pullRequests.cancelAiRun",
 
   // Text generation methods
   textGenerationGenerateIssueContent: "textGeneration.generateIssueContent",
@@ -824,6 +849,101 @@ export const WsSourceControlGetWorkflowJobLogRpc = Rpc.make(
 export const WsSourceControlRerunWorkflowRpc = Rpc.make(WS_METHODS.sourceControlRerunWorkflow, {
   payload: SourceControlWorkflowRerunInput,
   success: SourceControlWorkflowRerunResult,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsPullRequestsListInboxRpc = Rpc.make(WS_METHODS.pullRequestsListInbox, {
+  payload: Schema.Struct({}),
+  success: PullRequestInboxSnapshot,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsPullRequestsSubscribeInboxRpc = Rpc.make(WS_METHODS.pullRequestsSubscribeInbox, {
+  payload: Schema.Struct({}),
+  success: PullRequestInboxSnapshot,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  stream: true,
+});
+
+export const WsPullRequestsRefreshRpc = Rpc.make(WS_METHODS.pullRequestsRefresh, {
+  payload: Schema.Struct({}),
+  success: PullRequestInboxSnapshot,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsPullRequestsGetDetailRpc = Rpc.make(WS_METHODS.pullRequestsGetDetail, {
+  payload: Schema.Struct({ pullRequestId: PullRequestId }),
+  success: PullRequestDetailResult,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsPullRequestsMarkViewedRpc = Rpc.make(WS_METHODS.pullRequestsMarkViewed, {
+  payload: Schema.Struct({ pullRequestId: PullRequestId }),
+  success: Schema.Void,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsPullRequestsMarkUnreadRpc = Rpc.make(WS_METHODS.pullRequestsMarkUnread, {
+  payload: Schema.Struct({ pullRequestId: PullRequestId }),
+  success: Schema.Void,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsPullRequestsAttachRelationshipRpc = Rpc.make(
+  WS_METHODS.pullRequestsAttachRelationship,
+  {
+    payload: Schema.Struct({
+      pullRequestId: PullRequestId,
+      subject: PullRequestAssociationSubject,
+      relationship: Schema.Literal("explicitly-attached"),
+    }),
+    success: PullRequestInboxSnapshot,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsPullRequestsRemoveExplicitRelationshipRpc = Rpc.make(
+  WS_METHODS.pullRequestsRemoveExplicitRelationship,
+  {
+    payload: Schema.Struct({
+      pullRequestId: PullRequestId,
+      subject: PullRequestAssociationSubject,
+      relationship: Schema.Literal("explicitly-attached"),
+    }),
+    success: PullRequestInboxSnapshot,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsPullRequestsListAiRpc = Rpc.make(WS_METHODS.pullRequestsListAi, {
+  payload: Schema.Struct({}),
+  success: PullRequestAiSnapshot,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+});
+
+export const WsPullRequestsSubscribeAiRpc = Rpc.make(WS_METHODS.pullRequestsSubscribeAi, {
+  payload: Schema.Struct({}),
+  success: PullRequestAiSnapshot,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  stream: true,
+});
+
+export const WsPullRequestsAnalyzeRpc = Rpc.make(WS_METHODS.pullRequestsAnalyze, {
+  payload: Schema.Struct({
+    pullRequestIds: Schema.Array(PullRequestId),
+    modelSelection: PullRequestAiModelSelection,
+    scope: Schema.Literals(["view", "single", "scheduled"]),
+    resourceMode: PullRequestAiResourceMode,
+    maxDeepAnalyses: Schema.optional(NonNegativeInt),
+    force: Schema.optional(Schema.Boolean),
+  }),
+  success: PullRequestAiRun,
+  error: Schema.Union([SourceControlProviderError, AuthRpcError, TextGenerationError]),
+});
+
+export const WsPullRequestsCancelAiRunRpc = Rpc.make(WS_METHODS.pullRequestsCancelAiRun, {
+  payload: Schema.Struct({ runId: PullRequestAiRunId }),
+  success: Schema.Void,
   error: Schema.Union([SourceControlProviderError, AuthRpcError]),
 });
 
@@ -1358,6 +1478,18 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlGetWorkflowRunJobsRpc,
   WsSourceControlGetWorkflowJobLogRpc,
   WsSourceControlRerunWorkflowRpc,
+  WsPullRequestsListInboxRpc,
+  WsPullRequestsSubscribeInboxRpc,
+  WsPullRequestsGetDetailRpc,
+  WsPullRequestsRefreshRpc,
+  WsPullRequestsMarkViewedRpc,
+  WsPullRequestsMarkUnreadRpc,
+  WsPullRequestsAttachRelationshipRpc,
+  WsPullRequestsRemoveExplicitRelationshipRpc,
+  WsPullRequestsListAiRpc,
+  WsPullRequestsSubscribeAiRpc,
+  WsPullRequestsAnalyzeRpc,
+  WsPullRequestsCancelAiRunRpc,
   WsTextGenerationGenerateIssueContentRpc,
   WsTextGenerationGenerateBranchNameRpc,
   WsAtlassianListConnectionsRpc,

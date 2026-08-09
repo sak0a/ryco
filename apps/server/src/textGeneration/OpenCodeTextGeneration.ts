@@ -17,8 +17,10 @@ import {
   buildCommitMessagePrompt,
   buildIssueContentPolishPrompt,
   buildIssueContentTitlePrompt,
+  buildPullRequestAnalysisPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  normalizePullRequestAiModelAssessmentOutput,
 } from "./TextGenerationPrompts.ts";
 import { type TextGenerationShape } from "./TextGeneration.ts";
 import {
@@ -159,7 +161,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "generatePullRequestAnalysis";
   }) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* () {
@@ -270,7 +273,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "generatePullRequestAnalysis";
     readonly cwd: string;
     readonly prompt: string;
     readonly outputSchemaJson: S;
@@ -504,11 +508,26 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     }
   });
 
+  const generatePullRequestAnalysis: TextGenerationShape["generatePullRequestAnalysis"] = Effect.fn(
+    "OpenCodeTextGeneration.generatePullRequestAnalysis",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestAnalysisPrompt(input);
+    const assessment = yield* runOpenCodeJson({
+      operation: "generatePullRequestAnalysis",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return normalizePullRequestAiModelAssessmentOutput(assessment);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    generatePullRequestAnalysis,
   } satisfies TextGenerationShape;
 });

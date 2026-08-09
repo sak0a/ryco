@@ -2,13 +2,61 @@ import { Schema } from "effect";
 
 import { TextGenerationError } from "@ryco/contracts";
 
-/** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
+function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Flatten the small `allOf` fragments Effect emits for accumulated checks.
+ *
+ * Codex and other strict structured-output implementations accept the
+ * equivalent sibling constraints (`minimum`, `maximum`, and so on), but reject
+ * `allOf` outright. Effect still performs the authoritative decode after the
+ * model responds, so this provider-facing schema only needs to express the
+ * same constraints in the broadly supported form.
+ */
+function normalizeStructuredOutputSchema(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeStructuredOutputSchema);
+  }
+  if (!isJsonSchemaObject(value)) {
+    return value;
+  }
+
+  const normalized: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key !== "allOf") {
+      normalized[key] = normalizeStructuredOutputSchema(entry);
+    }
+  }
+
+  if (!Array.isArray(value.allOf)) {
+    return normalized;
+  }
+
+  for (const rawFragment of value.allOf) {
+    const fragment = normalizeStructuredOutputSchema(rawFragment);
+    if (!isJsonSchemaObject(fragment)) continue;
+    for (const [key, entry] of Object.entries(fragment)) {
+      if (key === "required" && Array.isArray(entry) && Array.isArray(normalized.required)) {
+        normalized.required = [...new Set([...normalized.required, ...entry])];
+        continue;
+      }
+      normalized[key] = entry;
+    }
+  }
+
+  return normalized;
+}
+
+/** Convert an Effect Schema to a provider-compatible JSON Schema object. */
 export function toJsonSchemaObject(schema: Schema.Top): unknown {
   const document = Schema.toJsonSchemaDocument(schema);
-  if (document.definitions && Object.keys(document.definitions).length > 0) {
-    return { ...document.schema, $defs: document.definitions };
-  }
-  return document.schema;
+  const output =
+    document.definitions && Object.keys(document.definitions).length > 0
+      ? { ...document.schema, $defs: document.definitions }
+      : document.schema;
+  return normalizeStructuredOutputSchema(output);
 }
 
 /** Truncate a text section to `maxChars`, appending a `[truncated]` marker when needed. */

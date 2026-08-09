@@ -1152,6 +1152,103 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "pull-request.observe": {
+      if (
+        command.record.identity.id !== command.pullRequestId ||
+        command.accessTarget.pullRequestId !== command.pullRequestId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The canonical PR, record, and access-target identities must match.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "pull-request",
+          aggregateId: command.pullRequestId,
+          occurredAt: command.occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "pull-request.observed",
+        payload: {
+          pullRequestId: command.pullRequestId,
+          record: command.record,
+          accessTarget: command.accessTarget,
+        },
+      };
+    }
+
+    case "pull-request.association.record": {
+      if (command.association.pullRequestId !== command.pullRequestId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The canonical PR and association identities must match.",
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "pull-request",
+          aggregateId: command.pullRequestId,
+          occurredAt: command.occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "pull-request.association-recorded",
+        payload: {
+          pullRequestId: command.pullRequestId,
+          association: command.association,
+        },
+      };
+    }
+
+    case "pull-request.association.end":
+      return {
+        ...withEventBase({
+          aggregateKind: "pull-request",
+          aggregateId: command.pullRequestId,
+          occurredAt: command.occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "pull-request.association-ended",
+        payload: {
+          pullRequestId: command.pullRequestId,
+          subject: command.subject,
+          relationship: command.relationship,
+          endedAt: command.endedAt,
+        },
+      };
+
+    case "pull-request.viewed":
+      return {
+        ...withEventBase({
+          aggregateKind: "pull-request",
+          aggregateId: command.pullRequestId,
+          occurredAt: command.occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "pull-request.viewed",
+        payload: {
+          pullRequestId: command.pullRequestId,
+          viewerKey: command.viewerKey,
+          viewedAt: command.viewedAt,
+        },
+      };
+
+    case "pull-request.mark-unread":
+      return {
+        ...withEventBase({
+          aggregateKind: "pull-request",
+          aggregateId: command.pullRequestId,
+          occurredAt: command.occurredAt,
+          commandId: command.commandId,
+        }),
+        type: "pull-request.marked-unread",
+        payload: {
+          pullRequestId: command.pullRequestId,
+          viewerKey: command.viewerKey,
+          markedAt: command.markedAt,
+        },
+      };
+
     default: {
       command satisfies never;
       const fallback = command as never as { type: string };

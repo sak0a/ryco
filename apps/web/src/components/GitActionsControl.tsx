@@ -1213,6 +1213,7 @@ export default function GitActionsControl({
           action,
           actionId,
           cwd: gitCwd,
+          ...(activeThreadRef ? { threadId: activeThreadRef.threadId } : {}),
           ...(worktreeId ? { worktreeId } : {}),
           ...(commitMessage ? { commitMessage } : {}),
           ...(featureBranch ? { featureBranch: true } : {}),

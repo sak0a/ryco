@@ -89,6 +89,18 @@ describe("findChangeRequestForBranch", () => {
 });
 
 describe("resolveOverviewPullRequestNumber", () => {
+  it("prioritizes the canonical repository-aware association", () => {
+    expect(
+      resolveOverviewPullRequestNumber({
+        canonicalPullRequestNumber: 5,
+        activeWorktreePrNumber: 10,
+        gitStatusPrNumber: 20,
+        overviewBranchPullRequestNumber: 30,
+        postPushWatchPullRequestNumber: 40,
+      }),
+    ).toBe(5);
+  });
+
   it("prioritizes activeWorktreePrNumber", () => {
     expect(
       resolveOverviewPullRequestNumber({

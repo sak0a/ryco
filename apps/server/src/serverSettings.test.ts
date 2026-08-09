@@ -458,6 +458,38 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("round-trips a sparse pull request analysis model selection", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      const next = yield* serverSettings.updateSettings({
+        pullRequestAi: {
+          ...DEFAULT_SERVER_SETTINGS.pullRequestAi,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-opus-4-8",
+          },
+        },
+      });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      const persisted = JSON.parse(raw);
+      assert.deepEqual(persisted, {
+        pullRequestAi: {
+          modelSelection: {
+            instanceId: "claudeAgent",
+            model: "claude-opus-4-8",
+          },
+        },
+      });
+
+      const decoded = Schema.decodeUnknownSync(ServerSettings)(persisted);
+      assert.deepEqual(decoded.pullRequestAi, next.pullRequestAi);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("stores sensitive provider instance environment values outside settings.json", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;

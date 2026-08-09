@@ -15,8 +15,10 @@ import {
   buildCommitMessagePrompt,
   buildIssueContentPolishPrompt,
   buildIssueContentTitlePrompt,
+  buildPullRequestAnalysisPrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  normalizePullRequestAiModelAssessmentOutput,
 } from "./TextGenerationPrompts.ts";
 import {
   extractJsonObject,
@@ -39,7 +41,8 @@ function mapGrokAcpError(
     | "generatePrContent"
     | "generateBranchName"
     | "generateThreadTitle"
-    | "generateIssueContent",
+    | "generateIssueContent"
+    | "generatePullRequestAnalysis",
   detail: string,
   cause: unknown,
 ): TextGenerationError {
@@ -77,7 +80,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateIssueContent";
+      | "generateIssueContent"
+      | "generatePullRequestAnalysis";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -297,11 +301,26 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
     return { title: decoded.title.trim() };
   });
 
+  const generatePullRequestAnalysis: TextGenerationShape["generatePullRequestAnalysis"] = Effect.fn(
+    "GrokTextGeneration.generatePullRequestAnalysis",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildPullRequestAnalysisPrompt(input);
+    const assessment = yield* runGrokJson({
+      operation: "generatePullRequestAnalysis",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+    return normalizePullRequestAiModelAssessmentOutput(assessment);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateIssueContent,
+    generatePullRequestAnalysis,
   } satisfies TextGenerationShape;
 });

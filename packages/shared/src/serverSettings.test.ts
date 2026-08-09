@@ -135,6 +135,34 @@ describe("serverSettings helpers", () => {
     });
   });
 
+  it("replaces pull request analysis selection without leaking stale model options", () => {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      pullRequestAi: {
+        ...DEFAULT_SERVER_SETTINGS.pullRequestAi,
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.6", [
+          { id: "reasoningEffort", value: "high" },
+          { id: "fastMode", value: true },
+        ]),
+      },
+    };
+
+    expect(
+      applyServerSettingsPatch(current, {
+        pullRequestAi: {
+          ...current.pullRequestAi,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "claude-opus-4-8",
+          },
+        },
+      }).pullRequestAi.modelSelection,
+    ).toEqual({
+      instanceId: "claudeAgent",
+      model: "claude-opus-4-8",
+    });
+  });
+
   it("accepts array-based text generation selection patches", () => {
     expect(
       applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {

@@ -2,6 +2,7 @@ import {
   type EnvironmentId,
   type EditorId,
   type ProjectScript,
+  type PullRequestId,
   type ResolvedKeybindingsConfig,
 } from "@ryco/contracts";
 import { memo } from "react";
@@ -43,9 +44,11 @@ interface ChatHeaderProps {
   worktreeWorkItemKey?: string | null;
   worktreeWorkItemState?: "open" | "in_progress" | "done" | "closed" | "unknown" | null;
   worktreeWorkItemStateName?: string | null;
+  worktreeId?: string | null;
   onSelectProject?: () => void;
   onSelectWorktree?: () => void;
   onOpenLinkedWorktreeItem?: (item: LinkedWorktreeItem) => void;
+  onOpenPullRequest?: (pullRequestId: PullRequestId) => void;
   workspacePanelOpen: boolean;
   onToggleWorkspacePanel: () => void;
   overviewSidebarOpen: boolean;
@@ -143,6 +146,7 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
         projectName={props.activeProjectName}
         isGitRepo={props.isGitRepo}
         worktreeBranch={props.worktreeBranch}
+        worktreeId={props.worktreeId}
         worktreeTitle={props.worktreeTitle}
         worktreeOrigin={props.worktreeOrigin}
         worktreeIssueNumber={props.worktreeIssueNumber}
@@ -160,6 +164,7 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
         {...(props.onOpenLinkedWorktreeItem
           ? { onOpenLinkedWorktreeItem: props.onOpenLinkedWorktreeItem }
           : {})}
+        {...(props.onOpenPullRequest ? { onOpenPullRequest: props.onOpenPullRequest } : {})}
         inlineActions={inlineActions}
       />
     </div>

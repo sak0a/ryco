@@ -64,6 +64,10 @@ import {
   sourceControlOptionValue,
   summarizeActiveWorkflowJob,
 } from "./ChatOverviewPanel.logic";
+import {
+  hasActivePullRequestRelationship,
+  useRelatedPullRequests,
+} from "../pullRequests/useRelatedPullRequests";
 
 export const OVERVIEW_FLOATING_EXIT_DURATION_MS = 260;
 export const OVERVIEW_SIDEBAR_EXIT_DURATION_MS = 320;
@@ -166,6 +170,8 @@ export interface ChatOverviewPanelProps {
   environmentId: EnvironmentId;
   gitCwd: string | null;
   activeWorktreeBranch: string | null;
+  activeWorktreeId: string | null;
+  activeThreadId: ThreadId | null;
   activeThreadBranch: string | null;
   activeWorktreePrNumber: number | null;
   activeWorktreePrState: ChangeRequestState | null | undefined;
@@ -340,6 +346,8 @@ export function ChatOverviewPanel(
     environmentId,
     gitCwd,
     activeWorktreeBranch,
+    activeWorktreeId,
+    activeThreadId,
     activeThreadBranch,
     activeWorktreePrNumber,
     activeWorktreePrState,
@@ -365,6 +373,22 @@ export function ChatOverviewPanel(
   } = props;
 
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
+  const relatedWorktreePullRequests = useRelatedPullRequests("worktree", activeWorktreeId);
+  const relatedThreadPullRequests = useRelatedPullRequests("thread", activeThreadId);
+  const canonicalBranchPullRequest = useMemo(() => {
+    const candidates = [...relatedWorktreePullRequests, ...relatedThreadPullRequests];
+    return (
+      candidates.find((item) => {
+        const relatedToWorktree =
+          activeWorktreeId !== null &&
+          hasActivePullRequestRelationship(item, "worktree", activeWorktreeId, "current-branch");
+        const relatedToThread =
+          activeThreadId !== null &&
+          hasActivePullRequestRelationship(item, "thread", activeThreadId, "current-branch");
+        return relatedToWorktree || relatedToThread;
+      }) ?? null
+    );
+  }, [activeThreadId, activeWorktreeId, relatedThreadPullRequests, relatedWorktreePullRequests]);
   const overviewBranchName =
     activeWorktreeBranch ?? activeThreadBranch ?? gitStatusQuery.data?.refName ?? null;
 
@@ -392,6 +416,7 @@ export function ChatOverviewPanel(
   });
 
   const overviewPullRequestNumber = resolveOverviewPullRequestNumber({
+    canonicalPullRequestNumber: canonicalBranchPullRequest?.pullRequest.identity.number ?? null,
     activeWorktreePrNumber,
     gitStatusPrNumber: gitStatusQuery.data?.pr?.number ?? null,
     overviewBranchPullRequestNumber: overviewBranchPullRequest?.number ?? null,
@@ -419,6 +444,7 @@ export function ChatOverviewPanel(
   });
 
   const overviewPullRequestProvider =
+    canonicalBranchPullRequest?.pullRequest.identity.provider ??
     overviewPullRequestDetail.data?.provider ??
     overviewBranchPullRequest?.provider ??
     overviewGitProvider;
@@ -637,10 +663,21 @@ export function ChatOverviewPanel(
       };
     }
 
-    const pullRequestUrl = detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
+    const canonicalPullRequest = canonicalBranchPullRequest?.pullRequest ?? null;
+    const pullRequestUrl =
+      canonicalPullRequest?.url ?? detail?.url ?? gitPr?.url ?? branchPr?.url ?? null;
     const pullRequestState =
-      detail?.state ?? activeWorktreePrState ?? gitPr?.state ?? branchPr?.state ?? null;
-    const pullRequestIsDraft = detail?.isDraft ?? activeWorktreePrIsDraft ?? branchPr?.isDraft;
+      canonicalPullRequest?.state ??
+      detail?.state ??
+      activeWorktreePrState ??
+      gitPr?.state ??
+      branchPr?.state ??
+      null;
+    const pullRequestIsDraft =
+      canonicalPullRequest?.isDraft ??
+      detail?.isDraft ??
+      activeWorktreePrIsDraft ??
+      branchPr?.isDraft;
     const reviewsApproved = detail?.participants
       ? detail.participants.filter((participant) => participant.approved === true).length
       : undefined;
@@ -649,6 +686,7 @@ export function ChatOverviewPanel(
     return {
       number: overviewPullRequestNumber,
       title:
+        canonicalPullRequest?.title ??
         detail?.title ??
         gitPr?.title ??
         branchPr?.title ??
@@ -679,6 +717,7 @@ export function ChatOverviewPanel(
     activeWorktreePrState,
     activeWorktreePrIsDraft,
     activeWorktreeTitle,
+    canonicalBranchPullRequest,
     checksErrorInfo,
     gitStatusQuery.data?.pr,
     overviewActiveWorkflowRunId,

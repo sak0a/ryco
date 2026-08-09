@@ -1,4 +1,5 @@
 import { memo } from "react";
+import type { PullRequestId } from "@ryco/contracts";
 import { ChatHeaderBreadcrumb } from "./ChatHeaderBreadcrumb";
 import type { WorktreeOriginLike } from "./ChatHeaderBreadcrumb.logic";
 import type { LinkedWorktreeItem } from "../worktrees/LinkedWorktreeItemDialog";
@@ -23,6 +24,8 @@ export interface ChatHeaderBarProps {
   onSelectProject?: (() => void) | undefined;
   onSelectWorktree?: (() => void) | undefined;
   onOpenLinkedWorktreeItem?: ((item: LinkedWorktreeItem) => void) | undefined;
+  worktreeId?: string | null | undefined;
+  onOpenPullRequest?: ((pullRequestId: PullRequestId) => void) | undefined;
   inlineActions?: React.ReactNode;
 }
 
@@ -40,6 +43,7 @@ export const ChatHeaderBar = memo(function ChatHeaderBar(props: ChatHeaderBarPro
           {...(props.onSelectWorktree ? { onSelectWorktree: props.onSelectWorktree } : {})}
         />
         <WorktreeSourceControlBadges
+          worktreeId={props.worktreeId}
           issueNumber={props.worktreeIssueNumber}
           issueState={props.worktreeIssueState}
           prNumber={props.worktreePrNumber}
@@ -52,6 +56,7 @@ export const ChatHeaderBar = memo(function ChatHeaderBar(props: ChatHeaderBarPro
           density="header"
           labelStyle="kind"
           onOpenLinkedItem={props.onOpenLinkedWorktreeItem}
+          onOpenPullRequest={props.onOpenPullRequest}
         />
         {props.projectName && !props.isGitRepo ? (
           <span className="shrink-0 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">
