@@ -44,6 +44,8 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: release-preflight
 
       - id: release_meta
         name: Resolve release version
@@ -172,6 +174,8 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: release-build-${{ matrix.arch }}-${{ matrix.platform }}
 
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
@@ -364,6 +368,7 @@ jobs:
       - name: Setup project
         uses: ./.github/actions/setup-ryco
         with:
+          cache-scope: release-publish-cli
           registry-url: https://registry.npmjs.org
           install-dependencies: "false"
 
@@ -397,6 +402,7 @@ jobs:
       - name: Setup project
         uses: ./.github/actions/setup-ryco
         with:
+          cache-scope: release-github-release
           install-dependencies: "false"
 
       - name: Install dependencies
@@ -527,6 +533,7 @@ jobs:
       - name: Setup project
         uses: ./.github/actions/setup-ryco
         with:
+          cache-scope: release-finalize
           install-dependencies: "false"
 
       - name: Install dependencies
