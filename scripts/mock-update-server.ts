@@ -18,7 +18,7 @@ const resolveMockUpdateServerConfig = Effect.gen(function* () {
     root: Config.string("RYCO_DESKTOP_MOCK_UPDATE_SERVER_ROOT").pipe(
       Config.withDefault("../release-mock"),
     ),
-  }).asEffect();
+  });
 
   const resolvedRoot = path.resolve(import.meta.dirname, config.root);
 

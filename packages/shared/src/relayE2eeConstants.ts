@@ -498,7 +498,7 @@ export const RELAY_CHUNK_CAPABILITY_PRELUDE_BYTES = RELAY_CHUNK_CAPABILITY_PRELU
 /**
  * 8,000 ms. Period of the pinned RPC client's keepalive fiber (§3.2.2 L1). The
  * pinned client hard-codes it (`Effect.delay("8 seconds")` in `makePinger`,
- * `patches/effect@4.0.0-beta.59.patch`) and exports no constant, so this is the
+ * `patches/effect@4.0.0-beta.106.patch`) and exports no constant, so this is the
  * one restated row with no importable definition site.
  */
 export const RPC_KEEPALIVE_INTERVAL = 8_000;

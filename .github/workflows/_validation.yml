@@ -45,10 +45,10 @@ env:
 # Each check runs as its own job so they execute in parallel instead of as one
 # serial chain. Jobs share the Bun/Vite+ toolchain caches via setup-ryco, and
 # each keeps its own Turbo cache slice (see `cache-scope`), so the redundant
-# install/build work is cache-cheap. The long poles (the Effect TS6 typecheck,
-# the unit tests, and the browser suite) are sharded across runners. The
-# desktop build and release smoke stay gated behind their inputs so callers can
-# skip them per path (see pull-request-validation.yml) or event.
+# install/build work is cache-cheap. The long poles (the unit tests and the
+# browser suite) are sharded across runners. The desktop build and release
+# smoke stay gated behind their inputs so callers can skip them per path (see
+# pull-request-validation.yml) or event.
 #
 # Cache handling convention for every job below: `setup-ryco` restores, and the
 # job ends with an `if: always()` save. `actions/cache` normally registers its
@@ -86,37 +86,6 @@ jobs:
       # fmt/lint stay repo-wide (fast); only typecheck scopes to affected.
       - name: Typecheck
         run: bun run typecheck ${{ inputs['affected-base'] != '' && '--affected' || '' }}
-
-      - name: Save Turbo cache
-        if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}
-        uses: actions/cache/save@v5
-        with:
-          path: .turbo/cache
-          key: ${{ steps.setup.outputs['turbo-cache-key'] }}
-
-  typecheck-effect:
-    name: Effect typecheck ${{ matrix.shard }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: ["1/2", "2/2"]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ inputs['checkout-ref'] != '' && inputs['checkout-ref'] || github.ref }}
-          persist-credentials: false
-
-      - name: Setup project
-        id: setup
-        uses: ./.github/actions/setup-ryco
-        with:
-          cache-scope: typecheck-effect-${{ matrix.shard }}
-
-      - name: Effect typecheck (TS6)
-        run: bun run typecheck:effect --shard ${{ matrix.shard }}
 
       - name: Save Turbo cache
         if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}

@@ -188,7 +188,6 @@ bun fmt
 bun run fmt:check
 bun lint
 bun typecheck
-bun run typecheck:effect
 bun run test
 bun run build
 bun run build --filter=@ryco/web

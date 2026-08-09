@@ -1,8 +1,6 @@
-import { Effect, Exit, PubSub, Scope, Stream } from "effect";
+import { Effect, Exit, Queue, Scope } from "effect";
 import { ORCHESTRATION_WS_METHODS, WS_METHODS, WsRpcGroup } from "@ryco/contracts";
 import { RpcMessage, RpcSerialization, RpcServer } from "effect/unstable/rpc";
-
-type RpcServerInstance = RpcServer.RpcServer<any>;
 
 type BrowserWsClient = {
   send: (data: string) => void;
@@ -10,8 +8,10 @@ type BrowserWsClient = {
 
 interface BrowserWsConnection {
   readonly client: BrowserWsClient;
+  readonly closed: { value: boolean };
+  readonly incoming: Queue.Queue<unknown>;
   readonly scope: Scope.Closeable;
-  readonly serverReady: Promise<RpcServerInstance>;
+  readonly serverReady: Promise<void>;
 }
 
 export type NormalizedWsRpcRequestBody = {
@@ -68,30 +68,62 @@ export class BrowserWsRpcHarness {
   private getInitialStreamValues: NonNullable<
     BrowserWsRpcHarnessOptions["getInitialStreamValues"]
   > = () => [];
-  private streamPubSubs = new Map<string, PubSub.PubSub<unknown>>();
+  private streamQueues = new Map<string, Set<Queue.Queue<unknown>>>();
 
   async reset(options?: BrowserWsRpcHarnessOptions): Promise<void> {
     await this.disconnect();
     this.requests.length = 0;
     this.resolveUnary = options?.resolveUnary ?? (() => ({}));
     this.getInitialStreamValues = options?.getInitialStreamValues ?? (() => []);
-    this.initializeStreamPubSubs();
+    this.initializeStreamQueues();
   }
 
   connect(client: BrowserWsClient): void {
-    if (this.streamPubSubs.size === 0) {
-      this.initializeStreamPubSubs();
+    if (this.streamQueues.size === 0) {
+      this.initializeStreamQueues();
     }
 
     const scope = Effect.runSync(Scope.make());
+    const closed = { value: false };
+    const incoming = Effect.runSync(Queue.unbounded<unknown>());
+    const disconnects = Effect.runSync(Queue.unbounded<number>());
+    const protocol = {
+      run: (writeRequest: (clientId: number, message: never) => Effect.Effect<void>) =>
+        Queue.take(incoming).pipe(
+          Effect.flatMap((message) => writeRequest(0, message as never)),
+          Effect.forever,
+        ),
+      disconnects,
+      send: (_clientId: number, response: unknown) =>
+        Effect.sync(() => {
+          if (closed.value) return;
+          const encoded = this.parser.encode(response);
+          if (typeof encoded === "string") {
+            client.send(encoded);
+          }
+        }),
+      end: () => Effect.void,
+      clientIds: Effect.succeed(new Set([0]) as ReadonlySet<number>),
+      initialMessage: Effect.succeedNone,
+      supportsAck: true,
+      supportsTransferables: false,
+      supportsSpanPropagation: true,
+    } satisfies RpcServer.Protocol["Service"];
     const connection: BrowserWsConnection = {
       client,
+      closed,
+      incoming,
       scope,
       serverReady: Effect.runPromise(
         Scope.provide(scope)(
-          RpcServer.makeNoSerialization(WsRpcGroup, this.makeServerOptions(client)),
-        ).pipe(Effect.provide(this.makeLayer())),
-      ) as Promise<RpcServerInstance>,
+          RpcServer.make(WsRpcGroup).pipe(
+            Effect.provideService(RpcServer.Protocol, protocol),
+            Effect.provide(this.makeLayer()),
+            Effect.forkScoped,
+            Effect.asVoid,
+          ),
+        ),
+      ),
     };
     this.connections.set(client, connection);
     this.activeConnections.add(connection);
@@ -108,6 +140,7 @@ export class BrowserWsRpcHarness {
     if (this.latestConnection === connection) {
       this.latestConnection = Array.from(this.activeConnections).at(-1) ?? null;
     }
+    connection.closed.value = true;
     await Effect.runPromise(Scope.close(connection.scope, Exit.void)).catch(() => undefined);
   }
 
@@ -117,21 +150,25 @@ export class BrowserWsRpcHarness {
     this.activeConnections.clear();
     this.latestConnection = null;
 
+    for (const connection of connections) {
+      connection.closed.value = true;
+    }
+
     await Promise.all(
       connections.map((connection) =>
         Effect.runPromise(Scope.close(connection.scope, Exit.void)).catch(() => undefined),
       ),
     );
-    for (const pubsub of this.streamPubSubs.values()) {
-      Effect.runSync(PubSub.shutdown(pubsub));
+    for (const queues of this.streamQueues.values()) {
+      for (const queue of queues) {
+        Effect.runSync(Queue.shutdown(queue));
+      }
     }
-    this.streamPubSubs.clear();
+    this.streamQueues.clear();
   }
 
-  private initializeStreamPubSubs(): void {
-    this.streamPubSubs = new Map(
-      Array.from(STREAM_METHODS, (method) => [method, Effect.runSync(PubSub.unbounded<unknown>())]),
-    );
+  private initializeStreamQueues(): void {
+    this.streamQueues = new Map(Array.from(STREAM_METHODS, (method) => [method, new Set()]));
   }
 
   async onMessage(rawData: string, client?: BrowserWsClient): Promise<void> {
@@ -139,7 +176,7 @@ export class BrowserWsRpcHarness {
     if (!connection) {
       return;
     }
-    const server = await connection.serverReady;
+    await connection.serverReady;
     const messages = this.parser.decode(rawData);
     for (const message of messages) {
       if (message && typeof message === "object" && "_tag" in message && message._tag === "Ping") {
@@ -149,16 +186,18 @@ export class BrowserWsRpcHarness {
         }
         continue;
       }
-      await Effect.runPromise(server.write(0, message as never));
+      await Effect.runPromise(Queue.offer(connection.incoming, message));
     }
   }
 
   emitStreamValue(method: string, value: unknown): void {
-    const pubsub = this.streamPubSubs.get(method);
-    if (!pubsub) {
+    const queues = this.streamQueues.get(method);
+    if (!queues) {
       throw new Error(`No stream registered for ${method}`);
     }
-    Effect.runSync(PubSub.publish(pubsub, value));
+    for (const queue of queues) {
+      Queue.offerUnsafe(queue, value);
+    }
   }
 
   private makeLayer() {
@@ -171,18 +210,6 @@ export class BrowserWsRpcHarness {
     return WsRpcGroup.toLayer(handlers as never);
   }
 
-  private makeServerOptions(client: BrowserWsClient) {
-    return {
-      onFromServer: (response: unknown) =>
-        Effect.sync(() => {
-          const encoded = this.parser.encode(response);
-          if (typeof encoded === "string") {
-            client.send(encoded);
-          }
-        }),
-    };
-  }
-
   private handleUnary(method: string, payload: unknown) {
     const request = normalizeRequest(method, payload);
     this.requests.push(request);
@@ -192,12 +219,24 @@ export class BrowserWsRpcHarness {
   private handleStream(method: string, payload: unknown) {
     const request = normalizeRequest(method, payload);
     this.requests.push(request);
-    const pubsub = this.streamPubSubs.get(method);
-    if (!pubsub) {
+    const queues = this.streamQueues.get(method);
+    if (!queues) {
       throw new Error(`No stream registered for ${method}`);
     }
-    return Stream.fromIterable(this.getInitialStreamValues(request) ?? []).pipe(
-      Stream.concat(Stream.fromPubSub(pubsub)),
+    const initialValues = this.getInitialStreamValues(request) ?? [];
+    return Effect.acquireRelease(
+      Queue.unbounded<unknown>().pipe(
+        Effect.tap((queue) => Queue.offerAll(queue, initialValues)),
+        Effect.tap((queue) =>
+          Effect.sync(() => {
+            queues.add(queue);
+          }),
+        ),
+      ),
+      (queue) =>
+        Effect.sync(() => {
+          queues.delete(queue);
+        }).pipe(Effect.andThen(Queue.shutdown(queue))),
     );
   }
 }

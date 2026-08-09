@@ -70,7 +70,7 @@ const parseLenientJsonGetter = SchemaGetter.onSome((input: string) =>
 
       return Option.some(JSON.parse(stripped));
     },
-    catch: (e) => new SchemaIssue.InvalidValue(Option.some(input), { message: String(e) }),
+    catch: (e) => new SchemaIssue.InvalidValue({ message: String(e) }, input),
   }),
 );
 

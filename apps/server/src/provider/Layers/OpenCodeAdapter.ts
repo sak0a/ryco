@@ -17,7 +17,7 @@ import {
   TurnId,
   type UserInputQuestion,
 } from "@ryco/contracts";
-import { Cause, Effect, Exit, Queue, Random, Ref, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Queue, Ref, Scope, Stream } from "effect";
 import type {
   OpencodeClient,
   Part,
@@ -246,7 +246,7 @@ const buildEventBase = (input: {
     "eventId" | "provider" | "threadId" | "createdAt" | "turnId" | "itemId" | "requestId" | "raw"
   >
 > =>
-  Random.nextUUIDv4.pipe(
+  Effect.sync(() => crypto.randomUUID()).pipe(
     Effect.map((uuid) => ({
       eventId: EventId.make(uuid),
       provider: PROVIDER,
@@ -1628,7 +1628,7 @@ export function makeOpenCodeAdapter(
 
     const sendTurn: OpenCodeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
       const context = ensureSessionContext(sessions, input.threadId);
-      const turnId = TurnId.make(`opencode-turn-${yield* Random.nextUUIDv4}`);
+      const turnId = TurnId.make(`opencode-turn-${yield* Effect.sync(() => crypto.randomUUID())}`);
       const modelSelection =
         input.modelSelection ??
         (context.session.model

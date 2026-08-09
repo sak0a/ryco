@@ -90,7 +90,7 @@ export function deriveLocalBranchNameFromRemoteRef(branchName: string): string {
 }
 
 export function buildTemporaryWorktreeBranchName(): string {
-  const token = Effect.runSync(Random.nextUUIDv4).replace(/-/g, "").slice(0, 8).toLowerCase();
+  const token = Effect.runSync(Random.nextIntBetween(0, 0xffff_ffff)).toString(16).padStart(8, "0");
   return `${WORKTREE_BRANCH_PREFIX}/${token}`;
 }
 

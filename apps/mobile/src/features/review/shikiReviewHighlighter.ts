@@ -23,12 +23,12 @@ import { applyDiffRangesToTokens, computeWordAltDiffRanges } from "./reviewWordD
 export type ReviewDiffTheme = "light" | "dark";
 export type { ReviewHighlighterEngine };
 
-export class ReviewHighlighterEngineInitializationError extends Schema.TaggedErrorClass<ReviewHighlighterEngineInitializationError>()(
+export class ReviewHighlighterEngineInitializationError extends Schema.TaggedError<ReviewHighlighterEngineInitializationError>()(
   "ReviewHighlighterEngineInitializationError",
   {
     preferredEngine: Schema.Literals(["native", "javascript"]),
     attemptedEngine: Schema.Literals(["native", "javascript"]),
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {

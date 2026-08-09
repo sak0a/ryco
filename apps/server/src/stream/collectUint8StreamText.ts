@@ -55,12 +55,10 @@ export const collectUint8StreamText = <E>(input: {
         };
       },
     ),
-    Effect.map(
-      (state): CollectedUint8StreamText => ({
-        text: state.truncated ? state.text : `${state.text}${decoder.decode()}`,
-        bytes: state.bytes,
-        truncated: state.truncated,
-      }),
-    ),
+    Effect.map((state): CollectedUint8StreamText => ({
+      text: state.truncated ? state.text : `${state.text}${decoder.decode()}`,
+      bytes: state.bytes,
+      truncated: state.truncated,
+    })),
   );
 };

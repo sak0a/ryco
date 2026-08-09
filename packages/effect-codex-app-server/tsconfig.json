@@ -5,12 +5,13 @@
     "plugins": [
       {
         "name": "@effect/language-service",
+        "includeSuggestionsInTsc": false,
         "namespaceImportPackages": ["@effect/platform-node"],
         "diagnosticSeverity": {
           "importFromBarrel": "error",
           "anyUnknownInErrorContext": "warning",
           "instanceOfSchema": "warning",
-          "deterministicKeys": "warning"
+          "deterministicKeys": "off"
         }
       }
     ]

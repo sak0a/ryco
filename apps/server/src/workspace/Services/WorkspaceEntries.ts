@@ -18,24 +18,24 @@ import type {
   ProjectSearchEntriesResult,
 } from "@ryco/contracts";
 
-export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntriesError>()(
+export class WorkspaceEntriesError extends Schema.TaggedError<WorkspaceEntriesError>()(
   "WorkspaceEntriesError",
   {
     cwd: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
-export class WorkspaceEntriesBrowseError extends Schema.TaggedErrorClass<WorkspaceEntriesBrowseError>()(
+export class WorkspaceEntriesBrowseError extends Schema.TaggedError<WorkspaceEntriesBrowseError>()(
   "WorkspaceEntriesBrowseError",
   {
     cwd: Schema.optional(Schema.String),
     partialPath: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

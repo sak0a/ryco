@@ -26,6 +26,8 @@ import {
   SchemaIssue,
   SchemaTransformation,
 } from "effect";
+// oxlint-disable-next-line no-unused-vars -- TS needs the symbol in scope to name exported CLI types.
+import type { NodeInspectSymbol } from "effect/Inspectable";
 import { Argument, Command, Flag, GlobalFlag } from "effect/unstable/cli";
 import {
   FetchHttpClient,
@@ -690,9 +692,10 @@ const DurationFromString = Schema.String.pipe(
           return Effect.succeed(duration);
         }
         return Effect.fail(
-          new SchemaIssue.InvalidValue(Option.some(value), {
-            message: "Invalid duration. Use values like 5m, 1h, 30d, or 15 minutes.",
-          }),
+          new SchemaIssue.InvalidValue(
+            { message: "Invalid duration. Use values like 5m, 1h, 30d, or 15 minutes." },
+            value,
+          ),
         );
       },
       encode: (duration) => Effect.succeed(Duration.format(duration)),
@@ -719,7 +722,10 @@ const DurationFromString = Schema.String.pipe(
  * rule: under `--json`, nothing this process writes below Error reaches the
  * console, whatever part of the command produced it.
  */
-const quietly = <A, E, R>(quiet: boolean, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+const quietly = <A, E, R>(
+  quiet: boolean,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
   quiet ? Effect.provideService(effect, References.MinimumLogLevel, "Error") : effect;
 
 const runWithAuthControlPlane = <A, E>(

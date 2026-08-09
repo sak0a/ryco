@@ -31,13 +31,13 @@ const BitbucketApiEnvConfig = Config.all({
   apiToken: Config.string("RYCO_BITBUCKET_API_TOKEN").pipe(Config.option),
 });
 
-export class BitbucketApiError extends Schema.TaggedErrorClass<BitbucketApiError>()(
+export class BitbucketApiError extends Schema.TaggedError<BitbucketApiError>()(
   "BitbucketApiError",
   {
     operation: Schema.String,
     detail: Schema.String,
     status: Schema.optional(Schema.Number),
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {

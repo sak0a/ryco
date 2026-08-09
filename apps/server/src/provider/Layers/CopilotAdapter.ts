@@ -12,7 +12,7 @@ import {
   type UserInputQuestion,
 } from "@ryco/contracts";
 import type { PermissionRequestResult, SessionConfig, SessionEvent } from "@github/copilot-sdk";
-import { Effect, Queue, Random, Stream } from "effect";
+import { Effect, Queue, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
@@ -76,7 +76,10 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     providerInstanceId: instanceId,
   });
 
-  const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.make(id));
+  const nextEventId = Effect.map(
+    Effect.sync(() => crypto.randomUUID()),
+    (id) => EventId.make(id),
+  );
   const makeEventStamp = () =>
     Effect.all({
       eventId: nextEventId,

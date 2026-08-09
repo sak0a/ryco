@@ -170,7 +170,7 @@ export function createWsRpcProtocolLayer(
   const lifecycle = composeLifecycleHandlers(handlers);
   const retryPolicy = Schedule.addDelay(
     Schedule.recurs(handlers?.reconnectMaxRetries ?? WS_RECONNECT_MAX_RETRIES),
-    (retryCount) =>
+    ({ output: retryCount }) =>
       Effect.succeed(
         Duration.millis(
           handlers?.getReconnectDelayMs?.(retryCount) ??
