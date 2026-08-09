@@ -51,7 +51,7 @@ env:
 jobs:
   static:
     name: Static
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -78,7 +78,7 @@ jobs:
 
   typecheck-effect:
     name: Effect typecheck ${{ matrix.shard }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -103,7 +103,7 @@ jobs:
   # whole suite across three runners. This job just emits the matrix.
   test-matrix:
     name: Test matrix
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
       include: ${{ steps.pick.outputs.include }}
@@ -124,7 +124,7 @@ jobs:
   test:
     name: Test ${{ matrix.name }}
     needs: test-matrix
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -149,7 +149,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -168,7 +168,7 @@ jobs:
   browser:
     name: Browser tests
     if: ${{ inputs['run-browser-tests'] }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -202,7 +202,7 @@ jobs:
   desktop:
     name: Desktop build
     if: ${{ inputs['run-desktop-build'] }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -225,7 +225,7 @@ jobs:
   release-smoke:
     name: Release Smoke
     if: ${{ inputs['run-release-smoke'] }}
-    runs-on: ubuntu-24.04
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - name: Checkout
