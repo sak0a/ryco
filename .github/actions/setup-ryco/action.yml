@@ -14,6 +14,23 @@ inputs:
     description: Vite+ CLI version. Keep aligned with package.json workspaces.catalog.vite-plus.
     required: false
     default: "0.1.24"
+  cache-scope:
+    description: >
+      Discriminator for this job's Turbo cache entry. Every job in a workflow
+      run restores and saves concurrently, and GitHub's cache backend only lets
+      one writer reserve a given key, so a shared key means exactly one job's
+      artifacts survive and the other writers are dropped. Give each job a
+      distinct scope (matrix legs included) so every job keeps its own slice.
+    required: true
+
+outputs:
+  turbo-cache-key:
+    description: >
+      Primary key the Turbo cache was restored under. Pass it to
+      `actions/cache/save` in an `if: always()` step at the end of the job;
+      `actions/cache` skips its own save when the job fails, which is precisely
+      when re-running the same expensive tasks costs the most.
+    value: ${{ steps.turbo-cache-key.outputs.key }}
 
 runs:
   using: composite
@@ -33,19 +50,55 @@ runs:
       with:
         bun-version-file: package.json
 
-    - name: Cache Turbo
-      uses: actions/cache@v5
+    - name: Compute Turbo cache key
+      id: turbo-cache-key
+      shell: bash
+      env:
+        SCOPE: ${{ inputs['cache-scope'] }}
+        LOCK_HASH: ${{ hashFiles('bun.lock') }}
+        TURBO_HASH: ${{ hashFiles('turbo.json') }}
+        SHA: ${{ github.sha }}
+      run: |
+        # Slashes are legal in cache keys but noisy in logs; matrix legs like
+        # "1/2" become "1-2".
+        scope="${SCOPE//\//-}"
+        prefix="${RUNNER_OS}-turbo-${scope}-${LOCK_HASH}-${TURBO_HASH}"
+        {
+          echo "key=${prefix}-${SHA}"
+          echo "restore-prefix=${prefix}-"
+          echo "scope-prefix=${RUNNER_OS}-turbo-${scope}-"
+          echo "shared-prefix=${RUNNER_OS}-turbo-"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore Turbo cache
+      uses: actions/cache/restore@v5
       with:
-        path: .turbo
-        # Per-commit key so every run writes a fresh cache entry (GitHub never
+        # Only the artifact store. `.turbo` also holds the daemon socket, run
+        # summaries, and logs, none of which are safe or useful to carry across
+        # machines.
+        path: .turbo/cache
+        # Per-commit key so every run writes a fresh entry (GitHub never
         # overwrites an existing key — a lockfile-stable key froze the cache at
         # its first run and never re-saved). restore-keys seed each run from the
         # most recent prefix match, so the cache accumulates commit-to-commit.
-        key: ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-${{ github.sha }}
+        key: ${{ steps.turbo-cache-key.outputs.key }}
+        # Narrowest match first: this job's own history, then this job's history
+        # across dependency/config changes, then any job's cache. Turbo entries
+        # are content-addressed by task hash, so the cross-scope fallback can
+        # only ever add usable entries. It is what lets a job that has never
+        # run before (a new matrix leg, a release job) start warm.
         restore-keys: |
-          ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json') }}-
-          ${{ runner.os }}-bun-turbo-${{ hashFiles('bun.lock') }}-
-          ${{ runner.os }}-bun-turbo-
+          ${{ steps.turbo-cache-key.outputs['restore-prefix'] }}
+          ${{ steps.turbo-cache-key.outputs['scope-prefix'] }}
+          ${{ steps.turbo-cache-key.outputs['shared-prefix'] }}
+
+    # A job whose Turbo tasks are all cache hits (or that runs no Turbo task at
+    # all) leaves `.turbo/cache` absent, and `actions/cache/save` treats a
+    # missing path as a hard error. Materialize it so the save step is always
+    # safe to run.
+    - name: Ensure Turbo cache directory exists
+      shell: bash
+      run: mkdir -p .turbo/cache
 
     - name: Install dependencies
       if: ${{ inputs['install-dependencies'] == 'true' }}

@@ -43,11 +43,19 @@ env:
   TURBO_SCM_HEAD: HEAD
 
 # Each check runs as its own job so they execute in parallel instead of as one
-# serial chain. Jobs share the same Turbo/Bun caches via setup-ryco, so the
-# redundant install/build work is cache-cheap. The two long poles — the Effect
-# (TS6) typecheck and the unit tests — are sharded across runners. Browser tests,
-# the desktop build, and release smoke stay gated behind their inputs so callers
-# can skip them per path (see pull-request-validation.yml) or event.
+# serial chain. Jobs share the Bun/Vite+ toolchain caches via setup-ryco, and
+# each keeps its own Turbo cache slice (see `cache-scope`), so the redundant
+# install/build work is cache-cheap. The long poles (the Effect TS6 typecheck,
+# the unit tests, and the browser suite) are sharded across runners. The
+# desktop build and release smoke stay gated behind their inputs so callers can
+# skip them per path (see pull-request-validation.yml) or event.
+#
+# Cache handling convention for every job below: `setup-ryco` restores, and the
+# job ends with an `if: always()` save. `actions/cache` normally registers its
+# own post-job save, but that post step is skipped when the job fails, exactly
+# the runs where the next attempt would benefit most from a warm cache. Failing
+# jobs get retried; making them re-download and recompute from cold each time
+# is the worst case, so saves are explicit and unconditional here.
 jobs:
   static:
     name: Static
@@ -64,7 +72,10 @@ jobs:
           persist-credentials: false
 
       - name: Setup project
+        id: setup
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: static
 
       - name: Format
         run: bun run fmt:check
@@ -75,6 +86,13 @@ jobs:
       # fmt/lint stay repo-wide (fast); only typecheck scopes to affected.
       - name: Typecheck
         run: bun run typecheck ${{ inputs['affected-base'] != '' && '--affected' || '' }}
+
+      - name: Save Turbo cache
+        if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs['turbo-cache-key'] }}
 
   typecheck-effect:
     name: Effect typecheck ${{ matrix.shard }}
@@ -92,18 +110,29 @@ jobs:
           persist-credentials: false
 
       - name: Setup project
+        id: setup
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: typecheck-effect-${{ matrix.shard }}
 
       - name: Effect typecheck (TS6)
         run: bun run typecheck:effect --shard ${{ matrix.shard }}
 
+      - name: Save Turbo cache
+        if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs['turbo-cache-key'] }}
+
   # Turbo forbids combining `--filter` with `--affected`, so the test strategy
   # switches shape by mode: PRs run a single `--affected` job (changed packages
   # plus their dependents — small and fast); full runs (main / manual) shard the
-  # whole suite across three runners. This job just emits the matrix.
+  # whole suite across three runners. This job just emits the matrix, so it gets
+  # the smallest runner rather than a 4 vCPU box for a few seconds of shell.
   test-matrix:
     name: Test matrix
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
       include: ${{ steps.pick.outputs.include }}
@@ -141,11 +170,21 @@ jobs:
           persist-credentials: false
 
       - name: Setup project
+        id: setup
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: test-${{ matrix.name }}
 
       # PR mode passes `--affected`; full mode passes one shard's `--filter`.
       - name: Test
         run: bun run test ${{ matrix.filter }}
+
+      - name: Save Turbo cache
+        if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs['turbo-cache-key'] }}
 
   build:
     name: Build
@@ -160,16 +199,35 @@ jobs:
           persist-credentials: false
 
       - name: Setup project
+        id: setup
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: build
 
       - name: Build
         run: bun run build ${{ inputs['affected-base'] != '' && '--affected' || '' }}
 
+      - name: Save Turbo cache
+        if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs['turbo-cache-key'] }}
+
+  # `vitest.browser.config.ts` sets `fileParallelism: false` on purpose:
+  # interaction tests share one constrained Chromium and go flaky when they
+  # race. That keeps a single runner at roughly 15% CPU for the whole suite, so
+  # the way to spend the idle capacity is more runners, not a bigger one. Each
+  # shard stays internally serial, preserving the timing invariant.
   browser:
-    name: Browser tests
+    name: Browser tests ${{ matrix.shard }}
     if: ${{ inputs['run-browser-tests'] }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/4", "2/4", "3/4", "4/4"]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -178,15 +236,19 @@ jobs:
           persist-credentials: false
 
       - name: Setup project
+        id: setup
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: browser-${{ matrix.shard }}
 
       # Browser tests run vitest directly (not through Turbo), so build the web
       # package and its workspace dependencies first.
       - name: Build web package
         run: bun run build --filter=@ryco/web
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
+      - name: Restore Playwright browsers
+        id: playwright-cache
+        uses: actions/cache/restore@v5
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
@@ -196,8 +258,26 @@ jobs:
       - name: Install browser test runtime
         run: bun run --cwd apps/web test:browser:install
 
+      # Saved before the suite runs, and only on a cold key. The browser
+      # download is already complete here and is independent of the test
+      # outcome, so there is no reason to make a red suite re-download Chromium
+      # on the next attempt.
+      - name: Save Playwright browsers
+        if: ${{ steps.playwright-cache.outputs['cache-hit'] != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
+
       - name: Browser test
-        run: bun run --cwd apps/web test:browser
+        run: bun run --cwd apps/web test:browser --shard ${{ matrix.shard }}
+
+      - name: Save Turbo cache
+        if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs['turbo-cache-key'] }}
 
   desktop:
     name: Desktop build
@@ -212,7 +292,10 @@ jobs:
           persist-credentials: false
 
       - name: Setup project
+        id: setup
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: desktop
 
       - name: Build desktop pipeline
         run: bun run build:desktop
@@ -221,6 +304,13 @@ jobs:
         run: |
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
+
+      - name: Save Turbo cache
+        if: ${{ always() && steps.setup.outputs['turbo-cache-key'] != '' }}
+        uses: actions/cache/save@v5
+        with:
+          path: .turbo/cache
+          key: ${{ steps.setup.outputs['turbo-cache-key'] }}
 
   release-smoke:
     name: Release Smoke
@@ -236,6 +326,10 @@ jobs:
 
       - name: Setup project
         uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: release-smoke
 
+      # No Turbo save: this job runs no Turbo task, so it has nothing to
+      # contribute to the cache.
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
