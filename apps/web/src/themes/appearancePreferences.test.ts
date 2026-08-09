@@ -394,9 +394,9 @@ describe("material and motion tokens", () => {
     // Both tiers are held to their own contrast floors, which at this step are
     // what binds rather than the step's own 72%. They differ per tier because
     // they are derived per tier from the roles that tier can render.
-    expect(coverage("sheet", "light")).toBeCloseTo(0.9, 4);
+    expect(coverage("sheet", "light")).toBeCloseTo(0.92, 4);
     expect(coverage("sheet", "dark")).toBeCloseTo(0.96, 4);
-    expect(coverage("chip", "light")).toBeCloseTo(0.88, 4);
+    expect(coverage("chip", "light")).toBeCloseTo(0.9, 4);
     expect(coverage("chip", "dark")).toBeCloseTo(0.82, 4);
     // The material layer itself is genuinely thinner than the coverage.
     expect(readPercent("--app-glass-sheet-dark-alpha")).toBeLessThan(0.96);

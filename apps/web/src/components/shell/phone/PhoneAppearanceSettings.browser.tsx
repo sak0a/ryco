@@ -104,7 +104,7 @@ describe("PhoneAppearanceSettings", () => {
     // A tier default, not a stored value.
     expect(storedPreferences().surfaceTransparency).toBeUndefined();
     // …and it is what actually renders.
-    expect(rootVariable("--app-surface-opacity")).toBe("84%");
+    expect(rootVariable("--app-surface-opacity")).toBe("87.2%");
   });
 
   it("writes the one transparency key from the three-option Material sheet", async () => {

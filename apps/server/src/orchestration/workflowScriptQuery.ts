@@ -98,12 +98,9 @@ export const readWorkflowScript = Effect.fn("orchestration.readWorkflowScript")(
   // Failures echo only the client-supplied path — the resolved path and the
   // raw fs cause stay in server logs (clients could otherwise probe the
   // filesystem layout through error payloads).
-  const resolved = yield* Effect.tryPromise({
-    try: () => NodeFSP.realpath(requested),
-    catch: (cause) => cause,
-  }).pipe(
-    Effect.catch((cause) =>
-      Effect.logInfo("workflow script realpath failed", { requested, cause }).pipe(
+  const resolved = yield* Effect.tryPromise(() => NodeFSP.realpath(requested)).pipe(
+    Effect.catch((error) =>
+      Effect.logInfo("workflow script realpath failed", { requested, cause: error.cause }).pipe(
         Effect.andThen(
           Effect.fail(
             new OrchestrationGetWorkflowScriptError({ reason: "not-found", scriptPath: requested }),
@@ -134,36 +131,37 @@ export const readWorkflowScript = Effect.fn("orchestration.readWorkflowScript")(
   // their own tagged reasons (not manufactured Errors folded into
   // read-failed); "read-failed" is reserved for genuine platform failures
   // with the real cause attached.
-  const read = yield* Effect.tryPromise({
-    try: async () => {
-      const handle = await NodeFSP.open(resolved, "r");
-      try {
-        const stat = await handle.stat();
-        if (!stat.isFile()) {
-          return { failure: "not-regular-file" as const };
-        }
-        // The opened inode must be the same one realpath resolved to: a
-        // process swapping the path between realpath and open changes the
-        // inode, which this comparison catches.
-        const pathStat = await NodeFSP.lstat(resolved);
-        if (stat.ino !== pathStat.ino || stat.dev !== pathStat.dev) {
-          return { failure: "changed-during-read" as const };
-        }
-        const truncated = stat.size > SCRIPT_BYTE_CAP;
-        const buffer = Buffer.alloc(Math.min(stat.size, SCRIPT_BYTE_CAP));
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        return {
-          contents: buffer.subarray(0, bytesRead).toString("utf8"),
-          truncated,
-        };
-      } finally {
-        await handle.close();
+  const read = yield* Effect.tryPromise(async () => {
+    const handle = await NodeFSP.open(resolved, "r");
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) {
+        return { failure: "not-regular-file" as const };
       }
-    },
-    catch: (cause) => cause,
+      // The opened inode must be the same one realpath resolved to: a
+      // process swapping the path between realpath and open changes the
+      // inode, which this comparison catches.
+      const pathStat = await NodeFSP.lstat(resolved);
+      if (stat.ino !== pathStat.ino || stat.dev !== pathStat.dev) {
+        return { failure: "changed-during-read" as const };
+      }
+      const truncated = stat.size > SCRIPT_BYTE_CAP;
+      const buffer = Buffer.alloc(Math.min(stat.size, SCRIPT_BYTE_CAP));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      return {
+        contents: buffer.subarray(0, bytesRead).toString("utf8"),
+        truncated,
+      };
+    } finally {
+      await handle.close();
+    }
   }).pipe(
-    Effect.catch((cause) =>
-      Effect.logWarning("workflow script read failed", { requested, resolved, cause }).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("workflow script read failed", {
+        requested,
+        resolved,
+        cause: error.cause,
+      }).pipe(
         Effect.andThen(
           Effect.fail(
             new OrchestrationGetWorkflowScriptError({

@@ -490,26 +490,31 @@ const GLASS_TIER_SATURATION_SCALE: Record<GlassSurfaceTier, number> = {
  * together:
  *
  * - `sheet` renders destructive row labels, so dark binds hardest (96 %,
- *   `--destructive` at 4.5:1 over the amber status colour); light is set by
- *   `--muted-foreground` at 4.5:1 and the presence text at 3:1 (90 %).
+ *   `--destructive` at 4.5:1 over the amber status colour); light is set by the
+ *   presence text at 3:1 (92 %), which overtook `--muted-foreground` at 4.5:1
+ *   when the neutral-graphite palette darkened the worst-case backdrop —
+ *   `emerald-600` is only ~3.60:1 opaque, so it has the least headroom to spend
+ *   on translucency of any role the sheet can render.
  * - `chip` is the connection pill alone, whose only two text colours are
  *   `--foreground` and `--muted-foreground`. That inverts the schemes: light
- *   binds harder (88 %) because `--muted-foreground` is enforced at 4.5:1
+ *   binds harder (90 %) because `--muted-foreground` is enforced at 4.5:1
  *   there, while in dark it is exempt to 3:1 (82 %) — see the exemption rule in
  *   `GlassSurface.browser.tsx`.
  * - `dock` is the floating capsule, whose only text is its action labels at the
  *   inherited `--foreground` — no secondary, destructive, or presence colour is
  *   reachable inside it, so `--foreground` at 4.5:1 is the binding role in both
- *   schemes. Derived against the same worst-case backdrops that gives 34 %
- *   light and 43 % dark, both far **below** every Material step's own coverage
+ *   schemes. Derived against the same worst-case backdrops that gives 51 %
+ *   light and 60 % dark, both still **below** every Material step's own coverage
  *   (Glass is 72 %), so on the shipped scale the step binds and the floor never
  *   does. It is still recorded and asserted: it is what stops a future step, or
- *   a future palette, from taking the dock below AA.
+ *   a future palette, from taking the dock below AA. The neutral-graphite
+ *   palette moved these up from 34 %/43 % without changing that conclusion —
+ *   which is exactly the drift the assertion exists to surface.
  */
 const GLASS_TIER_COVERAGE_FLOORS: Record<GlassSurfaceTier, { light: number; dark: number }> = {
-  sheet: { light: 90, dark: 96 },
-  chip: { light: 88, dark: 82 },
-  dock: { light: 34, dark: 43 },
+  sheet: { light: 92, dark: 96 },
+  chip: { light: 90, dark: 82 },
+  dock: { light: 51, dark: 60 },
 };
 
 /**
