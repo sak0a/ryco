@@ -28,7 +28,7 @@ jobs:
   # path-scope / Turbo inputs.
   gate:
     name: Gate
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       checkout-ref: ${{ steps.gate.outputs.checkout-ref }}

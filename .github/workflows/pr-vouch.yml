@@ -23,7 +23,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     outputs:
       targets: ${{ steps.collect.outputs.targets }}
     steps:
@@ -73,7 +73,7 @@ jobs:
       pull-requests: write
     needs: collect-targets
     if: ${{ needs.collect-targets.outputs.targets != '[]' }}
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     concurrency:
       group: pr-vouch-${{ matrix.target.number }}
       cancel-in-progress: true

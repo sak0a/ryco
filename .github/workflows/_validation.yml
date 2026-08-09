@@ -51,7 +51,7 @@ env:
 jobs:
   static:
     name: Static
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -78,7 +78,7 @@ jobs:
 
   typecheck-effect:
     name: Effect typecheck ${{ matrix.shard }}
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -103,7 +103,7 @@ jobs:
   # whole suite across three runners. This job just emits the matrix.
   test-matrix:
     name: Test matrix
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       include: ${{ steps.pick.outputs.include }}
@@ -124,7 +124,7 @@ jobs:
   test:
     name: Test ${{ matrix.name }}
     needs: test-matrix
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -149,7 +149,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -168,7 +168,7 @@ jobs:
   browser:
     name: Browser tests
     if: ${{ inputs['run-browser-tests'] }}
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -185,8 +185,14 @@ jobs:
       - name: Build web package
         run: bun run build --filter=@ryco/web
 
-      # Private runner containers do not share a stable home directory, so
-      # install the pinned runtime instead of restoring a hosted-runner cache.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install browser test runtime
         run: bun run --cwd apps/web test:browser:install
 
@@ -196,7 +202,7 @@ jobs:
   desktop:
     name: Desktop build
     if: ${{ inputs['run-desktop-build'] }}
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout
@@ -219,7 +225,7 @@ jobs:
   release-smoke:
     name: Release Smoke
     if: ${{ inputs['run-release-smoke'] }}
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout

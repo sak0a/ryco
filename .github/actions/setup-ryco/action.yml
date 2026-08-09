@@ -23,9 +23,7 @@ runs:
       with:
         version: ${{ inputs['vite-plus-version'] }}
         node-version-file: package.json
-        # Runner containers do not share a stable home directory. Their
-        # package-manager cache cannot be safely restored across jobs.
-        cache: false
+        cache: true
         cache-dependency-path: bun.lock
         registry-url: ${{ inputs['registry-url'] }}
         run-install: false
@@ -34,9 +32,6 @@ runs:
       uses: oven-sh/setup-bun@v2
       with:
         bun-version-file: package.json
-        # Let the explicit workspace-local Turbo cache own reuse instead of
-        # restoring a package-manager path from a different runner container.
-        no-cache: true
 
     - name: Cache Turbo
       uses: actions/cache@v5

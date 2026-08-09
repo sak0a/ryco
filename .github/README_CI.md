@@ -3,19 +3,6 @@
 Ryco keeps CI entrypoints small and routes shared checks through
 `.github/workflows/_validation.yml`.
 
-## Temporary self-hosted-only mode
-
-All Linux CI and PR-support jobs use the repository-scoped
-`[self-hosted, ryco-validation]` pool. This avoids GitHub-hosted Actions runner
-usage while hosted capacity is unavailable. Browser, desktop, and release-smoke
-validation run on that pool too.
-
-Desktop release publishing still needs macOS and Windows runners. Until suitable
-private runners exist, `release.yml` fails at its private preflight and does not
-queue any hosted job. After hosted capacity returns, set the repository Actions
-variable `RYCO_ENABLE_HOSTED_RELEASES` to `true` to restore the existing release
-runner matrix.
-
 - `ci.yml` validates `main` and manual CI runs with the full suite.
 - `pull-request-validation.yml` is the single automatic source of truth for
   branches. `pr-vouch.yml` dispatches validation for `vouch:trusted` PRs; an
@@ -33,9 +20,10 @@ runner matrix.
 ## Parallelism and path scoping
 
 `_validation.yml` runs each check as its own job so they execute in parallel
-rather than as one serial chain. Every validation and control job uses the
-repository-scoped self-hosted runner label `ryco-validation`. The two long poles
-are sharded across runners:
+rather than as one serial chain. Validation and control jobs use the standard
+GitHub-hosted `ubuntu-24.04` runner. Release builds use the matching GitHub-hosted
+macOS, Ubuntu, and Windows x64/arm64 runners. The two long poles are sharded
+across runners:
 
 - `typecheck-effect` splits its projects into two shards via
   `bun run typecheck:effect --shard <i>/<n>`. Sharding is derived from the
@@ -75,10 +63,9 @@ should reuse that action instead of duplicating Vite+, Bun, Node, cache, and
 install steps. The action uses `setup-vp` for Vite+ and Node, sets up Bun
 explicitly for Ryco's command surface, and installs dependencies with
 `vp install`, which keeps Bun as the underlying package manager via
-`packageManager`. Bun setup caching is disabled because runner containers do not
-share stable home-directory paths; the explicit Turbo cache supplies reuse.
-For the same reason, browser validation installs its pinned Playwright runtime
-instead of restoring a home-directory cache.
+`packageManager`. The action also restores the toolchain cache and the explicit
+workspace-local Turbo cache; browser validation restores the pinned Playwright
+runtime cache.
 
 Reusable validation uses Ryco's canonical Bun entrypoints: `bun run fmt:check`,
 `bun run lint`, `bun run typecheck`, `bun run test`, and `bun run build`.

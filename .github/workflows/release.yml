@@ -23,7 +23,7 @@ permissions:
 jobs:
   preflight:
     name: Preflight
-    runs-on: [self-hosted, ryco-validation]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
@@ -37,18 +37,6 @@ jobs:
       make_latest: ${{ steps.release_meta.outputs.make_latest }}
       ref: ${{ github.sha }}
     steps:
-      - name: Require hosted release runners
-        shell: bash
-        env:
-          RYCO_ENABLE_HOSTED_RELEASES: ${{ vars.RYCO_ENABLE_HOSTED_RELEASES }}
-        run: |
-          if [[ "${RYCO_ENABLE_HOSTED_RELEASES}" == "true" ]]; then
-            exit 0
-          fi
-
-          echo "::error title=Hosted release runners are disabled::Mac and Windows release artifacts require hosted runners. Set the RYCO_ENABLE_HOSTED_RELEASES repository Actions variable to true after hosted capacity is available."
-          exit 1
-
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -151,7 +139,7 @@ jobs:
             target: dmg
             arch: arm64
           - label: macOS x64
-            runner: macos-15
+            runner: macos-15-intel
             platform: mac
             target: dmg
             arch: x64
@@ -160,16 +148,21 @@ jobs:
             platform: linux
             target: AppImage
             arch: x64
+          - label: Linux arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            target: AppImage
+            arch: arm64
           - label: Windows x64
             runner: windows-2025
             platform: win
             target: nsis
             arch: x64
-          # - label: Windows arm64
-          #   runner: windows-11-arm
-          #   platform: win
-          #   target: nsis
-          #   arch: arm64
+          - label: Windows arm64
+            runner: windows-11-arm
+            platform: win
+            target: nsis
+            arch: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -338,17 +331,16 @@ jobs:
             done
           fi
 
-          # Enable if Windows arm64 builds are enabled.
           # Windows updater metadata is channel-specific (for example
           # "latest.yml" or "nightly.yml"). Suffix each per-arch copy so the
           # release job can merge matching arm64/x64 manifests back into one
           # canonical manifest per channel.
-          # if [[ "${{ matrix.platform }}" == "win" ]]; then
-          #   shopt -s nullglob
-          #   for manifest in release-publish/*.yml; do
-          #     mv "$manifest" "${manifest%.yml}-win-${{ matrix.arch }}.yml"
-          #   done
-          # fi
+          if [[ "${{ matrix.platform }}" == "win" ]]; then
+            shopt -s nullglob
+            for manifest in release-publish/*.yml; do
+              mv "$manifest" "${manifest%.yml}-win-${{ matrix.arch }}.yml"
+            done
+          fi
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7
@@ -428,34 +420,34 @@ jobs:
             fi
           done
 
-      # - name: Merge Windows updater manifests
-      #   run: |
-      #     shopt -s nullglob
-      #     found_windows_manifest=false
-      #     for x64_manifest in release-assets/*-win-x64.yml; do
-      #       if [[ "$(basename "$x64_manifest")" == builder-debug-* ]]; then
-      #         continue
-      #       fi
+      - name: Merge Windows updater manifests
+        run: |
+          shopt -s nullglob
+          found_windows_manifest=false
+          for x64_manifest in release-assets/*-win-x64.yml; do
+            if [[ "$(basename "$x64_manifest")" == builder-debug-* ]]; then
+              continue
+            fi
 
-      #       arm64_manifest="${x64_manifest/-x64.yml/-arm64.yml}"
-      #       output_manifest="${x64_manifest/-win-x64.yml/.yml}"
-      #       if [[ ! -f "$arm64_manifest" ]]; then
-      #         echo "Missing matching arm64 Windows manifest for $x64_manifest" >&2
-      #         exit 1
-      #       fi
+            arm64_manifest="${x64_manifest/-x64.yml/-arm64.yml}"
+            output_manifest="${x64_manifest/-win-x64.yml/.yml}"
+            if [[ ! -f "$arm64_manifest" ]]; then
+              echo "Missing matching arm64 Windows manifest for $x64_manifest" >&2
+              exit 1
+            fi
 
-      #       found_windows_manifest=true
-      #       node scripts/merge-update-manifests.ts --platform win \
-      #         "$arm64_manifest" \
-      #         "$x64_manifest" \
-      #         "$output_manifest"
-      #       rm -f "$arm64_manifest" "$x64_manifest"
-      #     done
+            found_windows_manifest=true
+            node scripts/merge-update-manifests.ts --platform win \
+              "$arm64_manifest" \
+              "$x64_manifest" \
+              "$output_manifest"
+            rm -f "$arm64_manifest" "$x64_manifest"
+          done
 
-      #     if [[ "$found_windows_manifest" != true ]]; then
-      #       echo "No Windows updater manifests found to merge." >&2
-      #       exit 1
-      #     fi
+          if [[ "$found_windows_manifest" != true ]]; then
+            echo "No Windows updater manifests found to merge." >&2
+            exit 1
+          fi
 
       - name: Prepare release notes body
         shell: bash
