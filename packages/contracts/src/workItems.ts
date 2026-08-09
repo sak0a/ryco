@@ -254,12 +254,12 @@ export const WorkItemTransitionInput = Schema.Struct({
 });
 export type WorkItemTransitionInput = typeof WorkItemTransitionInput.Type;
 
-export class WorkItemProviderError extends Schema.TaggedErrorClass<WorkItemProviderError>()(
+export class WorkItemProviderError extends Schema.TaggedError<WorkItemProviderError>()(
   "WorkItemProviderError",
   {
     provider: WorkItemProviderKind,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}

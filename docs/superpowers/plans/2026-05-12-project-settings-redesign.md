@@ -995,8 +995,7 @@ export interface Project {
 ```typescript
 function mapProject(
   project:
-    | OrchestrationReadModel["projects"][number]
-    | OrchestrationShellSnapshot["projects"][number],
+    OrchestrationReadModel["projects"][number] | OrchestrationShellSnapshot["projects"][number],
   environmentId: EnvironmentId,
 ): Project {
   return {

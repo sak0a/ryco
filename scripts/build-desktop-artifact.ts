@@ -38,7 +38,7 @@ const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
 );
-const encodeJsonString = Schema.encodeEffect(Schema.UnknownFromJsonString);
+const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 interface DesktopBuildIconAssets {
   readonly macIconPng: string;
@@ -373,7 +373,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
 ) {
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
-  const env = yield* BuildEnvConfig.asEffect();
+  const env = yield* BuildEnvConfig;
 
   const platform = mergeOptions(
     input.platform,
@@ -1019,7 +1019,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       // "env set but empty" are treated as absent. Config.option only maps
       // missing-env failures; SchemaError from Config.nonEmptyString still
       // propagates and would abort the build.
-      const azureSignOptions = yield* Effect.option(AzureTrustedSigningOptionsConfig.asEffect());
+      const azureSignOptions = yield* Effect.option(AzureTrustedSigningOptionsConfig);
       if (Option.isSome(azureSignOptions)) {
         winConfig.azureSignOptions = azureSignOptions.value;
         yield* Effect.log("[desktop-artifact] Windows signing: Azure Trusted Signing.");

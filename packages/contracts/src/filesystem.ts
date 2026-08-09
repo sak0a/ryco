@@ -28,10 +28,10 @@ export const FilesystemBrowseResult = Schema.Struct({
 });
 export type FilesystemBrowseResult = typeof FilesystemBrowseResult.Type;
 
-export class FilesystemBrowseError extends Schema.TaggedErrorClass<FilesystemBrowseError>()(
+export class FilesystemBrowseError extends Schema.TaggedError<FilesystemBrowseError>()(
   "FilesystemBrowseError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}

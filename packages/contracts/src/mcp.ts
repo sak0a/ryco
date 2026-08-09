@@ -222,10 +222,7 @@ export const McpOauthLoginResult = Schema.Struct({
 });
 export type McpOauthLoginResult = typeof McpOauthLoginResult.Type;
 
-export class McpSettingsError extends Schema.TaggedErrorClass<McpSettingsError>()(
-  "McpSettingsError",
-  {
-    message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
-  },
-) {}
+export class McpSettingsError extends Schema.TaggedError<McpSettingsError>()("McpSettingsError", {
+  message: TrimmedNonEmptyString,
+  cause: Schema.optional(Schema.Defect()),
+}) {}

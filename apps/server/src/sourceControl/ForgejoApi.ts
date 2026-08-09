@@ -30,11 +30,11 @@ const ForgejoApiEnvConfig = Config.all({
   cliKeysFile: Config.string("RYCO_FORGEJO_CLI_KEYS_FILE").pipe(Config.option),
 });
 
-export class ForgejoApiError extends Schema.TaggedErrorClass<ForgejoApiError>()("ForgejoApiError", {
+export class ForgejoApiError extends Schema.TaggedError<ForgejoApiError>()("ForgejoApiError", {
   operation: Schema.String,
   detail: Schema.String,
   status: Schema.optional(Schema.Number),
-  cause: Schema.optional(Schema.Defect),
+  cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
     return `Forgejo API failed in ${this.operation}: ${this.detail}`;

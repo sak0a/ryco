@@ -8,7 +8,7 @@
  */
 import { Context, Schema, type Effect } from "effect";
 
-export class WorkspaceAccessDeniedError extends Schema.TaggedErrorClass<WorkspaceAccessDeniedError>()(
+export class WorkspaceAccessDeniedError extends Schema.TaggedError<WorkspaceAccessDeniedError>()(
   "WorkspaceAccessDeniedError",
   {
     operation: Schema.String,

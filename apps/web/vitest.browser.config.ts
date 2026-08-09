@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { playwright } from "vite-plus/test/browser-playwright";
-import { defineConfig, mergeConfig } from "vite-plus";
+import { playwright } from "@vitest/browser-playwright";
+import { defineConfig, mergeConfig } from "vitest/config";
 
 import viteConfig from "./vite.config";
 

@@ -2,6 +2,8 @@ import type { ReadonlyRecord } from "effect/Record";
 import { Context, Effect, Layer, Scope } from "effect";
 import { Atom, Reactivity } from "effect/unstable/reactivity";
 
+import { appAtomRegistry } from "./atomRegistry.ts";
+
 /**
  * Reactivity keys accepted by `AtomRpc` query/mutation `reactivityKeys` and by
  * the {@link Reactivity} service.
@@ -60,6 +62,7 @@ export const invalidate = (
 type ReactivityService = Context.Service.Shape<typeof Reactivity.Reactivity>;
 
 let sharedReactivity: ReactivityService | null = null;
+let sharedMemoMap: Layer.MemoMap | null = null;
 
 /**
  * Resolve the single {@link Reactivity} instance shared by all atoms created
@@ -68,13 +71,13 @@ let sharedReactivity: ReactivityService | null = null;
  * atoms register their refresh handlers against.
  */
 function getSharedReactivity(): ReactivityService {
-  if (sharedReactivity) {
+  const memoMap = appAtomRegistry.get(Atom.runtime.memoMap);
+  if (sharedReactivity && sharedMemoMap === memoMap) {
     return sharedReactivity;
   }
   const scope = Effect.runSync(Scope.make());
-  const context = Effect.runSync(
-    Layer.buildWithMemoMap(Reactivity.layer, Atom.defaultMemoMap, scope),
-  );
+  const context = Effect.runSync(Layer.buildWithMemoMap(Reactivity.layer, memoMap, scope));
+  sharedMemoMap = memoMap;
   sharedReactivity = Context.get(context, Reactivity.Reactivity);
   return sharedReactivity;
 }
@@ -123,4 +126,5 @@ export function invalidateServerConfig(): void {
  */
 export function resetInvalidationForTests(): void {
   sharedReactivity = null;
+  sharedMemoMap = null;
 }

@@ -13,12 +13,12 @@ import {
 
 export type ReviewHighlighterStatus = "idle" | "initializing" | "ready" | "error";
 
-export class ReviewHighlighterManagerError extends Schema.TaggedErrorClass<ReviewHighlighterManagerError>()(
+export class ReviewHighlighterManagerError extends Schema.TaggedError<ReviewHighlighterManagerError>()(
   "ReviewHighlighterManagerError",
   {
     operation: Schema.Literals(["prepare", "prepare-languages", "resolve-engine"]),
     languages: Schema.Array(Schema.String),
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   },
 ) {
   override get message(): string {

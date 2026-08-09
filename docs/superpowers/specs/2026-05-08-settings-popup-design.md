@@ -60,12 +60,7 @@ Out of scope:
 import { create } from "zustand";
 
 export type SettingsSectionId =
-  | "general"
-  | "providers"
-  | "appearance"
-  | "source-control"
-  | "connections"
-  | "archived";
+  "general" | "providers" | "appearance" | "source-control" | "connections" | "archived";
 
 interface SettingsDialogStore {
   open: boolean;

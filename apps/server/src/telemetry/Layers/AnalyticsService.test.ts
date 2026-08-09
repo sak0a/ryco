@@ -113,7 +113,7 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       );
       assert.equal(batchRequests.length, 3);
       assert.equal(
-        batchRequests.every((request) => request.path === "/batch/" || request.path === "/batch"),
+        batchRequests.every((request) => request.path.endsWith("/batch/")),
         true,
       );
       const deliveredIndexes = batchRequests.flatMap((request) =>

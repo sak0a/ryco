@@ -1,5 +1,10 @@
 import { Effect, Layer, References, Tracer } from "effect";
-import { OtlpMetrics, OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
+import {
+  OtlpExporter,
+  OtlpMetrics,
+  OtlpSerialization,
+  OtlpTracer,
+} from "effect/unstable/observability";
 
 import { ServerConfig } from "../../config.ts";
 import { makeDiagnosticsService } from "../../diagnostics/Layers/Diagnostics.ts";
@@ -79,7 +84,7 @@ export const ObservabilityLive = Layer.unwrap(
           }),
         );
       }),
-    ).pipe(Layer.provideMerge(otlpSerializationLayer));
+    ).pipe(Layer.provideMerge(otlpSerializationLayer), Layer.provide(OtlpExporter.layerFlusher));
 
     const metricsLayer =
       config.otlpMetricsUrl === undefined

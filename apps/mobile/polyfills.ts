@@ -216,7 +216,7 @@ class Utf8TextEncoder {
   encode(input = ""): Uint8Array {
     const source = String(input);
     let size = 0;
-    for (let index = 0; index < source.length; ) {
+    for (let index = 0; index < source.length;) {
       const point = readCodePoint(source, index);
       size += utf8ByteLength(point.value);
       index += point.units;

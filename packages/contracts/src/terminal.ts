@@ -14,9 +14,13 @@ const TerminalIdSchema = TrimmedNonEmptyStringSchema.check(Schema.isMaxLength(12
 const TerminalEnvKeySchema = Schema.String.check(
   Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/),
 ).check(Schema.isMaxLength(128));
+const isTerminalEnvKey = Schema.is(TerminalEnvKeySchema);
 const TerminalEnvValueSchema = Schema.String.check(Schema.isMaxLength(8_192));
-const TerminalEnvSchema = Schema.Record(TerminalEnvKeySchema, TerminalEnvValueSchema).check(
+const TerminalEnvSchema = Schema.Record(Schema.String, TerminalEnvValueSchema).check(
   Schema.isMaxProperties(128),
+  Schema.makeFilter((env) =>
+    Object.keys(env).every(isTerminalEnvKey) ? undefined : "Invalid terminal environment key",
+  ),
 );
 
 const TerminalIdWithDefaultSchema = TerminalIdSchema.pipe(
@@ -153,14 +157,11 @@ export const TerminalEvent = Schema.Union([
 ]);
 export type TerminalEvent = typeof TerminalEvent.Type;
 
-export class TerminalCwdError extends Schema.TaggedErrorClass<TerminalCwdError>()(
-  "TerminalCwdError",
-  {
-    cwd: Schema.String,
-    reason: Schema.Literals(["notFound", "notDirectory", "outsideWorkspace", "statFailed"]),
-    cause: Schema.optional(Schema.Defect),
-  },
-) {
+export class TerminalCwdError extends Schema.TaggedError<TerminalCwdError>()("TerminalCwdError", {
+  cwd: Schema.String,
+  reason: Schema.Literals(["notFound", "notDirectory", "outsideWorkspace", "statFailed"]),
+  cause: Schema.optional(Schema.Defect()),
+}) {
   override get message() {
     if (this.reason === "notDirectory") {
       return `Terminal cwd is not a directory: ${this.cwd}`;
@@ -181,13 +182,13 @@ export class TerminalCwdError extends Schema.TaggedErrorClass<TerminalCwdError>(
   }
 }
 
-export class TerminalHistoryError extends Schema.TaggedErrorClass<TerminalHistoryError>()(
+export class TerminalHistoryError extends Schema.TaggedError<TerminalHistoryError>()(
   "TerminalHistoryError",
   {
     operation: Schema.Literals(["read", "truncate", "migrate"]),
     threadId: Schema.String,
     terminalId: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
@@ -195,7 +196,7 @@ export class TerminalHistoryError extends Schema.TaggedErrorClass<TerminalHistor
   }
 }
 
-export class TerminalSessionLookupError extends Schema.TaggedErrorClass<TerminalSessionLookupError>()(
+export class TerminalSessionLookupError extends Schema.TaggedError<TerminalSessionLookupError>()(
   "TerminalSessionLookupError",
   {
     threadId: Schema.String,
@@ -207,7 +208,7 @@ export class TerminalSessionLookupError extends Schema.TaggedErrorClass<Terminal
   }
 }
 
-export class TerminalNotRunningError extends Schema.TaggedErrorClass<TerminalNotRunningError>()(
+export class TerminalNotRunningError extends Schema.TaggedError<TerminalNotRunningError>()(
   "TerminalNotRunningError",
   {
     threadId: Schema.String,

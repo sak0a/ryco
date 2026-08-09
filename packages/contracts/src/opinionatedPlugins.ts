@@ -96,12 +96,12 @@ export const OpinionatedPluginInstallResult = Schema.Struct({
 });
 export type OpinionatedPluginInstallResult = typeof OpinionatedPluginInstallResult.Type;
 
-export class OpinionatedPluginError extends Schema.TaggedErrorClass<OpinionatedPluginError>()(
+export class OpinionatedPluginError extends Schema.TaggedError<OpinionatedPluginError>()(
   "OpinionatedPluginError",
   {
     pluginId: Schema.optional(OpinionatedPluginId),
     detail: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {

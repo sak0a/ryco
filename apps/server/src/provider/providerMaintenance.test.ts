@@ -4,7 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import os from "node:os";
 import path from "node:path";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
-import { Effect, Random } from "effect";
+import { Effect } from "effect";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import {
   clearLatestProviderVersionCacheForTests,
@@ -20,7 +20,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
 const makeTempDir = Effect.fn("makeTempDir")(function* (name: string) {
-  const id = yield* Random.nextUUIDv4;
+  const id = yield* Effect.sync(() => crypto.randomUUID());
   return path.join(os.tmpdir(), `${name}-${id}`);
 });
 const isNativeTestCommandPath =

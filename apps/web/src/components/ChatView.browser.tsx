@@ -1413,6 +1413,9 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
       truncated: false,
     };
   }
+  if (tag === WS_METHODS.sourceControlListChangeRequests) {
+    return [];
+  }
   if (tag === WS_METHODS.shellOpenInEditor) {
     return null;
   }

@@ -20,12 +20,12 @@ import * as SourceControlProvider from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export class AzureDevOpsCliError extends Schema.TaggedErrorClass<AzureDevOpsCliError>()(
+export class AzureDevOpsCliError extends Schema.TaggedError<AzureDevOpsCliError>()(
   "AzureDevOpsCliError",
   {
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message(): string {
