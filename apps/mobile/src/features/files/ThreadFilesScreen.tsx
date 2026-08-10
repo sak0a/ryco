@@ -19,6 +19,7 @@ import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { resolveFileSelectionNavigationAction } from "../../lib/adaptive-navigation";
 import { useProjectListEntries, useProjectSearchEntries } from "../../rpc/useProjectFiles";
@@ -31,6 +32,7 @@ import {
   useStore,
 } from "../../state/threadsRuntime";
 import { findThreadWorktree } from "../threads/threadHeaderModel";
+import { useFileWorkspaceLayout } from "./FileWorkspaceLayout";
 import { buildThreadFilesScreenModel } from "./threadFilesModel";
 import { useThreadWorkspaceRoot } from "./useThreadWorkspaceRoot";
 
@@ -38,13 +40,6 @@ import { useThreadWorkspaceRoot } from "./useThreadWorkspaceRoot";
 // render lives in threadFilesModel; this file owns only the React Native surface
 // and the two pieces of local state the model reads back — the search box and
 // the expansion set.
-
-/**
- * Phone-first: there is no side-by-side file inspector yet, so a selection always
- * pushes. The replace branch below stays wired so a later regular-width layout
- * only has to flip this flag.
- */
-const HAS_PERSISTENT_FILE_INSPECTOR = false;
 
 const ROW_INDENT_BASE = 8;
 const ROW_INDENT_PER_DEPTH = 18;
@@ -54,6 +49,7 @@ function TreeRow(props: {
   readonly expanded: boolean;
   readonly iconColor: string;
   readonly mutedIconColor: string;
+  readonly selected: boolean;
   readonly onPress: () => void;
 }) {
   const { node } = props.row;
@@ -65,9 +61,15 @@ function TreeRow(props: {
       // The row shows only the name; the full path is what a screen reader needs
       // to place it.
       accessibilityLabel={node.path}
-      accessibilityState={isDirectory ? { expanded: props.expanded } : undefined}
+      accessibilityState={{
+        ...(isDirectory ? { expanded: props.expanded } : {}),
+        selected: props.selected,
+      }}
       onPress={props.onPress}
-      className="min-h-[42px] flex-row items-center gap-2 pr-4 active:bg-subtle-strong"
+      className={cn(
+        "min-h-[42px] flex-row items-center gap-2 pr-4 active:bg-subtle-strong",
+        props.selected && "bg-subtle-strong",
+      )}
       style={{ paddingLeft: ROW_INDENT_BASE + props.row.depth * ROW_INDENT_PER_DEPTH }}
     >
       <View className="w-3.5 items-center">
@@ -102,6 +104,7 @@ function SearchRow(props: {
   readonly row: WorkspaceFileSearchRow;
   readonly iconColor: string;
   readonly mutedIconColor: string;
+  readonly selected: boolean;
   readonly onPress: () => void;
 }) {
   const isDirectory = props.row.kind === "directory";
@@ -110,8 +113,12 @@ function SearchRow(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={props.row.path}
+      accessibilityState={{ selected: props.selected }}
       onPress={props.onPress}
-      className="min-h-[52px] flex-row items-center gap-2.5 px-4 py-2 active:bg-subtle-strong"
+      className={cn(
+        "min-h-[52px] flex-row items-center gap-2.5 px-4 py-2 active:bg-subtle-strong",
+        props.selected && "bg-subtle-strong",
+      )}
     >
       <SymbolView
         name={isDirectory ? "folder" : "doc.text"}
@@ -164,10 +171,16 @@ function ListNote(props: { readonly children: string }) {
 export function ThreadFilesScreen(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly presentation?: "screen" | "inspector";
+  readonly selectedPath?: string | null;
 }) {
   const { environmentId, threadId } = props;
+  const presentation = props.presentation ?? "screen";
+  const selectedPath = props.selectedPath ?? null;
   const navigation = useNavigation();
   const headerHeight = useHeaderHeight();
+  const { inspector } = useFileWorkspaceLayout();
+  const hasPersistentFileInspector = inspector.supported;
   const iconColor = String(useThemeColor("--color-icon"));
   const mutedIconColor = String(useThemeColor("--color-icon-muted"));
   const placeholderColor = String(useThemeColor("--color-placeholder"));
@@ -267,20 +280,35 @@ export function ThreadFilesScreen(props: {
   // A deep link straight to this route has nothing beneath it, so the native
   // back button never appears; the thread is where "back" belongs.
   useLayoutEffect(() => {
-    if (navigation.canGoBack()) return;
+    if (presentation === "inspector") return;
     navigation.setOptions({
-      headerLeft: () => (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to task"
-          onPress={goToThread}
-          className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
-        >
-          <SymbolView name="chevron.left" size={19} tintColor={iconColor} type="monochrome" />
-        </Pressable>
-      ),
+      // ThreadFiles renders the task itself while the regular-width inspector
+      // is active. Restore the route's own chrome when a resize brings the
+      // compact browser back on this SAME route.
+      title: "Files",
+      headerRight: undefined,
+      headerLeft: navigation.canGoBack()
+        ? undefined
+        : () => (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to task"
+              onPress={goToThread}
+              className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
+            >
+              <SymbolView name="chevron.left" size={19} tintColor={iconColor} type="monochrome" />
+            </Pressable>
+          ),
     });
-  }, [goToThread, iconColor, navigation]);
+  }, [goToThread, iconColor, navigation, presentation]);
+
+  const closeInspector = useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+    goToThread();
+  }, [goToThread, navigation]);
 
   const [refreshing, setRefreshing] = useState(false);
   const mountedRef = useRef(true);
@@ -306,16 +334,39 @@ export function ThreadFilesScreen(props: {
       const params = { environmentId, threadId, path: relativePathToRouteSegments(path) };
       if (
         resolveFileSelectionNavigationAction({
-          hasPersistentFileInspector: HAS_PERSISTENT_FILE_INSPECTOR,
+          hasPersistentFileInspector,
         }) === "replace"
       ) {
+        // Once a file route already owns the inspector, navigating to the same
+        // route updates its params in place and preserves the one-step return
+        // to chat. The initial browser -> file transition replaces the browser.
+        if (selectedPath !== null) {
+          navigation.navigate("ThreadFile", params);
+          return;
+        }
         navigation.dispatch(StackActions.replace("ThreadFile", params));
         return;
       }
       navigation.navigate("ThreadFile", params);
     },
-    [environmentId, navigation, threadId],
+    [environmentId, hasPersistentFileInspector, navigation, selectedPath, threadId],
   );
+
+  // A deep selected file must stay reachable even when only top-level folders
+  // were expanded before this route replaced the browser.
+  useEffect(() => {
+    if (selectedPath === null) return;
+    setExpanded((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const ancestor of workspaceAncestorPaths(selectedPath)) {
+        if (next.has(ancestor)) continue;
+        next.add(ancestor);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [selectedPath]);
 
   const toggleDirectory = useCallback((path: string) => {
     setExpanded((current) => {
@@ -343,6 +394,7 @@ export function ThreadFilesScreen(props: {
       expanded={expanded.has(item.node.path)}
       iconColor={iconColor}
       mutedIconColor={mutedIconColor}
+      selected={item.node.path === selectedPath}
       onPress={() =>
         item.node.kind === "directory" ? toggleDirectory(item.node.path) : openFile(item.node.path)
       }
@@ -354,6 +406,7 @@ export function ThreadFilesScreen(props: {
       row={item}
       iconColor={iconColor}
       mutedIconColor={mutedIconColor}
+      selected={item.path === selectedPath}
       onPress={() => (item.kind === "directory" ? revealDirectory(item.path) : openFile(item.path))}
     />
   );
@@ -479,7 +532,27 @@ export function ThreadFilesScreen(props: {
   }
 
   return (
-    <View className="flex-1 bg-screen" style={{ paddingTop: headerHeight }}>
+    <View className="flex-1 bg-screen">
+      {presentation === "inspector" ? (
+        <View
+          className="justify-end border-b border-border-subtle px-3 pb-1"
+          style={{ height: headerHeight }}
+        >
+          <View className="h-11 flex-row items-center justify-between">
+            <Text className="font-sans text-base font-ryco-bold text-foreground">Files</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close files"
+              onPress={closeInspector}
+              className="h-10 w-10 items-center justify-center rounded-full active:bg-subtle-strong"
+            >
+              <SymbolView name="xmark" size={16} tintColor={iconColor} type="monochrome" />
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <View style={{ height: headerHeight }} />
+      )}
       <View className="mx-4 mb-2 mt-2 flex-row items-center rounded-2xl bg-sidebar-search px-3">
         <SymbolView
           name="magnifyingglass"

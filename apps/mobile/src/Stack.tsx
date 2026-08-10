@@ -19,6 +19,7 @@ import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteSc
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { E2eeNodeSecurityRouteScreen } from "./features/e2ee/E2eeNodeSecurityRouteScreen";
 import { E2eeNodeVerificationRouteScreen } from "./features/e2ee/E2eeNodeVerificationRouteScreen";
+import { FileWorkspaceLayout } from "./features/files/FileWorkspaceLayout";
 import { ThreadFileRouteScreen } from "./features/files/ThreadFileRouteScreen";
 import { ThreadFilesRouteScreen } from "./features/files/ThreadFilesRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
@@ -264,13 +265,9 @@ function RootStackLayout(props: {
   const path = getPathFromState(props.state, navigationPathConfig);
   const pathname = path.startsWith("/") ? path : `/${path}`;
 
-  // NOTE (divergence, recorded): upstream wraps children in AdaptiveWorkspaceLayout
-  // (the tablet split view). B2 is phone-first; the adaptive layout + thread
-  // sidebar land with the Home data wave (Task 3). The nav shell is fully
-  // functional on phone without it.
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
-      {props.children}
+      <FileWorkspaceLayout>{props.children}</FileWorkspaceLayout>
     </HardwareKeyboardCommandProvider>
   );
 }
