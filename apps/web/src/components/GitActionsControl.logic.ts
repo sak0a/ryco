@@ -1,4 +1,9 @@
-import type { GitRunStackedActionResult, GitStackedAction, VcsStatusResult } from "@ryco/contracts";
+import type {
+  ChangeRequest,
+  GitRunStackedActionResult,
+  GitStackedAction,
+  VcsStatusResult,
+} from "@ryco/contracts";
 import { isTemporaryWorktreeBranch } from "@ryco/shared/git";
 import {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
@@ -38,6 +43,33 @@ export type DefaultBranchConfirmableAction =
   | "create_pr"
   | "commit_push"
   | "commit_push_pr";
+
+/**
+ * The overview can discover the current branch's change request before the
+ * remote portion of the streamed Git status catches up. Reconcile that richer
+ * result into the status used by Git actions so the panel lane and footer do
+ * not temporarily offer contradictory actions.
+ */
+export function mergeDetectedChangeRequestIntoGitStatus(
+  gitStatus: VcsStatusResult | null,
+  detectedChangeRequest: ChangeRequest | null,
+): VcsStatusResult | null {
+  if (!gitStatus || gitStatus.pr || !detectedChangeRequest) {
+    return gitStatus;
+  }
+
+  return {
+    ...gitStatus,
+    pr: {
+      number: detectedChangeRequest.number,
+      title: detectedChangeRequest.title,
+      url: detectedChangeRequest.url,
+      baseRef: detectedChangeRequest.baseRefName,
+      headRef: detectedChangeRequest.headRefName,
+      state: detectedChangeRequest.state,
+    },
+  };
+}
 
 function resolveChangeRequestTerminology(
   gitStatus: VcsStatusResult | null,

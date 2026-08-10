@@ -1,8 +1,10 @@
-import type { VcsStatusResult } from "@ryco/contracts";
+import type { ChangeRequest, VcsStatusResult } from "@ryco/contracts";
+import { Option } from "effect";
 import { assert, describe, it } from "vite-plus/test";
 import {
   buildGitActionProgressStages,
   buildMenuItems,
+  mergeDetectedChangeRequestIntoGitStatus,
   requiresDefaultBranchConfirmation,
   resolveAutoFeatureBranchName,
   resolveDefaultBranchActionDialogCopy,
@@ -10,6 +12,17 @@ import {
   resolveQuickAction,
   resolveThreadBranchUpdate,
 } from "./GitActionsControl.logic";
+
+const detectedOpenPullRequest: ChangeRequest = {
+  provider: "github" as const,
+  number: 24,
+  title: "Detected from branch list",
+  url: "https://example.com/pr/24",
+  baseRefName: "main",
+  headRefName: "feature/test",
+  state: "open" as const,
+  updatedAt: Option.none(),
+};
 
 function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
   return {
@@ -32,6 +45,36 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
 }
 
 describe("when: ref is clean and has an open PR", () => {
+  it("uses a PR discovered by the overview when Git status has not caught up", () => {
+    const reconciled = mergeDetectedChangeRequestIntoGitStatus(status(), detectedOpenPullRequest);
+    const quick = resolveQuickAction(reconciled, false);
+
+    assert.deepInclude(reconciled?.pr, {
+      number: 24,
+      state: "open",
+      headRef: "feature/test",
+    });
+    assert.deepInclude(quick, { kind: "open_pr", label: "View PR", disabled: false });
+  });
+
+  it("keeps the PR supplied by Git status when both discovery paths have data", () => {
+    const nativeStatus = status({
+      pr: {
+        number: 25,
+        title: "Git status PR",
+        url: "https://example.com/pr/25",
+        baseRef: "main",
+        headRef: "feature/test",
+        state: "open",
+      },
+    });
+
+    assert.strictEqual(
+      mergeDetectedChangeRequestIntoGitStatus(nativeStatus, detectedOpenPullRequest),
+      nativeStatus,
+    );
+  });
+
   it("resolveQuickAction opens the existing PR", () => {
     const quick = resolveQuickAction(
       status({
