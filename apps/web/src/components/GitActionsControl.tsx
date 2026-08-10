@@ -1,4 +1,4 @@
-import { type ScopedThreadRef, WorktreeId } from "@ryco/contracts";
+import { type ChangeRequest, type ScopedThreadRef, WorktreeId } from "@ryco/contracts";
 import { scopedThreadKey } from "@ryco/client-runtime/scoped";
 import type {
   GitActionProgressEvent,
@@ -46,6 +46,7 @@ import {
   type GitActionMenuItem,
   type GitQuickAction,
   type DefaultBranchConfirmableAction,
+  mergeDetectedChangeRequestIntoGitStatus,
   requiresDefaultBranchConfirmation,
   resolveDefaultBranchActionDialogCopy,
   resolveLiveThreadBranchUpdate,
@@ -111,6 +112,7 @@ interface GitActionsControlProps {
    * matching the overview panel footer. Defaults to the compact toolbar group.
    */
   block?: boolean;
+  detectedChangeRequest?: ChangeRequest | null;
   onPostPush?: (event: GitActionPostPushEvent) => void;
 }
 
@@ -1029,6 +1031,7 @@ export default function GitActionsControl({
   draftId,
   showLabels = false,
   block = false,
+  detectedChangeRequest = null,
   onPostPush,
 }: GitActionsControlProps) {
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
@@ -1161,7 +1164,10 @@ export default function GitActionsControl({
   // Default to true while loading so we don't flash init controls.
   const isRepo = gitStatus?.isRepo ?? true;
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
-  const gitStatusForActions = gitStatus;
+  const gitStatusForActions = useMemo(
+    () => mergeDetectedChangeRequestIntoGitStatus(gitStatus, detectedChangeRequest),
+    [detectedChangeRequest, gitStatus],
+  );
 
   const allFiles = gitStatusForActions?.workingTree.files ?? [];
   const selectedFiles = allFiles.filter((f) => !excludedFiles.has(f.path));
