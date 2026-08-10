@@ -1,5 +1,6 @@
 import { Schema } from "effect";
-import { PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
+import { BarChart3Icon, PanelLeftOpenIcon, SettingsIcon } from "lucide-react";
+import { WS_METHODS } from "@ryco/contracts";
 import { Link } from "@tanstack/react-router";
 import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 
@@ -18,6 +19,7 @@ import {
   syncShortcutModifierStateFromKeyboardEvent,
 } from "../shortcutModifierState";
 import { useSettingsDialogStore } from "../settingsDialogStore";
+import { useHostedRpcCapability } from "../hostedHub/capabilities";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_OPEN_STORAGE_KEY = "chat_thread_sidebar_open";
@@ -140,6 +142,7 @@ export function useAppShellGlobalEffects(): void {
 function CollapsedAppSidebarChrome({ sidebarOpen }: { sidebarOpen: boolean }) {
   const { toggleSidebar } = useSidebar();
   const openSettings = useSettingsDialogStore((s) => s.openSettings);
+  const statisticsCapability = useHostedRpcCapability(WS_METHODS.serverGetStatistics);
 
   return (
     <div
@@ -198,6 +201,22 @@ function CollapsedAppSidebarChrome({ sidebarOpen }: { sidebarOpen: boolean }) {
           sidebarOpen ? "opacity-0 duration-75" : "opacity-100 delay-75 duration-150",
         )}
       >
+        {statisticsCapability.allowed ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Link
+                  aria-label="Open statistics"
+                  className="pointer-events-auto flex size-8 items-center justify-center rounded-md text-muted-foreground/72 hover:bg-accent hover:text-foreground"
+                  to="/statistics"
+                >
+                  <BarChart3Icon className="size-4" />
+                </Link>
+              }
+            />
+            <TooltipPopup side="bottom">Statistics</TooltipPopup>
+          </Tooltip>
+        ) : null}
         <Tooltip>
           <TooltipTrigger
             render={

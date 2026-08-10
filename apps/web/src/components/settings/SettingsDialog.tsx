@@ -1,5 +1,6 @@
 // apps/web/src/components/settings/SettingsDialog.tsx
 import { lazy, Suspense, useCallback, useEffect, useState, type ComponentType } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   ActivityIcon,
   ArchiveIcon,
@@ -137,7 +138,9 @@ const LazyDiagnosticsSettings = lazy(() =>
   import("./DiagnosticsSettings").then((module) => ({ default: module.DiagnosticsSettings })),
 );
 const LazyStatisticsPanel = lazy(() =>
-  import("./StatisticsPanel").then((module) => ({ default: module.StatisticsPanel })),
+  import("./StatisticsSettingsLink").then((module) => ({
+    default: module.StatisticsSettingsLink,
+  })),
 );
 
 function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
@@ -182,6 +185,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
 }
 
 export function SettingsDialog() {
+  const navigate = useNavigate();
   const open = useSettingsDialogStore((s) => s.open);
   const section = useSettingsDialogStore((s) => s.section);
   const closeSettings = useSettingsDialogStore((s) => s.closeSettings);
@@ -321,6 +325,11 @@ export function SettingsDialog() {
                           key={`${entry.section}:${entry.title}`}
                           type="button"
                           onClick={() => {
+                            if (entry.section === "statistics") {
+                              closeSettings();
+                              void navigate({ to: "/statistics" });
+                              return;
+                            }
                             setSection(entry.section);
                             setSearchQuery("");
                           }}

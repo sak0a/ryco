@@ -15,6 +15,7 @@ export * from "./keybindings.ts";
 export * from "./server.ts";
 export * from "./diagnostics.ts";
 export * from "./statistics.ts";
+export * from "./usage.ts";
 export * from "./settings.ts";
 export * from "./opinionatedPlugins.ts";
 export * from "./mcp.ts";

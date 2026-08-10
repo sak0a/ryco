@@ -16,12 +16,15 @@
  * @module StatisticsQuery
  */
 import {
+  PullRequestState,
   ProjectId,
   type StatisticsDailyBucket,
   type StatisticsModelRef,
   type StatisticsProjectRef,
+  type StatisticsRecentPullRequest,
   type StatisticsSnapshot,
   type StatisticsTokenAttribution,
+  WorktreeId,
 } from "@ryco/contracts";
 import { Context, Effect, Layer, Schema } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -92,9 +95,17 @@ const TurnRow = Schema.Struct({
 });
 
 const WorktreeRow = Schema.Struct({
+  worktreeId: WorktreeId,
+  projectId: ProjectId,
+  title: Schema.NullOr(Schema.String),
+  branch: Schema.String,
   createdAt: Schema.String,
+  updatedAt: Schema.String,
   archivedAt: Schema.NullOr(Schema.String),
   prNumber: Schema.NullOr(Schema.Number),
+  prTitle: Schema.NullOr(Schema.String),
+  prState: Schema.NullOr(PullRequestState),
+  prIsDraft: Schema.NullOr(Schema.Number),
 });
 
 interface MutableBucket {
@@ -261,9 +272,17 @@ const makeStatisticsQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
+          worktree_id AS "worktreeId",
+          project_id AS "projectId",
+          title,
+          branch,
           created_at AS "createdAt",
+          updated_at AS "updatedAt",
           archived_at AS "archivedAt",
-          pr_number AS "prNumber"
+          pr_number AS "prNumber",
+          pr_title AS "prTitle",
+          pr_state AS "prState",
+          pr_is_draft AS "prIsDraft"
         FROM projection_worktrees
       `,
   });
@@ -587,6 +606,33 @@ const makeStatisticsQuery = Effect.gen(function* () {
         (a, b) =>
           (a.provider ?? "").localeCompare(b.provider ?? "") || a.model.localeCompare(b.model),
       );
+      const recentPullRequests: Array<StatisticsRecentPullRequest> = worktreeRows
+        .filter((row): row is typeof row & { readonly prNumber: number } => row.prNumber !== null)
+        .map((row) =>
+          Object.assign(
+            {
+              worktreeId: row.worktreeId,
+              branch: row.branch,
+              projectId: row.projectId,
+              projectTitle: projectTitle.get(row.projectId)?.trim() || row.projectId,
+              prNumber: row.prNumber,
+              createdAt: row.createdAt,
+              updatedAt: row.updatedAt,
+              active: row.archivedAt === null,
+            },
+            row.title === null ? {} : { worktreeTitle: row.title },
+            row.prTitle === null ? {} : { prTitle: row.prTitle },
+            row.prState === null ? {} : { prState: row.prState },
+            row.prIsDraft === null ? {} : { prIsDraft: row.prIsDraft === 1 },
+            row.archivedAt === null ? {} : { archivedAt: row.archivedAt },
+          ),
+        )
+        .toSorted(
+          (left, right) =>
+            right.updatedAt.localeCompare(left.updatedAt) ||
+            left.worktreeId.localeCompare(right.worktreeId),
+        )
+        .slice(0, 20);
 
       const snapshot: StatisticsSnapshot = {
         generatedAt: new Date().toISOString(),
@@ -602,6 +648,7 @@ const makeStatisticsQuery = Effect.gen(function* () {
         },
         totals,
         tokenAttribution: attribution,
+        recentPullRequests,
       };
       return snapshot;
     });

@@ -5,6 +5,7 @@ import { AtlassianSaveProjectLinkInput } from "./atlassian.ts";
 import { CONTEXT_HANDOFF_WS_METHODS, ORCHESTRATION_WS_METHODS } from "./orchestration.ts";
 import { WS_METHODS } from "./rpc.ts";
 import { StatisticsSnapshot } from "./statistics.ts";
+import { USAGE_CONTRACT_VERSION } from "./usage.ts";
 import { WorkItemGetInput } from "./workItems.ts";
 
 describe("WS_METHODS Atlassian and work item names", () => {
@@ -107,6 +108,7 @@ describe("Statistics contract", () => {
 
   it("exposes a stable method name", () => {
     expect(WS_METHODS.serverGetStatistics).toBe("server.getStatistics");
+    expect(WS_METHODS.serverGetUsageSummary).toBe("server.getUsageSummary");
   });
 
   it("decodes a well-formed snapshot", () => {
@@ -133,5 +135,9 @@ describe("Statistics contract", () => {
       dailyBuckets: [{ ...minimalSnapshot.dailyBuckets[0], model: "", provider: "" }],
     });
     expect(() => Schema.encodeUnknownSync(StatisticsSnapshot)(decoded)).not.toThrow();
+  });
+
+  it("keeps the usage contract version explicit", () => {
+    expect(USAGE_CONTRACT_VERSION).toBe(1);
   });
 });

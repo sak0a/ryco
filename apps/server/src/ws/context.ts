@@ -25,6 +25,7 @@ import { OrchestrationEngineService } from "../orchestration/Services/Orchestrat
 import { ContextHandoffInspection } from "../orchestration/Services/ContextHandoffInspection.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { StatisticsQuery } from "../statistics/StatisticsQuery.ts";
+import { UsageService, UsageServiceTest } from "../usage/UsageService.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import * as ProviderMaintenanceRunner from "../provider/providerMaintenanceRunner.ts";
@@ -100,6 +101,8 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       principal.directSessionId ?? AuthSessionId.make(`relay-scope-${principal.scopeId}`);
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const statisticsQuery = yield* StatisticsQuery;
+    const usageServiceOption = yield* Effect.serviceOption(UsageService);
+    const usageService = Option.getOrElse(usageServiceOption, () => UsageServiceTest);
     const orchestrationEngine = yield* OrchestrationEngineService;
     // Most server route tests intentionally provide only the services used by
     // the RPC under test. Keep this additive capability optional at context
@@ -653,6 +656,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       currentSessionId,
       projectionSnapshotQuery,
       statisticsQuery,
+      usageService,
       orchestrationEngine,
       contextHandoffInspection,
       checkpointDiffQuery,
