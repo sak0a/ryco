@@ -17,6 +17,7 @@ import {
 import type {
   EnvironmentId,
   ProjectListEntriesResult,
+  ProjectReadFileBinaryResult,
   ProjectReadFileResult,
   ProjectSearchEntriesResult,
 } from "@ryco/contracts";
@@ -25,11 +26,13 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useConnectionRegistry } from "../providers/ConnectionRegistryProvider";
 import {
   projectListEntriesQuery,
+  projectReadFileBinaryQuery,
   projectReadFileQuery,
   projectSearchEntriesQuery,
   type ProjectFilesQuery,
   type ProjectFilesQueryState,
   type ProjectListEntriesInput,
+  type ProjectReadFileBinaryInput,
   type ProjectReadFileInput,
   type ProjectSearchEntriesInput,
 } from "./projectFilesAtoms";
@@ -114,6 +117,17 @@ export function useProjectReadFile(
   input: ProjectReadFileInput,
 ): ProjectFilesQueryResult<ProjectReadFileResult> {
   return useProjectFilesQuery(projectReadFileQuery, input, input.environmentId);
+}
+
+/**
+ * Raster image bytes, base64 over the same socket. The retained-key budget for
+ * this family is deliberately small, so leaving the screen makes the payload
+ * evictable rather than keeping it for the session.
+ */
+export function useProjectReadFileBinary(
+  input: ProjectReadFileBinaryInput,
+): ProjectFilesQueryResult<ProjectReadFileBinaryResult> {
+  return useProjectFilesQuery(projectReadFileBinaryQuery, input, input.environmentId);
 }
 
 /**

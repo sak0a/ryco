@@ -2,6 +2,7 @@ import { Effect, Schema } from "effect";
 import {
   FilesystemBrowseError,
   ProjectListEntriesError,
+  ProjectReadFileBinaryError,
   ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectStageFileReferenceError,
@@ -68,6 +69,25 @@ export const makeProjectHandlers = (ctx: WsRpcContext) => {
                 ? "Workspace file path must stay within the project root."
                 : cause.detail;
               return new ProjectReadFileError({
+                message,
+                cause,
+              });
+            }),
+          ),
+        ),
+        { "rpc.aggregate": "workspace" },
+      ),
+    [WS_METHODS.projectsReadFileBinary]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.projectsReadFileBinary,
+        ownerEffect(
+          WS_METHODS.projectsReadFileBinary,
+          workspaceFileSystem.readFileBinary(input).pipe(
+            Effect.mapError((cause) => {
+              const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                ? "Workspace file path must stay within the project root."
+                : cause.detail;
+              return new ProjectReadFileBinaryError({
                 message,
                 cause,
               });

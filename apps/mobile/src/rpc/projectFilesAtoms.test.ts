@@ -3,7 +3,12 @@ import {
   WORKSPACE_FILE_SEARCH_LIMIT,
   WORKSPACE_FILE_SEARCH_QUERY_MAX_LENGTH,
 } from "@ryco/client-runtime/state/files";
-import type { EnvironmentApi, EnvironmentId, ProjectListEntriesResult } from "@ryco/contracts";
+import type {
+  EnvironmentApi,
+  EnvironmentId,
+  ProjectListEntriesResult,
+  ProjectReadFileBinaryResult,
+} from "@ryco/contracts";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 // Native modules are stubbed so the environmentApi -> bootstrap chain loads
@@ -34,7 +39,9 @@ import {
   clearProjectFilesStateForEnvironment,
   invalidateProjectFilesState,
   PROJECT_LIST_ENTRIES_RETAINED_KEY_LIMIT,
+  PROJECT_READ_FILE_BINARY_RETAINED_KEY_LIMIT,
   projectListEntriesQuery,
+  projectReadFileBinaryQuery,
   projectReadFileQuery,
   projectSearchEntriesQuery,
   resetProjectFilesAtomsForTests,
@@ -54,6 +61,19 @@ function listResult(path: string): ProjectListEntriesResult {
 
 function listedPath(cacheKey: string | null): string | undefined {
   return projectListEntriesQuery.getSnapshot(cacheKey).data?.entries[0]?.path;
+}
+
+function binaryResult(relativePath: string): ProjectReadFileBinaryResult {
+  return {
+    relativePath,
+    dataBase64: `bytes-of-${relativePath}`,
+    mimeType: "image/png",
+    sizeBytes: 4,
+  };
+}
+
+function readBinaryBytes(cacheKey: string | null): string | undefined {
+  return projectReadFileBinaryQuery.getSnapshot(cacheKey).data?.dataBase64;
 }
 
 function deferred<T>() {
@@ -94,6 +114,16 @@ describe("projectFilesAtoms cache keys", () => {
     expect(readA).not.toBe(readB);
     expect(readA).not.toBe(list);
 
+    // Same environment, same workspace, same file — but a different RPC and a
+    // very different payload, so the two families must never share an entry.
+    expect(
+      projectReadFileBinaryQuery.keyOf({
+        environmentId: ENV,
+        cwd: CWD,
+        relativePath: "src/a.ts",
+      }),
+    ).not.toBe(readA);
+
     const searchA = projectSearchEntriesQuery.keyOf({ environmentId: ENV, cwd: CWD, query: "abc" });
     const searchB = projectSearchEntriesQuery.keyOf({ environmentId: ENV, cwd: CWD, query: "abd" });
     expect(searchA).not.toBe(searchB);
@@ -113,6 +143,17 @@ describe("projectFilesAtoms cache keys", () => {
     ).toBeNull();
     expect(
       projectReadFileQuery.keyOf({ environmentId: ENV, cwd: CWD, relativePath: null }),
+    ).toBeNull();
+    expect(
+      projectReadFileBinaryQuery.keyOf({ environmentId: ENV, cwd: CWD, relativePath: null }),
+    ).toBeNull();
+    expect(
+      projectReadFileBinaryQuery.keyOf({
+        environmentId: ENV,
+        cwd: CWD,
+        relativePath: "a.png",
+        enabled: false,
+      }),
     ).toBeNull();
     expect(
       projectSearchEntriesQuery.keyOf({ environmentId: ENV, cwd: CWD, query: "   " }),
@@ -231,6 +272,135 @@ describe("projectFilesAtoms fetching", () => {
       expect(projectReadFileQuery.getSnapshot(cacheKey).data).toBeNull();
       release();
     }
+  });
+});
+
+describe("projectFilesAtoms binary reads", () => {
+  it("asks the node for the bytes of one file and keeps each path apart", async () => {
+    const readFileBinary = vi.fn(async (request: { relativePath: string }) =>
+      binaryResult(request.relativePath),
+    );
+    setProjectsApi(ENV, { readFileBinary });
+
+    const logo = { environmentId: ENV, cwd: CWD, relativePath: "assets/logo.png" };
+    const icon = { environmentId: ENV, cwd: CWD, relativePath: "assets/icon.png" };
+    const releaseLogo = projectReadFileBinaryQuery.watch(logo);
+    const releaseIcon = projectReadFileBinaryQuery.watch(icon);
+
+    await vi.waitFor(() => {
+      expect(readBinaryBytes(projectReadFileBinaryQuery.keyOf(logo))).toBe(
+        "bytes-of-assets/logo.png",
+      );
+      expect(readBinaryBytes(projectReadFileBinaryQuery.keyOf(icon))).toBe(
+        "bytes-of-assets/icon.png",
+      );
+    });
+    expect(readFileBinary).toHaveBeenCalledWith({ cwd: CWD, relativePath: "assets/logo.png" });
+
+    releaseLogo();
+    releaseIcon();
+  });
+
+  it("surfaces the node's image refusals verbatim so the screen can classify them", async () => {
+    const messagesByPath: Record<string, string> = {
+      "huge.png": "File is too large to preview (8388608 bytes). Limit is 4194304 bytes.",
+      "notes.tiff": "Not a supported image.",
+      assets: "Only regular files can be previewed.",
+    };
+    const readFileBinary = vi.fn(async (request: { relativePath: string }) => {
+      throw new Error(messagesByPath[request.relativePath]);
+    });
+    setProjectsApi(ENV, { readFileBinary });
+
+    for (const [relativePath, message] of Object.entries(messagesByPath)) {
+      const input = { environmentId: ENV, cwd: CWD, relativePath };
+      const release = projectReadFileBinaryQuery.watch(input);
+      const cacheKey = projectReadFileBinaryQuery.keyOf(input);
+      await vi.waitFor(() =>
+        expect(projectReadFileBinaryQuery.getSnapshot(cacheKey).error).toBeInstanceOf(Error),
+      );
+      expect(projectReadFileBinaryQuery.getSnapshot(cacheKey).error?.message).toBe(message);
+      expect(projectReadFileBinaryQuery.getSnapshot(cacheKey).data).toBeNull();
+      release();
+    }
+  });
+
+  it("never publishes bytes owned by a torn-down connection", async () => {
+    const inFlight = deferred<ProjectReadFileBinaryResult>();
+    setProjectsApi(ENV, { readFileBinary: vi.fn(() => inFlight.promise) });
+
+    const input = { environmentId: ENV, cwd: CWD, relativePath: "assets/logo.png" };
+    const cacheKey = projectReadFileBinaryQuery.keyOf(input);
+    const release = projectReadFileBinaryQuery.watch(input);
+    await flush();
+
+    clearProjectFilesStateForEnvironment(ENV);
+    inFlight.resolve(binaryResult("assets/logo.png"));
+    await flush();
+
+    expect(projectReadFileBinaryQuery.getSnapshot(cacheKey).data).toBeNull();
+    release();
+  });
+
+  it("holds only a handful of released payloads, oldest release first", async () => {
+    setProjectsApi(ENV, {
+      readFileBinary: vi.fn(async (request: { relativePath: string }) =>
+        binaryResult(request.relativePath),
+      ),
+    });
+
+    const cacheKeys: Array<string | null> = [];
+    for (let index = 0; index <= PROJECT_READ_FILE_BINARY_RETAINED_KEY_LIMIT; index += 1) {
+      const input = { environmentId: ENV, cwd: CWD, relativePath: `assets/${index}.png` };
+      const cacheKey = projectReadFileBinaryQuery.keyOf(input);
+      const release = projectReadFileBinaryQuery.watch(input);
+      await vi.waitFor(() =>
+        expect(readBinaryBytes(cacheKey)).toBe(`bytes-of-assets/${index}.png`),
+      );
+      release();
+      cacheKeys.push(cacheKey);
+    }
+
+    expect(PROJECT_READ_FILE_BINARY_RETAINED_KEY_LIMIT).toBe(6);
+    expect(projectReadFileBinaryQuery.getSnapshot(cacheKeys[0] ?? null).data).toBeNull();
+    for (const cacheKey of cacheKeys.slice(1)) {
+      expect(projectReadFileBinaryQuery.getSnapshot(cacheKey).data).not.toBeNull();
+    }
+  });
+
+  it("evicts on its own budget without touching the text read's", async () => {
+    setProjectsApi(ENV, {
+      readFile: vi.fn(async (request: { relativePath: string }) => ({
+        relativePath: request.relativePath,
+        contents: "kept",
+        version: "v1",
+        encoding: "utf8",
+        lineEnding: "lf",
+      })),
+      readFileBinary: vi.fn(async (request: { relativePath: string }) =>
+        binaryResult(request.relativePath),
+      ),
+    });
+
+    const text = { environmentId: ENV, cwd: CWD, relativePath: "src/a.ts" };
+    const textKey = projectReadFileQuery.keyOf(text);
+    projectReadFileQuery.watch(text)();
+    await vi.waitFor(() =>
+      expect(projectReadFileQuery.getSnapshot(textKey).data?.contents).toBe("kept"),
+    );
+
+    for (let index = 0; index <= PROJECT_READ_FILE_BINARY_RETAINED_KEY_LIMIT + 2; index += 1) {
+      const input = { environmentId: ENV, cwd: CWD, relativePath: `assets/${index}.png` };
+      const release = projectReadFileBinaryQuery.watch(input);
+      await vi.waitFor(() =>
+        expect(readBinaryBytes(projectReadFileBinaryQuery.keyOf(input))).toBe(
+          `bytes-of-assets/${index}.png`,
+        ),
+      );
+      release();
+    }
+
+    expect(projectReadFileQuery.getSnapshot(textKey).data?.contents).toBe("kept");
   });
 });
 

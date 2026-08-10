@@ -4,7 +4,9 @@ import {
   classifyWorkspaceFilePath,
   classifyWorkspaceFileReadError,
   resolveWorkspaceFileViewMode,
+  WORKSPACE_FILE_BINARY_PREVIEW_MAX_BYTES,
   WORKSPACE_FILE_PREVIEW_MAX_BYTES,
+  workspaceFileReadTransport,
 } from "./previewClassification.ts";
 
 describe("classifyWorkspaceFilePath", () => {
@@ -14,7 +16,7 @@ describe("classifyWorkspaceFilePath", () => {
     }
   });
 
-  it("recognizes images so the screen never issues a read", () => {
+  it("recognizes raster images, which the node sends as bytes", () => {
     for (const path of [
       "a.avif",
       "a.bmp",
@@ -24,12 +26,18 @@ describe("classifyWorkspaceFilePath", () => {
       "a.jpeg",
       "a.JPG",
       "assets/logo.png",
-      "a.svg",
       "a.tiff",
       "a.webp",
     ]) {
       expect(classifyWorkspaceFilePath(path), path).toBe("image");
     }
+  });
+
+  it("splits the two markup previews out of the image and text buckets", () => {
+    expect(classifyWorkspaceFilePath("assets/logo.svg")).toBe("svg");
+    expect(classifyWorkspaceFilePath("a.SVG")).toBe("svg");
+    expect(classifyWorkspaceFilePath("public/index.html")).toBe("html");
+    expect(classifyWorkspaceFilePath("legacy/page.HTM")).toBe("html");
   });
 
   it("recognizes curated binary families", () => {
@@ -99,8 +107,20 @@ describe("classifyWorkspaceFilePath", () => {
     }
   });
 
-  it("pins the preview ceiling to the node's limit", () => {
+  it("pins both preview ceilings to the node's limits", () => {
     expect(WORKSPACE_FILE_PREVIEW_MAX_BYTES).toBe(524_288);
+    expect(WORKSPACE_FILE_BINARY_PREVIEW_MAX_BYTES).toBe(4_194_304);
+  });
+});
+
+describe("workspaceFileReadTransport", () => {
+  it("sends raster bytes over the binary read and every markup kind over the text read", () => {
+    expect(workspaceFileReadTransport("image")).toBe("binary");
+    expect(workspaceFileReadTransport("svg")).toBe("text");
+    expect(workspaceFileReadTransport("html")).toBe("text");
+    expect(workspaceFileReadTransport("markdown")).toBe("text");
+    expect(workspaceFileReadTransport("text")).toBe("text");
+    expect(workspaceFileReadTransport("binary")).toBe("none");
   });
 });
 
@@ -134,6 +154,46 @@ describe("resolveWorkspaceFileViewMode", () => {
     ).toBe("source");
   });
 
+  it("opens SVG rendered and HTML as source, because only one of them is a document we run", () => {
+    expect(
+      resolveWorkspaceFileViewMode({
+        path: "assets/logo.svg",
+        kind: "svg",
+        markdownRendererAvailable: true,
+        override: null,
+      }),
+    ).toBe("preview");
+
+    expect(
+      resolveWorkspaceFileViewMode({
+        path: "public/index.html",
+        kind: "html",
+        markdownRendererAvailable: true,
+        override: null,
+      }),
+    ).toBe("source");
+  });
+
+  it("keeps a raster image on its preview, override or not", () => {
+    expect(
+      resolveWorkspaceFileViewMode({
+        path: "assets/logo.png",
+        kind: "image",
+        markdownRendererAvailable: false,
+        override: null,
+      }),
+    ).toBe("preview");
+
+    expect(
+      resolveWorkspaceFileViewMode({
+        path: "assets/logo.png",
+        kind: "image",
+        markdownRendererAvailable: false,
+        override: { path: "assets/logo.png", mode: "source" },
+      }),
+    ).toBe("preview");
+  });
+
   it("honors an override for its own file and drops it for any other", () => {
     expect(
       resolveWorkspaceFileViewMode({
@@ -153,6 +213,28 @@ describe("resolveWorkspaceFileViewMode", () => {
       }),
     ).toBe("preview");
   });
+
+  it("lets the user opt an HTML file into its render", () => {
+    expect(
+      resolveWorkspaceFileViewMode({
+        path: "public/index.html",
+        kind: "html",
+        markdownRendererAvailable: false,
+        override: { path: "public/index.html", mode: "preview" },
+      }),
+    ).toBe("preview");
+
+    // Opening another HTML file starts over at source: the opt-in was for one
+    // document, not for the kind.
+    expect(
+      resolveWorkspaceFileViewMode({
+        path: "public/other.html",
+        kind: "html",
+        markdownRendererAvailable: false,
+        override: { path: "public/index.html", mode: "preview" },
+      }),
+    ).toBe("source");
+  });
 });
 
 describe("classifyWorkspaceFileReadError", () => {
@@ -171,6 +253,17 @@ describe("classifyWorkspaceFileReadError", () => {
       "missing",
     );
     expect(classifyWorkspaceFileReadError("File not found")).toBe("missing");
+  });
+
+  it("maps the binary read's own refusals", () => {
+    // Same wording as the text ceiling with a different number, so the mapping
+    // must not be pinned to 524288.
+    expect(
+      classifyWorkspaceFileReadError(
+        "File is too large to preview (8388608 bytes). Limit is 4194304 bytes.",
+      ),
+    ).toBe("oversized");
+    expect(classifyWorkspaceFileReadError("Not a supported image.")).toBe("unsupported-image");
   });
 
   it("ignores casing and wrapping text", () => {

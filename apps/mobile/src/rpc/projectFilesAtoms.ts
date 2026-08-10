@@ -13,6 +13,7 @@
 import type {
   EnvironmentId,
   ProjectListEntriesResult,
+  ProjectReadFileBinaryResult,
   ProjectReadFileResult,
   ProjectSearchEntriesResult,
 } from "@ryco/contracts";
@@ -46,6 +47,12 @@ const FETCH_RETRY_COUNT = 1;
 export const PROJECT_LIST_ENTRIES_RETAINED_KEY_LIMIT = 8;
 export const PROJECT_READ_FILE_RETAINED_KEY_LIMIT = 24;
 export const PROJECT_SEARCH_ENTRIES_RETAINED_KEY_LIMIT = 30;
+/**
+ * Far tighter than the text budget: one retained entry here is a base64 raster
+ * image, up to ~5.4 MB of string on a device whose whole JS heap is a few
+ * hundred, so the browser remembers only the handful of images just looked at.
+ */
+export const PROJECT_READ_FILE_BINARY_RETAINED_KEY_LIMIT = 6;
 
 export interface ProjectFilesQueryState<T> {
   readonly data: T | null;
@@ -284,6 +291,47 @@ export const projectReadFileQuery = defineQuery<ProjectReadFileInput, ProjectRea
   run: (input) =>
     runWithRetry(() =>
       projectsClient(input.environmentId as EnvironmentId).readFile({
+        cwd: input.cwd as string,
+        relativePath: input.relativePath as string,
+      }),
+    ),
+});
+
+// ---------------------------------------------------------------------------
+// Read file binary (raster image preview)
+// ---------------------------------------------------------------------------
+//
+// Only the raster image kind routes here. The node caps the raw file at 4 MiB
+// and derives the mime type from the magic bytes, so what comes back is either
+// image bytes it vouched for or a refusal the screen classifies — the client
+// never guesses a type from the extension, and never builds a node URL to fetch
+// the file over HTTP.
+
+export interface ProjectReadFileBinaryInput {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly relativePath: string | null;
+  readonly enabled?: boolean;
+}
+
+export const projectReadFileBinaryQuery = defineQuery<
+  ProjectReadFileBinaryInput,
+  ProjectReadFileBinaryResult
+>({
+  label: "readFileBinary",
+  staleTime: READ_FILE_STALE_TIME_MS,
+  retainedKeyLimit: PROJECT_READ_FILE_BINARY_RETAINED_KEY_LIMIT,
+  isEnabled: (input) =>
+    (input.enabled ?? true) &&
+    input.environmentId !== null &&
+    input.cwd !== null &&
+    input.relativePath !== null,
+  buildKey: (input) =>
+    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.relativePath}`,
+  resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
+  run: (input) =>
+    runWithRetry(() =>
+      projectsClient(input.environmentId as EnvironmentId).readFileBinary({
         cwd: input.cwd as string,
         relativePath: input.relativePath as string,
       }),

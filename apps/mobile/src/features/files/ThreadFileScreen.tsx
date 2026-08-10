@@ -4,6 +4,7 @@ import {
   type LegendListRef,
   type LegendListRenderItemProps,
 } from "@legendapp/list/react-native";
+import { Image } from "expo-image";
 import * as Linking from "expo-linking";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -15,6 +16,8 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
+import { SvgXml } from "react-native-svg";
+import { WebView } from "react-native-webview";
 
 import { getWsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
@@ -37,7 +40,7 @@ import {
 } from "../../lib/appearancePreferences";
 import { useFontFamily } from "../../lib/useFontFamily";
 import { useThemeColor } from "../../lib/useThemeColor";
-import { useProjectReadFile } from "../../rpc/useProjectFiles";
+import { useProjectReadFile, useProjectReadFileBinary } from "../../rpc/useProjectFiles";
 import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import {
@@ -59,16 +62,26 @@ import {
   type ReviewHighlightedToken,
 } from "../review/shikiReviewHighlighter";
 import { findThreadWorktree } from "../threads/threadHeaderModel";
+import { buildSandboxedHtmlDocument, isAllowedHtmlPreviewNavigation } from "./htmlPreview";
 import {
   buildThreadFileScreenModel,
+  formatWorkspaceFileSize,
   shouldReadWorkspaceFile,
+  shouldReadWorkspaceFileAsBinary,
+  type ThreadFileRenderableKind,
   type ThreadFileScreenBody,
 } from "./threadFileModel";
 import { useThreadWorkspaceRoot } from "./useThreadWorkspaceRoot";
 
 // One file, read-only. The states, the mode default and the line split come from
-// threadFileModel; this file owns the two renderings — a virtualized, highlighted
-// source surface and the native Markdown preview — and nothing else.
+// threadFileModel; this file owns the renderings — a virtualized, highlighted
+// source surface, the native Markdown preview, and the three M2 previews (raster
+// image, SVG, sandboxed HTML) — and nothing else.
+//
+// None of these renderings fetches anything. The image bytes arrive base64 over
+// the socket and become a data URI; the HTML document is handed to the WebView as
+// a string inside the wrapper htmlPreview.ts builds. No node URL is ever
+// constructed, and nothing is allowed to reach the disk.
 
 /** Shiki's FontStyle bitmask; only italic and bold have a React Native analogue. */
 const FONT_STYLE_ITALIC = 1;
@@ -87,12 +100,18 @@ const UNAVAILABLE_COPY: Record<
   { readonly title: string; readonly detail: string }
 > = {
   oversized: {
+    // The exact ceiling differs by read (512 KB of text, 4 MB of image bytes)
+    // and the node's own message under this copy always names it.
     title: "Too large to preview",
-    detail: "This file is past the node's 512 KB preview limit.",
+    detail: "This file is past the node's preview limit.",
   },
   binary: {
     title: "Not a text file",
     detail: "The node reports this file as binary, so there is nothing to show.",
+  },
+  "unsupported-image": {
+    title: "Unrecognized image",
+    detail: "The node could not identify these bytes as an image format it can send.",
   },
   encoding: {
     title: "Not UTF-8",
@@ -409,6 +428,136 @@ function MarkdownFileView(props: {
   );
 }
 
+/**
+ * Raster preview.
+ *
+ * `cachePolicy="memory"` is load-bearing, not a performance knob: expo-image
+ * writes to a disk cache by default, and node-owned bytes must not outlive the
+ * process. The decoder is also the last check on what the node sent — a failure
+ * here is reported up so the screen can say so instead of showing a blank box.
+ */
+function RasterImageView(props: {
+  readonly dataUri: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+  readonly basename: string;
+  readonly refreshing: boolean;
+  readonly onRefresh: () => void;
+  readonly onRenderFailure: () => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <ScrollView
+      className="flex-1"
+      contentInsetAdjustmentBehavior="never"
+      contentContainerStyle={{ flexGrow: 1 }}
+      refreshControl={<RefreshControl refreshing={props.refreshing} onRefresh={props.onRefresh} />}
+    >
+      <View className="flex-1 items-center justify-center px-4 py-6">
+        <Image
+          source={{ uri: props.dataUri }}
+          accessibilityLabel={props.basename}
+          style={{ width: "100%", flex: 1, minHeight: 160 }}
+          contentFit="contain"
+          cachePolicy="memory"
+          onLoad={() => setLoaded(true)}
+          onError={props.onRenderFailure}
+        />
+        {loaded ? null : (
+          <View className="absolute">
+            <ActivityIndicator size="small" />
+          </View>
+        )}
+      </View>
+      <Text className="px-4 pb-6 text-center font-mono text-2xs text-foreground-tertiary">
+        {`${props.mimeType} · ${formatWorkspaceFileSize(props.sizeBytes)}`}
+      </Text>
+    </ScrollView>
+  );
+}
+
+/**
+ * Vector preview.
+ *
+ * `SvgXml` parses the document itself and never runs script, so the markup is
+ * safe to hand over whole. It reports a parse failure from inside its own
+ * render, which is why the report is deferred: React refuses a state update to
+ * another component mid-render.
+ */
+function SvgFileView(props: {
+  readonly markup: string;
+  readonly refreshing: boolean;
+  readonly onRefresh: () => void;
+  readonly onRenderFailure: () => void;
+}) {
+  const onRenderFailure = props.onRenderFailure;
+  const reportFailure = useCallback(() => {
+    queueMicrotask(onRenderFailure);
+  }, [onRenderFailure]);
+
+  return (
+    <ScrollView
+      className="flex-1"
+      contentInsetAdjustmentBehavior="never"
+      contentContainerStyle={{ flexGrow: 1 }}
+      refreshControl={<RefreshControl refreshing={props.refreshing} onRefresh={props.onRefresh} />}
+    >
+      <View className="flex-1 items-center justify-center px-4 py-6">
+        <SvgXml xml={props.markup} width="100%" height="100%" onError={reportFailure} />
+      </View>
+    </ScrollView>
+  );
+}
+
+/**
+ * HTML preview.
+ *
+ * Everything that makes this safe is in the document htmlPreview.ts builds; the
+ * props here are the second fence. JavaScript is off at the engine level, the
+ * WebView keeps no persistent store, and any load that is not the wrapper's own
+ * `about:` load is refused rather than handed to the system browser.
+ */
+function HtmlFileView(props: { readonly html: string; readonly onRenderFailure: () => void }) {
+  const wrapperDocument = useMemo(() => buildSandboxedHtmlDocument(props.html), [props.html]);
+
+  return (
+    <View className="flex-1">
+      {/*
+        Said out loud, because a page that looks broken here may simply be a page
+        whose scripts and remote assets were denied — and because the user should
+        know what this preview will and will not do with a file they did not read.
+      */}
+      <View className="items-start px-4 py-1.5">
+        <Text className="rounded-full bg-subtle px-2 py-0.5 text-2xs font-ryco-medium text-foreground-tertiary">
+          Sandboxed · no scripts, no network
+        </Text>
+      </View>
+      <WebView
+        source={{ html: wrapperDocument }}
+        originWhitelist={["about:*", "data:*"]}
+        javaScriptEnabled={false}
+        incognito
+        cacheEnabled={false}
+        domStorageEnabled={false}
+        allowsInlineMediaPlayback={false}
+        allowFileAccess={false}
+        setSupportMultipleWindows={false}
+        onShouldStartLoadWithRequest={(request) => isAllowedHtmlPreviewNavigation(request.url)}
+        onError={props.onRenderFailure}
+        onHttpError={props.onRenderFailure}
+        style={{ flex: 1, backgroundColor: "transparent" }}
+      />
+    </View>
+  );
+}
+
+const RENDER_FAILURE_COPY: Record<ThreadFileRenderableKind, string> = {
+  image: "Could not render this image",
+  svg: "Could not render this image",
+  html: "Could not render this page",
+};
+
 function BodyEmptyState(props: {
   readonly title: string;
   readonly detail: string;
@@ -469,15 +618,30 @@ export function ThreadFileScreen(props: {
     null,
   );
 
-  // Hard constraint: an image or a known binary is decided from the path alone
-  // and never costs the node a read.
+  // A known binary is decided from the path alone and never costs the node a
+  // read; every other kind reads over exactly one of the two RPCs, never both.
   const kind = path === null ? null : classifyWorkspaceFilePath(path);
+  const readsBinary = kind !== null && shouldReadWorkspaceFileAsBinary(kind);
   const read = useProjectReadFile({
     environmentId,
     cwd: workspaceRoot,
     relativePath: path,
-    enabled: kind !== null && shouldReadWorkspaceFile(kind),
+    enabled: kind !== null && shouldReadWorkspaceFile(kind) && !readsBinary,
   });
+  const binaryRead = useProjectReadFileBinary({
+    environmentId,
+    cwd: workspaceRoot,
+    relativePath: path,
+    enabled: readsBinary,
+  });
+
+  // A renderer that could not draw what the node sent. Scoped to the file it
+  // happened on so the next one starts clean, and cleared on a refresh so
+  // "Try again" is not permanently poisoned by one bad frame.
+  const [renderFailedPath, setRenderFailedPath] = useState<string | null>(null);
+  const reportRenderFailure = useCallback(() => {
+    if (path !== null) setRenderFailedPath(path);
+  }, [path]);
 
   const markdownRendererAvailable = hasNativeSelectableMarkdownText();
   const model = useMemo(
@@ -490,11 +654,20 @@ export function ThreadFileScreen(props: {
         project,
         worktree,
         readState: { data: read.data, error: read.error, isLoading: read.isLoading },
+        binaryReadState: {
+          data: binaryRead.data,
+          error: binaryRead.error,
+          isLoading: binaryRead.isLoading,
+        },
         connectionUiState,
         markdownRendererAvailable,
         viewModeOverride,
+        renderFailedPath,
       }),
     [
+      binaryRead.data,
+      binaryRead.error,
+      binaryRead.isLoading,
       bootstrapComplete,
       connectionUiState,
       line,
@@ -504,6 +677,7 @@ export function ThreadFileScreen(props: {
       read.data,
       read.error,
       read.isLoading,
+      renderFailedPath,
       thread,
       viewModeOverride,
       worktree,
@@ -518,13 +692,16 @@ export function ThreadFileScreen(props: {
       mountedRef.current = false;
     };
   }, []);
-  const readRefetch = read.refetch;
+  const activeRefetch = readsBinary ? binaryRead.refetch : read.refetch;
   const refresh = useCallback(() => {
     setRefreshing(true);
-    void readRefetch().finally(() => {
+    // A retry is also the user's way out of a render failure: re-reading may
+    // hand the renderer a file that has since been fixed on the node.
+    setRenderFailedPath(null);
+    void activeRefetch().finally(() => {
       if (mountedRef.current) setRefreshing(false);
     });
-  }, [readRefetch]);
+  }, [activeRefetch]);
 
   const goToFiles = useCallback(
     () => navigation.dispatch(StackActions.replace("ThreadFiles", { environmentId, threadId })),
@@ -538,6 +715,7 @@ export function ThreadFileScreen(props: {
     },
     [path],
   );
+  const viewSource = useCallback(() => selectMode("source"), [selectMode]);
 
   const toggle = model.header.toggle;
   const headerTitle = model.header.title;
@@ -617,9 +795,12 @@ export function ThreadFileScreen(props: {
       <FileBody
         body={model.body}
         path={path}
+        basename={headerTitle}
         refreshing={refreshing}
         onRefresh={refresh}
         onOpenFiles={goToFiles}
+        onRenderFailure={reportRenderFailure}
+        onViewSource={viewSource}
       />
     </View>
   );
@@ -628,9 +809,12 @@ export function ThreadFileScreen(props: {
 function FileBody(props: {
   readonly body: ThreadFileScreenBody;
   readonly path: string | null;
+  readonly basename: string;
   readonly refreshing: boolean;
   readonly onRefresh: () => void;
   readonly onOpenFiles: () => void;
+  readonly onRenderFailure: () => void;
+  readonly onViewSource: () => void;
 }) {
   const { body } = props;
 
@@ -669,8 +853,8 @@ function FileBody(props: {
     case "unsupported":
       return (
         <BodyEmptyState
-          title={body.reason === "image" ? "Images are not previewed" : "Not a text file"}
-          detail="Ryco on mobile previews UTF-8 text only. Open this one on the node."
+          title="Not a text file"
+          detail="Ryco previews text, Markdown, images and HTML. Open this one on the node."
         />
       );
     case "unavailable":
@@ -689,6 +873,42 @@ function FileBody(props: {
       );
     case "empty-file":
       return <BodyEmptyState title="Empty file" detail="This file has no contents." />;
+    case "render-failed":
+      return (
+        <BodyEmptyState
+          title={RENDER_FAILURE_COPY[body.kind]}
+          detail={
+            body.canViewSource
+              ? "The file arrived, but nothing could be drawn from it."
+              : "The file arrived, but the image decoder rejected it."
+          }
+          actionLabel={body.canViewSource ? "View source" : "Try again"}
+          onAction={body.canViewSource ? props.onViewSource : props.onRefresh}
+        />
+      );
+    case "image":
+      return (
+        <RasterImageView
+          dataUri={body.dataUri}
+          mimeType={body.mimeType}
+          sizeBytes={body.sizeBytes}
+          basename={props.basename}
+          refreshing={props.refreshing}
+          onRefresh={props.onRefresh}
+          onRenderFailure={props.onRenderFailure}
+        />
+      );
+    case "svg":
+      return (
+        <SvgFileView
+          markup={body.markup}
+          refreshing={props.refreshing}
+          onRefresh={props.onRefresh}
+          onRenderFailure={props.onRenderFailure}
+        />
+      );
+    case "html":
+      return <HtmlFileView html={body.html} onRenderFailure={props.onRenderFailure} />;
     case "markdown":
       return (
         <MarkdownFileView
