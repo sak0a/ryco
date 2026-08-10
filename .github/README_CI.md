@@ -22,18 +22,13 @@ Ryco keeps CI entrypoints small and routes shared checks through
 `_validation.yml` runs each check as its own job so they execute in parallel
 rather than as one serial chain. Validation and control jobs use the standard
 GitHub-hosted `ubuntu-24.04` runner. Release builds use the matching GitHub-hosted
-macOS, Ubuntu, and Windows x64/arm64 runners. The two long poles are sharded
-across runners:
-
-- `typecheck-effect` splits its projects into two shards via
-  `bun run typecheck:effect --shard <i>/<n>`. Sharding is derived from the
-  authoritative project list in `scripts/typecheck-effect.ts` (round-robin), so
-  adding a project can never silently drop it from a shard.
-- `test` switches shape by mode (Turbo forbids `--filter` with `--affected`):
-  full runs shard the whole suite into three legs — `ryco-cli` (server) and
-  `@ryco/web` each get a runner, and `rest` catches every other package through
-  negation filters (`--filter=!ryco-cli --filter=!@ryco/web`) so a new package is
-  always covered; PRs instead run a single `--affected` job.
+macOS, Ubuntu, and Windows x64/arm64 runners. The test suite is sharded across
+runners. It switches shape by mode (Turbo forbids `--filter` with `--affected`):
+full runs shard the whole suite into three legs — `ryco-cli` (server) and
+`@ryco/web` each get a runner, and `rest` catches every other package through
+negation filters (`--filter=!ryco-cli --filter=!@ryco/web`) so a new package is
+always covered; PRs instead run a single `--affected` job. TypeScript and
+Effect diagnostics share the normal `typecheck` job through `@effect/tsgo`.
 
 ## Affected scoping and caching
 

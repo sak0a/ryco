@@ -321,7 +321,6 @@ describe("executeChatSendTurn", () => {
         defaultModelSelection: null,
       },
       scroll: { scrollToEndBeforeOptimistic },
-      // No `undo` config: this send dispatches immediately (matching the assertion order).
       draft: {
         composerDraftTarget: DraftId.make("draft-1"),
         environmentId: EnvironmentId.make("env-1"),
@@ -363,7 +362,7 @@ describe("executeChatSendTurn", () => {
     );
   });
 
-  it("keeps the staged target retryable after immediate rejection and undo", async () => {
+  it("keeps the staged target retryable after immediate rejection", async () => {
     const targetSelection = {
       instanceId: ProviderInstanceId.make("claudeAgent"),
       model: "claude-sonnet-4-6",
@@ -471,20 +470,9 @@ describe("executeChatSendTurn", () => {
       }),
     ]);
 
-    await executeChatSendTurn({
-      ...input,
-      undo: {
-        windowMs: 4_000,
-        present: ({ triggerUndo }) => {
-          triggerUndo();
-          return () => {};
-        },
-      },
-    });
-
     expect(dispatchCommand).toHaveBeenCalledTimes(2);
     expect(persistThreadSettingsForNextTurn).toHaveBeenCalledTimes(2);
-    expect(refs.promptRef.current).toBe("Continue with Claude");
+    expect(refs.promptRef.current).toBe("");
     expect(input.composer.selectedModelSelection).toEqual(targetSelection);
   });
 });

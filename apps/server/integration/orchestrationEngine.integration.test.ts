@@ -55,7 +55,7 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-class IntegrationWaitTimeoutError extends Schema.TaggedErrorClass<IntegrationWaitTimeoutError>()(
+class IntegrationWaitTimeoutError extends Schema.TaggedError<IntegrationWaitTimeoutError>()(
   "IntegrationWaitTimeoutError",
   {
     description: Schema.String,

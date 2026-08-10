@@ -276,14 +276,11 @@ export const DiagnosticsSnapshot = Schema.Struct({
 });
 export type DiagnosticsSnapshot = typeof DiagnosticsSnapshot.Type;
 
-export class DiagnosticsError extends Schema.TaggedErrorClass<DiagnosticsError>()(
-  "DiagnosticsError",
-  {
-    operation: TrimmedNonEmptyString,
-    detail: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
-  },
-) {
+export class DiagnosticsError extends Schema.TaggedError<DiagnosticsError>()("DiagnosticsError", {
+  operation: TrimmedNonEmptyString,
+  detail: TrimmedNonEmptyString,
+  cause: Schema.optional(Schema.Defect()),
+}) {
   override get message() {
     return `Diagnostics ${this.operation} failed: ${this.detail}`;
   }

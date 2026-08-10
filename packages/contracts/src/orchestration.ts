@@ -1,4 +1,4 @@
-import { Effect, Option, Schema, SchemaIssue, SchemaTransformation, Struct } from "effect";
+import { Effect, Schema, SchemaIssue, SchemaTransformation, Struct } from "effect";
 import { ProviderOptionSelections } from "./model.ts";
 import { RepositoryIdentity } from "./environment.ts";
 import {
@@ -391,7 +391,7 @@ export const ContextHandoffExportChunk = Schema.Struct({
 });
 export type ContextHandoffExportChunk = typeof ContextHandoffExportChunk.Type;
 
-export class ContextHandoffInspectionError extends Schema.TaggedErrorClass<ContextHandoffInspectionError>()(
+export class ContextHandoffInspectionError extends Schema.TaggedError<ContextHandoffInspectionError>()(
   "ContextHandoffInspectionError",
   {
     reason: Schema.Literals([
@@ -1837,9 +1837,10 @@ export const TurnCountRange = Schema.Struct({
   Schema.makeFilter(
     (input) =>
       input.fromTurnCount <= input.toTurnCount ||
-      new SchemaIssue.InvalidValue(Option.some(input.fromTurnCount), {
-        message: "fromTurnCount must be less than or equal to toTurnCount",
-      }),
+      new SchemaIssue.InvalidValue(
+        { message: "fromTurnCount must be less than or equal to toTurnCount" },
+        input.fromTurnCount,
+      ),
     { identifier: "OrchestrationTurnDiffRange" },
   ),
 );
@@ -1983,7 +1984,7 @@ export const WORKFLOW_SCRIPT_ERROR_MESSAGES = {
   "read-failed": "Script read failed.",
 } as const;
 
-export class OrchestrationGetWorkflowScriptError extends Schema.TaggedErrorClass<OrchestrationGetWorkflowScriptError>()(
+export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<OrchestrationGetWorkflowScriptError>()(
   "OrchestrationGetWorkflowScriptError",
   {
     reason: Schema.Literals([
@@ -2039,7 +2040,7 @@ export const TASK_OUTPUT_ERROR_MESSAGES = {
   "read-failed": "Task output read failed.",
 } as const;
 
-export class OrchestrationGetTaskOutputError extends Schema.TaggedErrorClass<OrchestrationGetTaskOutputError>()(
+export class OrchestrationGetTaskOutputError extends Schema.TaggedError<OrchestrationGetTaskOutputError>()(
   "OrchestrationGetTaskOutputError",
   {
     reason: Schema.Literals([
@@ -2078,7 +2079,7 @@ export const STOP_BACKGROUND_TASK_ERROR_MESSAGES = {
   "stop-failed": "Stopping the background task failed.",
 } as const;
 
-export class OrchestrationStopBackgroundTaskError extends Schema.TaggedErrorClass<OrchestrationStopBackgroundTaskError>()(
+export class OrchestrationStopBackgroundTaskError extends Schema.TaggedError<OrchestrationStopBackgroundTaskError>()(
   "OrchestrationStopBackgroundTaskError",
   {
     reason: Schema.Literals(["unsupported", "session-not-found", "stop-failed"]),
@@ -2138,42 +2139,42 @@ export const OrchestrationRpcSchemas = {
   },
 } as const;
 
-export class OrchestrationGetSnapshotError extends Schema.TaggedErrorClass<OrchestrationGetSnapshotError>()(
+export class OrchestrationGetSnapshotError extends Schema.TaggedError<OrchestrationGetSnapshotError>()(
   "OrchestrationGetSnapshotError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
-export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<OrchestrationDispatchCommandError>()(
+export class OrchestrationDispatchCommandError extends Schema.TaggedError<OrchestrationDispatchCommandError>()(
   "OrchestrationDispatchCommandError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
-export class OrchestrationGetTurnDiffError extends Schema.TaggedErrorClass<OrchestrationGetTurnDiffError>()(
+export class OrchestrationGetTurnDiffError extends Schema.TaggedError<OrchestrationGetTurnDiffError>()(
   "OrchestrationGetTurnDiffError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
-export class OrchestrationGetFullThreadDiffError extends Schema.TaggedErrorClass<OrchestrationGetFullThreadDiffError>()(
+export class OrchestrationGetFullThreadDiffError extends Schema.TaggedError<OrchestrationGetFullThreadDiffError>()(
   "OrchestrationGetFullThreadDiffError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 
-export class OrchestrationReplayEventsError extends Schema.TaggedErrorClass<OrchestrationReplayEventsError>()(
+export class OrchestrationReplayEventsError extends Schema.TaggedError<OrchestrationReplayEventsError>()(
   "OrchestrationReplayEventsError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}

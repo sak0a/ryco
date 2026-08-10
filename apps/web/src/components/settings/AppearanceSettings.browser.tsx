@@ -165,7 +165,7 @@ describe("AppearanceSettingsPanel", () => {
     expect(style?.textContent).toContain("--font-size-base: 18px");
     expect(style?.textContent).toContain("--radius: 0rem");
     expect(style?.textContent).toContain(`--primary: ${primaryColorValue}`);
-    expect(style?.textContent).toContain("--app-surface-opacity: 78%");
+    expect(style?.textContent).toContain("--app-surface-opacity: 82.4%");
 
     await expect
       .element(page.getByRole("button", { name: "Reset interface font to default" }))
@@ -204,12 +204,6 @@ describe("AppearanceSettingsPanel", () => {
     await page.getByRole("button", { name: "Reset wide composer labels to default" }).click();
     await expect.element(autoCollapseSwitch).toBeChecked();
     expect(useUiStateStore.getState().wideComposerControlsAutoCollapse).toBe(true);
-
-    await expect
-      .element(
-        page.getByText("How token efficiency appears when wide composer auto-collapse is off."),
-      )
-      .toBeInTheDocument();
   });
 
   it("omits reasoning and token mode style controls", async () => {

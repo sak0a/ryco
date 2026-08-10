@@ -1176,9 +1176,7 @@ describe("GitHubSourceControlProvider.createIssue", () => {
           expect(args.labels).toEqual(["bug"]);
           return { url: "https://github.com/owner/repo/issues/42", number: 42 };
         },
-        getIssue: () => ({
-          /* fake decoded issue */
-        }),
+        getIssue: () => ({/* fake decoded issue */}),
       });
       const provider = makeGitHubSourceControlProvider({ cli /* deps */ });
       const summary = yield* provider.createIssue({
@@ -1578,12 +1576,7 @@ describe("sourceControl.createIssue RPC", () => {
       const harness = makeServerTestHarness({
         provider: { createIssue: () => Effect.succeed(fakeIssueSummary) },
         git: {
-          createWorktreeForProject: () =>
-            Effect.fail(
-              new GitManagerServiceError({
-                /* … */
-              }),
-            ),
+          createWorktreeForProject: () => Effect.fail(new GitManagerServiceError({/* … */})),
         },
       });
       const result = yield* harness.rpc.sourceControl.createIssue({

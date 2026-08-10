@@ -260,7 +260,7 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
       const message = yield* Deferred.await(inboundRequest);
       assert.deepEqual(message, {
         _tag: "Request",
-        id: "0",
+        id: 0,
         tag: "session/request_permission",
         payload: {
           sessionId: "session-1",
@@ -275,7 +275,7 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
 
       yield* transport.serverProtocol.send(0, {
         _tag: "Exit",
-        requestId: "0",
+        requestId: 0,
         exit: {
           _tag: "Success",
           value: {
@@ -346,7 +346,7 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
       const message = yield* Deferred.await(lateResponse);
       assert.deepEqual(message, {
         _tag: "Exit",
-        requestId: "1",
+        requestId: 1,
         exit: {
           _tag: "Success",
           value: {

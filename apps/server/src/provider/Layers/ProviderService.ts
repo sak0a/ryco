@@ -34,7 +34,6 @@ import {
   Metric,
   Option,
   PubSub,
-  Random,
   Ref,
   Schema,
   SchemaIssue,
@@ -700,7 +699,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     return yield* Effect.gen(function* () {
       const adapter = yield* registry.getByInstance(bindingInstanceId);
       const runtimeSessionId =
-        input.binding.runtimeSessionId ?? RuntimeSessionId.make(yield* Random.nextUUIDv4);
+        input.binding.runtimeSessionId ??
+        RuntimeSessionId.make(yield* Effect.sync(() => crypto.randomUUID()));
       const hasResumeCursor =
         input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined;
       const activeSessions = yield* adapter.listSessions();
@@ -920,7 +920,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             threadId,
             provider: resolvedProvider,
             runtimeSessionId:
-              parsed.runtimeSessionId ?? RuntimeSessionId.make(yield* Random.nextUUIDv4),
+              parsed.runtimeSessionId ??
+              RuntimeSessionId.make(yield* Effect.sync(() => crypto.randomUUID())),
           };
           if (!instanceInfo.enabled) {
             return yield* toValidationError(

@@ -21,10 +21,10 @@ import type * as SourceControlProvider from "./SourceControlProvider.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export class GitLabCliError extends Schema.TaggedErrorClass<GitLabCliError>()("GitLabCliError", {
+export class GitLabCliError extends Schema.TaggedError<GitLabCliError>()("GitLabCliError", {
   operation: Schema.String,
   detail: Schema.String,
-  cause: Schema.optional(Schema.Defect),
+  cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
     return `GitLab CLI failed in ${this.operation}: ${this.detail}`;

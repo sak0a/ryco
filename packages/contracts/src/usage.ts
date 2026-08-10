@@ -119,11 +119,11 @@ export const UsageReadErrorReason = Schema.Literals([
 ]);
 export type UsageReadErrorReason = typeof UsageReadErrorReason.Type;
 
-export class UsageReadError extends Schema.TaggedErrorClass<UsageReadError>()("UsageReadError", {
+export class UsageReadError extends Schema.TaggedError<UsageReadError>()("UsageReadError", {
   reason: UsageReadErrorReason,
   detail: TrimmedNonEmptyString,
   environmentId: Schema.optional(EnvironmentId),
-  cause: Schema.optional(Schema.Defect),
+  cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
     return this.detail;

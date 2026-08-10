@@ -460,8 +460,19 @@ describe("MobileSheet", () => {
     await vi.waitFor(() => {
       expect(popup.contains(document.activeElement)).toBe(true);
     });
-    // Modal scroll lock: Base UI pins the scroll container inline while open.
-    expect(document.body.style.overflow).toBe("hidden");
+    // Modal scroll lock: Base UI pins whichever element owns viewport scrolling.
+    // That can be either <html> or <body>, depending on the document styles.
+    const baseUiInlineScrollLockIsPresent = () =>
+      [document.documentElement, document.body].some(
+        (element) => element.style.overflow === "hidden" || element.style.overflowY === "hidden",
+      );
+    const viewportScrollIsLocked = () =>
+      [document.documentElement, document.body].some((element) =>
+        /hidden|clip/.test(getComputedStyle(element).overflowY),
+      );
+    await vi.waitFor(() => {
+      expect(viewportScrollIsLocked()).toBe(true);
+    });
 
     for (let index = 0; index < 6; index += 1) {
       await userEvent.keyboard("{Tab}");
@@ -476,7 +487,7 @@ describe("MobileSheet", () => {
       expect(document.activeElement).toBe(triggerElement);
     });
     await vi.waitFor(() => {
-      expect(document.body.style.overflow).toBe("");
+      expect(baseUiInlineScrollLockIsPresent()).toBe(false);
     });
   });
 });

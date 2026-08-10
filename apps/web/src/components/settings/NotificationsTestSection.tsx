@@ -177,20 +177,6 @@ const PRESETS: ReadonlyArray<NotificationTestPreset> = [
     },
   },
   {
-    value: "message-undo",
-    label: "Message sent (undo window)",
-    fire: () => {
-      toastManager.add({
-        type: "info",
-        title: "Message sent",
-        description: "You can undo before the agent picks it up.",
-        timeout: 4_000,
-        actionProps: { children: "Undo", onClick: () => undefined },
-        data: { actionVariant: "outline" },
-      });
-    },
-  },
-  {
     value: "reconnected",
     label: "Connection restored",
     fire: () => {

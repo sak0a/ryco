@@ -161,11 +161,11 @@ export const AtlassianSaveManualJiraTokenInput = Schema.Struct({
 });
 export type AtlassianSaveManualJiraTokenInput = typeof AtlassianSaveManualJiraTokenInput.Type;
 
-export class AtlassianConnectionError extends Schema.TaggedErrorClass<AtlassianConnectionError>()(
+export class AtlassianConnectionError extends Schema.TaggedError<AtlassianConnectionError>()(
   "AtlassianConnectionError",
   {
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}

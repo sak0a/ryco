@@ -290,16 +290,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
           "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
           "alchemy@2.0.0-beta.49": "patches/alchemy@2.0.0-beta.49.patch",
-          "effect@4.0.0-beta.59": "patches/effect@4.0.0-beta.59.patch",
+          "effect@4.0.0-beta.106": "patches/effect@4.0.0-beta.106.patch",
         },
         {
           "@pierre/diffs": "1.1.20",
-          effect: "4.0.0-beta.59",
+          effect: "4.0.0-beta.106",
         },
       ),
       {
         "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
-        "effect@4.0.0-beta.59": "patches/effect@4.0.0-beta.59.patch",
+        "effect@4.0.0-beta.106": "patches/effect@4.0.0-beta.106.patch",
       },
     );
 
@@ -308,7 +308,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         {
           "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
         },
-        { effect: "4.0.0-beta.59" },
+        { effect: "4.0.0-beta.106" },
       ),
       undefined,
     );

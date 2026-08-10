@@ -6,11 +6,11 @@ export interface CodexAppServerProtocolErrorShape {
   readonly data?: unknown;
 }
 
-export class CodexAppServerSpawnError extends Schema.TaggedErrorClass<CodexAppServerSpawnError>()(
+export class CodexAppServerSpawnError extends Schema.TaggedError<CodexAppServerSpawnError>()(
   "CodexAppServerSpawnError",
   {
     command: Schema.optional(Schema.String),
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   },
 ) {
   override get message() {
@@ -20,11 +20,11 @@ export class CodexAppServerSpawnError extends Schema.TaggedErrorClass<CodexAppSe
   }
 }
 
-export class CodexAppServerProcessExitedError extends Schema.TaggedErrorClass<CodexAppServerProcessExitedError>()(
+export class CodexAppServerProcessExitedError extends Schema.TaggedError<CodexAppServerProcessExitedError>()(
   "CodexAppServerProcessExitedError",
   {
     code: Schema.optional(Schema.Number),
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
@@ -34,11 +34,11 @@ export class CodexAppServerProcessExitedError extends Schema.TaggedErrorClass<Co
   }
 }
 
-export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<CodexAppServerProtocolParseError>()(
+export class CodexAppServerProtocolParseError extends Schema.TaggedError<CodexAppServerProtocolParseError>()(
   "CodexAppServerProtocolParseError",
   {
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {
   override get message() {
@@ -46,11 +46,11 @@ export class CodexAppServerProtocolParseError extends Schema.TaggedErrorClass<Co
   }
 }
 
-export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexAppServerTransportError>()(
+export class CodexAppServerTransportError extends Schema.TaggedError<CodexAppServerTransportError>()(
   "CodexAppServerTransportError",
   {
     detail: Schema.String,
-    cause: Schema.Defect,
+    cause: Schema.Defect(),
   },
 ) {
   override get message() {
@@ -58,7 +58,7 @@ export class CodexAppServerTransportError extends Schema.TaggedErrorClass<CodexA
   }
 }
 
-export class CodexAppServerRequestError extends Schema.TaggedErrorClass<CodexAppServerRequestError>()(
+export class CodexAppServerRequestError extends Schema.TaggedError<CodexAppServerRequestError>()(
   "CodexAppServerRequestError",
   {
     code: Schema.Number,

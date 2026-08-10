@@ -540,8 +540,8 @@ export function persistState(state: UiState): void {
           ]
         : [];
     });
-    const pinnedThreadKeys = Object.entries(state.pinnedThreadKeys).flatMap(([threadKey, pinned]) =>
-      pinned ? [threadKey] : [],
+    const pinnedThreadKeys = Object.entries(state.pinnedThreadKeys).flatMap(
+      ([threadKey, pinned]) => (pinned ? [threadKey] : []),
     );
     const threadChangedFilesExpandedById = Object.fromEntries(
       Object.entries(state.threadChangedFilesExpandedById).flatMap(([threadId, turns]) => {

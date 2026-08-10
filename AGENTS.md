@@ -14,7 +14,6 @@
   bun run fmt:check
   bun lint
   bun typecheck
-  bun run typecheck:effect
   bun run test
   bun run build
   ```
@@ -37,9 +36,9 @@
 
 ## TypeScript
 
-Daily typecheck uses **TS7** (`bun typecheck`). Effect-specific rules still run via patched **TS6**
-(`bun run typecheck:effect`) and are enforced in CI. See [docs/typescript.md](docs/typescript.md) for
-why both coexist.
+Typechecking uses the native **TS7** compiler patched by `@effect/tsgo`, so `bun typecheck`
+enforces both TypeScript and Effect-specific diagnostics in one pass. See
+[docs/typescript.md](docs/typescript.md) for the toolchain details.
 
 ## Project Snapshot
 

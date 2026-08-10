@@ -33,7 +33,6 @@ type ComposerThreadTarget = ScopedThreadRef | DraftId;
 import { appendTerminalContextsToPrompt, formatTerminalContextLabel } from "../lib/terminalContext";
 import { collapseExpandedComposerCursor } from "../composer-logic";
 import { newCommandId, newMessageId } from "../lib/utils";
-import { runSendUndoWindow } from "./sendUndoController";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import {
   buildChatSendTitleSeed,
@@ -82,7 +81,7 @@ export interface SendTurnWorktreePlan {
  * Thread identity resolved at commit time, replacing the one the turn was
  * assembled with.
  */
-export interface SendTurnCommitPreparation {
+export interface SendTurnDispatchPreparation {
   readonly threadId: ThreadId;
   readonly isServerThread: boolean;
   readonly isFirstMessage: boolean;
@@ -102,17 +101,6 @@ export interface SendTurnProjectContext {
 
 export interface SendTurnScrollDeps {
   scrollToEndBeforeOptimistic: () => Promise<void>;
-}
-
-export interface SendTurnUndoDeps {
-  /** How long the undo affordance stays live before the turn auto-commits. */
-  windowMs: number;
-  /**
-   * Present the undo affordance (e.g. a toast). Receives a `triggerUndo` callback
-   * to wire to the Undo control, and returns an optional disposer run once the
-   * window resolves. See `runSendUndoWindow`.
-   */
-  present: (controls: { triggerUndo: () => void }) => (() => void) | void;
 }
 
 export interface SendTurnComposerDraftDeps {
@@ -172,15 +160,11 @@ export interface ExecuteChatSendTurnInput {
   settings: SendTurnSettings;
   project: SendTurnProjectContext;
   scroll: SendTurnScrollDeps;
-  /** When present, hold the provider dispatch behind a short cancellable undo window. */
-  undo?: SendTurnUndoDeps;
   /**
-   * Runs after the undo window commits and before dispatch. Use for work that
-   * must not happen if the user undoes — most importantly creating a worktree,
-   * which is a side effect on disk that Undo cannot take back. Returning a
-   * preparation redirects the dispatch at the thread it produced.
+   * Runs before dispatch for work that must produce the destination thread first.
+   * Returning a preparation redirects the dispatch at the thread it produced.
    */
-  prepareOnCommit?: () => Promise<SendTurnCommitPreparation | null>;
+  prepareForDispatch?: () => Promise<SendTurnDispatchPreparation | null>;
   draft: SendTurnComposerDraftDeps;
   dispatch: SendTurnDispatchDeps;
   refs: SendTurnRollbackRefs;
@@ -386,7 +370,6 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
   composerHandle.readComposer()?.resetCursorState();
 
   let turnStartSucceeded = false;
-  let undone = false;
   await (async () => {
     let firstComposerImageName: string | null = null;
     if (imagesSnapshot.length > 0) {
@@ -436,29 +419,13 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       threadCreatedAt: thread.createdAt,
     });
 
-    // Short "undo send" window: hold the provider dispatch so the user can pull
-    // the message back before the turn is picked up. Skipped (immediate dispatch)
-    // when no `undo` config is supplied — e.g. queued auto-sends on quiescence.
-    if (input.undo && input.undo.windowMs > 0) {
-      const outcome = await runSendUndoWindow({
-        windowMs: input.undo.windowMs,
-        present: input.undo.present,
-      });
-      if (outcome === "undone") {
-        undone = true;
-        return;
-      }
-    }
-
-    // Anything that has to exist before dispatch but must not survive an undo
-    // happens here, past the window: creating a worktree from a PR / issue /
-    // work item also creates its thread, so that work waits until the send is
-    // committed and then redirects the dispatch at what it produced.
-    const prepared = input.prepareOnCommit ? await input.prepareOnCommit() : null;
+    // Creating a worktree from a PR / issue / work item also creates its thread,
+    // so that work happens before send assembly and redirects the dispatch at
+    // what it produced.
+    const prepared = input.prepareForDispatch ? await input.prepareForDispatch() : null;
 
     // Provider-independent dispatch assembly (title update, next-turn settings,
-    // and `thread.turn.start`). Runs only once the turn commits — an undone
-    // first send must not leave orphan title/settings.
+    // and `thread.turn.start`).
     await commitSendTurnDispatch({
       api,
       threadId: prepared?.threadId ?? thread.threadId,
@@ -495,23 +462,6 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
     });
     setThreadError(thread.threadId, err instanceof Error ? err.message : "Failed to send message.");
   });
-
-  if (undone) {
-    // Explicit undo always pulls the optimistic bubble back out of the timeline...
-    removeOptimisticUserMessage(setOptimisticUserMessages, messageIdForSend);
-    // ...and restores the composer content when the user hasn't typed anything new
-    // in the window (the guard inside `rollbackSendTurn` protects fresh input).
-    rollbackSendTurn({
-      refs,
-      composerHandle,
-      dispatch: { setOptimisticUserMessages },
-      draft,
-      messageId: messageIdForSend,
-      promptSnapshot: composer.prompt,
-      imagesSnapshot,
-      terminalContextsSnapshot,
-    });
-  }
 
   refs.sendInFlightRef.current = false;
   if (!turnStartSucceeded) {

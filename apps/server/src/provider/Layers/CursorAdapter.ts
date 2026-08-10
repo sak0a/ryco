@@ -33,7 +33,6 @@ import {
   FileSystem,
   Option,
   PubSub,
-  Random,
   Scope,
   Semaphore,
   Stream,
@@ -334,7 +333,10 @@ export function makeCursorAdapter(
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-    const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.make(id));
+    const nextEventId = Effect.map(
+      Effect.sync(() => crypto.randomUUID()),
+      (id) => EventId.make(id),
+    );
     const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso });
 
     const offerRuntimeEventForRuntime = (

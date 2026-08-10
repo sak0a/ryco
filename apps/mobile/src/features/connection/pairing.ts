@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 const MOBILE_PAIRING_URL_PARAM = "pairingUrl";
 const RYCO_PAIRING_SCHEMES = new Set(["ryco:", "ryco-dev:", "ryco-preview:"]);
 
-export class PairingQrPayloadEmptyError extends Schema.TaggedErrorClass<PairingQrPayloadEmptyError>()(
+export class PairingQrPayloadEmptyError extends Schema.TaggedError<PairingQrPayloadEmptyError>()(
   "PairingQrPayloadEmptyError",
   {},
 ) {

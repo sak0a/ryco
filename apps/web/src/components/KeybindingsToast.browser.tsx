@@ -273,6 +273,9 @@ function resolveWsRpc(tag: string): unknown {
   if (tag === WS_METHODS.serverGetConfig) {
     return fixture.serverConfig;
   }
+  if (tag === WS_METHODS.serverDiscoverSourceControl) {
+    return { versionControlSystems: [], sourceControlProviders: [] };
+  }
   if (tag === WS_METHODS.vcsListRefs) {
     return {
       isRepo: true,
@@ -284,6 +287,9 @@ function resolveWsRpc(tag: string): unknown {
   }
   if (tag === WS_METHODS.projectsSearchEntries) {
     return { entries: [], truncated: false };
+  }
+  if (tag === WS_METHODS.sourceControlListChangeRequests) {
+    return [];
   }
   return {};
 }

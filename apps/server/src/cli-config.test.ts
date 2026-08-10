@@ -1,4 +1,5 @@
 import os from "node:os";
+import { closeSync, openSync } from "node:fs";
 import { join } from "node:path";
 
 import { assert, expect, it } from "@effect/vitest";
@@ -120,8 +121,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     const fs = yield* FileSystem.FileSystem;
     const filePath = yield* fs.makeTempFileScoped({ prefix: "ryco-bootstrap-", suffix: ".ndjson" });
     yield* fs.writeFileString(filePath, `${JSON.stringify(payload)}\n`);
-    const { fd } = yield* fs.open(filePath, { flag: "r" });
-    return fd;
+    return yield* Effect.acquireRelease(
+      Effect.sync(() => openSync(filePath, "r")),
+      (fd) => Effect.sync(() => closeSync(fd)),
+    );
   });
 
   type ResolveServerFlags = Parameters<typeof resolveServerConfig>[0];

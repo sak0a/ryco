@@ -1,4 +1,5 @@
 import { DEFAULT_SERVER_SETTINGS, WS_METHODS } from "@ryco/contracts";
+import { E2EE_CAPABILITY_CARRIER_TAG } from "@ryco/shared/relayE2eeConstants";
 import { Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
@@ -613,11 +614,11 @@ describe("WsTransport", () => {
       expect(socket.sent).toHaveLength(1);
     });
 
-    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string | number };
     await waitFor(() => {
       expect(getSlowRpcAckRequests()).toMatchObject([
         {
-          requestId: requestMessage.id,
+          requestId: String(requestMessage.id),
           tag: WS_METHODS.serverUpsertKeybinding,
         },
       ]);
@@ -669,12 +670,12 @@ describe("WsTransport", () => {
       expect(firstSocket.sent).toHaveLength(1);
     });
 
-    const firstRequest = JSON.parse(firstSocket.sent[0] ?? "{}") as { id: string };
+    const firstRequest = JSON.parse(firstSocket.sent[0] ?? "{}") as { id: string | number };
 
     await waitFor(() => {
       expect(getSlowRpcAckRequests()).toMatchObject([
         {
-          requestId: firstRequest.id,
+          requestId: String(firstRequest.id),
           tag: WS_METHODS.serverUpsertKeybinding,
         },
       ]);
@@ -751,6 +752,64 @@ describe("WsTransport", () => {
       issues: [],
     });
 
+    await transport.dispose();
+  });
+
+  it("ignores the E2EE capability carrier without mutating an in-flight RPC", async () => {
+    const transport = createTransport("ws://localhost:3020");
+    const requestPromise = transport.request((client) =>
+      client[WS_METHODS.serverUpsertKeybinding]({
+        command: "terminal.toggle",
+        key: "ctrl+k",
+      }),
+    );
+    let requestSettled = false;
+    void requestPromise.finally(() => {
+      requestSettled = true;
+    });
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    const socket = getSocket();
+    socket.open();
+    await waitFor(() => {
+      expect(socket.sent).toHaveLength(1);
+    });
+
+    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: E2EE_CAPABILITY_CARRIER_TAG,
+        statement: "test-only-capability-statement",
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    // §5.6 C2–C4: the real Effect decoder broadcasts the request-id-free
+    // unknown tag, its dispatcher ignores it, and our wrapper passes it through.
+    expect(socket.sent).toHaveLength(1);
+    expect(requestSettled).toBe(false);
+
+    socket.serverMessage(
+      JSON.stringify({
+        _tag: "Exit",
+        requestId: requestMessage.id,
+        exit: {
+          _tag: "Success",
+          value: {
+            keybindings: [],
+            issues: [],
+          },
+        },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({
+      keybindings: [],
+      issues: [],
+    });
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
     await transport.dispose();
   });
 

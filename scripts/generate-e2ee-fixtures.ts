@@ -7895,7 +7895,7 @@ function buildFamily16(): FixtureFamily {
 // chunk assembler and about JSON whitespace, and both are derived below from the
 // landed module. C2–C5 are claims about the behavior of the pinned third-party
 // RPC client and of the node's RPC server: §5.6 scopes them normatively to
-// `effect@4.0.0-beta.59` as patched, and requires the family to be RE-RUN
+// `effect@4.0.0-beta.106` as patched, and requires the family to be RE-RUN
 // against any new build before a changed pin lands. No shared module can produce
 // their outcomes, so they are named in `deferred` rather than guessed at.
 
@@ -8015,7 +8015,7 @@ function buildFamily2(): FixtureFamily {
     summary:
       "The §5.6 compatibility cases this repository's own modules decide: C1, the carrier through the client reassembly path with and without the prelude, and C6, the prelude's JSON-whitespace tolerance; plus the §5.5 carrier boundary at `E2EE_ADVERTISEMENT_MIN_CHUNK_BYTES`, where the maximum conforming carrier of F3 is still emitted unchunked with the prelude intact.",
     deferred: [
-      "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.59` as patched by `patches/effect@4.0.0-beta.59.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. Owned by the §5.6 compatibility harness.",
+      "Cases C2, C3, and C4 are behavioral claims about the PINNED third-party RPC client — its protocol-socket broadcast routing, its response dispatcher's default branch, and the client-runtime connection wrapper. §5.6 scopes them normatively to `effect@4.0.0-beta.106` as patched by `patches/effect@4.0.0-beta.106.patch`, and no shared module can produce their outcomes. They require a harness that drives the real decoder, and §5.6 requires that harness to be RE-RUN against any new build before a changed `effect` pin — or a changed patch touching its RPC client — lands. The current build is exercised by `apps/web/src/rpc/wsTransport.test.ts`. Owned by the §5.6 compatibility harness.",
       "Case C5, the node-direction hazard, is the defect reply the node's RPC server emits for an unknown request tag. It is a property of the pinned RPC server rather than of any protocol structure, and it is what makes the carrier direction node-to-client only. Owned by the §5.6 compatibility harness, together with the node phase.",
       "The §5.5 U1 accounting half of the boundary pair — advertisement suppression, exactly one `undersized-connection` occurrence, NO peer-legacy occurrence, and FATAL-PRE `P2`/`P23` under effective `requireE2EE` — is node policy (§12.5) with no implementation in packages/shared/src, so THIS family carries only the comparison the decision reads, which IS emitted above. The accounting itself is family F10's rows N15–N17, emitted there and driven against the real advertiser by the node-side consuming test. Owned by the node phase.",
       crossRuntimeDeferral(2),

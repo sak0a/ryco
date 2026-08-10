@@ -80,7 +80,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   const notificationQueue = yield* Queue.unbounded<AcpIncomingNotification>();
   const disconnects = yield* Queue.unbounded<number>();
   const outgoing = yield* Queue.unbounded<string | Uint8Array, Cause.Done<void>>();
-  const nextRequestId = yield* Ref.make(1n);
+  const nextRequestId = yield* Ref.make(1);
   const terminationHandled = yield* Ref.make(false);
   const extPending = yield* Ref.make(
     new Map<string, Deferred.Deferred<unknown, AcpError.AcpError>>(),
@@ -210,7 +210,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       ] as const;
     }).pipe(Effect.flatten);
 
-  const respondWithSuccess = (requestId: string, value: unknown) =>
+  const respondWithSuccess = (requestId: string | number, value: unknown) =>
     offerOutgoing({
       _tag: "Exit",
       requestId,
@@ -220,7 +220,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       },
     });
 
-  const respondWithError = (requestId: string, error: AcpError.AcpRequestError) =>
+  const respondWithError = (requestId: string | number, error: AcpError.AcpRequestError) =>
     offerOutgoing({
       _tag: "Exit",
       requestId,
@@ -309,21 +309,22 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   const handleExitEncoded = (message: RpcMessage.ResponseExitEncoded) =>
     Ref.get(extPending).pipe(
       Effect.flatMap((pending) => {
-        if (!pending.has(message.requestId)) {
+        const requestId = String(message.requestId);
+        if (!pending.has(requestId)) {
           return Queue.offer(clientQueue, message).pipe(Effect.asVoid);
         }
         if (message.exit._tag === "Success") {
-          return completeExtPendingSuccess(message.requestId, message.exit.value);
+          return completeExtPendingSuccess(requestId, message.exit.value);
         }
         const failure = message.exit.cause.find((entry) => entry._tag === "Fail");
         if (failure && isProtocolError(failure.error)) {
           return completeExtPendingFailure(
-            message.requestId,
+            requestId,
             AcpError.AcpRequestError.fromProtocolError(failure.error),
           );
         }
         return completeExtPendingFailure(
-          message.requestId,
+          requestId,
           AcpError.AcpRequestError.internalError("Extension request failed"),
         );
       }),
@@ -339,16 +340,17 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
         return handleExitEncoded(message);
       case "Chunk":
         return Ref.get(extPending).pipe(
-          Effect.flatMap((pending) =>
-            pending.has(message.requestId)
+          Effect.flatMap((pending) => {
+            const requestId = String(message.requestId);
+            return pending.has(requestId)
               ? completeExtPendingFailure(
-                  message.requestId,
+                  requestId,
                   AcpError.AcpRequestError.internalError(
                     "Streaming extension responses are not supported",
                   ),
                 )
-              : Queue.offer(clientQueue, message).pipe(Effect.asVoid),
-          ),
+              : Queue.offer(clientQueue, message).pipe(Effect.asVoid);
+          }),
         );
       case "Defect":
       case "ClientProtocolError":
@@ -476,13 +478,13 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
   const sendRequest = Effect.fn("sendRequest")(function* (method: string, payload: unknown) {
     const requestId = yield* Ref.modify(
       nextRequestId,
-      (current) => [current, current + 1n] as const,
+      (current) => [current, current + 1] as const,
     );
     const deferred = yield* Deferred.make<unknown, AcpError.AcpError>();
     yield* Ref.update(extPending, (pending) => new Map(pending).set(String(requestId), deferred));
     yield* offerOutgoing({
       _tag: "Request",
-      id: String(requestId),
+      id: requestId,
       tag: method,
       payload,
       headers: [],

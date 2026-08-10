@@ -154,6 +154,26 @@ export const projectReadFileQuery = defineQuery<ProjectReadFileInput, ProjectRea
     ),
 });
 
+/** Keep the selected-file cache aligned with an explicit read or save. */
+export function setProjectReadFileCacheData(
+  input: ProjectReadFileInput,
+  data: ProjectReadFileResult,
+): void {
+  const cacheKey = projectReadFileQuery.keyOf(input);
+  if (cacheKey === null) return;
+  const controller = projectPreviewRegistry.controllers.get(cacheKey);
+  if (controller) {
+    controller.hasData = true;
+    controller.lastFetchedAt = Date.now();
+  }
+  projectPreviewRegistry.setQueryState(cacheKey, {
+    data,
+    isLoading: false,
+    isFetching: false,
+    error: null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------

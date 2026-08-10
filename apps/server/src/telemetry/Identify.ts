@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Path, Random, Schema } from "effect";
+import { Effect, FileSystem, Path, Schema } from "effect";
 import * as Crypto from "node:crypto";
 import { homedir } from "node:os";
 import { ServerConfig } from "../config.ts";
@@ -13,9 +13,9 @@ const ClaudeJsonSchema = Schema.Struct({
   userID: Schema.String,
 });
 
-class IdentifyUserError extends Schema.TaggedErrorClass<IdentifyUserError>()("IdentifyUserError", {
+class IdentifyUserError extends Schema.TaggedError<IdentifyUserError>()("IdentifyUserError", {
   message: Schema.String,
-  cause: Schema.optional(Schema.Defect),
+  cause: Schema.optional(Schema.Defect()),
 }) {}
 
 const hash = (value: string) =>
@@ -61,7 +61,7 @@ const upsertAnonymousId = Effect.gen(function* () {
   const anonymousId = yield* fileSystem.readFileString(anonymousIdPath).pipe(
     Effect.catch(() =>
       Effect.gen(function* () {
-        const randomId = yield* Random.nextUUIDv4;
+        const randomId = yield* Effect.sync(() => crypto.randomUUID());
         yield* fileSystem.writeFileString(anonymousIdPath, randomId);
         return randomId;
       }),

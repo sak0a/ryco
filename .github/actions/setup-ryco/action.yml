@@ -13,7 +13,7 @@ inputs:
   vite-plus-version:
     description: Vite+ CLI version. Keep aligned with package.json workspaces.catalog.vite-plus.
     required: false
-    default: "0.1.24"
+    default: "0.2.8"
   cache-scope:
     description: >
       Discriminator for this job's Turbo cache entry. Every job in a workflow

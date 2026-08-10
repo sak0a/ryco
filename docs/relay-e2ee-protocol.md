@@ -434,7 +434,7 @@ of this document justified `T_ADV` as "chosen below the keepalive interval so a 
 never stalls the keepalive"; that justification was wrong twice over — a tick inside the
 buffering window _is_ stalled, and the quantity that must fit the interval is the whole
 negotiating window, not `T_ADV` alone. The node runs no keepalive fiber, so this constraint is
-client-side only (verified against `patches/effect@4.0.0-beta.59.patch`, `makePinger` /
+client-side only (verified against `patches/effect@4.0.0-beta.106.patch`, `makePinger` /
 `makeProtocolSocket`, and the single `makePinger` call site therein, 2026-07-30).
 
 #### 3.2.1 Size-relationship invariants (normative)
@@ -1326,7 +1326,7 @@ Normative requirements:
 
 _Note (non-normative)_: a malformed carrier is **not** ignored by legacy clients — a JSON parse
 failure fails every in-flight request — which is why the carrier bytes must come from a real
-JSON encoder rather than hand assembly (verified against the pinned `effect@4.0.0-beta.59` RPC
+JSON encoder rather than hand assembly (verified against the pinned `effect@4.0.0-beta.106` RPC
 client's decode-failure path, 2026-07-30). The JSON-whitespace chunk prelude alone does not make
 an arbitrary extra message legacy-safe; the safety argument is the tag-routing analysis in §5.6.
 
@@ -1531,7 +1531,7 @@ implementations. All verification citations are as of 2026-07-30.
 **Version binding and re-verification.** C1–C6 are claims about the behavior of a third-party RPC
 client implementation that this protocol does not control. They are verified against, and
 normatively scoped to, the RPC client pinned by the workspace catalog at the time of writing —
-`effect@4.0.0-beta.59` as patched by `patches/effect@4.0.0-beta.59.patch`. The scope is not
+`effect@4.0.0-beta.106` as patched by `patches/effect@4.0.0-beta.106.patch`. The scope is not
 cosmetic: the relevant routing internals have already changed once inside this repository's own
 dependency history. Before `effect@4.0.0-beta.45`, `RpcClient.makeProtocolSocket` had no
 multi-client fan-out and performed no `requestId` lookup, forwarding every decoded response
@@ -1573,8 +1573,8 @@ carrier can never enter the chunk parser because its first byte is `{`, not
 **C2 — protocol-socket routing.** The decoded carrier object MUST be routed to the client
 protocol's broadcast path: its tag is not the keepalive response tag and it has no `requestId`
 member, so no request-entry lookup occurs and no reply is generated. (Normatively scoped to the
-pinned `effect@4.0.0-beta.59` RPC client as patched by `patches/effect@4.0.0-beta.59.patch`;
-verified against its `makeProtocolSocket` response routing, 2026-07-30. Re-verification is
+pinned `effect@4.0.0-beta.106` RPC client as patched by `patches/effect@4.0.0-beta.106.patch`;
+verified against its `makeProtocolSocket` response routing, 2026-08-10. Re-verification is
 required on any pin change per the version-binding rule above.)
 
 **C3 — client dispatcher ignore.** The carrier's tag matches no known response tag, so the RPC

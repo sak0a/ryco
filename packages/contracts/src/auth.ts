@@ -72,7 +72,7 @@ export type ServerAuthSessionMethod = typeof ServerAuthSessionMethod.Type;
 export const AuthSessionRole = Schema.Literals(["owner", "client"]);
 export type AuthSessionRole = typeof AuthSessionRole.Type;
 
-export class AuthRpcError extends Schema.TaggedErrorClass<AuthRpcError>()("AuthRpcError", {
+export class AuthRpcError extends Schema.TaggedError<AuthRpcError>()("AuthRpcError", {
   message: TrimmedNonEmptyString,
   status: Schema.Literal(403),
 }) {}

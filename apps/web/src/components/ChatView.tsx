@@ -191,7 +191,6 @@ import {
   executeChatSendTurn,
   type SendTurnComposerSnapshot,
   type SendTurnSettings,
-  type SendTurnUndoDeps,
 } from "../hooks/executeChatSendTurn";
 import { useMessageQueueStore } from "../messageQueueStore";
 import type { QueuedMessage } from "../messageQueue.logic";
@@ -243,10 +242,6 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_SESSION_TABS: ReadonlyArray<SessionTabItem> = Object.freeze([]);
 const PROVIDER_STATUS_KEY_SEPARATOR = "\0";
-
-// "Undo send" window: how long a freshly sent message can be pulled back before
-// the turn is dispatched to the provider (mid-range of the 3–5s target).
-const SEND_UNDO_WINDOW_MS = 4000;
 
 // Stable identity so the message-queue selector doesn't churn on empty threads.
 const EMPTY_QUEUED_MESSAGES: readonly QueuedMessage[] = Object.freeze([]);
@@ -585,8 +580,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const openTerminalThreadKeys = useTerminalStateStore(
     useShallow((state) =>
-      Object.entries(state.terminalStateByThreadKey).flatMap(([nextThreadKey, nextTerminalState]) =>
-        nextTerminalState.terminalOpen ? [nextThreadKey] : [],
+      Object.entries(state.terminalStateByThreadKey).flatMap(
+        ([nextThreadKey, nextTerminalState]) =>
+          nextTerminalState.terminalOpen ? [nextThreadKey] : [],
       ),
     ),
   );
@@ -2567,14 +2563,13 @@ export default function ChatView(props: ChatViewProps) {
   }, [providerSelectionPolicy.reason]);
 
   // Build the executeChatSendTurn input from a composer snapshot and dispatch it.
-  // Shared by direct sends (with an undo window) and queue flushes (without one),
-  // so a queued message replays exactly like a live send.
+  // Shared by direct sends and queue flushes, so a queued message replays exactly
+  // like a live send.
   // Returns true once the send path has actually started (all guards passed), so
   // the queue only drops an item after it is genuinely on its way.
   const dispatchComposerSnapshot = async (
     composerSnapshot: SendTurnComposerSnapshot,
     settingsSnapshot: SendTurnSettings,
-    undo: SendTurnUndoDeps | undefined,
   ): Promise<boolean> => {
     if (!dispatchCapability.allowed) return false;
     const api = readEnvironmentApi(environmentId);
@@ -2614,11 +2609,10 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError(threadIdForSend, "Worktree creation is unavailable in this environment.");
       return false;
     }
-    // Filled by `prepareOnCommit` below, which only runs once the undo window
-    // has committed — so an undone send leaves no worktree and no thread, and
-    // the navigation at the end of this function stays put.
+    // Filled by `prepareForDispatch` below when a source-backed worktree is created,
+    // so the navigation at the end of this function targets the resulting thread.
     let sourceThreadRef: ScopedThreadRef | null = null;
-    const prepareWorktreeSourceOnCommit = async () => {
+    const prepareWorktreeSourceForDispatch = async () => {
       const createWorktree = api.git.createWorktreeForProject;
       if (!pendingWorktreeSource || !createWorktree || !activeProject) return null;
       const created = await createWorktree({
@@ -2676,7 +2670,7 @@ export default function ChatView(props: ChatViewProps) {
       },
       worktree: pendingWorktreeSource
         ? {
-            // The source's own worktree is created in `prepareOnCommit`; the
+            // The source's own worktree is created in `prepareForDispatch`; the
             // bootstrap must not prepare a second one.
             shouldMaterializeLegacyBranchWorktree: false,
             baseBranchForWorktree: null,
@@ -2693,8 +2687,7 @@ export default function ChatView(props: ChatViewProps) {
         projectCwd: activeProject.cwd,
         defaultModelSelection: activeProject.defaultModelSelection ?? null,
       },
-      ...(undo ? { undo } : {}),
-      ...(pendingWorktreeSource ? { prepareOnCommit: prepareWorktreeSourceOnCommit } : {}),
+      ...(pendingWorktreeSource ? { prepareForDispatch: prepareWorktreeSourceForDispatch } : {}),
       scroll: {
         scrollToEndBeforeOptimistic: async () => {
           isAtEndRef.current = true;
@@ -2909,24 +2902,7 @@ export default function ChatView(props: ChatViewProps) {
       return;
     }
 
-    await dispatchComposerSnapshotRef.current(composerSnapshot, settingsSnapshot, {
-      windowMs: SEND_UNDO_WINDOW_MS,
-      present: ({ triggerUndo }) => {
-        const toastId = toastManager.add(
-          stackedThreadToast({
-            type: "info",
-            title: "Message sent",
-            description: "You can undo before the agent picks it up.",
-            timeout: SEND_UNDO_WINDOW_MS,
-            actionVariant: "outline",
-            actionProps: { children: "Undo", onClick: triggerUndo },
-          }),
-        );
-        return () => {
-          toastManager.close(toastId);
-        };
-      },
-    });
+    await dispatchComposerSnapshotRef.current(composerSnapshot, settingsSnapshot);
   };
   const runSendRef = useRef(runSend);
   runSendRef.current = runSend;
@@ -2949,13 +2925,11 @@ export default function ChatView(props: ChatViewProps) {
     if (sendInFlightRef.current) return;
     // Only remove the item once the send path has actually started; a guard
     // early-return (missing env/thread/base branch) leaves it queued.
-    void dispatchComposerSnapshotRef
-      .current(next.composer, next.settings, undefined)
-      .then((started) => {
-        if (started) {
-          dequeueMessage(threadKey);
-        }
-      });
+    void dispatchComposerSnapshotRef.current(next.composer, next.settings).then((started) => {
+      if (started) {
+        dequeueMessage(threadKey);
+      }
+    });
   }, [
     activeThreadKey,
     queuedMessages,

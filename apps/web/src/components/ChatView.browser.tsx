@@ -86,6 +86,7 @@ import { resetCheckpointDiffStateForTests } from "../rpc/providerAtoms";
 import { getServerConfig } from "../rpc/serverState";
 import { getRouter } from "../router";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
+import { clearRightPanelSessionSearch } from "../rightPanelSessionState";
 import { selectBootstrapCompleteForActiveEnvironment, useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -1412,6 +1413,9 @@ function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
       truncated: false,
     };
   }
+  if (tag === WS_METHODS.sourceControlListChangeRequests) {
+    return [];
+  }
   if (tag === WS_METHODS.shellOpenInEditor) {
     return null;
   }
@@ -2083,9 +2087,14 @@ async function expectVisibleComboboxPopupToBeOpaqueAndClipped(): Promise<void> {
   const popupShellStyles = window.getComputedStyle(popupShell);
   const popupStyles = window.getComputedStyle(popup);
 
+  // Opacity is the shell's job alone. `combobox.tsx` deliberately leaves the
+  // inner popup transparent so the two do not both paint a glass layer (see
+  // "kill glass-on-glass"), so asserting a background on the popup would pin
+  // the exact bug that change removed. What the user can observe — that the
+  // list is not see-through — is the shell's background plus its clipping.
   expect(popupShellStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
   expect(popupShellStyles.overflow).toBe("hidden");
-  expect(popupStyles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  expect(popupStyles.backgroundColor).toBe("rgba(0, 0, 0, 0)");
 
   const popupShellRect = popupShell.getBoundingClientRect();
   const popupRect = popup.getBoundingClientRect();
@@ -2223,6 +2232,11 @@ async function mountChatView(options: {
       await setViewport(viewport);
       await waitForProductionStyles();
     },
+    // Resizes the mount host only. Media queries still report the real
+    // viewport, so a layout that reflows via `sm:`/`not-phone:` variants will
+    // NOT respond to this — it just gets squeezed and overflows. Use it to
+    // test container-driven layout; reach for `setViewport` whenever the
+    // assertion is about what a window resize does.
     setContainerSize: async (viewport) => {
       host.style.width = `${viewport.width}px`;
       host.style.height = `${viewport.height}px`;
@@ -2310,6 +2324,9 @@ function resolveWorkSurfaceRpc(body: NormalizedWsRpcRequestBody): unknown | unde
     return {
       relativePath: typeof body.relativePath === "string" ? body.relativePath : "README.md",
       contents: "# Work surface readme\n",
+      version: `sha256:${"0".repeat(64)}`,
+      encoding: "utf8",
+      lineEnding: "lf",
     };
   }
   return undefined;
@@ -2450,6 +2467,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     resetProjectPreviewAtomsForTests();
     resetSavedEnvironmentRegistryStoreForTests();
     resetSavedEnvironmentRuntimeStoreForTests();
+    clearRightPanelSessionSearch();
     Reflect.deleteProperty(window, "desktopBridge");
     useComposerDraftStore.setState({
       draftsByThreadKey: {},
@@ -7355,7 +7373,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await waitForButtonByText("Previous");
       await waitForButtonByText("Submit answers");
 
-      await mounted.setContainerSize(COMPACT_FOOTER_VIEWPORT);
+      await mounted.setViewport({
+        ...COMPACT_FOOTER_VIEWPORT,
+        width: 1_024,
+      });
       await expectComposerActionsContained();
     } finally {
       await mounted.cleanup();
@@ -7441,9 +7462,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Unable to find implementation actions trigger.",
       );
 
-      await mounted.setContainerSize({
-        width: 440,
-        height: WIDE_FOOTER_VIEWPORT.height,
+      await mounted.setViewport({
+        ...WIDE_FOOTER_VIEWPORT,
+        width: 1_024,
       });
       await expectComposerActionsContained();
 

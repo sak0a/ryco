@@ -491,7 +491,10 @@ describe("wsApi", () => {
   });
 
   it("forwards workspace file writes to the project RPC", async () => {
-    rpcClientMock.projects.writeFile.mockResolvedValue({ relativePath: "plan.md" });
+    rpcClientMock.projects.writeFile.mockResolvedValue({
+      relativePath: "plan.md",
+      version: `sha256:${"1".repeat(64)}`,
+    });
     const { createEnvironmentApi } = await import("./environmentApi");
 
     const api = createEnvironmentApi(rpcClientMock as never);

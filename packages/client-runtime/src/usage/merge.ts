@@ -204,27 +204,24 @@ export function mergeUsageEnvironmentResults(
   }
 
   const buckets: MergedUsageBucket[] = [...mutableBuckets.values()]
-    .map(
-      (bucket): MergedUsageBucket =>
-        Object.assign(
-          {
-            date: bucket.date,
-            provider: bucket.provider,
-            model: bucket.model,
-            tokens: bucket.tokens,
-            responseCount: bucket.responseCount,
-            sessionCount: bucket.sessionCount,
-            pricedTokenCount: bucket.pricedTokenCount,
-            unpricedTokenCount: bucket.unpricedTokenCount,
-            costSource: resolveMergedCostSource(bucket.costSources, bucket.unpricedTokenCount),
-            sourceIds: [...bucket.sourceIds].toSorted(),
-          },
-          bucket.rawModel === undefined ? {} : { rawModel: bucket.rawModel },
-          bucket.hasCost ? { estimatedCostUsd: bucket.estimatedCostUsd } : {},
-          bucket.hasCacheSavings
-            ? { estimatedCacheSavingsUsd: bucket.estimatedCacheSavingsUsd }
-            : {},
-        ),
+    .map((bucket): MergedUsageBucket =>
+      Object.assign(
+        {
+          date: bucket.date,
+          provider: bucket.provider,
+          model: bucket.model,
+          tokens: bucket.tokens,
+          responseCount: bucket.responseCount,
+          sessionCount: bucket.sessionCount,
+          pricedTokenCount: bucket.pricedTokenCount,
+          unpricedTokenCount: bucket.unpricedTokenCount,
+          costSource: resolveMergedCostSource(bucket.costSources, bucket.unpricedTokenCount),
+          sourceIds: [...bucket.sourceIds].toSorted(),
+        },
+        bucket.rawModel === undefined ? {} : { rawModel: bucket.rawModel },
+        bucket.hasCost ? { estimatedCostUsd: bucket.estimatedCostUsd } : {},
+        bucket.hasCacheSavings ? { estimatedCacheSavingsUsd: bucket.estimatedCacheSavingsUsd } : {},
+      ),
     )
     .toSorted(
       (left, right) =>

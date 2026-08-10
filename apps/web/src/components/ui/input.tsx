@@ -18,17 +18,25 @@ import { cn } from "~/lib/utils";
 const TOUCH_INPUT_CLASS_NAME =
   "phone:h-11 phone:[&_[data-slot=input]]:h-11 phone:[&_[data-slot=input]]:leading-11";
 
-type InputProps = Omit<InputPrimitive.Props & React.RefAttributes<HTMLInputElement>, "size"> & {
-  size?: "sm" | "default" | "lg" | number;
-  unstyled?: boolean;
-  nativeInput?: boolean;
+type SharedInputProps = {
+  className?: string | undefined;
+  size?: "sm" | "default" | "lg" | number | undefined;
+  unstyled?: boolean | undefined;
+  nativeInput?: boolean | undefined;
 };
+
+type InputProps = Omit<
+  InputPrimitive.Props & React.RefAttributes<HTMLInputElement>,
+  "className" | "size"
+> &
+  SharedInputProps;
 
 function Input({
   className,
   size = "default",
   unstyled = false,
   nativeInput = false,
+  style,
   ...props
 }: InputProps) {
   const inputClassName = cn(
@@ -55,17 +63,19 @@ function Input({
     >
       {nativeInput ? (
         <input
+          {...(props as React.ComponentPropsWithRef<"input">)}
           className={inputClassName}
           data-slot="input"
           size={typeof size === "number" ? size : undefined}
-          {...props}
+          style={typeof style === "function" ? undefined : style}
         />
       ) : (
         <InputPrimitive
+          {...props}
           className={inputClassName}
           data-slot="input"
           size={typeof size === "number" ? size : undefined}
-          {...props}
+          style={style}
         />
       )}
     </span>
