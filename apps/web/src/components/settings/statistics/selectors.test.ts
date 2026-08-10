@@ -41,6 +41,7 @@ function makeSnapshot(
     models: [],
     dailyBuckets: buckets,
     worktrees: { created: 0, archived: 0, active: 0, openPrs: 0 },
+    recentPullRequests: [],
     // The functions under test read only generatedAt + dailyBuckets; totals is
     // required by the type but unused here.
     totals: {

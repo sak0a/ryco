@@ -84,10 +84,10 @@ Inactive-view filters are preserved when switching tabs. Arrays are sorted befor
 
 The two views intentionally answer different questions:
 
-| View | Question | Data scope | Main filters |
-| --- | --- | --- | --- |
-| Usage | How many provider-recorded tokens were processed, and what would comparable base API usage cost? | Supported transcript files on selected connected environments | Range, environments, providers |
-| Activity | What work did I do through Ryco? | Ryco projection state on the current environment | Range, project, model |
+| View     | Question                                                                                         | Data scope                                                    | Main filters                   |
+| -------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- | ------------------------------ |
+| Usage    | How many provider-recorded tokens were processed, and what would comparable base API usage cost? | Supported transcript files on selected connected environments | Range, environments, providers |
+| Activity | What work did I do through Ryco?                                                                 | Ryco projection state on the current environment              | Range, project, model          |
 
 Usage never exposes a project filter. Activity never claims machine-wide coverage. A persistent scope note appears in each view, not only in a tooltip.
 

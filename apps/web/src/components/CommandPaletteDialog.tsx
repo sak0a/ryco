@@ -24,6 +24,7 @@ import {
   ArrowDownIcon,
   ArrowLeftIcon,
   ArrowUpIcon,
+  BarChart3Icon,
   CircleAlertIcon,
   CornerLeftUpIcon,
   FolderIcon,
@@ -127,6 +128,7 @@ import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useComposerHandleContext } from "../composerHandleContext";
 import { useHostedRpcCapability } from "../hostedHub/capabilities";
+import { getPresentationTier } from "../lib/presentationTier";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
@@ -382,6 +384,7 @@ export function CommandPaletteDialog() {
 function OpenCommandPaletteDialog() {
   const dispatchCapability = useHostedRpcCapability(ORCHESTRATION_WS_METHODS.dispatchCommand);
   const addProjectCapability = useHostedRpcCapability(WS_METHODS.projectsAdd);
+  const statisticsCapability = useHostedRpcCapability(WS_METHODS.serverGetStatistics);
   const navigate = useNavigate();
   const setOpen = useCommandPaletteStore((store) => store.setOpen);
   const openIntent = useCommandPaletteStore((store) => store.openIntent);
@@ -1156,6 +1159,22 @@ function OpenCommandPaletteDialog() {
       openAddProjectFlow();
     },
   });
+
+  if (getPresentationTier() !== "phone") {
+    actionItems.push({
+      kind: "action",
+      value: "action:statistics",
+      searchTerms: ["statistics", "usage", "activity", "tokens", "cost", "history"],
+      title: "Open statistics",
+      ...(statisticsCapability.reason ? { description: statisticsCapability.reason } : {}),
+      disabled: !statisticsCapability.allowed,
+      icon: <BarChart3Icon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        setOpen(false);
+        await navigate({ to: "/statistics" });
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",

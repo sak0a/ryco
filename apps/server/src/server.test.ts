@@ -847,6 +847,7 @@ const buildAppUnderTest = (options?: {
                   projects: 0,
                 },
                 tokenAttribution: "per-turn-delta",
+                recentPullRequests: [],
               }),
             ...options?.layers?.statisticsQuery,
           }),

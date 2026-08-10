@@ -1,6 +1,7 @@
-import { PanelLeftCloseIcon, SettingsIcon } from "lucide-react";
+import { BarChart3Icon, PanelLeftCloseIcon, SettingsIcon } from "lucide-react";
 import React, { memo, useCallback } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
+import { WS_METHODS } from "@ryco/contracts";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../../branding";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import { SidebarFooter, SidebarHeader, useSidebar } from "../ui/sidebar";
@@ -8,6 +9,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { RycoLetterMark } from "../RycoLetterMark";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
+import { useHostedRpcCapability } from "../../hostedHub/capabilities";
+import { cn } from "../../lib/utils";
 
 const SIDEBAR_HEADER_ACTION_CLASS_NAME =
   "inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2";
@@ -101,8 +104,25 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 });
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const statisticsCapability = useHostedRpcCapability(WS_METHODS.serverGetStatistics);
   return (
     <SidebarFooter className="p-2">
+      {statisticsCapability.allowed ? (
+        <Link
+          to="/statistics"
+          aria-label="Open statistics"
+          className={cn(
+            "flex h-8 items-center gap-2 rounded-md px-2 text-xs font-medium transition-colors",
+            pathname === "/statistics"
+              ? "bg-sidebar-accent text-sidebar-accent-foreground"
+              : "text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          )}
+        >
+          <BarChart3Icon className="size-3.5" />
+          <span>Statistics</span>
+        </Link>
+      ) : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdatePill />
     </SidebarFooter>

@@ -5,7 +5,7 @@ import { observeRpcEffect } from "../observability/RpcInstrumentation.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
 
 export const makeStatisticsHandlers = (ctx: WsRpcContext) => {
-  const { statisticsQuery, ownerEffect } = ctx;
+  const { statisticsQuery, usageService, ownerEffect } = ctx;
 
   return defineWsHandlers({
     // Owner-gated: the snapshot exposes every project's title and usage, so only
@@ -17,6 +17,12 @@ export const makeStatisticsHandlers = (ctx: WsRpcContext) => {
           WS_METHODS.serverGetStatistics,
           statisticsQuery.getStatistics().pipe(Effect.orDie),
         ),
+        { "rpc.aggregate": "server" },
+      ),
+    [WS_METHODS.serverGetUsageSummary]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.serverGetUsageSummary,
+        ownerEffect(WS_METHODS.serverGetUsageSummary, usageService.readSummary(input)),
         { "rpc.aggregate": "server" },
       ),
   });

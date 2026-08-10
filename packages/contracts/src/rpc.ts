@@ -6,6 +6,7 @@ import { OpenError, OpenInEditorInput } from "./editor.ts";
 import { AuthAccessStreamEvent, AuthRpcError } from "./auth.ts";
 import { DiagnosticsError, DiagnosticsSnapshot } from "./diagnostics.ts";
 import { StatisticsSnapshot } from "./statistics.ts";
+import { UsageReadError, UsageSummary, UsageSummaryRequest } from "./usage.ts";
 import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import {
   AtlassianConnectionError,
@@ -276,6 +277,7 @@ export const WS_METHODS = {
   serverInstallOpinionatedPlugin: "server.installOpinionatedPlugin",
   serverGetDiagnosticsSnapshot: "server.getDiagnosticsSnapshot",
   serverGetStatistics: "server.getStatistics",
+  serverGetUsageSummary: "server.getUsageSummary",
 
   // MCP settings methods
   mcpListWorkspaces: "mcp.listWorkspaces",
@@ -551,6 +553,12 @@ export const WsServerGetStatisticsRpc = Rpc.make(WS_METHODS.serverGetStatistics,
   payload: Schema.Struct({}),
   success: StatisticsSnapshot,
   error: AuthRpcError,
+});
+
+export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
+  payload: UsageSummaryRequest,
+  success: UsageSummary,
+  error: Schema.Union([UsageReadError, AuthRpcError]),
 });
 
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
@@ -1318,6 +1326,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetAdvertisedEndpointsRpc,
   WsServerGetDiagnosticsMetricsRpc,
   WsServerGetStatisticsRpc,
+  WsServerGetUsageSummaryRpc,
   WsServerRefreshProvidersRpc,
   WsServerUpdateProviderRpc,
   WsServerUpsertKeybindingRpc,

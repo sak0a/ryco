@@ -1,6 +1,7 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import { IsoDateTime, ProjectId } from "./baseSchemas.ts";
+import { PullRequestState, WorktreeId } from "./worktree.ts";
 
 /**
  * Usage statistics surfaced in Settings → Statistics.
@@ -106,6 +107,23 @@ export const StatisticsTotals = Schema.Struct({
 });
 export type StatisticsTotals = typeof StatisticsTotals.Type;
 
+export const StatisticsRecentPullRequest = Schema.Struct({
+  worktreeId: WorktreeId,
+  worktreeTitle: Schema.optional(Schema.String),
+  branch: Schema.String,
+  projectId: ProjectId,
+  projectTitle: Schema.String,
+  prNumber: Schema.Number,
+  prTitle: Schema.optional(Schema.String),
+  prState: Schema.optional(PullRequestState),
+  prIsDraft: Schema.optional(Schema.Boolean),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  archivedAt: Schema.optional(IsoDateTime),
+  active: Schema.Boolean,
+});
+export type StatisticsRecentPullRequest = typeof StatisticsRecentPullRequest.Type;
+
 /**
  * How per-day/per-model token figures were attributed:
  *  - `per-turn-delta`: exact, one definitive delta per (thread, turn).
@@ -131,5 +149,8 @@ export const StatisticsSnapshot = Schema.Struct({
   worktrees: StatisticsWorktreeSummary,
   totals: StatisticsTotals,
   tokenAttribution: Schema.optional(StatisticsTokenAttribution),
+  recentPullRequests: Schema.Array(StatisticsRecentPullRequest).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
 });
 export type StatisticsSnapshot = typeof StatisticsSnapshot.Type;
