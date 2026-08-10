@@ -2834,8 +2834,48 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(response.relativePath, "nested/created.txt");
+      assert.match(response.version, /^sha256:[a-f0-9]{64}$/);
       const persisted = yield* fs.readFileString(path.join(workspaceDir, "nested", "created.txt"));
       assert.equal(persisted, "written-by-rpc");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes guarded project write conflicts with a typed reason", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "ryco-ws-project-edit-" });
+      const filePath = path.join(workspaceDir, "src", "app.ts");
+      yield* fs.makeDirectory(path.dirname(filePath), { recursive: true });
+      yield* fs.writeFileString(filePath, "export const value = 1;\n");
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const opened = yield* client[WS_METHODS.projectsReadFile]({
+              cwd: workspaceDir,
+              relativePath: "src/app.ts",
+            });
+            yield* fs.writeFileString(filePath, "export const value = 2;\n");
+            return yield* client[WS_METHODS.projectsWriteFile]({
+              cwd: workspaceDir,
+              relativePath: "src/app.ts",
+              contents: "export const value = 3;\n",
+              expectedVersion: opened.version,
+              encoding: opened.encoding,
+              lineEnding: opened.lineEnding,
+            }).pipe(Effect.result);
+          }),
+        ),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "ProjectWriteFileError");
+      assert.equal(result.failure.reason, "conflict");
+      assert.equal(yield* fs.readFileString(filePath), "export const value = 2;\n");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -2893,6 +2933,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assertTrue(result._tag === "Failure");
       assertTrue(result.failure._tag === "ProjectWriteFileError");
+      assert.equal(result.failure.reason, "failed");
       assert.equal(
         result.failure.message,
         "Workspace file path must stay within the project root.",

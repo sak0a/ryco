@@ -1,12 +1,17 @@
-import { randomUUID } from "node:crypto";
-import { realpath as realpathPromise } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { constants as NodeFsConstants, type BigIntStats } from "node:fs";
+import * as NodeFs from "node:fs/promises";
+import * as NodePath from "node:path";
 
-import { Data, Effect, FileSystem, Layer, Path } from "effect";
+import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect";
 import { PROJECT_STAGE_FILE_MAX_BYTES } from "@ryco/contracts";
 
 import {
+  WorkspaceFileConflictError,
+  WorkspaceFileDeletedError,
   WorkspaceFileSystem,
   WorkspaceFileSystemError,
+  WorkspaceFileUnsupportedEditError,
   type WorkspaceFileSystemShape,
 } from "../Services/WorkspaceFileSystem.ts";
 import { WorkspaceEntries } from "../Services/WorkspaceEntries.ts";
@@ -14,6 +19,7 @@ import { WorkspacePathOutsideRootError, WorkspacePaths } from "../Services/Works
 
 const WORKSPACE_PREVIEW_MAX_BYTES = 512 * 1024;
 const WORKSPACE_PREVIEW_TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const STAGED_FILE_ROOT = ".ryco/attachments";
 const UNSAFE_PATH_SEGMENT_CHARS = new Set(["<", ">", ":", '"', "/", "\\", "|", "?", "*"]);
 
@@ -21,11 +27,210 @@ function isLikelyBinaryPreview(bytes: Uint8Array): boolean {
   return bytes.subarray(0, Math.min(bytes.length, 8_192)).includes(0);
 }
 
+function fileVersion(bytes: Uint8Array): string {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
 function decodePreviewContents(bytes: Uint8Array): string | null {
   try {
     return WORKSPACE_PREVIEW_TEXT_DECODER.decode(bytes);
   } catch {
     return null;
+  }
+}
+
+function detectLineEnding(contents: string): "lf" | "crlf" | "cr" | "mixed" {
+  const crlfCount = contents.match(/\r\n/g)?.length ?? 0;
+  const lfCount = contents.match(/(?<!\r)\n/g)?.length ?? 0;
+  const crCount = contents.match(/\r(?!\n)/g)?.length ?? 0;
+  const styles = Number(crlfCount > 0) + Number(lfCount > 0) + Number(crCount > 0);
+  if (styles > 1) return "mixed";
+  if (crlfCount > 0) return "crlf";
+  if (crCount > 0) return "cr";
+  return "lf";
+}
+
+function normalizeLineEndings(contents: string): string {
+  return contents.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+}
+
+function encodeWorkspaceText(
+  contents: string,
+  encoding: "utf8" | "utf8-bom",
+  lineEnding: "lf" | "crlf" | "cr",
+): Buffer {
+  const normalized = normalizeLineEndings(contents);
+  const text =
+    lineEnding === "lf"
+      ? normalized
+      : normalized.replaceAll("\n", lineEnding === "crlf" ? "\r\n" : "\r");
+  const encoded = Buffer.from(text, "utf8");
+  return encoding === "utf8-bom" ? Buffer.concat([UTF8_BOM, encoded]) : encoded;
+}
+
+function sameFileState(left: BigIntStats, right: BigIntStats): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function pathStaysWithinRoot(rootPath: string, targetPath: string): boolean {
+  const relative = NodePath.relative(rootPath, targetPath);
+  return (
+    relative.length > 0 &&
+    relative !== "." &&
+    relative !== ".." &&
+    !relative.startsWith(`..${NodePath.sep}`) &&
+    !NodePath.isAbsolute(relative)
+  );
+}
+
+async function readStableFileBytes(filePath: string): Promise<{
+  readonly bytes: Buffer;
+  readonly stat: BigIntStats;
+}> {
+  const handle = await NodeFs.open(filePath, "r");
+  try {
+    const beforeReadStat = await handle.stat({ bigint: true });
+    if (!beforeReadStat.isFile()) {
+      throw new Error("Only regular files can be previewed.");
+    }
+    if (beforeReadStat.size > BigInt(WORKSPACE_PREVIEW_MAX_BYTES)) {
+      throw new Error(
+        `File is too large to preview (${beforeReadStat.size} bytes). Limit is ${WORKSPACE_PREVIEW_MAX_BYTES} bytes.`,
+      );
+    }
+    const bytes = await handle.readFile();
+    const afterReadStat = await handle.stat({ bigint: true });
+    const pathStat = await NodeFs.stat(filePath, { bigint: true });
+    if (
+      bytes.byteLength !== Number(afterReadStat.size) ||
+      !sameFileState(beforeReadStat, afterReadStat) ||
+      !sameFileState(afterReadStat, pathStat)
+    ) {
+      throw new Error("File changed while it was being read. Try again.");
+    }
+    return { bytes, stat: afterReadStat };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function readCurrentFileVersion(input: {
+  readonly cwd: string;
+  readonly relativePath: string;
+  readonly filePath: string;
+}): Promise<{ readonly version: string; readonly stat: BigIntStats }> {
+  try {
+    const { bytes, stat } = await readStableFileBytes(input.filePath);
+    return { version: fileVersion(bytes), stat };
+  } catch (cause) {
+    if (isEnoentError(cause)) {
+      throw new WorkspaceFileDeletedError({ cwd: input.cwd, relativePath: input.relativePath });
+    }
+    throw cause;
+  }
+}
+
+async function writeGuardedFileAtomically(input: {
+  readonly cwd: string;
+  readonly relativePath: string;
+  readonly logicalPath: string;
+  readonly realTargetPath: string;
+  readonly bytes: Buffer;
+  readonly expectedVersion: string;
+}): Promise<void> {
+  const realRoot = await NodeFs.realpath(input.cwd);
+  const initial = await readCurrentFileVersion({
+    cwd: input.cwd,
+    relativePath: input.relativePath,
+    filePath: input.realTargetPath,
+  });
+  if (initial.version !== input.expectedVersion) {
+    throw new WorkspaceFileConflictError({
+      cwd: input.cwd,
+      relativePath: input.relativePath,
+    });
+  }
+  await NodeFs.access(input.realTargetPath, NodeFsConstants.W_OK);
+
+  const mode = Number(initial.stat.mode & 0o777n);
+  const temporaryPath = NodePath.join(
+    NodePath.dirname(input.realTargetPath),
+    `.${NodePath.basename(input.realTargetPath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  let handle: NodeFs.FileHandle | undefined;
+  let temporaryIdentity: { readonly dev: bigint; readonly ino: bigint } | null = null;
+
+  try {
+    const noFollow = process.platform === "win32" ? 0 : NodeFsConstants.O_NOFOLLOW;
+    handle = await NodeFs.open(
+      temporaryPath,
+      NodeFsConstants.O_WRONLY | NodeFsConstants.O_CREAT | NodeFsConstants.O_EXCL | noFollow,
+      mode,
+    );
+    const handleStat = await handle.stat({ bigint: true });
+    temporaryIdentity = { dev: handleStat.dev, ino: handleStat.ino };
+    const pathStat = await NodeFs.stat(temporaryPath, { bigint: true });
+    if (!handleStat.isFile() || !sameFileState(handleStat, pathStat)) {
+      throw new Error("Workspace write temporary path changed after open.");
+    }
+    const realTemporaryPath = await NodeFs.realpath(temporaryPath);
+    if (realTemporaryPath !== temporaryPath || !pathStaysWithinRoot(realRoot, realTemporaryPath)) {
+      throw new Error("Workspace write temporary path escaped the project root.");
+    }
+    await handle.chmod(mode);
+    await handle.writeFile(input.bytes);
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+
+    const finalRealTarget = await NodeFs.realpath(input.logicalPath).catch((cause: unknown) => {
+      if (isEnoentError(cause)) {
+        throw new WorkspaceFileDeletedError({
+          cwd: input.cwd,
+          relativePath: input.relativePath,
+        });
+      }
+      throw cause;
+    });
+    if (
+      finalRealTarget !== input.realTargetPath ||
+      !pathStaysWithinRoot(realRoot, finalRealTarget)
+    ) {
+      throw new WorkspaceFileConflictError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+      });
+    }
+    const current = await readCurrentFileVersion({
+      cwd: input.cwd,
+      relativePath: input.relativePath,
+      filePath: input.realTargetPath,
+    });
+    if (current.version !== input.expectedVersion || !sameFileState(initial.stat, current.stat)) {
+      throw new WorkspaceFileConflictError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+      });
+    }
+    await NodeFs.rename(temporaryPath, input.realTargetPath);
+  } catch (cause) {
+    await handle?.close().catch(() => undefined);
+    const temporaryStat = await NodeFs.stat(temporaryPath, { bigint: true }).catch(() => null);
+    if (
+      temporaryStat !== null &&
+      temporaryIdentity !== null &&
+      temporaryStat.dev === temporaryIdentity.dev &&
+      temporaryStat.ino === temporaryIdentity.ino
+    ) {
+      await NodeFs.unlink(temporaryPath).catch(() => undefined);
+    }
+    throw cause;
   }
 }
 
@@ -118,7 +323,7 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
 
     while (true) {
       const realCandidatePath = yield* Effect.tryPromise({
-        try: () => realpathPromise(candidatePath),
+        try: () => NodeFs.realpath(candidatePath),
         catch: (cause) =>
           isEnoentError(cause)
             ? new MissingRealPathError()
@@ -155,7 +360,7 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
         Effect.mapError(toWorkspaceFileSystemError(input, "workspaceFileSystem.workspaceRoot")),
       );
     const realWorkspaceRoot = yield* Effect.tryPromise({
-      try: () => realpathPromise(normalizedWorkspaceRoot),
+      try: () => NodeFs.realpath(normalizedWorkspaceRoot),
       catch: toWorkspaceFileSystemError(input, "workspaceFileSystem.realpath.root"),
     });
     const realTargetPath = yield* resolveRealWorkspaceTargetPath(input, absolutePath);
@@ -172,6 +377,7 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
         relativePath: input.relativePath,
       });
     }
+    return { realWorkspaceRoot, realTargetPath };
   });
 
   const readFile: WorkspaceFileSystemShape["readFile"] = Effect.fn("WorkspaceFileSystem.readFile")(
@@ -181,42 +387,14 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
         relativePath: input.relativePath,
       });
 
-      yield* ensureResolvedPathStaysWithinWorkspace(input, target.absolutePath);
-
-      const fileInfo = yield* fileSystem
-        .stat(target.absolutePath)
-        .pipe(
-          Effect.mapError(toWorkspaceFileSystemError(input, "workspaceFileSystem.readFile.stat")),
-        );
-      if (fileInfo.type !== "File") {
-        return yield* new WorkspaceFileSystemError({
-          cwd: input.cwd,
-          relativePath: input.relativePath,
-          operation: "workspaceFileSystem.readFile.stat",
-          detail: "Only regular files can be previewed.",
-        });
-      }
-
-      const fileSize =
-        typeof fileInfo.size === "bigint"
-          ? Number(fileInfo.size)
-          : typeof fileInfo.size === "number"
-            ? fileInfo.size
-            : 0;
-      if (fileSize > WORKSPACE_PREVIEW_MAX_BYTES) {
-        return yield* new WorkspaceFileSystemError({
-          cwd: input.cwd,
-          relativePath: input.relativePath,
-          operation: "workspaceFileSystem.readFile.sizeLimit",
-          detail: `File is too large to preview (${fileSize} bytes). Limit is ${WORKSPACE_PREVIEW_MAX_BYTES} bytes.`,
-        });
-      }
-
-      const bytes = yield* fileSystem
-        .readFile(target.absolutePath)
-        .pipe(
-          Effect.mapError(toWorkspaceFileSystemError(input, "workspaceFileSystem.readFile.read")),
-        );
+      const { realTargetPath } = yield* ensureResolvedPathStaysWithinWorkspace(
+        input,
+        target.absolutePath,
+      );
+      const { bytes } = yield* Effect.tryPromise({
+        try: () => readStableFileBytes(realTargetPath),
+        catch: toWorkspaceFileSystemError(input, "workspaceFileSystem.readFile"),
+      });
       if (isLikelyBinaryPreview(bytes)) {
         return yield* new WorkspaceFileSystemError({
           cwd: input.cwd,
@@ -226,7 +404,9 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
         });
       }
 
-      const contents = decodePreviewContents(bytes);
+      const hasUtf8Bom = bytes.length >= UTF8_BOM.length && bytes.subarray(0, 3).equals(UTF8_BOM);
+      const textBytes = hasUtf8Bom ? bytes.subarray(UTF8_BOM.length) : bytes;
+      const contents = decodePreviewContents(textBytes);
       if (contents === null) {
         return yield* new WorkspaceFileSystemError({
           cwd: input.cwd,
@@ -238,7 +418,10 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
 
       return {
         relativePath: target.relativePath,
-        contents,
+        contents: normalizeLineEndings(contents),
+        version: fileVersion(bytes),
+        encoding: hasUtf8Bom ? "utf8-bom" : "utf8",
+        lineEnding: detectLineEnding(contents),
       };
     },
   );
@@ -251,18 +434,72 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
       relativePath: input.relativePath,
     });
 
-    yield* ensureResolvedPathStaysWithinWorkspace(input, target.absolutePath);
+    const { realTargetPath } = yield* ensureResolvedPathStaysWithinWorkspace(
+      input,
+      target.absolutePath,
+    );
+    const guarded = input.expectedVersion !== undefined;
+    if (
+      guarded &&
+      (input.encoding === undefined ||
+        input.lineEnding === undefined ||
+        input.lineEnding === "mixed")
+    ) {
+      return yield* new WorkspaceFileUnsupportedEditError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+        detail: "Explorer saves require a supported encoding and consistent line endings.",
+      });
+    }
+    const bytes = guarded
+      ? encodeWorkspaceText(
+          input.contents,
+          input.encoding as "utf8" | "utf8-bom",
+          input.lineEnding as "lf" | "crlf" | "cr",
+        )
+      : Buffer.from(input.contents, "utf8");
+    if (guarded && bytes.byteLength > WORKSPACE_PREVIEW_MAX_BYTES) {
+      return yield* new WorkspaceFileUnsupportedEditError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+        detail: "The edited file is too large to save from Explorer.",
+      });
+    }
 
-    yield* fileSystem
-      .makeDirectory(path.dirname(target.absolutePath), { recursive: true })
-      .pipe(
-        Effect.mapError(toWorkspaceFileSystemError(input, "workspaceFileSystem.makeDirectory")),
-      );
-    yield* fileSystem
-      .writeFileString(target.absolutePath, input.contents)
-      .pipe(Effect.mapError(toWorkspaceFileSystemError(input, "workspaceFileSystem.writeFile")));
+    if (guarded) {
+      yield* Effect.tryPromise({
+        try: () =>
+          writeGuardedFileAtomically({
+            cwd: input.cwd,
+            relativePath: input.relativePath,
+            logicalPath: target.absolutePath,
+            realTargetPath,
+            bytes,
+            expectedVersion: input.expectedVersion as string,
+          }),
+        catch: (cause) => {
+          if (
+            Schema.is(WorkspaceFileConflictError)(cause) ||
+            Schema.is(WorkspaceFileDeletedError)(cause) ||
+            Schema.is(WorkspaceFileUnsupportedEditError)(cause)
+          ) {
+            return cause;
+          }
+          return toWorkspaceFileSystemError(input, "workspaceFileSystem.writeFile")(cause);
+        },
+      });
+    } else {
+      yield* fileSystem
+        .makeDirectory(path.dirname(realTargetPath), { recursive: true })
+        .pipe(
+          Effect.mapError(toWorkspaceFileSystemError(input, "workspaceFileSystem.makeDirectory")),
+        );
+      yield* fileSystem
+        .writeFile(realTargetPath, bytes)
+        .pipe(Effect.mapError(toWorkspaceFileSystemError(input, "workspaceFileSystem.writeFile")));
+    }
     yield* workspaceEntries.invalidate(input.cwd);
-    return { relativePath: target.relativePath };
+    return { relativePath: target.relativePath, version: fileVersion(bytes) };
   });
 
   const stageFileReference: WorkspaceFileSystemShape["stageFileReference"] = Effect.fn(

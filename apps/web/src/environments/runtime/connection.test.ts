@@ -87,9 +87,18 @@ function createTestClient() {
     },
     projects: {
       listEntries: vi.fn(async () => ({ entries: [], truncated: false })),
-      readFile: vi.fn(async () => ({ relativePath: "README.md", contents: "" })),
+      readFile: vi.fn(async () => ({
+        relativePath: "README.md",
+        contents: "",
+        version: `sha256:${"0".repeat(64)}`,
+        encoding: "utf8",
+        lineEnding: "lf",
+      })),
       searchEntries: vi.fn(async () => []),
-      writeFile: vi.fn(async () => undefined),
+      writeFile: vi.fn(async () => ({
+        relativePath: "README.md",
+        version: `sha256:${"1".repeat(64)}`,
+      })),
       stageFileReference: vi.fn(async () => ({
         relativePath: ".ryco/attachments/file.txt",
         sizeBytes: 0,
