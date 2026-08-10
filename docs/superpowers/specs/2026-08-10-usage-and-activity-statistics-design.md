@@ -1,7 +1,7 @@
 # Usage and Activity Statistics Design
 
 **Date:** 2026-08-10
-**Status:** Design approved; specification awaiting final review
+**Status:** Approved for implementation
 
 ## Purpose
 
