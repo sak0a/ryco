@@ -424,9 +424,15 @@ export function ThreadFilesScreen(props: {
       case "search":
         return (
           <LegendList
+            // A distinct identity per view: the search and tree lists sit at the
+            // same JSX position, and updating one LegendList in place with the
+            // OTHER view's row shape makes its recycler probe stale indices —
+            // keyExtractor then sees undefined rows (crashed in QA on clearing
+            // the search box). Remounting on the switch is the robust boundary.
+            key="search-rows"
             data={model.rows}
             renderItem={renderSearchRow}
-            keyExtractor={(row) => row.path}
+            keyExtractor={(row, index) => row?.path ?? `search-${index}`}
             recycleItems
             refreshing={refreshing}
             onRefresh={refresh}
@@ -449,9 +455,10 @@ export function ThreadFilesScreen(props: {
       case "tree":
         return (
           <LegendList
+            key="tree-rows"
             data={model.rows}
             renderItem={renderTreeRow}
-            keyExtractor={(row) => row.node.path}
+            keyExtractor={(row, index) => row?.node.path ?? `tree-${index}`}
             recycleItems
             refreshing={refreshing}
             onRefresh={refresh}

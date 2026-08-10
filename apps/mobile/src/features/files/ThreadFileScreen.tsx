@@ -335,6 +335,10 @@ function SourceFileView(props: {
               data={props.lines}
               renderItem={renderLine}
               keyExtractor={(_line, index) => String(index)}
+              // The lines array keeps its identity when the tokens resolve, so
+              // without this the recycler never re-renders visible rows and the
+              // highlight silently never appears (caught in simulator QA).
+              extraData={tokenLines}
               recycleItems
               estimatedItemSize={surface.rowHeight}
               refreshing={props.refreshing}
