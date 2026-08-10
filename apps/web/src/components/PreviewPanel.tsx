@@ -1,13 +1,15 @@
 import { File as DiffsFile } from "@pierre/diffs/react";
-import { useParams, useSearch } from "@tanstack/react-router";
+import { useBlocker, useParams, useSearch } from "@tanstack/react-router";
 import { Schema } from "effect";
 import {
   ArrowLeftIcon,
   CircleAlertIcon,
   FolderOpenIcon,
+  LoaderCircleIcon,
   PanelRightCloseIcon,
   PanelRightOpenIcon,
   RefreshCwIcon,
+  SaveIcon,
   SearchIcon,
   TextWrapIcon,
   TriangleAlertIcon,
@@ -28,6 +30,8 @@ import { useSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem } from "../hooks/useLocalStorage";
 import { useProjectListEntries, useProjectReadFile } from "~/rpc/useProjectPreview";
+import { setProjectReadFileCacheData } from "~/rpc/projectPreviewAtoms";
+import { ensureEnvironmentApi } from "~/environmentApi";
 import { selectProjectByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef } from "../threadRoutes";
@@ -35,10 +39,33 @@ import { DraftId, useComposerDraftStore } from "../composerDraftStore";
 import type { TurnDiffSummary } from "../types";
 import { ChangedFilesTree } from "./chat/ChangedFilesTree";
 import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+import { PreviewFileEditor } from "./PreviewFileEditor";
+import { PREVIEW_FILE_UNSAFE_CSS } from "./PreviewFileStyles";
+import {
+  beginPreviewFileSave,
+  createPreviewFileDocument,
+  createPreviewFileEditSession,
+  discardPreviewFileChanges,
+  failPreviewFileSave,
+  finishPreviewFileSave,
+  isPreviewFileSessionDirty,
+  readPreviewFileSaveFailure,
+  reconcilePreviewFileSession,
+  updatePreviewFileSessionContents,
+  type PreviewFileEditSession,
+} from "./PreviewFileEditSession";
 import { Badge } from "./ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Toggle } from "./ui/toggle";
+import {
+  AlertDialog,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import { cn } from "~/lib/utils";
 import {
   detectPreviewFileKind,
@@ -55,32 +82,28 @@ const PREVIEW_CODE_CSS = `
 .preview-panel-diffs-file {
   display: block;
   min-height: 100%;
+  padding: 0.75rem;
   background-color: color-mix(in srgb, var(--card) 90%, var(--background));
 }
-`;
 
-const PREVIEW_FILE_UNSAFE_CSS = `
-[data-file] {
-  --diffs-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
-  --diffs-light-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
-  --diffs-dark-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
-  --diffs-token-light-bg: transparent;
-  --diffs-token-dark-bg: transparent;
-  background-color: var(--diffs-bg) !important;
+.preview-panel-file-card {
+  container-type: inline-size;
 }
 
-[data-content] {
-  padding: 0.75rem;
-}
+@container (max-width: 360px) {
+  .preview-panel-file-toolbar {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding-block: 0.375rem;
+  }
 
-[data-line],
-[data-column-number] {
-  font-size: 11px;
-  line-height: 1.25rem;
-}
+  .preview-panel-file-identity {
+    flex-basis: 100%;
+  }
 
-[data-line-number-content] {
-  color: color-mix(in srgb, var(--muted-foreground) 85%, transparent);
+  .preview-panel-file-actions {
+    margin-left: auto;
+  }
 }
 `;
 
@@ -94,6 +117,9 @@ type RichPreviewFileData = {
   readonly contents?: string;
   readonly base64?: string;
   readonly mimeType?: string;
+  readonly version?: string;
+  readonly encoding?: "utf8" | "utf8-bom";
+  readonly lineEnding?: "lf" | "crlf" | "cr" | "mixed";
 };
 
 function clampTreeWidth(width: number, containerWidth: number): number {
@@ -264,6 +290,9 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   );
   const activeCwd = activeThread?.worktreePath ?? activeProject?.cwd ?? null;
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [editSession, setEditSession] = useState<PreviewFileEditSession | null>(null);
+  const editSessionRef = useRef<PreviewFileEditSession | null>(null);
+  const [pendingFilePath, setPendingFilePath] = useState<string | null>(null);
   const [fileFilterQuery, setFileFilterQuery] = useState("");
   const [isTreeVisible, setIsTreeVisible] = useState(true);
   // Same readability rationale as the phone diff surface: 320-430px columns
@@ -293,14 +322,21 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   const previousSelectedFileRefreshKeyRef = useRef<string | null>(null);
   const missingFileRefreshKeyRef = useRef<string | null>(null);
 
+  const commitEditSession = useCallback((next: PreviewFileEditSession | null) => {
+    editSessionRef.current = next;
+    setEditSession(next);
+  }, []);
+
   useEffect(() => {
     setWrapPreviewLines(isPhonePresentation ? true : settings.diffWordWrap);
   }, [isPhonePresentation, settings.diffWordWrap]);
 
   useEffect(() => {
     setSelectedFilePath(null);
+    commitEditSession(null);
+    setPendingFilePath(null);
     setIsTreeVisible(true);
-  }, [activeThread?.environmentId, activeThread?.id]);
+  }, [activeThread?.environmentId, activeThread?.id, commitEditSession]);
 
   const latestProjectFilesRefreshKey = useMemo(() => {
     const latestChangedSummary = (activeThread?.turnDiffSummaries ?? [])
@@ -347,13 +383,19 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       return;
     }
     if (projectFiles.entries.length === 0) {
-      setSelectedFilePath(null);
+      if (!isPreviewFileSessionDirty(editSessionRef.current)) {
+        setSelectedFilePath(null);
+        commitEditSession(null);
+      }
       return;
     }
     if (selectedFilePath && !projectFiles.entries.some((file) => file.path === selectedFilePath)) {
-      setSelectedFilePath(null);
+      if (!isPreviewFileSessionDirty(editSessionRef.current)) {
+        setSelectedFilePath(null);
+        commitEditSession(null);
+      }
     }
-  }, [projectFiles, selectedFilePath]);
+  }, [commitEditSession, projectFiles, selectedFilePath]);
 
   useEffect(() => {
     if (previewSearch.preview !== "1") {
@@ -450,11 +492,227 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
     void refetchProjectFiles()
       .then((result) => {
         if (!result.data?.entries.some((entry) => entry.path === selectedFilePath)) {
-          setSelectedFilePath((current) => (current === selectedFilePath ? null : current));
+          const currentSession = editSessionRef.current;
+          if (
+            currentSession?.relativePath === selectedFilePath &&
+            isPreviewFileSessionDirty(currentSession)
+          ) {
+            commitEditSession(
+              failPreviewFileSave(currentSession, {
+                reason: "deleted",
+                message:
+                  "This file was removed from disk after it was opened. Explorer will not recreate it.",
+              }),
+            );
+          } else {
+            setSelectedFilePath((current) => (current === selectedFilePath ? null : current));
+            if (currentSession?.relativePath === selectedFilePath) commitEditSession(null);
+          }
         }
       })
       .catch(() => undefined);
-  }, [activeCwd, refetchProjectFiles, selectedFileError, selectedFilePath]);
+  }, [activeCwd, commitEditSession, refetchProjectFiles, selectedFileError, selectedFilePath]);
+
+  const selectedFileDocument = useMemo(() => {
+    if (
+      !activeThread?.environmentId ||
+      !activeCwd ||
+      !selectedFileData ||
+      selectedFileData.relativePath !== selectedFilePath
+    ) {
+      return null;
+    }
+    return createPreviewFileDocument(
+      { environmentId: activeThread.environmentId, cwd: activeCwd },
+      selectedFileData,
+    );
+  }, [activeCwd, activeThread?.environmentId, selectedFileData, selectedFilePath]);
+
+  useEffect(() => {
+    if (!selectedFileDocument) return;
+    commitEditSession(reconcilePreviewFileSession(editSessionRef.current, selectedFileDocument));
+  }, [commitEditSession, selectedFileDocument]);
+
+  const currentEditSession =
+    selectedFileDocument && editSession?.key === selectedFileDocument.key ? editSession : null;
+  const hasUnsavedChanges = isPreviewFileSessionDirty(currentEditSession);
+  const isSelectedFileEditable = Boolean(
+    !isPhonePresentation &&
+    selectedFileKind === "text" &&
+    selectedFileDocument &&
+    selectedFileDocument.lineEnding !== "mixed",
+  );
+  const shouldBlockNavigation = useCallback(() => hasUnsavedChanges, [hasUnsavedChanges]);
+  const navigationBlocker = useBlocker({
+    shouldBlockFn: shouldBlockNavigation,
+    disabled: !hasUnsavedChanges,
+    enableBeforeUnload: hasUnsavedChanges,
+    withResolver: true,
+  });
+
+  const openFileImmediately = useCallback(
+    (filePath: string) => {
+      commitEditSession(null);
+      setSelectedFilePath(filePath);
+    },
+    [commitEditSession],
+  );
+
+  const onSelectFile = useCallback(
+    (filePath: string) => {
+      if (filePath === selectedFilePath) return;
+      if (isPreviewFileSessionDirty(editSessionRef.current)) {
+        setPendingFilePath(filePath);
+        return;
+      }
+      openFileImmediately(filePath);
+    },
+    [openFileImmediately, selectedFilePath],
+  );
+
+  const onEditContentsChange = useCallback(
+    (contents: string) => {
+      const current = editSessionRef.current;
+      if (!current || current.key !== selectedFileDocument?.key) return;
+      commitEditSession(updatePreviewFileSessionContents(current, contents));
+    },
+    [commitEditSession, selectedFileDocument?.key],
+  );
+
+  const reloadSelectedFile = useCallback(async () => {
+    if (!activeThread?.environmentId || !activeCwd || !selectedFilePath) return false;
+    try {
+      const data = await ensureEnvironmentApi(activeThread.environmentId).projects.readFile({
+        cwd: activeCwd,
+        relativePath: selectedFilePath,
+      });
+      setProjectReadFileCacheData(
+        {
+          environmentId: activeThread.environmentId,
+          cwd: activeCwd,
+          relativePath: selectedFilePath,
+        },
+        data,
+      );
+      commitEditSession(
+        createPreviewFileEditSession(
+          createPreviewFileDocument(
+            { environmentId: activeThread.environmentId, cwd: activeCwd },
+            data,
+          ),
+        ),
+      );
+      return true;
+    } catch (error) {
+      const current = editSessionRef.current;
+      if (current) {
+        commitEditSession(
+          failPreviewFileSave(current, {
+            reason: isMissingWorkspaceFileError(
+              error instanceof Error ? error.message : String(error),
+            )
+              ? "deleted"
+              : "failed",
+            message: error instanceof Error ? error.message : "Failed to reload this file.",
+          }),
+        );
+      }
+      return false;
+    }
+  }, [activeCwd, activeThread?.environmentId, commitEditSession, selectedFilePath]);
+
+  const onDiscardFileChanges = useCallback(() => {
+    const current = editSessionRef.current;
+    if (!current || current.key !== selectedFileDocument?.key) return;
+    if (current.errorReason === "deleted") {
+      commitEditSession(null);
+      setSelectedFilePath(null);
+      void refetchProjectFiles();
+      return;
+    }
+    if (current.saveStatus === "conflict") {
+      void reloadSelectedFile();
+      return;
+    }
+    commitEditSession(discardPreviewFileChanges(current));
+  }, [commitEditSession, refetchProjectFiles, reloadSelectedFile, selectedFileDocument?.key]);
+
+  const saveSelectedFile = useCallback(async () => {
+    const current = editSessionRef.current;
+    if (
+      !current ||
+      !activeThread?.environmentId ||
+      !activeCwd ||
+      current.relativePath !== selectedFilePath ||
+      current.lineEnding === "mixed" ||
+      current.saveStatus === "saving" ||
+      current.saveStatus === "conflict" ||
+      !isPreviewFileSessionDirty(current)
+    ) {
+      return false;
+    }
+
+    const savingKey = current.key;
+    const savedContents = current.contents;
+    commitEditSession(beginPreviewFileSave(current));
+    try {
+      const result = await ensureEnvironmentApi(activeThread.environmentId).projects.writeFile({
+        cwd: activeCwd,
+        relativePath: current.relativePath,
+        contents: savedContents,
+        expectedVersion: current.version,
+        encoding: current.encoding,
+        lineEnding: current.lineEnding,
+      });
+      setProjectReadFileCacheData(
+        {
+          environmentId: activeThread.environmentId,
+          cwd: activeCwd,
+          relativePath: current.relativePath,
+        },
+        {
+          relativePath: current.relativePath,
+          contents: savedContents,
+          version: result.version,
+          encoding: current.encoding,
+          lineEnding: current.lineEnding,
+        },
+      );
+      const latest = editSessionRef.current;
+      if (!latest || latest.key !== savingKey) return false;
+      const saved = finishPreviewFileSave(latest, savedContents, result.version);
+      commitEditSession(saved);
+      return !isPreviewFileSessionDirty(saved);
+    } catch (error) {
+      const latest = editSessionRef.current;
+      if (latest?.key === savingKey) {
+        commitEditSession(failPreviewFileSave(latest, readPreviewFileSaveFailure(error)));
+      }
+      return false;
+    }
+  }, [activeCwd, activeThread?.environmentId, commitEditSession, selectedFilePath]);
+
+  const saveIsBlocked =
+    currentEditSession?.saveStatus === "conflict" ||
+    currentEditSession?.errorReason === "unsupported";
+  const canSaveSelectedFile = Boolean(
+    isSelectedFileEditable &&
+    hasUnsavedChanges &&
+    currentEditSession?.saveStatus !== "saving" &&
+    !saveIsBlocked,
+  );
+
+  useEffect(() => {
+    if (!isSelectedFileEditable || !hasUnsavedChanges) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (canSaveSelectedFile) void saveSelectedFile();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [canSaveSelectedFile, hasUnsavedChanges, isSelectedFileEditable, saveSelectedFile]);
 
   const previewTextFile = useMemo(() => {
     const contents = richSelectedFileData?.contents;
@@ -469,6 +727,17 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       cacheKey: buildPreviewFileCacheKey(selectedFilePath, contents),
     };
   }, [richSelectedFileData?.contents, selectedFileKind, selectedFilePath]);
+  const previewFileOptions = useMemo(
+    () => ({
+      disableFileHeader: true,
+      overflow: wrapPreviewLines ? ("wrap" as const) : ("scroll" as const),
+      theme: resolveDiffThemeName(resolvedTheme),
+      themeType: resolvedTheme,
+      unsafeCSS: PREVIEW_FILE_UNSAFE_CSS,
+      tokenizeMaxLineLength: 1_000,
+    }),
+    [resolvedTheme, wrapPreviewLines],
+  );
 
   const onResizePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -545,6 +814,29 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
     setIsTreeVisible((current) => !current);
   }, [isTreeVisible]);
 
+  const unsavedDialogOpen = pendingFilePath !== null || navigationBlocker.status === "blocked";
+
+  const cancelUnsavedNavigation = useCallback(() => {
+    setPendingFilePath(null);
+    if (navigationBlocker.status === "blocked") navigationBlocker.reset();
+  }, [navigationBlocker]);
+
+  const continueUnsavedNavigation = useCallback(() => {
+    const nextFilePath = pendingFilePath;
+    setPendingFilePath(null);
+    commitEditSession(null);
+    if (nextFilePath) {
+      setSelectedFilePath(nextFilePath);
+      return;
+    }
+    if (navigationBlocker.status === "blocked") navigationBlocker.proceed();
+  }, [commitEditSession, navigationBlocker, pendingFilePath]);
+
+  const saveAndContinueNavigation = useCallback(async () => {
+    if (!(await saveSelectedFile())) return;
+    continueUnsavedNavigation();
+  }, [continueUnsavedNavigation, saveSelectedFile]);
+
   const headerRow = (
     <>
       <div className="min-w-0 flex-1 px-1 [-webkit-app-region:no-drag]">
@@ -614,19 +906,111 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
       </div>
     ) : selectedFileQuery.isLoading && !selectedFileData ? (
       <DiffPanelLoadingState label="Loading file preview..." />
-    ) : selectedFileError ? (
+    ) : selectedFileError && !selectedFileData ? (
       <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
         {selectedFileError}
       </div>
     ) : (
-      <div className="min-h-0 flex-1 overflow-auto p-2">
+      <div className="min-h-0 flex-1 p-2">
         <style>{PREVIEW_CODE_CSS}</style>
-        <div className="min-h-full overflow-hidden rounded-md border border-border/70 bg-[color:color-mix(in_srgb,var(--card)_90%,var(--background))]">
-          <div className="border-b border-border/70 bg-[color:color-mix(in_srgb,var(--card)_94%,var(--foreground))] px-3 py-2 text-foreground">
-            <div className="truncate font-mono text-[12px] font-medium">{selectedFilePath}</div>
+        <div className="preview-panel-file-card flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-border/70 bg-[color:color-mix(in_srgb,var(--card)_90%,var(--background))]">
+          <div className="preview-panel-file-toolbar flex min-h-10 shrink-0 items-center gap-3 border-b border-border/70 bg-[color:color-mix(in_srgb,var(--card)_94%,var(--foreground))] px-3 py-1.5 text-foreground">
+            <div className="preview-panel-file-identity flex min-w-0 flex-1 items-center gap-2">
+              <div className="truncate font-mono text-[12px] font-medium">{selectedFilePath}</div>
+              {hasUnsavedChanges ? (
+                <span
+                  aria-label="Unsaved changes"
+                  className="size-1.5 shrink-0 rounded-full bg-primary"
+                  title="Unsaved changes"
+                />
+              ) : null}
+              {currentEditSession?.saveStatus === "saving" ? (
+                <span
+                  aria-live="polite"
+                  className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground"
+                >
+                  <LoaderCircleIcon className="size-3 animate-spin" /> Saving
+                </span>
+              ) : null}
+              {!isPhonePresentation && selectedFileDocument?.lineEnding === "mixed" ? (
+                <span className="shrink-0 text-[10px] text-muted-foreground">
+                  Read-only · mixed line endings
+                </span>
+              ) : null}
+            </div>
+            {isSelectedFileEditable && currentEditSession ? (
+              <div className="preview-panel-file-actions flex shrink-0 items-center gap-1">
+                <Button
+                  aria-label="Discard file changes"
+                  disabled={!hasUnsavedChanges || currentEditSession.saveStatus === "saving"}
+                  onClick={onDiscardFileChanges}
+                  size="xs"
+                  variant="ghost"
+                >
+                  Discard
+                </Button>
+                <Button
+                  aria-label="Save file"
+                  disabled={!canSaveSelectedFile}
+                  onClick={() => void saveSelectedFile()}
+                  size="xs"
+                  title="Save file (Ctrl/⌘ S)"
+                >
+                  {currentEditSession.saveStatus === "saving" ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <SaveIcon />
+                  )}
+                  Save
+                  <span className="ml-0.5 text-[9px] opacity-70">⌘S</span>
+                </Button>
+              </div>
+            ) : null}
           </div>
+          {currentEditSession?.errorMessage ? (
+            <div className="shrink-0 border-b border-border/60 p-2">
+              <Alert
+                variant={currentEditSession.saveStatus === "conflict" ? "warning" : "error"}
+                className="rounded-lg px-3 py-2 text-[11px]"
+              >
+                {currentEditSession.saveStatus === "conflict" ? (
+                  <TriangleAlertIcon className="size-3.5" />
+                ) : (
+                  <CircleAlertIcon className="size-3.5" />
+                )}
+                <AlertTitle className="text-[11px]">
+                  {currentEditSession.errorReason === "deleted"
+                    ? "File removed on disk"
+                    : currentEditSession.saveStatus === "conflict"
+                      ? "File changed on disk"
+                      : "Couldn’t save file"}
+                </AlertTitle>
+                <AlertDescription className="gap-2 text-[11px] leading-4">
+                  <span>{currentEditSession.errorMessage}</span>
+                  {currentEditSession.saveStatus === "conflict" ? (
+                    <Button
+                      className="self-start"
+                      onClick={
+                        currentEditSession.errorReason === "deleted"
+                          ? onDiscardFileChanges
+                          : () => void reloadSelectedFile()
+                      }
+                      size="xs"
+                      variant="outline"
+                    >
+                      {currentEditSession.errorReason === "deleted" ? "Close file" : "Reload"}
+                    </Button>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            </div>
+          ) : selectedFileError ? (
+            <div className="shrink-0 border-b border-border/60 px-3 py-2 text-[11px] text-destructive">
+              Refresh failed: {selectedFileError}
+            </div>
+          ) : null}
           {selectedFileKind === "image" && richSelectedFileData?.base64 ? (
-            <div className="flex min-h-0 justify-center overflow-auto bg-background/70 p-3">
+            <div className="flex min-h-0 flex-1 justify-center overflow-auto bg-background/70 p-3">
               <img
                 alt={selectedFilePath ?? undefined}
                 className="max-h-full max-w-full object-contain"
@@ -635,23 +1019,28 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
                 }`}
               />
             </div>
-          ) : previewTextFile ? (
-            <DiffsFile
-              file={previewTextFile}
+          ) : isSelectedFileEditable && currentEditSession ? (
+            <PreviewFileEditor
+              cacheKey={currentEditSession.key}
               className="preview-panel-diffs-file"
-              options={{
-                disableFileHeader: true,
-                overflow: wrapPreviewLines ? "wrap" : "scroll",
-                theme: resolveDiffThemeName(resolvedTheme),
-                themeType: resolvedTheme,
-                unsafeCSS: PREVIEW_FILE_UNSAFE_CSS,
-                tokenizeMaxLineLength: 1_000,
-              }}
+              contents={currentEditSession.contents}
+              filePath={currentEditSession.relativePath}
+              language={inferPreviewLanguage(currentEditSession.relativePath)}
+              onChange={onEditContentsChange}
+              options={previewFileOptions}
             />
+          ) : previewTextFile ? (
+            <div className="min-h-0 flex-1 overflow-auto">
+              <DiffsFile
+                file={previewTextFile}
+                className="preview-panel-diffs-file"
+                options={previewFileOptions}
+              />
+            </div>
           ) : (
             <pre
               className={cn(
-                "min-h-full bg-transparent p-3 font-mono text-[11px] leading-5 text-muted-foreground/90",
+                "min-h-0 flex-1 bg-transparent p-3 font-mono text-[11px] leading-5 text-muted-foreground/90",
                 wrapPreviewLines
                   ? "overflow-auto whitespace-pre-wrap wrap-break-word"
                   : "overflow-auto",
@@ -720,7 +1109,7 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
             files={filteredProjectFiles}
             allDirectoriesExpanded={isFilteringProjectFiles}
             resolvedTheme={resolvedTheme}
-            onSelectFile={setSelectedFilePath}
+            onSelectFile={onSelectFile}
             selectedFilePath={selectedFilePath}
             showStats={false}
           />
@@ -730,78 +1119,124 @@ export default function PreviewPanel({ mode = "inline" }: PreviewPanelProps) {
   );
 
   return (
-    <DiffPanelShell mode={mode} header={headerRow}>
-      {!activeThread ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          Select a thread to preview files.
-        </div>
-      ) : projectFilesQuery.isLoading && !projectFilesQuery.data ? (
-        <DiffPanelLoadingState label="Loading project tree..." />
-      ) : projectFilesError && !projectFilesQuery.data ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          {projectFilesError}
-        </div>
-      ) : (projectFilesQuery.data?.entries.length ?? 0) === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
-          No project files available yet.
-        </div>
-      ) : isPhonePresentation ? (
-        // Single-pane phone arrangement: tree full-width, tapping a file
-        // pushes a full-width file view with back-to-tree. A `preview=1` deep
-        // link lands on the tree (the preview params carry no file path), so
-        // the surface is never empty.
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {selectedFilePath ? (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex min-h-12 shrink-0 items-center gap-1 border-b border-border/60 px-1.5">
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  aria-label="Back to workspace tree"
-                  className="shrink-0"
-                  onClick={() => setSelectedFilePath(null)}
-                >
-                  <ArrowLeftIcon />
-                </Button>
-                <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
-                  {selectedFilePath}
-                </span>
-              </div>
-              {selectedFileView}
-            </div>
-          ) : (
-            treePane
-          )}
-        </div>
-      ) : (
-        <div ref={splitLayoutRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-          <div
-            data-preview-content-panel
-            className="flex min-h-0 min-w-0 flex-1 flex-col transition-[min-width] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
-          >
-            {!selectedFilePath ? <PreviewOpenFileEmptyState /> : selectedFileView}
+    <>
+      <DiffPanelShell mode={mode} header={headerRow}>
+        {!activeThread ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            Select a thread to preview files.
           </div>
-          <button
-            type="button"
-            aria-label="Resize workspace tree"
-            aria-hidden={isTreeVisible ? undefined : true}
-            className={cn(
-              "group relative shrink-0 overflow-hidden bg-background transition-[width,opacity,background-color] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent/40 motion-reduce:transition-none",
-              isTreeVisible ? "w-2 cursor-ew-resize opacity-100" : "w-0 opacity-0",
+        ) : projectFilesQuery.isLoading && !projectFilesQuery.data ? (
+          <DiffPanelLoadingState label="Loading project tree..." />
+        ) : projectFilesError && !projectFilesQuery.data ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            {projectFilesError}
+          </div>
+        ) : (projectFilesQuery.data?.entries.length ?? 0) === 0 ? (
+          <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
+            No project files available yet.
+          </div>
+        ) : isPhonePresentation ? (
+          // Single-pane phone arrangement: tree full-width, tapping a file
+          // pushes a full-width file view with back-to-tree. A `preview=1` deep
+          // link lands on the tree (the preview params carry no file path), so
+          // the surface is never empty.
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+            {selectedFilePath ? (
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                <div className="flex min-h-12 shrink-0 items-center gap-1 border-b border-border/60 px-1.5">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    aria-label="Back to workspace tree"
+                    className="shrink-0"
+                    onClick={() => setSelectedFilePath(null)}
+                  >
+                    <ArrowLeftIcon />
+                  </Button>
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
+                    {selectedFilePath}
+                  </span>
+                </div>
+                {selectedFileView}
+              </div>
+            ) : (
+              treePane
             )}
-            disabled={!isTreeVisible}
-            onPointerDown={onResizePointerDown}
-            onPointerMove={onResizePointerMove}
-            onPointerUp={onResizePointerEnd}
-            onPointerCancel={onResizePointerEnd}
-          >
-            <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-border" />
-          </button>
-          <PreviewTreeMotionFrame width={treeWidth} open={isTreeVisible} resizing={isTreeResizing}>
-            {treePane}
-          </PreviewTreeMotionFrame>
-        </div>
-      )}
-    </DiffPanelShell>
+          </div>
+        ) : (
+          <div ref={splitLayoutRef} className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+            <div
+              data-preview-content-panel
+              className="flex min-h-0 min-w-0 flex-1 flex-col transition-[min-width] duration-[320ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduce:transition-none"
+            >
+              {!selectedFilePath ? <PreviewOpenFileEmptyState /> : selectedFileView}
+            </div>
+            <button
+              type="button"
+              aria-label="Resize workspace tree"
+              aria-hidden={isTreeVisible ? undefined : true}
+              className={cn(
+                "group relative shrink-0 overflow-hidden bg-background transition-[width,opacity,background-color] duration-[360ms] ease-[cubic-bezier(0.16,1,0.3,1)] hover:bg-accent/40 motion-reduce:transition-none",
+                isTreeVisible ? "w-2 cursor-ew-resize opacity-100" : "w-0 opacity-0",
+              )}
+              disabled={!isTreeVisible}
+              onPointerDown={onResizePointerDown}
+              onPointerMove={onResizePointerMove}
+              onPointerUp={onResizePointerEnd}
+              onPointerCancel={onResizePointerEnd}
+            >
+              <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-border/80 group-hover:bg-border" />
+            </button>
+            <PreviewTreeMotionFrame
+              width={treeWidth}
+              open={isTreeVisible}
+              resizing={isTreeResizing}
+            >
+              {treePane}
+            </PreviewTreeMotionFrame>
+          </div>
+        )}
+      </DiffPanelShell>
+      <AlertDialog
+        open={unsavedDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) cancelUnsavedNavigation();
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save changes before continuing?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {selectedFilePath
+                ? `${selectedFilePath} has unsaved changes.`
+                : "This file has unsaved changes."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button onClick={cancelUnsavedNavigation} variant="outline">
+              Cancel
+            </Button>
+            <Button
+              disabled={currentEditSession?.saveStatus === "saving"}
+              onClick={continueUnsavedNavigation}
+              variant="destructive-outline"
+            >
+              {pendingFilePath ? "Discard & Open" : "Discard & Continue"}
+            </Button>
+            <Button
+              disabled={!canSaveSelectedFile}
+              onClick={() => void saveAndContinueNavigation()}
+            >
+              {currentEditSession?.saveStatus === "saving" ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <SaveIcon />
+              )}
+              {pendingFilePath ? "Save & Open" : "Save & Continue"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </>
   );
 }

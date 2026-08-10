@@ -10,6 +10,12 @@ import {
 } from "@ryco/contracts";
 
 import { observeRpcEffect } from "../observability/RpcInstrumentation.ts";
+import {
+  WorkspaceFileConflictError,
+  WorkspaceFileDeletedError,
+  WorkspaceFileSystemError,
+  WorkspaceFileUnsupportedEditError,
+} from "../workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePathOutsideRootError } from "../workspace/Services/WorkspacePaths.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
 
@@ -77,11 +83,27 @@ export const makeProjectHandlers = (ctx: WsRpcContext) => {
           WS_METHODS.projectsWriteFile,
           workspaceFileSystem.writeFile(input).pipe(
             Effect.mapError((cause) => {
-              const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+              const conflict = Schema.is(WorkspaceFileConflictError)(cause);
+              const deleted = Schema.is(WorkspaceFileDeletedError)(cause);
+              const unsupported = Schema.is(WorkspaceFileUnsupportedEditError)(cause);
+              const outside = Schema.is(WorkspacePathOutsideRootError)(cause);
+              const reason = conflict
+                ? "conflict"
+                : deleted
+                  ? "deleted"
+                  : unsupported
+                    ? "unsupported"
+                    : "failed";
+              const message = outside
                 ? "Workspace file path must stay within the project root."
-                : "Failed to write workspace file";
+                : conflict || deleted || unsupported
+                  ? cause.message
+                  : Schema.is(WorkspaceFileSystemError)(cause)
+                    ? cause.detail
+                    : "Failed to write workspace file.";
               return new ProjectWriteFileError({
                 message,
+                reason,
                 cause,
               });
             }),

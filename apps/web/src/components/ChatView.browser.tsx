@@ -2324,6 +2324,9 @@ function resolveWorkSurfaceRpc(body: NormalizedWsRpcRequestBody): unknown | unde
     return {
       relativePath: typeof body.relativePath === "string" ? body.relativePath : "README.md",
       contents: "# Work surface readme\n",
+      version: `sha256:${"0".repeat(64)}`,
+      encoding: "utf8",
+      lineEnding: "lf",
     };
   }
   return undefined;

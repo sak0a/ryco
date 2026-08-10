@@ -109,7 +109,48 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         expect(result).toEqual({
           relativePath: "plans/effect-rpc.md",
           contents: "# Plan\n",
+          version: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+          encoding: "utf8",
+          lineEnding: "lf",
         });
+      }),
+    );
+
+    it.effect("normalizes UTF-8 BOM and CRLF files while retaining their format metadata", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeBinaryFile(
+          cwd,
+          "notes/windows.txt",
+          Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("first\r\nsecond\r\n")]),
+        );
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "notes/windows.txt",
+        });
+
+        expect(result.contents).toBe("first\nsecond\n");
+        expect(result.encoding).toBe("utf8-bom");
+        expect(result.lineEnding).toBe("crlf");
+        expect(result.version).toMatch(/^sha256:[a-f0-9]{64}$/);
+      }),
+    );
+
+    it.effect("marks mixed line endings without altering the normalized preview", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "notes/mixed.txt", "one\r\ntwo\nthree\r");
+
+        const result = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "notes/mixed.txt",
+        });
+
+        expect(result.contents).toBe("one\ntwo\nthree\n");
+        expect(result.lineEnding).toBe("mixed");
       }),
     );
 
@@ -300,8 +341,138 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           .readFileString(path.join(cwd, "plans/effect-rpc.md"))
           .pipe(Effect.orDie);
 
-        expect(result).toEqual({ relativePath: "plans/effect-rpc.md" });
+        expect(result).toEqual({
+          relativePath: "plans/effect-rpc.md",
+          version: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        });
         expect(saved).toBe("# Plan\n");
+      }),
+    );
+
+    it.effect("guardedly saves while preserving BOM, CRLF, and permissions", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        const absolutePath = path.join(cwd, "notes/windows.txt");
+        yield* writeBinaryFile(
+          cwd,
+          "notes/windows.txt",
+          Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("before\r\n")]),
+        );
+        if (process.platform !== "win32") {
+          yield* Effect.promise(() => fsPromises.chmod(absolutePath, 0o640)).pipe(Effect.orDie);
+        }
+        const loaded = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "notes/windows.txt",
+        });
+
+        const saved = yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "notes/windows.txt",
+          contents: "after\nsecond\n",
+          expectedVersion: loaded.version,
+          encoding: loaded.encoding,
+          lineEnding: loaded.lineEnding,
+        });
+
+        const raw = yield* Effect.promise(() => fsPromises.readFile(absolutePath)).pipe(
+          Effect.orDie,
+        );
+        expect(raw.subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
+        expect(raw.subarray(3).toString("utf8")).toBe("after\r\nsecond\r\n");
+        expect(saved.version).not.toBe(loaded.version);
+        if (process.platform !== "win32") {
+          const stat = yield* Effect.promise(() => fsPromises.stat(absolutePath)).pipe(
+            Effect.orDie,
+          );
+          expect(stat.mode & 0o777).toBe(0o640);
+        }
+      }),
+    );
+
+    it.effect("rejects a guarded save after the file changes", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "src/app.ts", "export const value = 1;\n");
+        const loaded = yield* workspaceFileSystem.readFile({ cwd, relativePath: "src/app.ts" });
+        yield* writeTextFile(cwd, "src/app.ts", "export const value = 2;\n");
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "src/app.ts",
+            contents: "export const value = 3;\n",
+            expectedVersion: loaded.version,
+            encoding: loaded.encoding,
+            lineEnding: loaded.lineEnding,
+          })
+          .pipe(Effect.flip);
+
+        expect(error._tag).toBe("WorkspaceFileConflictError");
+        const persisted = yield* Effect.promise(() =>
+          fsPromises.readFile(`${cwd}/src/app.ts`, "utf8"),
+        ).pipe(Effect.orDie);
+        expect(persisted).toBe("export const value = 2;\n");
+      }),
+    );
+
+    it.effect("does not recreate a file deleted after it was opened", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+        const absolutePath = path.join(cwd, "src/app.ts");
+        yield* writeTextFile(cwd, "src/app.ts", "export {};\n");
+        const loaded = yield* workspaceFileSystem.readFile({ cwd, relativePath: "src/app.ts" });
+        yield* Effect.promise(() => fsPromises.unlink(absolutePath)).pipe(Effect.orDie);
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "src/app.ts",
+            contents: "export const restored = true;\n",
+            expectedVersion: loaded.version,
+            encoding: loaded.encoding,
+            lineEnding: loaded.lineEnding,
+          })
+          .pipe(Effect.flip);
+
+        expect(error._tag).toBe("WorkspaceFileDeletedError");
+        const exists = yield* Effect.promise(() =>
+          fsPromises.stat(absolutePath).then(
+            () => true,
+            () => false,
+          ),
+        );
+        expect(exists).toBe(false);
+      }),
+    );
+
+    it.effect("rejects guarded saves with mixed line endings", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "notes/mixed.txt", "one\r\ntwo\n");
+        const loaded = yield* workspaceFileSystem.readFile({
+          cwd,
+          relativePath: "notes/mixed.txt",
+        });
+
+        const error = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "notes/mixed.txt",
+            contents: loaded.contents,
+            expectedVersion: loaded.version,
+            encoding: loaded.encoding,
+            lineEnding: loaded.lineEnding,
+          })
+          .pipe(Effect.flip);
+
+        expect(error._tag).toBe("WorkspaceFileUnsupportedEditError");
       }),
     );
 
