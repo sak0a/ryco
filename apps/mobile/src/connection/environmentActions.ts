@@ -2,6 +2,7 @@ import type { EnvironmentId } from "@ryco/contracts";
 import type { SavedEnvironmentRecord } from "@ryco/client-runtime/connection";
 
 import { useStore } from "../state/threadsRuntime";
+import { clearProjectFilesStateForEnvironment } from "../rpc/projectFilesAtoms";
 import { mobileE2eeTrustStore, type MobileE2eeTrustStore } from "../platform/e2eeTrustStore";
 import type { MobileConnectionRegistry } from "../runtime/bootstrap";
 
@@ -118,6 +119,11 @@ export function createEnvironmentActions(deps: EnvironmentActionsDeps) {
     registry.catalog.registryStore.getState().remove(environmentId);
     registry.catalog.runtimeStore.getState().clear(environmentId);
     useStore.getState().removeEnvironmentState(environmentId);
+    // Keyed-query caches are not part of the threads store: the workspace
+    // listings and file contents this node handed us are memory-only and scoped
+    // to its environment id, so forgetting the node drops them here or not at
+    // all.
+    clearProjectFilesStateForEnvironment(environmentId);
     await registry.catalog.removeBearerToken(environmentId);
     // The owner forgetting a node also forgets its §13 trust state — the pin, the
     // latch, the approval, and any legacy consent — and drops the

@@ -26,6 +26,8 @@ describe("MVP route config", () => {
         "Project",
         "SettingsSheet",
         "Thread",
+        "ThreadFile",
+        "ThreadFiles",
         "ThreadReview",
         "ThreadReviewComment",
       ].toSorted(),
@@ -33,8 +35,6 @@ describe("MVP route config", () => {
     // Deferred routes must be absent from the tree.
     for (const absent of [
       "ThreadTerminal",
-      "ThreadFiles",
-      "ThreadFile",
       "GitOverview",
       "NewTaskSheet",
       "SettingsLegal",
@@ -54,6 +54,12 @@ describe("MVP route config", () => {
     expect(MVP_ROOT_ROUTES.ThreadReview.linking).toBe("threads/:environmentId/:threadId/review");
     expect(MVP_ROOT_ROUTES.ThreadReviewComment.linking).toBe(
       "threads/:environmentId/:threadId/review-comment",
+    );
+    expect(MVP_ROOT_ROUTES.ThreadFiles.linking).toBe("threads/:environmentId/:threadId/files");
+    // `:path*` and not `:path`: a workspace-relative path carries slashes, so the
+    // file route only resolves as a segment wildcard.
+    expect(MVP_ROOT_ROUTES.ThreadFile.linking).toBe(
+      "threads/:environmentId/:threadId/files/:path*",
     );
     expect(MVP_ROOT_ROUTES.Connections.linking).toBe("connections");
     expect(MVP_ROOT_ROUTES.ConnectionsNew.linking).toBe("connections/new");
@@ -100,6 +106,8 @@ describe("MVP route config", () => {
       "Project",
       "Thread",
       "ThreadReview",
+      "ThreadFiles",
+      "ThreadFile",
       "NotFound",
     ] as const) {
       expect(overlays.has(workspace)).toBe(false);
