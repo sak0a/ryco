@@ -24,6 +24,8 @@ describe("shared RPC access policy", () => {
     expect(hostedRoleAllows("operator", WS_METHODS.terminalOpen)).toBe(true);
     expect(hostedRoleAllows("operator", WS_METHODS.serverGetStatistics)).toBe(false);
     expect(hostedRoleAllows("owner", WS_METHODS.serverGetStatistics)).toBe(true);
+    expect(hostedRoleAllows("operator", WS_METHODS.serverGetUsageSummary)).toBe(false);
+    expect(hostedRoleAllows("owner", WS_METHODS.serverGetUsageSummary)).toBe(true);
     expect(hostedRoleAllows("owner", WS_METHODS.subscribeAuthAccess)).toBe(false);
   });
 });

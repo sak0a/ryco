@@ -1,4 +1,5 @@
 import type {
+  ChangeRequest,
   ChangeRequestState,
   EnvironmentId,
   ScopedThreadRef,
@@ -180,7 +181,7 @@ export interface ChatOverviewPanelProps {
   sidebarProposedPlan: LatestProposedPlanState | null;
   threadSubagents: ReadonlyArray<ThreadSubagentView>;
   changedFileSummaries?: ReadonlyArray<TurnDiffSummary> | undefined;
-  sourceControlActions: ReactNode;
+  sourceControlActions: (detectedChangeRequest: ChangeRequest | null) => ReactNode;
   branchControl: ReactNode;
   markdownCwd: string | undefined;
   workspaceRoot: string | undefined;
@@ -255,7 +256,7 @@ export interface OverviewPanelControlsInput {
 }
 
 export interface OverviewPanelControls {
-  sourceControlActions: ReactNode;
+  sourceControlActions: (detectedChangeRequest: ChangeRequest | null) => ReactNode;
   branchControl: ReactNode;
 }
 
@@ -277,12 +278,13 @@ export function useOverviewPanelControls(input: OverviewPanelControlsInput): Ove
     onCheckoutPullRequestRequest,
   } = input;
 
-  const sourceControlActions = useMemo<ReactNode>(
-    () =>
+  const sourceControlActions = useCallback(
+    (detectedChangeRequest: ChangeRequest | null) =>
       gitCwd && activeThreadRef ? (
         <GitActionsControl
           gitCwd={gitCwd}
           activeThreadRef={activeThreadRef}
+          detectedChangeRequest={detectedChangeRequest}
           {...(routeKind === "draft" && draftId ? { draftId } : {})}
           onPostPush={onPostPush}
           showLabels
@@ -792,6 +794,8 @@ export function ChatOverviewPanel(
     overviewPullRequestDetail.isFetching ||
     (overviewWorkflowRunsSupported && overviewWorkflowRuns.isFetching);
 
+  const detectedChangeRequest = overviewPullRequestDetail.data ?? overviewBranchPullRequest ?? null;
+
   return (
     <PlanSidebar
       activePlan={activePlan}
@@ -802,7 +806,7 @@ export function ChatOverviewPanel(
       onRefreshPullRequest={handleRefreshPullRequest}
       isRefreshingPullRequest={isRefreshingPullRequest}
       subagents={threadSubagents}
-      sourceControlActions={sourceControlActions}
+      sourceControlActions={sourceControlActions(detectedChangeRequest)}
       branchControl={branchControl}
       environmentId={environmentId}
       markdownCwd={markdownCwd}

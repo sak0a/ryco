@@ -71,6 +71,7 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment.ts";
+import { UsageServiceLive } from "./usage/UsageService.ts";
 import { AdvertisedEndpointRegistryLive } from "./remote/AdvertisedEndpointRegistry.ts";
 import {
   authBearerBootstrapRouteLayer,
@@ -321,13 +322,17 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   // no longer transitively provides it. Exposing it at the runtime level
   // keeps a single Live for all opencode consumers.
   Layer.provideMerge(OpenCodeRuntimeLive),
-  Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(ProjectAvatarStoreLayerLive),
 );
 
-const RuntimeCoreDependenciesLive = RuntimeCoreBaseDependenciesLive.pipe(
+const RuntimeCoreBaseWithSettingsLive = Layer.mergeAll(
+  RuntimeCoreBaseDependenciesLive,
+  UsageServiceLive,
+).pipe(Layer.provideMerge(ServerSettingsLive));
+
+const RuntimeCoreDependenciesLive = RuntimeCoreBaseWithSettingsLive.pipe(
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
   Layer.provideMerge(AdvertisedEndpointRegistryLive),

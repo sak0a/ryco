@@ -4,11 +4,21 @@ import { EnvironmentId, ProjectId, ThreadId } from "@ryco/contracts";
 import { page } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
+import type { ReactNode } from "react";
 
 import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../rpc/atomRegistry";
 import { resetProjectPreviewAtomsForTests } from "../rpc/projectPreviewAtoms";
 import PreviewPanel from "./PreviewPanel";
 import { PREVIEW_FILE_SIZE_LIMIT_BYTES } from "./PreviewPanel.logic";
+
+type PreviewWriteFileInput = {
+  readonly cwd: string;
+  readonly relativePath: string;
+  readonly contents: string;
+  readonly expectedVersion?: string;
+  readonly encoding?: "utf8" | "utf8-bom";
+  readonly lineEnding?: "lf" | "crlf" | "cr" | "mixed";
+};
 
 const previewHarness = vi.hoisted(() => {
   type Entry = {
@@ -22,6 +32,9 @@ const previewHarness = vi.hoisted(() => {
     readonly contents?: string;
     readonly base64?: string;
     readonly mimeType?: string;
+    readonly version?: string;
+    readonly encoding?: "utf8" | "utf8-bom";
+    readonly lineEnding?: "lf" | "crlf" | "cr" | "mixed";
   };
   type DraftThreadStub = {
     readonly threadId: string;
@@ -39,6 +52,9 @@ const previewHarness = vi.hoisted(() => {
     entries: [] as Entry[],
     readFiles: new Map<string, ReadFileResult>(),
     readAttempts: [] as string[],
+    writeAttempts: [] as PreviewWriteFileInput[],
+    writeFailure: null as { readonly reason: string; readonly message: string } | null,
+    savedVersion: 0,
     serverThreadEnabled: true,
     draftThread: null as DraftThreadStub | null,
     routeParams: { environmentId: "environment-local", threadId: "thread-1" } as Params,
@@ -46,6 +62,9 @@ const previewHarness = vi.hoisted(() => {
       this.entries = [];
       this.readFiles = new Map();
       this.readAttempts = [];
+      this.writeAttempts = [];
+      this.writeFailure = null;
+      this.savedVersion = 0;
       this.serverThreadEnabled = true;
       this.draftThread = null;
       this.routeParams = { environmentId: "environment-local", threadId: "thread-1" };
@@ -54,11 +73,28 @@ const previewHarness = vi.hoisted(() => {
 });
 
 vi.mock("@pierre/diffs/react", () => ({
-  File: (props: { file: { contents: string } }) => (
-    <pre>
-      <code>{props.file.contents}</code>
-    </pre>
-  ),
+  EditProvider: (props: { children: ReactNode }) => props.children,
+  Virtualizer: (props: { children: ReactNode }) => <div>{props.children}</div>,
+  File: (props: {
+    edit?: boolean;
+    file: { contents: string; name: string };
+    editorOptions?: {
+      onChange?: (file: { contents: string; name: string }) => void;
+    };
+  }) =>
+    props.edit ? (
+      <textarea
+        aria-label={`Edit ${props.file.name}`}
+        value={props.file.contents}
+        onChange={(event) =>
+          props.editorOptions?.onChange?.({ ...props.file, contents: event.currentTarget.value })
+        }
+      />
+    ) : (
+      <pre>
+        <code>{props.file.contents}</code>
+      </pre>
+    ),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
@@ -70,6 +106,14 @@ vi.mock("@tanstack/react-router", () => ({
     const search = { preview: "1" };
     return options?.select ? options.select(search) : search;
   }),
+  useBlocker: vi.fn(() => ({
+    status: "idle",
+    current: undefined,
+    next: undefined,
+    action: undefined,
+    proceed: undefined,
+    reset: undefined,
+  })),
 }));
 
 vi.mock("../environmentApi", () => ({
@@ -87,7 +131,27 @@ vi.mock("../environmentApi", () => ({
         if (!result) {
           return Promise.reject(new Error("ENOENT: no such file"));
         }
-        return Promise.resolve(result);
+        return Promise.resolve({
+          version: `sha256:${relativePath}:initial`,
+          encoding: "utf8",
+          lineEnding: "lf",
+          ...result,
+        });
+      }),
+      writeFile: vi.fn().mockImplementation((input: PreviewWriteFileInput) => {
+        previewHarness.writeAttempts.push(input);
+        if (previewHarness.writeFailure) return Promise.reject(previewHarness.writeFailure);
+        const version = `sha256:saved:${++previewHarness.savedVersion}`;
+        const existing = previewHarness.readFiles.get(input.relativePath);
+        previewHarness.readFiles.set(input.relativePath, {
+          ...existing,
+          relativePath: input.relativePath,
+          contents: input.contents,
+          version,
+          encoding: input.encoding ?? "utf8",
+          lineEnding: input.lineEnding ?? "lf",
+        });
+        return Promise.resolve({ relativePath: input.relativePath, version });
       }),
       stageFileReference: vi.fn(),
     },
@@ -282,6 +346,152 @@ describe("PreviewPanel", () => {
     await page.getByRole("button", { name: "src/app.ts" }).click();
 
     await expect.element(page.getByText("const answer = 42;")).toBeInTheDocument();
+  });
+
+  it("edits and explicitly saves a text file with its read version and format", async () => {
+    previewHarness.entries = [{ path: "src/app.ts", kind: "file", sizeBytes: 64 }];
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 41;",
+      version: "sha256:opened",
+      encoding: "utf8-bom",
+      lineEnding: "crlf",
+    });
+
+    mounted = await renderPreviewPanel();
+    await page.getByRole("button", { name: "src/app.ts" }).click();
+    const editor = page.getByRole("textbox", { name: "Edit src/app.ts" });
+    await editor.fill("const answer = 42;");
+
+    await expect.element(page.getByLabelText("Unsaved changes")).toBeInTheDocument();
+    const saveShortcut = new KeyboardEvent("keydown", {
+      key: "s",
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    expect(window.dispatchEvent(saveShortcut)).toBe(false);
+
+    await vi.waitFor(() => expect(previewHarness.writeAttempts).toHaveLength(1));
+    expect(previewHarness.writeAttempts[0]).toMatchObject({
+      cwd: "/repo",
+      relativePath: "src/app.ts",
+      contents: "const answer = 42;",
+      expectedVersion: "sha256:opened",
+      encoding: "utf8-bom",
+      lineEnding: "crlf",
+    });
+    await expect.element(page.getByLabelText("Unsaved changes")).not.toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Save file" })).toBeDisabled();
+  });
+
+  it("guards file switching with cancel and discard choices", async () => {
+    previewHarness.entries = [
+      { path: "src/app.ts", kind: "file", sizeBytes: 64 },
+      { path: "README.md", kind: "file", sizeBytes: 64 },
+    ];
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 41;",
+    });
+    previewHarness.readFiles.set("README.md", {
+      relativePath: "README.md",
+      contents: "# Ryco",
+    });
+
+    mounted = await renderPreviewPanel();
+    await page.getByRole("button", { name: "src/app.ts" }).click();
+    await page.getByRole("textbox", { name: "Edit src/app.ts" }).fill("const answer = 42;");
+    await page.getByRole("button", { name: "README.md" }).click();
+
+    await expect
+      .element(page.getByRole("heading", { name: "Save changes before continuing?" }))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Edit src/app.ts" }))
+      .toHaveValue("const answer = 42;");
+
+    await page.getByRole("button", { name: "README.md" }).click();
+    await page.getByRole("button", { name: "Discard & Open" }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Edit README.md" }))
+      .toHaveValue("# Ryco");
+    expect(previewHarness.writeAttempts).toHaveLength(0);
+  });
+
+  it("preserves local edits on conflict and reloads the disk version on request", async () => {
+    previewHarness.entries = [{ path: "src/app.ts", kind: "file", sizeBytes: 64 }];
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 41;",
+      version: "sha256:opened",
+    });
+
+    mounted = await renderPreviewPanel();
+    await page.getByRole("button", { name: "src/app.ts" }).click();
+    const editor = page.getByRole("textbox", { name: "Edit src/app.ts" });
+    await editor.fill("const answer = 42;");
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 99;",
+      version: "sha256:external",
+    });
+    previewHarness.writeFailure = {
+      reason: "conflict",
+      message: "This file changed on disk after it was opened. Reload it before saving.",
+    };
+
+    await page.getByRole("button", { name: "Save file" }).click();
+    await expect
+      .element(page.getByText("File changed on disk", { exact: true }))
+      .toBeInTheDocument();
+    await expect.element(editor).toHaveValue("const answer = 42;");
+    await expect.element(page.getByRole("button", { name: "Save file" })).toBeDisabled();
+
+    await page.getByRole("button", { name: "Reload" }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Edit src/app.ts" }))
+      .toHaveValue("const answer = 99;");
+    await expect
+      .element(page.getByText("File changed on disk", { exact: true }))
+      .not.toBeInTheDocument();
+
+    await page.getByRole("textbox", { name: "Edit src/app.ts" }).fill("const answer = 43;");
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "const answer = 100;",
+      version: "sha256:external-again",
+    });
+    await page.getByRole("button", { name: "Save file" }).click();
+    await expect
+      .element(page.getByText("File changed on disk", { exact: true }))
+      .toBeInTheDocument();
+
+    await page.getByRole("button", { name: "Discard file changes" }).click();
+    await expect
+      .element(page.getByRole("textbox", { name: "Edit src/app.ts" }))
+      .toHaveValue("const answer = 100;");
+    await expect
+      .element(page.getByText("File changed on disk", { exact: true }))
+      .not.toBeInTheDocument();
+  });
+
+  it("keeps mixed-line-ending files read-only", async () => {
+    previewHarness.entries = [{ path: "src/app.ts", kind: "file", sizeBytes: 64 }];
+    previewHarness.readFiles.set("src/app.ts", {
+      relativePath: "src/app.ts",
+      contents: "first\nsecond\n",
+      lineEnding: "mixed",
+    });
+
+    mounted = await renderPreviewPanel();
+    await page.getByRole("button", { name: "src/app.ts" }).click();
+
+    await expect.element(page.getByText("Read-only · mixed line endings")).toBeInTheDocument();
+    await expect
+      .element(page.getByRole("textbox", { name: "Edit src/app.ts" }))
+      .not.toBeInTheDocument();
   });
 
   it("shows a size warning and skips fetching oversized files", async () => {

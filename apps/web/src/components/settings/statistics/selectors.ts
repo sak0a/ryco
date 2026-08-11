@@ -241,6 +241,7 @@ export interface DayPoint {
   readonly totalTokens: number;
   readonly turns: number;
   readonly activeMs: number;
+  readonly filesChanged: number;
   readonly additions: number;
   readonly deletions: number;
 }
@@ -294,6 +295,7 @@ export function buildTimeSeries(
       totalTokens: totals.totalTokens,
       turns: totals.turns,
       activeMs: totals.activeMs,
+      filesChanged: totals.filesChanged,
       additions: totals.additions,
       deletions: totals.deletions,
     });

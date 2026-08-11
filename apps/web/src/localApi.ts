@@ -154,6 +154,8 @@ function createBrowserLocalApi(
         withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getDiagnosticsMetrics()),
       getStatistics: () =>
         withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getStatistics()),
+      getUsageSummary: (input) =>
+        withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.getUsageSummary(input)),
       refreshProviders: () =>
         withRpcClient(readRpcClient, (rpcClient) => rpcClient.server.refreshProviders()),
       updateProvider: (input) =>

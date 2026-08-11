@@ -30,6 +30,43 @@ export class WorkspaceFileSystemError extends Schema.TaggedError<WorkspaceFileSy
   },
 ) {}
 
+export class WorkspaceFileConflictError extends Schema.TaggedError<WorkspaceFileConflictError>()(
+  "WorkspaceFileConflictError",
+  {
+    cwd: Schema.String,
+    relativePath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return "This file changed on disk after it was opened. Reload it before saving.";
+  }
+}
+
+export class WorkspaceFileDeletedError extends Schema.TaggedError<WorkspaceFileDeletedError>()(
+  "WorkspaceFileDeletedError",
+  {
+    cwd: Schema.String,
+    relativePath: Schema.String,
+  },
+) {
+  override get message(): string {
+    return "This file was removed from disk after it was opened. Explorer will not recreate it.";
+  }
+}
+
+export class WorkspaceFileUnsupportedEditError extends Schema.TaggedError<WorkspaceFileUnsupportedEditError>()(
+  "WorkspaceFileUnsupportedEditError",
+  {
+    cwd: Schema.String,
+    relativePath: Schema.String,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 /**
  * WorkspaceFileSystemShape - Service API for workspace-relative file operations.
  */
@@ -56,7 +93,11 @@ export interface WorkspaceFileSystemShape {
     input: ProjectWriteFileInput,
   ) => Effect.Effect<
     ProjectWriteFileResult,
-    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+    | WorkspaceFileConflictError
+    | WorkspaceFileDeletedError
+    | WorkspaceFileSystemError
+    | WorkspaceFileUnsupportedEditError
+    | WorkspacePathOutsideRootError
   >;
 
   /**

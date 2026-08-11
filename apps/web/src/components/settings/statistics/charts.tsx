@@ -19,6 +19,7 @@ import {
 } from "~/components/ui/chart";
 import {
   formatDayLabel,
+  formatDuration,
   formatInteger,
   formatProviderLabel,
   formatTokens,
@@ -169,16 +170,35 @@ export function ProviderDonut({ data }: { data: ReadonlyArray<ProviderAggregate>
   );
 }
 
-export function ProjectBars({ data }: { data: ReadonlyArray<ProjectAggregate> }) {
-  const chartData = data.slice(0, 6).map((entry, index) => ({
-    name: entry.title,
-    value: entry.totalTokens,
-    fill: chartColor(index),
-  }));
+export function ProjectBars({
+  data,
+  metric = "tokens",
+}: {
+  data: ReadonlyArray<ProjectAggregate>;
+  metric?: "tokens" | "turns" | "activeMs" | "files";
+}) {
+  const valueOf = (entry: ProjectAggregate) =>
+    metric === "tokens"
+      ? entry.totalTokens
+      : metric === "turns"
+        ? entry.turns
+        : metric === "activeMs"
+          ? entry.activeMs
+          : entry.filesChanged;
+  const chartData = [...data]
+    .toSorted((left, right) => valueOf(right) - valueOf(left))
+    .slice(0, 6)
+    .map((entry, index) => ({
+      name: entry.title,
+      value: valueOf(entry),
+      fill: chartColor(index),
+    }));
 
   if (chartData.length === 0) {
     return (
-      <div className="py-10 text-center text-muted-foreground text-xs">No project usage yet.</div>
+      <div className="py-10 text-center text-muted-foreground text-xs">
+        No project activity yet.
+      </div>
     );
   }
 
@@ -202,7 +222,13 @@ export function ProjectBars({ data }: { data: ReadonlyArray<ProjectAggregate> })
           content={
             <ChartTooltipContent
               hideLabel
-              formatter={(value) => formatTokens(Number(value) || 0)}
+              formatter={(value) =>
+                metric === "tokens"
+                  ? formatTokens(Number(value) || 0)
+                  : metric === "activeMs"
+                    ? formatDuration(Number(value) || 0)
+                    : formatInteger(Number(value) || 0)
+              }
             />
           }
         />

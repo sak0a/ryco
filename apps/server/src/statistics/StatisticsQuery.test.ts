@@ -249,10 +249,58 @@ statisticsLayer("StatisticsQuery", (it) => {
       assert.equal(snapshot.worktrees.archived, 1);
       assert.equal(snapshot.worktrees.active, 2);
       assert.equal(snapshot.worktrees.openPrs, 1);
+      assert.deepEqual(
+        snapshot.recentPullRequests.map((pullRequest) => ({
+          worktreeId: pullRequest.worktreeId,
+          projectTitle: pullRequest.projectTitle,
+          prNumber: pullRequest.prNumber,
+          active: pullRequest.active,
+        })),
+        [{ worktreeId: "wt-2", projectTitle: "Project One", prNumber: 42, active: true }],
+      );
 
       // Commits/pushes are not yet instrumented.
       assert.equal(snapshot.totals.commits, 0);
       assert.equal(snapshot.totals.pushes, 0);
+    }),
+  );
+
+  it.effect("bounds recent pull requests and orders them by update time then worktree id", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const statistics = yield* StatisticsQuery;
+      yield* clean(sql);
+      yield* insertProject(sql, "project-1", "Project One");
+
+      for (let index = 0; index < 21; index += 1) {
+        const suffix = String(index).padStart(2, "0");
+        yield* insertWorktree(sql, `wt-${suffix}`, "project-1", "pr", index + 1, null);
+      }
+      yield* sql`
+        UPDATE projection_worktrees
+        SET updated_at = '2026-06-06T00:00:00.000Z',
+            title = 'Newest worktree',
+            pr_title = 'Ship usage statistics',
+            pr_state = 'open',
+            pr_is_draft = 1
+        WHERE worktree_id = 'wt-20'
+      `;
+
+      const snapshot = yield* statistics.getStatistics();
+      assert.equal(snapshot.recentPullRequests.length, 20);
+      assert.deepEqual(
+        snapshot.recentPullRequests.map((pullRequest) => pullRequest.worktreeId),
+        [
+          "wt-20",
+          ...Array.from({ length: 19 }, (_, index) => `wt-${String(index).padStart(2, "0")}`),
+        ],
+      );
+      assert.deepInclude(snapshot.recentPullRequests[0]!, {
+        worktreeTitle: "Newest worktree",
+        prTitle: "Ship usage statistics",
+        prState: "open",
+        prIsDraft: true,
+      });
     }),
   );
 

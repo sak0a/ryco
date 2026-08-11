@@ -73,6 +73,7 @@ export const RPC_ACCESS_POLICY = {
   [WS_METHODS.serverGetDiagnosticsSnapshot]: "owner",
   [WS_METHODS.serverGetSettings]: "viewer",
   [WS_METHODS.serverGetStatistics]: "owner",
+  [WS_METHODS.serverGetUsageSummary]: "owner",
   [WS_METHODS.serverInstallOpinionatedPlugin]: "owner",
   [WS_METHODS.serverListOpinionatedPlugins]: "owner",
   [WS_METHODS.serverRefreshProviders]: "owner",
