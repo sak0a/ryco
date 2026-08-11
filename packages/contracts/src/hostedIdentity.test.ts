@@ -459,6 +459,7 @@ describe("native automatic-node claim contracts", () => {
     expect(
       strictDecode(NativeNodeClaimFinishRequest, {
         claimId,
+        challenge: opaqueB,
         signature: `${"A".repeat(85)}Q`,
         idempotencyKey: opaque,
       }),
@@ -479,6 +480,7 @@ describe("native automatic-node claim contracts", () => {
     expect(() =>
       strictDecode(NativeNodeClaimFinishRequest, {
         claimId,
+        challenge: opaqueB,
         signature: `${"A".repeat(85)}B`,
         idempotencyKey: opaque,
       }),

@@ -470,6 +470,7 @@ export type NativeNodeClaimStartResponse = typeof NativeNodeClaimStartResponse.T
 export const NativeNodeClaimFinishRequest = strict(
   Schema.Struct({
     claimId: NativeNodeClaimId,
+    challenge: Opaque256,
     signature: Schema.String.check(
       Schema.isMinLength(86),
       Schema.isMaxLength(86),
