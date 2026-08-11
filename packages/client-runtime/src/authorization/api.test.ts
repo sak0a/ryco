@@ -2580,6 +2580,7 @@ describe("HostedHubApi public hosted identity contracts", () => {
         disposition: "created",
         node: {
           id: "node_aaaaaaaaaaaaaaaaaaaaaa",
+          activeKeyId: "nkey_aaaaaaaaaaaaaaaaaaaaaa",
           environmentId: "env_aaaaaaaaaaaaaaaaaaaaaa",
           label: "Ada's Mac",
           fingerprint,

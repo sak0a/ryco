@@ -276,6 +276,7 @@ export function makeHubEnrollmentClient(
     const publicKey = await dependencies.signingIdentity.generate(keySecretName);
     const createdAt = now();
     const pending: PendingHubEnrollmentState = {
+      kind: "device-code",
       hubOrigin,
       keySecretName,
       pollingSecretName,
@@ -370,6 +371,7 @@ export function makeHubEnrollmentClient(
     const pending = state.pendingEnrollment;
     if (
       pending === null ||
+      (pending.kind ?? "device-code") !== "device-code" ||
       pending.hubOrigin !== hubOrigin ||
       pending.expiresAt === null ||
       pending.pollIntervalMs === null
@@ -456,7 +458,13 @@ export function makeHubEnrollmentClient(
     }
     const state = await dependencies.stateStore.readOrCreate();
     const pending = state.pendingEnrollment;
-    if (pending === null || pending.hubOrigin !== hubOrigin) return;
+    if (
+      pending === null ||
+      (pending.kind ?? "device-code") !== "device-code" ||
+      pending.hubOrigin !== hubOrigin
+    ) {
+      return;
+    }
     await clearPending(pending).catch(() => clientError("enrollment_local_state_failed"));
   };
 

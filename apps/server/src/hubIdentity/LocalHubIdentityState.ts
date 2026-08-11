@@ -5,6 +5,14 @@ import { canonicalizeHubOrigin, normalizeHubNodeName } from "@ryco/shared/nodeId
 import { openProtectedStateFile, type ProtectedStateFileFailure } from "./ProtectedStateFile.ts";
 
 export interface PendingHubEnrollmentState {
+  /**
+   * Absent on legacy records and read as `device-code`.
+   *
+   * The native-claim preparation reuses this identity-key ownership slot so an
+   * older binary still sees and can erase the provisional key instead of
+   * dropping an unknown field and orphaning non-listable secret material.
+   */
+  readonly kind?: "device-code" | "native-claim";
   readonly hubOrigin: string;
   readonly keySecretName: string;
   readonly pollingSecretName: string;
@@ -209,6 +217,9 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
   if (typeof value !== "object" || value === null) return stateError("identity_state_corrupt");
   const candidate = value as Partial<PendingHubEnrollmentState>;
   if (
+    (candidate.kind !== undefined &&
+      candidate.kind !== "device-code" &&
+      candidate.kind !== "native-claim") ||
     !isSecretName(candidate.keySecretName) ||
     !isSecretName(candidate.pollingSecretName) ||
     !isTimestamp(candidate.createdAt) ||
@@ -230,6 +241,7 @@ function parsePending(value: unknown): PendingHubEnrollmentState | null {
     return stateError("identity_state_corrupt");
   }
   return {
+    kind: candidate.kind ?? "device-code",
     hubOrigin,
     keySecretName: candidate.keySecretName,
     pollingSecretName: candidate.pollingSecretName,

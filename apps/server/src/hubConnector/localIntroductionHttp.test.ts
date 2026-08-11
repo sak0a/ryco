@@ -23,7 +23,11 @@ import {
   desktopLocalControlIsAuthorized,
   desktopLocalIntroductionRoutesLayer,
 } from "./localIntroductionHttp.ts";
-import { stubE2eeOperator, stubLocalIntroductionService } from "./testUtils/e2eeOperatorStub.ts";
+import {
+  stubE2eeOperator,
+  stubLocalIntroductionService,
+  stubNativeNodeClaimService,
+} from "./testUtils/e2eeOperatorStub.ts";
 
 const TOKEN = "A".repeat(43);
 const OTHER_TOKEN = "B".repeat(43);
@@ -51,6 +55,7 @@ function service(
     cancelEnrollment: async () => status,
     stop: async () => undefined,
     localIntroduction,
+    nativeNodeClaim: stubNativeNodeClaimService(),
     e2ee: stubE2eeOperator(),
   };
 }

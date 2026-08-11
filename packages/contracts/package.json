@@ -35,6 +35,11 @@
       "import": "./src/localIntroduction.ts",
       "require": "./src/localIntroduction.ts"
     },
+    "./desktop-native-node-claim": {
+      "types": "./src/desktopNativeNodeClaim.ts",
+      "import": "./src/desktopNativeNodeClaim.ts",
+      "require": "./src/desktopNativeNodeClaim.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",

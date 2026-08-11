@@ -27,6 +27,7 @@ import {
   stubClientListing,
   stubE2eeOperator,
   stubLocalIntroductionService,
+  stubNativeNodeClaimService,
 } from "./testUtils/e2eeOperatorStub.ts";
 
 const ONLINE_STATUS: HubConnectorStatus = {
@@ -97,6 +98,7 @@ const makeConnectorStub = (stub: ConnectorStub) => {
     cancelEnrollment: async () => stub.statuses[0]!,
     stop: async () => undefined,
     localIntroduction: stubLocalIntroductionService(),
+    nativeNodeClaim: stubNativeNodeClaimService(),
     e2ee: stubE2eeOperator(stub.e2ee ?? {}),
   };
   return {
