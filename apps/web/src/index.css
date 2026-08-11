@@ -246,6 +246,17 @@
   animation: status-ping 6s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
+:root[data-ryco-motion-paused]
+  :is(
+    .animate-status-pulse,
+    .animate-status-ping,
+    .chat-file-edit-text--active,
+    .sidebar-status-text--shimmer,
+    .thinking-status-shimmer
+  ) {
+  animation-play-state: paused;
+}
+
 @keyframes status-pulse {
   0% {
     opacity: 1;
@@ -1246,14 +1257,15 @@ code {
     background-position: 100% center;
     background-clip: text;
     -webkit-background-clip: text;
-    animation: chat-file-edit-text-shimmer 1.65s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+    animation: chat-file-edit-text-shimmer 6s linear infinite;
   }
 
   @keyframes chat-file-edit-text-shimmer {
     0% {
       background-position: 100% center;
+      animation-timing-function: steps(8, end);
     }
-    30%,
+    20%,
     100% {
       background-position: -100% center;
     }
@@ -1289,7 +1301,7 @@ code {
   }
 
   .sidebar-status-text.sidebar-status-text {
-    --sidebar-status-text-duration: 2s;
+    --sidebar-status-text-duration: 6s;
     --sidebar-status-text-spread: 20px;
     color: transparent;
     -webkit-text-fill-color: transparent;
@@ -1322,7 +1334,7 @@ code {
   }
 
   .sidebar-status-text--in-progress {
-    --sidebar-status-text-duration: 2s;
+    --sidebar-status-text-duration: 6s;
     --sidebar-status-text-base-color: var(--muted-foreground);
     --sidebar-status-text-shimmer-color: var(--color-sky-500);
   }
@@ -1401,8 +1413,9 @@ code {
       background-position:
         120% center,
         center;
+      animation-timing-function: steps(8, end);
     }
-    25%,
+    20%,
     100% {
       background-position:
         -20% center,

@@ -87,6 +87,7 @@ import { adaptProjectForSidebarTree } from "./sidebar/sidebarTreeAdapters";
 import { composeSidebarTree } from "./sidebar/hooks/useSidebarTree";
 import { SidebarProjectsContent, PROJECT_ROOT_DROP_ID } from "./sidebar/SidebarProjectList";
 import { SidebarProjectItem } from "./sidebar/SidebarProjectItem";
+import { SidebarProjectDialogProvider } from "./sidebar/SidebarProjectDialogOwner";
 import { SidebarChromeHeader, SidebarChromeFooter } from "./sidebar/SidebarChrome";
 import { SidebarNewThreadButton } from "./sidebar/SidebarNewThreadButton";
 import { resolveNewThreadProjectKey } from "./sidebar/sidebarNewThreadTarget";
@@ -1088,51 +1089,56 @@ export default function Sidebar() {
         onClick={startNewThreadFromSidebar}
       />
 
-      <SidebarProjectsContent
-        showArm64IntelBuildWarning={showArm64IntelBuildWarning}
-        arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
-        desktopUpdateButtonAction={desktopUpdateButtonAction}
-        desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
-        handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
-        projectSortOrder={sidebarProjectSortOrder}
-        threadSortOrder={sidebarThreadSortOrder}
-        projectGroupingMode={sidebarProjectGroupingMode}
+      <SidebarProjectDialogProvider
+        projectGroupingSettings={projectGroupingSettings}
         updateSettings={updateSettings}
-        openAddProject={openAddProjectCommandPalette}
-        isManualProjectSorting={isManualProjectSorting}
-        projectDnDSensors={projectDnDSensors}
-        projectCollisionDetection={projectCollisionDetection}
-        handleProjectDragStart={handleProjectDragStart}
-        handleProjectDragEnd={handleProjectDragEnd}
-        handleProjectDragCancel={handleProjectDragCancel}
-        projectTreeRows={projectTreeRows}
-        commandPaletteShortcutLabel={commandPaletteShortcutLabel}
-        attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
-        projectsLength={projects.length}
-        renderProjectRow={(project, dragHandleProps, onNewFolderWithProject) => (
-          <SidebarProjectItem
-            project={project}
-            isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-            activeRouteThreadKey={
-              activeRouteProjectKey === project.projectKey ? activeRouteThreadKey : null
-            }
-            newThreadShortcutLabel={newThreadShortcutLabel}
-            handleNewThread={handleNewThread}
-            archiveThread={archiveThread}
-            deleteThread={deleteThread}
-            threadJumpLabelByKey={visibleThreadJumpLabelByKey}
-            attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-            expandThreadListForProject={expandThreadListForProject}
-            collapseThreadListForProject={collapseThreadListForProject}
-            onNewFolderWithProject={onNewFolderWithProject}
-            dragInProgressRef={dragInProgressRef}
-            suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-            suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-            isManualProjectSorting={isManualProjectSorting}
-            dragHandleProps={dragHandleProps}
-          />
-        )}
-      />
+        navigateToThread={navigateToThread}
+      >
+        <SidebarProjectsContent
+          showArm64IntelBuildWarning={showArm64IntelBuildWarning}
+          arm64IntelBuildWarningDescription={arm64IntelBuildWarningDescription}
+          desktopUpdateButtonAction={desktopUpdateButtonAction}
+          desktopUpdateButtonDisabled={desktopUpdateButtonDisabled}
+          handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
+          projectSortOrder={sidebarProjectSortOrder}
+          threadSortOrder={sidebarThreadSortOrder}
+          projectGroupingMode={sidebarProjectGroupingMode}
+          updateSettings={updateSettings}
+          openAddProject={openAddProjectCommandPalette}
+          isManualProjectSorting={isManualProjectSorting}
+          projectDnDSensors={projectDnDSensors}
+          projectCollisionDetection={projectCollisionDetection}
+          handleProjectDragStart={handleProjectDragStart}
+          handleProjectDragEnd={handleProjectDragEnd}
+          handleProjectDragCancel={handleProjectDragCancel}
+          projectTreeRows={projectTreeRows}
+          commandPaletteShortcutLabel={commandPaletteShortcutLabel}
+          attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
+          projectsLength={projects.length}
+          renderProjectRow={(project, dragHandleProps, onNewFolderWithProject) => (
+            <SidebarProjectItem
+              project={project}
+              isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
+              activeRouteThreadKey={
+                activeRouteProjectKey === project.projectKey ? activeRouteThreadKey : null
+              }
+              handleNewThread={handleNewThread}
+              archiveThread={archiveThread}
+              deleteThread={deleteThread}
+              threadJumpLabelByKey={visibleThreadJumpLabelByKey}
+              attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+              expandThreadListForProject={expandThreadListForProject}
+              collapseThreadListForProject={collapseThreadListForProject}
+              onNewFolderWithProject={onNewFolderWithProject}
+              dragInProgressRef={dragInProgressRef}
+              suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+              suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+              isManualProjectSorting={isManualProjectSorting}
+              dragHandleProps={dragHandleProps}
+            />
+          )}
+        />
+      </SidebarProjectDialogProvider>
 
       <SidebarSeparator />
       <SidebarChromeFooter />

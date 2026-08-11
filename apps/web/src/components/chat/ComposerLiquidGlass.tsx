@@ -6,8 +6,9 @@ import {
   isChromiumEngine,
   isLiquidGlassMediaEligible,
   registerLiquidGlassGlintHost,
-  renderDisplacementMap,
 } from "../../lib/liquidGlass";
+import { acquireLiquidGlassMap, type LiquidGlassMapLease } from "../../lib/liquidGlassMapCache";
+import { readWebPerfNow, recordWebPerf } from "../../perf/perfInstrumentation";
 
 /**
  * Liquid-glass layer for the composer, adapted from rdev/liquid-glass-react
@@ -52,27 +53,45 @@ export function ComposerLiquidGlass({ hostRef }: { hostRef: React.RefObject<HTML
     handles.setScale(DISPLACEMENT_SCALE);
     ensureLiquidGlassDefsHost().appendChild(handles.filter);
     let frame = 0;
+    let generation = 0;
+    let mapLease: LiquidGlassMapLease | null = null;
+    let disposed = false;
     const regenerate = () => {
       frame = 0;
       const width = host.offsetWidth;
       const height = host.offsetHeight;
       if (width < 24 || height < 24) return;
-      const url = renderDisplacementMap(width, height, 22, 36);
-      if (!url) return;
-      handles.setMap(url, width, height);
-      setMapReady(true);
+      const requestGeneration = ++generation;
+      void acquireLiquidGlassMap({ width, height, radius: 22, edgeBandPx: 36 }).then((lease) => {
+        if (!lease) return;
+        if (disposed || requestGeneration !== generation) {
+          lease.release();
+          return;
+        }
+        const applyStartedAt = readWebPerfNow();
+        handles.setMap(lease.url, width, height);
+        mapLease?.release();
+        mapLease = lease;
+        setMapReady(true);
+        recordWebPerf("web.liquid-glass.apply", {
+          durationMs: Math.max(0, readWebPerfNow() - applyStartedAt),
+        });
+      });
     };
     const observer = new ResizeObserver(() => {
       if (frame) return;
       frame = window.requestAnimationFrame(regenerate);
     });
     observer.observe(host);
-    // Generate the initial map synchronously: ResizeObserver's initial
-    // delivery has proven unreliable here, and the host is already laid out.
+    // Start the worker request immediately; the plain frost remains interactive
+    // while the displacement map is generated.
     regenerate();
     return () => {
+      disposed = true;
+      generation += 1;
       observer.disconnect();
       if (frame) window.cancelAnimationFrame(frame);
+      mapLease?.release();
       handles.filter.remove();
       setMapReady(false);
     };

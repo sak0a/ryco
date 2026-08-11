@@ -47,7 +47,7 @@ import { deriveThreadAgentPanelModel, deriveThreadSubagents } from "../threadWor
 import { parseStandaloneComposerSlashCommand } from "../composer-logic";
 import {
   derivePhase,
-  deriveTimelineEntries,
+  createTimelineEntryIndex,
   type ContextHandoffTimelineEntry,
   deriveActiveWorkStartedAt,
   deriveThreadActivityViewModel,
@@ -1661,23 +1661,32 @@ export default function ChatView(props: ChatViewProps) {
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
-  const timelineEntries = useMemo(
-    () =>
-      deriveTimelineEntries(
-        timelineMessages,
-        activeThread?.proposedPlans ?? [],
-        workLogEntries,
-        contextCompactionEntries,
-        contextHandoffEntries,
-      ),
-    [
-      activeThread?.proposedPlans,
+  const timelineEntryIndexRef = useRef<{
+    readonly threadId: ThreadId | null;
+    readonly index: ReturnType<typeof createTimelineEntryIndex>;
+  }>({ threadId: null, index: createTimelineEntryIndex() });
+  const timelineEntries = useMemo(() => {
+    if (timelineEntryIndexRef.current.threadId !== activeThreadId) {
+      timelineEntryIndexRef.current = {
+        threadId: activeThreadId,
+        index: createTimelineEntryIndex(),
+      };
+    }
+    return timelineEntryIndexRef.current.index.update({
+      messages: timelineMessages,
+      proposedPlans: activeThread?.proposedPlans ?? [],
+      workEntries: workLogEntries,
       contextCompactionEntries,
       contextHandoffEntries,
-      timelineMessages,
-      workLogEntries,
-    ],
-  );
+    });
+  }, [
+    activeThreadId,
+    activeThread?.proposedPlans,
+    contextCompactionEntries,
+    contextHandoffEntries,
+    timelineMessages,
+    workLogEntries,
+  ]);
   // "Empty" for the new-thread surface means nothing to show at all, not merely
   // no chat messages. A thread can already carry work-log rows, a proposed plan,
   // or setup-script activity from worktree creation while `messages` is still

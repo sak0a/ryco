@@ -64,6 +64,23 @@ describe("status animation CSS", () => {
     expect(vendoredUtility).not.toContain("thinking-status-shimmer");
   });
 
+  it("duty-cycles sidebar and file-edit shimmer and pauses decoration while hidden", () => {
+    const fileEdit = cssSection(".chat-file-edit-text--active", ".chat-final-diff-section");
+    const sidebar = cssSection(".sidebar-status-text.sidebar-status-text", "@media (forced-colors");
+    const hidden = cssSection(":root[data-ryco-motion-paused]", "@keyframes status-pulse");
+
+    expect(fileEdit).toContain("animation: chat-file-edit-text-shimmer 6s linear infinite");
+    expect(fileEdit).toMatch(/0%\s*{[^}]*steps\(8, end\)/s);
+    expect(fileEdit).toMatch(/20%,\s*100%/s);
+    expect(sidebar).toContain("--sidebar-status-text-duration: 6s");
+    expect(sidebar).toMatch(/0%\s*{[^}]*steps\(8, end\)/s);
+    expect(sidebar).toMatch(/20%,\s*100%/s);
+    expect(hidden).toContain(".chat-file-edit-text--active");
+    expect(hidden).toContain(".sidebar-status-text--shimmer");
+    expect(hidden).toContain(".thinking-status-shimmer");
+    expect(hidden).toContain("animation-play-state: paused");
+  });
+
   it("disables the affected animations under reduced motion", () => {
     const statusReducedMotion = cssSection(
       "@media (prefers-reduced-motion: reduce) {\n  .animate-status-pulse",
