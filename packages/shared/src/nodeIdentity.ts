@@ -5,6 +5,7 @@ import { encode, rfc8949EncodeOptions } from "cborg";
 export const NODE_AUTH_TRANSCRIPT_DOMAIN = "ryco.node-auth.proof.v1" as const;
 export const NODE_KEY_FINGERPRINT_DOMAIN = "ryco.node-key.v1" as const;
 export const NODE_KEY_ROTATION_TRANSCRIPT_DOMAIN = "ryco.node-key-rotation.proof.v1" as const;
+export const NATIVE_NODE_CLAIM_TRANSCRIPT_DOMAIN = "ryco.native-node-claim.proof.v1" as const;
 export const NODE_CHALLENGE_BYTES = 32;
 export const ED25519_PUBLIC_KEY_BYTES = 32;
 export const ED25519_SIGNATURE_BYTES = 64;
@@ -40,6 +41,22 @@ export interface NodeKeyRotationTranscriptInput {
   readonly challenge: Uint8Array;
 }
 
+export interface NativeNodeClaimTranscriptInput {
+  readonly hubOrigin: string;
+  readonly protocolVersion: number;
+  readonly transcriptVersion: number;
+  readonly claimId: string;
+  readonly accountId: string;
+  readonly spaceId: string;
+  readonly sessionId: string;
+  readonly dpopKeyThumbprint: Uint8Array;
+  readonly installationId: string;
+  readonly environmentId: string;
+  readonly nodeKey: NodePublicKeyDescriptor;
+  readonly claimExpiresAt: number;
+  readonly challenge: Uint8Array;
+}
+
 export class NodeIdentityValidationError extends Error {
   readonly code = "invalid_node_identity_input" as const;
 
@@ -53,6 +70,12 @@ const ID_SUFFIX = "[A-Za-z0-9_-]{22}";
 const NODE_ID = new RegExp(`^node_${ID_SUFFIX}$`);
 const NODE_KEY_ID = new RegExp(`^nkey_${ID_SUFFIX}$`);
 const ROTATION_REQUEST_ID = new RegExp(`^nrot_${ID_SUFFIX}$`);
+const PUBLIC_ID_SUFFIX = "[A-Za-z0-9_-]{22,43}";
+const ACCOUNT_ID = new RegExp(`^acct_${PUBLIC_ID_SUFFIX}$`);
+const SPACE_ID = new RegExp(`^space_${PUBLIC_ID_SUFFIX}$`);
+const SESSION_ID = new RegExp(`^sess_${PUBLIC_ID_SUFFIX}$`);
+const NATIVE_NODE_CLAIM_ID = new RegExp(`^nclaim_${PUBLIC_ID_SUFFIX}$`);
+const DESKTOP_INSTALLATION_ID = new RegExp(`^install_${PUBLIC_ID_SUFFIX}$`);
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 function invalid(): never {
@@ -69,6 +92,10 @@ function assertProtocolVersion(value: number): void {
 
 function assertIdentifier(value: string, pattern: RegExp): void {
   if (!pattern.test(value)) invalid();
+}
+
+function assertBoundedString(value: string, minLength: number, maxLength: number): void {
+  if (typeof value !== "string" || value.length < minLength || value.length > maxLength) invalid();
 }
 
 function copyBytes(value: Uint8Array, expectedLengths: readonly number[]): Uint8Array {
@@ -197,6 +224,46 @@ export function encodeNodeKeyRotationTranscript(input: NodeKeyRotationTranscript
         newKey.publicKey,
         fingerprint,
         input.challengeExpiresAt,
+        challenge,
+      ],
+      rfc8949EncodeOptions,
+    ),
+  );
+}
+
+export function encodeNativeNodeClaimTranscript(input: NativeNodeClaimTranscriptInput): Uint8Array {
+  const hubOrigin = canonicalizeHubOrigin(input.hubOrigin);
+  assertProtocolVersion(input.protocolVersion);
+  assertProtocolVersion(input.transcriptVersion);
+  assertIdentifier(input.claimId, NATIVE_NODE_CLAIM_ID);
+  assertIdentifier(input.accountId, ACCOUNT_ID);
+  assertIdentifier(input.spaceId, SPACE_ID);
+  assertIdentifier(input.sessionId, SESSION_ID);
+  const dpopKeyThumbprint = copyBytes(input.dpopKeyThumbprint, [32]);
+  assertIdentifier(input.installationId, DESKTOP_INSTALLATION_ID);
+  assertBoundedString(input.environmentId, 1, 128);
+  const nodeKey = validateNodePublicKey(input.nodeKey);
+  const nodeFingerprint = fingerprintNodePublicKey(nodeKey);
+  assertUnsignedSafeInteger(input.claimExpiresAt);
+  const challenge = copyBytes(input.challenge, [NODE_CHALLENGE_BYTES]);
+  return Uint8Array.from(
+    encode(
+      [
+        NATIVE_NODE_CLAIM_TRANSCRIPT_DOMAIN,
+        hubOrigin,
+        input.protocolVersion,
+        input.transcriptVersion,
+        input.claimId,
+        input.accountId,
+        input.spaceId,
+        input.sessionId,
+        dpopKeyThumbprint,
+        input.installationId,
+        input.environmentId,
+        nodeKey.algorithm,
+        nodeKey.publicKey,
+        nodeFingerprint,
+        input.claimExpiresAt,
         challenge,
       ],
       rfc8949EncodeOptions,
