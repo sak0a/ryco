@@ -37,4 +37,14 @@ describe("Desktop-main local control credential boundary", () => {
     expect(rendererBootstrapHandler).not.toContain("desktopControlToken");
     expect(rendererBootstrapHandler).toContain("bootstrapToken: backendBootstrapToken");
   });
+
+  it("keeps the durable E2EE agreement scalar behind Desktop main", () => {
+    const main = source("main.ts");
+    const preload = source("preload.ts");
+
+    expect(main).toContain("DesktopNativeE2eeHandshakeService");
+    expect(preload).toContain("startNativeE2eeHandshake");
+    expect(preload).not.toContain("agreementSecretKey");
+    expect(preload).not.toContain("withAgreementSecretKey");
+  });
 });

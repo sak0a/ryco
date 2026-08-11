@@ -8,6 +8,7 @@ import {
   validateE2eeClientIdentityPublicKey,
   validateE2eeNodeIdentityPublicKey,
 } from "@ryco/shared/relayE2eeKeys";
+import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
 
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
 
@@ -186,6 +187,72 @@ export class DesktopE2eeTrustStore {
         record.nodeId === nodeId,
     );
     return matches.length === 1 ? publicPin(matches[0]!) : null;
+  }
+
+  async hasVerifiedOrigin(hubOrigin: string): Promise<boolean> {
+    const document = parseDocument(
+      await this.#store.read(TRUST_RECORD).catch(() => fail("trust_unavailable")),
+    );
+    return document.verifiedMarkerOrigins.includes(hubOrigin);
+  }
+
+  recordAuthenticatedStatement(input: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly nodeId: string;
+    readonly localNodeHandle: string;
+    readonly verification: Extract<NodeE2eeCapabilityVerification, { readonly kind: "verified" }>;
+  }): Promise<DesktopVerifiedE2eePin> {
+    return this.#exclusive(async () => {
+      if (input.verification.anchor === "none") return fail("trust_conflict");
+      const document = parseDocument(
+        await this.#store.read(TRUST_RECORD).catch(() => fail("trust_unavailable")),
+      );
+      const index = document.records.findIndex(
+        (record) =>
+          record.hubOrigin === input.hubOrigin &&
+          record.accountId === input.accountId &&
+          record.nodeId === input.nodeId &&
+          record.localNodeHandle === input.localNodeHandle,
+      );
+      if (index < 0) return fail("trust_conflict");
+      const existing = document.records[index]!;
+      const statement = input.verification.statement;
+      if (
+        statement.hubOrigin !== input.hubOrigin ||
+        statement.nodeId !== input.nodeId ||
+        statement.continuityId !== existing.recordedContinuityId ||
+        statement.policyGeneration < existing.acceptedPolicyGeneration
+      ) {
+        return fail("trust_conflict");
+      }
+      const nextPublicKey = validateE2eeNodeIdentityPublicKey(statement.identityPublicKey);
+      const nextFingerprint = formatE2eeKeyFingerprint(
+        e2eeKeyFingerprint("node-identity", nextPublicKey),
+      );
+      if (
+        input.verification.anchor === "pin-unchanged" &&
+        (nextFingerprint !== existing.verifiedFingerprint ||
+          !e2eeBytesEqual(
+            nextPublicKey,
+            validateE2eeNodeIdentityPublicKey(decodeBase64Url(existing.verifiedIdentityPublicKey)),
+          ))
+      ) {
+        return fail("trust_conflict");
+      }
+      const updated: StoredPin = {
+        ...existing,
+        verifiedFingerprint: nextFingerprint,
+        verifiedIdentityPublicKey: encodeBase64Url(nextPublicKey),
+        acceptedPolicyGeneration: statement.policyGeneration,
+      };
+      const records = [...document.records];
+      records[index] = updated;
+      await this.#store
+        .write(TRUST_RECORD, JSON.stringify({ ...document, records }))
+        .catch(() => fail("trust_unavailable"));
+      return publicPin(updated);
+    });
   }
 
   promoteLocal(input: {

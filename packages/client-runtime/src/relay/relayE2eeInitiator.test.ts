@@ -703,6 +703,62 @@ describe("§4.4 client transition table — rows K1–K4 (the capability carrier
     expect(outbound(test.socket)).toHaveLength(1);
   });
 
+  it("K1/K5: delegates the Desktop IK handshake while keeping the record layer local", async () => {
+    const clients = new Map<string, E2eeClientHandshake>();
+    const lifecycle = { starts: 0, finishes: 0, destroys: 0 };
+    const nativeHandshake: NonNullable<RelayE2eeInitiatorAttempt["nativeHandshake"]> = {
+      start: async (input) => {
+        lifecycle.starts += 1;
+        expect(input.statement).toEqual(STATEMENT);
+        const client = new E2eeClientHandshake({
+          channel: {
+            ...input.channel,
+            channelId: input.channel.channelId as RelayChannelId,
+          },
+          advertised: NODE_ADVERTISED,
+          selectedSuite: input.selectedSuite,
+          offeredSuites: input.offeredSuites,
+          credentials: CREDENTIALS,
+          intendedCapability: input.intendedCapability,
+          intendedRole: input.intendedRole,
+        });
+        const result = client.createHello(input.now);
+        if (result.kind !== "hello") return { kind: "fatal", result };
+        const handle = `desktop-${lifecycle.starts}`;
+        clients.set(handle, client);
+        return { kind: "hello", handle, result };
+      },
+      finish: async (handle, payload, now) => {
+        lifecycle.finishes += 1;
+        const client = clients.get(handle);
+        clients.delete(handle);
+        if (client === undefined) throw new Error("Missing Desktop handshake.");
+        return client.receiveServerAccept(payload, now);
+      },
+      destroy: (handle) => {
+        lifecycle.destroys += 1;
+        clients.get(handle)?.destroy();
+        clients.delete(handle);
+      },
+    };
+    const test = harness({
+      credentials: BORROWED_CREDENTIALS,
+      nativeHandshake,
+      verifiedPin: VERIFIED_PIN,
+    });
+
+    deliver(test.socket, CARRIER);
+    await flush();
+    const accept = respond(Uint8Array.from(outbound(test.socket).at(-1)!));
+    deliver(test.socket, accept.record, 1);
+    await flush();
+
+    expect(lifecycle).toEqual({ starts: 1, finishes: 1, destroys: 0 });
+    expect(clients.size).toBe(0);
+    expect(test.machine().mode()).toBe("e2ee");
+    expect(test.events.onOpen).toHaveBeenCalledOnce();
+  });
+
   it("gives a late K1 borrow only the trust deadline's final millisecond", async () => {
     let finishCommit!: () => void;
     const committed = new Promise<void>((resolve) => {
