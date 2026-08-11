@@ -447,6 +447,7 @@ describe("native automatic-node claim contracts", () => {
     for (const invalid of [
       { ...response, protocolVersion: 2 },
       { ...response, transcriptVersion: 2 },
+      { ...response, environmentId: "desktop-main" },
       { ...response, expiresAt: issuedAt },
       { ...response, rawDpopProof: "must-not-survive" },
     ]) {

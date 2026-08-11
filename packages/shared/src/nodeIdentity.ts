@@ -76,6 +76,7 @@ const SPACE_ID = new RegExp(`^space_${PUBLIC_ID_SUFFIX}$`);
 const SESSION_ID = new RegExp(`^sess_${PUBLIC_ID_SUFFIX}$`);
 const NATIVE_NODE_CLAIM_ID = new RegExp(`^nclaim_${PUBLIC_ID_SUFFIX}$`);
 const DESKTOP_INSTALLATION_ID = new RegExp(`^install_${PUBLIC_ID_SUFFIX}$`);
+const ENVIRONMENT_ID = /^env_[A-Za-z0-9_-]{22}$/;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 function invalid(): never {
@@ -92,10 +93,6 @@ function assertProtocolVersion(value: number): void {
 
 function assertIdentifier(value: string, pattern: RegExp): void {
   if (!pattern.test(value)) invalid();
-}
-
-function assertBoundedString(value: string, minLength: number, maxLength: number): void {
-  if (typeof value !== "string" || value.length < minLength || value.length > maxLength) invalid();
 }
 
 function copyBytes(value: Uint8Array, expectedLengths: readonly number[]): Uint8Array {
@@ -241,7 +238,7 @@ export function encodeNativeNodeClaimTranscript(input: NativeNodeClaimTranscript
   assertIdentifier(input.sessionId, SESSION_ID);
   const dpopKeyThumbprint = copyBytes(input.dpopKeyThumbprint, [32]);
   assertIdentifier(input.installationId, DESKTOP_INSTALLATION_ID);
-  assertBoundedString(input.environmentId, 1, 128);
+  assertIdentifier(input.environmentId, ENVIRONMENT_ID);
   const nodeKey = validateNodePublicKey(input.nodeKey);
   const nodeFingerprint = fingerprintNodePublicKey(nodeKey);
   assertUnsignedSafeInteger(input.claimExpiresAt);
