@@ -2603,6 +2603,7 @@ describe("HostedHubApi public hosted identity contracts", () => {
     } as never);
     const finished = await api.finishNativeNodeClaim({
       claimId: started.claimId,
+      challenge: started.challenge,
       signature: `${"A".repeat(85)}Q`,
       idempotencyKey: "C".repeat(43),
     } as never);
@@ -2612,6 +2613,12 @@ describe("HostedHubApi public hosted identity contracts", () => {
       "https://hub.example.test/api/native/node-claims/start",
       "https://hub.example.test/api/native/node-claims/finish",
     ]);
+    expect(JSON.parse(String(requests[1]?.init?.body))).toEqual({
+      claimId: started.claimId,
+      challenge: started.challenge,
+      signature: `${"A".repeat(85)}Q`,
+      idempotencyKey: "C".repeat(43),
+    });
     expect(calls).toHaveLength(2);
     expect(calls.every((call) => call.token === "native-token-sensitive-canary")).toBe(true);
     for (const request of requests) {
