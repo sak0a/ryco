@@ -2318,3 +2318,331 @@ describe("HostedHubApi browser fallback authentication", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("HostedHubApi public hosted identity contracts", () => {
+  const opaque = "A".repeat(43);
+  const issuedAt = 1_752_710_400_000;
+  const expiresAt = issuedAt + 900_000;
+  const space = {
+    id: "space_aaaaaaaaaaaaaaaaaaaaaa",
+    kind: "personal",
+    displayName: "Ada's space",
+    role: "owner",
+  } as const;
+  const identity = {
+    account: {
+      id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
+      username: "ada_dev",
+      displayName: "Ada",
+      createdAt: issuedAt,
+      disabledAt: null,
+    },
+    session: {
+      id: "sess_aaaaaaaaaaaaaaaaaaaaaa",
+      accountId: "acct_aaaaaaaaaaaaaaaaaaaaaa",
+      activeSpaceId: space.id,
+      createdAt: issuedAt,
+      expiresAt: issuedAt + 86_400_000,
+      lastSeenAt: issuedAt,
+      revokedAt: null,
+      revocationReasonCode: null,
+    },
+    activeSpace: space,
+    spaces: [space],
+    csrfToken: "public-csrf-sensitive-canary",
+  } as const;
+
+  it("strictly decodes signup legs and adopts session material only after completion", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      if (requests.length === 1) {
+        return response({
+          status: "accepted",
+          attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+          attemptSecret: opaque,
+          resendAfterMs: 30_000,
+          issuedAt,
+          expiresAt,
+        });
+      }
+      if (requests.length === 2) {
+        return response({
+          status: "verified",
+          attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+          activationSecret: "B".repeat(43),
+          issuedAt,
+          expiresAt,
+        });
+      }
+      return response({
+        status: "complete",
+        identity,
+        recoveryCodes: ["recovery-sensitive-canary"],
+      });
+    });
+    const api = createApi();
+
+    await api.startPublicSignup({
+      username: "ada_dev",
+      email: "ada@example.test",
+      antiBotAssertion: "anti-bot-sensitive-canary",
+    } as never);
+    await api.verifyPublicSignup({
+      attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+      attemptSecret: opaque,
+      proof: { kind: "email_code", code: "123456" },
+    } as never);
+    const completed = await api.finishPublicSignupWithPassword({
+      attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+      activationSecret: "B".repeat(43),
+      password: "password-sensitive-canary",
+      idempotencyKey: "C".repeat(43),
+    } as never);
+
+    expect(requests.map(({ input }) => input)).toEqual([
+      "/api/public-signup/start",
+      "/api/public-signup/verify",
+      "/api/public-signup/password/finish",
+    ]);
+    expect(completed.identity.account.username).toBe("ada_dev");
+    expect(completed.recoveryCodes).toEqual(["recovery-sensitive-canary"]);
+    expect(api.hasSessionMaterial).toBe(true);
+    for (const request of requests) {
+      expect(request.init).toMatchObject({
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      expect(String(request.input)).not.toContain("sensitive-canary");
+    }
+  });
+
+  it("validates passkey options before opening the ceremony and rejects response extras", async () => {
+    const register = vi.fn(async () => ({ id: "passkey-response" }) as never);
+    const api = createApi({ register });
+    globalThis.fetch = vi.fn(async () =>
+      response({ options: registrationOptions, internalChallengeId: "must-not-survive" }),
+    );
+
+    await expect(
+      api.finishPublicSignupWithPasskey({
+        attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+        activationSecret: opaque,
+        idempotencyKey: "B".repeat(43),
+      } as never),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+    expect(register).not.toHaveBeenCalled();
+
+    const fetchSpy = vi.fn(async () => response({ options: registrationOptions }));
+    globalThis.fetch = fetchSpy;
+    await expect(
+      api.finishPublicSignupWithPasskey({
+        attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+        activationSecret: opaque,
+        idempotencyKey: "too-short",
+      } as never),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(register).not.toHaveBeenCalled();
+  });
+
+  it("decodes password second-factor and reset results without reflecting secrets", async () => {
+    const requests: Array<RequestInfo | URL> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(input);
+      if (requests.length === 1) {
+        return response({
+          status: "factor_required",
+          attemptId: "login_aaaaaaaaaaaaaaaaaaaaaa",
+          attemptSecret: opaque,
+          factor: "email_code",
+          issuedAt,
+          expiresAt,
+        });
+      }
+      if (requests.length === 2) return response(identity);
+      if (requests.length === 3) return response({ status: "accepted" });
+      if (requests.length === 4) {
+        return response({
+          status: "verified",
+          attemptId: "reset_aaaaaaaaaaaaaaaaaaaaaa",
+          attemptSecret: "B".repeat(43),
+          requiresTotp: false,
+          issuedAt,
+          expiresAt,
+        });
+      }
+      return response({ status: "complete" });
+    });
+    const api = createApi();
+
+    const login = await api.startPasswordLogin({
+      identifier: "ada_dev",
+      password: "password-sensitive-canary",
+    } as never);
+    expect(login.factor).toBe("email_code");
+    await api.finishPasswordLogin({
+      attemptId: login.attemptId,
+      attemptSecret: login.attemptSecret,
+      factor: login.factor,
+      code: "123456",
+    });
+    await api.requestPasswordReset({ identifier: "ada@example.test" } as never);
+    const reset = await api.verifyPasswordReset({ token: "C".repeat(43) } as never);
+    await api.finishPasswordReset({
+      attemptId: reset.attemptId,
+      attemptSecret: reset.attemptSecret,
+      password: "new-password-sensitive-canary",
+      factor: { kind: "none" },
+    });
+
+    expect(requests).toEqual([
+      "/api/auth/password/start",
+      "/api/auth/password/finish",
+      "/api/auth/password-reset/request",
+      "/api/auth/password-reset/verify",
+      "/api/auth/password-reset/finish",
+    ]);
+    expect(api.hasSessionMaterial).toBe(false);
+
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        status: "factor_required",
+        attemptId: "login_aaaaaaaaaaaaaaaaaaaaaa",
+        attemptSecret: opaque,
+        factor: "email_code",
+        issuedAt,
+        expiresAt,
+        providerMessageId: "resend-sensitive-canary",
+      }),
+    );
+    const error = await api
+      .startPasswordLogin({
+        identifier: "ada_dev",
+        password: "password-sensitive-canary",
+      } as never)
+      .catch((cause) => cause);
+    expect(error).toMatchObject({ code: "invalid_response" });
+    expect((error as Error).message).not.toContain("resend-sensitive-canary");
+  });
+
+  it("fails closed across the cookie and DPoP transport boundary before I/O", async () => {
+    const fetchSpy = vi.fn(async () => response({ status: "accepted" }));
+    globalThis.fetch = fetchSpy;
+    const { service } = recordingDpopSigner();
+    const native = createBearerApi(service, inMemoryBearerCredentials());
+    const browser = createApi();
+
+    await expect(
+      native.startPublicSignup({
+        username: "ada_dev",
+        email: "ada@example.test",
+        antiBotAssertion: "assertion",
+      } as never),
+    ).rejects.toMatchObject({ code: "browser_only_transport" });
+    await expect(
+      browser.startNativeNodeClaim({
+        installationId: "install_aaaaaaaaaaaaaaaaaaaaaa",
+        node: {},
+      } as never),
+    ).rejects.toMatchObject({ code: "native_only_transport" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("uses the authenticated DPoP session for exact automatic-node claim requests", async () => {
+    const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("native-token-sensitive-canary");
+    const { calls, service } = recordingDpopSigner();
+    const fingerprint = `SHA256:${"A".repeat(42)}E`;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, ...(init ? { init } : {}) });
+      if (requests.length === 1) {
+        return response({
+          protocolVersion: 1,
+          transcriptVersion: 1,
+          claimId: "nclaim_aaaaaaaaaaaaaaaaaaaaaa",
+          challenge: opaque,
+          accountId: "acct_aaaaaaaaaaaaaaaaaaaaaa",
+          spaceId: space.id,
+          sessionId: "sess_aaaaaaaaaaaaaaaaaaaaaa",
+          dpopKeyThumbprint: "B".repeat(43),
+          installationId: "install_aaaaaaaaaaaaaaaaaaaaaa",
+          environmentId: "env_aaaaaaaaaaaaaaaaaaaaaa",
+          nodeFingerprint: fingerprint,
+          issuedAt,
+          expiresAt,
+        });
+      }
+      return response({
+        status: "claimed",
+        disposition: "created",
+        node: {
+          id: "node_aaaaaaaaaaaaaaaaaaaaaa",
+          environmentId: "env_aaaaaaaaaaaaaaaaaaaaaa",
+          label: "Ada's Mac",
+          fingerprint,
+          effectiveRole: "owner",
+        },
+      });
+    });
+    const api = createBearerApi(service, credentials);
+    const started = await api.startNativeNodeClaim({
+      installationId: "install_aaaaaaaaaaaaaaaaaaaaaa",
+      node: {
+        environmentId: "env_aaaaaaaaaaaaaaaaaaaaaa",
+        label: "Ada's Mac",
+        platformOs: "darwin",
+        platformArch: "arm64",
+        clientVersion: "0.1.8",
+        algorithm: "ed25519",
+        publicKey: opaque,
+        fingerprint,
+      },
+    } as never);
+    const finished = await api.finishNativeNodeClaim({
+      claimId: started.claimId,
+      signature: `${"A".repeat(85)}Q`,
+      idempotencyKey: "C".repeat(43),
+    } as never);
+
+    expect(finished.node.id).toBe("node_aaaaaaaaaaaaaaaaaaaaaa");
+    expect(requests.map(({ input }) => input)).toEqual([
+      "https://hub.example.test/api/native/node-claims/start",
+      "https://hub.example.test/api/native/node-claims/finish",
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.token === "native-token-sensitive-canary")).toBe(true);
+    for (const request of requests) {
+      const headers = headersOf(request.init);
+      expect(headers.get("Authorization")).toBe("DPoP native-token-sensitive-canary");
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+      expect(request.init?.credentials).toBe("omit");
+    }
+  });
+
+  it("forwards caller cancellation without publishing a synthetic Hub error", async () => {
+    globalThis.fetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("cancelled", "AbortError")),
+          );
+        }),
+    );
+    const api = createApi();
+    const controller = new AbortController();
+    const pending = api.startPublicSignup(
+      {
+        username: "ada_dev",
+        email: "ada@example.test",
+        antiBotAssertion: "anti-bot-sensitive-canary",
+      } as never,
+      controller.signal,
+    );
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});

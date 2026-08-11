@@ -21,6 +21,7 @@ import {
   type NativeHandoffStartRequest as NativeHandoffStartRequestType,
   type NativeHandoffStartResponse as NativeHandoffStartResponseType,
 } from "@ryco/contracts/native-handoff";
+import * as HostedIdentity from "@ryco/contracts/hosted-identity";
 import { Schema } from "effect";
 import { assertE2eeAccountId } from "@ryco/shared/relayE2eeTranscripts";
 
@@ -387,6 +388,8 @@ function messageForCode(code: string, intent?: HostedAccountIntent): string {
       return "The response was malformed or expired.";
     case "browser_only_transport":
       return "This action is only available in a browser.";
+    case "native_only_transport":
+      return "This action is only available in the native app.";
     default:
       return "Hub is temporarily unavailable.";
   }
@@ -792,6 +795,297 @@ export class HostedHubApi {
     );
   }
 
+  async startPublicSignup(
+    request: HostedIdentity.PublicSignupStartRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PublicSignupStartResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.PublicSignupStartRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.PublicSignupStartResponse,
+      await this.#request(HostedIdentity.PUBLIC_SIGNUP_START_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async verifyPublicSignup(
+    request: HostedIdentity.PublicSignupVerifyRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PublicSignupVerifyResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.PublicSignupVerifyRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.PublicSignupVerifyResponse,
+      await this.#request(HostedIdentity.PUBLIC_SIGNUP_VERIFY_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async finishPublicSignupWithPasskey(
+    request: HostedIdentity.PublicSignupPasskeyOptionsRequest & {
+      readonly idempotencyKey: HostedIdentity.PublicSignupPasskeyFinishRequest["idempotencyKey"];
+    },
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PublicSignupFinishResponse> {
+    this.#requireCookieTransport();
+    // Validate every caller-controlled member before network I/O or a platform
+    // passkey prompt. `response` is `Unknown` by contract and is replaced only
+    // after the ceremony returns.
+    const boundedRequest = decodeContract(
+      HostedIdentity.PublicSignupPasskeyFinishRequest,
+      { ...request, response: {} },
+      "invalid_request",
+    );
+    const activation = decodeContract(
+      HostedIdentity.PublicSignupPasskeyOptionsRequest,
+      {
+        attemptId: boundedRequest.attemptId,
+        activationSecret: boundedRequest.activationSecret,
+      },
+      "invalid_request",
+    );
+    const options = decodeContract(
+      HostedIdentity.PublicSignupPasskeyOptionsResponse,
+      await this.#request(HostedIdentity.PUBLIC_SIGNUP_PASSKEY_OPTIONS_PATH, {
+        method: "POST",
+        body: activation,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+    const response = await this.#passkeyCeremony.register(
+      validatePasskeyRegistrationOptions(options.options),
+      signal,
+    );
+    const body = decodeContract(
+      HostedIdentity.PublicSignupPasskeyFinishRequest,
+      { ...boundedRequest, response },
+      "invalid_request",
+    );
+    const result = decodeContract(
+      HostedIdentity.PublicSignupFinishResponse,
+      await this.#request(HostedIdentity.PUBLIC_SIGNUP_PASSKEY_FINISH_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+    this.#sessionCredentials.writeCsrfToken(result.identity.csrfToken);
+    return result;
+  }
+
+  async finishPublicSignupWithPassword(
+    request: HostedIdentity.PublicSignupPasswordFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PublicSignupFinishResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.PublicSignupPasswordFinishRequest,
+      request,
+      "invalid_request",
+    );
+    const result = decodeContract(
+      HostedIdentity.PublicSignupFinishResponse,
+      await this.#request(HostedIdentity.PUBLIC_SIGNUP_PASSWORD_FINISH_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+    this.#sessionCredentials.writeCsrfToken(result.identity.csrfToken);
+    return result;
+  }
+
+  async startPasswordLogin(
+    request: HostedIdentity.PasswordLoginStartRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PasswordLoginStartResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.PasswordLoginStartRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.PasswordLoginStartResponse,
+      await this.#request(HostedIdentity.PASSWORD_LOGIN_START_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async finishPasswordLogin(
+    request: HostedIdentity.PasswordLoginFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.HubBrowserSessionResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.PasswordLoginFinishRequest,
+      request,
+      "invalid_request",
+    );
+    const result = decodeContract(
+      HostedIdentity.HubBrowserSessionResponse,
+      await this.#request(HostedIdentity.PASSWORD_LOGIN_FINISH_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+    this.#sessionCredentials.writeCsrfToken(result.csrfToken);
+    return result;
+  }
+
+  async requestPasswordReset(
+    request: HostedIdentity.PasswordResetRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PasswordResetRequestResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(HostedIdentity.PasswordResetRequest, request, "invalid_request");
+    return decodeContract(
+      HostedIdentity.PasswordResetRequestResponse,
+      await this.#request(HostedIdentity.PASSWORD_RESET_REQUEST_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async verifyPasswordReset(
+    request: HostedIdentity.PasswordResetVerifyRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PasswordResetVerifyResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.PasswordResetVerifyRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.PasswordResetVerifyResponse,
+      await this.#request(HostedIdentity.PASSWORD_RESET_VERIFY_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async finishPasswordReset(
+    request: HostedIdentity.PasswordResetFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PasswordResetFinishResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.PasswordResetFinishRequest,
+      request,
+      "invalid_request",
+    );
+    const result = decodeContract(
+      HostedIdentity.PasswordResetFinishResponse,
+      await this.#request(HostedIdentity.PASSWORD_RESET_FINISH_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+    // Reset revokes every session family and intentionally does not log in.
+    this.clearSessionMaterial();
+    return result;
+  }
+
+  async switchActiveSpace(
+    request: HostedIdentity.ActiveSpaceSwitchRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.ActiveSpaceSwitchResponse> {
+    const body = decodeContract(
+      HostedIdentity.ActiveSpaceSwitchRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.ActiveSpaceSwitchResponse,
+      await this.#request(HostedIdentity.ACTIVE_SPACE_SWITCH_PATH, {
+        method: "POST",
+        body,
+        csrf: true,
+        dpop: "session",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async startNativeNodeClaim(
+    request: HostedIdentity.NativeNodeClaimStartRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeNodeClaimStartResponse> {
+    this.#requireBearerTransport();
+    const body = decodeContract(
+      HostedIdentity.NativeNodeClaimStartRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.NativeNodeClaimStartResponse,
+      await this.#request(HostedIdentity.NATIVE_NODE_CLAIM_START_PATH, {
+        method: "POST",
+        body,
+        dpop: "session",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async finishNativeNodeClaim(
+    request: HostedIdentity.NativeNodeClaimFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeNodeClaimFinishResponse> {
+    this.#requireBearerTransport();
+    const body = decodeContract(
+      HostedIdentity.NativeNodeClaimFinishRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.NativeNodeClaimFinishResponse,
+      await this.#request(HostedIdentity.NATIVE_NODE_CLAIM_FINISH_PATH, {
+        method: "POST",
+        body,
+        dpop: "session",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
   async signInWithPassword(
     input: {
       readonly email: string;
@@ -982,6 +1276,10 @@ export class HostedHubApi {
 
   #requireCookieTransport(): void {
     if (this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
+  }
+
+  #requireBearerTransport(): void {
+    if (!this.#isBearer) throw new HostedHubApiError("native_only_transport", 400);
   }
 
   async redeemInvitation(
