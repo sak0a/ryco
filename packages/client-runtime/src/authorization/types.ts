@@ -1,4 +1,5 @@
 import type { EnvironmentId, RelayCloseReason, RelayEffectiveRole } from "@ryco/contracts";
+import type * as HostedIdentity from "@ryco/contracts/hosted-identity";
 
 export type HostedAccountStatus =
   | "signed-out"
@@ -75,6 +76,76 @@ export interface HostedHubSessionResponse {
   readonly csrfToken?: string;
   readonly recoveryCodes?: ReadonlyArray<string>;
 }
+
+/** Canonical public multi-tenant identity records decoded at the Hub boundary. */
+export type HostedPublicAccount = HostedIdentity.HubPublicAccount;
+export type HostedActiveSpace = HostedIdentity.HubActiveSpaceSummary;
+export type HostedBrowserIdentity = HostedIdentity.HubBrowserSessionResponse;
+export type HostedPasswordLoginFactor = HostedIdentity.PasswordLoginFactor;
+
+/** Safe-to-publish identity metadata with the CSRF credential removed. */
+export interface HostedPublishedIdentity {
+  readonly account: HostedIdentity.HubPublicAccount;
+  readonly session: HostedIdentity.HubPublicBrowserSession;
+  readonly activeSpace: HostedIdentity.HubActiveSpaceSummary;
+  readonly spaces: ReadonlyArray<HostedIdentity.HubActiveSpaceSummary>;
+}
+
+/**
+ * Transport-neutral signup presentation state.
+ *
+ * Attempt and activation secrets are deliberately absent. Controllers keep
+ * them inside the currently running action; they must never enter a persisted
+ * runtime snapshot, diagnostics payload, or log.
+ */
+export type HostedPublicSignupState =
+  | { readonly status: "idle" }
+  | { readonly status: "starting" }
+  | {
+      readonly status: "check-email";
+      readonly attemptId: HostedIdentity.PublicSignupAttemptId;
+      readonly resendAfterMs: number;
+      readonly expiresAt: number;
+    }
+  | {
+      readonly status: "choose-credential";
+      readonly attemptId: HostedIdentity.PublicSignupAttemptId;
+      readonly expiresAt: number;
+    }
+  | { readonly status: "complete"; readonly identity: HostedPublishedIdentity };
+
+/** Password-login state after the password result is known, without the attempt secret. */
+export type HostedPasswordLoginState =
+  | { readonly status: "idle" }
+  | { readonly status: "verifying-password" }
+  | {
+      readonly status: "factor-required";
+      readonly attemptId: HostedIdentity.PasswordLoginAttemptId;
+      readonly factor: HostedPasswordLoginFactor;
+      readonly expiresAt: number;
+    }
+  | { readonly status: "signing-in" };
+
+/** Password-reset presentation state. Reset completion intentionally has no session. */
+export type HostedPasswordResetState =
+  | { readonly status: "idle" }
+  | { readonly status: "requesting" }
+  | { readonly status: "check-email" }
+  | {
+      readonly status: "set-password";
+      readonly attemptId: HostedIdentity.PasswordResetAttemptId;
+      readonly requiresTotp: boolean;
+      readonly expiresAt: number;
+    }
+  | { readonly status: "complete" };
+
+/** Automatic Desktop node setup state; signatures and challenges are action-local. */
+export type HostedAutomaticNodeState =
+  | { readonly status: "signed-out" }
+  | { readonly status: "setting-up" }
+  | { readonly status: "offline"; readonly nodeId: string }
+  | { readonly status: "online"; readonly nodeId: string }
+  | { readonly status: "claim-failed"; readonly retryable: boolean };
 
 /**
  * A passkey credential registered against the signed-in account. `id` is the

@@ -1,0 +1,516 @@
+import { Schema } from "effect";
+
+import { HubNodePublicKeyFingerprint } from "./hubConnector.ts";
+import { RelayNodeId } from "./relay.ts";
+
+export const PUBLIC_SIGNUP_START_PATH = "/api/public-signup/start" as const;
+export const PUBLIC_SIGNUP_VERIFY_PATH = "/api/public-signup/verify" as const;
+export const PUBLIC_SIGNUP_PASSKEY_OPTIONS_PATH = "/api/public-signup/passkey/options" as const;
+export const PUBLIC_SIGNUP_PASSKEY_FINISH_PATH = "/api/public-signup/passkey/finish" as const;
+export const PUBLIC_SIGNUP_PASSWORD_FINISH_PATH = "/api/public-signup/password/finish" as const;
+export const PASSWORD_LOGIN_START_PATH = "/api/auth/password/start" as const;
+export const PASSWORD_LOGIN_FINISH_PATH = "/api/auth/password/finish" as const;
+export const PASSWORD_RESET_REQUEST_PATH = "/api/auth/password-reset/request" as const;
+export const PASSWORD_RESET_VERIFY_PATH = "/api/auth/password-reset/verify" as const;
+export const PASSWORD_RESET_FINISH_PATH = "/api/auth/password-reset/finish" as const;
+export const ACTIVE_SPACE_SWITCH_PATH = "/api/auth/spaces/active" as const;
+export const NATIVE_NODE_CLAIM_START_PATH = "/api/native/node-claims/start" as const;
+export const NATIVE_NODE_CLAIM_FINISH_PATH = "/api/native/node-claims/finish" as const;
+
+export const HOSTED_IDENTITY_PROTOCOL_VERSION = 1 as const;
+export const NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION = 1 as const;
+
+export const HUB_USERNAME_MIN_CHARS = 3;
+export const HUB_USERNAME_MAX_CHARS = 32;
+export const HUB_SPACE_DISPLAY_NAME_MAX_CHARS = 100;
+export const HOSTED_IDENTITY_MAX_ANTI_BOT_ASSERTION_CHARS = 8_192;
+export const HOSTED_IDENTITY_MAX_EMAIL_CHARS = 254;
+export const HOSTED_IDENTITY_MAX_PASSWORD_CHARS = 256;
+export const HOSTED_IDENTITY_MAX_SPACES = 64;
+
+const strict = <S extends Schema.Top>(schema: S): S =>
+  schema.annotate({ parseOptions: { onExcessProperty: "error" } }) as S;
+
+const EpochMs = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const Opaque256 = Schema.String.check(
+  Schema.isMinLength(43),
+  Schema.isMaxLength(43),
+  Schema.isPattern(/^[A-Za-z0-9_-]{43}$/),
+);
+const AccountId = Schema.String.check(
+  Schema.isPattern(/^acct_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(48),
+);
+const SessionId = Schema.String.check(
+  Schema.isPattern(/^sess_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(48),
+);
+const BoundedDisplayName = Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(200));
+const BoundedSpaceDisplayName = Schema.Trim.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(HUB_SPACE_DISPLAY_NAME_MAX_CHARS),
+);
+const BoundedPassword = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(HOSTED_IDENTITY_MAX_PASSWORD_CHARS),
+);
+const AntiBotAssertion = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(HOSTED_IDENTITY_MAX_ANTI_BOT_ASSERTION_CHARS),
+);
+const IdempotencyKey = Opaque256.pipe(Schema.brand("HostedIdentityIdempotencyKey"));
+const SignupAttemptSecret = Opaque256.pipe(Schema.brand("PublicSignupAttemptSecret"));
+const SignupActivationSecret = Opaque256.pipe(Schema.brand("PublicSignupActivationSecret"));
+const PasswordLoginAttemptSecret = Opaque256.pipe(Schema.brand("PasswordLoginAttemptSecret"));
+const PasswordResetAttemptSecret = Opaque256.pipe(Schema.brand("PasswordResetAttemptSecret"));
+const MailToken = Opaque256.pipe(Schema.brand("HostedIdentityMailToken"));
+const EmailCode = Schema.String.check(Schema.isPattern(/^[0-9]{6,10}$/));
+const TotpCode = Schema.String.check(Schema.isPattern(/^[0-9]{6,8}$/));
+const JsonObject = Schema.Unknown.check(
+  Schema.makeFilter((value) =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? undefined
+      : "value must be an object",
+  ),
+);
+
+const strictTimed = <S extends Schema.Struct.Fields>(fields: S) =>
+  strict(
+    Schema.Struct({
+      ...fields,
+      issuedAt: EpochMs,
+      expiresAt: EpochMs,
+    }).check(
+      Schema.makeFilter((value) => {
+        const timed = value as { readonly issuedAt: number; readonly expiresAt: number };
+        return timed.expiresAt > timed.issuedAt ? undefined : "expiresAt must be after issuedAt";
+      }),
+    ),
+  );
+
+export const HubSpaceId = Schema.String.check(
+  Schema.isPattern(/^space_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(49),
+).pipe(Schema.brand("HubSpaceId"));
+export type HubSpaceId = typeof HubSpaceId.Type;
+
+export const HubSpaceKind = Schema.Literals(["personal", "legacy"]);
+export type HubSpaceKind = typeof HubSpaceKind.Type;
+
+export const HubSpaceRole = Schema.Literals(["viewer", "operator", "owner"]);
+export type HubSpaceRole = typeof HubSpaceRole.Type;
+
+/** A canonical, globally unique public username. Non-canonical input is rejected. */
+export const HubUsername = Schema.String.check(
+  Schema.isMinLength(HUB_USERNAME_MIN_CHARS),
+  Schema.isMaxLength(HUB_USERNAME_MAX_CHARS),
+  Schema.isPattern(/^[a-z0-9_]+$/),
+).pipe(Schema.brand("HubUsername"));
+export type HubUsername = typeof HubUsername.Type;
+
+export const HubNormalizedEmail = Schema.String.check(
+  Schema.isMinLength(3),
+  Schema.isMaxLength(HOSTED_IDENTITY_MAX_EMAIL_CHARS),
+  Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
+  Schema.makeFilter((value) =>
+    value === value.trim() && value === value.toLowerCase()
+      ? undefined
+      : "email must be trimmed lowercase",
+  ),
+).pipe(Schema.brand("HubNormalizedEmail"));
+export type HubNormalizedEmail = typeof HubNormalizedEmail.Type;
+
+export const HubLoginIdentifier = Schema.Union([HubUsername, HubNormalizedEmail]).pipe(
+  Schema.brand("HubLoginIdentifier"),
+);
+export type HubLoginIdentifier = typeof HubLoginIdentifier.Type;
+
+export const HubActiveSpaceSummary = strict(
+  Schema.Struct({
+    id: HubSpaceId,
+    kind: HubSpaceKind,
+    displayName: BoundedSpaceDisplayName,
+    role: HubSpaceRole,
+  }),
+);
+export type HubActiveSpaceSummary = typeof HubActiveSpaceSummary.Type;
+
+export const HubPublicAccount = strict(
+  Schema.Struct({
+    id: AccountId,
+    username: HubUsername,
+    displayName: BoundedDisplayName,
+    createdAt: EpochMs,
+    disabledAt: Schema.Null,
+  }),
+);
+export type HubPublicAccount = typeof HubPublicAccount.Type;
+
+export const HubPublicBrowserSession = strict(
+  Schema.Struct({
+    id: SessionId,
+    accountId: AccountId,
+    activeSpaceId: HubSpaceId,
+    createdAt: EpochMs,
+    expiresAt: EpochMs,
+    lastSeenAt: EpochMs,
+    revokedAt: Schema.Null,
+    revocationReasonCode: Schema.Null,
+  }).check(
+    Schema.makeFilter((session) =>
+      session.expiresAt > session.createdAt &&
+      session.lastSeenAt >= session.createdAt &&
+      session.lastSeenAt <= session.expiresAt
+        ? undefined
+        : "browser session timestamps are inconsistent",
+    ),
+  ),
+);
+export type HubPublicBrowserSession = typeof HubPublicBrowserSession.Type;
+
+const HubSpaces = Schema.Array(HubActiveSpaceSummary).check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(HOSTED_IDENTITY_MAX_SPACES),
+);
+
+export const HubBrowserSessionResponse = strict(
+  Schema.Struct({
+    account: HubPublicAccount,
+    session: HubPublicBrowserSession,
+    activeSpace: HubActiveSpaceSummary,
+    spaces: HubSpaces,
+    csrfToken: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)),
+  }).check(
+    Schema.makeFilter((value) => {
+      if (value.session.accountId !== value.account.id) return "session account does not match";
+      if (value.session.activeSpaceId !== value.activeSpace.id) {
+        return "session active space does not match";
+      }
+      if (new Set(value.spaces.map((space) => space.id)).size !== value.spaces.length) {
+        return "spaces must contain unique ids";
+      }
+      const matches = value.spaces.filter((space) => space.id === value.activeSpace.id);
+      return matches.length === 1 && matches[0]?.role === value.activeSpace.role
+        ? undefined
+        : "active space must appear exactly once in spaces";
+    }),
+  ),
+);
+export type HubBrowserSessionResponse = typeof HubBrowserSessionResponse.Type;
+
+export const PublicSignupAttemptId = Schema.String.check(
+  Schema.isPattern(/^signup_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(50),
+).pipe(Schema.brand("PublicSignupAttemptId"));
+export type PublicSignupAttemptId = typeof PublicSignupAttemptId.Type;
+
+export const PublicSignupStartRequest = strict(
+  Schema.Struct({
+    username: HubUsername,
+    email: HubNormalizedEmail,
+    antiBotAssertion: AntiBotAssertion,
+    invitationToken: Schema.optional(MailToken),
+  }),
+);
+export type PublicSignupStartRequest = typeof PublicSignupStartRequest.Type;
+
+export const PublicSignupStartResponse = strictTimed({
+  status: Schema.Literal("accepted"),
+  attemptId: PublicSignupAttemptId,
+  attemptSecret: SignupAttemptSecret,
+  resendAfterMs: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(15 * 60_000),
+  ),
+});
+export type PublicSignupStartResponse = typeof PublicSignupStartResponse.Type;
+
+export const PublicSignupMailboxProof = Schema.Union([
+  strict(Schema.Struct({ kind: Schema.Literal("link_token"), token: MailToken })),
+  strict(Schema.Struct({ kind: Schema.Literal("email_code"), code: EmailCode })),
+]);
+export type PublicSignupMailboxProof = typeof PublicSignupMailboxProof.Type;
+
+export const PublicSignupVerifyRequest = strict(
+  Schema.Struct({
+    attemptId: PublicSignupAttemptId,
+    attemptSecret: SignupAttemptSecret,
+    proof: PublicSignupMailboxProof,
+  }),
+);
+export type PublicSignupVerifyRequest = typeof PublicSignupVerifyRequest.Type;
+
+export const PublicSignupVerifyResponse = strictTimed({
+  status: Schema.Literal("verified"),
+  attemptId: PublicSignupAttemptId,
+  activationSecret: SignupActivationSecret,
+});
+export type PublicSignupVerifyResponse = typeof PublicSignupVerifyResponse.Type;
+
+const PublicSignupActivation = {
+  attemptId: PublicSignupAttemptId,
+  activationSecret: SignupActivationSecret,
+} as const;
+
+export const PublicSignupPasskeyOptionsRequest = strict(Schema.Struct(PublicSignupActivation));
+export type PublicSignupPasskeyOptionsRequest = typeof PublicSignupPasskeyOptionsRequest.Type;
+
+export const PublicSignupPasskeyOptionsResponse = strict(Schema.Struct({ options: JsonObject }));
+export type PublicSignupPasskeyOptionsResponse = typeof PublicSignupPasskeyOptionsResponse.Type;
+
+export const PublicSignupPasskeyFinishRequest = strict(
+  Schema.Struct({
+    ...PublicSignupActivation,
+    response: JsonObject,
+    idempotencyKey: IdempotencyKey,
+  }),
+);
+export type PublicSignupPasskeyFinishRequest = typeof PublicSignupPasskeyFinishRequest.Type;
+
+export const PublicSignupPasswordFinishRequest = strict(
+  Schema.Struct({
+    ...PublicSignupActivation,
+    password: BoundedPassword,
+    idempotencyKey: IdempotencyKey,
+  }),
+);
+export type PublicSignupPasswordFinishRequest = typeof PublicSignupPasswordFinishRequest.Type;
+
+export const PublicSignupFinishResponse = strict(
+  Schema.Struct({
+    status: Schema.Literal("complete"),
+    identity: HubBrowserSessionResponse,
+    recoveryCodes: Schema.Array(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+    ).check(Schema.isMinLength(1), Schema.isMaxLength(256)),
+  }),
+);
+export type PublicSignupFinishResponse = typeof PublicSignupFinishResponse.Type;
+
+export const PasswordLoginAttemptId = Schema.String.check(
+  Schema.isPattern(/^login_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(49),
+).pipe(Schema.brand("PasswordLoginAttemptId"));
+export type PasswordLoginAttemptId = typeof PasswordLoginAttemptId.Type;
+
+export const PasswordLoginFactor = Schema.Literals(["totp", "email_code"]);
+export type PasswordLoginFactor = typeof PasswordLoginFactor.Type;
+
+export const PasswordLoginStartRequest = strict(
+  Schema.Struct({
+    identifier: HubLoginIdentifier,
+    password: BoundedPassword,
+    antiBotAssertion: Schema.optional(AntiBotAssertion),
+  }),
+);
+export type PasswordLoginStartRequest = typeof PasswordLoginStartRequest.Type;
+
+export const PasswordLoginStartResponse = strictTimed({
+  status: Schema.Literal("factor_required"),
+  attemptId: PasswordLoginAttemptId,
+  attemptSecret: PasswordLoginAttemptSecret,
+  factor: PasswordLoginFactor,
+});
+export type PasswordLoginStartResponse = typeof PasswordLoginStartResponse.Type;
+
+export const PasswordLoginFinishRequest = Schema.Union([
+  strict(
+    Schema.Struct({
+      attemptId: PasswordLoginAttemptId,
+      attemptSecret: PasswordLoginAttemptSecret,
+      factor: Schema.Literal("totp"),
+      code: TotpCode,
+    }),
+  ),
+  strict(
+    Schema.Struct({
+      attemptId: PasswordLoginAttemptId,
+      attemptSecret: PasswordLoginAttemptSecret,
+      factor: Schema.Literal("email_code"),
+      code: EmailCode,
+    }),
+  ),
+]);
+export type PasswordLoginFinishRequest = typeof PasswordLoginFinishRequest.Type;
+
+export const PasswordResetRequest = strict(
+  Schema.Struct({
+    identifier: HubLoginIdentifier,
+    antiBotAssertion: Schema.optional(AntiBotAssertion),
+  }),
+);
+export type PasswordResetRequest = typeof PasswordResetRequest.Type;
+
+export const PasswordResetRequestResponse = strict(
+  Schema.Struct({ status: Schema.Literal("accepted") }),
+);
+export type PasswordResetRequestResponse = typeof PasswordResetRequestResponse.Type;
+
+export const PasswordResetAttemptId = Schema.String.check(
+  Schema.isPattern(/^reset_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(49),
+).pipe(Schema.brand("PasswordResetAttemptId"));
+export type PasswordResetAttemptId = typeof PasswordResetAttemptId.Type;
+
+export const PasswordResetVerifyRequest = strict(Schema.Struct({ token: MailToken }));
+export type PasswordResetVerifyRequest = typeof PasswordResetVerifyRequest.Type;
+
+export const PasswordResetVerifyResponse = strictTimed({
+  status: Schema.Literal("verified"),
+  attemptId: PasswordResetAttemptId,
+  attemptSecret: PasswordResetAttemptSecret,
+  requiresTotp: Schema.Boolean,
+});
+export type PasswordResetVerifyResponse = typeof PasswordResetVerifyResponse.Type;
+
+export const PasswordResetFactor = Schema.Union([
+  strict(Schema.Struct({ kind: Schema.Literal("none") })),
+  strict(Schema.Struct({ kind: Schema.Literal("totp"), code: TotpCode })),
+]);
+export type PasswordResetFactor = typeof PasswordResetFactor.Type;
+
+export const PasswordResetFinishRequest = strict(
+  Schema.Struct({
+    attemptId: PasswordResetAttemptId,
+    attemptSecret: PasswordResetAttemptSecret,
+    password: BoundedPassword,
+    factor: PasswordResetFactor,
+  }),
+);
+export type PasswordResetFinishRequest = typeof PasswordResetFinishRequest.Type;
+
+export const PasswordResetFinishResponse = strict(
+  Schema.Struct({ status: Schema.Literal("complete") }),
+);
+export type PasswordResetFinishResponse = typeof PasswordResetFinishResponse.Type;
+
+export const ActiveSpaceSwitchRequest = strict(Schema.Struct({ spaceId: HubSpaceId }));
+export type ActiveSpaceSwitchRequest = typeof ActiveSpaceSwitchRequest.Type;
+
+export const ActiveSpaceSwitchResponse = strict(
+  Schema.Struct({
+    activeSpace: HubActiveSpaceSummary,
+    spaces: HubSpaces,
+  }).check(
+    Schema.makeFilter((value) => {
+      if (new Set(value.spaces.map((space) => space.id)).size !== value.spaces.length) {
+        return "spaces must contain unique ids";
+      }
+      const matches = value.spaces.filter((space) => space.id === value.activeSpace.id);
+      return matches.length === 1 && matches[0]?.role === value.activeSpace.role
+        ? undefined
+        : "active space must appear exactly once in spaces";
+    }),
+  ),
+);
+export type ActiveSpaceSwitchResponse = typeof ActiveSpaceSwitchResponse.Type;
+
+export const DesktopInstallationId = Schema.String.check(
+  Schema.isPattern(/^install_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(51),
+).pipe(Schema.brand("DesktopInstallationId"));
+export type DesktopInstallationId = typeof DesktopInstallationId.Type;
+
+export const NativeNodeClaimId = Schema.String.check(
+  Schema.isPattern(/^nclaim_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(50),
+).pipe(Schema.brand("NativeNodeClaimId"));
+export type NativeNodeClaimId = typeof NativeNodeClaimId.Type;
+
+export const NativeNodeClaimEnvironmentId = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(128),
+).pipe(Schema.brand("NativeNodeClaimEnvironmentId"));
+export type NativeNodeClaimEnvironmentId = typeof NativeNodeClaimEnvironmentId.Type;
+
+export const NativeNodeClaimPublicKey = Schema.String.check(
+  Schema.isMinLength(43),
+  Schema.isMaxLength(43),
+  Schema.isPattern(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/),
+).pipe(Schema.brand("NativeNodeClaimPublicKey"));
+export type NativeNodeClaimPublicKey = typeof NativeNodeClaimPublicKey.Type;
+
+const NativeNodeClaimMetadata = strict(
+  Schema.Struct({
+    environmentId: NativeNodeClaimEnvironmentId,
+    label: Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(100)),
+    platformOs: Schema.Literals(["darwin", "linux", "windows", "unknown"]),
+    platformArch: Schema.Literals(["arm64", "x64", "other"]),
+    clientVersion: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(64)),
+    algorithm: Schema.Literal("ed25519"),
+    publicKey: NativeNodeClaimPublicKey,
+    fingerprint: HubNodePublicKeyFingerprint,
+  }),
+);
+
+export const NativeNodeClaimStartRequest = strict(
+  Schema.Struct({
+    installationId: DesktopInstallationId,
+    node: NativeNodeClaimMetadata,
+  }),
+);
+export type NativeNodeClaimStartRequest = typeof NativeNodeClaimStartRequest.Type;
+
+export const NativeNodeClaimStartResponse = strictTimed({
+  protocolVersion: Schema.Literal(HOSTED_IDENTITY_PROTOCOL_VERSION),
+  transcriptVersion: Schema.Literal(NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION),
+  claimId: NativeNodeClaimId,
+  challenge: Opaque256,
+  accountId: AccountId,
+  spaceId: HubSpaceId,
+  sessionId: SessionId,
+  dpopKeyThumbprint: Opaque256,
+  installationId: DesktopInstallationId,
+  environmentId: NativeNodeClaimEnvironmentId,
+  nodeFingerprint: HubNodePublicKeyFingerprint,
+});
+export type NativeNodeClaimStartResponse = typeof NativeNodeClaimStartResponse.Type;
+
+export const NativeNodeClaimFinishRequest = strict(
+  Schema.Struct({
+    claimId: NativeNodeClaimId,
+    signature: Schema.String.check(
+      Schema.isMinLength(86),
+      Schema.isMaxLength(86),
+      Schema.isPattern(/^[A-Za-z0-9_-]{85}[AQgw]$/),
+    ),
+    idempotencyKey: IdempotencyKey,
+  }),
+);
+export type NativeNodeClaimFinishRequest = typeof NativeNodeClaimFinishRequest.Type;
+
+export const NativeNodeClaimFinishResponse = strict(
+  Schema.Struct({
+    status: Schema.Literal("claimed"),
+    disposition: Schema.Literals(["created", "reconnected"]),
+    node: strict(
+      Schema.Struct({
+        id: RelayNodeId,
+        environmentId: NativeNodeClaimEnvironmentId,
+        label: Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(100)),
+        fingerprint: HubNodePublicKeyFingerprint,
+        effectiveRole: Schema.Literal("owner"),
+      }),
+    ),
+  }),
+);
+export type NativeNodeClaimFinishResponse = typeof NativeNodeClaimFinishResponse.Type;
+
+export const NativeNodeClaimError = Schema.Union([
+  strict(
+    Schema.Struct({
+      error: Schema.Literal("node_claim_rejected"),
+      retryable: Schema.Literal(false),
+    }),
+  ),
+  strict(
+    Schema.Struct({
+      error: Schema.Literal("node_claim_unavailable"),
+      retryable: Schema.Literal(true),
+      retryAfterMs: Schema.optional(
+        Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(300_000)),
+      ),
+    }),
+  ),
+]);
+export type NativeNodeClaimError = typeof NativeNodeClaimError.Type;

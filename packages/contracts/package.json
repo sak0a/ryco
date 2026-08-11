@@ -25,6 +25,11 @@
       "import": "./src/nativeHandoff.ts",
       "require": "./src/nativeHandoff.ts"
     },
+    "./hosted-identity": {
+      "types": "./src/hostedIdentity.ts",
+      "import": "./src/hostedIdentity.ts",
+      "require": "./src/hostedIdentity.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",
