@@ -1,10 +1,18 @@
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 
-import {
-  HostedPairingRouteSurface,
-  PairingPendingSurface,
-  PairingRouteSurface,
-} from "../components/auth/PairingRouteSurface";
+import { AppBootLoadingSurface } from "../components/AppBootLoadingSurface";
+
+const LazyHostedPairingRouteSurface = lazy(() =>
+  import("../components/auth/PairingRouteSurface").then((module) => ({
+    default: module.HostedPairingRouteSurface,
+  })),
+);
+const LazyPairingRouteSurface = lazy(() =>
+  import("../components/auth/PairingRouteSurface").then((module) => ({
+    default: module.PairingRouteSurface,
+  })),
+);
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async ({ context }) => {
@@ -39,20 +47,26 @@ function PairRouteView() {
   }
 
   if (authGateState.status === "hosted-pairing") {
-    return <HostedPairingRouteSurface />;
+    return (
+      <Suspense fallback={<AppBootLoadingSurface />}>
+        <LazyHostedPairingRouteSurface />
+      </Suspense>
+    );
   }
 
   return (
-    <PairingRouteSurface
-      auth={authGateState.auth}
-      onAuthenticated={() => {
-        void navigate({ to: "/", replace: true });
-      }}
-      {...(authGateState.errorMessage ? { initialErrorMessage: authGateState.errorMessage } : {})}
-    />
+    <Suspense fallback={<AppBootLoadingSurface />}>
+      <LazyPairingRouteSurface
+        auth={authGateState.auth}
+        onAuthenticated={() => {
+          void navigate({ to: "/", replace: true });
+        }}
+        {...(authGateState.errorMessage ? { initialErrorMessage: authGateState.errorMessage } : {})}
+      />
+    </Suspense>
   );
 }
 
 function PairRoutePendingView() {
-  return <PairingPendingSurface />;
+  return <AppBootLoadingSurface />;
 }

@@ -36,6 +36,17 @@ const buildSourcemap = parseOptInSourcemapEnv(readEnv("RYCO_WEB_SOURCEMAP"), {
  * workspace dependency renders every hook call it owns unusable.
  */
 export const REACT_DEDUPE_PACKAGES = ["react", "react-dom"] as const;
+export const REACT_COMPILER_INCLUDE = /[\\/]apps[\\/]web[\\/]src[\\/].*\.[jt]sx?(?:$|\?)/;
+export const REACT_COMPILER_EXCLUDE = [
+  /[\\/]node_modules[\\/]/,
+  /\0rolldown[\\/]runtime\.js/,
+  /[\\/]routeTree\.gen\.ts(?:$|\?)/,
+  /\.(?:test|browser)\.[jt]sx?(?:$|\?)/,
+  /\.worker\.[jt]s(?:$|\?)/,
+  /\.logic\.ts(?:$|\?)/,
+  /[\\/]src[\\/]perf[\\/]/,
+  /[\\/]src[\\/]pwa[\\/]/,
+] as const;
 
 export function shouldEnableHostedPwaBuild(input: {
   readonly clientMode: "hosted-hub" | "standard";
@@ -80,6 +91,11 @@ export function createWebViteConfig(
       tanstackRouter(),
       react(),
       babel({
+        // The compiler used to visit every TS module pulled from every
+        // workspace package. Keep it on web React source while excluding
+        // generated, worker, test, and deliberately pure logic modules.
+        include: REACT_COMPILER_INCLUDE,
+        exclude: [...REACT_COMPILER_EXCLUDE],
         // Root-level `vp build` executes from the repository root; keep Babel plugin
         // resolution anchored to the package that declares the React Compiler plugin.
         cwd: webRoot,
@@ -100,6 +116,7 @@ export function createWebViteConfig(
         "@pierre/diffs/worker/worker.js",
         "effect/Array",
         "effect/Order",
+        "@tanstack/react-router",
         "react-dom/client",
       ],
     },
@@ -169,6 +186,11 @@ export function createWebViteConfig(
       emptyOutDir: true,
       modulePreload: false,
       sourcemap: buildSourcemap,
+    },
+    test: {
+      // A full web run has several module-heavy suites. Capping workers avoids
+      // multiplying their module graph until the host starts swapping.
+      maxWorkers: process.env.CI ? 2 : 4,
     },
   };
 }

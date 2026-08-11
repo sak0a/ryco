@@ -1,6 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 
-import { HostedNativeAuthorizationRoute } from "../components/hostedHub/HostedNativeAuthorizationRoute";
+import { AppBootLoadingSurface } from "../components/AppBootLoadingSurface";
+
+const LazyHostedNativeAuthorizationRoute = lazy(() =>
+  import("../components/hostedHub/HostedNativeAuthorizationRoute").then((module) => ({
+    default: module.HostedNativeAuthorizationRoute,
+  })),
+);
 
 export const Route = createFileRoute("/native/authorize/$handoffId")({
   component: NativeAuthorizationRouteView,
@@ -8,5 +15,9 @@ export const Route = createFileRoute("/native/authorize/$handoffId")({
 
 function NativeAuthorizationRouteView() {
   const { handoffId } = Route.useParams();
-  return <HostedNativeAuthorizationRoute handoffId={handoffId} />;
+  return (
+    <Suspense fallback={<AppBootLoadingSurface />}>
+      <LazyHostedNativeAuthorizationRoute handoffId={handoffId} />
+    </Suspense>
+  );
 }

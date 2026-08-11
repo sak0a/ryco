@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { LinkIcon, PlusIcon } from "lucide-react";
+import { lazy, Suspense } from "react";
 
 import { NoActiveThreadState } from "../components/NoActiveThreadState";
-import { PhoneHome } from "../components/shell/phone/PhoneHome";
 import { Button } from "../components/ui/button";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -10,6 +10,12 @@ import { SidebarInset } from "../components/ui/sidebar";
 import { useSavedEnvironmentRegistryStore } from "../environments/runtime";
 import { usePresentationTier } from "../hooks/usePresentationTier";
 import { APP_DISPLAY_NAME } from "~/branding";
+
+const LazyPhoneHome = lazy(() =>
+  import("../components/shell/phone/PhoneHome").then((module) => ({
+    default: module.PhoneHome,
+  })),
+);
 
 function ChatIndexRouteView() {
   const { authGateState } = Route.useRouteContext();
@@ -25,7 +31,11 @@ function ChatIndexRouteView() {
   // The phone tier lands on Home (the project-grouped thread list); desktop
   // keeps the empty no-active-thread surface and its last-thread redirect.
   if (presentationTier === "phone") {
-    return <PhoneHome />;
+    return (
+      <Suspense fallback={null}>
+        <LazyPhoneHome />
+      </Suspense>
+    );
   }
 
   return <NoActiveThreadState />;

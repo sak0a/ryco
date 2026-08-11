@@ -24,6 +24,7 @@ export default mergeConfig(
       // Browser files share a constrained Chromium process in CI. Serializing
       // them avoids scheduler-driven timing failures in interaction tests.
       fileParallelism: false,
+      maxWorkers: 1,
       browser: {
         enabled: true,
         provider: playwright({

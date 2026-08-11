@@ -1,11 +1,18 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { lazy, Suspense } from "react";
 
-import { StatisticsPage } from "../components/statistics/StatisticsPage";
+import { AppBootLoadingSurface } from "../components/AppBootLoadingSurface";
 import {
   parseStatisticsSearch,
   type StatisticsSearch,
 } from "../components/statistics/statisticsSearch";
 import { getPresentationTier } from "../lib/presentationTier";
+
+const LazyStatisticsPage = lazy(() =>
+  import("../components/statistics/StatisticsPage").then((module) => ({
+    default: module.StatisticsPage,
+  })),
+);
 
 function StatisticsRouteView() {
   // The generated file-route registration validates this shape at runtime.
@@ -13,10 +20,12 @@ function StatisticsRouteView() {
   const search = Route.useSearch() as StatisticsSearch;
   const navigate = Route.useNavigate();
   return (
-    <StatisticsPage
-      search={search}
-      onSearchChange={(next) => void navigate({ search: next, replace: true })}
-    />
+    <Suspense fallback={<AppBootLoadingSurface />}>
+      <LazyStatisticsPage
+        search={search}
+        onSearchChange={(next) => void navigate({ search: next, replace: true })}
+      />
+    </Suspense>
   );
 }
 
