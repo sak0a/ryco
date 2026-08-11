@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   canonicalizeHubOrigin,
+  encodeNativeNodeClaimTranscript,
   encodeNodeAuthenticationTranscript,
   encodeNodeKeyRotationTranscript,
   equalNodeIdentityBytes,
@@ -34,6 +35,10 @@ const FIXTURE_ROTATION_TRANSCRIPT =
   "8d781f7279636f2e6e6f64652d6b65792d726f746174696f6e2e70726f6f662e76317768747470733a2f2f6875622e6578616d706c652e636f6d0101781b6e726f745f43434343434343434343434343434343434343434343781b6e6f64655f41414141414141414141414141414141414141414141781b6e6b65795f42424242424242424242424242424242424242424242781b6e6b65795f444444444444444444444444444444444444444444446765643235353139582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f68398d305820a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5";
 const FIXTURE_ROTATION_SIGNATURE =
   "6fba20967db2bcacdb2c6af8797f55bd5cb70f9e8b58cea773c6dea20cbf9ca0139514086e43119e6cd93011b6f71d807c2923985841f2f5dcfe2abd16e5270f";
+const FIXTURE_CLAIM_TRANSCRIPT =
+  "90781f7279636f2e6e61746976652d6e6f64652d636c61696d2e70726f6f662e76317768747470733a2f2f6875622e6578616d706c652e636f6d0101781d6e636c61696d5f43434343434343434343434343434343434343434343781b616363745f44444444444444444444444444444444444444444444781c73706163655f45454545454545454545454545454545454545454545781b736573735f4646464646464646464646464646464646464646464658206b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b781e696e7374616c6c5f474747474747474747474747474747474747474747476c6465736b746f702d6d61696e6765643235353139582003a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b858200156cdedee6f84797b28b7be83048194483cc17165b1ae7afe7bbc77eedf9b641b0000019f68398d3058207c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c7c";
+const FIXTURE_CLAIM_SIGNATURE =
+  "19afacad6f4aa9acb48e7aa46959131ebbadf24cc91ccfc36ede0b1f30b175dc69b2f40ab6ecd9a7378428ad25560434c1a0f93cd350f06c576a5df48480790a";
 
 const privateKey = createPrivateKey({
   key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), FIXTURE_SEED]),
@@ -65,6 +70,22 @@ const rotationInput = {
   challenge: new Uint8Array(32).fill(0xa5),
 } as const;
 
+const claimInput = {
+  hubOrigin: "https://hub.example.com",
+  protocolVersion: 1,
+  transcriptVersion: 1,
+  claimId: "nclaim_CCCCCCCCCCCCCCCCCCCCCC",
+  accountId: "acct_DDDDDDDDDDDDDDDDDDDDDD",
+  spaceId: "space_EEEEEEEEEEEEEEEEEEEEEE",
+  sessionId: "sess_FFFFFFFFFFFFFFFFFFFFFF",
+  dpopKeyThumbprint: new Uint8Array(32).fill(0x6b),
+  installationId: "install_GGGGGGGGGGGGGGGGGGGGGG",
+  environmentId: "desktop-main",
+  nodeKey: { algorithm: "ed25519", publicKey: FIXTURE_PUBLIC_KEY },
+  claimExpiresAt: 1_784_160_030_000,
+  challenge: new Uint8Array(32).fill(0x7c),
+} as const;
+
 describe("node identity canonical cryptography", () => {
   it("matches the deterministic Ed25519 fingerprint fixture", () => {
     const fingerprint = fingerprintNodePublicKey({
@@ -93,6 +114,14 @@ describe("node identity canonical cryptography", () => {
     expect(verify(null, transcript, publicKey, signature)).toBe(true);
   });
 
+  it("matches and verifies the deterministic native node-claim fixture", () => {
+    const transcript = encodeNativeNodeClaimTranscript(claimInput);
+    expect(Buffer.from(transcript).toString("hex")).toBe(FIXTURE_CLAIM_TRANSCRIPT);
+    const signature = sign(null, transcript, privateKey);
+    expect(signature.toString("hex")).toBe(FIXTURE_CLAIM_SIGNATURE);
+    expect(verify(null, transcript, publicKey, signature)).toBe(true);
+  });
+
   it("binds every authentication field", () => {
     const baseline = encodeNodeAuthenticationTranscript(authInput);
     const mutations = [
@@ -109,6 +138,39 @@ describe("node identity canonical cryptography", () => {
         false,
       );
     }
+  });
+
+  it("binds every authority-bearing native node-claim field", () => {
+    const baseline = encodeNativeNodeClaimTranscript(claimInput);
+    const mutations = [
+      { ...claimInput, hubOrigin: "https://other.example.com" },
+      { ...claimInput, protocolVersion: 2 },
+      { ...claimInput, transcriptVersion: 2 },
+      { ...claimInput, claimId: "nclaim_ZZZZZZZZZZZZZZZZZZZZZZ" },
+      { ...claimInput, accountId: "acct_ZZZZZZZZZZZZZZZZZZZZZZ" },
+      { ...claimInput, spaceId: "space_ZZZZZZZZZZZZZZZZZZZZZZ" },
+      { ...claimInput, sessionId: "sess_ZZZZZZZZZZZZZZZZZZZZZZ" },
+      { ...claimInput, dpopKeyThumbprint: new Uint8Array(32).fill(0x6c) },
+      { ...claimInput, installationId: "install_ZZZZZZZZZZZZZZZZZZZZZZ" },
+      { ...claimInput, environmentId: "desktop-other" },
+      {
+        ...claimInput,
+        nodeKey: { ...claimInput.nodeKey, publicKey: new Uint8Array(32).fill(0x42) },
+      },
+      { ...claimInput, claimExpiresAt: claimInput.claimExpiresAt + 1 },
+      { ...claimInput, challenge: new Uint8Array(32).fill(0x7d) },
+    ];
+    for (const mutation of mutations) {
+      expect(equalNodeIdentityBytes(baseline, encodeNativeNodeClaimTranscript(mutation))).toBe(
+        false,
+      );
+    }
+  });
+
+  it("encodes native claim digests and key material as canonical CBOR byte strings", () => {
+    const decoded = decode(encodeNativeNodeClaimTranscript(claimInput));
+    expect(decoded).toHaveLength(16);
+    for (const index of [8, 12, 13, 15]) expect(decoded[index]).toBeInstanceOf(Uint8Array);
   });
 
   it("encodes a canonical CBOR array with byte strings", () => {
@@ -187,5 +249,17 @@ describe("node identity canonical cryptography", () => {
     expect(() => encodeNodeAuthenticationTranscript({ ...authInput, protocolMinor: -1 })).toThrow(
       NodeIdentityValidationError,
     );
+    expect(() =>
+      encodeNativeNodeClaimTranscript({
+        ...claimInput,
+        dpopKeyThumbprint: new Uint8Array(31),
+      }),
+    ).toThrow(NodeIdentityValidationError);
+    expect(() =>
+      encodeNativeNodeClaimTranscript({ ...claimInput, environmentId: "x".repeat(129) }),
+    ).toThrow(NodeIdentityValidationError);
+    expect(() =>
+      encodeNativeNodeClaimTranscript({ ...claimInput, claimExpiresAt: Number.MAX_VALUE }),
+    ).toThrow(NodeIdentityValidationError);
   });
 });
