@@ -176,6 +176,7 @@ function decisionFor(
   overrides: {
     readonly continuityId?: string;
     readonly acceptedPolicyGeneration?: number;
+    readonly approvedAt?: number;
     readonly decidedAt?: number;
   } = {},
 ): E2eeOwnerVerificationDecision {
@@ -186,6 +187,7 @@ function decisionFor(
     comparedSafetyNumber: safetyNumber(index.hubOrigin, index.accountId),
     continuityId: overrides.continuityId ?? "continuity-1",
     acceptedPolicyGeneration: overrides.acceptedPolicyGeneration ?? 4,
+    ...(overrides.approvedAt === undefined ? {} : { approvedAt: overrides.approvedAt }),
     decidedAt: overrides.decidedAt ?? 1_000,
   });
 }
@@ -499,6 +501,23 @@ describe("§13.2 step 5 promotion", () => {
     await reloaded.hydrate();
     expect(reloaded.resolve(handleSelection(index))?.state).toBe("unverified");
     expect(reloaded.marker(HUB)).toEqual({ kind: "unset" });
+  });
+
+  it("records node-attested approval time separately from the local scan latch", async () => {
+    const store = context.create();
+    await store.hydrate();
+    const index = await store.beginPairing({ hubOrigin: HUB, accountId: ACCOUNT });
+    await store.promote(decisionFor(index, { approvedAt: 800, decidedAt: 1_000 }));
+
+    const promoted = verifiedPin(store, index);
+    expect(promoted.approval.approvedAt).toBe(800);
+    expect(promoted.latch).toEqual({ kind: "set", setAt: 1_000 });
+  });
+
+  it("refuses a node approval time later than the local owner decision", () => {
+    expect(() => decisionFor(SEEDED_INDEX, { approvedAt: 1_001, decidedAt: 1_000 })).toThrow(
+      MobileE2eeTrustStoreError,
+    );
   });
 
   it("refuses a decision whose compared safety number is not the one this device derives", () => {

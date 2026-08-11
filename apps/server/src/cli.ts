@@ -54,6 +54,7 @@ import {
   E2eeClientListingView,
   E2eeClientRecordView,
   E2eeContinuityChangeView,
+  E2eeCrossDeviceApprovalView,
   E2eeContinuityView,
   E2eeFallbackView,
   E2eePolicyChangeView,
@@ -64,6 +65,7 @@ import {
 } from "./hubConnector/e2eeOperatorContract.ts";
 import { expandHomePath, resolveBaseDir } from "./os-jank.ts";
 import { runServer } from "./server.ts";
+import { renderTerminalQrCode } from "./startupAccess.ts";
 import { AuthControlPlaneRuntimeLive } from "./auth/Layers/AuthControlPlane.ts";
 import {
   formatIssuedPairingCredential,
@@ -2132,6 +2134,47 @@ const e2eeClientApproveCommand = Command.make("approve", {
   ),
 );
 
+const e2eeClientApprovalQrCommand = Command.make("approval-qr", {
+  ...authLocationFlags,
+  ...e2eeClientKeyFlags,
+  fingerprint: e2eeFingerprintArgument,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription(
+    "Show a short-lived node-signed QR that verifies one already approved phone.",
+  ),
+  Command.withHandler((flags) =>
+    runHubCommand(
+      flags,
+      (origin, token) =>
+        e2eeRequest(
+          origin,
+          token,
+          "/api/hub/e2ee/clients/approval-qr",
+          E2eeCrossDeviceApprovalView,
+          {
+            hubOrigin: flags.hubOrigin,
+            accountId: flags.accountId,
+            fingerprint: flags.fingerprint,
+          },
+        ),
+      { quietLogs: flags.json },
+    ).pipe(
+      Effect.flatMap((approval) =>
+        Console.log(
+          flags.json
+            ? emitJson(approval)
+            : [
+                "Scan this code in Ryco on the approved phone. It expires after five minutes.",
+                renderTerminalQrCode(approval.payload),
+                "The code grants no access by itself; the phone still reconnects with a fresh ticket, channel, and IK handshake.",
+              ].join("\n"),
+        ),
+      ),
+    ),
+  ),
+);
+
 const e2eeClientNarrowCommand = Command.make("narrow", {
   ...authLocationFlags,
   ...e2eeClientKeyFlags,
@@ -2329,6 +2372,7 @@ const e2eeClientCommand = Command.make("client").pipe(
     e2eeClientListCommand,
     e2eeClientShowCommand,
     e2eeClientApproveCommand,
+    e2eeClientApprovalQrCommand,
     e2eeClientNarrowCommand,
     e2eeClientRevokeCommand,
     e2eeClientPurgeCommand,

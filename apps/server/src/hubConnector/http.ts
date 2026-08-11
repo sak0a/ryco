@@ -311,6 +311,29 @@ export const hubConnectorE2eeClientReadRouteLayer = HttpRouter.add(
 );
 
 /**
+ * Create a short-lived node-signed QR for one already approved client.
+ *
+ * It mutates no authorization state, but uses POST so the record key never
+ * enters a URL or access log. The cross-origin refusal also makes a local web
+ * page unable to turn the node identity key into a signing oracle.
+ */
+export const hubConnectorE2eeClientApprovalQrRouteLayer = HttpRouter.add(
+  "POST",
+  "/api/hub/e2ee/clients/approval-qr",
+  Effect.gen(function* () {
+    yield* authenticateOwner;
+    yield* rejectCrossOriginMutation;
+    const body = yield* decodeBody(E2eeClientKeyBody);
+    const connector = yield* HubConnectorService;
+    const result = yield* Effect.tryPromise({
+      try: () => connector.e2ee.createClientApprovalQr(body),
+      catch: e2eeOperationFailure,
+    });
+    return HttpServerResponse.jsonUnsafe(result, { status: 200 });
+  }).pipe(Effect.catchTag("AuthError", respondToAuthError)),
+);
+
+/**
  * §13.6's four owner commands.
  *
  * The response is produced only after the client's ordered procedure has
@@ -600,6 +623,7 @@ export const hubConnectorRoutesLayer = Layer.mergeAll(
   hubConnectorLeaveRouteLayer,
   hubConnectorE2eeClientsRouteLayer,
   hubConnectorE2eeClientReadRouteLayer,
+  hubConnectorE2eeClientApprovalQrRouteLayer,
   hubConnectorE2eeAuthorizationRouteLayer,
   hubConnectorE2eePairingWindowRouteLayer,
   hubConnectorE2eeRefusalsRouteLayer,

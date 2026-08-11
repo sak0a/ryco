@@ -27,6 +27,7 @@ import type {
   NodeE2eeAuthorizationRequest,
   NodeE2eeClientListing,
   NodeE2eeContinuity,
+  NodeE2eeCrossDeviceApproval,
   NodeE2eeContinuityChange,
   NodeE2eeFallback,
   NodeE2eePolicy,
@@ -260,7 +261,7 @@ export function createPrimaryAuth(deps: PrimaryAuthDependencies) {
     leaveHub: () => post<HubConnectorStatus>("/api/hub/leave"),
     // ─── the node's E2EE operator surface (§6.4, §7.5, §12.5, §12.6, §13.4–§13.6) ───
     //
-    // The same sixteen routes the node CLI drives, reached the same way the Hub
+    // The same local routes the node CLI drives, reached the same way the Hub
     // connector controls above are: through this factory, so they inherit the
     // cookie-versus-bearer credential choice and the bounded error extraction
     // rather than growing a second opinion about either.
@@ -278,6 +279,11 @@ export function createPrimaryAuth(deps: PrimaryAuthDependencies) {
       ),
     applyNodeE2eeAuthorization: (request: NodeE2eeAuthorizationRequest) =>
       post<NodeE2eeAuthorizationChange>("/api/hub/e2ee/clients/authorization", request),
+    createNodeE2eeClientApprovalQr: (request: {
+      readonly hubOrigin: string;
+      readonly accountId: string;
+      readonly fingerprint: string;
+    }) => post<NodeE2eeCrossDeviceApproval>("/api/hub/e2ee/clients/approval-qr", request),
     setNodeE2eePairingWindow: (
       request:
         | { readonly action: "open"; readonly fingerprint: string }

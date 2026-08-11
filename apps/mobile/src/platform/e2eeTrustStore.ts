@@ -379,6 +379,9 @@ export interface E2eeOwnerVerificationDecision {
   readonly clientIdentityFingerprint: string;
   readonly continuityId: string;
   readonly acceptedPolicyGeneration: number;
+  /** When the node durably approved the client; manual comparison uses decision time. */
+  readonly approvedAt: number;
+  /** Local owner action time; this is when the downgrade latch is set. */
   readonly decidedAt: number;
 }
 
@@ -427,6 +430,8 @@ export interface E2eeOwnerVerificationDecisionInput {
   readonly continuityId: string;
   /** §5.7's generation carried by the statement the ceremony ran against. */
   readonly acceptedPolicyGeneration: number;
+  /** Node-attested approval time for cross-device QR; defaults to `decidedAt`. */
+  readonly approvedAt?: number;
   readonly decidedAt: number;
 }
 
@@ -435,8 +440,15 @@ export function mintE2eeOwnerVerificationDecision(
 ): E2eeOwnerVerificationDecision {
   const continuityId = boundedString(input.continuityId);
   const acceptedPolicyGeneration = boundedCount(input.acceptedPolicyGeneration);
+  const approvedAt = boundedCount(input.approvedAt ?? input.decidedAt);
   const decidedAt = boundedCount(input.decidedAt);
-  if (continuityId === null || acceptedPolicyGeneration === null || decidedAt === null) {
+  if (
+    continuityId === null ||
+    acceptedPolicyGeneration === null ||
+    approvedAt === null ||
+    decidedAt === null ||
+    approvedAt > decidedAt
+  ) {
     trustError("trust_store_decision_invalid");
   }
   let verifiedFingerprint: string;
@@ -474,6 +486,7 @@ export function mintE2eeOwnerVerificationDecision(
     clientIdentityFingerprint,
     continuityId,
     acceptedPolicyGeneration,
+    approvedAt,
     decidedAt,
   } as E2eeOwnerVerificationDecision;
 }
@@ -980,7 +993,7 @@ export function makeMobileE2eeTrustStore(
           latch: { kind: "set", setAt: decision.decidedAt },
           approval: {
             clientIdentityFingerprint: decision.clientIdentityFingerprint,
-            approvedAt: decision.decidedAt,
+            approvedAt: decision.approvedAt,
           },
         };
         await commit({

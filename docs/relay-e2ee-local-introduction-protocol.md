@@ -17,9 +17,10 @@ keys.
 The key words **MUST**, **MUST NOT**, **SHOULD**, and **MAY** are interpreted as in RFC 2119 and
 RFC 8174.
 
-Cross-device introduction, QR payloads, account recovery, and Hub-mediated key synchronization
-are out of scope. They require their own protocol. This protocol MUST NOT be used when Desktop is
-connecting to a backend it did not spawn.
+Cross-device introduction is specified separately by
+[`relay-e2ee-cross-device-approval-protocol.md`](./relay-e2ee-cross-device-approval-protocol.md).
+Account recovery and Hub-mediated key synchronization remain out of scope. This protocol MUST NOT
+be used when Desktop is connecting to a backend it did not spawn.
 
 ## 2. Security boundary
 

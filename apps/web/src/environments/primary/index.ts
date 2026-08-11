@@ -20,6 +20,7 @@ export {
   applyNodeE2eePolicy,
   cancelHubEnrollment,
   clearNodeE2eeRefusals,
+  createNodeE2eeClientApprovalQr,
   createServerPairingCredential,
   fetchHubEnrollment,
   fetchHubIdentity,

@@ -39,6 +39,7 @@ import type {
   E2eeClientListingView,
   E2eeClientRecordView,
   E2eeContinuityChangeView,
+  E2eeCrossDeviceApprovalView,
   E2eeContinuityView,
   E2eeFallbackView,
   E2eePolicyChangeView,
@@ -110,6 +111,11 @@ export interface HubConnectorE2eeOperator {
     readonly accountId: string;
     readonly fingerprint: string;
   }) => Promise<E2eeAuthorizationChangeView>;
+  readonly createClientApprovalQr: (key: {
+    readonly hubOrigin: string;
+    readonly accountId: string;
+    readonly fingerprint: string;
+  }) => Promise<E2eeCrossDeviceApprovalView>;
   readonly openPairingWindow: (fingerprint: string) => Promise<E2eeClientListingView>;
   readonly closePairingWindow: () => Promise<E2eeClientListingView>;
   /**
@@ -237,6 +243,9 @@ const offlineE2eeSurface = {
     clearRefusedPairingAttempts: () => undefined,
     sweepExpired: e2eeOperatorUnavailable,
   },
+  crossDeviceApproval: {
+    create: e2eeOperatorUnavailable,
+  },
   localIntroduction: {
     descriptor: e2eeOperatorUnavailable,
     complete: e2eeOperatorUnavailable,
@@ -272,6 +281,7 @@ const offlineE2eeSurface = {
   | "registerE2eeChannel"
   | "e2eeClientAuthorization"
   | "e2eeAuthorizationAdmin"
+  | "crossDeviceApproval"
   | "localIntroduction"
   | "nativeNodeClaim"
   | "e2eeGeneration"

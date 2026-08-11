@@ -74,7 +74,9 @@ The following are explicitly not provided by protocol version 1:
 - **Post-compromise recovery within an open channel.** Epoch rekeying is a one-way symmetric
   ratchet, not a fresh DH; compromise of live session state can expose later epochs until the
   channel closes (§9).
-- **Multi-device client-key introduction.** Deferred to its own specification.
+- **Hub-mediated client-key synchronization.** Cross-device owner approval is defined by
+  [`relay-e2ee-cross-device-approval-protocol.md`](./relay-e2ee-cross-device-approval-protocol.md),
+  but the Hub never synchronizes private keys, pins, or trust decisions.
 
 ## 2. Threat model and guarantees
 
@@ -4419,6 +4421,15 @@ A product MAY instead require entry of the node enrollment fingerprint before an
 exchange; in that flow the client verifies the advertised identity fingerprint against the
 entered value before sending the pairing hello. In no flow may a product silently promote a
 self-signed first-contact key to a verified pin.
+
+A native client MAY replace the manual comparison and device-side half of step 5 with the
+owner-scanned, node-signed attestation in
+[`relay-e2ee-cross-device-approval-protocol.md`](./relay-e2ee-cross-device-approval-protocol.md).
+That extension starts only after steps 1–3 created the exact pending client record and the owner
+durably approved it on a locally trusted node surface. The attestation is bound to that client's
+authenticated identity fingerprint and the current node identity, continuity, and policy
+generation. The safety number remains locally derived and never travels in the QR. Step 6 remains
+unchanged: neither approval nor scanning upgrades an existing channel.
 
 #### 13.2.1 The unexpected-node surface
 

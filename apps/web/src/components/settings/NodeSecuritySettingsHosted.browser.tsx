@@ -59,6 +59,7 @@ vi.mock("~/environments/primary", async (importOriginal) => {
     fetchNodeE2eeContinuity: record("continuity"),
     fetchNodeE2eeFallback: record("fallback"),
     applyNodeE2eeAuthorization: record("authorization"),
+    createNodeE2eeClientApprovalQr: record("approval-qr"),
     setNodeE2eePairingWindow: record("pairing-window"),
     clearNodeE2eeRefusals: record("refusals"),
     previewNodeE2eePolicy: record("policy-preview"),

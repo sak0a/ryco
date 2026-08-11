@@ -12,7 +12,11 @@ import { stripRelayChunkCapabilityPrelude } from "@ryco/shared/relayMessageChunk
 import { DEFAULT_HUB_CONNECTOR_CONFIG, type HubConnectorConfig } from "../config.ts";
 import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import { HubRelayAuthenticationError, type HubIdentityRuntimeShape } from "./HubIdentityRuntime.ts";
-import { stubIdentityE2eeAdmin, stubNativeNodeClaimService } from "./testUtils/e2eeOperatorStub.ts";
+import {
+  stubCrossDeviceApprovalService,
+  stubIdentityE2eeAdmin,
+  stubNativeNodeClaimService,
+} from "./testUtils/e2eeOperatorStub.ts";
 import type { HubRelaySocket, HubRelaySocketEventMap } from "./HubRelayTransport.ts";
 import { HubConnector, type HubConnectorScheduler } from "./HubConnector.ts";
 import type { RelayChannelSendHandle } from "./RelayChannelRegistry.ts";
@@ -67,6 +71,7 @@ function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentity
       },
     },
     nativeNodeClaim: stubNativeNodeClaimService(),
+    crossDeviceApproval: stubCrossDeviceApprovalService(),
     readPendingEnrollment: async () => null,
     leave: async () => undefined,
     readState: async () => ({

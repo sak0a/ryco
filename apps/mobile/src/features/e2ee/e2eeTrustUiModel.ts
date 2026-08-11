@@ -2,6 +2,7 @@ import {
   E2EE_SAFETY_NUMBER_DIGITS,
   E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS,
 } from "@ryco/shared/relayE2eeConstants";
+import { verifyCrossDeviceApprovalQr } from "@ryco/shared/relayE2eeCrossDeviceApproval";
 
 import {
   attachMobileE2eeLocalNodeHandle,
@@ -584,6 +585,107 @@ async function confirmE2eeVerification(input: {
     return E2EE_VERIFICATION_UNAVAILABLE;
   }
 }
+
+/**
+ * The one-scan cross-device path. The shared verifier checks the node signature,
+ * current statement/selection, continuity, policy generation, and this device's
+ * hardware-backed client key before the same branded promotion path is used.
+ */
+export async function confirmE2eeApprovalQr(input: {
+  readonly session: MobileE2eeSessionState;
+  readonly payload: string;
+  readonly decidedAt: number;
+}): Promise<string | null> {
+  const { session } = input;
+  const selection = session.selection;
+  const presented = session.presented;
+  if (
+    selection === null ||
+    selection.nodeId === null ||
+    selection.clientIdentityPublicKey === null ||
+    presented === null
+  ) {
+    return E2EE_VERIFICATION_UNAVAILABLE;
+  }
+  const approval = verifyCrossDeviceApprovalQr({
+    payload: input.payload,
+    hubOrigin: selection.hubOrigin,
+    accountId: selection.accountId,
+    nodeId: selection.nodeId,
+    nodeIdentityPublicKey: presented.nodeIdentityPublicKey,
+    clientIdentityPublicKey: selection.clientIdentityPublicKey,
+    nodeContinuityId: presented.continuityId,
+    nodePolicyGeneration: presented.policyGeneration,
+    now: input.decidedAt,
+  });
+  if (approval === undefined) return E2EE_APPROVAL_QR_INVALID;
+
+  try {
+    const index =
+      selection.localNodeHandle === null
+        ? await mobileE2eeTrustStore.beginPairing({
+            hubOrigin: selection.hubOrigin,
+            accountId: selection.accountId,
+            nodeId: selection.nodeId,
+            ...(selection.environmentId === null ? {} : { environmentId: selection.environmentId }),
+          })
+        : {
+            hubOrigin: selection.hubOrigin,
+            accountId: selection.accountId,
+            localNodeHandle: selection.localNodeHandle,
+          };
+    attachMobileE2eeLocalNodeHandle(index.localNodeHandle);
+    const decision = mintE2eeOwnerVerificationDecision({
+      index,
+      nodeIdentityPublicKey: presented.nodeIdentityPublicKey,
+      clientIdentityPublicKey: selection.clientIdentityPublicKey,
+      comparedSafetyNumber: presented.display.safetyNumber,
+      continuityId: presented.continuityId,
+      acceptedPolicyGeneration: presented.policyGeneration,
+      approvedAt: approval.approvedAt,
+      decidedAt: input.decidedAt,
+    });
+    await mobileE2eeTrustStore.promote(decision);
+    clearMobileE2eeTrustEvent();
+    return null;
+  } catch {
+    return E2EE_VERIFICATION_UNAVAILABLE;
+  }
+}
+
+/**
+ * Create the local unverified record that makes the next connection
+ * pairing-only. No node key is trusted here and the pairing channel cannot carry
+ * application data; its sole purpose is to let the node authenticate this
+ * phone's client key and create the pending record the owner will approve.
+ */
+export async function requestE2eeApproval(session: MobileE2eeSessionState): Promise<string | null> {
+  const selection = session.selection;
+  if (
+    selection === null ||
+    selection.clientIdentityPublicKey === null ||
+    session.presented === null ||
+    session.pinVerified
+  ) {
+    return E2EE_VERIFICATION_UNAVAILABLE;
+  }
+  if (selection.localNodeHandle !== null) return null;
+  try {
+    const index = await mobileE2eeTrustStore.beginPairing({
+      hubOrigin: selection.hubOrigin,
+      accountId: selection.accountId,
+      nodeId: selection.nodeId,
+      ...(selection.environmentId === null ? {} : { environmentId: selection.environmentId }),
+    });
+    attachMobileE2eeLocalNodeHandle(index.localNodeHandle);
+    return null;
+  } catch {
+    return E2EE_VERIFICATION_UNAVAILABLE;
+  }
+}
+
+export const E2EE_APPROVAL_QR_INVALID =
+  "That approval code does not match this phone, node, account, or current node security state. Ask the node to show a new code and scan it again.";
 
 /**
  * One fixed message, for the reason the trust store has one: an origin, an

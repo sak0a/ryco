@@ -86,6 +86,15 @@ vi.mock("~/environments/primary", async (importOriginal) => ({
     calls.push("authorization");
     return { closedChannels: 0, abortedHandshakes: 0 };
   }),
+  createNodeE2eeClientApprovalQr: vi.fn(async () => {
+    calls.push("approval-qr");
+    return {
+      payload: "ryco-e2ee-approval-v1:test",
+      approvedAt: 1_700_000_000_000,
+      issuedAt: 1_700_000_001_000,
+      expiresAt: 1_700_000_301_000,
+    };
+  }),
   setNodeE2eePairingWindow: vi.fn(async () => {
     calls.push("pairing-window");
     return CLIENTS;
@@ -126,6 +135,7 @@ import { isHostedHubMode } from "../../env";
 import {
   applyNodeE2eeAuthorization,
   applyNodeE2eePolicy,
+  createNodeE2eeClientApprovalQr,
   previewNodeE2eePolicy,
 } from "~/environments/primary";
 import {
@@ -577,6 +587,14 @@ describe("§13.6 the request an approval builds is the one the owner was shown",
       action: "approve",
       maxRole: "viewer",
       capabilitySet: NODE_E2EE_APPROVAL_CAPABILITY_SET,
+    });
+    await vi.waitFor(() => {
+      expect(createNodeE2eeClientApprovalQr).toHaveBeenCalledWith({
+        hubOrigin: "https://hub.example.test",
+        accountId: "acct_reader",
+        fingerprint: FINGERPRINT,
+      });
+      expect(document.body.textContent).toContain("Verify this phone");
     });
     expect(NODE_E2EE_APPROVAL_CAPABILITY_SET.length).toBeGreaterThan(0);
   });

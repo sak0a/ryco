@@ -225,6 +225,7 @@ const E2EE_READ_PATHS = [
 
 const E2EE_MUTATION_PATHS = [
   "/api/hub/e2ee/clients/read",
+  "/api/hub/e2ee/clients/approval-qr",
   "/api/hub/e2ee/clients/authorization",
   "/api/hub/e2ee/clients/pairing-window",
   "/api/hub/e2ee/clients/refusals/clear",

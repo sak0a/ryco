@@ -90,6 +90,14 @@ export interface NodeE2eeAuthorizationChange {
   readonly abortedHandshakes: number;
 }
 
+/** Public, node-signed attestation rendered as a QR by a local owner surface. */
+export interface NodeE2eeCrossDeviceApproval {
+  readonly payload: string;
+  readonly approvedAt: number;
+  readonly issuedAt: number;
+  readonly expiresAt: number;
+}
+
 /**
  * §13.5's node-side half of the comparison, for sessions open now.
  *
