@@ -1,10 +1,10 @@
 import { describe, it, assert } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@ryco/contracts";
 import { createModelCapabilities } from "@ryco/shared/model";
-import { Deferred, Duration, Effect, Fiber, PubSub, Ref, Stream } from "effect";
+import { Deferred, Duration, Effect, Equal, Fiber, PubSub, Ref, Stream } from "effect";
 import { TestClock } from "effect/testing";
 
-import { makeManagedServerProvider } from "./makeManagedServerProvider.ts";
+import { isProviderSnapshotFresh, makeManagedServerProvider } from "./makeManagedServerProvider.ts";
 
 const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
 const fastModeCapabilities = createModelCapabilities({
@@ -97,45 +97,73 @@ const enrichedSnapshotSecond: ServerProvider = {
 };
 
 describe("makeManagedServerProvider", () => {
-  it.effect(
-    "runs the initial provider check in the background and streams the refreshed snapshot",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const checkCalls = yield* Ref.make(0);
-          const releaseCheck = yield* Deferred.make<void>();
-          const provider = yield* makeManagedServerProvider<TestSettings>({
-            maintenanceCapabilities,
-            getSettings: Effect.succeed({ enabled: true }),
-            streamSettings: Stream.empty,
-            haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
-            initialSnapshot: () => initialSnapshot,
-            checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
-              Effect.flatMap(() => Deferred.await(releaseCheck)),
-              Effect.as(refreshedSnapshot),
-            ),
-            refreshInterval: "1 hour",
-          });
+  it("treats a snapshot as stale at the exact freshness boundary", () => {
+    assert.strictEqual(
+      isProviderSnapshotFresh({
+        lastRefreshAttemptAtMs: 1_000,
+        nowMs: 300_999,
+        freshnessMs: 300_000,
+      }),
+      true,
+    );
+    assert.strictEqual(
+      isProviderSnapshotFresh({
+        lastRefreshAttemptAtMs: 1_000,
+        nowMs: 301_000,
+        freshnessMs: 300_000,
+      }),
+      false,
+    );
+    assert.strictEqual(
+      isProviderSnapshotFresh({
+        lastRefreshAttemptAtMs: null,
+        nowMs: 0,
+        freshnessMs: 300_000,
+      }),
+      false,
+    );
+  });
 
-          const initial = yield* provider.getSnapshot;
-          assert.deepStrictEqual(initial, initialSnapshot);
+  it.effect("coalesces an overlapping refresh with the background initial provider check", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const releaseCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => initialSnapshot,
+          checkProvider: Ref.update(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap(() => Deferred.await(releaseCheck)),
+            Effect.as(refreshedSnapshot),
+          ),
+          refreshInterval: "1 hour",
+        });
 
-          const updatesFiber = yield* Stream.take(provider.streamChanges, 1).pipe(
-            Stream.runCollect,
-            Effect.forkChild,
-          );
-          yield* Effect.yieldNow;
+        const initial = yield* provider.getSnapshot;
+        assert.deepStrictEqual(initial, initialSnapshot);
 
-          yield* Deferred.succeed(releaseCheck, undefined);
+        const updatesFiber = yield* Stream.take(provider.streamChanges, 1).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        const overlappingRefresh = yield* provider.refresh.pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
 
-          const updates = Array.from(yield* Fiber.join(updatesFiber));
-          const latest = yield* provider.getSnapshot;
+        yield* Deferred.succeed(releaseCheck, undefined);
 
-          assert.deepStrictEqual(updates, [refreshedSnapshot]);
-          assert.deepStrictEqual(latest, refreshedSnapshot);
-          assert.strictEqual(yield* Ref.get(checkCalls), 1);
-        }),
-      ),
+        const updates = Array.from(yield* Fiber.join(updatesFiber));
+        const refreshResult = yield* Fiber.join(overlappingRefresh);
+        const latest = yield* provider.getSnapshot;
+
+        assert.deepStrictEqual(updates, [refreshedSnapshot]);
+        assert.deepStrictEqual(refreshResult, refreshedSnapshot);
+        assert.deepStrictEqual(latest, refreshedSnapshot);
+        assert.strictEqual(yield* Ref.get(checkCalls), 1);
+      }),
+    ),
   );
 
   it.effect("does not run periodic checks when automatic refresh is disabled", () =>
@@ -167,6 +195,111 @@ describe("makeManagedServerProvider", () => {
         assert.strictEqual(yield* Ref.get(checkCalls), 1);
       }),
     ).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("coalesces concurrent forced refreshes into one provider check", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckComplete = yield* Deferred.make<void>();
+        const manualCheckStarted = yield* Deferred.make<void>();
+        const releaseManualCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => initialSnapshot,
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) => {
+              if (count === 1) {
+                return Deferred.succeed(initialCheckComplete, undefined).pipe(
+                  Effect.as(refreshedSnapshot),
+                );
+              }
+              return Deferred.succeed(manualCheckStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseManualCheck)),
+                Effect.as(refreshedSnapshotSecond),
+              );
+            }),
+          ),
+          refreshInterval: null,
+        });
+
+        yield* Deferred.await(initialCheckComplete);
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (Equal.equals(yield* provider.getSnapshot, refreshedSnapshot)) break;
+          yield* Effect.yieldNow;
+        }
+        const refreshes = yield* Effect.all(
+          Array.from({ length: 20 }, () => provider.refresh),
+          { concurrency: "unbounded" },
+        ).pipe(Effect.forkChild);
+
+        yield* Deferred.await(manualCheckStarted);
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+
+        yield* Deferred.succeed(releaseManualCheck, undefined);
+        const snapshots = yield* Fiber.join(refreshes);
+
+        assert.strictEqual(snapshots.length, 20);
+        assert.ok(snapshots.every((snapshot) => Equal.equals(snapshot, refreshedSnapshotSecond)));
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+      }),
+    ),
+  );
+
+  it.effect("coalesces stale revalidation callers", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const checkCalls = yield* Ref.make(0);
+        const initialCheckComplete = yield* Deferred.make<void>();
+        const staleCheckStarted = yield* Deferred.make<void>();
+        const releaseStaleCheck = yield* Deferred.make<void>();
+        const provider = yield* makeManagedServerProvider<TestSettings>({
+          maintenanceCapabilities,
+          getSettings: Effect.succeed({ enabled: true }),
+          streamSettings: Stream.empty,
+          haveSettingsChanged: (previous, next) => previous.enabled !== next.enabled,
+          initialSnapshot: () => initialSnapshot,
+          checkProvider: Ref.updateAndGet(checkCalls, (count) => count + 1).pipe(
+            Effect.flatMap((count) => {
+              if (count === 1) {
+                return Deferred.succeed(initialCheckComplete, undefined).pipe(
+                  Effect.as(refreshedSnapshot),
+                );
+              }
+              return Deferred.succeed(staleCheckStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseStaleCheck)),
+                Effect.as(refreshedSnapshotSecond),
+              );
+            }),
+          ),
+          refreshInterval: null,
+          snapshotFreshness: Duration.zero,
+        });
+
+        yield* Deferred.await(initialCheckComplete);
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          if (Equal.equals(yield* provider.getSnapshot, refreshedSnapshot)) break;
+          yield* Effect.yieldNow;
+        }
+        const revalidations = yield* Effect.all(
+          Array.from({ length: 20 }, () => provider.revalidate),
+          { concurrency: "unbounded" },
+        ).pipe(Effect.forkChild);
+
+        yield* Deferred.await(staleCheckStarted);
+        yield* Effect.yieldNow;
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+
+        yield* Deferred.succeed(releaseStaleCheck, undefined);
+        const snapshots = yield* Fiber.join(revalidations);
+        assert.ok(snapshots.every((snapshot) => Equal.equals(snapshot, refreshedSnapshotSecond)));
+        assert.strictEqual(yield* Ref.get(checkCalls), 2);
+      }),
+    ),
   );
 
   it.effect("reruns the provider check when streamed settings change", () =>

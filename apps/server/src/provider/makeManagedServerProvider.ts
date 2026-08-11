@@ -1,5 +1,17 @@
 import type { ServerProvider } from "@ryco/contracts";
-import { Duration, Effect, Equal, Fiber, PubSub, Ref, Scope, Stream } from "effect";
+import {
+  Clock,
+  Deferred,
+  Duration,
+  Effect,
+  Equal,
+  Fiber,
+  PubSub,
+  Ref,
+  Scope,
+  Stream,
+  SynchronizedRef,
+} from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import type { ServerProviderShape } from "./Services/ServerProvider.ts";
@@ -9,7 +21,18 @@ import { ignoreProviderBackgroundCause } from "./ignoreProviderBackgroundCause.t
 interface ProviderSnapshotState {
   readonly snapshot: ServerProvider;
   readonly enrichmentGeneration: number;
+  readonly lastRefreshAttemptAtMs: number | null;
 }
+
+const DEFAULT_SNAPSHOT_FRESHNESS = Duration.minutes(5);
+
+export const isProviderSnapshotFresh = (input: {
+  readonly lastRefreshAttemptAtMs: number | null;
+  readonly nowMs: number;
+  readonly freshnessMs: number;
+}): boolean =>
+  input.lastRefreshAttemptAtMs !== null &&
+  input.nowMs - input.lastRefreshAttemptAtMs < input.freshnessMs;
 
 export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(function* <
   Settings,
@@ -27,6 +50,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     readonly publishSnapshot: (snapshot: ServerProvider) => Effect.Effect<void>;
   }) => Effect.Effect<void>;
   readonly refreshInterval?: Duration.Input | null;
+  readonly snapshotFreshness?: Duration.Input;
 }): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope> {
   const refreshSemaphore = yield* Semaphore.make(1);
   const changesPubSub = yield* Effect.acquireRelease(
@@ -38,9 +62,17 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
   const snapshotStateRef = yield* Ref.make<ProviderSnapshotState>({
     snapshot: initialSnapshot,
     enrichmentGeneration: 0,
+    lastRefreshAttemptAtMs: null,
   });
   const settingsRef = yield* Ref.make(initialSettings);
   const enrichmentFiberRef = yield* Ref.make<Fiber.Fiber<void, unknown> | null>(null);
+  const refreshFlightRef = yield* SynchronizedRef.make<Deferred.Deferred<
+    ServerProvider,
+    ServerSettingsError
+  > | null>(null);
+  const snapshotFreshnessMs = Duration.toMillis(
+    Duration.fromInputUnsafe(input.snapshotFreshness ?? DEFAULT_SNAPSHOT_FRESHNESS),
+  );
   const scope = yield* Effect.scope;
 
   const publishEnrichedSnapshot = Effect.fn("publishEnrichedSnapshot")(function* (
@@ -105,7 +137,18 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
       return yield* Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot));
     }
 
-    const nextSnapshot = yield* input.checkProvider;
+    const nextSnapshot = yield* input.checkProvider.pipe(
+      Effect.onExit(() =>
+        Clock.currentTimeMillis.pipe(
+          Effect.flatMap((lastRefreshAttemptAtMs) =>
+            Ref.update(snapshotStateRef, (state) => ({
+              ...state,
+              lastRefreshAttemptAtMs,
+            })),
+          ),
+        ),
+      ),
+    );
     const nextGeneration = yield* Ref.modify(snapshotStateRef, (state) => {
       const generation = input.enrichSnapshot
         ? state.enrichmentGeneration + 1
@@ -115,6 +158,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
         {
           snapshot: nextSnapshot,
           enrichmentGeneration: generation,
+          lastRefreshAttemptAtMs: state.lastRefreshAttemptAtMs,
         },
       ] as const;
     });
@@ -127,8 +171,59 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     refreshSemaphore.withPermits(1)(applySnapshotBase(nextSettings, options));
 
   const refreshSnapshot = Effect.fn("refreshSnapshot")(function* () {
-    const nextSettings = yield* input.getSettings;
-    return yield* applySnapshot(nextSettings, { forceRefresh: true });
+    const candidate = yield* Deferred.make<ServerProvider, ServerSettingsError>();
+    type RefreshSelection = {
+      readonly deferred: Deferred.Deferred<ServerProvider, ServerSettingsError>;
+      readonly owner: boolean;
+    };
+    const selection = yield* SynchronizedRef.modify(
+      refreshFlightRef,
+      (
+        current,
+      ): readonly [
+        RefreshSelection,
+        Deferred.Deferred<ServerProvider, ServerSettingsError> | null,
+      ] => {
+        if (current !== null) {
+          return [{ deferred: current, owner: false }, current];
+        }
+        return [{ deferred: candidate, owner: true }, candidate];
+      },
+    );
+
+    if (!selection.owner) {
+      return yield* Deferred.await(selection.deferred);
+    }
+
+    const refresh = input.getSettings.pipe(
+      Effect.flatMap((nextSettings) => applySnapshot(nextSettings, { forceRefresh: true })),
+    );
+    return yield* refresh.pipe(
+      Effect.onExit((exit) =>
+        Deferred.done(candidate, exit).pipe(
+          Effect.andThen(
+            SynchronizedRef.update(refreshFlightRef, (current) =>
+              current === candidate ? null : current,
+            ),
+          ),
+        ),
+      ),
+    );
+  });
+
+  const revalidateSnapshot = Effect.fn("revalidateSnapshot")(function* () {
+    const nowMs = yield* Clock.currentTimeMillis;
+    const state = yield* Ref.get(snapshotStateRef);
+    if (
+      isProviderSnapshotFresh({
+        lastRefreshAttemptAtMs: state.lastRefreshAttemptAtMs,
+        nowMs,
+        freshnessMs: snapshotFreshnessMs,
+      })
+    ) {
+      return state.snapshot;
+    }
+    return yield* refreshSnapshot();
   });
 
   yield* Stream.runForEach(input.streamSettings, (nextSettings) =>
@@ -144,18 +239,15 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
     ).pipe(Effect.forkScoped);
   }
 
-  yield* applySnapshot(initialSettings, { forceRefresh: true }).pipe(
+  yield* refreshSnapshot().pipe(
     ignoreProviderBackgroundCause("provider initial refresh failed"),
     Effect.forkScoped,
   );
 
   return {
     maintenanceCapabilities: input.maintenanceCapabilities,
-    getSnapshot: input.getSettings.pipe(
-      Effect.flatMap(applySnapshot),
-      Effect.tapError(Effect.logError),
-      Effect.orDie,
-    ),
+    getSnapshot: Ref.get(snapshotStateRef).pipe(Effect.map((state) => state.snapshot)),
+    revalidate: revalidateSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
     refresh: refreshSnapshot().pipe(Effect.tapError(Effect.logError), Effect.orDie),
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
