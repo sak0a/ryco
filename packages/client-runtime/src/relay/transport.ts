@@ -22,6 +22,7 @@ interface PendingTicket {
 const HOSTED_SESSION_SYNC_SUBSCRIPTIONS = new Set<string>([
   ORCHESTRATION_WS_METHODS.subscribeShell,
   ORCHESTRATION_WS_METHODS.subscribeThread,
+  ORCHESTRATION_WS_METHODS.subscribeThreadWindow,
   WS_METHODS.subscribeServerConfig,
   WS_METHODS.subscribeServerLifecycle,
   WS_METHODS.subscribeTerminalEvents,

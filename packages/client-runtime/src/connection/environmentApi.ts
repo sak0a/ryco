@@ -72,10 +72,22 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       stopBackgroundTask: rpcClient.orchestration.stopBackgroundTask,
       getFullThreadDiff: rpcClient.orchestration.getFullThreadDiff,
       searchThreadMessages: rpcClient.orchestration.searchThreadMessages,
+      ...(rpcClient.orchestration.getThreadWindow
+        ? { getThreadWindow: rpcClient.orchestration.getThreadWindow }
+        : {}),
+      ...(rpcClient.orchestration.getThreadHistoryPage
+        ? { getThreadHistoryPage: rpcClient.orchestration.getThreadHistoryPage }
+        : {}),
       subscribeShell: (callback, options) =>
         rpcClient.orchestration.subscribeShell(callback, options),
       subscribeThread: (input, callback, options) =>
         rpcClient.orchestration.subscribeThread(input, callback, options),
+      ...(rpcClient.orchestration.subscribeThreadWindow
+        ? {
+            subscribeThreadWindow: (input, callback, options) =>
+              rpcClient.orchestration.subscribeThreadWindow!(input, callback, options),
+          }
+        : {}),
     },
     contextHandoff: {
       getInspectionSummary: rpcClient.contextHandoff.getInspectionSummary,

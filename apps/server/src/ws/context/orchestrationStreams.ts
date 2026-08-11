@@ -3,7 +3,6 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
-  type OrchestrationThreadDetailSnapshot,
   OrchestrationGetSnapshotError,
   ThreadId,
   WorktreeId,
@@ -70,6 +69,36 @@ export const offerOrchestrationLiveEventOrFail = (input: {
         capacity,
       }),
     );
+  });
+
+export const offerOrchestrationThreadLiveEventOrFail = (input: {
+  readonly threadId: ThreadId;
+  readonly event: OrchestrationEvent;
+  readonly recordLiveSequence: (sequence: number) => Effect.Effect<void, never, never>;
+  readonly liveQueue: Queue.Queue<OrchestrationEvent, OrchestrationGetSnapshotError>;
+  readonly overflowedRef: Ref.Ref<boolean>;
+  readonly replayMetrics: WsReplayMetrics;
+  readonly capacity?: number;
+}) =>
+  Effect.gen(function* () {
+    yield* input.recordLiveSequence(input.event.sequence);
+    if (
+      input.event.aggregateKind !== "thread" ||
+      input.event.aggregateId !== input.threadId ||
+      !isThreadDetailEvent(input.event)
+    ) {
+      return false;
+    }
+
+    yield* offerOrchestrationLiveEventOrFail({
+      stream: "thread",
+      event: input.event,
+      liveQueue: input.liveQueue,
+      overflowedRef: input.overflowedRef,
+      replayMetrics: input.replayMetrics,
+      ...(input.capacity === undefined ? {} : { capacity: input.capacity }),
+    });
+    return true;
   });
 
 export const makeOrchestrationStreamHelpers = (deps: {
@@ -370,8 +399,11 @@ export const makeOrchestrationStreamHelpers = (deps: {
       }),
     );
 
-  const makeReplayableThreadStream = (
-    snapshot: Effect.Effect<OrchestrationThreadDetailSnapshot, OrchestrationGetSnapshotError>,
+  const makeReplayableThreadStream = <
+    Snapshot extends { readonly snapshotSequence: number },
+    SnapshotError,
+  >(
+    snapshot: Effect.Effect<Snapshot, SnapshotError>,
     threadId: ThreadId,
   ) =>
     Stream.unwrap(
@@ -391,14 +423,14 @@ export const makeOrchestrationStreamHelpers = (deps: {
           snapshotSequence,
         });
 
+        const isMatchingThreadEvent = (event: OrchestrationEvent) =>
+          event.aggregateKind === "thread" &&
+          event.aggregateId === threadId &&
+          isThreadDetailEvent(event);
+
         const threadEvents = <E, R>(stream: Stream.Stream<OrchestrationEvent, E, R>) =>
           stream.pipe(
-            Stream.filter(
-              (event) =>
-                event.aggregateKind === "thread" &&
-                event.aggregateId === threadId &&
-                isThreadDetailEvent(event),
-            ),
+            Stream.filter(isMatchingThreadEvent),
             Stream.map((event) => ({
               kind: "event" as const,
               event,
@@ -407,15 +439,13 @@ export const makeOrchestrationStreamHelpers = (deps: {
 
         yield* Stream.fromSubscription(liveSubscription).pipe(
           Stream.runForEach((event) =>
-            Effect.gen(function* () {
-              yield* replayBoundary.recordLiveSequence(event.sequence);
-              yield* offerOrchestrationLiveEventOrFail({
-                stream: "thread",
-                event,
-                liveQueue,
-                overflowedRef,
-                replayMetrics,
-              });
+            offerOrchestrationThreadLiveEventOrFail({
+              threadId,
+              event,
+              recordLiveSequence: replayBoundary.recordLiveSequence,
+              liveQueue,
+              overflowedRef,
+              replayMetrics,
             }),
           ),
           Effect.ensuring(Queue.shutdown(liveQueue)),

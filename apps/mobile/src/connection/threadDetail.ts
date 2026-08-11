@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@ryco/contracts";
+import type { EnvironmentId, OrchestrationThreadHistoryPageInfo, ThreadId } from "@ryco/contracts";
 
 import { createMobileConnectionRegistry } from "../runtime/bootstrap";
 
@@ -12,4 +12,16 @@ export function retainThreadDetailSubscription(
   threadId: ThreadId,
 ): () => void {
   return registry.driver.supervisor.retainThreadDetailSubscription(environmentId, threadId);
+}
+
+export function loadOlderThreadMessages(input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly page: OrchestrationThreadHistoryPageInfo;
+}) {
+  return registry.driver.supervisor.loadOlderThreadHistory({
+    ...input,
+    collection: "messages",
+    limit: 100,
+  });
 }

@@ -4,6 +4,9 @@ import {
   type DesktopSshEnvironmentTarget,
   type EnvironmentId,
   type OrchestrationEvent,
+  type OrchestrationThreadHistoryCollection,
+  type OrchestrationThreadHistoryPageInfo,
+  type MessageId,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
   type ServerConfig,
@@ -146,6 +149,19 @@ function getEnvironmentSupervisor() {
       useStore
         .getState()
         .syncServerThreadDetail((snapshot as { readonly thread: never }).thread, environmentId),
+    syncThreadWindowSnapshot: (environmentId, snapshot) =>
+      useStore.getState().syncServerThreadWindow(snapshot, environmentId),
+    syncThreadHistoryPage: (environmentId, threadId, page) =>
+      useStore.getState().syncServerThreadHistoryPage(page, threadId, environmentId),
+    setThreadHistoryRequestState: (input) =>
+      useStore.getState().setServerThreadHistoryLoadState({
+        ...input,
+        loadState: {
+          status: input.status,
+          cursor: input.cursor,
+          error: input.error,
+        },
+      }),
     applyThreadDetailEvent: (environmentId, event) =>
       applyEnvironmentThreadDetailEvent(event as OrchestrationEvent, environmentId),
     stateSink: environmentStateSink,
@@ -285,6 +301,25 @@ export function retainThreadDetailSubscription(
   threadId: ThreadId,
 ): () => void {
   return getEnvironmentSupervisor().retainThreadDetailSubscription(environmentId, threadId);
+}
+
+export function loadOlderThreadHistory(input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly collection: OrchestrationThreadHistoryCollection;
+  readonly page: OrchestrationThreadHistoryPageInfo;
+  readonly limit: number;
+}) {
+  return getEnvironmentSupervisor().loadOlderThreadHistory(input);
+}
+
+export function loadThreadHistoryAroundMessage(input: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly messageId: MessageId;
+  readonly limit: number;
+}) {
+  return getEnvironmentSupervisor().loadThreadHistoryAroundMessage(input);
 }
 
 function getRuntimeErrorFields(error: unknown) {

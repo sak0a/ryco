@@ -58,6 +58,7 @@ import Migration0041 from "./Migrations/041_ProjectionThreadsSubagentNesting.ts"
 import Migration0042 from "./Migrations/042_ContextHandoffRuntimeSessions.ts";
 import Migration0043 from "./Migrations/043_ContextHandoffDeliveryArtifact.ts";
 import Migration0044 from "./Migrations/044_ProjectionThreadSummaryState.ts";
+import Migration0045 from "./Migrations/045_ProjectionThreadHistoryPaginationIndexes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -114,6 +115,7 @@ export const migrationEntries = [
   [42, "ContextHandoffRuntimeSessions", Migration0042],
   [43, "ContextHandoffDeliveryArtifact", Migration0043],
   [44, "ProjectionThreadSummaryState", Migration0044],
+  [45, "ProjectionThreadHistoryPaginationIndexes", Migration0045],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

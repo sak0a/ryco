@@ -4,6 +4,7 @@ import {
   type EnvironmentId,
   type MessageId,
   type ModelSelection,
+  type OrchestrationThreadMessageSearchResult,
   type ProjectId,
   ProviderInstanceId,
   type ServerProvider,
@@ -27,7 +28,7 @@ import {
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@ryco/shared/model";
 import { projectScriptCwd } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
-import { Debouncer } from "@tanstack/react-pacer";
+import { Debouncer, useDebouncedValue } from "@tanstack/react-pacer";
 import { useQueryClient } from "~/rpc/queryClient";
 import { DateTime } from "effect";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
@@ -228,7 +229,11 @@ import {
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { sanitizeThreadErrorMessage } from "@ryco/client-runtime/errors";
 import { useHostedRpcCapability } from "../hostedHub/capabilities";
-import { retainThreadDetailSubscription } from "../environments/runtime/service";
+import {
+  loadOlderThreadHistory,
+  loadThreadHistoryAroundMessage,
+  retainThreadDetailSubscription,
+} from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import {
@@ -504,6 +509,12 @@ export default function ChatView(props: ChatViewProps) {
   const [threadMessageSearchSelectedIndex, setThreadMessageSearchSelectedIndex] = useState(0);
   const [threadMessageSearchTarget, setThreadMessageSearchTarget] =
     useState<ThreadMessageSearchTarget | null>(null);
+  const [serverThreadMessageSearchResults, setServerThreadMessageSearchResults] = useState<
+    ReadonlyArray<OrchestrationThreadMessageSearchResult>
+  >([]);
+  const [debouncedThreadMessageSearchQuery] = useDebouncedValue(threadMessageSearchQuery, {
+    wait: 180,
+  });
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
@@ -719,6 +730,42 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const activeThreadMessageHistory = useStore((state) =>
+    activeThreadRef
+      ? state.environmentStateById[activeThreadRef.environmentId]?.threadHistoryByThreadId?.[
+          activeThreadRef.threadId
+        ]?.messages
+      : undefined,
+  );
+  const activeThreadMessageHistoryLoad = useStore((state) =>
+    activeThreadRef
+      ? state.environmentStateById[activeThreadRef.environmentId]?.threadHistoryLoadByThreadId?.[
+          activeThreadRef.threadId
+        ]?.messages
+      : undefined,
+  );
+  const handleLoadOlderMessages = useCallback(() => {
+    if (!activeThreadRef || !activeThreadMessageHistory) return;
+    void loadOlderThreadHistory({
+      environmentId: activeThreadRef.environmentId,
+      threadId: activeThreadRef.threadId,
+      collection: "messages",
+      page: activeThreadMessageHistory,
+      limit: 150,
+    }).catch(() => undefined);
+  }, [activeThreadMessageHistory, activeThreadRef]);
+
+  useEffect(() => {
+    const targetMessageId = rawSearch.messageId;
+    if (!activeThreadRef || !targetMessageId || !activeThreadMessageHistory) return;
+    if (activeThread?.messages.some((message) => message.id === targetMessageId)) return;
+    void loadThreadHistoryAroundMessage({
+      environmentId: activeThreadRef.environmentId,
+      threadId: activeThreadRef.threadId,
+      messageId: targetMessageId,
+      limit: 101,
+    }).catch(() => undefined);
+  }, [activeThread?.messages, activeThreadMessageHistory, activeThreadRef, rawSearch.messageId]);
 
   // Message queue: prompts composed while a turn runs are queued and auto-sent on
   // quiescence. Client-owned, keyed by the scoped thread key.
@@ -1643,7 +1690,7 @@ export default function ChatView(props: ChatViewProps) {
     presentationTier,
   });
 
-  const threadMessageSearchOccurrences = useMemo(
+  const loadedThreadMessageSearchOccurrences = useMemo(
     () =>
       buildThreadMessageSearchOccurrences({
         timelineEntries,
@@ -1651,6 +1698,57 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [threadMessageSearchQuery, timelineEntries],
   );
+  useEffect(() => {
+    const query = debouncedThreadMessageSearchQuery.trim();
+    if (!threadMessageSearchOpen || !activeThreadRef || query.length < 2) {
+      setServerThreadMessageSearchResults([]);
+      return;
+    }
+    const api = readEnvironmentApi(activeThreadRef.environmentId);
+    if (!api) {
+      setServerThreadMessageSearchResults([]);
+      return;
+    }
+    let cancelled = false;
+    void api.orchestration
+      .searchThreadMessages({
+        query,
+        threadId: activeThreadRef.threadId,
+        limit: 50,
+      })
+      .then((results) => {
+        if (!cancelled) setServerThreadMessageSearchResults(results);
+      })
+      .catch(() => {
+        if (!cancelled) setServerThreadMessageSearchResults([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeThreadRef, debouncedThreadMessageSearchQuery, threadMessageSearchOpen]);
+  const threadMessageSearchOccurrences = useMemo(() => {
+    const loadedMessageIds = new Set(
+      loadedThreadMessageSearchOccurrences.map((occurrence) => occurrence.messageId),
+    );
+    const unloadedOccurrences: ThreadMessageSearchOccurrence[] = [];
+    for (const result of serverThreadMessageSearchResults) {
+      if (loadedMessageIds.has(result.messageId)) continue;
+      unloadedOccurrences.push({
+        id: `server:${result.messageId}`,
+        messageId: result.messageId,
+        occurrenceIndex: loadedThreadMessageSearchOccurrences.length + unloadedOccurrences.length,
+        messageOccurrenceIndex: 0,
+        start: 0,
+        end: 0,
+        text: threadMessageSearchQuery.trim(),
+      });
+    }
+    return [...loadedThreadMessageSearchOccurrences, ...unloadedOccurrences];
+  }, [
+    loadedThreadMessageSearchOccurrences,
+    serverThreadMessageSearchResults,
+    threadMessageSearchQuery,
+  ]);
   const threadMessageSearchOccurrencesByMessageId = useMemo(() => {
     if (!threadMessageSearchOpen) {
       return new Map<MessageId, ReadonlyArray<ThreadMessageSearchOccurrence>>();
@@ -1698,6 +1796,29 @@ export default function ChatView(props: ChatViewProps) {
     revealThreadMessageSearchMatch(selectedThreadMessageSearchMessageId);
   }, [
     revealThreadMessageSearchMatch,
+    selectedThreadMessageSearchMessageId,
+    threadMessageSearchOpen,
+  ]);
+  useEffect(() => {
+    if (
+      !threadMessageSearchOpen ||
+      !selectedThreadMessageSearchMessageId ||
+      !activeThreadRef ||
+      !activeThreadMessageHistory ||
+      activeThread?.messages.some((message) => message.id === selectedThreadMessageSearchMessageId)
+    ) {
+      return;
+    }
+    void loadThreadHistoryAroundMessage({
+      environmentId: activeThreadRef.environmentId,
+      threadId: activeThreadRef.threadId,
+      messageId: selectedThreadMessageSearchMessageId,
+      limit: 101,
+    }).catch(() => undefined);
+  }, [
+    activeThread?.messages,
+    activeThreadMessageHistory,
+    activeThreadRef,
     selectedThreadMessageSearchMessageId,
     threadMessageSearchOpen,
   ]);
@@ -3695,6 +3816,10 @@ export default function ChatView(props: ChatViewProps) {
                 onIsAtEndChange={onIsAtEndChange}
                 onManualNavigation={stopTimelineLiveFollow}
                 onUserReachedEnd={resumeTimelineLiveFollow}
+                canLoadOlder={activeThreadMessageHistory?.hasMoreBefore ?? false}
+                isLoadingOlder={activeThreadMessageHistoryLoad?.status === "loading"}
+                loadOlderError={activeThreadMessageHistoryLoad?.error ?? null}
+                onLoadOlder={handleLoadOlderMessages}
                 {...(presentationTier !== "phone"
                   ? { onInspectContextHandoff: openContextHandoffInspection }
                   : {})}

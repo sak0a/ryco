@@ -38,10 +38,13 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreadMessages: "orchestration.searchThreadMessages",
+  getThreadWindow: "orchestration.getThreadWindow",
+  getThreadHistoryPage: "orchestration.getThreadHistoryPage",
   replayEvents: "orchestration.replayEvents",
   replayEventsPage: "orchestration.replayEventsPage",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeThreadWindow: "orchestration.subscribeThreadWindow",
 } as const;
 
 export const CONTEXT_HANDOFF_WS_METHODS = {
@@ -819,6 +822,128 @@ export const OrchestrationThreadDetailSnapshot = Schema.Struct({
   thread: OrchestrationThread,
 });
 export type OrchestrationThreadDetailSnapshot = typeof OrchestrationThreadDetailSnapshot.Type;
+
+export const OrchestrationThreadHistoryCursor = TrimmedNonEmptyString.pipe(
+  Schema.brand("OrchestrationThreadHistoryCursor"),
+);
+export type OrchestrationThreadHistoryCursor = typeof OrchestrationThreadHistoryCursor.Type;
+
+export const OrchestrationThreadHistoryCollection = Schema.Literals([
+  "messages",
+  "proposedPlans",
+  "activities",
+  "checkpoints",
+]);
+export type OrchestrationThreadHistoryCollection = typeof OrchestrationThreadHistoryCollection.Type;
+
+export const OrchestrationThreadHistoryLimits = Schema.Struct({
+  messages: PositiveInt,
+  proposedPlans: PositiveInt,
+  activities: PositiveInt,
+  checkpoints: PositiveInt,
+});
+export type OrchestrationThreadHistoryLimits = typeof OrchestrationThreadHistoryLimits.Type;
+
+export const OrchestrationThreadHistoryPageInfo = Schema.Struct({
+  oldestCursor: Schema.NullOr(OrchestrationThreadHistoryCursor),
+  newestCursor: Schema.NullOr(OrchestrationThreadHistoryCursor),
+  hasMoreBefore: Schema.Boolean,
+});
+export type OrchestrationThreadHistoryPageInfo = typeof OrchestrationThreadHistoryPageInfo.Type;
+
+export const OrchestrationThreadHistoryState = Schema.Struct({
+  messages: OrchestrationThreadHistoryPageInfo,
+  proposedPlans: OrchestrationThreadHistoryPageInfo,
+  activities: OrchestrationThreadHistoryPageInfo,
+  checkpoints: OrchestrationThreadHistoryPageInfo,
+});
+export type OrchestrationThreadHistoryState = typeof OrchestrationThreadHistoryState.Type;
+
+export const OrchestrationGetThreadWindowInput = Schema.Struct({
+  threadId: ThreadId,
+  limits: OrchestrationThreadHistoryLimits,
+});
+export type OrchestrationGetThreadWindowInput = typeof OrchestrationGetThreadWindowInput.Type;
+
+export const OrchestrationThreadWindowSnapshot = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  thread: OrchestrationThread,
+  history: OrchestrationThreadHistoryState,
+});
+export type OrchestrationThreadWindowSnapshot = typeof OrchestrationThreadWindowSnapshot.Type;
+
+export const OrchestrationThreadHistoryPageMode = Schema.Struct({
+  kind: Schema.Literal("before"),
+  cursor: OrchestrationThreadHistoryCursor,
+});
+export type OrchestrationThreadHistoryPageMode = typeof OrchestrationThreadHistoryPageMode.Type;
+
+export const OrchestrationGetThreadHistoryPageInput = Schema.Union([
+  Schema.Struct({
+    threadId: ThreadId,
+    collection: OrchestrationThreadHistoryCollection,
+    mode: OrchestrationThreadHistoryPageMode,
+    limit: PositiveInt,
+  }),
+  Schema.Struct({
+    threadId: ThreadId,
+    collection: Schema.Literal("messages"),
+    mode: Schema.Struct({
+      kind: Schema.Literal("around"),
+      anchorId: MessageId,
+    }),
+    limit: PositiveInt,
+  }),
+]);
+export type OrchestrationGetThreadHistoryPageInput =
+  typeof OrchestrationGetThreadHistoryPageInput.Type;
+
+const OrchestrationThreadMessageHistoryPage = Schema.Struct({
+  collection: Schema.Literal("messages"),
+  snapshotSequence: NonNegativeInt,
+  items: Schema.Array(OrchestrationMessage),
+  page: OrchestrationThreadHistoryPageInfo,
+});
+const OrchestrationThreadProposedPlanHistoryPage = Schema.Struct({
+  collection: Schema.Literal("proposedPlans"),
+  snapshotSequence: NonNegativeInt,
+  items: Schema.Array(OrchestrationProposedPlan),
+  page: OrchestrationThreadHistoryPageInfo,
+});
+const OrchestrationThreadActivityHistoryPage = Schema.Struct({
+  collection: Schema.Literal("activities"),
+  snapshotSequence: NonNegativeInt,
+  items: Schema.Array(OrchestrationThreadActivity),
+  page: OrchestrationThreadHistoryPageInfo,
+});
+const OrchestrationThreadCheckpointHistoryPage = Schema.Struct({
+  collection: Schema.Literal("checkpoints"),
+  snapshotSequence: NonNegativeInt,
+  items: Schema.Array(OrchestrationCheckpointSummary),
+  page: OrchestrationThreadHistoryPageInfo,
+});
+
+export const OrchestrationThreadHistoryPage = Schema.Union([
+  OrchestrationThreadMessageHistoryPage,
+  OrchestrationThreadProposedPlanHistoryPage,
+  OrchestrationThreadActivityHistoryPage,
+  OrchestrationThreadCheckpointHistoryPage,
+]);
+export type OrchestrationThreadHistoryPage = typeof OrchestrationThreadHistoryPage.Type;
+
+export class OrchestrationThreadHistoryError extends Schema.TaggedError<OrchestrationThreadHistoryError>()(
+  "OrchestrationThreadHistoryError",
+  {
+    reason: Schema.Literals([
+      "invalid-cursor",
+      "stale-cursor",
+      "unsupported-version",
+      "thread-not-found",
+    ]),
+    threadId: ThreadId,
+    collection: Schema.optional(OrchestrationThreadHistoryCollection),
+  },
+) {}
 
 export const ProjectCreateCommand = Schema.Struct({
   type: Schema.Literal("project.create"),
@@ -1827,6 +1952,18 @@ export const OrchestrationThreadStreamItem = Schema.Union([
 ]);
 export type OrchestrationThreadStreamItem = typeof OrchestrationThreadStreamItem.Type;
 
+export const OrchestrationThreadWindowStreamItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("snapshot"),
+    snapshot: OrchestrationThreadWindowSnapshot,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("event"),
+    event: OrchestrationEvent,
+  }),
+]);
+export type OrchestrationThreadWindowStreamItem = typeof OrchestrationThreadWindowStreamItem.Type;
+
 export const OrchestrationCommandReceiptStatus = Schema.Literals(["accepted", "rejected"]);
 export type OrchestrationCommandReceiptStatus = typeof OrchestrationCommandReceiptStatus.Type;
 
@@ -1917,6 +2054,7 @@ export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullTh
 export const OrchestrationSearchThreadMessagesInput = Schema.Struct({
   query: TrimmedNonEmptyString,
   projectId: Schema.optional(ProjectId),
+  threadId: Schema.optional(ThreadId),
   limit: PositiveInt,
 });
 export type OrchestrationSearchThreadMessagesInput =
@@ -1927,6 +2065,7 @@ export const OrchestrationThreadMessageSearchResult = Schema.Struct({
   messageId: MessageId,
   snippet: Schema.String,
   timestamp: IsoDateTime,
+  historyCursor: Schema.optional(OrchestrationThreadHistoryCursor),
 });
 export type OrchestrationThreadMessageSearchResult =
   typeof OrchestrationThreadMessageSearchResult.Type;
@@ -2121,6 +2260,14 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationSearchThreadMessagesInput,
     output: OrchestrationSearchThreadMessagesResult,
   },
+  getThreadWindow: {
+    input: OrchestrationGetThreadWindowInput,
+    output: OrchestrationThreadWindowSnapshot,
+  },
+  getThreadHistoryPage: {
+    input: OrchestrationGetThreadHistoryPageInput,
+    output: OrchestrationThreadHistoryPage,
+  },
   replayEvents: {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
@@ -2132,6 +2279,10 @@ export const OrchestrationRpcSchemas = {
   subscribeThread: {
     input: OrchestrationSubscribeThreadInput,
     output: OrchestrationThreadStreamItem,
+  },
+  subscribeThreadWindow: {
+    input: OrchestrationGetThreadWindowInput,
+    output: OrchestrationThreadWindowStreamItem,
   },
   subscribeShell: {
     input: Schema.Struct({}),

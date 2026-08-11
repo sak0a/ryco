@@ -1,7 +1,12 @@
 import type {
   EnvironmentId,
+  MessageId,
   OrchestrationShellSnapshot,
   OrchestrationShellStreamEvent,
+  OrchestrationThreadHistoryCollection,
+  OrchestrationThreadHistoryPage,
+  OrchestrationThreadHistoryPageInfo,
+  OrchestrationThreadWindowSnapshot,
   ThreadId,
 } from "@ryco/contracts";
 
@@ -17,6 +22,7 @@ import {
   orderSavedEnvironmentConnectionQueue,
   runSavedEnvironmentConnectionQueue,
 } from "./savedEnvironmentConnectionScheduler.ts";
+import { createThreadHistoryPaginationController } from "./threadHistoryPagination.ts";
 
 const NOOP = () => undefined;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 5 * 60 * 1000;
@@ -54,6 +60,23 @@ export interface EnvironmentSupervisorInput<SavedEnvironmentRecord> {
     threadId: ThreadId,
   ) => boolean;
   readonly syncThreadDetailSnapshot: (environmentId: EnvironmentId, snapshot: unknown) => void;
+  readonly syncThreadWindowSnapshot?: (
+    environmentId: EnvironmentId,
+    snapshot: OrchestrationThreadWindowSnapshot,
+  ) => void;
+  readonly syncThreadHistoryPage?: (
+    environmentId: EnvironmentId,
+    threadId: ThreadId,
+    page: OrchestrationThreadHistoryPage,
+  ) => void;
+  readonly setThreadHistoryRequestState?: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly collection: OrchestrationThreadHistoryCollection;
+    readonly status: "idle" | "loading" | "error";
+    readonly cursor: string | null;
+    readonly error: string | null;
+  }) => void;
   readonly applyThreadDetailEvent: (environmentId: EnvironmentId, event: unknown) => void;
   readonly stateSink: EnvironmentStateSink;
   readonly onShellSnapshotReceived: (environmentId: EnvironmentId) => void;
@@ -78,6 +101,7 @@ type ThreadDetailSubscriptionEntry = {
   refCount: number;
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
+  protocol: "bounded" | "legacy";
 };
 
 export interface EnvironmentConnectionSupervisor {
@@ -127,6 +151,19 @@ export interface EnvironmentConnectionSupervisor {
     threadIds: ReadonlyArray<ThreadId>,
   ) => void;
   readonly evictIdleThreadDetailSubscriptionsToCapacity: () => void;
+  readonly loadOlderThreadHistory: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly collection: OrchestrationThreadHistoryCollection;
+    readonly page: OrchestrationThreadHistoryPageInfo;
+    readonly limit: number;
+  }) => Promise<OrchestrationThreadHistoryPage | null>;
+  readonly loadThreadHistoryAroundMessage: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+    readonly limit: number;
+  }) => Promise<OrchestrationThreadHistoryPage | null>;
   readonly start: () => () => void;
   readonly requestProviderInvalidation: () => void;
   readonly resetForTests: () => Promise<void>;
@@ -185,6 +222,31 @@ export function createEnvironmentConnectionSupervisor<
     return connection;
   };
 
+  const historyPagination = createThreadHistoryPaginationController({
+    request: (environmentId, request) => {
+      const query = require(environmentId).client.orchestration.getThreadHistoryPage;
+      return query
+        ? query(request)
+        : Promise.reject(new Error("Thread history pagination is unavailable"));
+    },
+    apply: (environmentId, threadId, page) =>
+      input.syncThreadHistoryPage?.(environmentId, threadId, page),
+    setRequestState: (requestState) => input.setThreadHistoryRequestState?.(requestState),
+    recoverStale: async (scope) => {
+      const query = require(scope.environmentId).client.orchestration.getThreadWindow;
+      if (!query) throw new Error("Bounded thread history is unavailable");
+      const snapshot = await query({
+        threadId: scope.threadId,
+        limits: { messages: 150, proposedPlans: 30, activities: 150, checkpoints: 30 },
+      });
+      if (input.syncThreadWindowSnapshot) {
+        input.syncThreadWindowSnapshot(scope.environmentId, snapshot);
+      } else {
+        input.syncThreadDetailSnapshot(scope.environmentId, snapshot);
+      }
+    },
+  });
+
   const attach = (entry: ThreadDetailSubscriptionEntry): boolean => {
     if (entry.unsubscribeConnectionListener !== null) {
       entry.unsubscribeConnectionListener();
@@ -193,16 +255,67 @@ export function createEnvironmentConnectionSupervisor<
     if (entry.unsubscribe !== NOOP) return true;
     const connection = read(entry.environmentId);
     if (!connection) return false;
-    entry.unsubscribe = connection.client.orchestration.subscribeThread(
-      { threadId: entry.threadId },
+    let active = true;
+    let unsubscribeCurrent: () => void = NOOP;
+    const scope = {
+      environmentId: entry.environmentId,
+      threadId: entry.threadId,
+    };
+    const subscribeLegacy = () => {
+      if (!active) return;
+      entry.protocol = "legacy";
+      unsubscribeCurrent();
+      unsubscribeCurrent = connection.client.orchestration.subscribeThread(
+        { threadId: entry.threadId },
+        (item) => {
+          if (item.kind === "snapshot") {
+            historyPagination.beginSnapshot(scope);
+            input.syncThreadDetailSnapshot(entry.environmentId, item.snapshot);
+            return;
+          }
+          input.applyThreadDetailEvent(entry.environmentId, item.event);
+        },
+      );
+    };
+    entry.unsubscribe = () => {
+      active = false;
+      unsubscribeCurrent();
+    };
+    const subscribeWindow = connection.client.orchestration.subscribeThreadWindow;
+    if (entry.protocol === "legacy" || subscribeWindow === undefined) {
+      subscribeLegacy();
+      return true;
+    }
+    let fallbackRequested = false;
+    const requestLegacy = () => {
+      fallbackRequested = true;
+      if (unsubscribeCurrent !== NOOP) subscribeLegacy();
+    };
+    unsubscribeCurrent = subscribeWindow(
+      {
+        threadId: entry.threadId,
+        limits: {
+          messages: 150,
+          proposedPlans: 30,
+          activities: 150,
+          checkpoints: 30,
+        },
+      },
       (item) => {
         if (item.kind === "snapshot") {
-          input.syncThreadDetailSnapshot(entry.environmentId, item.snapshot);
+          historyPagination.beginSnapshot(scope);
+          if (input.syncThreadWindowSnapshot) {
+            input.syncThreadWindowSnapshot(entry.environmentId, item.snapshot);
+          } else {
+            input.syncThreadDetailSnapshot(entry.environmentId, item.snapshot);
+          }
           return;
         }
         input.applyThreadDetailEvent(entry.environmentId, item.event);
       },
+      { onError: requestLegacy },
     );
+    if (fallbackRequested) subscribeLegacy();
     return true;
   };
   const watch = (entry: ThreadDetailSubscriptionEntry) => {
@@ -219,6 +332,10 @@ export function createEnvironmentConnectionSupervisor<
     entry.unsubscribeConnectionListener?.();
     entry.unsubscribeConnectionListener = null;
     threadDetailSubscriptions.delete(key);
+    historyPagination.invalidate({
+      environmentId: entry.environmentId,
+      threadId: entry.threadId,
+    });
     entry.unsubscribe();
     entry.unsubscribe = NOOP;
     return true;
@@ -283,6 +400,7 @@ export function createEnvironmentConnectionSupervisor<
     if (!connection) return false;
     connections.delete(environmentId);
     projectionTracker.clearEnvironment(environmentId);
+    historyPagination.clearEnvironment(environmentId);
     emit();
     for (const entry of threadDetailSubscriptions.values()) {
       if (entry.environmentId !== environmentId) continue;
@@ -304,6 +422,7 @@ export function createEnvironmentConnectionSupervisor<
       refCount: 0,
       lastAccessedAt: input.now(),
       evictionTimeoutId: null,
+      protocol: "bounded" as const,
     };
     if (!existing) threadDetailSubscriptions.set(key, entry);
     clearEviction(entry);
@@ -346,7 +465,10 @@ export function createEnvironmentConnectionSupervisor<
     const pending = pendingSavedEnvironmentConnections.get(record.environmentId);
     if (pending) return pending.promise;
 
-    const pendingEntry: { cancelled: boolean; promise: Promise<EnvironmentConnection> } = {
+    const pendingEntry: {
+      cancelled: boolean;
+      promise: Promise<EnvironmentConnection>;
+    } = {
       cancelled: false,
       promise: Promise.resolve().then(async () => {
         const connection = await connect(() => pendingEntry.cancelled);
@@ -388,7 +510,10 @@ export function createEnvironmentConnectionSupervisor<
   const syncShellSnapshot = (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
-    callbacks?: { readonly onCurrent: () => void; readonly onReady: () => void },
+    callbacks?: {
+      readonly onCurrent: () => void;
+      readonly onReady: () => void;
+    },
   ) => {
     input.onShellSnapshotReceived(environmentId);
     const snapshotClassification = classifyProjectionSnapshot({
@@ -549,6 +674,19 @@ export function createEnvironmentConnectionSupervisor<
     reconcileThreadDetailSubscriptionEvictionForThread: reconcileForThread,
     reconcileThreadDetailSubscriptionsForEnvironment: reconcileSubscriptionsForEnvironment,
     evictIdleThreadDetailSubscriptionsToCapacity: evictToCapacity,
+    loadOlderThreadHistory: ({ environmentId, threadId, collection, page, limit }) =>
+      historyPagination.loadBefore({
+        scope: { environmentId, threadId },
+        collection,
+        page,
+        limit,
+      }),
+    loadThreadHistoryAroundMessage: ({ environmentId, threadId, messageId, limit }) =>
+      historyPagination.loadAroundMessage({
+        scope: { environmentId, threadId },
+        anchorId: messageId,
+        limit,
+      }),
     start,
     requestProviderInvalidation,
     resetForTests,

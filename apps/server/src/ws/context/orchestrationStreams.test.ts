@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import {
   EventId,
+  MessageId,
   OrchestrationGetSnapshotError,
   type OrchestrationEvent,
   ThreadId,
@@ -8,7 +9,10 @@ import {
 import { Cause, Effect, Metric, Queue, Ref } from "effect";
 
 import { makeWsReplayMetrics } from "../../wsReplayMetrics.ts";
-import { offerOrchestrationLiveEventOrFail } from "./orchestrationStreams.ts";
+import {
+  offerOrchestrationLiveEventOrFail,
+  offerOrchestrationThreadLiveEventOrFail,
+} from "./orchestrationStreams.ts";
 
 const LIVE_OVERFLOWS_METRIC_ID = "t3_ws_orchestration_live_buffer_overflows_total";
 
@@ -48,7 +52,70 @@ const makeThreadDeletedEvent = (sequence: number, threadId: ThreadId): Orchestra
   },
 });
 
+const makeThreadMessageEvent = (sequence: number, threadId: ThreadId): OrchestrationEvent => ({
+  sequence,
+  eventId: EventId.make(`event-live-message-${sequence}`),
+  aggregateKind: "thread",
+  aggregateId: threadId,
+  occurredAt: "2026-04-05T00:00:00.000Z",
+  commandId: null,
+  causationEventId: null,
+  correlationId: null,
+  metadata: {},
+  type: "thread.message-sent",
+  payload: {
+    threadId,
+    messageId: MessageId.make(`message-live-${sequence}`),
+    role: "assistant",
+    text: "hello",
+    turnId: null,
+    streaming: false,
+    createdAt: "2026-04-05T00:00:00.000Z",
+    updatedAt: "2026-04-05T00:00:00.000Z",
+  },
+});
+
 describe("orchestrationStreams", () => {
+  it.effect("tracks unrelated events without filling a thread live queue", () =>
+    Effect.gen(function* () {
+      const selectedThreadId = ThreadId.make("thread-selected");
+      const unrelatedThreadId = ThreadId.make("thread-unrelated");
+      const liveQueue = yield* Queue.bounded<OrchestrationEvent, OrchestrationGetSnapshotError>(1);
+      const overflowedRef = yield* Ref.make(false);
+      const latestSequenceRef = yield* Ref.make(0);
+      const replayMetrics = yield* makeWsReplayMetrics({
+        stream: "thread",
+        subscriptionId: "orchestration-stream-thread-prefilter-unit",
+        snapshotSequence: 0,
+      });
+      const offer = (event: OrchestrationEvent) =>
+        offerOrchestrationThreadLiveEventOrFail({
+          threadId: selectedThreadId,
+          event,
+          recordLiveSequence: (sequence) => Ref.set(latestSequenceRef, sequence),
+          liveQueue,
+          overflowedRef,
+          replayMetrics,
+          capacity: 1,
+        });
+
+      yield* Effect.all(
+        Array.from({ length: 1_000 }, (_, index) =>
+          offer(makeThreadDeletedEvent(index + 1, unrelatedThreadId)),
+        ),
+        { discard: true },
+      );
+      yield* offer(makeThreadMessageEvent(1_001, selectedThreadId));
+
+      assert.equal(yield* Ref.get(latestSequenceRef), 1_001);
+      assert.equal(yield* Queue.size(liveQueue), 1);
+      assert.equal(yield* Ref.get(overflowedRef), false);
+      assert.equal((yield* Queue.take(liveQueue)).aggregateId, selectedThreadId);
+
+      yield* replayMetrics.reset;
+    }),
+  );
+
   it.effect("fails live queues on overflow so subscriptions resync by reconnecting", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-live-overflow");

@@ -11,3 +11,4 @@ export * from "./remoteApi.ts";
 export * from "./remoteTarget.ts";
 export * from "./savedEnvironmentConnectionScheduler.ts";
 export * from "./supervision.ts";
+export * from "./threadHistoryPagination.ts";
