@@ -419,8 +419,8 @@ export const NativeNodeClaimId = Schema.String.check(
 export type NativeNodeClaimId = typeof NativeNodeClaimId.Type;
 
 export const NativeNodeClaimEnvironmentId = Schema.String.check(
-  Schema.isMinLength(1),
-  Schema.isMaxLength(128),
+  Schema.isPattern(/^env_[A-Za-z0-9_-]{22}$/),
+  Schema.isMaxLength(26),
 ).pipe(Schema.brand("NativeNodeClaimEnvironmentId"));
 export type NativeNodeClaimEnvironmentId = typeof NativeNodeClaimEnvironmentId.Type;
 
