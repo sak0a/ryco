@@ -25,6 +25,7 @@ export const HUB_USERNAME_MAX_CHARS = 32;
 export const HUB_SPACE_DISPLAY_NAME_MAX_CHARS = 100;
 export const HOSTED_IDENTITY_MAX_ANTI_BOT_ASSERTION_CHARS = 8_192;
 export const HOSTED_IDENTITY_MAX_EMAIL_CHARS = 254;
+export const HOSTED_IDENTITY_MIN_PASSWORD_CHARS = 12;
 export const HOSTED_IDENTITY_MAX_PASSWORD_CHARS = 256;
 export const HOSTED_IDENTITY_MAX_SPACES = 64;
 
@@ -51,7 +52,7 @@ const BoundedSpaceDisplayName = Schema.Trim.check(
   Schema.isMaxLength(HUB_SPACE_DISPLAY_NAME_MAX_CHARS),
 );
 const BoundedPassword = Schema.String.check(
-  Schema.isNonEmpty(),
+  Schema.isMinLength(HOSTED_IDENTITY_MIN_PASSWORD_CHARS),
   Schema.isMaxLength(HOSTED_IDENTITY_MAX_PASSWORD_CHARS),
 );
 const AntiBotAssertion = Schema.String.check(
@@ -64,8 +65,8 @@ const SignupActivationSecret = Opaque256.pipe(Schema.brand("PublicSignupActivati
 const PasswordLoginAttemptSecret = Opaque256.pipe(Schema.brand("PasswordLoginAttemptSecret"));
 const PasswordResetAttemptSecret = Opaque256.pipe(Schema.brand("PasswordResetAttemptSecret"));
 const MailToken = Opaque256.pipe(Schema.brand("HostedIdentityMailToken"));
-const EmailCode = Schema.String.check(Schema.isPattern(/^[0-9]{6,10}$/));
-const TotpCode = Schema.String.check(Schema.isPattern(/^[0-9]{6,8}$/));
+const EmailCode = Schema.String.check(Schema.isPattern(/^[0-9]{6}$/));
+const TotpCode = Schema.String.check(Schema.isPattern(/^[0-9]{6}$/));
 const JsonObject = Schema.Unknown.check(
   Schema.makeFilter((value) =>
     typeof value === "object" && value !== null && !Array.isArray(value)

@@ -251,6 +251,7 @@ describe("public signup contracts", () => {
       { kind: "link_token", code: "123456" },
       { kind: "email_code", token: opaqueB },
       { kind: "email_code", code: "12ab56" },
+      { kind: "email_code", code: "1234567" },
       { kind: "provider", token: opaqueB },
     ]) {
       expect(() => strictDecode(PublicSignupVerifyRequest, { ...linkRequest, proof })).toThrow();
@@ -286,6 +287,13 @@ describe("public signup contracts", () => {
         idempotencyKey: opaqueB,
       }),
     ).toBeTruthy();
+    expect(() =>
+      strictDecode(PublicSignupPasswordFinishRequest, {
+        ...activation,
+        password: "a".repeat(11),
+        idempotencyKey: opaqueB,
+      }),
+    ).toThrow();
 
     const completed = {
       status: "complete",
@@ -338,6 +346,16 @@ describe("password login and reset contracts", () => {
         emailCode: "123456",
       }),
     ).toThrow();
+    for (const factor of ["totp", "email_code"] as const) {
+      expect(() =>
+        strictDecode(PasswordLoginFinishRequest, {
+          attemptId: "login_aaaaaaaaaaaaaaaaaaaaaa",
+          attemptSecret: opaque,
+          factor,
+          code: "1234567",
+        }),
+      ).toThrow();
+    }
   });
 
   it("keeps reset uniform, single-use, and explicitly sessionless", () => {

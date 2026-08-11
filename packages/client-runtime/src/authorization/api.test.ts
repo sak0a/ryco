@@ -2518,7 +2518,10 @@ describe("HostedHubApi public hosted identity contracts", () => {
       }),
     );
     const error = await api
-      .startPasswordLogin({ identifier: "ada_dev", password: "pw" } as never)
+      .startPasswordLogin({
+        identifier: "ada_dev",
+        password: "password-sensitive-canary",
+      } as never)
       .catch((cause) => cause);
     expect(error).toMatchObject({ code: "invalid_response" });
     expect((error as Error).message).not.toContain("resend-sensitive-canary");
