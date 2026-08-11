@@ -106,7 +106,7 @@ function createBaseServerConfig(): ServerConfig {
     },
     settings: {
       ...DEFAULT_SERVER_SETTINGS,
-      enableAssistantStreaming: false,
+      enableLegacyTokenStreaming: false,
       defaultThreadEnvMode: "local" as const,
       textGenerationModelSelection: {
         instanceId: ProviderInstanceId.make("codex"),

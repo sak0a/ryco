@@ -96,7 +96,11 @@ export function syncDocumentVisualViewportInsets(): () => void {
   let frame: number | null = null;
 
   const clearVars = () => {
-    if (!published) {
+    if (
+      !published &&
+      rootStyle.getPropertyValue(KEYBOARD_INSET_CSS_VAR) === "" &&
+      rootStyle.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR) === ""
+    ) {
       return;
     }
     rootStyle.removeProperty(KEYBOARD_INSET_CSS_VAR);

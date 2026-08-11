@@ -34,6 +34,7 @@ const getStateSpy = vi.fn<() => MockLegendListState>(() => ({
 // The timeline reads bottom-ness off the live scroller, so the mock hands it a
 // detached element whose scroll metrics each test controls.
 let scrollableNode: HTMLElement | null = null;
+let latestLegendOnScroll: (() => void) | null = null;
 const sizeListeners = new Set<() => void>();
 
 function setScrollMetrics(metrics: {
@@ -70,9 +71,11 @@ vi.mock("@legendapp/list/react", async () => {
       ListFooterComponent?: React.ReactNode;
       className?: string;
       onScroll?: () => void;
+      maintainScrollAtEnd?: boolean;
     },
     ref: React.ForwardedRef<LegendListRef>,
   ) {
+    latestLegendOnScroll = props.onScroll ?? null;
     React.useImperativeHandle(
       ref,
       () =>
@@ -89,7 +92,11 @@ vi.mock("@legendapp/list/react", async () => {
     }, [props]);
 
     return (
-      <div className={props.className} data-testid="legend-list">
+      <div
+        className={props.className}
+        data-testid="legend-list"
+        data-maintain-scroll-at-end={String(props.maintainScrollAtEnd)}
+      >
         {props.ListHeaderComponent}
         {props.data.map((item) => (
           <div key={props.keyExtractor(item)}>{props.renderItem({ item })}</div>
@@ -191,6 +198,7 @@ describe("MessagesTimeline", () => {
     getStateSpy.mockReset();
     getStateSpy.mockReturnValue({ isAtEnd: true, listen: mockListen });
     scrollableNode = null;
+    latestLegendOnScroll = null;
     sizeListeners.clear();
     vi.restoreAllMocks();
     useUiStateStore.setState({
@@ -591,6 +599,63 @@ describe("MessagesTimeline", () => {
     try {
       await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
       expect(props.onIsAtEndChange).toHaveBeenCalledWith(false);
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("gates automatic end pinning with the explicit live-follow latch", async () => {
+    const props = buildProps();
+    const screen = await render(
+      <MessagesTimeline {...props} liveFollowEnabled={false} timelineEntries={THINKING_ENTRIES} />,
+    );
+
+    try {
+      const list = page.getByTestId("legend-list");
+      expect(list.element().dataset.maintainScrollAtEnd).toBe("false");
+
+      await screen.rerender(
+        <MessagesTimeline {...props} liveFollowEnabled timelineEntries={THINKING_ENTRIES} />,
+      );
+      expect(list.element().dataset.maintainScrollAtEnd).toBe("true");
+    } finally {
+      await screen.unmount();
+    }
+  });
+
+  it("breaks live follow on upward navigation and rearms only at a user-reached end", async () => {
+    const scrollNode = setScrollMetrics({ scrollTop: 1200, scrollHeight: 2000, clientHeight: 800 });
+    const onManualNavigation = vi.fn();
+    const onUserReachedEnd = vi.fn();
+    const props = buildProps();
+    const screen = await render(
+      <MessagesTimeline
+        {...props}
+        timelineEntries={THINKING_ENTRIES}
+        onManualNavigation={onManualNavigation}
+        onUserReachedEnd={onUserReachedEnd}
+      />,
+    );
+
+    try {
+      await expect.element(page.getByText("Thinking · Inspecting repository state")).toBeVisible();
+      onUserReachedEnd.mockClear();
+      latestLegendOnScroll?.();
+      expect(onUserReachedEnd).not.toHaveBeenCalled();
+
+      await vi.waitFor(() => {
+        scrollNode.dispatchEvent(new WheelEvent("wheel", { deltaY: -40 }));
+        expect(onManualNavigation).toHaveBeenCalled();
+      });
+
+      Object.defineProperty(scrollNode, "scrollTop", { value: 1050, configurable: true });
+      latestLegendOnScroll?.();
+      expect(onUserReachedEnd).not.toHaveBeenCalled();
+
+      scrollNode.dispatchEvent(new WheelEvent("wheel", { deltaY: 80 }));
+      Object.defineProperty(scrollNode, "scrollTop", { value: 1200, configurable: true });
+      latestLegendOnScroll?.();
+      expect(onUserReachedEnd).toHaveBeenCalledTimes(1);
     } finally {
       await screen.unmount();
     }

@@ -142,12 +142,168 @@ describe("deriveThreadSubagents", () => {
       providerThreadIds: ["child-thread-1"],
       messages: [
         {
+          id: "agent-start:child-thread-1",
+          text: "Inspecting retry paths",
+          providerThreadId: "child-thread-1",
+        },
+        {
           id: "msg-child-1",
           text: "The retry flow drops partial stream state.",
           providerThreadId: "child-thread-1",
         },
       ],
     });
+  });
+
+  it("projects Codex spawn/wait events as one labeled child, not tool-call duplicates", () => {
+    const spawnRows = [
+      makeActivity({
+        id: "spawn-start",
+        kind: "tool.started",
+        createdAt: "2026-06-04T10:00:00.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          providerItemId: "call-explorer",
+          detail: "Role: explorer.\nTask: Inspect the provider event path.",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              id: "call-explorer",
+              tool: "spawnAgent",
+              prompt: "Role: explorer.\nTask: Inspect the provider event path.",
+              receiverThreadIds: [],
+              status: "inProgress",
+              agentsStates: {},
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "spawn-complete",
+        kind: "tool.completed",
+        createdAt: "2026-06-04T10:00:01.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          providerItemId: "call-explorer",
+          detail: "Role: explorer.\nTask: Inspect the provider event path.",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              id: "call-explorer",
+              tool: "spawnAgent",
+              prompt: "Role: explorer.\nTask: Inspect the provider event path.",
+              receiverThreadIds: ["child-explorer"],
+              status: "completed",
+              agentsStates: {
+                "child-explorer": { status: "pendingInit", message: null },
+              },
+            },
+          },
+        },
+      }),
+    ];
+
+    expect(deriveThreadSubagents(spawnRows)).toMatchObject([
+      {
+        key: "subagent:call-explorer",
+        role: "Explorer",
+        status: "running",
+        tool: "spawnAgent",
+        detail: "Inspect the provider event path.",
+        providerThreadIds: ["child-explorer"],
+        entries: [{ id: "spawn-complete" }],
+      },
+    ]);
+
+    const coordinated = deriveThreadSubagents([
+      ...spawnRows,
+      makeActivity({
+        id: "wait-start",
+        kind: "tool.started",
+        createdAt: "2026-06-04T10:00:02.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          providerItemId: "call-wait",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              id: "call-wait",
+              tool: "wait",
+              prompt: null,
+              receiverThreadIds: ["child-explorer"],
+              status: "inProgress",
+              agentsStates: {},
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "wait-complete",
+        kind: "tool.completed",
+        createdAt: "2026-06-04T10:00:05.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          providerItemId: "call-wait",
+          data: {
+            item: {
+              type: "collabAgentToolCall",
+              id: "call-wait",
+              tool: "wait",
+              prompt: null,
+              receiverThreadIds: ["child-explorer"],
+              status: "completed",
+              agentsStates: {
+                "child-explorer": {
+                  status: "completed",
+                  message: "The event path is stable.",
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    expect(coordinated).toHaveLength(1);
+    expect(coordinated[0]).toMatchObject({
+      key: "subagent:call-explorer",
+      role: "Explorer",
+      status: "finished",
+      messages: [
+        {
+          id: "wait-complete:child-explorer",
+          text: "The event path is stable.",
+          providerThreadId: "child-explorer",
+        },
+      ],
+    });
+  });
+
+  it("does not resurrect a transcript-only child after its parent turn is interrupted", () => {
+    const activities = [
+      makeActivity({
+        id: "orphaned-spawn",
+        kind: "tool.started",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          providerItemId: "call-orphaned",
+          detail: "Role: verifier.\nTask: Check reconnect behavior.",
+        },
+      }),
+    ];
+
+    expect(deriveThreadSubagents(activities)[0]?.status).toBe("running");
+    expect(
+      deriveThreadSubagents(activities, {
+        sessionLive: true,
+        parentTurnState: "interrupted",
+      })[0]?.status,
+    ).toBe("interrupted");
   });
 
   it("groups canonical subagent lifecycle activities and attaches message deltas", () => {
@@ -302,6 +458,91 @@ describe("deriveThreadSubagents", () => {
     });
   });
 
+  it("builds persistent transcript tabs from native task activities", () => {
+    const activities = [
+      makeActivity({
+        id: "task-start",
+        kind: "task.started",
+        createdAt: "2026-06-04T10:00:00.000Z",
+        payload: {
+          taskId: "native-agent-1",
+          agentKind: "agent",
+          role: "code-reviewer",
+          title: "Review reconnect handling",
+          detail: "Inspect session recovery and queued turns",
+          status: "running",
+        },
+      }),
+      makeActivity({
+        id: "task-usage",
+        kind: "task.progress",
+        createdAt: "2026-06-04T10:00:02.000Z",
+        summary: "Task usage updated",
+        payload: {
+          taskId: "native-agent-1",
+          agentKind: "agent",
+          role: "code-reviewer",
+          usageSnapshot: true,
+          typedUsage: { totalTokens: 900 },
+        },
+      }),
+      makeActivity({
+        id: "task-complete",
+        kind: "task.completed",
+        createdAt: "2026-06-04T10:00:04.000Z",
+        payload: {
+          taskId: "native-agent-1",
+          agentKind: "agent",
+          status: "completed",
+          summary: "Reconnect path verified",
+        },
+      }),
+      makeActivity({
+        id: "task-late-progress",
+        kind: "task.progress",
+        createdAt: "2026-06-04T10:00:05.000Z",
+        payload: {
+          taskId: "native-agent-1",
+          agentKind: "agent",
+          status: "running",
+          summary: "Late replayed progress",
+        },
+      }),
+    ];
+
+    const [subagent] = deriveThreadSubagents(activities);
+    expect(subagent).toMatchObject({
+      key: "subagent:native-agent-1",
+      role: "Code Reviewer",
+      status: "finished",
+      detail: "Late replayed progress",
+    });
+    expect(subagent?.name).toMatch(/^[A-Z][A-Za-z]+( \d+)?$/);
+  });
+
+  it("recovers a running transcript tab from a retained native usage snapshot", () => {
+    const [subagent] = deriveThreadSubagents([
+      makeActivity({
+        id: "retained-task-usage",
+        kind: "task.progress",
+        payload: {
+          taskId: "retained-agent",
+          taskType: "local_agent",
+          agentKind: "agent",
+          role: "verifier",
+          usageSnapshot: true,
+          typedUsage: { totalTokens: 1_200 },
+        },
+      }),
+    ]);
+
+    expect(subagent).toMatchObject({
+      key: "subagent:retained-agent",
+      role: "Verifier",
+      status: "running",
+    });
+  });
+
   it("does not attach unrelated agent messages to a subagent", () => {
     const activities = [
       makeActivity({
@@ -338,7 +579,7 @@ describe("deriveThreadSubagents", () => {
     expect(deriveThreadSubagents(activities)[0]?.messages).toEqual([]);
   });
 
-  it("uses lifecycle completion even when nested Codex agent state is stale", () => {
+  it("keeps the child running when only the Codex spawn tool has completed", () => {
     const activities = [
       makeActivity({
         id: "agent-done",
@@ -366,7 +607,7 @@ describe("deriveThreadSubagents", () => {
     ];
 
     expect(deriveThreadSubagents(activities)[0]).toMatchObject({
-      status: "finished",
+      status: "running",
     });
   });
 
@@ -483,7 +724,7 @@ describe("deriveThreadSubagents", () => {
       startActivity("c3", "2026-06-04T10:00:01.000Z"),
     ]);
 
-    expect(c3First).toEqual({ "subagent:c3": "Turing", "subagent:c7": "Shannon" });
+    expect(Object.keys(c3First).toSorted()).toEqual(["subagent:c3", "subagent:c7"]);
     expect(c7First).toEqual(c3First);
     expect(c3First["subagent:c3"]).not.toBe(c3First["subagent:c7"]);
   });

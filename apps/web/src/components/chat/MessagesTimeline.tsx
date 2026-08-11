@@ -201,7 +201,11 @@ interface MessagesTimelineProps {
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
+  /** Enables LegendList's automatic pinning only while the user follows live output. */
+  liveFollowEnabled?: boolean;
   onIsAtEndChange: (isAtEnd: boolean) => void;
+  onManualNavigation?: () => void;
+  onUserReachedEnd?: () => void;
   onInspectContextHandoff?: (
     marker: ContextHandoffTimelineEntry,
     trigger: HTMLButtonElement,
@@ -245,7 +249,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   timestampFormat,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
+  liveFollowEnabled = true,
   onIsAtEndChange,
+  onManualNavigation,
+  onUserReachedEnd,
   onInspectContextHandoff,
 }: MessagesTimelineProps) {
   usePerfMark("MessagesTimeline");
@@ -297,6 +304,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // Long-press target for the phone message action sheet.
   const [messageActionsRequest, setMessageActionsRequest] =
     useState<TimelineMessageActionsRequest | null>(null);
+  const manualScrollIntentRef = useRef(false);
+  const manualScrollIntentTimerRef = useRef<number | null>(null);
+  const markManualScrollIntent = useCallback(() => {
+    manualScrollIntentRef.current = true;
+    if (manualScrollIntentTimerRef.current !== null) {
+      window.clearTimeout(manualScrollIntentTimerRef.current);
+    }
+    manualScrollIntentTimerRef.current = window.setTimeout(() => {
+      manualScrollIntentRef.current = false;
+      manualScrollIntentTimerRef.current = null;
+    }, 800);
+  }, []);
   const onOpenMessageActions = useCallback((request: TimelineMessageActionsRequest) => {
     setMessageActionsRequest(request);
   }, []);
@@ -305,16 +324,26 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // flag is only refreshed inside the list's own layout/scroll passes, so a
   // transcript short enough never to scroll keeps whatever value it was
   // initialised with and the scroll-to-bottom pill sticks around forever.
-  const evaluateIsAtEnd = useCallback(() => {
+  const evaluateIsAtEnd = useCallback((): boolean | null => {
     const scrollNode = listRef.current?.getScrollableNode?.();
     if (!(scrollNode instanceof HTMLElement)) {
-      return;
+      return null;
     }
-    onIsAtEndChange(isTimelineScrolledToEnd(scrollNode));
+    const isAtEnd = isTimelineScrolledToEnd(scrollNode);
+    onIsAtEndChange(isAtEnd);
+    return isAtEnd;
   }, [listRef, onIsAtEndChange]);
 
   const handleScroll = useCallback(() => {
-    evaluateIsAtEnd();
+    const isAtEnd = evaluateIsAtEnd();
+    if (isAtEnd === true && manualScrollIntentRef.current) {
+      manualScrollIntentRef.current = false;
+      if (manualScrollIntentTimerRef.current !== null) {
+        window.clearTimeout(manualScrollIntentTimerRef.current);
+        manualScrollIntentTimerRef.current = null;
+      }
+      onUserReachedEnd?.();
+    }
     const state = listRef.current?.getState?.();
     if (!state || minimapItems.length === 0) {
       return;
@@ -338,7 +367,87 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [evaluateIsAtEnd, listRef, minimapItems, minimapStripMap]);
+  }, [evaluateIsAtEnd, listRef, minimapItems, minimapStripMap, onUserReachedEnd]);
+
+  useEffect(() => {
+    let removeListeners: (() => void) | null = null;
+    let frame: number | null = null;
+
+    const attach = (remainingAttempts: number) => {
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        const scrollNode = listRef.current?.getScrollableNode?.();
+        if (!(scrollNode instanceof HTMLElement)) {
+          if (remainingAttempts > 0) attach(remainingAttempts - 1);
+          return;
+        }
+
+        const contentOverflows = () => scrollNode.scrollHeight - scrollNode.clientHeight > 1;
+        const viewportIsAwayFromEnd = () => !isTimelineScrolledToEnd(scrollNode);
+        const breakLiveFollow = () => {
+          markManualScrollIntent();
+          onManualNavigation?.();
+        };
+        const handleWheel = (event: WheelEvent) => {
+          if (!contentOverflows()) return;
+          markManualScrollIntent();
+          if (event.deltaY < 0) onManualNavigation?.();
+        };
+        const handleTouchMove = () => {
+          markManualScrollIntent();
+          if (viewportIsAwayFromEnd()) onManualNavigation?.();
+        };
+        const handlePointerDown = (event: PointerEvent) => {
+          markManualScrollIntent();
+          if (event.target === scrollNode ? contentOverflows() : viewportIsAwayFromEnd()) {
+            onManualNavigation?.();
+          }
+        };
+        const handleKeyDown = (event: KeyboardEvent) => {
+          switch (event.key) {
+            case "PageUp":
+            case "Home":
+            case "ArrowUp":
+              if (contentOverflows()) breakLiveFollow();
+              break;
+            case "PageDown":
+            case "End":
+            case "ArrowDown":
+              markManualScrollIntent();
+              break;
+            default:
+              break;
+          }
+        };
+
+        scrollNode.addEventListener("wheel", handleWheel, { passive: true });
+        scrollNode.addEventListener("touchmove", handleTouchMove, { passive: true });
+        scrollNode.addEventListener("pointerdown", handlePointerDown, { passive: true });
+        scrollNode.addEventListener("keydown", handleKeyDown);
+        removeListeners = () => {
+          scrollNode.removeEventListener("wheel", handleWheel);
+          scrollNode.removeEventListener("touchmove", handleTouchMove);
+          scrollNode.removeEventListener("pointerdown", handlePointerDown);
+          scrollNode.removeEventListener("keydown", handleKeyDown);
+        };
+      });
+    };
+
+    attach(12);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      removeListeners?.();
+    };
+  }, [listRef, markManualScrollIntent, onManualNavigation]);
+
+  useEffect(
+    () => () => {
+      if (manualScrollIntentTimerRef.current !== null) {
+        window.clearTimeout(manualScrollIntentTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -428,6 +537,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
 
     setHighlightedMessageId(targetMessageRowHighlight ? targetMessageId : null);
+    onManualNavigation?.();
     void listRef.current?.scrollToIndex?.({
       animated: true,
       index: targetRowIndex,
@@ -462,7 +572,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       window.cancelAnimationFrame(frameId);
       window.clearTimeout(timeoutId);
     };
-  }, [listRef, rows, targetMessageId, targetMessageRequestId, targetMessageRowHighlight]);
+  }, [
+    listRef,
+    onManualNavigation,
+    rows,
+    targetMessageId,
+    targetMessageRequestId,
+    targetMessageRowHighlight,
+  ]);
 
   // Streaming-frequent context — rebuilt on turn-lifecycle transitions.
   const streamingState = useMemo<TimelineStreamingState>(
@@ -562,9 +679,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             data={rows}
             keyExtractor={keyExtractor}
             renderItem={renderItem}
-            estimatedItemSize={90}
+            estimatedItemSize={56}
+            recycleItems={false}
             initialScrollAtEnd
-            maintainScrollAtEnd
+            maintainScrollAtEnd={liveFollowEnabled}
             maintainScrollAtEndThreshold={0.1}
             maintainVisibleContentPosition
             onScroll={handleScroll}
@@ -582,6 +700,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             items={minimapItems}
             stripMap={minimapStripMap}
             onSelect={(item) => {
+              markManualScrollIntent();
+              onManualNavigation?.();
               void listRef.current?.scrollToIndex({
                 index: item.rowIndex,
                 animated: true,

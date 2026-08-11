@@ -63,17 +63,17 @@ The comparison uses upstream stable
 Ryco and upstream have both changed substantially since their common ancestor,
 so each change is selected on behavior and adapted at the relevant boundary.
 
-| Concern | Upstream reference | Ryco state | Decision |
-| --- | --- | --- | --- |
-| Native subagent/workflow observability | [PR #5219](https://github.com/pingdotgg/t3code/pull/5219) | Core contracts, provider mapping, runtime fold, and Agents panel are already present | Preserve Ryco's port and build on it |
-| Stable rows and independent usage updates | [PR #5569](https://github.com/pingdotgg/t3code/pull/5569) | Rows reorder by latest update; one progress record can overwrite usage or activity | Port the event split, `firstSeenAt`, ordering, and row treatment |
-| Live subagent count | [PR #5745](https://github.com/pingdotgg/t3code/pull/5745) | Runtime already derives `liveCount`, but workspace entry points do not show it | Adapt the badge to Ryco's header toggle and workspace launcher |
-| Claude stop settlement | [PR #5568](https://github.com/pingdotgg/t3code/pull/5568) | `stopTask` can race the terminal notification and leave a live-looking row | Port acknowledged-stop settlement |
-| Background-session reaping | [PR #5677](https://github.com/pingdotgg/t3code/pull/5677) | An idle parent session can be reaped while background agents still run | Port the background-liveness guard |
-| Claude resume handshake | [PR #5710](https://github.com/pingdotgg/t3code/pull/5710) | An untargeted zero-turn result can publish a phantom completion | Port adapter suppression and ingestion defense |
-| Codex queued follow-up interruption | [PR #5762](https://github.com/pingdotgg/t3code/pull/5762) | Accepting a queued turn overwrites the actually active turn id | Port functional session updates and retain the active id |
-| Chat live-follow stability | [PR #5566](https://github.com/pingdotgg/t3code/pull/5566) and [PR #5449](https://github.com/pingdotgg/t3code/pull/5449) | `maintainScrollAtEnd` can keep following after the user scrolls away | Adapt the explicit follow latch and compatible list-position safeguards |
-| Token-by-token output | [PR #5664](https://github.com/pingdotgg/t3code/pull/5664) | Buffered mode is already the default, but the old setting remains prominent and ambiguous | Rename it to a fresh legacy key and move it behind a collapsed warning |
+| Concern                                   | Upstream reference                                                                                                      | Ryco state                                                                                | Decision                                                                |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Native subagent/workflow observability    | [PR #5219](https://github.com/pingdotgg/t3code/pull/5219)                                                               | Core contracts, provider mapping, runtime fold, and Agents panel are already present      | Preserve Ryco's port and build on it                                    |
+| Stable rows and independent usage updates | [PR #5569](https://github.com/pingdotgg/t3code/pull/5569)                                                               | Rows reorder by latest update; one progress record can overwrite usage or activity        | Port the event split, `firstSeenAt`, ordering, and row treatment        |
+| Live subagent count                       | [PR #5745](https://github.com/pingdotgg/t3code/pull/5745)                                                               | Runtime already derives `liveCount`, but workspace entry points do not show it            | Adapt the badge to Ryco's header toggle and workspace launcher          |
+| Claude stop settlement                    | [PR #5568](https://github.com/pingdotgg/t3code/pull/5568)                                                               | `stopTask` can race the terminal notification and leave a live-looking row                | Port acknowledged-stop settlement                                       |
+| Background-session reaping                | [PR #5677](https://github.com/pingdotgg/t3code/pull/5677)                                                               | An idle parent session can be reaped while background agents still run                    | Port the background-liveness guard                                      |
+| Claude resume handshake                   | [PR #5710](https://github.com/pingdotgg/t3code/pull/5710)                                                               | An untargeted zero-turn result can publish a phantom completion                           | Port adapter suppression and ingestion defense                          |
+| Codex queued follow-up interruption       | [PR #5762](https://github.com/pingdotgg/t3code/pull/5762)                                                               | Accepting a queued turn overwrites the actually active turn id                            | Port functional session updates and retain the active id                |
+| Chat live-follow stability                | [PR #5566](https://github.com/pingdotgg/t3code/pull/5566) and [PR #5449](https://github.com/pingdotgg/t3code/pull/5449) | `maintainScrollAtEnd` can keep following after the user scrolls away                      | Adapt the explicit follow latch and compatible list-position safeguards |
+| Token-by-token output                     | [PR #5664](https://github.com/pingdotgg/t3code/pull/5664)                                                               | Buffered mode is already the default, but the old setting remains prominent and ambiguous | Rename it to a fresh legacy key and move it behind a collapsed warning  |
 
 ## Current Ryco architecture
 
@@ -259,7 +259,7 @@ return the queued turn's id. Updating a session from that response must retain
 the existing active turn id:
 
 ```ts
-activeTurnId: session.activeTurnId ?? acceptedTurnId
+activeTurnId: session.activeTurnId ?? acceptedTurnId;
 ```
 
 Allow the session update helper to compute its patch from the current session

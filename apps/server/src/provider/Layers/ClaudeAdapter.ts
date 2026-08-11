@@ -228,6 +228,17 @@ interface ClaudeSessionContext {
    * even when nothing changed for most members.
    */
   readonly workflowMemberFingerprints: Map<string, string>;
+  /**
+   * Last complete workflow phase roster per coordinator task. Claude only
+   * includes workflow_progress on some task_progress heartbeats, while the
+   * persisted activity is a latest-state upsert. Repeating this cached shape
+   * prevents a thin heartbeat from temporarily erasing future phases in the
+   * Agents workspace.
+   */
+  readonly workflowPhasesByTaskId: Map<
+    string,
+    ReadonlyArray<{ readonly index: number; readonly title: string }>
+  >;
   /** Task ids that have started and not yet reached a terminal state. */
   readonly liveTaskIds: Set<string>;
   /**
@@ -708,6 +719,32 @@ function parseWorkflowProgress(value: unknown): ClaudeWorkflowProgress | undefin
     .toSorted((a, b) => a.index - b.index)
     .slice(0, WORKFLOW_AGENT_CAP);
   return { phases, agents };
+}
+
+/**
+ * Workflow progress is a sparse snapshot stream: some ticks omit phases and
+ * later ticks may reveal additional ones. Keep a monotonic, index-keyed
+ * roster so the coordinator's latest-state activity always carries the full
+ * workflow shape observed so far.
+ */
+function mergeWorkflowPhases(
+  current: ReadonlyArray<{ readonly index: number; readonly title: string }> | undefined,
+  incoming: ReadonlyArray<{ readonly index: number; readonly title: string }> | undefined,
+): ReadonlyArray<{ readonly index: number; readonly title: string }> {
+  if (!incoming || incoming.length === 0) {
+    return current ?? [];
+  }
+  const byIndex = new Map<number, string>();
+  for (const phase of current ?? []) {
+    byIndex.set(phase.index, phase.title);
+  }
+  for (const phase of incoming) {
+    byIndex.set(phase.index, phase.title);
+  }
+  return Array.from(byIndex.entries())
+    .map(([index, title]) => ({ index, title }))
+    .toSorted((left, right) => left.index - right.index)
+    .slice(0, WORKFLOW_PHASE_CAP);
 }
 
 /**
@@ -1990,24 +2027,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
-      const stamp = yield* makeEventStamp();
-      yield* offerRuntimeEventForContext(context, {
-        type: "turn.completed",
-        eventId: stamp.eventId,
-        provider: PROVIDER,
-        createdAt: stamp.createdAt,
+      // Real turns always receive local turnState when sent, and out-of-turn
+      // assistant messages create a synthetic turn. What remains is a resume
+      // handshake, a late duplicate result, or a no-turn stream failure. Keep
+      // usage, but never publish an untargeted lifecycle completion.
+      yield* Effect.logInfo("claude.turn.result-without-active-turn", {
         threadId: context.session.threadId,
-        payload: {
-          state: status,
-          ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
-          ...(result?.usage ? { usage: result.usage } : {}),
-          ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
-          ...(typeof result?.total_cost_usd === "number"
-            ? { totalCostUsd: result.total_cost_usd }
-            : {}),
-          ...(errorMessage ? { errorMessage } : {}),
-        },
-        providerRefs: {},
+        status,
+        numTurns: result?.num_turns,
+        hasUsage: result?.usage !== undefined,
+        ...(errorMessage ? { errorMessage } : {}),
       });
       return;
     }
@@ -2710,10 +2739,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const emitWorkflowMemberProgress = Effect.fn("emitWorkflowMemberProgress")(function* (
     context: ClaudeSessionContext,
     message: Extract<SDKMessage, { type: "system"; subtype: "task_progress" }>,
+    progress: ClaudeWorkflowProgress | undefined,
   ) {
-    const progress = parseWorkflowProgress(
-      (message as unknown as Record<string, unknown>).workflow_progress,
-    );
     if (!progress) {
       return;
     }
@@ -2861,7 +2888,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         context.backgroundedTaskIds.add(taskId);
       }
 
-      for (const taskId of [...context.liveTaskIds]) {
+      for (const taskId of context.liveTaskIds) {
         if (liveSet.has(taskId) || !context.backgroundedTaskIds.has(taskId)) {
           continue;
         }
@@ -3078,9 +3105,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         // separate phases-only row would share the stable ingestion activity
         // id with this full row, and the thinner upsert would overwrite
         // usage and progress text.
-        const workflowPhases = parseWorkflowProgress(
+        const workflowProgress = parseWorkflowProgress(
           (message as unknown as Record<string, unknown>).workflow_progress,
-        )?.phases;
+        );
+        const workflowPhases = mergeWorkflowPhases(
+          context.workflowPhasesByTaskId.get(message.task_id),
+          workflowProgress?.phases,
+        );
+        if (workflowPhases.length > 0) {
+          context.workflowPhasesByTaskId.set(message.task_id, workflowPhases);
+        }
         yield* offerRuntimeEventForContext(context, {
           ...base,
           type: "task.progress",
@@ -3091,12 +3125,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             ...(message.usage ? { usage: message.usage } : {}),
             ...(progressTypedUsage ? { typedUsage: progressTypedUsage } : {}),
             ...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
-            ...(workflowPhases && workflowPhases.length > 0 ? { phases: workflowPhases } : {}),
+            ...(workflowPhases.length > 0 ? { phases: workflowPhases } : {}),
             ...progressLinkage,
             ...(message.subagent_type ? { role: message.subagent_type } : {}),
           },
         });
-        yield* emitWorkflowMemberProgress(context, message);
+        yield* emitWorkflowMemberProgress(context, message, workflowProgress);
         if (isClaudeSubagentTaskMessage(message) || context.subagentByTaskId.has(message.task_id)) {
           const subagent = makeClaudeTaskSubagentRef(
             context.subagentByTaskId.get(message.task_id),
@@ -4016,6 +4050,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         suppressedSubagentBlocks: new Map(),
         taskAgents: new Map(),
         workflowMemberFingerprints: new Map(),
+        workflowPhasesByTaskId: new Map(),
         liveTaskIds: new Set(),
         backgroundedTaskIds: new Set(),
         turnState: undefined,
@@ -4223,11 +4258,40 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         yield* Effect.forEach(
           liveIds,
           (taskId) =>
-            Effect.tryPromise({
-              // Invoke through the query object: SDK methods rely on `this`.
-              try: () => context.query.stopTask!(taskId),
-              catch: () => undefined,
-            }).pipe(Effect.timeoutOption("3 seconds"), Effect.ignore),
+            Effect.gen(function* () {
+              const stopAcknowledged = yield* Effect.tryPromise({
+                // Invoke through the query object: SDK methods rely on `this`.
+                try: () => context.query.stopTask!(taskId),
+                catch: () => undefined,
+              }).pipe(
+                Effect.timeoutOption("3 seconds"),
+                Effect.orElseSucceed(() => Option.none()),
+              );
+              if (Option.isNone(stopAcknowledged) || !context.liveTaskIds.delete(taskId)) {
+                return;
+              }
+
+              // The separate task notification can lose its race with the
+              // parent interrupt. Treat an acknowledged stop as authoritative
+              // durable state for the Agents surface.
+              const stamp = yield* makeEventStamp();
+              yield* offerRuntimeEventForContext(context, {
+                type: "task.completed",
+                eventId: stamp.eventId,
+                provider: PROVIDER,
+                createdAt: stamp.createdAt,
+                threadId: context.session.threadId,
+                ...(context.turnState
+                  ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                  : {}),
+                payload: {
+                  taskId: RuntimeTaskId.make(taskId),
+                  status: "stopped",
+                  ...taskLinkageFor(context.taskAgents, taskId),
+                },
+                providerRefs: nativeProviderRefs(context),
+              });
+            }).pipe(Effect.ignore),
           { concurrency: 8, discard: true },
         ).pipe(Effect.timeoutOption("10 seconds"), Effect.ignore);
       }

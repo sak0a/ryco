@@ -174,6 +174,47 @@ describe("branch search atoms", () => {
     releaseA();
     releaseB();
   });
+
+  it("resets a reused branch atom on every lifecycle clear", async () => {
+    listRefsSpy.mockResolvedValue(makeRefsPage(0));
+    const target = { environmentId: ENVIRONMENT_A, cwd: "/repo/reused", query: "" };
+    const key = getBranchesTargetKey(target);
+
+    const releaseFirst = watchBranches(target);
+    await flush();
+    releaseFirst();
+    resetGitAtomsForTests();
+    expect(getBranchesSnapshot(key).pages).toHaveLength(0);
+
+    const releaseSecond = watchBranches(target);
+    await flush();
+    expect(getBranchesSnapshot(key).pages).toHaveLength(1);
+    releaseSecond();
+    resetGitAtomsForTests();
+
+    expect(getBranchesSnapshot(key).pages).toHaveLength(0);
+    expect(getBranchesSnapshot(key).isPending).toBe(true);
+  });
+
+  it("ignores a branch response that settles after its watcher is cleared", async () => {
+    let resolveRequest!: (value: VcsListRefsResult) => void;
+    listRefsSpy.mockReturnValue(
+      new Promise<VcsListRefsResult>((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+    const target = { environmentId: ENVIRONMENT_A, cwd: "/repo/late", query: "" };
+    const key = getBranchesTargetKey(target);
+
+    const release = watchBranches(target);
+    release();
+    resetGitAtomsForTests();
+    resolveRequest(makeRefsPage(0));
+    await flush();
+
+    expect(getBranchesSnapshot(key).pages).toHaveLength(0);
+    expect(getBranchesSnapshot(key).isPending).toBe(true);
+  });
 });
 
 describe("resolve pull request atoms", () => {
@@ -218,5 +259,30 @@ describe("resolve pull request atoms", () => {
     expect(snapshot.error?.message).toBe("not found");
 
     release();
+  });
+
+  it("resets a reused pull request atom on every lifecycle clear", async () => {
+    const target = { environmentId: ENVIRONMENT_A, cwd: "/repo/reused", reference: "7" };
+    const key = getResolvePullRequestTargetKey(target);
+    resolvePullRequestSpy.mockResolvedValue({ pullRequest: null });
+
+    const releaseFirst = watchResolvePullRequest(target);
+    await flush();
+    releaseFirst();
+    resetGitAtomsForTests();
+
+    const releaseSecond = watchResolvePullRequest(target);
+    await flush();
+    expect(getResolvePullRequestSnapshot(key).data).toEqual({ pullRequest: null });
+    releaseSecond();
+    resetGitAtomsForTests();
+
+    expect(getResolvePullRequestSnapshot(key)).toEqual({
+      data: null,
+      isPending: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+    });
   });
 });

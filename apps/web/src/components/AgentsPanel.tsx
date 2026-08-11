@@ -4,13 +4,12 @@
  * spawn batch).
  *
  * Visualization rules:
- * - Live work first: running workflows and direct spawns sort above settled.
+ * - Stable spawn order: activity and usage updates never reshuffle the roster.
  * - Rows are flat status lines — no expansion, no per-agent tool feeds. The
  *   row answers "who / what phase / how much"; agents with a transcript
  *   deep-link into their workspace transcript tab instead of unfolding.
- * - A settled workflow run collapses to a single summary line; click it to
- *   show its member list inline (the one allowed toggle — run granularity,
- *   not agent granularity).
+ * - Workflow expansion is presentation state keyed by workflow id; lifecycle
+ *   changes cannot move or implicitly collapse the group.
  * - Static status dots, DOM-write elapsed timers, plain token counters.
  */
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
@@ -20,19 +19,24 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  Clock3Icon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { readEnvironmentApi } from "../environmentApi";
 import {
+  assignSubagentIdentities,
   formatSubagentModelLabel,
   formatSubagentTokenCount,
+  subagentRoleDuplicatesLabel,
   type AgentPanelModel,
   type AgentPanelWorkflowGroup,
   type RuntimeSubagent,
+  type SubagentIdentity,
 } from "../threadWorkspaceViewModel";
 import { cn } from "~/lib/utils";
+import { SubagentAvatar } from "./sidebar/SubagentAvatar";
 import { ScrollArea } from "./ui/scroll-area";
 
 /**
@@ -53,6 +57,16 @@ const STATUS_VISUALS: Record<RuntimeSubagent["status"], { dotClass: string; labe
   cancelled: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
   interrupted: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
 };
+
+interface AgentsPanelIdentityContextValue {
+  readonly identities: ReadonlyMap<string, SubagentIdentity>;
+  readonly onOpenAgent: ((agentId: string) => void) | null;
+}
+
+const AgentsPanelIdentityContext = createContext<AgentsPanelIdentityContextValue>({
+  identities: new Map(),
+  onOpenAgent: null,
+});
 
 function StatusDot({ status }: { status: RuntimeSubagent["status"] }) {
   return (
@@ -180,59 +194,131 @@ function AgentRowList({ children }: { children: ReactNode }) {
   return <div className="divide-y divide-border/30">{children}</div>;
 }
 
-/** Flat, non-interactive agent status line. No unfold. */
+/**
+ * Claude reveals workflow agents phase-by-phase. Keep future stages visible
+ * as deliberate pending rows until their concrete agent slots arrive; this
+ * makes the complete Work → Review → Verify arc readable from the first
+ * workflow snapshot without pretending an unknown agent already exists.
+ */
+function PendingWorkflowPhaseRow({ title }: { title: string }) {
+  return (
+    <div
+      data-workflow-pending-step
+      data-phase-title={title}
+      aria-label={`${title} pending`}
+      className="grid h-14 grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-2 rounded-md px-1.5 py-1 text-left"
+    >
+      <span
+        aria-hidden
+        className="flex size-7 items-center justify-center rounded-lg border border-dashed border-border/60 bg-background/30 text-muted-foreground/55"
+      >
+        <Clock3Icon className="size-3.5" />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-foreground/75">{title}</span>
+        <span className="block truncate text-[11px] text-muted-foreground/65">
+          Waiting for this stage to start
+        </span>
+      </span>
+      <span className="inline-flex items-center gap-1 font-mono text-[.68rem] text-muted-foreground/65">
+        <span aria-hidden className="size-1.5 rounded-full bg-muted-foreground/40" />
+        Pending
+      </span>
+    </div>
+  );
+}
+
+/** Fixed three-line identity/task/activity row; updates never change height. */
 function AgentRow({ agent }: { agent: RuntimeSubagent }) {
+  const { identities, onOpenAgent } = use(AgentsPanelIdentityContext);
   const visuals = STATUS_VISUALS[agent.status];
   const activity = agentActivityText(agent);
   const modelLabel = formatSubagentModelLabel(agent.model, agent.effort);
+  const identity = identities.get(agent.id);
+  const codename = identity?.codename ?? agent.title;
+  const role =
+    identity?.role &&
+    !subagentRoleDuplicatesLabel(identity.role, codename) &&
+    !subagentRoleDuplicatesLabel(identity.role, agent.title)
+      ? identity.role
+      : null;
+  const taskLabel = identity?.taskLabel ?? agent.title;
+  const metadata = [
+    modelLabel,
+    agent.usage ? `${formatSubagentTokenCount(agent.usage.totalTokens)} tok` : "— tok",
+    agent.usage?.toolUses !== undefined ? `${agent.usage.toolUses} tools` : null,
+    agent.activationCount > 1 ? `run ${agent.activationCount}` : null,
+  ].filter((value): value is string => value !== null);
 
-  return (
-    <div className="px-1.5 py-2">
-      <div className="flex items-start gap-2">
-        <span className="flex h-5 items-center">
+  const content = (
+    <>
+      <span
+        aria-hidden
+        className="relative col-start-1 row-span-3 row-start-1 mt-0.5 flex size-7 items-center justify-center rounded-lg border border-border/45 bg-background/45"
+      >
+        <SubagentAvatar name={identity?.avatarKey ?? agent.id} className="size-5" />
+        <span className="absolute -right-0.5 -bottom-0.5 grid size-2.5 place-items-center rounded-full bg-background ring-1 ring-background">
           <StatusDot status={agent.status} />
         </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="truncate text-sm font-medium">{agent.title}</span>
-            {agent.role ? (
-              <span className="max-w-28 truncate rounded-sm border border-border/60 px-1 font-mono text-[.65rem] text-muted-foreground">
-                {agent.role}
-              </span>
-            ) : null}
-            <span className="ml-auto flex items-center gap-1 font-mono text-[.7rem] text-muted-foreground/80">
-              <AgentElapsed agent={agent} />
-              {agent.status === "completed" ? (
-                <CheckIcon aria-hidden className="size-3 text-success" />
-              ) : null}
-            </span>
-          </span>
-          {activity ? (
-            <span
-              className={cn(
-                "mt-0.5 block truncate text-xs",
-                agent.status === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
-              )}
-            >
-              {activity}
-            </span>
-          ) : null}
-          <span className="mt-0.5 flex items-center gap-1 font-mono text-[.7rem] text-muted-foreground/70">
-            {modelLabel ? <span className="truncate">{modelLabel}</span> : null}
-            {agent.usage ? (
-              <span className="tabular-nums">
-                {modelLabel ? "· " : ""}
-                {formatSubagentTokenCount(agent.usage.totalTokens)} tok
-              </span>
-            ) : null}
-            {agent.usage?.toolUses !== undefined ? (
-              <span>· {agent.usage.toolUses} tools</span>
-            ) : null}
-            {agent.activationCount > 1 ? <span>· run {agent.activationCount}</span> : null}
-            <span className="sr-only">{visuals.label}</span>
-          </span>
+      </span>
+      <span className="col-start-2 row-start-1 flex min-w-0 items-center gap-1.5">
+        <span className="min-w-0 truncate text-sm font-semibold tracking-[-0.01em]">
+          {codename}
         </span>
-      </div>
+        {role ? (
+          <span className="max-w-32 shrink-0 truncate rounded-sm border border-border/60 bg-background/40 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+            {role}
+          </span>
+        ) : null}
+      </span>
+      <span className="col-start-3 row-start-1 min-w-14 text-right font-mono text-[.7rem] text-muted-foreground/80">
+        <span className="inline-flex items-center gap-1">
+          <AgentElapsed agent={agent} />
+          {agent.status === "completed" ? (
+            <CheckIcon aria-hidden className="size-3 text-success" />
+          ) : null}
+        </span>
+      </span>
+      <span
+        className="col-start-2 col-end-4 row-start-2 block truncate text-[11px] text-foreground/65"
+        title={taskLabel}
+      >
+        {taskLabel}
+      </span>
+      <span
+        className={cn(
+          "col-start-2 row-start-3 block min-w-0 truncate text-xs",
+          agent.status === "failed" ? "text-destructive-foreground" : "text-muted-foreground",
+        )}
+        title={activity ?? visuals.label}
+      >
+        {activity ?? visuals.label}
+      </span>
+      <span className="col-start-3 row-start-3 max-w-40 truncate text-right font-mono text-[.68rem] tabular-nums text-muted-foreground/65">
+        {metadata.join(" · ")}
+      </span>
+      <span className="sr-only">{visuals.label}</span>
+    </>
+  );
+
+  const className = cn(
+    "grid h-[4.5rem] w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] grid-rows-[1.375rem_1.125rem_1rem] items-center gap-x-2 rounded-md px-1.5 py-1 text-left outline-none transition-colors",
+    onOpenAgent && "hover:bg-accent/35 focus-visible:ring-2 focus-visible:ring-ring/50",
+  );
+  return onOpenAgent ? (
+    <button
+      type="button"
+      className={className}
+      data-agent-row
+      data-agent-id={agent.id}
+      onClick={() => onOpenAgent(agent.id)}
+      aria-label={`Open ${codename}${role ? `, ${role}` : ""} transcript. ${visuals.label}.`}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className={className} data-agent-row data-agent-id={agent.id}>
+      {content}
     </div>
   );
 }
@@ -417,14 +503,28 @@ function WorkflowScriptView({
  * collapsed to header + member dot row. User toggles override the default
  * and stick for the phase's lifetime.
  */
-function PhaseSection({ phase }: { phase: AgentPanelWorkflowGroup["phases"][number] }) {
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const open = userOpen ?? phase.state === "running";
+function PhaseSection({
+  phase,
+  defaultOpen = false,
+}: {
+  phase: AgentPanelWorkflowGroup["phases"][number];
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen || phase.state === "running");
+  const previousState = useRef(phase.state);
+
+  useEffect(() => {
+    if (previousState.current !== "running" && phase.state === "running") {
+      setOpen(true);
+    }
+    previousState.current = phase.state;
+  }, [phase.state]);
+
   return (
     <div>
       <button
         type="button"
-        onClick={() => setUserOpen(!open)}
+        onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         className={cn(
           "mt-2 flex w-full items-center gap-1.5 rounded-sm px-1.5 text-left text-[.65rem] font-medium uppercase tracking-wider hover:bg-accent/40",
@@ -459,24 +559,28 @@ function PhaseSection({ phase }: { phase: AgentPanelWorkflowGroup["phases"][numb
       </button>
       {open ? (
         <AgentRowList>
-          {phase.members.map((member) => (
-            <AgentRow key={member.id} agent={member} />
-          ))}
+          {phase.members.length === 0 && phase.state === "pending" ? (
+            <PendingWorkflowPhaseRow title={phase.title} />
+          ) : (
+            phase.members.map((member) => <AgentRow key={member.id} agent={member} />)
+          )}
         </AgentRowList>
       ) : null}
     </div>
   );
 }
 
-/** Live workflow: phase rail + full phase tree. */
-function LiveWorkflowSection({
+/** Expanded workflow: phase rail + full phase tree. */
+function ExpandedWorkflowSection({
   group,
   environmentId,
   threadId,
+  onCollapse,
 }: {
   group: AgentPanelWorkflowGroup;
   environmentId: EnvironmentId | null;
   threadId: ThreadId | null;
+  onCollapse: () => void;
 }) {
   const [scriptOpen, setScriptOpen] = useState(false);
   const members = workflowMembers(group);
@@ -492,8 +596,10 @@ function LiveWorkflowSection({
   return (
     <section className="rounded-lg border border-border/50 bg-card/30 p-1.5">
       <div className="flex items-center gap-2 px-1.5 pt-0.5 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
-        <span aria-hidden className="size-1.5 rounded-full bg-info" />
-        <span>{group.workflow.workflowName ?? group.workflow.title}</span>
+        <StatusDot status={group.workflow.status} />
+        <span className="min-w-0 truncate">
+          {group.workflow.workflowName ?? group.workflow.title}
+        </span>
         {canShowScript ? (
           <button
             type="button"
@@ -510,6 +616,14 @@ function LiveWorkflowSection({
         <span className="ml-auto font-mono normal-case text-muted-foreground/80">
           {settled}/{members.length} settled
         </span>
+        <button
+          type="button"
+          onClick={onCollapse}
+          aria-label="Collapse workflow"
+          className="rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <ChevronDownIcon aria-hidden className="size-3" />
+        </button>
       </div>
       <PhaseRail group={group} />
       {scriptOpen && canShowScript ? (
@@ -521,7 +635,7 @@ function LiveWorkflowSection({
         />
       ) : null}
       {group.phases.map((phase) => (
-        <PhaseSection key={phase.index} phase={phase} />
+        <PhaseSection key={phase.index} phase={phase} defaultOpen />
       ))}
       <AgentRowList>
         {group.unphasedMembers.map((member) => (
@@ -536,24 +650,16 @@ function LiveWorkflowSection({
 }
 
 /**
- * Settled workflow: one summary line. Click toggles the member list — the
- * only expansion in the panel, at run granularity. The script stays
- * reachable after the run settles: runHandles survive the fold, and a
- * finished run is exactly when reading its script matters.
+ * Collapsed workflow: one stable summary row. The parent owns presentation
+ * state so a live workflow never collapses merely because it settled.
  */
-function SettledWorkflowSection({
+function CollapsedWorkflowSection({
   group,
-  environmentId,
-  threadId,
+  onExpand,
 }: {
   group: AgentPanelWorkflowGroup;
-  environmentId: EnvironmentId | null;
-  threadId: ThreadId | null;
+  onExpand: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [scriptOpen, setScriptOpen] = useState(false);
-  const scriptPath = group.workflow.runHandles?.scriptPath;
-  const canShowScript = scriptPath !== undefined && environmentId !== null && threadId !== null;
   const members = workflowMembers(group);
   const failed = members.filter((member) => member.status === "failed").length;
   // Coordinator usage may already aggregate members (panel-footer rule):
@@ -568,67 +674,48 @@ function SettledWorkflowSection({
       : null;
   return (
     <section>
-      <div className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 hover:bg-accent/40">
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          aria-expanded={open}
-        >
-          <StatusDot status={failed > 0 ? "failed" : group.workflow.status} />
-          <span className="truncate text-sm">
-            {group.workflow.workflowName ?? group.workflow.title}
-          </span>
-        </button>
-        {canShowScript ? (
-          <button
-            type="button"
-            onClick={() => setScriptOpen((value) => !value)}
-            className={cn(
-              "shrink-0 rounded-sm border border-border/60 px-1 font-mono text-[.65rem] text-muted-foreground hover:text-foreground",
-              scriptOpen && "text-foreground",
-            )}
-            aria-expanded={scriptOpen}
-          >
-            {"{}"} script
-          </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => setOpen((value) => !value)}
-          className="flex shrink-0 items-center gap-1.5 font-mono text-[.7rem] text-muted-foreground/80"
-          aria-expanded={open}
-          tabIndex={-1}
-        >
+      <button
+        type="button"
+        onClick={onExpand}
+        className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring/50"
+        aria-expanded={false}
+      >
+        <StatusDot status={failed > 0 ? "failed" : group.workflow.status} />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {group.workflow.workflowName ?? group.workflow.title}
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5 font-mono text-[.7rem] text-muted-foreground/80">
           {failed > 0 ? <span className="text-destructive-foreground">{failed} failed</span> : null}
           <span>{members.length} agents</span>
           <span className="tabular-nums">· {formatSubagentTokenCount(totalTokens)} tok</span>
           {elapsed ? <span className="tabular-nums">· {elapsed}</span> : null}
-          {open ? (
-            <ChevronDownIcon aria-hidden className="size-3" />
-          ) : (
-            <ChevronRightIcon aria-hidden className="size-3" />
-          )}
-        </button>
-      </div>
-      {scriptOpen && canShowScript ? (
-        <WorkflowScriptView
-          environmentId={environmentId}
-          threadId={threadId}
-          scriptPath={scriptPath}
-          onClose={() => setScriptOpen(false)}
-        />
-      ) : null}
-      {open ? (
-        <div className="ms-3 border-s border-border/45 ps-2">
-          <AgentRowList>
-            {members.map((member) => (
-              <AgentRow key={member.id} agent={member} />
-            ))}
-          </AgentRowList>
-        </div>
-      ) : null}
+          <ChevronRightIcon aria-hidden className="size-3" />
+        </span>
+      </button>
     </section>
+  );
+}
+
+/** A workflow's open state is presentation state, never a status derivative. */
+function WorkflowSection({
+  group,
+  environmentId,
+  threadId,
+}: {
+  group: AgentPanelWorkflowGroup;
+  environmentId: EnvironmentId | null;
+  threadId: ThreadId | null;
+}) {
+  const [open, setOpen] = useState(() => workflowIsLive(group));
+  return open ? (
+    <ExpandedWorkflowSection
+      group={group}
+      environmentId={environmentId}
+      threadId={threadId}
+      onCollapse={() => setOpen(false)}
+    />
+  ) : (
+    <CollapsedWorkflowSection group={group} onExpand={() => setOpen(true)} />
   );
 }
 
@@ -636,11 +723,32 @@ export function AgentsPanel({
   model,
   environmentId = null,
   threadId = null,
+  onOpenAgent = null,
 }: {
   model: AgentPanelModel;
   environmentId?: EnvironmentId | null;
   threadId?: ThreadId | null;
+  onOpenAgent?: ((agentId: string) => void) | null;
 }) {
+  const identityContext = useMemo<AgentsPanelIdentityContextValue>(() => {
+    const agentsById = new Map<string, RuntimeSubagent>();
+    for (const group of model.workflows) {
+      agentsById.set(group.workflow.id, group.workflow);
+      for (const member of workflowMembers(group)) agentsById.set(member.id, member);
+    }
+    for (const agent of model.directAgents) agentsById.set(agent.id, agent);
+    return {
+      identities: assignSubagentIdentities(
+        [...agentsById.values()].map((agent) => ({
+          key: agent.id,
+          role: agent.role,
+          taskLabel: agent.title,
+        })),
+      ),
+      onOpenAgent,
+    };
+  }, [model, onOpenAgent]);
+
   if (!model.hasAgents) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
@@ -654,75 +762,46 @@ export function AgentsPanel({
     );
   }
 
-  const liveWorkflows = model.workflows.filter(workflowIsLive);
-  const settledWorkflows = model.workflows.filter((group) => !workflowIsLive(group));
-  const liveDirect = model.directAgents.filter(
-    (agent) =>
-      agent.status === "running" || agent.status === "pending" || agent.status === "waiting",
-  );
-  const settledDirect = model.directAgents.filter(
-    (agent) =>
-      agent.status !== "running" && agent.status !== "pending" && agent.status !== "waiting",
-  );
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="flex flex-col gap-2 p-2">
-          {liveWorkflows.map((group) => (
-            <LiveWorkflowSection
-              key={group.workflow.id}
-              group={group}
-              environmentId={environmentId}
-              threadId={threadId}
-            />
-          ))}
-          {liveDirect.length > 0 ? (
-            <section>
-              <div className="px-1.5 pt-1 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
-                Direct spawns
-              </div>
-              <AgentRowList>
-                {liveDirect.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} />
-                ))}
-              </AgentRowList>
-            </section>
-          ) : null}
-          {settledWorkflows.length > 0 || settledDirect.length > 0 ? (
-            <section>
-              <div className="px-1.5 pt-2 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground/70">
-                Earlier
-              </div>
-              {settledWorkflows.map((group) => (
-                <SettledWorkflowSection
-                  key={group.workflow.id}
-                  group={group}
-                  environmentId={environmentId}
-                  threadId={threadId}
-                />
-              ))}
-              <AgentRowList>
-                {settledDirect.map((agent) => (
-                  <AgentRow key={agent.id} agent={agent} />
-                ))}
-              </AgentRowList>
-            </section>
-          ) : null}
-        </div>
-      </ScrollArea>
-      <footer className="flex items-center justify-between border-t border-border/60 px-3 py-1.5 font-mono text-[.7rem] text-muted-foreground">
-        <span className="flex items-center gap-2">
-          {model.runningCount + model.waitingCount > 0 ? (
-            <span className="text-info-foreground">
-              ● {model.runningCount + model.waitingCount} working
-            </span>
-          ) : null}
-          {model.idleCount > 0 ? <span>{model.idleCount} idle</span> : null}
-          {model.settledCount > 0 ? <span>{model.settledCount} settled</span> : null}
-        </span>
-        <span className="tabular-nums">Σ {formatSubagentTokenCount(model.totalTokens)} tok</span>
-      </footer>
-    </div>
+    <AgentsPanelIdentityContext.Provider value={identityContext}>
+      <div className="flex h-full min-h-0 flex-col">
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="flex flex-col gap-2 p-2">
+            {model.workflows.map((group) => (
+              <WorkflowSection
+                key={group.workflow.id}
+                group={group}
+                environmentId={environmentId}
+                threadId={threadId}
+              />
+            ))}
+            {model.directAgents.length > 0 ? (
+              <section>
+                <div className="px-1.5 pt-1 text-[.65rem] font-medium uppercase tracking-wider text-muted-foreground">
+                  Direct spawns
+                </div>
+                <AgentRowList>
+                  {model.directAgents.map((agent) => (
+                    <AgentRow key={agent.id} agent={agent} />
+                  ))}
+                </AgentRowList>
+              </section>
+            ) : null}
+          </div>
+        </ScrollArea>
+        <footer className="flex items-center justify-between border-t border-border/60 px-3 py-1.5 font-mono text-[.7rem] text-muted-foreground">
+          <span className="flex items-center gap-2">
+            {model.runningCount + model.waitingCount > 0 ? (
+              <span className="text-info-foreground">
+                ● {model.runningCount + model.waitingCount} working
+              </span>
+            ) : null}
+            {model.idleCount > 0 ? <span>{model.idleCount} idle</span> : null}
+            {model.settledCount > 0 ? <span>{model.settledCount} settled</span> : null}
+          </span>
+          <span className="tabular-nums">Σ {formatSubagentTokenCount(model.totalTokens)} tok</span>
+        </footer>
+      </div>
+    </AgentsPanelIdentityContext.Provider>
   );
 }

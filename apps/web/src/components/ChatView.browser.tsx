@@ -80,6 +80,7 @@ import {
 } from "../lib/visualViewportInsets";
 import { __resetLocalApiForTests } from "../localApi";
 import { AppAtomRegistryProvider } from "../rpc/atomRegistry";
+import { resetGitAtomsForTests } from "../rpc/gitAtoms";
 import { resetProjectAtomsForTests } from "../rpc/projectAtoms";
 import { resetProjectPreviewAtomsForTests } from "../rpc/projectPreviewAtoms";
 import { resetCheckpointDiffStateForTests } from "../rpc/providerAtoms";
@@ -1539,6 +1540,17 @@ async function waitForElement<T extends Element>(
   return element;
 }
 
+async function clickEnabledButton(button: HTMLButtonElement, errorMessage: string): Promise<void> {
+  await vi.waitFor(
+    () => {
+      expect(button.isConnected, errorMessage).toBe(true);
+      expect(button.disabled, errorMessage).toBe(false);
+    },
+    { timeout: 8_000, interval: 16 },
+  );
+  button.click();
+}
+
 async function waitForURL(
   router: ReturnType<typeof getRouter>,
   predicate: (pathname: string) => boolean,
@@ -2456,6 +2468,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
     wsRequests.length = 0;
     customWsRpcResolver = null;
     __resetEnvironmentApiOverridesForTests();
+    resetGitAtomsForTests();
     resetProjectAtomsForTests();
     // The checkpoint-diff and project-preview caches are module-level; stale
     // entries from a previous mount would otherwise dedupe the fresh fetches
@@ -3795,7 +3808,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find branch selector button.",
       );
-      branchButton.click();
+      await clickEnabledButton(branchButton, "Branch selector did not become actionable.");
 
       const branchInput = await waitForElement(
         () => document.querySelector<HTMLInputElement>('input[placeholder="Search refs..."]'),
@@ -3820,7 +3833,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         "Unable to find Worktree button.",
       );
-      worktreeButton.click();
+      await clickEnabledButton(
+        worktreeButton,
+        "Worktree preparation did not become actionable after resolving the pull request.",
+      );
 
       await vi.waitFor(
         () => {
@@ -4257,7 +4273,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Unable to find the new workspace from-branch selector trigger.",
       );
 
-      fromBranchTrigger.click();
+      await clickEnabledButton(
+        fromBranchTrigger,
+        "New workspace branch selector did not become actionable.",
+      );
       await expectVisibleComboboxPopupToBeOpaqueAndClipped();
     } finally {
       await mounted.cleanup();
@@ -4325,7 +4344,10 @@ describe("ChatView timeline estimator parity (full app)", () => {
             .find((element) => element.textContent?.includes("main")) ?? null,
         "Unable to find the new workspace from-branch selector trigger.",
       );
-      fromBranchTrigger.click();
+      await clickEnabledButton(
+        fromBranchTrigger,
+        "New workspace branch selector did not become actionable.",
+      );
       await page.getByText("release/next", { exact: true }).click();
 
       await vi.waitFor(
@@ -4641,7 +4663,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         'Unable to find branch selector button with "From main".',
       );
-      branchButton.click();
+      await clickEnabledButton(branchButton, "Branch selector did not become actionable.");
 
       const branchOption = await waitForElement(
         () =>
@@ -4753,7 +4775,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
           ) as HTMLButtonElement | null,
         'Unable to find branch selector button with "From feature/selected".',
       );
-      branchButton.click();
+      await clickEnabledButton(branchButton, "Branch selector did not become actionable.");
 
       await waitForElement(
         () => document.querySelector<HTMLInputElement>('input[placeholder="Search refs..."]'),
@@ -8610,6 +8632,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
         300,
         (scrollContainer!.scrollHeight - scrollContainer!.clientHeight) / 4,
       );
+      // Match a real user scroll. The live-follow latch intentionally ignores
+      // bare programmatic scrollTop writes so layout corrections cannot turn
+      // off streaming follow mode by accident.
+      scrollContainer!.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -240, bubbles: true, cancelable: true }),
+      );
+      await waitForLayout();
       await vi.waitFor(async () => {
         scrollContainer!.scrollTop = targetScrollTop;
         await waitForLayout();
@@ -9891,6 +9920,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
         '[data-slot="combobox-trigger"]',
       );
       expect(branchTrigger).not.toBeNull();
+      await vi.waitFor(() => {
+        expect(branchTrigger!.disabled).toBe(false);
+      });
       branchTrigger!.click();
       await waitForElement(
         () => document.querySelector<HTMLInputElement>('input[placeholder="Search refs..."]'),

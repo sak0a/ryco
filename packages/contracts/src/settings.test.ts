@@ -7,6 +7,24 @@ import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
+describe("ServerSettings.enableLegacyTokenStreaming", () => {
+  it("defaults to buffered output and deliberately ignores the retired key", () => {
+    expect(DEFAULT_SERVER_SETTINGS.enableLegacyTokenStreaming).toBe(false);
+    expect(
+      decodeServerSettings({ enableAssistantStreaming: true }).enableLegacyTokenStreaming,
+    ).toBe(false);
+  });
+
+  it("round-trips the fresh legacy setting key", () => {
+    expect(
+      decodeServerSettings({ enableLegacyTokenStreaming: true }).enableLegacyTokenStreaming,
+    ).toBe(true);
+    expect(
+      decodeServerSettingsPatch({ enableLegacyTokenStreaming: true }).enableLegacyTokenStreaming,
+    ).toBe(true);
+  });
+});
+
 describe("ServerSettings.enableProviderUpdateChecks", () => {
   it("defaults provider update checks on", () => {
     expect(DEFAULT_SERVER_SETTINGS.enableProviderUpdateChecks).toBe(true);

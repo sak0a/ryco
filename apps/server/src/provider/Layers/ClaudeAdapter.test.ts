@@ -4079,7 +4079,65 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("interruptTurn stops every live task before interrupting the turn", () => {
+  it.effect("does not emit turn.completed for a result with no active turn", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-resume-handshake"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        num_turns: 1,
+        session_id: "sdk-session-1",
+        uuid: "result-real",
+      } as unknown as SDKMessage);
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        num_turns: 0,
+        usage: { input_tokens: 0, output_tokens: 0 },
+        session_id: "sdk-session-1",
+        uuid: "result-handshake",
+      } as unknown as SDKMessage);
+      harness.query.finish();
+
+      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+      const completions = runtimeEvents.filter((event) => event.type === "turn.completed");
+      assert.equal(completions.length, 1);
+      const completed = completions[0];
+      if (completed?.type === "turn.completed") {
+        assert.equal(String(completed.turnId), String(turn.turnId));
+        assert.equal(completed.payload.state, "completed");
+      }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("interruptTurn settles every acknowledged live task before interrupting", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
       const adapter = yield* ClaudeAdapter;
@@ -4137,11 +4195,28 @@ describe("ClaudeAdapterLive", () => {
 
       yield* Fiber.join(taskEventsFiber);
 
+      const stoppedTaskEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "task.completed"),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
       yield* adapter.interruptTurn(session.threadId);
 
       // Only the still-live task is stopped; interrupt always fires after.
       assert.deepEqual(harness.query.stopTaskCalls, ["task-live"]);
       assert.equal(harness.query.interruptCalls.length, 1);
+
+      const stoppedTaskEvents = Array.from(yield* Fiber.join(stoppedTaskEventFiber));
+      assert.equal(stoppedTaskEvents.length, 1);
+      const stoppedTaskEvent = stoppedTaskEvents[0];
+      assert.equal(stoppedTaskEvent?.type, "task.completed");
+      if (stoppedTaskEvent?.type === "task.completed") {
+        assert.equal(String(stoppedTaskEvent.payload.taskId), "task-live");
+        assert.equal(stoppedTaskEvent.payload.status, "stopped");
+        assert.equal(stoppedTaskEvent.payload.taskType, "local_agent");
+        assert.equal(stoppedTaskEvent.payload.title, "Agent A");
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
@@ -4231,6 +4306,78 @@ describe("ClaudeAdapterLive", () => {
       // tick 3 unchanged).
       assert.equal(byMember.get("wf-coalesce:wf:0"), 2);
       assert.equal(byMember.get("wf-coalesce:wf:1"), 1);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("retains the complete workflow phase roster across sparse progress ticks", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const coordinatorEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "task.progress" &&
+            String((event.payload as { taskId?: unknown }).taskId) === "wf-sparse-phases",
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      const session = yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("test-claudeadapter-wf-sparse-phases"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "run workflow",
+        attachments: [],
+      });
+
+      const phases = [
+        { type: "workflow_phase", index: 1, title: "Work" },
+        { type: "workflow_phase", index: 2, title: "Review" },
+        { type: "workflow_phase", index: 3, title: "Verify" },
+      ];
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "wf-sparse-phases",
+        description: "Work, review, then verify",
+        workflow_progress: phases,
+        uuid: "wf-sparse-phases-full",
+        session_id: "sdk-session",
+      } as unknown as SDKMessage);
+      // Real Claude workflow streams interleave thin coordinator heartbeats
+      // that omit workflow_progress. This second tick replaces the same
+      // latest-state activity, so it must repeat the remembered phase shape.
+      harness.query.emit({
+        type: "system",
+        subtype: "task_progress",
+        task_id: "wf-sparse-phases",
+        description: "Work, review, then verify",
+        summary: "Work is still running",
+        uuid: "wf-sparse-phases-thin",
+        session_id: "sdk-session",
+      } as unknown as SDKMessage);
+
+      const coordinatorEvents = Array.from(yield* Fiber.join(coordinatorEventsFiber));
+      assert.equal(coordinatorEvents.length, 2);
+      for (const event of coordinatorEvents) {
+        assert.equal(event.type, "task.progress");
+        if (event.type === "task.progress") {
+          assert.deepEqual(event.payload.phases, [
+            { index: 1, title: "Work" },
+            { index: 2, title: "Review" },
+            { index: 3, title: "Verify" },
+          ]);
+        }
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

@@ -21,6 +21,7 @@ import {
   hasServerAcknowledgedLocalDispatch,
   normalizeInteractionModeForProviderTarget,
   reconcileMountedTerminalThreadIds,
+  resolveHeaderLiveAgentCount,
   resolveSendEnvMode,
   resolveChatSendWorktreePlan,
   shouldShowNewThreadSurface,
@@ -49,6 +50,32 @@ const idleProviderSelectionPolicyInput = {
   environmentAvailable: true,
   isPhoneTier: false,
 };
+
+describe("resolveHeaderLiveAgentCount", () => {
+  it("suppresses only the redundant badge while the Agents roster is visible", () => {
+    expect(
+      resolveHeaderLiveAgentCount({
+        liveCount: 4,
+        workspacePanelOpen: true,
+        workspaceTab: "agents",
+      }),
+    ).toBe(0);
+    expect(
+      resolveHeaderLiveAgentCount({
+        liveCount: 4,
+        workspacePanelOpen: true,
+        workspaceTab: "files",
+      }),
+    ).toBe(4);
+    expect(
+      resolveHeaderLiveAgentCount({
+        liveCount: 4,
+        workspacePanelOpen: false,
+        workspaceTab: "agents",
+      }),
+    ).toBe(4);
+  });
+});
 
 describe("deriveProviderSelectionPolicy", () => {
   it("exposes every ready provider on a started, truly idle desktop thread", () => {

@@ -6,6 +6,8 @@ export interface SettingsSearchEntry {
   readonly description: string;
   /** Extra match terms not present in title/description. */
   readonly keywords?: string;
+  /** Optional in-panel target revealed after selecting this result. */
+  readonly targetId?: string;
 }
 
 /**
@@ -48,9 +50,10 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
   },
   {
     section: "general",
-    title: "Assistant output",
-    description: "Show token-by-token output while a response streams.",
-    keywords: "streaming tokens",
+    title: "Stream token by token (legacy)",
+    description: "Compatibility mode for token-by-token assistant output.",
+    keywords: "token streaming assistant output streaming tokens buffered",
+    targetId: "legacy-token-streaming",
   },
   {
     section: "general",

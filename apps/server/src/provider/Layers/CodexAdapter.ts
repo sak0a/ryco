@@ -31,7 +31,7 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@ryco/contracts";
-import { Effect, Exit, Fiber, FileSystem, Queue, Schema, Scope, Stream } from "effect";
+import { Effect, Exit, Fiber, FileSystem, Option, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
@@ -1999,9 +1999,36 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     return session;
   });
 
+  const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
+    session: CodexAdapterSessionContext,
+  ) {
+    if (session.stopped) {
+      return;
+    }
+    session.stopped = true;
+    sessions.delete(session.threadId);
+    yield* session.runtime.close.pipe(Effect.ignore);
+    yield* Effect.ignore(Scope.close(session.scope, Exit.void));
+    yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
+  });
+
   const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
     requireSession(threadId).pipe(
-      Effect.flatMap((session) => session.runtime.interruptTurn(turnId)),
+      Effect.flatMap((session) =>
+        session.runtime.interruptTurn(turnId).pipe(
+          Effect.timeoutOption("15 seconds"),
+          Effect.flatMap(
+            Option.match({
+              onSome: () => Effect.void,
+              onNone: () =>
+                Effect.logWarning(
+                  "Codex turn interrupt timed out; recycling the wedged provider session.",
+                  { threadId },
+                ).pipe(Effect.andThen(stopSessionInternal(session))),
+            }),
+          ),
+        ),
+      ),
       Effect.mapError((cause) =>
         cause._tag === "ProviderAdapterSessionNotFoundError"
           ? cause
@@ -2077,19 +2104,6 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     yield* nativeEventLogger.write(event, event.threadId);
-  });
-
-  const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
-    session: CodexAdapterSessionContext,
-  ) {
-    if (session.stopped) {
-      return;
-    }
-    session.stopped = true;
-    sessions.delete(session.threadId);
-    yield* session.runtime.close.pipe(Effect.ignore);
-    yield* Effect.ignore(Scope.close(session.scope, Exit.void));
-    yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
   });
 
   const stopSession: CodexAdapterShape["stopSession"] = (threadId) =>

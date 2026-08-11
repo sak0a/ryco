@@ -17,6 +17,7 @@ import type { WorktreeOriginLike } from "./ChatHeaderBreadcrumb.logic";
 import { HEADER_CHROME_ICON_BUTTON_CLASS_NAME } from "./headerChrome";
 import type { LinkedWorktreeItem } from "../worktrees/LinkedWorktreeItemDialog";
 import { usePerfMark, useDevPropDiff } from "../../perf/tabSwitchInstrumentation";
+import { formatLiveAgentCount, LiveAgentCountBadge } from "../LiveAgentCountBadge";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -47,6 +48,8 @@ interface ChatHeaderProps {
   onSelectWorktree?: () => void;
   onOpenLinkedWorktreeItem?: (item: LinkedWorktreeItem) => void;
   workspacePanelOpen: boolean;
+  /** Running/pending + waiting agents; pass zero while the roster is visible. */
+  liveAgentCount: number;
   onToggleWorkspacePanel: () => void;
   overviewSidebarOpen: boolean;
   onToggleOverviewSidebar: (open?: boolean) => void;
@@ -106,15 +109,29 @@ export const ChatHeader = memo(function ChatHeader(props: ChatHeaderProps) {
             <Toggle
               pressed={props.workspacePanelOpen}
               onPressedChange={props.onToggleWorkspacePanel}
-              aria-label="Toggle workspace panel"
+              aria-label={
+                props.liveAgentCount > 0
+                  ? `Toggle workspace panel, ${formatLiveAgentCount(props.liveAgentCount)}`
+                  : "Toggle workspace panel"
+              }
               className={HEADER_CHROME_ICON_BUTTON_CLASS_NAME}
               size="sm"
             >
-              <PanelRightIcon className="size-4" />
+              <span className="relative inline-flex">
+                <PanelRightIcon className="size-4" />
+                <LiveAgentCountBadge
+                  count={props.liveAgentCount}
+                  className="-top-2 -right-2.5 h-3.5 min-w-3.5 px-0.5 text-[8px]"
+                />
+              </span>
             </Toggle>
           }
         />
-        <TooltipPopup side="bottom">Toggle workspace panel</TooltipPopup>
+        <TooltipPopup side="bottom">
+          {props.liveAgentCount > 0
+            ? `Workspace · ${formatLiveAgentCount(props.liveAgentCount)}`
+            : "Toggle workspace panel"}
+        </TooltipPopup>
       </Tooltip>
       {props.activeProjectScripts ? (
         <ProjectScriptsControl
