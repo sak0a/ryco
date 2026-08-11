@@ -192,12 +192,15 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           .withTransaction(
             Effect.gen(function* () {
               const committedEvents: OrchestrationEvent[] = [];
+              const postCommitEffects: Array<Effect.Effect<void>> = [];
               let nextCommandReadModel = commandReadModel;
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
                 nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
-                yield* projectionPipeline.projectEvent(savedEvent);
+                postCommitEffects.push(
+                  yield* projectionPipeline.projectEventInTransaction(savedEvent),
+                );
                 committedEvents.push(savedEvent);
               }
 
@@ -223,6 +226,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 committedEvents,
                 lastSequence: lastSavedEvent.sequence,
                 nextCommandReadModel,
+                postCommitEffects,
               } as const;
             }),
           )
@@ -235,6 +239,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         commandReadModel = committedCommand.nextCommandReadModel;
+        yield* Effect.forEach(committedCommand.postCommitEffects, (effect) => effect, {
+          concurrency: 1,
+          discard: true,
+        });
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {

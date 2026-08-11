@@ -31,6 +31,14 @@ export interface OrchestrationProjectionPipelineShape {
   readonly projectEvent: (
     event: OrchestrationEvent,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Project an event using the caller's active SQL transaction and return the
+   * post-commit side effects that must run only after that transaction commits.
+   */
+  readonly projectEventInTransaction: (
+    event: OrchestrationEvent,
+  ) => Effect.Effect<Effect.Effect<void>, ProjectionRepositoryError>;
 }
 
 /**
