@@ -47,6 +47,7 @@ describe("ChatHeader", () => {
           worktreeTitle="Header polish"
           worktreeOrigin="manual"
           workspacePanelOpen={false}
+          liveAgentCount={3}
           onToggleWorkspacePanel={onToggleWorkspacePanel}
           overviewSidebarOpen={false}
           onToggleOverviewSidebar={onToggleOverviewSidebar}
@@ -62,7 +63,7 @@ describe("ChatHeader", () => {
       'button[aria-label="Toggle overview panel"]',
     );
     const workspaceToggle = document.querySelector<HTMLButtonElement>(
-      'button[aria-label="Toggle workspace panel"]',
+      'button[aria-label="Toggle workspace panel, 3 agents working"]',
     );
 
     expect(overviewToggle).not.toBeNull();
@@ -77,7 +78,8 @@ describe("ChatHeader", () => {
     expect(workspaceToggle!.querySelector("svg")?.className.baseVal).toContain("size-4");
 
     await page.getByRole("button", { name: "Toggle overview panel" }).click();
-    await page.getByRole("button", { name: "Toggle workspace panel" }).click();
+    expect(workspaceToggle!.textContent).toContain("3");
+    await page.getByRole("button", { name: "Toggle workspace panel, 3 agents working" }).click();
 
     expect(onToggleOverviewSidebar.mock.calls[0]?.[0]).toBe(true);
     expect(onToggleWorkspacePanel.mock.calls[0]?.[0]).toBe(true);

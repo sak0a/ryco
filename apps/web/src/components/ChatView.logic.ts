@@ -33,6 +33,14 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
+export function resolveHeaderLiveAgentCount(input: {
+  readonly liveCount: number;
+  readonly workspacePanelOpen: boolean;
+  readonly workspaceTab: string | null | undefined;
+}): number {
+  return input.workspacePanelOpen && input.workspaceTab === "agents" ? 0 : input.liveCount;
+}
+
 export function buildLocalDraftThread(
   threadId: ThreadId,
   draftThread: DraftThreadState,

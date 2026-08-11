@@ -158,7 +158,13 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   );
 }
 
-function SectionPanel({ section }: { section: SettingsSectionId }) {
+function SectionPanel({
+  section,
+  searchTargetId,
+}: {
+  section: SettingsSectionId;
+  searchTargetId: string | null;
+}) {
   return (
     <Suspense
       fallback={
@@ -168,7 +174,7 @@ function SectionPanel({ section }: { section: SettingsSectionId }) {
       }
     >
       {section === "account" ? <LazyAccountSettingsPanel /> : null}
-      {section === "general" ? <GeneralSettingsPanel /> : null}
+      {section === "general" ? <GeneralSettingsPanel searchTargetId={searchTargetId} /> : null}
       {section === "providers" ? <LazyProvidersSettingsPanel /> : null}
       {section === "opinionated-plugins" ? <LazyOpinionatedPluginsSettingsPanel /> : null}
       {section === "mcp-servers" ? <LazyMcpServersSettings /> : null}
@@ -209,8 +215,12 @@ export function SettingsDialog() {
   }, [effectiveSection, hosted, open, roleFresh, section, setSection]);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchTargetId, setSearchTargetId] = useState<string | null>(null);
   useEffect(() => {
-    if (!open) setSearchQuery("");
+    if (!open) {
+      setSearchQuery("");
+      setSearchTargetId(null);
+    }
   }, [open]);
   const visibleSectionIds = new Set(visibleNavItems.map((item) => item.id));
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -259,7 +269,10 @@ export function SettingsDialog() {
               <input
                 type="search"
                 value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
+                onChange={(event) => {
+                  setSearchTargetId(null);
+                  setSearchQuery(event.target.value);
+                }}
                 placeholder="Search settings…"
                 aria-label="Search settings"
                 className="h-8 w-full rounded-md border border-input bg-muted/40 pr-3 pl-8 text-[13px] outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -285,7 +298,10 @@ export function SettingsDialog() {
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => setSection(item.id)}
+                  onClick={() => {
+                    setSearchTargetId(null);
+                    setSection(item.id);
+                  }}
                   className={cn(
                     "relative z-10 flex h-9 items-center gap-2.5 rounded-md px-2 text-left text-[13px] outline-hidden ring-ring transition-colors duration-150 focus-visible:ring-2",
                     isActive
@@ -330,6 +346,7 @@ export function SettingsDialog() {
                               void navigate({ to: "/statistics" });
                               return;
                             }
+                            setSearchTargetId(entry.targetId ?? null);
                             setSection(entry.section);
                             setSearchQuery("");
                           }}
@@ -352,7 +369,7 @@ export function SettingsDialog() {
               </div>
             ) : (
               <div key={restoreSignal} className="flex flex-col">
-                <SectionPanel section={effectiveSection} />
+                <SectionPanel section={effectiveSection} searchTargetId={searchTargetId} />
               </div>
             )}
           </ScrollArea>

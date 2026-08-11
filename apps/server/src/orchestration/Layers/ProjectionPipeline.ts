@@ -795,7 +795,29 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: event.payload.session.activeTurnId,
+            latestTurnId: event.payload.session.activeTurnId ?? existingRow.value.latestTurnId,
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId);
+          return;
+        }
+
+        case "thread.turn-interrupt-requested": {
+          if (event.payload.turnId === undefined) {
+            return;
+          }
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          // Keep the interrupted turn as the durable latest turn so reconnecting
+          // clients can settle transcript-only subagents instead of resurrecting
+          // them as live.
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            latestTurnId: event.payload.turnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);

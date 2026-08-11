@@ -25,6 +25,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, vi } from "@effect/vitest";
 
 import { Context, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
@@ -80,6 +81,7 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   public readonly interruptTurnImpl = vi.fn((_turnId?: TurnId): Promise<void> =>
     Promise.resolve(undefined),
   );
+  public interruptTurnEffect: Effect.Effect<void> | null = null;
 
   public readonly readThreadImpl = vi.fn((): Promise<CodexThreadSnapshot> =>
     Promise.resolve({
@@ -124,7 +126,7 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   }
 
   interruptTurn(turnId?: TurnId) {
-    return Effect.promise(() => this.interruptTurnImpl(turnId));
+    return this.interruptTurnEffect ?? Effect.promise(() => this.interruptTurnImpl(turnId));
   }
 
   readThread = Effect.promise(() => this.readThreadImpl());
@@ -705,6 +707,21 @@ function startLifecycleRuntime() {
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
+  it.effect("recycles a provider session when its interrupt RPC never settles", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime, session } = yield* startLifecycleRuntime();
+      runtime.interruptTurnEffect = Effect.never;
+
+      const interruptFiber = yield* adapter.interruptTurn(session.threadId).pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("15 seconds");
+      yield* Fiber.join(interruptFiber);
+
+      assert.equal(runtime.closeImpl.mock.calls.length, 1);
+      assert.equal(yield* adapter.hasSession(session.threadId), false);
+    }),
+  );
+
   it.effect("maps completed agent message items to canonical item.completed events", () =>
     Effect.gen(function* () {
       const { adapter, runtime, session } = yield* startLifecycleRuntime();

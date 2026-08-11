@@ -467,7 +467,7 @@ function taskLinkageActivityFields(payload: Record<string, unknown>): Record<str
   return fields;
 }
 
-function runtimeEventToActivities(
+export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   taskTitle?: string,
 ): ReadonlyArray<OrchestrationThreadActivity> {
@@ -672,34 +672,73 @@ function runtimeEventToActivities(
 
     case "task.progress": {
       const description = event.payload.description.trim();
+      const linkage = taskLinkageActivityFields(event.payload as Record<string, unknown>);
+      // Usage and activity are independent latest-state streams. Separate
+      // stable ids keep a command/reasoning update from replacing token usage
+      // and keep a pure usage tick from blanking meaningful activity.
+      const identityLinkage = { ...linkage };
+      delete identityLinkage.typedUsage;
+      delete identityLinkage.status;
+      delete identityLinkage.error;
+      const title = description.length > 0 ? { title: truncateDetail(description, 120) } : {};
+      const hasProgressState =
+        event.payload.typedUsage === undefined ||
+        event.payload.summary !== undefined ||
+        event.payload.lastToolName !== undefined ||
+        event.payload.status !== undefined ||
+        event.payload.error !== undefined;
       return [
-        {
-          // Stable per-task id: progress is "latest state", not history, so
-          // each tick REPLACES the last via the activity upsert (PK + the
-          // replace-by-id apply in projector and client reducer). Keeps one
-          // progress row per task instead of thousands, so a large fleet's
-          // ticks can no longer evict its own start/terminal rows out of
-          // the 500-row retention window. Thread-scoped: activity_id is a
-          // GLOBAL primary key and Claude task ids are session-local, so a
-          // bare taskId could collide across threads and steal another
-          // thread's row.
-          id: EventId.make(`task-progress:${event.threadId}:${event.payload.taskId}`),
-          createdAt: event.createdAt,
-          tone: "info",
-          kind: "task.progress",
-          summary: description.length > 0 ? truncateDetail(description, 120) : "Reasoning update",
-          payload: {
-            taskId: event.payload.taskId,
-            ...(description.length > 0 ? { title: truncateDetail(description, 120) } : {}),
-            detail: truncateDetail(event.payload.summary ?? event.payload.description),
-            ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
-            ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
-            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
-            ...taskLinkageActivityFields(event.payload as Record<string, unknown>),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
+        ...(hasProgressState
+          ? [
+              {
+                // Activity is latest state, not history, so each meaningful
+                // tick replaces the last and a large fleet stays bounded.
+                id: EventId.make(`task-progress:${event.threadId}:${event.payload.taskId}`),
+                createdAt: event.createdAt,
+                tone: "info" as const,
+                kind: "task.progress" as const,
+                summary:
+                  description.length > 0 ? truncateDetail(description, 120) : "Reasoning update",
+                payload: {
+                  taskId: event.payload.taskId,
+                  ...title,
+                  detail: truncateDetail(event.payload.summary ?? event.payload.description),
+                  ...(event.payload.summary
+                    ? { summary: truncateDetail(event.payload.summary) }
+                    : {}),
+                  ...(event.payload.lastToolName
+                    ? { lastToolName: event.payload.lastToolName }
+                    : {}),
+                  ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+                  ...(event.payload.status ? { status: event.payload.status } : {}),
+                  ...(event.payload.error ? { error: event.payload.error } : {}),
+                  ...identityLinkage,
+                },
+                turnId: toTurnId(event.turnId) ?? null,
+                ...maybeSequence,
+              },
+            ]
+          : []),
+        ...(event.payload.typedUsage !== undefined
+          ? [
+              {
+                id: EventId.make(`task-usage:${event.threadId}:${event.payload.taskId}`),
+                createdAt: event.createdAt,
+                tone: "info" as const,
+                kind: "task.progress" as const,
+                summary: "Task usage updated",
+                payload: {
+                  taskId: event.payload.taskId,
+                  ...title,
+                  ...identityLinkage,
+                  usageSnapshot: true,
+                  typedUsage: event.payload.typedUsage,
+                },
+                turnId: toTurnId(event.turnId) ?? null,
+                ...maybeSequence,
+              },
+            ]
+          : []),
       ];
     }
 
@@ -1951,6 +1990,27 @@ const make = Effect.gen(function* () {
       const eventTurnId = toTurnId(event.turnId);
       const activeTurnId = thread.session?.activeTurnId ?? null;
 
+      // A recovered provider can become ready after the process that owned the
+      // projected turn disappeared. In that case no turn.aborted notification
+      // can ever arrive, so the provider's own idle session state is the
+      // authoritative recovery signal. Do not apply this to incidental ready
+      // notifications (for example sandbox setup) while the provider still
+      // reports an active turn.
+      const providerActiveTurnId =
+        event.type === "session.state.changed" &&
+        event.payload.state === "ready" &&
+        activeTurnId !== null
+          ? yield* getExpectedProviderTurnIdForThread(thread.id)
+          : undefined;
+      const reconciledInterruptedTurnId =
+        activeTurnId !== null &&
+        (event.type === "session.exited" ||
+          (event.type === "session.state.changed" &&
+            (event.payload.state === "stopped" ||
+              (event.payload.state === "ready" && providerActiveTurnId === undefined))))
+          ? activeTurnId
+          : undefined;
+
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
       const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
@@ -2005,8 +2065,10 @@ const make = Effect.gen(function* () {
             if (activeTurnId !== null && eventTurnId !== undefined) {
               return sameId(activeTurnId, eventTurnId);
             }
-            // If no active turn is tracked, accept completion scoped to this thread.
-            return true;
+            // Without an active turn, only a named completion proves that a
+            // real turn existed. Claude's resume handshake is untargeted and
+            // must not settle a pending turn that never started.
+            return eventTurnId !== undefined;
           default:
             return true;
         }
@@ -2030,13 +2092,16 @@ const make = Effect.gen(function* () {
             ? (eventTurnId ?? null)
             : event.type === "turn.completed" ||
                 event.type === "turn.aborted" ||
-                event.type === "session.exited"
+                event.type === "session.exited" ||
+                reconciledInterruptedTurnId !== undefined
               ? null
               : activeTurnId;
         const status = (() => {
           switch (event.type) {
             case "session.state.changed":
-              return orchestrationSessionStatusFromRuntimeState(event.payload.state);
+              return event.payload.state === "ready" && nextActiveTurnId !== null
+                ? "running"
+                : orchestrationSessionStatusFromRuntimeState(event.payload.state);
             case "turn.started":
               return "running";
             case "session.exited":
@@ -2109,12 +2174,18 @@ const make = Effect.gen(function* () {
             createdAt: now,
           });
 
-          if (event.type === "turn.aborted" && eventTurnId !== undefined) {
+          const interruptedTurnId =
+            event.type === "turn.aborted" ? eventTurnId : reconciledInterruptedTurnId;
+          if (interruptedTurnId !== undefined) {
             yield* orchestrationEngine.dispatch({
               type: "thread.turn.interrupt",
-              commandId: providerCommandId(event, "thread-turn-interrupt", String(eventTurnId)),
+              commandId: providerCommandId(
+                event,
+                "thread-turn-interrupt",
+                String(interruptedTurnId),
+              ),
               threadId: thread.id,
-              turnId: eventTurnId,
+              turnId: interruptedTurnId,
               createdAt: now,
             });
           }
@@ -2165,7 +2236,7 @@ const make = Effect.gen(function* () {
 
         const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
           serverSettingsService.getSettings,
-          (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
+          (settings) => (settings.enableLegacyTokenStreaming ? "streaming" : "buffered"),
         );
         if (assistantDeliveryMode === "buffered") {
           const spillChunk = yield* appendBufferedAssistantText(assistantMessageId, assistantDelta);
@@ -2204,7 +2275,7 @@ const make = Effect.gen(function* () {
         const detailedThread = yield* getLoadedThreadDetail();
         const assistantDeliveryMode: AssistantDeliveryMode = yield* Effect.map(
           serverSettingsService.getSettings,
-          (settings) => (settings.enableAssistantStreaming ? "streaming" : "buffered"),
+          (settings) => (settings.enableLegacyTokenStreaming ? "streaming" : "buffered"),
         );
         const flushedMessageIds =
           assistantDeliveryMode === "buffered"
@@ -2380,11 +2451,15 @@ const make = Effect.gen(function* () {
         });
       }
 
-      if (event.type === "turn.completed" || event.type === "turn.aborted") {
+      if (
+        event.type === "turn.completed" ||
+        event.type === "turn.aborted" ||
+        reconciledInterruptedTurnId !== undefined
+      ) {
         const detailedThread = yield* getLoadedThreadDetail();
         const messages = detailedThread?.messages ?? [];
         const proposedPlans = detailedThread?.proposedPlans ?? [];
-        const turnId = toTurnId(event.turnId);
+        const turnId = toTurnId(event.turnId) ?? reconciledInterruptedTurnId;
         if (turnId) {
           const assistantMessageIds = yield* getAssistantMessageIdsForTurn(thread.id, turnId);
           yield* Effect.forEach(

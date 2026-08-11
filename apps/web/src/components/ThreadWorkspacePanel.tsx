@@ -48,6 +48,7 @@ import {
   type ThreadSubagentView,
 } from "../threadWorkspaceViewModel";
 import { AgentsPanel } from "./AgentsPanel";
+import { formatLiveAgentCount, LiveAgentCountBadge } from "./LiveAgentCountBadge";
 import { buildTabs, type WorkspaceTab } from "../threadWorkspaceTabs";
 import { readEnvironmentApi } from "../environmentApi";
 import { shortcutLabelForCommand } from "../keybindings";
@@ -86,6 +87,7 @@ function statusLabel(status: ThreadSubagentStatus): string {
   if (status === "running") return "Working";
   if (status === "failed") return "Needs review";
   if (status === "finished") return "Finished";
+  if (status === "interrupted") return "Stopped";
   return "Idle";
 }
 
@@ -109,7 +111,7 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
   if (props.tab.mode === "agent") {
     return (
       <SubagentAvatar
-        name={props.tab.label}
+        name={props.tab.avatarKey ?? props.tab.agentKey}
         className={cn("size-3.5 shrink-0", !props.active && "opacity-70")}
       />
     );
@@ -167,17 +169,22 @@ export function AgentThreadPanel(props: {
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="border-b border-border/60 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <SubagentAvatar name={props.subagent.name} className="size-4" />
+          <SubagentAvatar
+            name={props.subagent.avatarKey ?? props.subagent.key}
+            className="size-4"
+          />
           <p className="min-w-0 flex-1 text-sm font-medium">
             <AgentStatusName agent={props.subagent} />
           </p>
+          {props.subagent.role ? (
+            <span className="max-w-36 shrink-0 truncate rounded-sm border border-border/60 bg-background/40 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+              {props.subagent.role}
+            </span>
+          ) : null}
           <span className="shrink-0 rounded-md border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
             {statusLabel(props.subagent.status)}
           </span>
         </div>
-        {props.subagent.role ? (
-          <p className="mt-1 text-xs font-medium text-muted-foreground/70">{props.subagent.role}</p>
-        ) : null}
         {props.subagent.detail ? (
           <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
             {props.subagent.detail}
@@ -229,7 +236,9 @@ export function AgentThreadPanel(props: {
                         ? "bg-destructive"
                         : props.subagent?.status === "running"
                           ? "bg-sky-400"
-                          : "bg-emerald-400",
+                          : props.subagent?.status === "interrupted"
+                            ? "bg-muted-foreground/60"
+                            : "bg-emerald-400",
                     )}
                   />
                   <p className="min-w-0 truncate text-xs font-medium text-foreground">
@@ -517,6 +526,7 @@ function LauncherCard(props: {
   shortcutLabel?: string | null;
   disabled?: boolean;
   compact?: boolean;
+  badgeCount?: number;
   onClick?: () => void;
 }) {
   const Icon = props.icon;
@@ -536,13 +546,22 @@ function LauncherCard(props: {
           : "hover:border-border hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
       )}
     >
-      <Icon
-        className={cn(
-          "text-muted-foreground transition-colors",
-          props.compact ? "size-4 @sm/workspace-launcher:size-6" : "size-6",
-          !props.disabled && "group-hover:text-foreground",
-        )}
-      />
+      <span className="relative inline-flex">
+        <Icon
+          className={cn(
+            "text-muted-foreground transition-colors",
+            props.compact ? "size-4 @sm/workspace-launcher:size-6" : "size-6",
+            !props.disabled && "group-hover:text-foreground",
+          )}
+        />
+        <LiveAgentCountBadge
+          count={props.badgeCount ?? 0}
+          className="-top-2 -right-3 h-4 min-w-4 px-1 text-[9px]"
+        />
+      </span>
+      {(props.badgeCount ?? 0) > 0 ? (
+        <span className="sr-only">{formatLiveAgentCount(props.badgeCount ?? 0)}</span>
+      ) : null}
       <span
         className={cn(
           "font-semibold text-foreground",
@@ -582,6 +601,7 @@ function WorkspaceLauncher(props: {
   /** The frozen phone tier has no Agents workspace (AGENTS.md). */
   showAgents: boolean;
   isPhoneSurface: boolean;
+  liveAgentCount: number;
 }) {
   const keybindings = useServerKeybindings();
   const filesTab: WorkspaceTab = { key: "files", label: "Files", mode: "files" };
@@ -648,6 +668,7 @@ function WorkspaceLauncher(props: {
           label="Agents"
           description="Watch subagents and workflows run"
           icon={BotIcon}
+          badgeCount={props.liveAgentCount}
           compact={compact}
           onClick={() => props.onSelectTab(agentsTab)}
         />
@@ -666,7 +687,7 @@ function WorkspaceLauncher(props: {
             onClick={() => props.onSelectTab(tab)}
           >
             <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background/50 text-muted-foreground">
-              <SubagentAvatar name={tab.label} className="size-5" />
+              <SubagentAvatar name={tab.avatarKey ?? tab.agentKey} className="size-5" />
             </span>
             <span className="min-w-0 flex-1">
               <span
@@ -756,9 +777,18 @@ export default function ThreadWorkspacePanel(props: {
   const activeThread = useStore(
     useMemo(() => createThreadSelectorByRef(routeThreadRef), [routeThreadRef]),
   );
+  const agentSessionLive =
+    derivePhase(activeThread?.session ?? null) !== "disconnected" &&
+    activeThread?.session?.orchestrationStatus !== "stopped" &&
+    activeThread?.session?.orchestrationStatus !== "interrupted" &&
+    activeThread?.session?.orchestrationStatus !== "error";
   const subagents = useMemo(
-    () => deriveThreadSubagents(activeThread?.activities ?? []),
-    [activeThread?.activities],
+    () =>
+      deriveThreadSubagents(activeThread?.activities ?? [], {
+        sessionLive: agentSessionLive,
+        parentTurnState: activeThread?.latestTurn?.state ?? null,
+      }),
+    [activeThread?.activities, activeThread?.latestTurn?.state, agentSessionLive],
   );
   const agentKey =
     search.workspaceTab === "agent" && search.workspaceAgentKey ? search.workspaceAgentKey : null;
@@ -770,9 +800,10 @@ export default function ThreadWorkspacePanel(props: {
     () =>
       deriveThreadAgentPanelModel({
         activities: activeThread?.activities ?? [],
-        sessionLive: derivePhase(activeThread?.session ?? null) !== "disconnected",
+        transcriptSubagents: subagents,
+        sessionLive: agentSessionLive,
       }),
-    [activeThread?.activities, activeThread?.session],
+    [activeThread?.activities, agentSessionLive, subagents],
   );
   const openedPanelModes = useMemo(() => {
     if (
@@ -858,6 +889,15 @@ export default function ThreadWorkspacePanel(props: {
   const openLauncher = useCallback(() => {
     navigateSearch((previous) => buildOpenWorkspaceSearch(previous));
   }, [navigateSearch]);
+  const openRuntimeAgent = useCallback(
+    (runtimeAgentId: string) => {
+      const agentKey = runtimeAgentId.startsWith("subagent:")
+        ? runtimeAgentId
+        : `subagent:${runtimeAgentId}`;
+      navigateSearch((previous) => buildOpenAgentSearch(previous, agentKey));
+    },
+    [navigateSearch],
+  );
   const closeTab = useCallback(
     (tab: WorkspaceTab) => {
       onClosePanelTab({
@@ -1098,6 +1138,7 @@ export default function ThreadWorkspacePanel(props: {
             model={agentPanelModel}
             environmentId={routeThreadRef?.environmentId ?? null}
             threadId={routeThreadRef ? (routeThreadRef.threadId as ThreadId) : null}
+            onOpenAgent={openRuntimeAgent}
           />
         ) : activeMode === "agent" ? (
           <AgentThreadPanel subagent={activeAgent} agentKey={agentKey} />
@@ -1108,6 +1149,7 @@ export default function ThreadWorkspacePanel(props: {
             onSelectTab={selectTab}
             showAgents={!isPhoneSurface}
             isPhoneSurface={isPhoneSurface}
+            liveAgentCount={agentPanelModel.liveCount}
           />
         )}
       </div>

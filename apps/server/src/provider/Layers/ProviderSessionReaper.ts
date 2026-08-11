@@ -88,6 +88,18 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue;
         }
 
+        // Parent turns can settle while fleets, workflows, or monitor loops
+        // continue inside the provider process. Their liveness marker is
+        // authoritative even when ordinary session activity is old.
+        if (thread?.backgroundLiveness != null) {
+          yield* Effect.logDebug("provider.session.reaper.skipped-background-work", {
+            threadId: binding.threadId,
+            backgroundLiveness: thread.backgroundLiveness,
+            idleDurationMs,
+          });
+          continue;
+        }
+
         const reaped = yield* providerService.stopSession({ threadId: binding.threadId }).pipe(
           Effect.tap(() =>
             Effect.logInfo("provider.session.reaped", {

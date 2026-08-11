@@ -827,11 +827,11 @@ function currentProviderThreadId(session: ProviderSession): string | undefined {
 
 function updateSession(
   sessionRef: Ref.Ref<ProviderSession>,
-  updates: Partial<ProviderSession>,
+  updates: Partial<ProviderSession> | ((session: ProviderSession) => Partial<ProviderSession>),
 ): Effect.Effect<void> {
   return Ref.update(sessionRef, (session) => ({
     ...session,
-    ...updates,
+    ...(typeof updates === "function" ? updates(session) : updates),
     updatedAt: new Date().toISOString(),
   }));
 }
@@ -1761,11 +1761,14 @@ export const makeCodexSessionRuntime = (
             ),
           );
           const turnId = TurnId.make(response.turn.id);
-          yield* updateSession(sessionRef, {
+          yield* updateSession(sessionRef, (session) => ({
             status: "running",
-            activeTurnId: turnId,
+            // A follow-up can be accepted while another turn is active. The
+            // returned id is queued, but interrupt must still target the turn
+            // that is actually running now.
+            activeTurnId: session.activeTurnId ?? turnId,
             ...(normalizedModel ? { model: normalizedModel } : {}),
-          });
+          }));
           const resumedProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
           return {
             threadId: options.threadId,

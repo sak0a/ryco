@@ -19,6 +19,9 @@
  */
 import type { OrchestrationThreadActivity } from "@ryco/contracts";
 
+import { canonicalSubagentIdentityKey } from "./subagentIdentity.ts";
+import type { ThreadSubagentView } from "./threadWorkspaceViewModel.ts";
+
 export type RuntimeSubagentStatus =
   | "pending"
   | "running"
@@ -80,6 +83,8 @@ export interface RuntimeSubagent {
   readonly phases: ReadonlyArray<SubagentWorkflowPhase>;
   readonly runHandles: SubagentRunHandles | null;
   readonly recentActivity: ReadonlyArray<SubagentActivityEntry>;
+  /** Earliest retained observation, used for deterministic roster order. */
+  readonly firstSeenAt: string;
   readonly startedAt: string | null;
   readonly completedAt: string | null;
   readonly updatedAt: string;
@@ -105,6 +110,24 @@ export function isActiveSubagentStatus(status: RuntimeSubagentStatus): boolean {
 const RECENT_ACTIVITY_LIMIT = 6;
 const SUMMARY_CHAR_LIMIT = 180;
 const ROSTER_LIMIT = 100;
+
+function rosterRetentionRank(agent: Pick<RuntimeSubagent, "status">): number {
+  return isActiveSubagentStatus(agent.status) ? 0 : agent.status === "idle" ? 1 : 2;
+}
+
+/** Bounds retained rows while preferring live, then resumable, then recent settled work. */
+function capSubagentRoster<T extends RuntimeSubagent>(roster: ReadonlyArray<T>): T[] {
+  if (roster.length <= ROSTER_LIMIT) {
+    return [...roster];
+  }
+  return roster
+    .toSorted(
+      (left, right) =>
+        rosterRetentionRank(left) - rosterRetentionRank(right) ||
+        right.updatedAt.localeCompare(left.updatedAt),
+    )
+    .slice(0, ROSTER_LIMIT);
+}
 
 /**
  * True when this activity's payload does NOT belong on the Agents surface.
@@ -247,6 +270,7 @@ interface MutableAgent {
   phases: ReadonlyArray<SubagentWorkflowPhase>;
   runHandles: SubagentRunHandles | null;
   recentActivity: ReadonlyArray<SubagentActivityEntry>;
+  firstSeenAt: string;
   startedAt: string | null;
   completedAt: string | null;
   updatedAt: string;
@@ -274,6 +298,9 @@ function getOrCreate(
 ): MutableAgent {
   const existing = agents.get(id);
   if (existing) {
+    if (at.localeCompare(existing.firstSeenAt) < 0) {
+      existing.firstSeenAt = at;
+    }
     return existing;
   }
   const created: MutableAgent = {
@@ -300,6 +327,7 @@ function getOrCreate(
     phases: [],
     runHandles: null,
     recentActivity: [],
+    firstSeenAt: at,
     startedAt: null,
     completedAt: null,
     updatedAt: at,
@@ -309,7 +337,8 @@ function getOrCreate(
 }
 
 /** Metadata fill from any payload: never downgrades known values to null. */
-function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): void {
+function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): boolean {
+  let startsNewAttempt = false;
   const title = asString(payload.title);
   if (title) agent.title = title;
   const role = asString(payload.role);
@@ -340,6 +369,7 @@ function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): vo
     // The activation bump lives ONLY in applyStatus — bumping here too
     // counted every retry twice (review finding: two attempts read "run 3").
     if (agent.attempt !== null && attempt > agent.attempt) {
+      startsNewAttempt = true;
       agent.result = null;
       agent.error = null;
       agent.completedAt = null;
@@ -385,17 +415,31 @@ function fillMetadata(agent: MutableAgent, payload: Record<string, unknown>): vo
       agent.runHandles = { ...agent.runHandles, ...runHandles };
     }
   }
+  return startsNewAttempt;
 }
 
-function applyStatus(agent: MutableAgent, status: RuntimeSubagentStatus, at: string): void {
+function applyStatus(
+  agent: MutableAgent,
+  status: RuntimeSubagentStatus,
+  at: string,
+  allowTerminalReactivation = false,
+): void {
   const wasTerminal = isTerminalSubagentStatus(agent.status);
   const isTerminal = isTerminalSubagentStatus(status);
-  if (wasTerminal && isTerminal) {
+  if (wasTerminal && !allowTerminalReactivation) {
     // Duplicate terminal events are idempotent: first write wins, timestamps
-    // don't slide.
+    // don't slide. Late non-terminal events are equally harmless.
     return;
   }
-  if ((wasTerminal || agent.status === "idle") && (status === "running" || status === "pending")) {
+  if (wasTerminal && allowTerminalReactivation) {
+    // A provider-stamped workflow attempt bump is the sole proof that a
+    // terminal slot represents a genuinely new activation.
+    agent.activationCount += 1;
+    agent.result = null;
+    agent.error = null;
+    agent.completedAt = null;
+    agent.startedAt = status === "pending" ? null : at;
+  } else if (agent.status === "idle" && (status === "running" || status === "pending")) {
     // Reactivation: same identity, new run. Clear the previous run's terminal
     // detail so a live card never shows the prior run's output.
     agent.activationCount += 1;
@@ -474,15 +518,17 @@ export function foldSubagentActivities(
         // not the Agents surface (a "Run 12s stall" shell is not a subagent).
         if (isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
-        fillMetadata(agent, payload);
+        const startsNewAttempt = fillMetadata(agent, payload);
         // Order-robustness: a start row arriving after a terminal state is a
         // late/out-of-order delivery and only fills metadata — it must not
-        // reopen the run. Reactivation comes exclusively from explicit
-        // status transitions (task.updated / progress status). Guard on the
-        // status itself, not activationCount: a task first seen via a
+        // reopen the run. Only an explicit provider attempt bump proves this
+        // is a fresh start. Guard on the status itself, not activationCount:
+        // a task first seen via a
         // terminal task.updated has zero activations but is still settled
         // (review finding: a late start reopened a failed child).
-        if (agent.activationCount === 0 && !isTerminalSubagentStatus(agent.status)) {
+        if (startsNewAttempt) {
+          applyStatus(agent, "running", at, true);
+        } else if (agent.activationCount === 0 && !isTerminalSubagentStatus(agent.status)) {
           agent.activationCount = 1;
           agent.startedAt = agent.startedAt ?? at;
           agent.status = "running";
@@ -500,14 +546,21 @@ export function foldSubagentActivities(
         // Membership is sticky per taskId: rows after the first (terminal
         // rows often carry only taskId+status, no marker fields) inherit the
         // first row's classification instead of being re-judged.
-        if (!agents.has(taskId) && isBackgroundTaskActivity(payload)) break;
+        const existed = agents.has(taskId);
+        if (!existed && isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
-        fillMetadata(agent, payload);
+        const startsNewAttempt = fillMetadata(agent, payload);
         if (agent.activationCount === 0) agent.activationCount = 1;
         const explicitStatus = asRuntimeStatus(payload.status);
         if (explicitStatus) {
-          applyStatus(agent, explicitStatus, at);
-        } else if (!isTerminalSubagentStatus(agent.status) && agent.status !== "idle") {
+          applyStatus(agent, explicitStatus, at, startsNewAttempt);
+        } else if (startsNewAttempt) {
+          applyStatus(agent, "running", at, true);
+        } else if (
+          (payload.usageSnapshot !== true || !existed) &&
+          !isTerminalSubagentStatus(agent.status) &&
+          agent.status !== "idle"
+        ) {
           applyStatus(agent, "running", at);
         }
         const summary = asString(payload.summary);
@@ -536,14 +589,14 @@ export function foldSubagentActivities(
         // first row's classification instead of being re-judged.
         if (!agents.has(taskId) && isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
-        fillMetadata(agent, payload);
+        const startsNewAttempt = fillMetadata(agent, payload);
         // A task first seen via task.updated (start row aged out) has run at
         // least once — zero activations would misreport "run 0" and let a
         // later start row treat it as never-started (review finding).
         if (agent.activationCount === 0) agent.activationCount = 1;
         const wasTerminal = isTerminalSubagentStatus(agent.status);
         const status = asRuntimeStatus(payload.status);
-        if (status) applyStatus(agent, status, at);
+        if (status) applyStatus(agent, status, at, startsNewAttempt);
         const error = asString(payload.error);
         if (error) agent.error = bounded(error);
         // Provider end time beats ingestion time for the transition that
@@ -564,7 +617,7 @@ export function foldSubagentActivities(
         // first row's classification instead of being re-judged.
         if (!agents.has(taskId) && isBackgroundTaskActivity(payload)) break;
         const agent = getOrCreate(agents, taskId, payload, at);
-        fillMetadata(agent, payload);
+        const startsNewAttempt = fillMetadata(agent, payload);
         if (agent.activationCount === 0) agent.activationCount = 1;
         // Already-terminal: status and timestamps are frozen (first write
         // wins, duplicates must not slide them) but the completion still
@@ -574,7 +627,7 @@ export function foldSubagentActivities(
         // dropped both). Fill-if-missing keeps duplicate completions from
         // replacing the first result.
         const summary = asString(payload.summary) ?? asString(payload.detail);
-        if (isTerminalSubagentStatus(agent.status)) {
+        if (isTerminalSubagentStatus(agent.status) && !startsNewAttempt) {
           if (summary) {
             if (agent.status === "failed") {
               agent.error = agent.error ?? bounded(summary);
@@ -586,7 +639,7 @@ export function foldSubagentActivities(
           break;
         }
         const status = TASK_COMPLETED_STATUS.get(asString(payload.status) ?? "") ?? "completed";
-        applyStatus(agent, status, at);
+        applyStatus(agent, status, at, startsNewAttempt);
         if (summary) {
           if (status === "failed") {
             agent.error = agent.error ?? bounded(summary);
@@ -651,15 +704,7 @@ export function foldSubagentActivities(
     }
   }
 
-  let roster = Array.from(agents.values());
-  if (roster.length > ROSTER_LIMIT) {
-    // Prefer live, then waiting/idle, then newest settled.
-    const rank = (agent: MutableAgent): number =>
-      isActiveSubagentStatus(agent.status) ? 0 : agent.status === "idle" ? 1 : 2;
-    roster = roster
-      .toSorted((a, b) => rank(a) - rank(b) || b.updatedAt.localeCompare(a.updatedAt))
-      .slice(0, ROSTER_LIMIT);
-  }
+  const roster = capSubagentRoster(Array.from(agents.values()));
 
   // MutableAgent objects are fold-local (never aliased after return), so the
   // roster can be returned directly as the readonly shape.
@@ -709,18 +754,92 @@ export function emptyAgentPanelModel(): AgentPanelModel {
   return EMPTY_PANEL_MODEL;
 }
 
+function runtimeStatusFromTranscript(
+  status: ThreadSubagentView["status"],
+  sessionLive: boolean,
+): RuntimeSubagentStatus {
+  if (status === "running") {
+    return sessionLive ? "running" : "interrupted";
+  }
+  if (status === "finished") {
+    return "completed";
+  }
+  return status;
+}
+
+/**
+ * Codex collaboration events predate the native task.* projection. They are
+ * already persisted and reconstructed for transcript tabs, so adapt that
+ * durable view into the same source-neutral roster shape instead of keeping
+ * a second UI path. Native task rows win when both representations exist.
+ */
+function runtimeSubagentFromTranscript(
+  subagent: ThreadSubagentView,
+  sessionLive: boolean,
+): RuntimeSubagent {
+  const status = runtimeStatusFromTranscript(subagent.status, sessionLive);
+  const lastMessage = subagent.messages.at(-1)?.text;
+  const lastEntry = subagent.entries.at(-1);
+  const failureDetail = lastMessage ?? lastEntry?.output ?? null;
+  const progressDetail = status === "running" ? (lastMessage ?? null) : null;
+  const terminal = isTerminalSubagentStatus(status);
+
+  return {
+    id: subagent.key,
+    kind: "subagent",
+    title: subagent.detail ?? subagent.role ?? "Agent task",
+    role: subagent.role ?? null,
+    model: null,
+    effort: null,
+    status,
+    activationCount: 1,
+    usage: null,
+    progress: progressDetail ? bounded(progressDetail) : null,
+    lastToolName: null,
+    result: status === "completed" && lastMessage ? bounded(lastMessage) : null,
+    error: status === "failed" && failureDetail ? bounded(failureDetail) : null,
+    outputFile: null,
+    parentAgentId: null,
+    agentIndex: null,
+    phaseIndex: null,
+    phaseTitle: null,
+    attempt: null,
+    workflowName: null,
+    phases: [],
+    runHandles: null,
+    recentActivity: subagent.entries.slice(-RECENT_ACTIVITY_LIMIT).map((entry) => ({
+      at: entry.createdAt,
+      summary: bounded(entry.detail ?? entry.output ?? entry.label),
+    })),
+    firstSeenAt: subagent.startedAt,
+    startedAt: subagent.startedAt,
+    completedAt: terminal ? subagent.updatedAt : null,
+    updatedAt: subagent.updatedAt,
+  };
+}
+
 /**
  * The one fold-and-derive composition every Agents surface uses (chat view,
- * workspace panel, launcher badge). A single helper so callers can never
- * drift on fold options. sessionLive derives interruption for agents
+ * workspace panel, launcher badge). Native task.* activities are preferred;
+ * persisted provider collaboration views fill gaps for Codex sessions that
+ * only emit collab tool events. sessionLive derives interruption for agents
  * orphaned by session death.
  */
 export function deriveThreadAgentPanelModel(input: {
   readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly transcriptSubagents: ReadonlyArray<ThreadSubagentView>;
   readonly sessionLive: boolean;
 }): AgentPanelModel {
+  const nativeAgents = foldSubagentActivities(input.activities, {
+    sessionLive: input.sessionLive,
+  });
+  const nativeKeys = new Set(nativeAgents.map((agent) => canonicalSubagentIdentityKey(agent.id)));
+  const transcriptFallback = input.transcriptSubagents
+    .filter((subagent) => !nativeKeys.has(canonicalSubagentIdentityKey(subagent.key)))
+    .map((subagent) => runtimeSubagentFromTranscript(subagent, input.sessionLive));
+
   return deriveAgentPanelModel({
-    agents: foldSubagentActivities(input.activities, { sessionLive: input.sessionLive }),
+    agents: capSubagentRoster([...nativeAgents, ...transcriptFallback]),
   });
 }
 
@@ -742,7 +861,9 @@ export function deriveAgentPanelModel({
     return EMPTY_PANEL_MODEL;
   }
 
-  const workflows = source.filter((agent) => agent.kind === "workflow");
+  const workflows = source
+    .filter((agent) => agent.kind === "workflow")
+    .toSorted((a, b) => a.firstSeenAt.localeCompare(b.firstSeenAt) || a.id.localeCompare(b.id));
   const workflowIds = new Set(workflows.map((workflow) => workflow.id));
   const members = new Map<string, RuntimeSubagent[]>();
   const direct: RuntimeSubagent[] = [];
@@ -785,7 +906,12 @@ export function deriveAgentPanelModel({
     const phases = knownPhases.map((phase) => {
       const phaseMembers = workflowMembers
         .filter((member) => member.phaseIndex === phase.index)
-        .toSorted((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0));
+        .toSorted(
+          (a, b) =>
+            (a.agentIndex ?? Number.MAX_SAFE_INTEGER) - (b.agentIndex ?? Number.MAX_SAFE_INTEGER) ||
+            a.firstSeenAt.localeCompare(b.firstSeenAt) ||
+            a.id.localeCompare(b.id),
+        );
       const activeCount = phaseMembers.filter(
         // Idle members count as active for phase-liveness: a resumable Codex
         // member has not finished the phase.
@@ -796,7 +922,9 @@ export function deriveAgentPanelModel({
       ).length;
       const state: "pending" | "running" | "done" =
         phaseMembers.length === 0
-          ? "pending"
+          ? isTerminalSubagentStatus(workflow.status)
+            ? "done"
+            : "pending"
           : activeCount > 0
             ? "running"
             : settledCount === phaseMembers.length
@@ -816,7 +944,12 @@ export function deriveAgentPanelModel({
     // because its phase row was lost (review finding).
     const unphasedMembers = workflowMembers
       .filter((member) => member.phaseIndex === null || !knownPhaseIndices.has(member.phaseIndex))
-      .toSorted((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0));
+      .toSorted(
+        (a, b) =>
+          (a.agentIndex ?? Number.MAX_SAFE_INTEGER) - (b.agentIndex ?? Number.MAX_SAFE_INTEGER) ||
+          a.firstSeenAt.localeCompare(b.firstSeenAt) ||
+          a.id.localeCompare(b.id),
+      );
 
     return { workflow, phases, unphasedMembers };
   });
@@ -840,7 +973,10 @@ export function deriveAgentPanelModel({
 
   return {
     workflows: workflowGroups,
-    directAgents: direct.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    // Updates and retention ranking must never reshuffle visible rows.
+    directAgents: direct.toSorted(
+      (a, b) => a.firstSeenAt.localeCompare(b.firstSeenAt) || a.id.localeCompare(b.id),
+    ),
     runningCount,
     waitingCount,
     idleCount,

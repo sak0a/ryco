@@ -3,6 +3,7 @@ import { type OrchestrationThreadActivity } from "@ryco/contracts";
 import { classifyTaskAgentKind } from "@ryco/shared/taskClassification";
 import {
   deriveAgentPanelModel,
+  deriveThreadAgentPanelModel,
   foldSubagentActivities,
   formatSubagentModelLabel,
   formatSubagentTokenCount,
@@ -11,6 +12,7 @@ import {
   isTimelineBypassActivity,
   workflowCardMembers,
 } from "./subagentRuntime.ts";
+import { deriveThreadSubagents } from "./threadWorkspaceViewModel.ts";
 
 // Timestamps derive from a base epoch so every fixture stays a VALID ISO
 // string past 59 rows — interpolating the sequence into the seconds field
@@ -153,17 +155,17 @@ describe("foldSubagentActivities", () => {
     expect(agents[0]!.completedAt).toBe("2026-08-01T11:00:00.000Z");
   });
 
-  it("reactivation increments the run count and clears result/error", () => {
+  it("late running state cannot reopen a terminal agent", () => {
     const agents = fold([
       activity("task.started", { taskId: "task-4", taskType: "local_agent" }),
       activity("task.completed", { taskId: "task-4", status: "completed", summary: "run 1 done" }),
       activity("task.updated", { taskId: "task-4", status: "running" }),
     ]);
     const agent = agents[0]!;
-    expect(agent.activationCount).toBe(2);
-    expect(agent.result).toBeNull();
-    expect(agent.completedAt).toBeNull();
-    expect(agent.status).toBe("running");
+    expect(agent.activationCount).toBe(1);
+    expect(agent.result).toBe("run 1 done");
+    expect(agent.completedAt).not.toBeNull();
+    expect(agent.status).toBe("completed");
   });
 
   it("idle is nonterminal: an idle agent resumes without losing identity", () => {
@@ -191,6 +193,34 @@ describe("foldSubagentActivities", () => {
       activity("task.progress", { taskId: "task-5", typedUsage: { totalTokens: 500 } }),
     ]);
     expect(agents[0]!.usage).toEqual({ totalTokens: 900, inputTokens: 700 });
+  });
+
+  it("usage snapshots enrich an existing agent without changing its status", () => {
+    const [agent] = fold([
+      activity("task.started", { taskId: "usage-waiting", taskType: "local_agent" }),
+      activity("task.progress", { taskId: "usage-waiting", status: "waiting" }),
+      activity("task.progress", {
+        taskId: "usage-waiting",
+        usageSnapshot: true,
+        typedUsage: { totalTokens: 1_200 },
+      }),
+    ]);
+
+    expect(agent?.status).toBe("waiting");
+    expect(agent?.usage?.totalTokens).toBe(1_200);
+  });
+
+  it("a retained usage snapshot can reconstruct a running agent", () => {
+    const [agent] = fold([
+      activity("task.progress", {
+        taskId: "usage-only",
+        usageSnapshot: true,
+        typedUsage: { totalTokens: 800 },
+      }),
+    ]);
+
+    expect(agent?.status).toBe("running");
+    expect(agent?.usage?.totalTokens).toBe(800);
   });
 
   it("partial terminal usage preserves known breakdown fields", () => {
@@ -369,6 +399,49 @@ describe("deriveAgentPanelModel", () => {
     );
   });
 
+  it("keeps direct spawns in first-seen order as their activity changes", () => {
+    const directRoster = fold([
+      activity("task.started", { taskId: "direct-a", title: "First" }, "2026-08-01T11:00:00.000Z"),
+      activity("task.started", { taskId: "direct-b", title: "Second" }, "2026-08-01T11:00:01.000Z"),
+      activity(
+        "task.progress",
+        { taskId: "direct-a", summary: "Newest activity" },
+        "2026-08-01T11:00:02.000Z",
+      ),
+    ]);
+
+    expect(
+      deriveAgentPanelModel({ agents: directRoster }).directAgents.map((agent) => agent.id),
+    ).toEqual(["direct-a", "direct-b"]);
+  });
+
+  it("keeps first-seen order after roster retention ranking", () => {
+    const starts = Array.from({ length: 101 }, (_, index) =>
+      activity(
+        "task.started",
+        { taskId: `capped-${index}`, title: `Agent ${index}` },
+        `2026-08-01T12:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(
+          index % 60,
+        ).padStart(2, "0")}.000Z`,
+      ),
+    );
+    const cappedRoster = fold([
+      ...starts,
+      activity(
+        "task.progress",
+        { taskId: "capped-0", summary: "Newest activity" },
+        "2026-08-01T12:02:00.000Z",
+      ),
+    ]);
+
+    const ids = deriveAgentPanelModel({ agents: cappedRoster }).directAgents.map(
+      (agent) => agent.id,
+    );
+    expect(ids).toHaveLength(100);
+    expect(ids.slice(0, 3)).toEqual(["capped-0", "capped-2", "capped-3"]);
+    expect(ids.at(-1)).toBe("capped-100");
+  });
+
   it("a phase with only pending members never reads as running", () => {
     const pendingRoster = fold([
       activity("task.started", { taskId: "wf-9", taskType: "local_workflow" }),
@@ -390,6 +463,49 @@ describe("deriveAgentPanelModel", () => {
     // running only if a member is genuinely pending/running — this asserts
     // the settled-count rule: no member settled, phase not done.
     expect(model.workflows[0]!.phases[0]!.state).not.toBe("done");
+  });
+
+  it("keeps unstarted phases pending while live and settles them with the workflow", () => {
+    const liveActivities = [
+      activity("task.started", { taskId: "wf-sequential", taskType: "local_workflow" }),
+      activity("task.progress", {
+        taskId: "wf-sequential",
+        phases: [
+          { index: 1, title: "Work" },
+          { index: 2, title: "Review" },
+          { index: 3, title: "Verify" },
+        ],
+      }),
+      activity("task.progress", {
+        taskId: "wf-sequential:wf:1",
+        title: "Implement",
+        status: "running",
+        parentAgentId: "wf-sequential",
+        phaseIndex: 1,
+      }),
+    ];
+    const live = deriveAgentPanelModel({ agents: fold(liveActivities) });
+    expect(live.workflows[0]!.phases.map((phase) => phase.state)).toEqual([
+      "running",
+      "pending",
+      "pending",
+    ]);
+
+    const settled = deriveAgentPanelModel({
+      agents: fold([
+        ...liveActivities,
+        activity("task.completed", {
+          taskId: "wf-sequential",
+          taskType: "local_workflow",
+          status: "completed",
+        }),
+      ]),
+    });
+    expect(settled.workflows[0]!.phases.map((phase) => phase.state)).toEqual([
+      "done",
+      "done",
+      "done",
+    ]);
   });
 
   it("v2 projection wins outright and sources are never merged", () => {
@@ -579,6 +695,98 @@ describe("session-derived interruption", () => {
   });
 });
 
+describe("Codex collaboration transcript fallback", () => {
+  it("renders persisted collab agents when no native task projection exists", () => {
+    const rows = [
+      activity("tool.started", {
+        itemType: "collab_agent_tool_call",
+        status: "inProgress",
+        providerItemId: "collab-reviewer",
+        data: {
+          item: {
+            type: "collabAgentToolCall",
+            id: "collab-reviewer",
+            tool: "spawnAgent",
+            prompt: "You are a reviewer. Inspect the Agents workspace.",
+            receiverThreadIds: ["child-reviewer"],
+            status: "inProgress",
+          },
+        },
+      }),
+    ];
+
+    const model = deriveThreadAgentPanelModel({
+      activities: rows,
+      transcriptSubagents: deriveThreadSubagents(rows),
+      sessionLive: true,
+    });
+
+    expect(model).toMatchObject({
+      hasAgents: true,
+      liveCount: 1,
+      runningCount: 1,
+    });
+    expect(model.directAgents).toHaveLength(1);
+    expect(model.directAgents[0]).toMatchObject({
+      id: "subagent:collab-reviewer",
+      kind: "subagent",
+      role: "Reviewer",
+      status: "running",
+      title: "You are a reviewer. Inspect the Agents workspace.",
+    });
+  });
+
+  it("prefers native task state when transcript and task rows share an identity", () => {
+    const rows = [
+      activity("task.started", {
+        taskId: "shared-agent",
+        taskType: "local_agent",
+        title: "Native verifier",
+        role: "verifier",
+      }),
+      activity("tool.started", {
+        itemType: "collab_agent_tool_call",
+        status: "inProgress",
+        subagentId: "shared-agent",
+        detail: "Duplicate legacy representation",
+      }),
+    ];
+
+    const model = deriveThreadAgentPanelModel({
+      activities: rows,
+      transcriptSubagents: deriveThreadSubagents(rows),
+      sessionLive: true,
+    });
+
+    expect(model.directAgents).toHaveLength(1);
+    expect(model.directAgents[0]).toMatchObject({
+      id: "shared-agent",
+      title: "Native verifier",
+      role: "verifier",
+    });
+  });
+
+  it("does not leave a collab-only running row live after its session dies", () => {
+    const rows = [
+      activity("tool.started", {
+        itemType: "collab_agent_tool_call",
+        status: "inProgress",
+        providerItemId: "orphaned-collab",
+        detail: "Inspect reconnect behavior",
+      }),
+    ];
+
+    const model = deriveThreadAgentPanelModel({
+      activities: rows,
+      transcriptSubagents: deriveThreadSubagents(rows),
+      sessionLive: false,
+    });
+
+    expect(model.liveCount).toBe(0);
+    expect(model.directAgents[0]?.status).toBe("interrupted");
+  });
+});
+
 describe("terminal robustness", () => {
   it("task.updated creating an agent (start row aged out) counts one activation", () => {
     const agents = fold([
@@ -671,6 +879,63 @@ describe("terminal robustness", () => {
       }),
     ]);
     expect(agents[0]!.activationCount).toBe(2);
+  });
+
+  it("an explicit attempt bump on task.started reopens a settled workflow slot", () => {
+    const agents = fold([
+      activity("task.progress", {
+        taskId: "wf-start:wf:0",
+        parentAgentId: "wf-start",
+        status: "failed",
+        attempt: 1,
+        error: "first attempt failed",
+      }),
+      activity("task.started", {
+        taskId: "wf-start:wf:0",
+        parentAgentId: "wf-start",
+        attempt: 2,
+      }),
+    ]);
+
+    expect(agents[0]).toMatchObject({
+      activationCount: 2,
+      status: "running",
+      error: null,
+      completedAt: null,
+    });
+  });
+
+  it("a retry observed only at completion becomes a complete second activation", () => {
+    const retryCompletedAt = "2026-08-01T12:00:00.000Z";
+    const agents = fold([
+      activity("task.completed", {
+        taskId: "wf-complete:wf:0",
+        parentAgentId: "wf-complete",
+        status: "failed",
+        attempt: 1,
+        summary: "first attempt failed",
+      }),
+      activity(
+        "task.completed",
+        {
+          taskId: "wf-complete:wf:0",
+          parentAgentId: "wf-complete",
+          status: "completed",
+          attempt: 2,
+          summary: "retry succeeded",
+        },
+        retryCompletedAt,
+      ),
+    ]);
+
+    expect(agents[0]).toMatchObject({
+      activationCount: 2,
+      status: "completed",
+      result: "retry succeeded",
+      error: null,
+      startedAt: retryCompletedAt,
+      completedAt: retryCompletedAt,
+    });
   });
 });
 

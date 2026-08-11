@@ -315,7 +315,7 @@ export function AvatarStack({ subagents }: { subagents: ReadonlyArray<ThreadSuba
             index > 0 && "-ml-[7px]",
           )}
         >
-          <SubagentAvatar name={subagent.name} className="size-3" />
+          <SubagentAvatar name={subagent.avatarKey ?? subagent.key} className="size-3" />
         </span>
       ))}
     </span>
@@ -894,6 +894,7 @@ function subagentStatusLabel(status: ThreadSubagentView["status"]): string {
   if (status === "running") return "Working";
   if (status === "failed") return "Needs review";
   if (status === "finished") return "Finished";
+  if (status === "interrupted") return "Stopped";
   return "Idle";
 }
 
@@ -902,6 +903,7 @@ const SUBAGENT_DOT_TONE: Record<ThreadSubagentView["status"], string> = {
     "bg-sky-400 animate-status-pulse shadow-[0_0_0_3px_color-mix(in_srgb,var(--sky)_22%,transparent)]",
   finished: "bg-success",
   failed: "bg-destructive",
+  interrupted: "bg-muted-foreground/60",
   idle: "bg-muted-foreground/40",
 };
 
@@ -924,7 +926,7 @@ export function SubagentRows({ subagents = [], onOpenSubagent }: SubagentProps) 
             title={subagent.detail ?? undefined}
           >
             <span className="grid size-[26px] shrink-0 place-items-center rounded-lg border border-border bg-secondary/40">
-              <SubagentAvatar name={subagent.name} className="size-[18px]" />
+              <SubagentAvatar name={subagent.avatarKey ?? subagent.key} className="size-[18px]" />
             </span>
             <span className="min-w-0 flex-1">
               <span className="flex items-center gap-1.5">

@@ -232,6 +232,7 @@ describe("hosted connection controls", () => {
             worktreeTitle="Phone shell"
             worktreeOrigin="manual"
             workspacePanelOpen={false}
+            liveAgentCount={0}
             onToggleWorkspacePanel={vi.fn()}
             overviewSidebarOpen={false}
             onToggleOverviewSidebar={vi.fn()}

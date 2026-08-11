@@ -112,6 +112,17 @@ describe("syncDocumentVisualViewportInsets", () => {
     teardown();
   });
 
+  it("clears stale keyboard variables when a fresh adapter starts without an inset", () => {
+    style.setProperty(KEYBOARD_INSET_CSS_VAR, "313px");
+    style.setProperty(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR, "531px");
+
+    const teardown = syncDocumentVisualViewportInsets();
+
+    expect(style.getPropertyValue(KEYBOARD_INSET_CSS_VAR)).toBe("");
+    expect(style.getPropertyValue(VISIBLE_VIEWPORT_HEIGHT_CSS_VAR)).toBe("");
+    teardown();
+  });
+
   it("publishes rounded bounded pixel variables while a keyboard inset exists", () => {
     const teardown = syncDocumentVisualViewportInsets();
 

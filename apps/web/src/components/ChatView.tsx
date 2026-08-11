@@ -208,6 +208,7 @@ import {
   normalizeInteractionModeForProviderTarget,
   PullRequestDialogState,
   reconcileMountedTerminalThreadIds,
+  resolveHeaderLiveAgentCount,
   resolveSendEnvMode,
   resolveChatSendWorktreePlan,
   shouldShowNewThreadSurface,
@@ -572,6 +573,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const legendListRef = useRef<LegendListRef | null>(null);
   const isAtEndRef = useRef(true);
+  const [timelineLiveFollowEnabled, setTimelineLiveFollowEnabled] = useState(true);
   const sendInFlightRef = useRef(false);
   const terminalOpenByThreadRef = useRef<Record<string, boolean>>({});
 
@@ -1369,20 +1371,29 @@ export default function ChatView(props: ChatViewProps) {
     pendingUserInputs,
     activePlan,
   } = threadActivityViewModel;
-  const threadSubagents = useMemo(
-    () => deriveThreadSubagents(threadActivities),
-    [threadActivities],
-  );
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, timeline spawn CTAs, and the background-liveness banner.
-  const agentSessionLive = phase !== "disconnected";
+  const agentSessionLive =
+    phase !== "disconnected" &&
+    activeThread?.session?.orchestrationStatus !== "stopped" &&
+    activeThread?.session?.orchestrationStatus !== "interrupted" &&
+    activeThread?.session?.orchestrationStatus !== "error";
+  const threadSubagents = useMemo(
+    () =>
+      deriveThreadSubagents(threadActivities, {
+        sessionLive: agentSessionLive,
+        parentTurnState: activeLatestTurn?.state ?? null,
+      }),
+    [activeLatestTurn?.state, agentSessionLive, threadActivities],
+  );
   const agentPanelModel = useMemo(
     () =>
       deriveThreadAgentPanelModel({
         activities: threadActivities,
+        transcriptSubagents: threadSubagents,
         sessionLive: agentSessionLive,
       }),
-    [agentSessionLive, threadActivities],
+    [agentSessionLive, threadActivities, threadSubagents],
   );
   const {
     activePendingUserInput,
@@ -2146,7 +2157,15 @@ export default function ChatView(props: ChatViewProps) {
 
   // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
   const scrollToEnd = useCallback((animated = false) => {
+    setTimelineLiveFollowEnabled(true);
     legendListRef.current?.scrollToEnd?.({ animated });
+  }, []);
+
+  const stopTimelineLiveFollow = useCallback(() => {
+    setTimelineLiveFollowEnabled(false);
+  }, []);
+  const resumeTimelineLiveFollow = useCallback(() => {
+    setTimelineLiveFollowEnabled(true);
   }, []);
 
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
@@ -2169,6 +2188,7 @@ export default function ChatView(props: ChatViewProps) {
   useEffect(() => {
     setPullRequestDialogState(null);
     isAtEndRef.current = true;
+    setTimelineLiveFollowEnabled(true);
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
     // Honor an explicit "open the overview on the next thread" signal, set when
@@ -2691,6 +2711,7 @@ export default function ChatView(props: ChatViewProps) {
       scroll: {
         scrollToEndBeforeOptimistic: async () => {
           isAtEndRef.current = true;
+          setTimelineLiveFollowEnabled(true);
           showScrollDebouncer.current.cancel();
           setShowScrollToBottom(false);
           await legendListRef.current?.scrollToEnd?.({ animated: false });
@@ -2999,6 +3020,7 @@ export default function ChatView(props: ChatViewProps) {
 
       // Scroll to the current end *before* adding the optimistic message.
       isAtEndRef.current = true;
+      setTimelineLiveFollowEnabled(true);
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
       await legendListRef.current?.scrollToEnd?.({ animated: false });
@@ -3578,6 +3600,11 @@ export default function ChatView(props: ChatViewProps) {
             worktreeWorkItemStateName={activeWorktreeSummary?.workItemStateName ?? null}
             onOpenLinkedWorktreeItem={handleOpenHeaderLinkedItem}
             workspacePanelOpen={workspacePanelOpen}
+            liveAgentCount={resolveHeaderLiveAgentCount({
+              liveCount: agentPanelModel.liveCount,
+              workspacePanelOpen,
+              workspaceTab: rawSearch.workspaceTab,
+            })}
             onToggleWorkspacePanel={onToggleWorkspacePanel}
             overviewSidebarOpen={overviewControlOpen}
             onToggleOverviewSidebar={toggleOverviewSidebar}
@@ -3664,7 +3691,10 @@ export default function ChatView(props: ChatViewProps) {
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
                 skills={activeProviderStatus?.skills ?? EMPTY_PROVIDER_SKILLS}
+                liveFollowEnabled={timelineLiveFollowEnabled}
                 onIsAtEndChange={onIsAtEndChange}
+                onManualNavigation={stopTimelineLiveFollow}
+                onUserReachedEnd={resumeTimelineLiveFollow}
                 {...(presentationTier !== "phone"
                   ? { onInspectContextHandoff: openContextHandoffInspection }
                   : {})}

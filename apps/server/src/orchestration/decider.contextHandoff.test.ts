@@ -7,6 +7,7 @@ import {
   RuntimeSessionId,
   ThreadTurnStartCommand,
   ThreadId,
+  TurnId,
   type OrchestrationReadModel,
   type OrchestrationThread,
 } from "@ryco/contracts";
@@ -315,5 +316,45 @@ describe("context handoff decider", () => {
         }),
       ),
     ).rejects.toThrow();
+  });
+});
+
+describe("turn interrupt decider", () => {
+  it("persists the active orchestration turn when the caller interrupts by session", async () => {
+    const activeTurnId = TurnId.make("turn-active");
+    const baseThread = makeThread();
+    const thread = makeThread({
+      session: {
+        ...baseThread.session!,
+        status: "running",
+        activeTurnId,
+      },
+      latestTurn: {
+        turnId: activeTurnId,
+        state: "running",
+        requestedAt: now,
+        startedAt: now,
+        completedAt: null,
+        assistantMessageId: null,
+      },
+    });
+
+    const result = await Effect.runPromise(
+      decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.interrupt",
+          commandId: CommandId.make("command-interrupt-active"),
+          threadId: thread.id,
+          createdAt: now,
+        },
+        readModel: makeReadModel(thread),
+      }),
+    );
+    const event = Array.isArray(result) ? result[0] : result;
+
+    expect(event).toMatchObject({
+      type: "thread.turn-interrupt-requested",
+      payload: { turnId: activeTurnId },
+    });
   });
 });

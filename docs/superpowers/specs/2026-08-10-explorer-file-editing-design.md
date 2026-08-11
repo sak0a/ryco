@@ -1,6 +1,6 @@
 # Explorer File Editing Design
 
-**Date:** 2026-08-10  
+**Date:** 2026-08-10
 **Status:** Approved for implementation planning
 
 ## Context

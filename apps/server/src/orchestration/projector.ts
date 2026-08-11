@@ -35,6 +35,7 @@ import {
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
+  ThreadTurnInterruptRequestedPayload,
   ThreadTurnDiffCompletedPayload,
   ThreadAttachedToWorktreePayload,
   ThreadStatusBucketOverriddenPayload,
@@ -658,7 +659,37 @@ export function projectEvent(
                         ? thread.latestTurn.assistantMessageId
                         : null,
                   }
-                : null,
+                : thread.latestTurn,
+            updatedAt: event.occurredAt,
+          }),
+        };
+      });
+
+    case "thread.turn-interrupt-requested":
+      return Effect.gen(function* () {
+        const payload = yield* decodeForEvent(
+          ThreadTurnInterruptRequestedPayload,
+          event.payload,
+          event.type,
+          "payload",
+        );
+        if (payload.turnId === undefined) {
+          return nextBase;
+        }
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+        if (thread?.latestTurn?.turnId !== payload.turnId) {
+          return nextBase;
+        }
+
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            latestTurn: {
+              ...thread.latestTurn,
+              state: "interrupted",
+              startedAt: thread.latestTurn.startedAt ?? payload.createdAt,
+              completedAt: thread.latestTurn.completedAt ?? payload.createdAt,
+            },
             updatedAt: event.occurredAt,
           }),
         };

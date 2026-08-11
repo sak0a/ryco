@@ -6,10 +6,10 @@ import { splitUnifiedSettingsPatch, updateMobileSettings } from "./settingsRouti
 describe("settings patch routing", () => {
   it("splits a unified patch into server-owned and client-owned keys", () => {
     const { serverPatch, clientPatch } = splitUnifiedSettingsPatch({
-      enableAssistantStreaming: false,
+      enableLegacyTokenStreaming: false,
       diffIgnoreWhitespace: true,
     } as Partial<UnifiedSettings>);
-    expect(serverPatch).toEqual({ enableAssistantStreaming: false });
+    expect(serverPatch).toEqual({ enableLegacyTokenStreaming: false });
     expect(clientPatch).toEqual({ diffIgnoreWhitespace: true });
   });
 
@@ -19,12 +19,12 @@ describe("settings patch routing", () => {
     const persistClientSettings = vi.fn();
 
     updateMobileSettings(
-      { enableAssistantStreaming: true, diffIgnoreWhitespace: false } as Partial<UnifiedSettings>,
+      { enableLegacyTokenStreaming: true, diffIgnoreWhitespace: false } as Partial<UnifiedSettings>,
       { applyServerOptimistic, updateServerSettings, persistClientSettings },
     );
 
-    expect(applyServerOptimistic).toHaveBeenCalledWith({ enableAssistantStreaming: true });
-    expect(updateServerSettings).toHaveBeenCalledWith({ enableAssistantStreaming: true });
+    expect(applyServerOptimistic).toHaveBeenCalledWith({ enableLegacyTokenStreaming: true });
+    expect(updateServerSettings).toHaveBeenCalledWith({ enableLegacyTokenStreaming: true });
     expect(persistClientSettings).toHaveBeenCalledWith({ diffIgnoreWhitespace: false });
   });
 

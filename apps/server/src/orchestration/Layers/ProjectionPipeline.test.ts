@@ -1441,6 +1441,37 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         });
 
         yield* appendAndProject({
+          type: "thread.session-set",
+          eventId: EventId.make("evt-conflict-3-ready"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-conflict"),
+          occurredAt: "2026-02-26T13:00:02.500Z",
+          commandId: CommandId.make("cmd-conflict-3-ready"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-conflict-3-ready"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-conflict"),
+            session: {
+              threadId: ThreadId.make("thread-conflict"),
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-02-26T13:00:02.500Z",
+            },
+          },
+        });
+
+        const interruptedLatestRows = yield* sql<{ readonly latestTurnId: string | null }>`
+          SELECT latest_turn_id AS "latestTurnId"
+          FROM projection_threads
+          WHERE thread_id = 'thread-conflict'
+        `;
+        assert.deepEqual(interruptedLatestRows, [{ latestTurnId: "turn-interrupted" }]);
+
+        yield* appendAndProject({
           type: "thread.message-sent",
           eventId: EventId.make("evt-conflict-4"),
           aggregateKind: "thread",

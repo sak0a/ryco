@@ -1,8 +1,9 @@
-import type { OrchestrationThreadActivity } from "@ryco/contracts";
+import type { OrchestrationLatestTurnState, OrchestrationThreadActivity } from "@ryco/contracts";
 
 import { deriveWorkLogEntries, type WorkLogEntry } from "./session-logic.ts";
+import { assignSubagentIdentities } from "./subagentIdentity.ts";
 
-export type ThreadSubagentStatus = "running" | "idle" | "finished" | "failed";
+export type ThreadSubagentStatus = "running" | "idle" | "finished" | "failed" | "interrupted";
 
 export interface ThreadSubagentMessageView {
   id: string;
@@ -15,6 +16,8 @@ export interface ThreadSubagentView {
   key: string;
   /** Stable, unique abstract codename used as the subagent's primary identity. */
   name: string;
+  /** Stable avatar seed shared with the runtime roster. */
+  avatarKey?: string;
   /** Inferred descriptive role (e.g. "Code Reviewer"), shown as a subtitle. */
   role?: string | null;
   status: ThreadSubagentStatus;
@@ -40,6 +43,7 @@ interface MutableThreadSubagentView {
   detail: string | null;
   providerThreadIds: Set<string>;
   providerSessionIds: Set<string>;
+  attempt: number | null;
   startedAt: string;
   updatedAt: string;
   entries: WorkLogEntry[];
@@ -77,6 +81,10 @@ function asStringArray(value: unknown): string[] {
         return text ? [text] : [];
       })
     : [];
+}
+
+function asNonNegativeCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function normalizeForKey(value: string): string {
@@ -156,7 +164,11 @@ function extractToolCallId(payload: Record<string, unknown> | null): string | nu
 
 function extractCanonicalSubagentId(payload: Record<string, unknown> | null): string | null {
   const subagent = canonicalSubagentFromPayload(payload);
-  return asTrimmedString(subagent?.subagentId) ?? asTrimmedString(payload?.subagentId);
+  return (
+    asTrimmedString(subagent?.subagentId) ??
+    asTrimmedString(payload?.subagentId) ??
+    asTrimmedString(payload?.taskId)
+  );
 }
 
 function extractProviderThreadIds(payload: Record<string, unknown> | null): string[] {
@@ -218,6 +230,29 @@ function detailPrefix(value: string | null): string | null {
   return GENERIC_SUBAGENT_TITLES.has(normalized) ? null : prefix;
 }
 
+function labeledPromptValue(value: string | null, label: "role" | "task"): string | null {
+  if (!value) {
+    return null;
+  }
+  const match = new RegExp(`(?:^|\\n)\\s*${label}\\s*:\\s*([^\\n]+)`, "i").exec(value);
+  return asTrimmedString(match?.[1]);
+}
+
+function roleFromLabeledPrompt(value: string | null): string | null {
+  const role = labeledPromptValue(value, "role")
+    ?.replace(/[.,;:]+$/, "")
+    .trim();
+  return role ? titleCaseCompact(role) : null;
+}
+
+function taskFromLabeledPrompt(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  const focus = /(?:^|\n)\s*focus(?:\s+on)?\s*:?\s*([^\n]+)/i.exec(value);
+  return asTrimmedString(focus?.[1]) ?? labeledPromptValue(value, "task");
+}
+
 function extractSubagentName(
   payload: Record<string, unknown> | null,
   fallbackDetail: string | null,
@@ -225,6 +260,7 @@ function extractSubagentName(
   const input = inputFromPayload(payload);
   const data = asRecord(payload?.data);
   const state = asRecord(data?.state);
+  const item = collabItemFromPayload(payload);
   const subagent = canonicalSubagentFromPayload(payload);
   const metadata = metadataFromSubagent(subagent);
   const candidates = [
@@ -237,6 +273,8 @@ function extractSubagentName(
     metadata?.role,
     metadata?.name,
     metadata?.title,
+    payload?.role,
+    payload?.title,
     input?.subagent_type,
     input?.agent_type,
     input?.agent_role,
@@ -244,6 +282,8 @@ function extractSubagentName(
     input?.name,
     data?.agentName,
     state?.agentName,
+    roleFromLabeledPrompt(asTrimmedString(item?.prompt)),
+    roleFromLabeledPrompt(fallbackDetail),
     detailPrefix(fallbackDetail),
     inferRoleFromPrompt(fallbackDetail),
   ];
@@ -304,7 +344,7 @@ function extractSubagentDetail(
   const item = collabItemFromPayload(payload);
   const subagent = canonicalSubagentFromPayload(payload);
   const metadata = metadataFromSubagent(subagent);
-  return (
+  const detail =
     asTrimmedString(item?.prompt) ??
     firstCollabAgentStateMessage(item) ??
     asTrimmedString(payload?.summary) ??
@@ -317,12 +357,19 @@ function extractSubagentDetail(
     asTrimmedString(input?.prompt) ??
     asTrimmedString(input?.task) ??
     asTrimmedString(payload?.detail) ??
-    fallback
-  );
+    fallback;
+  return taskFromLabeledPrompt(detail) ?? detail;
 }
 
 function isSubagentPayload(payload: Record<string, unknown> | null): boolean {
   return payload?.itemType === "collab_agent_tool_call" || payload?.itemType === "subagent";
+}
+
+function isTaskAgentActivity(
+  activity: OrchestrationThreadActivity,
+  payload: Record<string, unknown> | null,
+): boolean {
+  return activity.kind.startsWith("task.") && payload?.agentKind === "agent";
 }
 
 function statusFromCollabAgentStatus(status: string | null): ThreadSubagentStatus | null {
@@ -334,9 +381,10 @@ function statusFromCollabAgentStatus(status: string | null): ThreadSubagentStatu
     case "shutdown":
       return "finished";
     case "errored":
-    case "interrupted":
     case "notFound":
       return "failed";
+    case "interrupted":
+      return "interrupted";
     default:
       return null;
   }
@@ -346,6 +394,40 @@ function statusFromCollabItem(
   payload: Record<string, unknown> | null,
 ): ThreadSubagentStatus | null {
   const item = collabItemFromPayload(payload);
+  const states = asRecord(item?.agentsStates);
+  if (states && Object.keys(states).length > 0) {
+    let sawRunning = false;
+    let sawFinished = false;
+    let sawInterrupted = false;
+    for (const state of Object.values(states)) {
+      const status = statusFromCollabAgentStatus(asTrimmedString(asRecord(state)?.status));
+      if (status === "failed") {
+        return "failed";
+      }
+      if (status === "interrupted") {
+        sawInterrupted = true;
+      }
+      if (status === "running") {
+        sawRunning = true;
+      }
+      if (status === "finished") {
+        sawFinished = true;
+      }
+    }
+    if (sawRunning) {
+      return "running";
+    }
+    if (sawInterrupted) {
+      return "interrupted";
+    }
+    if (sawFinished) {
+      return "finished";
+    }
+  }
+
+  // The collab tool itself completes as soon as a child has been launched;
+  // that does not mean the child completed. Agent states above are therefore
+  // authoritative whenever present, with tool status only as a fallback.
   const itemStatus = asTrimmedString(item?.status);
   if (itemStatus === "failed") {
     return "failed";
@@ -356,53 +438,45 @@ function statusFromCollabItem(
   if (itemStatus === "inProgress") {
     return "running";
   }
-
-  const states = asRecord(item?.agentsStates);
-  if (!states) {
-    return null;
-  }
-  let sawRunning = false;
-  let sawFinished = false;
-  for (const state of Object.values(states)) {
-    const status = statusFromCollabAgentStatus(asTrimmedString(asRecord(state)?.status));
-    if (status === "failed") {
-      return "failed";
-    }
-    if (status === "running") {
-      sawRunning = true;
-    }
-    if (status === "finished") {
-      sawFinished = true;
-    }
-  }
-  if (sawRunning) {
-    return "running";
-  }
-  if (sawFinished) {
-    return "finished";
-  }
   return null;
 }
 
 function statusFromActivity(
   activity: OrchestrationThreadActivity,
   payload: Record<string, unknown> | null,
-): ThreadSubagentStatus {
-  if (payload?.status === "starting" || payload?.status === "running") {
+): ThreadSubagentStatus | null {
+  if (collabItemFromPayload(payload)) {
+    const collabStatus = statusFromCollabItem(payload);
+    if (collabStatus) {
+      return collabStatus;
+    }
+  }
+  if (
+    payload?.status === "starting" ||
+    payload?.status === "pending" ||
+    payload?.status === "running" ||
+    payload?.status === "waiting"
+  ) {
     return "running";
   }
   if (payload?.status === "failed") {
     return "failed";
   }
-  if (payload?.status === "completed" || payload?.status === "stopped") {
+  if (payload?.status === "interrupted") {
+    return "interrupted";
+  }
+  if (
+    payload?.status === "completed" ||
+    payload?.status === "stopped" ||
+    payload?.status === "cancelled"
+  ) {
     return "finished";
+  }
+  if (payload?.status === "idle") {
+    return "idle";
   }
   if (payload?.status === "inProgress") {
     return "running";
-  }
-  const collabStatus = statusFromCollabItem(payload);
-  if (collabStatus) {
-    return collabStatus;
   }
   if (activity.kind === "tool.started" || activity.kind === "tool.updated") {
     return "running";
@@ -410,7 +484,13 @@ function statusFromActivity(
   if (activity.kind === "tool.completed") {
     return activity.tone === "error" ? "failed" : "finished";
   }
-  return "idle";
+  if (activity.kind === "task.started") {
+    return "running";
+  }
+  if (activity.kind === "task.progress") {
+    return payload?.usageSnapshot === true ? null : "running";
+  }
+  return null;
 }
 
 function statusFromWorkEntry(entry: WorkLogEntry): ThreadSubagentStatus {
@@ -461,7 +541,14 @@ function compareActivitiesByOrder(
 function applyStatus(
   previous: ThreadSubagentStatus,
   next: ThreadSubagentStatus,
+  allowTerminalReactivation = false,
 ): ThreadSubagentStatus {
+  if (
+    (previous === "finished" || previous === "failed" || previous === "interrupted") &&
+    !allowTerminalReactivation
+  ) {
+    return previous;
+  }
   if (next === "failed") {
     return "failed";
   }
@@ -484,8 +571,9 @@ function mergeStringSet(target: Set<string>, values: ReadonlyArray<string>): voi
 }
 
 function toWorkEntrySubagentKey(entry: WorkLogEntry): string {
-  const detail = entry.detail ?? entry.output ?? null;
-  const name = extractSubagentName(null, detail ?? entry.toolTitle ?? entry.label);
+  const rawDetail = entry.detail ?? entry.output ?? null;
+  const detail = taskFromLabeledPrompt(rawDetail) ?? rawDetail;
+  const name = extractSubagentName(null, rawDetail ?? entry.toolTitle ?? entry.label);
   return subagentKey({
     canonicalSubagentId: null,
     toolCallId: null,
@@ -548,7 +636,11 @@ function findSubagentByVisibleIdentity(
   input: { name: string | null; detail: string | null },
 ): MutableThreadSubagentView | null {
   for (const subagent of subagents.values()) {
-    if (input.detail && subagent.detail === input.detail) {
+    if (
+      input.detail &&
+      subagent.detail === input.detail &&
+      (!input.name || !subagent.name || input.name === subagent.name)
+    ) {
       return subagent;
     }
     if (input.name && input.detail && subagent.name === input.name && subagent.detail === null) {
@@ -558,153 +650,83 @@ function findSubagentByVisibleIdentity(
   return null;
 }
 
-/**
- * Distinct, memorable codenames (scientists and philosophers) used to identify
- * subagents that carry no inferable role. Far nicer than "Subagent 1, 2, 3…":
- * each agent gets a stable, unique handle that pairs with its colored avatar.
- */
-const SUBAGENT_CODENAMES = [
-  "Turing",
-  "Dirac",
-  "Hegel",
-  "Arendt",
-  "Boyle",
-  "Locke",
-  "Epicurus",
-  "Curie",
-  "Bohr",
-  "Newton",
-  "Euler",
-  "Gauss",
-  "Hopper",
-  "Lovelace",
-  "Noether",
-  "Pascal",
-  "Tesla",
-  "Darwin",
-  "Kepler",
-  "Faraday",
-  "Planck",
-  "Heisenberg",
-  "Maxwell",
-  "Fermi",
-  "Feynman",
-  "Lagrange",
-  "Riemann",
-  "Babbage",
-  "Shannon",
-  "Ramanujan",
-  "Galileo",
-  "Copernicus",
-  "Pasteur",
-  "Mendel",
-  "Hawking",
-  "Lavoisier",
-  "Fourier",
-  "Pauli",
-  "Kant",
-  "Plato",
-  "Socrates",
-  "Aristotle",
-  "Nietzsche",
-  "Spinoza",
-  "Descartes",
-  "Hume",
-  "Leibniz",
-  "Wittgenstein",
-  "Russell",
-  "Camus",
-  "Sartre",
-  "Voltaire",
-  "Confucius",
-  "Seneca",
-  "Aurelius",
-  "Diogenes",
-] as const;
-
-function hashSubagentSeed(value: string): number {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
+function isSpawnCollabTool(toolName: string | null): boolean {
+  const tool = toolName?.replace(/[_\s-]+/g, "").toLocaleLowerCase();
+  return tool === "spawnagent" || tool === "spawnagents" || tool === "spawn";
 }
 
-/**
- * Builds a deterministic preference order over the whole codename pool for a
- * seed. The permutation depends only on the seed, so two subagents that would
- * pick the same first codename fall back to different alternates in a stable,
- * order-independent way.
- */
-function codenamePreferenceOrder(seed: string): number[] {
-  const order = Array.from({ length: SUBAGENT_CODENAMES.length }, (_, index) => index);
-  // Fisher–Yates shuffle driven by a seed-derived PRNG (no Math.random, so the
-  // permutation is reproducible for a given seed).
-  let state = hashSubagentSeed(seed) || 1;
-  for (let i = order.length - 1; i > 0; i -= 1) {
-    state = (Math.imul(state, 0x01000193) ^ (i + 1)) >>> 0;
-    const j = state % (i + 1);
-    const swap = order[i]!;
-    order[i] = order[j]!;
-    order[j] = swap;
-  }
-  return order;
+function isSpawnCollabItem(item: Record<string, unknown>): boolean {
+  return isSpawnCollabTool(asTrimmedString(item.tool));
 }
 
-/**
- * Assigns a unique codename to every subagent key. Keys are resolved in sorted
- * order and each takes the first free codename in its own seed-derived
- * preference order, so the mapping is a pure function of the key set — a given
- * subagent keeps the same codename (and therefore avatar) regardless of the
- * order activities arrive or are backfilled.
- */
-function assignSubagentCodenames(keys: ReadonlyArray<string>): Map<string, string> {
-  const names = new Map<string, string>();
-  const taken = new Set<string>();
-  for (const key of [...keys].toSorted((left, right) => left.localeCompare(right))) {
-    if (names.has(key)) {
+function mergeCollabAgentStates(
+  subagents: ReadonlyMap<string, MutableThreadSubagentView>,
+  activity: OrchestrationThreadActivity,
+  item: Record<string, unknown>,
+): void {
+  const states = asRecord(item.agentsStates);
+  if (!states) {
+    return;
+  }
+  for (const [providerThreadId, stateValue] of Object.entries(states)) {
+    const subagent = findSubagentByProviderThreadId(subagents, providerThreadId);
+    if (!subagent) {
       continue;
     }
-    const preference = codenamePreferenceOrder(key);
-    let chosen: string | null = null;
-    for (const index of preference) {
-      const candidate = SUBAGENT_CODENAMES[index]!;
-      if (!taken.has(candidate.toLowerCase())) {
-        chosen = candidate;
-        break;
-      }
+    const state = asRecord(stateValue);
+    const status = statusFromCollabAgentStatus(asTrimmedString(state?.status));
+    const message = asTrimmedString(state?.message);
+    if (status) {
+      subagent.status = applyStatus(subagent.status, status);
     }
-    if (chosen === null) {
-      // More subagents than codenames: append a numeric suffix to the seed's top
-      // choice, still resolved within the fixed key ordering above.
-      const base = SUBAGENT_CODENAMES[preference[0]!]!;
-      let suffix = 2;
-      while (taken.has(`${base} ${suffix}`.toLowerCase())) {
-        suffix += 1;
-      }
-      chosen = `${base} ${suffix}`;
+    if (message && subagent.messages.at(-1)?.text !== message) {
+      subagent.messages.push({
+        id: `${activity.id}:${providerThreadId}`,
+        text: message,
+        createdAt: activity.createdAt,
+        providerThreadId,
+      });
     }
-    taken.add(chosen.toLowerCase());
-    names.set(key, chosen);
+    if (status || message) {
+      subagent.updatedAt = activity.createdAt;
+    }
   }
-  return names;
 }
 
 export function deriveThreadSubagents(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
+  options?: {
+    readonly sessionLive?: boolean;
+    readonly parentTurnState?: OrchestrationLatestTurnState | null;
+  },
 ): ThreadSubagentView[] {
   const subagents = new Map<string, MutableThreadSubagentView>();
+  const coordinationActivityIds = new Set<string>();
+  const subagentKeyByActivityId = new Map<string, string>();
   const orderedActivities = [...activities].toSorted(compareActivitiesByOrder);
 
   for (const activity of orderedActivities) {
     const payload = payloadFromActivity(activity);
-    if (!isSubagentPayload(payload)) {
+    if (!isSubagentPayload(payload) && !isTaskAgentActivity(activity, payload)) {
       continue;
     }
 
-    const detail = extractSubagentDetail(payload, asTrimmedString(activity.summary));
+    const collabItem = collabItemFromPayload(payload);
+    if (collabItem && !isSpawnCollabItem(collabItem)) {
+      // wait/send/resume/close calls coordinate already-known children. They
+      // may carry the most authoritative per-child terminal state and final
+      // message, but are not themselves agents.
+      coordinationActivityIds.add(activity.id);
+      mergeCollabAgentStates(subagents, activity, collabItem);
+      continue;
+    }
+
+    const detail =
+      payload?.usageSnapshot === true
+        ? null
+        : extractSubagentDetail(payload, asTrimmedString(activity.summary));
     const name = extractSubagentName(payload, detail);
+    const explicitRole = asTrimmedString(payload?.role);
     const canonicalSubagentId = extractCanonicalSubagentId(payload);
     const providerThreadIds = extractProviderThreadIds(payload);
     const providerSessionIds = extractProviderSessionIds(payload);
@@ -720,35 +742,55 @@ export function deriveThreadSubagents(
     });
     const existing = subagents.get(key);
     const status = statusFromActivity(activity, payload);
+    subagentKeyByActivityId.set(activity.id, key);
 
     if (existing) {
-      existing.name = existing.name ?? name;
+      existing.name = explicitRole ? titleCaseCompact(explicitRole) : (existing.name ?? name);
       existing.detail = detail ?? existing.detail;
       existing.origin = existing.origin ?? origin;
       existing.capability = existing.capability ?? capability;
       existing.tool = existing.tool ?? tool;
       mergeProviderThreadIds(existing.providerThreadIds, providerThreadIds);
       mergeStringSet(existing.providerSessionIds, providerSessionIds);
-      existing.status = applyStatus(existing.status, status);
+      const nextAttempt = asNonNegativeCount(payload?.attempt);
+      const startsNewAttempt =
+        nextAttempt !== null && existing.attempt !== null && nextAttempt > existing.attempt;
+      if (nextAttempt !== null) {
+        existing.attempt = nextAttempt;
+      }
+      if (status) {
+        existing.status = applyStatus(existing.status, status, startsNewAttempt);
+      }
       existing.updatedAt = activity.createdAt;
+      if (collabItem) {
+        mergeCollabAgentStates(subagents, activity, collabItem);
+      }
       continue;
     }
 
     subagents.set(key, {
       key,
       name,
-      status,
+      status:
+        status ??
+        (isTaskAgentActivity(activity, payload) && payload?.usageSnapshot === true
+          ? "running"
+          : "idle"),
       origin,
       capability,
       tool,
       detail,
       providerThreadIds: new Set(providerThreadIds),
       providerSessionIds: new Set(providerSessionIds),
+      attempt: asNonNegativeCount(payload?.attempt),
       startedAt: activity.createdAt,
       updatedAt: activity.createdAt,
       entries: [],
       messages: [],
     });
+    if (collabItem) {
+      mergeCollabAgentStates(subagents, activity, collabItem);
+    }
   }
 
   for (const activity of orderedActivities) {
@@ -768,19 +810,27 @@ export function deriveThreadSubagents(
   }
 
   for (const entry of deriveWorkLogEntries(activities, undefined)) {
-    if (entry.itemType !== "collab_agent_tool_call") {
+    if (entry.itemType !== "collab_agent_tool_call" || coordinationActivityIds.has(entry.id)) {
       continue;
     }
 
-    const detail = entry.detail ?? entry.output ?? null;
-    const name = extractSubagentName(null, detail ?? entry.toolTitle ?? entry.label);
+    const rawDetail = entry.detail ?? entry.output ?? null;
+    const detail = taskFromLabeledPrompt(rawDetail) ?? rawDetail;
+    const name = extractSubagentName(null, rawDetail ?? entry.toolTitle ?? entry.label);
     const key = toWorkEntrySubagentKey(entry);
+    const lifecycleKey = subagentKeyByActivityId.get(entry.id);
     const existing =
-      subagents.get(key) ?? findSubagentByVisibleIdentity(subagents, { name, detail });
+      (lifecycleKey ? subagents.get(lifecycleKey) : undefined) ??
+      subagents.get(key) ??
+      findSubagentByVisibleIdentity(subagents, { name, detail });
     const status = statusFromWorkEntry(entry);
     if (existing) {
       existing.entries.push(entry);
-      existing.status = applyStatus(existing.status, status);
+      // A Codex spawn tool completes after launch, while the child remains
+      // pending/running. Its embedded agentsStates drive lifecycle above.
+      if (!isSpawnCollabTool(existing.tool)) {
+        existing.status = applyStatus(existing.status, status);
+      }
       existing.updatedAt = entry.createdAt;
       continue;
     }
@@ -795,6 +845,7 @@ export function deriveThreadSubagents(
       detail,
       providerThreadIds: new Set(),
       providerSessionIds: new Set(),
+      attempt: null,
       startedAt: entry.createdAt,
       updatedAt: entry.createdAt,
       entries: [entry],
@@ -806,15 +857,39 @@ export function deriveThreadSubagents(
     left.startedAt.localeCompare(right.startedAt),
   );
 
+  // Legacy Codex collaboration rows can be missing their final wait/close
+  // event when the parent is interrupted or the provider process exits. The
+  // persisted parent lifecycle is then authoritative: no transcript-only
+  // child from that activation may resurrect as Working after reload.
+  if (
+    options?.sessionLive === false ||
+    options?.parentTurnState === "interrupted" ||
+    options?.parentTurnState === "error"
+  ) {
+    for (const subagent of ordered) {
+      if (subagent.status === "running") {
+        subagent.status = "interrupted";
+      }
+    }
+  }
+
   // Every subagent gets a stable, unique abstract codename as its primary
   // identity; any inferred descriptive label is demoted to `role` (a subtitle).
-  const codenamesByKey = assignSubagentCodenames(ordered.map((subagent) => subagent.key));
+  const identitiesByKey = assignSubagentIdentities(
+    ordered.map((subagent) => ({
+      key: subagent.key,
+      role: subagent.name,
+      taskLabel: subagent.detail,
+    })),
+  );
 
   return ordered.map((subagent) => {
+    const identity = identitiesByKey.get(subagent.key);
     return {
       key: subagent.key,
-      name: codenamesByKey.get(subagent.key) ?? subagent.key,
-      role: subagent.name,
+      name: identity?.codename ?? subagent.key,
+      avatarKey: identity?.avatarKey ?? subagent.key,
+      role: identity?.role ?? subagent.name,
       status: subagent.status,
       origin: subagent.origin,
       capability: subagent.capability,

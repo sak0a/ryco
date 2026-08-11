@@ -26,6 +26,8 @@ import { __resetLocalApiForTests } from "../../localApi";
 import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
 import { useUiStateStore } from "../../uiStateStore";
+import { syncDocumentPresentationTier } from "../../lib/presentationTier";
+import { useTierOverrideStore } from "../../tierOverrideStore";
 import { DEFAULT_CLIENT_SETTINGS } from "@ryco/contracts/settings";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 import { KeybindingsSettingsPanel } from "./KeybindingsSettings";
@@ -300,6 +302,7 @@ function installSettingsNativeApi(input?: {
   readonly updateSettings?: LocalApi["server"]["updateSettings"];
   readonly setClientSettings?: LocalApi["persistence"]["setClientSettings"];
   readonly clientSettings?: Awaited<ReturnType<LocalApi["persistence"]["getClientSettings"]>>;
+  readonly confirm?: LocalApi["dialogs"]["confirm"];
 }) {
   const updateSettings =
     input?.updateSettings ??
@@ -338,7 +341,7 @@ function installSettingsNativeApi(input?: {
     },
     dialogs: {
       pickFolder: vi.fn().mockResolvedValue(null),
-      confirm: vi.fn().mockResolvedValue(false),
+      confirm: input?.confirm ?? vi.fn().mockResolvedValue(false),
     },
     contextMenu: {
       show: vi.fn().mockResolvedValue(null),
@@ -512,6 +515,7 @@ describe("GeneralSettingsPanel observability", () => {
     localStorage.clear();
     useUiStateStore.setState({ defaultAdvertisedEndpointKey: null });
     authAccessHarness.reset();
+    useTierOverrideStore.setState({ override: null });
     mockConnectDesktopSshEnvironment.mockReset();
   });
 
@@ -532,6 +536,7 @@ describe("GeneralSettingsPanel observability", () => {
     resetServerStateForTests();
     await __resetLocalApiForTests();
     authAccessHarness.reset();
+    useTierOverrideStore.setState({ override: null });
   });
 
   it("hides owner pairing tools in browser-served loopback builds without remote exposure", async () => {
@@ -841,6 +846,74 @@ describe("GeneralSettingsPanel observability", () => {
         ),
       )
       .toBeInTheDocument();
+  });
+
+  it("reveals and focuses legacy token streaming when settings search targets it", async () => {
+    useTierOverrideStore.setState({ override: "desktop" });
+    syncDocumentPresentationTier();
+    installSettingsNativeApi();
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel searchTargetId="legacy-token-streaming" />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("Legacy features", { exact: true })).toBeInTheDocument();
+    await expect
+      .element(page.getByText("Stream token by token (legacy)", { exact: true }))
+      .toBeInTheDocument();
+    const tokenStreamingSwitch = page.getByLabelText("Stream token by token (legacy)");
+    await expect.element(tokenStreamingSwitch).toBeInTheDocument();
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(tokenStreamingSwitch.element());
+    });
+  });
+
+  it("confirms legacy token streaming before enabling and disables it immediately", async () => {
+    useTierOverrideStore.setState({ override: "desktop" });
+    syncDocumentPresentationTier();
+    const confirm = vi
+      .fn<LocalApi["dialogs"]["confirm"]>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const updateSettings = vi
+      .fn<LocalApi["server"]["updateSettings"]>()
+      .mockImplementation(async (patch) => ({
+        ...DEFAULT_SERVER_SETTINGS,
+        enableLegacyTokenStreaming:
+          patch.enableLegacyTokenStreaming ?? DEFAULT_SERVER_SETTINGS.enableLegacyTokenStreaming,
+      }));
+    installSettingsNativeApi({ confirm, updateSettings });
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel searchTargetId="legacy-token-streaming" />
+      </AppAtomRegistryProvider>,
+    );
+
+    const tokenStreamingSwitch = page.getByLabelText("Stream token by token (legacy)");
+    await expect.element(tokenStreamingSwitch).not.toBeChecked();
+
+    await tokenStreamingSwitch.click();
+    await vi.waitFor(() => expect(confirm).toHaveBeenCalledTimes(1));
+    expect(updateSettings).not.toHaveBeenCalled();
+    await expect.element(tokenStreamingSwitch).not.toBeChecked();
+
+    await tokenStreamingSwitch.click();
+    await vi.waitFor(() => {
+      expect(confirm).toHaveBeenCalledTimes(2);
+      expect(updateSettings).toHaveBeenLastCalledWith({ enableLegacyTokenStreaming: true });
+    });
+    await expect.element(tokenStreamingSwitch).toBeChecked();
+
+    await tokenStreamingSwitch.click();
+    await vi.waitFor(() =>
+      expect(updateSettings).toHaveBeenLastCalledWith({ enableLegacyTokenStreaming: false }),
+    );
+    expect(confirm).toHaveBeenCalledTimes(2);
   });
 
   it("disables the keybindings file opener when no editor is available", async () => {

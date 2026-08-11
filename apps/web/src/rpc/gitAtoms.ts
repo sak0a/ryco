@@ -440,10 +440,12 @@ function unwatchBranches(key: string): void {
   if (controller.intervalId !== null) {
     clearInterval(controller.intervalId);
   }
+  controller.fetchToken += 1;
   branchesControllers.delete(key);
 }
 
 const branchesPrefetchInFlight = new Set<string>();
+let branchesPrefetchGeneration = 0;
 
 async function prefetchBranchesByKey(targetKey: string): Promise<void> {
   if (branchesPrefetchInFlight.has(targetKey)) {
@@ -464,9 +466,10 @@ async function prefetchBranchesByKey(targetKey: string): Promise<void> {
   const query = targetKey.slice(lastSeparatorIndex + 1);
 
   branchesPrefetchInFlight.add(targetKey);
+  const generation = branchesPrefetchGeneration;
   try {
     const page = await fetchRefsPage(environmentId, cwd, query, 0);
-    if (branchesControllers.has(targetKey)) {
+    if (generation !== branchesPrefetchGeneration || branchesControllers.has(targetKey)) {
       return;
     }
     setBranchesState(targetKey, {
@@ -478,7 +481,9 @@ async function prefetchBranchesByKey(targetKey: string): Promise<void> {
   } catch {
     // Prefetch failures are non-fatal; the next subscription will retry.
   } finally {
-    branchesPrefetchInFlight.delete(targetKey);
+    if (generation === branchesPrefetchGeneration) {
+      branchesPrefetchInFlight.delete(targetKey);
+    }
   }
 }
 
@@ -690,6 +695,7 @@ function unwatchResolvePullRequest(key: string): void {
 
 export function clearGitAtomState(): void {
   for (const controller of branchesControllers.values()) {
+    controller.fetchToken += 1;
     controller.invalidationUnsub();
     if (controller.focusListener && typeof window !== "undefined") {
       window.removeEventListener("focus", controller.focusListener);
@@ -700,22 +706,25 @@ export function clearGitAtomState(): void {
     }
   }
   branchesControllers.clear();
+  branchesPrefetchGeneration += 1;
   branchesPrefetchInFlight.clear();
+  for (const controller of resolvePrControllers.values()) {
+    controller.fetchToken += 1;
+  }
   resolvePrControllers.clear();
   invalidationListeners.clear();
 
+  // Atom.family retains each atom instance. Keep the matching key indexes too,
+  // so a later clear can reset a key that was reused after an earlier clear.
   for (const key of knownBranchesKeys) {
     appAtomRegistry.set(branchesStateAtom(key), INITIAL_BRANCHES_STATE);
   }
-  knownBranchesKeys.clear();
   for (const key of knownResolvePrKeys) {
     appAtomRegistry.set(resolvePrStateAtom(key), EMPTY_RESOLVE_PR_STATE);
   }
-  knownResolvePrKeys.clear();
   for (const key of knownMutationTrackingKeys) {
     appAtomRegistry.set(mutationRunningCountAtom(key), 0);
   }
-  knownMutationTrackingKeys.clear();
 }
 
 export const resetGitAtomsForTests = clearGitAtomState;

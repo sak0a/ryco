@@ -17,6 +17,7 @@ export type WorkspaceTab =
       mode: "agent";
       agentKey: string;
       status: ThreadSubagentStatus;
+      avatarKey?: string;
     };
 
 export function buildTabs(input: {
@@ -66,6 +67,7 @@ export function buildTabs(input: {
       mode: "agent",
       agentKey: subagent.key,
       status: subagent.status,
+      avatarKey: subagent.avatarKey ?? subagent.key,
     });
   }
 

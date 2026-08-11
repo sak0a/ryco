@@ -1,5 +1,5 @@
-import { ArchiveIcon, ArchiveX } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { ArchiveIcon, ArchiveX, ChevronRightIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ORCHESTRATION_WS_METHODS,
   type DesktopUpdateChannel,
@@ -39,6 +39,7 @@ import {
 } from "../../store";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { DraftInput } from "../ui/draft-input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
@@ -350,8 +351,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open overview"]
         : []),
-      ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
-        ? ["Assistant output"]
+      ...(settings.enableLegacyTokenStreaming !==
+      DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming
+        ? ["Stream token by token"]
         : []),
       ...(settings.enableProviderUpdateChecks !==
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
@@ -380,7 +382,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffIgnoreWhitespace,
       settings.diffWordWrap,
-      settings.enableAssistantStreaming,
+      settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
       settings.timestampFormat,
       theme,
@@ -403,7 +405,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
-      enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
+      enableLegacyTokenStreaming: DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
@@ -420,9 +422,104 @@ export function useSettingsRestore(onRestored?: () => void) {
   };
 }
 
-export function GeneralSettingsPanel() {
+function LegacyFeaturesSection({ searchTargetId }: { searchTargetId: string | null }) {
   const settings = useSettings();
   const { updateSettings } = useUpdateSettings();
+  const targeted = searchTargetId === "legacy-token-streaming";
+  const [open, setOpen] = useState(targeted);
+  const tokenStreamingRowRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!targeted) return;
+    setOpen(true);
+    const frame = requestAnimationFrame(() => {
+      tokenStreamingRowRef.current?.scrollIntoView({ block: "center" });
+      tokenStreamingRowRef.current?.querySelector<HTMLElement>("[role=switch]")?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [targeted]);
+
+  return (
+    <section className="space-y-2.5">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-lg px-1 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="inline-block h-px w-3 bg-border" aria-hidden />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/50 transition-colors group-hover:text-foreground/70">
+              Legacy features
+            </span>
+            <span className="hidden text-[11px] text-muted-foreground/55 sm:inline">
+              Compatibility controls
+            </span>
+          </span>
+          <ChevronRightIcon
+            aria-hidden
+            className="size-3.5 text-muted-foreground/60 transition-transform duration-200 group-data-panel-open:rotate-90"
+          />
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <div className="pt-2">
+            <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-card text-card-foreground shadow-sm/4 dark:shadow-none">
+              <div ref={tokenStreamingRowRef} id="legacy-token-streaming">
+                <SettingsRow
+                  title="Stream token by token (legacy)"
+                  description="Paint assistant output token by token instead of in complete chunks. This legacy mode is significantly slower and makes long responses harder to follow."
+                  resetAction={
+                    settings.enableLegacyTokenStreaming !==
+                    DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming ? (
+                      <SettingResetButton
+                        label="legacy token streaming"
+                        onClick={() =>
+                          updateSettings({
+                            enableLegacyTokenStreaming:
+                              DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
+                          })
+                        }
+                      />
+                    ) : null
+                  }
+                  control={
+                    <Switch
+                      checked={settings.enableLegacyTokenStreaming}
+                      onCheckedChange={(checked) => {
+                        if (!checked) {
+                          updateSettings({ enableLegacyTokenStreaming: false });
+                          return;
+                        }
+                        void (async () => {
+                          const api = readLocalApi();
+                          const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
+                            [
+                              "Turn on token-by-token output?",
+                              "It is significantly slower than buffered output and makes long responses harder to follow. This switch exists only for backwards compatibility.",
+                            ].join("\n"),
+                          );
+                          if (confirmed) {
+                            updateSettings({ enableLegacyTokenStreaming: true });
+                          }
+                        })();
+                      }}
+                      aria-label="Stream token by token (legacy)"
+                    />
+                  }
+                />
+              </div>
+            </div>
+          </div>
+        </CollapsiblePanel>
+      </Collapsible>
+    </section>
+  );
+}
+
+export function GeneralSettingsPanel({
+  searchTargetId = null,
+}: {
+  searchTargetId?: string | null;
+}) {
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  const isPhoneTier = usePresentationTier() === "phone";
   const [openingPathByTarget, setOpeningPathByTarget] = useState({
     logsDirectory: false,
   });
@@ -686,33 +783,6 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          title="Assistant output"
-          description="Show token-by-token output while a response is in progress."
-          resetAction={
-            settings.enableAssistantStreaming !==
-            DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming ? (
-              <SettingResetButton
-                label="assistant output"
-                onClick={() =>
-                  updateSettings({
-                    enableAssistantStreaming: DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.enableAssistantStreaming}
-              onCheckedChange={(checked) =>
-                updateSettings({ enableAssistantStreaming: Boolean(checked) })
-              }
-              aria-label="Stream assistant messages"
-            />
-          }
-        />
-
-        <SettingsRow
           title="Provider update checks"
           description="Check installed provider CLIs for newer versions. Disable if you install providers with Nix or another package manager."
           resetAction={
@@ -916,6 +986,8 @@ export function GeneralSettingsPanel() {
           />
         ) : null}
       </SettingsSection>
+
+      {!isPhoneTier ? <LegacyFeaturesSection searchTargetId={searchTargetId} /> : null}
 
       <SettingsSection title="About">
         <AboutBrandingHeader />
