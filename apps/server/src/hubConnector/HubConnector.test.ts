@@ -58,6 +58,14 @@ function encoded(frame: RelayFrame): Uint8Array {
 function identity(overrides: Partial<HubIdentityRuntimeShape> = {}): HubIdentityRuntimeShape {
   return {
     backend: "keytar",
+    localIntroduction: {
+      descriptor: async () => {
+        throw new Error("unused");
+      },
+      complete: async () => {
+        throw new Error("unused");
+      },
+    },
     readPendingEnrollment: async () => null,
     leave: async () => undefined,
     readState: async () => ({

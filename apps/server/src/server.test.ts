@@ -145,7 +145,10 @@ import {
   HubConnectorService,
   type HubConnectorServiceShape,
 } from "./hubConnector/HubConnectorLive.ts";
-import { stubE2eeOperator } from "./hubConnector/testUtils/e2eeOperatorStub.ts";
+import {
+  stubE2eeOperator,
+  stubLocalIntroductionService,
+} from "./hubConnector/testUtils/e2eeOperatorStub.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -669,6 +672,7 @@ const buildAppUnderTest = (options?: {
               throw new Error("not implemented in test");
             },
             stop: async () => undefined,
+            localIntroduction: stubLocalIntroductionService(),
             e2ee: stubE2eeOperator(),
             ...options?.layers?.hubConnector,
           }),

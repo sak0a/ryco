@@ -297,6 +297,112 @@ describe("node client authorization caps and partitions", () => {
   });
 });
 
+describe("node client authorization Local Trusted Introduction", () => {
+  const introduce = (client: NodeClientAuthorizationClient, seed: number, overrides = {}) =>
+    client.introduce({
+      key: key(seed),
+      maxRole: "owner",
+      capabilitySet: [CAPABILITY],
+      safetyNumber: SAFETY_NUMBER,
+      displayLabel: "Desktop",
+      ...overrides,
+    });
+
+  it("creates the ordinary approved Branch A record directly", async () => {
+    const test = await harness();
+    const result = await introduce(test.client, 40);
+    expect(result).toMatchObject({
+      disposition: "created",
+      record: {
+        status: "approved",
+        maxRole: "owner",
+        capabilitySet: [CAPABILITY],
+        safetyNumber: SAFETY_NUMBER,
+        displayLabel: "Desktop",
+        approvedAt: START,
+      },
+    });
+    expect(test.client.lookupClientAuthorization(key(40))).toEqual({
+      status: "approved",
+      maxRole: "owner",
+      capabilitySet: [CAPABILITY],
+    });
+    const stored = await test.stored();
+    expect(stored.pending).toEqual([]);
+    expect(stored.approved).toHaveLength(1);
+  });
+
+  it("promotes an exact pending record and preserves its creation time", async () => {
+    const test = await harness();
+    await test.pair(key(41));
+    test.advance(500);
+    const result = await introduce(test.client, 41);
+    expect(result.disposition).toBe("promoted");
+    expect(result.record).toMatchObject({
+      status: "approved",
+      createdAt: START,
+      approvedAt: START + 500,
+    });
+    expect((await test.stored()).pending).toEqual([]);
+  });
+
+  it("reconciles only an exactly equal approval and preserves its approval time", async () => {
+    const test = await harness();
+    const first = await introduce(test.client, 42);
+    test.advance(10_000);
+    const second = await introduce(test.client, 42);
+    expect(second.disposition).toBe("reconciled");
+    expect(second.record.approvedAt).toBe(first.record.approvedAt);
+    expect((await test.stored()).approved).toHaveLength(1);
+
+    await expect(introduce(test.client, 42, { maxRole: "operator" })).rejects.toMatchObject({
+      code: "client_authorization_conflict",
+    });
+    await expect(introduce(test.client, 42, { capabilitySet: [] })).rejects.toMatchObject({
+      code: "client_authorization_conflict",
+    });
+    await expect(
+      introduce(test.client, 42, { safetyNumber: SAFETY_NUMBER.replace(/^0/, "9") }),
+    ).rejects.toMatchObject({ code: "client_authorization_conflict" });
+    await expect(
+      introduce(test.client, 42, { displayLabel: "Another Desktop" }),
+    ).rejects.toMatchObject({ code: "client_authorization_conflict" });
+  });
+
+  it("never resurrects a revoked client", async () => {
+    const test = await harness();
+    await introduce(test.client, 43);
+    await test.client.revoke(key(43));
+    await expect(introduce(test.client, 43)).rejects.toMatchObject({
+      code: "client_authorization_conflict",
+    });
+    expect(await test.client.get(key(43))).toMatchObject({ status: "revoked" });
+  });
+
+  it("honors the same approved-record cap and validates local inputs", async () => {
+    const approved = Array.from({ length: E2EE_APPROVED_CLIENTS_MAX }, (_, index) =>
+      pendingEntry(index, {
+        maxRole: "owner",
+        capabilitySet: [CAPABILITY],
+        approvedAt: START,
+      }),
+    );
+    const full = await harness({ approved });
+    await expect(introduce(full.client, 9_999)).rejects.toMatchObject({
+      code: "client_authorization_approved_cap",
+    });
+    expect((await full.stored()).approved).toEqual(approved);
+
+    const test = await harness();
+    await expect(introduce(test.client, 44, { safetyNumber: "12345" })).rejects.toMatchObject({
+      code: "client_authorization_invalid",
+    });
+    await expect(introduce(test.client, 44, { displayLabel: " padded" })).rejects.toMatchObject({
+      code: "client_authorization_invalid",
+    });
+  });
+});
+
 describe("node client authorization pairing window", () => {
   const saturatedPartition = () =>
     Array.from({ length: E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT }, (_, index) =>

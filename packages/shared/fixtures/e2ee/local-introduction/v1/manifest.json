@@ -1,0 +1,11 @@
+{
+  "protocol": "ryco-e2ee-local-introduction",
+  "version": 1,
+  "files": [
+    {
+      "name": "valid.json",
+      "sha256": "37372b5d0f6908cd0ac5f69f1ad1263b5088e76546e562d3c415926de844b857",
+      "cases": 1
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 
 import type { HubConnectorE2eeOperator } from "../HubConnectorLive.ts";
 import type { NodeE2eeAuthorizationAdmin } from "../HubIdentityRuntime.ts";
+import type { NodeLocalIntroductionService } from "../../hubIdentity/NodeLocalIntroductionService.ts";
 import type {
   E2eeClientListingView,
   E2eeClientRecordView,
@@ -14,6 +15,15 @@ import type {
 // argument parsing does not have to restate a surface it is not exercising —
 // and so a test that DOES exercise it overrides exactly the members it asserts
 // on, leaving the rest of the shape honest rather than absent.
+
+export const stubLocalIntroductionService = (
+  overrides: Partial<NodeLocalIntroductionService> = {},
+): NodeLocalIntroductionService => {
+  const unused = async (): Promise<never> => {
+    throw new Error("unused");
+  };
+  return { descriptor: unused, complete: unused, ...overrides };
+};
 
 /** A record with every field populated, so a display assertion has something to find. */
 export const stubClientRecord = (

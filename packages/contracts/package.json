@@ -30,6 +30,11 @@
       "import": "./src/hostedIdentity.ts",
       "require": "./src/hostedIdentity.ts"
     },
+    "./local-introduction": {
+      "types": "./src/localIntroduction.ts",
+      "import": "./src/localIntroduction.ts",
+      "require": "./src/localIntroduction.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts",

@@ -8,6 +8,7 @@ import {
   E2EE_PENDING_CLIENTS_MAX_GLOBAL,
   E2EE_PENDING_CLIENTS_MAX_PER_ACCOUNT,
   E2EE_REVOKED_CLIENTS_RETAINED_MAX,
+  E2EE_SAFETY_NUMBER_DIGITS,
 } from "@ryco/shared/relayE2eeConstants";
 import {
   type E2eeAdmittedAuthoritySnapshot,
@@ -104,6 +105,8 @@ export type NodeClientAuthorizationErrorCode =
   | "client_authorization_not_approved"
   /** A narrowing command was handed a change that widens or leaves authority. */
   | "client_authorization_not_narrowing"
+  /** LTI may reconcile only the exact same non-revoked record and authority. */
+  | "client_authorization_conflict"
   /** §13.6: `E2EE_APPROVED_CLIENTS_MAX` — approval fails explicitly and evicts nothing. */
   | "client_authorization_approved_cap"
   /** The durable record could not be read or committed. */
@@ -232,6 +235,11 @@ export interface NodeClientAuthorizationChangeResult {
   readonly abortedHandshakes: number;
 }
 
+export interface NodeClientIntroductionResult {
+  readonly disposition: "created" | "promoted" | "reconciled";
+  readonly record: NodeClientAuthorizationRecord;
+}
+
 /**
  * The row N3 seam: the withdrawal test, then — through `established` — the
  * phase change that makes the channel an ACTIVE E2EE channel for the sweep.
@@ -330,6 +338,18 @@ export interface NodeClientAuthorizationClient {
     readonly capabilitySet: readonly string[];
     readonly displayLabel?: string | undefined;
   }) => Promise<NodeClientAuthorizationChangeResult>;
+  /**
+   * Local Trusted Introduction only: create/promote the exact approved record,
+   * or reconcile an already identical one. Revocations and mismatches fail
+   * closed; this is not an owner-command widening primitive.
+   */
+  readonly introduce: (input: {
+    readonly key: E2eeClientAuthorizationKey;
+    readonly maxRole: string;
+    readonly capabilitySet: readonly string[];
+    readonly safetyNumber: string;
+    readonly displayLabel?: string | undefined;
+  }) => Promise<NodeClientIntroductionResult>;
   /** §13.6 narrow: reduce `maxRole`, remove capabilities, or both. Never widens. */
   readonly narrow: (input: {
     readonly key: E2eeClientAuthorizationKey;
@@ -463,6 +483,28 @@ function requireDisplayLabel(label: string | undefined): string | undefined {
   if (label === undefined || label === "") return undefined;
   if (!isValidClientDisplayLabel(label)) authorizationError("client_authorization_invalid");
   return label;
+}
+
+function requireLocalIntroductionDisplayLabel(label: string | undefined): string | undefined {
+  const validated = requireDisplayLabel(label);
+  if (validated !== undefined && validated.trim() !== validated) {
+    return authorizationError("client_authorization_invalid");
+  }
+  return validated;
+}
+
+const SAFETY_NUMBER_PATTERN = new RegExp(
+  `^\\d{${E2EE_SAFETY_NUMBER_DIGITS.digitsPerGroup}}(?:${E2EE_SAFETY_NUMBER_DIGITS.separator.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  )}\\d{${E2EE_SAFETY_NUMBER_DIGITS.digitsPerGroup}}){${E2EE_SAFETY_NUMBER_DIGITS.groups - 1}}$`,
+);
+
+function requireSafetyNumber(value: string): string {
+  if (typeof value !== "string" || !SAFETY_NUMBER_PATTERN.test(value)) {
+    return authorizationError("client_authorization_invalid");
+  }
+  return value;
 }
 
 /**
@@ -1220,6 +1262,75 @@ export async function makeNodeClientAuthorizationClient(options: {
     });
   };
 
+  const introduce: NodeClientAuthorizationClient["introduce"] = async (input) => {
+    const indexKey = requireKey(input.key);
+    const hubOrigin = canonicalizeE2eeHubOrigin(input.key.hubOrigin);
+    const accountId = assertE2eeAccountId(input.key.accountId);
+    const clientIdentityFingerprint = Buffer.from(input.key.clientIdentityFingerprint).toString(
+      "base64url",
+    );
+    const maxRole = requireRole(input.maxRole);
+    const capabilitySet = requireCapabilitySet(input.capabilitySet);
+    const safetyNumber = requireSafetyNumber(input.safetyNumber);
+    const displayLabel = requireLocalIntroductionDisplayLabel(input.displayLabel);
+    const at = now();
+    let disposition: NodeClientIntroductionResult["disposition"] = "reconciled";
+
+    await applyOwnerChange({
+      indexKey,
+      change: (current) => {
+        const found = findEntry(current, indexKey, at);
+        if (found?.status === "revoked") {
+          return authorizationError("client_authorization_conflict");
+        }
+        if (found?.status === "approved") {
+          const sameCapabilities =
+            found.entry.capabilitySet.length === capabilitySet.length &&
+            found.entry.capabilitySet.every(
+              (capability, index) => capability === capabilitySet[index],
+            );
+          if (
+            found.entry.maxRole !== maxRole ||
+            !sameCapabilities ||
+            found.entry.safetyNumber !== safetyNumber ||
+            found.entry.displayLabel !== displayLabel
+          ) {
+            return authorizationError("client_authorization_conflict");
+          }
+          disposition = "reconciled";
+          return null;
+        }
+        if (current.approved.length >= E2EE_APPROVED_CLIENTS_MAX) {
+          return authorizationError("client_authorization_approved_cap");
+        }
+        disposition = found === undefined ? "created" : "promoted";
+        const approved: StoredClientAuthorizationEntry = {
+          hubOrigin,
+          accountId,
+          clientIdentityFingerprint,
+          maxRole,
+          capabilitySet,
+          createdAt: found?.entry.createdAt ?? at,
+          approvedAt: at,
+          ...(found?.entry.lastSeenAt === undefined ? {} : { lastSeenAt: found.entry.lastSeenAt }),
+          safetyNumber,
+          ...(displayLabel === undefined ? {} : { displayLabel }),
+          ...(found?.entry.forwardFields === undefined
+            ? {}
+            : { forwardFields: found.entry.forwardFields }),
+        };
+        const stripped = withoutKey(current, indexKey);
+        return { ...stripped, approved: [...stripped.approved, approved] };
+      },
+    });
+
+    const record = await get(input.key);
+    if (record?.status !== "approved") {
+      return authorizationError("client_authorization_state_failed");
+    }
+    return { disposition, record };
+  };
+
   const narrow: NodeClientAuthorizationClient["narrow"] = async (input) => {
     const indexKey = requireKey(input.key);
     const maxRole = input.maxRole === undefined ? undefined : requireRole(input.maxRole);
@@ -1531,6 +1642,7 @@ export async function makeNodeClientAuthorizationClient(options: {
     list,
     get,
     approve,
+    introduce,
     narrow,
     revoke,
     purge,

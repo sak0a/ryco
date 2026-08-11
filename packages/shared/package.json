@@ -48,6 +48,10 @@
       "types": "./src/relayE2eeTranscripts.ts",
       "import": "./src/relayE2eeTranscripts.ts"
     },
+    "./relayE2eeLocalIntroduction": {
+      "types": "./src/relayE2eeLocalIntroduction.ts",
+      "import": "./src/relayE2eeLocalIntroduction.ts"
+    },
     "./relayE2eeVerificationDisplay": {
       "types": "./src/relayE2eeVerificationDisplay.ts",
       "import": "./src/relayE2eeVerificationDisplay.ts"
