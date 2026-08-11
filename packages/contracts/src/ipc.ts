@@ -284,6 +284,11 @@ export interface DesktopHubLaunchConfig {
   readonly fileSecretStoreFallbackSupported: boolean;
 }
 
+/** Secret-free projection of Desktop main's native Hub identity workflow. */
+export interface DesktopHostedIdentityState {
+  readonly status: "signed-out" | "ready" | "unavailable";
+}
+
 export type DesktopHubOriginRejection =
   | "empty"
   | "too_long"
@@ -338,6 +343,10 @@ export interface DesktopBridge {
     readonly port?: number;
   }) => Promise<DesktopServerExposureState>;
   getHubLaunchConfig: () => Promise<DesktopHubLaunchConfig>;
+  /** Native account setup is available only in Desktop builds that support hardware-backed keys. */
+  getHostedIdentityState?: () => Promise<DesktopHostedIdentityState>;
+  connectHostedIdentity?: () => Promise<DesktopHostedIdentityState>;
+  disconnectHostedIdentity?: () => Promise<DesktopHostedIdentityState>;
   /**
    * Persist hub launch configuration and relaunch to apply it.
    *

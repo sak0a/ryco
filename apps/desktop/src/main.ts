@@ -114,6 +114,31 @@ import {
   shouldUseUnsignedMacUpdateInstaller,
   type MacCodeSignatureKind,
 } from "./unsignedMacUpdateInstaller.ts";
+import { createDesktopProtectedRecordStore } from "./protectedRecordStore.ts";
+import { createDesktopNativeSecretStore } from "./nativeSecretStore.ts";
+import {
+  createNativeSecurityHelperRunner,
+  DesktopNativeSecurityHelper,
+  desktopNativeSecurityNamespace,
+  resolveDesktopNativeSecurityHelperPath,
+} from "./nativeSecurityHelper.ts";
+import {
+  createDesktopNativeAuthorization,
+  DesktopAuthorizationCallbackBroker,
+  desktopAuthorizationCallbackUri,
+  findDesktopAuthorizationCallback,
+  type DesktopAuthorizationVariant,
+} from "./nativeAuthorization.ts";
+import {
+  createDesktopHostedSessionCredentials,
+  getOrCreateDesktopInstallationId,
+} from "./hostedCredentials.ts";
+import { createDesktopHubControlClient } from "./desktopHubControl.ts";
+import {
+  createDesktopHostedHubApi,
+  DesktopHostedIdentityCoordinator,
+  type DesktopHostedIdentityStatus,
+} from "./desktopHostedIdentity.ts";
 
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
@@ -150,6 +175,9 @@ const SET_HUB_LAUNCH_CONFIG_CHANNEL = "desktop:set-hub-launch-config";
 const VALIDATE_HUB_ORIGIN_CHANNEL = "desktop:validate-hub-origin";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
+const GET_HOSTED_IDENTITY_STATUS_CHANNEL = "desktop:get-hosted-identity-status";
+const CONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:connect-hosted-identity";
+const DISCONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:disconnect-hosted-identity";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
 const BASE_DIR = readEnv("RYCO_HOME")?.trim() || Path.join(OS.homedir(), ".ryco");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
@@ -186,6 +214,7 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const UNSIGNED_MAC_UPDATE_INSTALLER_DIR = Path.join(STATE_DIR, "update-installers");
 const UNSIGNED_MAC_UPDATE_INSTALLER_LOG_PATH = Path.join(LOG_DIR, "unsigned-mac-update.log");
+const NATIVE_SECURITY_DIR = Path.join(STATE_DIR, "native-security");
 
 if (!isDevelopment) {
   protocol.registerSchemesAsPrivileged([
@@ -274,6 +303,10 @@ type LinuxDesktopNamedApp = Electron.App & {
 };
 
 let mainWindow: BrowserWindow | null = null;
+const desktopAuthorizationBroker = new DesktopAuthorizationCallbackBroker();
+let desktopHostedIdentityCoordinator: DesktopHostedIdentityCoordinator | null = null;
+let desktopHostedIdentityStatus: DesktopHostedIdentityStatus = { status: "signed-out" };
+let desktopHostedIdentityControlGeneration = "";
 // Retain live turn-complete notifications: Electron GCs Notification objects once
 // the creating scope returns, which would drop their `click`/`close` handlers.
 const activeTurnCompleteNotifications = new Set<Notification>();
@@ -565,6 +598,114 @@ function getDesktopSecretStorage() {
   } as const;
 }
 
+function desktopAuthorizationVariant(): DesktopAuthorizationVariant {
+  if (isDevelopment) return "development";
+  return desktopAppBranding.stageLabel === "Nightly" ? "preview" : "production";
+}
+
+function desktopHostedDeviceLabel(): string {
+  const hostname = OS.hostname()
+    .replace(/\.local$/i, "")
+    .trim();
+  return hostname.length > 0 ? hostname : APP_DISPLAY_NAME;
+}
+
+async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedIdentityCoordinator> {
+  if (desktopHostedIdentityCoordinator !== null) return desktopHostedIdentityCoordinator;
+  if (
+    process.platform !== "darwin" ||
+    desktopSettings.hubConnectorEnabled !== true ||
+    desktopSettings.hubOrigin === null
+  ) {
+    throw new Error("Desktop native Hub identity is unavailable.");
+  }
+  const protection = getDesktopSecretStorage();
+  const installationRecords = createDesktopProtectedRecordStore({
+    directory: NATIVE_SECURITY_DIR,
+    namespace: desktopNativeSecurityNamespace("ryco.desktop.installation.v1"),
+    protection,
+  });
+  const installationId = await getOrCreateDesktopInstallationId(installationRecords);
+  const namespace = desktopNativeSecurityNamespace(
+    `${desktopSettings.hubOrigin}\0${installationId}`,
+  );
+  const records = createDesktopProtectedRecordStore({
+    directory: NATIVE_SECURITY_DIR,
+    namespace,
+    protection,
+  });
+  const security = new DesktopNativeSecurityHelper({
+    run: createNativeSecurityHelperRunner(
+      resolveDesktopNativeSecurityHelperPath({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        moduleDirectory: __dirname,
+      }),
+    ),
+    store: createDesktopNativeSecretStore({
+      directory: NATIVE_SECURITY_DIR,
+      namespace,
+      protection,
+    }),
+  });
+  const credentials = createDesktopHostedSessionCredentials(records);
+  const nativeAuthorization = createDesktopNativeAuthorization({
+    variant: desktopAuthorizationVariant(),
+    deviceLabel: desktopHostedDeviceLabel,
+    broker: desktopAuthorizationBroker,
+    openExternal: async (url) => await shell.openExternal(url, { activate: true }),
+  });
+  const api = await createDesktopHostedHubApi({
+    origin: desktopSettings.hubOrigin,
+    credentials,
+    security,
+    nativeAuthorization,
+  });
+  const coordinator = new DesktopHostedIdentityCoordinator({
+    origin: desktopSettings.hubOrigin,
+    installationId,
+    api,
+    credentials,
+    security,
+    records,
+    control: createDesktopHubControlClient({
+      baseUrl: () => backendHttpUrl,
+      controlToken: () => backendControlToken,
+    }),
+  });
+  desktopHostedIdentityCoordinator = coordinator;
+  return coordinator;
+}
+
+async function runDesktopHostedIdentity(
+  interactive: boolean,
+): Promise<DesktopHostedIdentityStatus> {
+  try {
+    const coordinator = await ensureDesktopHostedIdentityCoordinator();
+    desktopHostedIdentityStatus = interactive
+      ? await coordinator.connect()
+      : await coordinator.resume();
+  } catch {
+    desktopHostedIdentityStatus =
+      desktopSettings.hubConnectorEnabled && desktopSettings.hubOrigin !== null
+        ? { status: "unavailable" }
+        : { status: "signed-out" };
+  }
+  writeDesktopLogHeader(`native hosted identity status=${desktopHostedIdentityStatus.status}`);
+  return desktopHostedIdentityStatus;
+}
+
+function resumeDesktopHostedIdentityForBackend(): void {
+  if (
+    backendControlToken.length === 0 ||
+    desktopHostedIdentityControlGeneration === backendControlToken
+  ) {
+    return;
+  }
+  desktopHostedIdentityControlGeneration = backendControlToken;
+  void runDesktopHostedIdentity(false);
+}
+
 function resolveAdvertisedHostOverride(): string | undefined {
   const override = readEnv("RYCO_DESKTOP_LAN_HOST")?.trim();
   return override && override.length > 0 ? override : undefined;
@@ -783,6 +924,7 @@ function ensureDevelopmentInitialWindowOpen(): void {
     .then((source) => {
       markDesktopStartupPhase("desktop.backend.listening", `source=${source}`);
       writeDesktopLogHeader(`bootstrap development resources ready backendSource=${source}`);
+      resumeDesktopHostedIdentityForBackend();
     })
     .catch((error) => {
       if (isBackendReadinessAborted(error)) {
@@ -852,6 +994,7 @@ function ensureInitialBackendWindowOpen(): void {
     .then((source) => {
       markDesktopStartupPhase("desktop.backend.listening", `source=${source}`);
       writeDesktopLogHeader(`bootstrap backend ready source=${source}`);
+      resumeDesktopHostedIdentityForBackend();
       const window = ensurePackagedBootstrapWindowOpen("backend-ready");
       if (window) {
         loadPackagedBackendAppWindow(window, "backend-ready");
@@ -1448,6 +1591,19 @@ function configureAppIdentity(): void {
       app.dock.setIcon(iconPath);
     }
   }
+}
+
+function registerDesktopAuthorizationProtocol(): void {
+  const callback = desktopAuthorizationCallbackUri(desktopAuthorizationVariant());
+  const scheme = new URL(callback).protocol.slice(0, -1);
+  app.setAsDefaultProtocolClient(scheme);
+}
+
+function handleDesktopAuthorizationCallback(rawUrl: string): boolean {
+  if (!desktopAuthorizationBroker.accept(rawUrl)) return false;
+  const window = mainWindow ?? BrowserWindow.getAllWindows()[0];
+  if (window) revealWindow(window);
+  return true;
 }
 
 function clearUpdatePollTimer(): void {
@@ -2326,6 +2482,21 @@ function registerIpcHandlers(): void {
     fileSecretStoreFallbackSupported: isDesktopHubFileSecretStoreSupported(process.platform),
   }));
 
+  const hostedIdentityView = () => ({ status: desktopHostedIdentityStatus.status });
+  ipcMain.removeHandler(GET_HOSTED_IDENTITY_STATUS_CHANNEL);
+  ipcMain.handle(GET_HOSTED_IDENTITY_STATUS_CHANNEL, hostedIdentityView);
+  ipcMain.removeHandler(CONNECT_HOSTED_IDENTITY_CHANNEL);
+  ipcMain.handle(CONNECT_HOSTED_IDENTITY_CHANNEL, async () => {
+    await runDesktopHostedIdentity(true);
+    return hostedIdentityView();
+  });
+  ipcMain.removeHandler(DISCONNECT_HOSTED_IDENTITY_CHANNEL);
+  ipcMain.handle(DISCONNECT_HOSTED_IDENTITY_CHANNEL, async () => {
+    await desktopHostedIdentityCoordinator?.disconnect().catch(() => undefined);
+    desktopHostedIdentityStatus = { status: "signed-out" };
+    return hostedIdentityView();
+  });
+
   ipcMain.removeHandler(VALIDATE_HUB_ORIGIN_CHANNEL);
   ipcMain.handle(VALIDATE_HUB_ORIGIN_CHANNEL, (_event, raw: unknown) =>
     validateHubOrigin(typeof raw === "string" ? raw : ""),
@@ -2911,7 +3082,17 @@ if (!isDevelopment && !app.requestSingleInstanceLock()) {
   app.exit(0);
 }
 
-app.on("second-instance", () => {
+app.on("open-url", (event, url) => {
+  if (!handleDesktopAuthorizationCallback(url)) return;
+  event.preventDefault();
+});
+
+app.on("second-instance", (_event, commandLine) => {
+  const callback = findDesktopAuthorizationCallback(
+    commandLine,
+    desktopAuthorizationCallbackUri(desktopAuthorizationVariant()),
+  );
+  if (callback !== null) handleDesktopAuthorizationCallback(callback);
   const [existing] = BrowserWindow.getAllWindows();
   if (existing === undefined) return;
   if (existing.isMinimized()) existing.restore();
@@ -2988,6 +3169,7 @@ app.on("before-quit", () => {
   clearUpdatePollTimer();
   cancelBackendReadinessWait();
   stopBackend();
+  desktopAuthorizationBroker.cancel();
   void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
   restoreStdIoCapture?.();
 });
@@ -2999,6 +3181,7 @@ app
     configureAppIdentity();
     configureApplicationMenu();
     registerDesktopProtocol();
+    registerDesktopAuthorizationProtocol();
     configureAutoUpdater();
     void bootstrap().catch((error) => {
       if (isBackendReadinessAborted(error) && isQuitting) {

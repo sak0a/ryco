@@ -2,6 +2,7 @@ import { TriangleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DesktopHubLaunchConfig,
+  DesktopHostedIdentityState,
   HubConnectorStatus,
   HubEnrollmentCeremonyDetail,
   HubIdentitySummary,
@@ -84,6 +85,9 @@ export function HubSection({
   const [pendingAction, setPendingAction] = useState<HubAction | null>(null);
   const [savingFileFallback, setSavingFileFallback] = useState(false);
   const [leaveOpen, setLeaveOpen] = useState(false);
+  const [hostedIdentity, setHostedIdentity] = useState<DesktopHostedIdentityState | null>(null);
+  const [hostedIdentityPending, setHostedIdentityPending] = useState(false);
+  const [hostedIdentityError, setHostedIdentityError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const { copyToClipboard } = useCopyToClipboard();
   // Same derivation the pairing rows use: clipboard writes need a secure context.
@@ -141,6 +145,50 @@ export function HubSection({
         );
       });
   }, [desktopBridge]);
+
+  useEffect(() => {
+    if (!desktopBridge?.getHostedIdentityState) return;
+    void desktopBridge
+      .getHostedIdentityState()
+      .then((value) => {
+        if (!mountedRef.current) return;
+        setHostedIdentity(value);
+        setHostedIdentityError(null);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setHostedIdentity({ status: "unavailable" });
+        setHostedIdentityError("Unable to read the native account setup state.");
+      });
+  }, [desktopBridge]);
+
+  const runHostedIdentityAction = useCallback(
+    async (action: "connect" | "disconnect") => {
+      const invoke =
+        action === "connect"
+          ? desktopBridge?.connectHostedIdentity
+          : desktopBridge?.disconnectHostedIdentity;
+      if (!invoke) return;
+      setHostedIdentityPending(true);
+      setHostedIdentityError(null);
+      try {
+        const next = await invoke();
+        if (!mountedRef.current) return;
+        setHostedIdentity(next);
+      } catch {
+        if (!mountedRef.current) return;
+        setHostedIdentity({ status: "unavailable" });
+        setHostedIdentityError(
+          action === "connect"
+            ? "Automatic secure setup did not finish. Retry when the Hub is reachable."
+            : "Unable to clear the native account session.",
+        );
+      } finally {
+        if (mountedRef.current) setHostedIdentityPending(false);
+      }
+    },
+    [desktopBridge],
+  );
 
   const runAction = useCallback(
     async (action: HubAction) => {
@@ -430,6 +478,74 @@ export function HubSection({
           ) : null}
         </AnimatedHeight>
       </SettingsRow>
+
+      {config?.enabled === true &&
+      config.origin !== null &&
+      desktopBridge.getHostedIdentityState !== undefined ? (
+        <SettingsRow
+          title="Ryco account"
+          description={
+            hostedIdentity === null
+              ? "Checking this Mac's native account setup…"
+              : hostedIdentity.status === "ready"
+                ? "Your native account session and this Mac's automatic node claim are ready. Local trust introduction is verified."
+                : hostedIdentity.status === "signed-out"
+                  ? "Sign in in your browser. Ryco will claim this Mac's node and verify its local trust automatically."
+                  : "Automatic secure setup did not finish. Existing node and trust state are preserved while you retry."
+          }
+          status={
+            <>
+              {hostedIdentity === null ? null : (
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={`inline-block size-2 shrink-0 rounded-full ${
+                      hostedIdentity.status === "ready"
+                        ? "bg-success"
+                        : hostedIdentity.status === "unavailable"
+                          ? "bg-warning"
+                          : "bg-muted-foreground/40"
+                    }`}
+                    aria-hidden
+                  />
+                  {hostedIdentity.status === "ready"
+                    ? "Secure setup complete"
+                    : hostedIdentity.status === "unavailable"
+                      ? "Setup needs attention"
+                      : "Not signed in"}
+                </span>
+              )}
+              {hostedIdentityError ? (
+                <span className="block text-destructive">{hostedIdentityError}</span>
+              ) : null}
+            </>
+          }
+          control={
+            hostedIdentity === null ? null : hostedIdentity.status === "ready" ? (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={hostedIdentityPending || !desktopBridge.disconnectHostedIdentity}
+                onClick={() => void runHostedIdentityAction("disconnect")}
+              >
+                {hostedIdentityPending ? "Working…" : "Sign out"}
+              </Button>
+            ) : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={hostedIdentityPending || !desktopBridge.connectHostedIdentity}
+                onClick={() => void runHostedIdentityAction("connect")}
+              >
+                {hostedIdentityPending
+                  ? "Opening browser…"
+                  : hostedIdentity.status === "unavailable"
+                    ? "Retry secure setup"
+                    : "Connect account"}
+              </Button>
+            )
+          }
+        />
+      ) : null}
 
       <SettingsRow
         title="Hub address"

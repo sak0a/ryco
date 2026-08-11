@@ -514,6 +514,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("excludes the bundled GitHub Copilot CLI from desktop artifacts", () => {
     assert.deepStrictEqual(DESKTOP_BUILD_FILES, [
       "**/*",
+      "!apps/desktop/resources/ryco-desktop-security-helper",
+      "!apps/desktop/prod-resources/ryco-desktop-security-helper",
       "!node_modules/@github/copilot/**",
       "!node_modules/@github/copilot-darwin-arm64/**",
       "!node_modules/@github/copilot-darwin-x64/**",
@@ -555,6 +557,43 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ]);
     assert.equal(COPILOT_SDK_PACKAGE_JSON_PATH, "node_modules/@github/copilot-sdk/package.json");
   });
+
+  it.effect("packages the macOS security helper outside the app archive", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.1.1",
+        true,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.deepStrictEqual(config.extraResources, [
+        {
+          from: "apps/desktop/resources/ryco-desktop-security-helper",
+          to: "ryco-desktop-security-helper",
+        },
+      ]);
+      assert.deepStrictEqual(config.protocols, [
+        { name: "Ryco Hosted Authorization", schemes: ["ryco"] },
+      ]);
+
+      const nightly = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "0.1.1-nightly.20260812.1",
+        true,
+        false,
+        undefined,
+        undefined,
+      );
+      assert.deepStrictEqual(nightly.protocols, [
+        { name: "Ryco Hosted Authorization", schemes: ["ryco-preview"] },
+      ]);
+    }),
+  );
 
   it.effect("prunes bundled provider CLI payloads without removing JS SDKs or sharp", () =>
     Effect.gen(function* () {

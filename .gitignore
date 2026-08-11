@@ -5,6 +5,7 @@ node_modules
 *.log
 *.tsbuildinfo
 apps/*/dist
+apps/desktop/resources/ryco-desktop-security-helper
 .astro
 packages/*/dist
 .env
