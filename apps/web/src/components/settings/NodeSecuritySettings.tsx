@@ -16,6 +16,11 @@ import type {
 } from "@ryco/client-runtime/connection";
 
 import { isHostedHubMode } from "../../env";
+import {
+  createVisibilityAwarePoller,
+  type VisibilityAwarePoller,
+} from "../../lib/visibilityPolling";
+import { webAppLifecycle } from "../../platform/appLifecycle";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { deriveHostedConnectionStatusIndicator } from "../../hostedHub/connectionStatus";
 import { useHostedHubStore } from "../../hostedHub/state";
@@ -432,6 +437,7 @@ export function NodeSecuritySettings() {
   const [windowFingerprint, setWindowFingerprint] = useState("");
   const mountedRef = useRef(true);
   const failuresRef = useRef(0);
+  const pollerRef = useRef<VisibilityAwarePoller | null>(null);
   const { copyToClipboard } = useCopyToClipboard();
 
   useEffect(() => {
@@ -490,26 +496,25 @@ export function NodeSecuritySettings() {
    * what a permanent one costs.
    */
   useEffect(() => {
-    void refresh();
     if (!availability.available) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
-      if (cancelled) return;
-      const delay = Math.min(
-        POLL_INTERVAL_MS * 2 ** Math.max(0, failuresRef.current - 1),
-        POLL_MAX_INTERVAL_MS,
-      );
-      timer = setTimeout(() => {
-        void refresh().finally(schedule);
-      }, delay);
-    };
-    schedule();
+    const poller = createVisibilityAwarePoller({
+      lifecycle: webAppLifecycle,
+      run: refresh,
+      resolveDelayMs: () =>
+        Math.min(
+          POLL_INTERVAL_MS * 2 ** Math.max(0, failuresRef.current - 1),
+          POLL_MAX_INTERVAL_MS,
+        ),
+      jitterRatio: 0.1,
+    });
+    pollerRef.current = poller;
     return () => {
-      cancelled = true;
-      if (timer !== undefined) clearTimeout(timer);
+      if (pollerRef.current === poller) pollerRef.current = null;
+      poller.stop();
     };
   }, [availability.available, refresh]);
+
+  const refreshCurrent = useCallback(() => pollerRef.current?.refresh() ?? refresh(), [refresh]);
 
   /**
    * Every mutation goes through here, so none of them can skip the refresh.
@@ -531,7 +536,7 @@ export function NodeSecuritySettings() {
       try {
         const produced = await operation();
         if (mountedRef.current) setNotice(typeof produced === "string" ? produced : message);
-        await refresh();
+        await refreshCurrent();
       } catch (cause) {
         if (!mountedRef.current) return;
         setError(cause instanceof Error ? cause.message : "That didn't work.");
@@ -539,7 +544,7 @@ export function NodeSecuritySettings() {
         if (mountedRef.current) setBusy(false);
       }
     },
-    [refresh],
+    [refreshCurrent],
   );
 
   const confirmThen = useCallback(
@@ -719,7 +724,7 @@ export function NodeSecuritySettings() {
           <p className="mt-1 text-muted-foreground text-xs">{NODE_PANEL_SUBTITLE}</p>
         </div>
         {availability.available ? (
-          <Button size="xs" variant="outline" disabled={busy} onClick={() => void refresh()}>
+          <Button size="xs" variant="outline" disabled={busy} onClick={() => void refreshCurrent()}>
             <RefreshCwIcon className="size-3.5" />
             Refresh
           </Button>

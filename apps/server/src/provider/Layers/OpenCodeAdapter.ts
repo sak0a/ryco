@@ -572,7 +572,7 @@ export function makeOpenCodeAdapter(
     // `options.nativeEventLogger`, they own its lifecycle.
     const managedNativeEventLogger =
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
-    const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEvents = yield* Queue.bounded<ProviderRuntimeEvent>(2_048);
     const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
       queue: "provider.adapter.runtimeEvents",
       component: "OpenCodeAdapter",

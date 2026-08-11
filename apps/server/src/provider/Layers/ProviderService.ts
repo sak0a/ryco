@@ -279,7 +279,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
-  const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventPubSub = yield* PubSub.bounded<ProviderRuntimeEvent>(4_096);
   const staleSessionBindings = yield* Ref.make(new Map<string, ProviderRuntimeBinding>());
   const staleSessionStopTimeoutMs = normalizePositiveInt(
     options?.staleSessionStopTimeoutMs,

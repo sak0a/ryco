@@ -257,6 +257,30 @@ describe("sourceControlAtoms — invalidation", () => {
     releaseTarget();
     releaseOther();
   });
+
+  it("replaces an in-flight read and ignores its stale completion", async () => {
+    const stale = createDeferred<unknown>();
+    const freshData = [issue(2)];
+    listIssues.mockReturnValueOnce(stale.promise).mockResolvedValueOnce(freshData);
+    const input = {
+      environmentId: ENVIRONMENT_ID,
+      cwd: CWD,
+      state: "open" as const,
+    };
+
+    const release = issueListBinding.watch(input);
+    await flush();
+    invalidateSourceControl({ environmentId: ENVIRONMENT_ID, cwd: CWD });
+    await flush();
+
+    expect(listIssues).toHaveBeenCalledTimes(2);
+    expect(issueListBinding.snapshotFor(input).data).toBe(freshData);
+
+    stale.resolve([issue(1)]);
+    await flush();
+    expect(issueListBinding.snapshotFor(input).data).toBe(freshData);
+    release();
+  });
 });
 
 describe("sourceControlAtoms — detail fetches", () => {

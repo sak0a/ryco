@@ -30,6 +30,10 @@ describe("QueueMetrics", () => {
 
       yield* metrics.recordEnqueued(3);
       yield* metrics.recordDequeued();
+      yield* metrics.recordBlocked(25);
+      yield* metrics.recordCoalesced(2);
+      yield* metrics.recordOverflow();
+      yield* metrics.recordRecovery();
 
       const snapshots = yield* Metric.snapshot;
       assert.equal(
@@ -42,6 +46,18 @@ describe("QueueMetrics", () => {
       );
       assert.equal(findMetricValue(snapshots, metricNames.runtimeQueueDepth, attributes), 2);
       assert.equal(findMetricValue(snapshots, metricNames.runtimeQueueHighWater, attributes), 3);
+      assert.equal(
+        findMetricValue(snapshots, metricNames.runtimeQueueCoalescedTotal, attributes),
+        2,
+      );
+      assert.equal(
+        findMetricValue(snapshots, metricNames.runtimeQueueOverflowsTotal, attributes),
+        1,
+      );
+      assert.equal(
+        findMetricValue(snapshots, metricNames.runtimeQueueRecoveriesTotal, attributes),
+        1,
+      );
 
       yield* metrics.reset;
       const resetSnapshots = yield* Metric.snapshot;

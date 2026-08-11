@@ -1,5 +1,6 @@
 import type { OrchestrationEvent } from "@ryco/contracts";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
+import { losslessBackpressureQueuePolicy } from "@ryco/shared/QueuePolicy";
 import { Cause, Effect, Layer, Stream } from "effect";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -74,7 +75,13 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processThreadDeletedSafely);
+  const worker = yield* makeDrainableWorker({
+    policy: losslessBackpressureQueuePolicy({
+      component: "ThreadDeletionReactor",
+      capacity: 128,
+    }),
+    process: processThreadDeletedSafely,
+  });
 
   const start: ThreadDeletionReactorShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(

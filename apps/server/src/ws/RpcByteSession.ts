@@ -133,7 +133,7 @@ export function makeRpcByteSession<Rpcs extends Rpc.Any, E, R>(
       return yield* Effect.die(new Error("RPC byte session capacity is invalid."));
     }
     const incoming = yield* Queue.dropping<Uint8Array>(capacity);
-    const disconnects = yield* Queue.unbounded<number>();
+    const disconnects = yield* Queue.sliding<number>(1);
     const parser = RpcSerialization.json.makeUnsafe();
     // Reassembles messages the peer had to split because they exceeded the
     // relay data-frame limit. An unchunked payload passes straight through, so

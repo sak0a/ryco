@@ -3,6 +3,7 @@ import { describe, expect } from "vite-plus/test";
 import { Deferred, Effect } from "effect";
 
 import { makeDrainableWorker } from "./DrainableWorker.ts";
+import { losslessBackpressureQueuePolicy } from "./QueuePolicy.ts";
 
 describe("makeDrainableWorker", () => {
   it.live("waits for work enqueued during active processing before draining", () =>
@@ -14,21 +15,26 @@ describe("makeDrainableWorker", () => {
         const secondStarted = yield* Deferred.make<void>();
         const releaseSecond = yield* Deferred.make<void>();
 
-        const worker = yield* makeDrainableWorker((item: string) =>
-          Effect.gen(function* () {
-            if (item === "first") {
-              yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.orDie);
-              yield* Deferred.await(releaseFirst);
-            }
-
-            if (item === "second") {
-              yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.orDie);
-              yield* Deferred.await(releaseSecond);
-            }
-
-            processed.push(item);
+        const worker = yield* makeDrainableWorker({
+          policy: losslessBackpressureQueuePolicy({
+            component: "drainable-worker-test",
+            capacity: 2,
           }),
-        );
+          process: (item: string) =>
+            Effect.gen(function* () {
+              if (item === "first") {
+                yield* Deferred.succeed(firstStarted, undefined).pipe(Effect.orDie);
+                yield* Deferred.await(releaseFirst);
+              }
+
+              if (item === "second") {
+                yield* Deferred.succeed(secondStarted, undefined).pipe(Effect.orDie);
+                yield* Deferred.await(releaseSecond);
+              }
+
+              processed.push(item);
+            }),
+        });
 
         yield* worker.enqueue("first");
         yield* Deferred.await(firstStarted);
@@ -50,6 +56,50 @@ describe("makeDrainableWorker", () => {
         yield* Deferred.await(drained);
 
         expect(processed).toEqual(["first", "second"]);
+        expect(yield* worker.metrics).toMatchObject({
+          component: "drainable-worker-test",
+          capacity: 2,
+          depth: 0,
+          highWaterMark: 2,
+        });
+      }),
+    ),
+  );
+
+  it.live("backpressures admission when capacity is exhausted", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstStarted = yield* Deferred.make<void>();
+        const releaseFirst = yield* Deferred.make<void>();
+        const thirdAdmitted = yield* Deferred.make<void>();
+        const worker = yield* makeDrainableWorker({
+          policy: losslessBackpressureQueuePolicy({
+            component: "bounded-test",
+            capacity: 1,
+          }),
+          process: (item: number) =>
+            item === 1
+              ? Deferred.succeed(firstStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseFirst)),
+                )
+              : Effect.void,
+        });
+
+        yield* worker.enqueue(1);
+        yield* Deferred.await(firstStarted);
+        yield* worker.enqueue(2);
+        yield* Effect.forkChild(
+          worker
+            .enqueue(3)
+            .pipe(Effect.andThen(Deferred.succeed(thirdAdmitted, undefined)), Effect.asVoid),
+        );
+        yield* Effect.yieldNow;
+        expect(yield* Deferred.isDone(thirdAdmitted)).toBe(false);
+
+        yield* Deferred.succeed(releaseFirst, undefined);
+        yield* Deferred.await(thirdAdmitted);
+        yield* worker.drain;
+        expect((yield* worker.metrics).highWaterMark).toBe(2);
       }),
     ),
   );

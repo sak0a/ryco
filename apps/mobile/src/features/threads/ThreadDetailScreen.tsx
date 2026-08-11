@@ -436,16 +436,8 @@ export function ThreadDetailScreen(props: {
     }
   };
 
-  // The running fold shows a live timer, so it needs a clock that advances. One
-  // interval for the whole screen, and only while something is actually running.
   const runningTurnId =
     thread?.latestTurn?.state === "running" ? (thread.latestTurn.turnId ?? null) : null;
-  const [nowIso, setNowIso] = useState(() => new Date().toISOString());
-  useEffect(() => {
-    if (runningTurnId === null) return;
-    const timer = setInterval(() => setNowIso(new Date().toISOString()), 1000);
-    return () => clearInterval(timer);
-  }, [runningTurnId]);
 
   const timelineRows = useMemo(
     () =>
@@ -453,9 +445,12 @@ export function ThreadDetailScreen(props: {
         entries: built?.timeline ?? [],
         runningTurnId,
         expandedFoldIds,
-        now: nowIso,
+        // Running folds deliberately use a stable "Working…" label. Sampling
+        // the clock only when the timeline changes avoids rebuilding the whole
+        // virtualized list every second for a duration that is not displayed.
+        now: new Date().toISOString(),
       }),
-    [built?.timeline, expandedFoldIds, nowIso, runningTurnId],
+    [built?.timeline, expandedFoldIds, runningTurnId],
   );
 
   const renderItem = ({ item }: LegendListRenderItemProps<ThreadTimelineRow>) =>

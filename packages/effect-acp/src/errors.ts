@@ -47,6 +47,18 @@ export class AcpTransportError extends Schema.TaggedError<AcpTransportError>()(
   },
 ) {}
 
+export class AcpProtocolOverloadedError extends Schema.TaggedError<AcpProtocolOverloadedError>()(
+  "AcpProtocolOverloadedError",
+  {
+    queue: Schema.String,
+    capacity: Schema.Number,
+  },
+) {
+  override get message() {
+    return `ACP protocol queue ${this.queue} exceeded its bounded capacity (${this.capacity})`;
+  }
+}
+
 export class AcpRequestError extends Schema.TaggedError<AcpRequestError>()("AcpRequestError", {
   code: AcpSchema.ErrorCode,
   errorMessage: Schema.String,
@@ -133,6 +145,7 @@ export const AcpError = Schema.Union([
   AcpSpawnError,
   AcpProcessExitedError,
   AcpProtocolParseError,
+  AcpProtocolOverloadedError,
   AcpTransportError,
 ]);
 

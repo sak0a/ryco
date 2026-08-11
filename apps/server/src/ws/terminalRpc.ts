@@ -1,9 +1,32 @@
-import { Effect, Queue, Stream } from "effect";
-import { type TerminalEvent, WS_METHODS } from "@ryco/contracts";
+import { Cause, Effect, Queue, Stream } from "effect";
+import { type TerminalEvent, TerminalSubscriptionResyncError, WS_METHODS } from "@ryco/contracts";
 
 import { observeRpcEffect, observeRpcStream } from "../observability/RpcInstrumentation.ts";
 import { recordServerPerfPayload } from "../observability/PerfInstrumentation.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
+
+const TERMINAL_SUBSCRIBER_CAPACITY = 256;
+
+export function makeTerminalSubscriberOffer(
+  queue: Queue.Queue<TerminalEvent, TerminalSubscriptionResyncError | Cause.Done<void>>,
+  capacity = TERMINAL_SUBSCRIBER_CAPACITY,
+) {
+  let overflowed = false;
+  return (event: TerminalEvent) =>
+    Effect.gen(function* () {
+      if (overflowed) return;
+      recordServerPerfPayload("server.ws.terminal.events", event);
+      if (Queue.offerUnsafe(queue, event)) return;
+      overflowed = true;
+      yield* Queue.fail(
+        queue,
+        new TerminalSubscriptionResyncError({
+          reason: "slowConsumer",
+          capacity,
+        }),
+      );
+    });
+}
 
 export const makeTerminalHandlers = (ctx: WsRpcContext) => {
   const { ownerEffect, ownerStream, terminalManager } = ctx;
@@ -62,35 +85,32 @@ export const makeTerminalHandlers = (ctx: WsRpcContext) => {
         WS_METHODS.subscribeTerminalEvents,
         ownerStream(
           WS_METHODS.subscribeTerminalEvents,
-          Stream.callback<TerminalEvent>((queue) =>
-            Effect.acquireRelease(
-              Effect.gen(function* () {
-                const unsubscribe = yield* terminalManager.subscribe((event) =>
-                  Effect.gen(function* () {
-                    recordServerPerfPayload("server.ws.terminal.events", event);
-                    yield* Queue.offer(queue, event);
-                  }),
-                );
-                const snapshots = yield* terminalManager.listSessions;
-                yield* Effect.forEach(
-                  snapshots.filter((snapshot) => snapshot.status === "running"),
-                  (snapshot) => {
-                    const event: TerminalEvent = {
-                      type: "started",
-                      threadId: snapshot.threadId,
-                      terminalId: snapshot.terminalId,
-                      createdAt: new Date().toISOString(),
-                      snapshot,
-                    };
-                    recordServerPerfPayload("server.ws.terminal.events", event);
-                    return Queue.offer(queue, event);
-                  },
-                  { discard: true },
-                );
-                return unsubscribe;
-              }),
-              (unsubscribe) => Effect.sync(unsubscribe),
-            ),
+          Stream.callback<TerminalEvent, TerminalSubscriptionResyncError>(
+            (queue) =>
+              Effect.acquireRelease(
+                Effect.gen(function* () {
+                  const offerEvent = makeTerminalSubscriberOffer(queue);
+                  const unsubscribe = yield* terminalManager.subscribe(offerEvent);
+                  const snapshots = yield* terminalManager.listSessions;
+                  yield* Effect.forEach(
+                    snapshots.filter((snapshot) => snapshot.status === "running"),
+                    (snapshot) => {
+                      const event: TerminalEvent = {
+                        type: "started",
+                        threadId: snapshot.threadId,
+                        terminalId: snapshot.terminalId,
+                        createdAt: new Date().toISOString(),
+                        snapshot,
+                      };
+                      return offerEvent(event);
+                    },
+                    { discard: true },
+                  );
+                  return unsubscribe;
+                }),
+                (unsubscribe) => Effect.sync(unsubscribe),
+              ),
+            { bufferSize: TERMINAL_SUBSCRIBER_CAPACITY, strategy: "dropping" },
           ),
         ),
         { "rpc.aggregate": "terminal" },

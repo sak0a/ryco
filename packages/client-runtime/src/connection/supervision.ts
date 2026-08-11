@@ -27,6 +27,7 @@ import { createThreadHistoryPaginationController } from "./threadHistoryPaginati
 const NOOP = () => undefined;
 const THREAD_DETAIL_SUBSCRIPTION_IDLE_EVICTION_MS = 5 * 60 * 1000;
 const MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS = 32;
+const MAX_CACHED_THREAD_DETAIL_ESTIMATED_BYTES = 12 * 1024 * 1024;
 const BROWSER_RESUME_RECONNECT_COOLDOWN_MS = 2_000;
 const SAVED_ENVIRONMENT_STARTUP_DELAY_MS = 2500;
 const SAVED_ENVIRONMENT_CONNECT_CONCURRENCY = 2;
@@ -102,6 +103,7 @@ type ThreadDetailSubscriptionEntry = {
   lastAccessedAt: number;
   evictionTimeoutId: ReturnType<typeof setTimeout> | null;
   protocol: "bounded" | "legacy";
+  estimatedRetainedBytes: number;
 };
 
 export interface EnvironmentConnectionSupervisor {
@@ -200,6 +202,22 @@ export function createEnvironmentConnectionSupervisor<
   };
   const keyFor = (environmentId: EnvironmentId, threadId: ThreadId) =>
     scopedThreadKey(scopeThreadRef(environmentId, threadId));
+  const estimateRetainedBytes = (value: unknown): number => {
+    try {
+      return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    } catch {
+      return 0;
+    }
+  };
+  const recordRetainedSnapshot = (entry: ThreadDetailSubscriptionEntry, snapshot: unknown) => {
+    entry.estimatedRetainedBytes = estimateRetainedBytes(snapshot);
+  };
+  const recordRetainedEvent = (entry: ThreadDetailSubscriptionEntry, event: unknown) => {
+    entry.estimatedRetainedBytes = Math.min(
+      MAX_CACHED_THREAD_DETAIL_ESTIMATED_BYTES,
+      entry.estimatedRetainedBytes + estimateRetainedBytes(event),
+    );
+  };
   const clearEviction = (entry: ThreadDetailSubscriptionEntry) => {
     if (entry.evictionTimeoutId !== null) {
       input.clearTimeout(entry.evictionTimeoutId);
@@ -229,8 +247,14 @@ export function createEnvironmentConnectionSupervisor<
         ? query(request)
         : Promise.reject(new Error("Thread history pagination is unavailable"));
     },
-    apply: (environmentId, threadId, page) =>
-      input.syncThreadHistoryPage?.(environmentId, threadId, page),
+    apply: (environmentId, threadId, page) => {
+      input.syncThreadHistoryPage?.(environmentId, threadId, page);
+      const entry = threadDetailSubscriptions.get(keyFor(environmentId, threadId));
+      if (entry) {
+        recordRetainedEvent(entry, page);
+        evictToCapacity();
+      }
+    },
     setRequestState: (requestState) => input.setThreadHistoryRequestState?.(requestState),
     recoverStale: async (scope) => {
       const query = require(scope.environmentId).client.orchestration.getThreadWindow;
@@ -243,6 +267,11 @@ export function createEnvironmentConnectionSupervisor<
         input.syncThreadWindowSnapshot(scope.environmentId, snapshot);
       } else {
         input.syncThreadDetailSnapshot(scope.environmentId, snapshot);
+      }
+      const entry = threadDetailSubscriptions.get(keyFor(scope.environmentId, scope.threadId));
+      if (entry) {
+        recordRetainedSnapshot(entry, snapshot);
+        evictToCapacity();
       }
     },
   });
@@ -270,9 +299,13 @@ export function createEnvironmentConnectionSupervisor<
         (item) => {
           if (item.kind === "snapshot") {
             historyPagination.beginSnapshot(scope);
+            recordRetainedSnapshot(entry, item.snapshot);
+            evictToCapacity();
             input.syncThreadDetailSnapshot(entry.environmentId, item.snapshot);
             return;
           }
+          recordRetainedEvent(entry, item.event);
+          evictToCapacity();
           input.applyThreadDetailEvent(entry.environmentId, item.event);
         },
       );
@@ -304,6 +337,8 @@ export function createEnvironmentConnectionSupervisor<
       (item) => {
         if (item.kind === "snapshot") {
           historyPagination.beginSnapshot(scope);
+          recordRetainedSnapshot(entry, item.snapshot);
+          evictToCapacity();
           if (input.syncThreadWindowSnapshot) {
             input.syncThreadWindowSnapshot(entry.environmentId, item.snapshot);
           } else {
@@ -311,6 +346,8 @@ export function createEnvironmentConnectionSupervisor<
           }
           return;
         }
+        recordRetainedEvent(entry, item.event);
+        evictToCapacity();
         input.applyThreadDetailEvent(entry.environmentId, item.event);
       },
       { onError: requestLegacy },
@@ -341,13 +378,29 @@ export function createEnvironmentConnectionSupervisor<
     return true;
   };
   const evictToCapacity = () => {
-    if (threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS) return;
+    let estimatedBytes = [...threadDetailSubscriptions.values()].reduce(
+      (total, entry) => total + entry.estimatedRetainedBytes,
+      0,
+    );
+    if (
+      threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS &&
+      estimatedBytes <= MAX_CACHED_THREAD_DETAIL_ESTIMATED_BYTES
+    ) {
+      return;
+    }
     const idle = [...threadDetailSubscriptions.entries()]
       .filter(([, entry]) => shouldEvict(entry))
       .toSorted(([, left], [, right]) => left.lastAccessedAt - right.lastAccessedAt);
     for (const [key] of idle) {
-      if (threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS) return;
+      if (
+        threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS &&
+        estimatedBytes <= MAX_CACHED_THREAD_DETAIL_ESTIMATED_BYTES
+      ) {
+        return;
+      }
+      const retainedBytes = threadDetailSubscriptions.get(key)?.estimatedRetainedBytes ?? 0;
       disposeByKey(key);
+      estimatedBytes = Math.max(0, estimatedBytes - retainedBytes);
     }
   };
   const reconcileEntry = (entry: ThreadDetailSubscriptionEntry) => {
@@ -423,6 +476,7 @@ export function createEnvironmentConnectionSupervisor<
       lastAccessedAt: input.now(),
       evictionTimeoutId: null,
       protocol: "bounded" as const,
+      estimatedRetainedBytes: 0,
     };
     if (!existing) threadDetailSubscriptions.set(key, entry);
     clearEviction(entry);

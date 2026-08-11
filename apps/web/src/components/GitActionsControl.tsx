@@ -92,6 +92,8 @@ import { refreshGitStatus, useGitStatus } from "~/lib/gitStatusState";
 import { useSourceControlDiscovery } from "~/lib/sourceControlDiscoveryState";
 import { hasNoShortcutModifiers } from "~/keybindings";
 import { newCommandId, randomUUID } from "~/lib/utils";
+import { createVisibilityAwarePoller } from "~/lib/visibilityPolling";
+import { webAppLifecycle } from "~/platform/appLifecycle";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { ensureEnvironmentApi, readEnvironmentApi } from "~/environmentApi";
@@ -1303,13 +1305,17 @@ export default function GitActionsControl({
       return;
     }
 
-    const interval = window.setInterval(() => {
-      updateActiveProgressToast();
-    }, 1000);
+    const poller = createVisibilityAwarePoller({
+      lifecycle: webAppLifecycle,
+      run: () => {
+        updateActiveProgressToast();
+        return Promise.resolve();
+      },
+      resolveDelayMs: () => 1_000,
+      runImmediately: false,
+    });
 
-    return () => {
-      window.clearInterval(interval);
-    };
+    return poller.stop;
   }, [activeGitActionProgressVersion, updateActiveProgressToast]);
 
   useEffect(() => {

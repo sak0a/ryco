@@ -135,6 +135,7 @@ import {
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
+  TerminalSubscriptionResyncError,
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
@@ -1336,7 +1337,7 @@ export const WsContextHandoffReadExportChunkRpc = Rpc.make(
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
-  error: AuthRpcError,
+  error: Schema.Union([AuthRpcError, TerminalSubscriptionResyncError]),
   stream: true,
 });
 

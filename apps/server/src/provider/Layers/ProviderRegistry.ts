@@ -191,7 +191,7 @@ export const ProviderRegistryLive = Layer.effect(
     // Aggregator PubSub — consumers (WS gateway, etc.) subscribe here for
     // coalesced updates across every instance.
     const changesPubSub = yield* Effect.acquireRelease(
-      PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
+      PubSub.sliding<ReadonlyArray<ServerProvider>>(1),
       PubSub.shutdown,
     );
 

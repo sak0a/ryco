@@ -117,12 +117,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   let commandReadModel = createEmptyReadModel(new Date().toISOString());
 
-  const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const commandQueue = yield* Queue.bounded<CommandEnvelope>(1_024);
   const commandQueueMetrics = yield* makeServerQueueMetrics({
     queue: "orchestration.command",
     component: "OrchestrationEngine",
   });
-  const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+  const eventPubSub = yield* PubSub.bounded<OrchestrationEvent>(4_096);
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -353,7 +353,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
+      const admissionStartedAtMs = Date.now();
       yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      yield* commandQueueMetrics.recordBlocked(Date.now() - admissionStartedAtMs);
       yield* commandQueueMetrics.recordEnqueued();
       return yield* Deferred.await(result);
     });

@@ -8,6 +8,7 @@ import {
   type TerminalSessionStatus,
 } from "@ryco/contracts";
 import { makeKeyedCoalescingWorker } from "@ryco/shared/KeyedCoalescingWorker";
+import { latestStateQueuePolicy } from "@ryco/shared/QueuePolicy";
 import {
   Effect,
   Deferred,
@@ -1120,6 +1121,10 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
       never,
       never
     >({
+      policy: latestStateQueuePolicy({
+        component: "TerminalManager.persistHistory",
+        capacity: 256,
+      }),
       merge: (current, next) => ({
         history: next.history,
         immediate: current.immediate || next.immediate,

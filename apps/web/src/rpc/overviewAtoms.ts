@@ -10,6 +10,8 @@ import { Atom } from "effect/unstable/reactivity";
 
 import { requireEnvironmentConnection } from "../environments/runtime";
 import { appAtomRegistry } from "@ryco/client-runtime/rpc";
+import { createVisibilityAwarePoller, type VisibilityAwarePoller } from "../lib/visibilityPolling";
+import { webAppLifecycle } from "../platform/appLifecycle";
 import { invalidateScopes, subscribeInvalidationScope } from "./gitAtoms";
 
 // ---------------------------------------------------------------------------
@@ -92,7 +94,7 @@ const knownQueryKeys = new Set<string>();
 const queryStateAtoms = Atom.family((key: string) => {
   knownQueryKeys.add(key);
   return Atom.make(INITIAL_QUERY_STATE).pipe(
-    Atom.keepAlive,
+    Atom.setIdleTTL(120_000),
     Atom.withLabel(`overview-query:${key}`),
   );
 });
@@ -114,7 +116,7 @@ interface QueryController {
   subscriberCount: number;
   token: number;
   lastFetchedAt: number;
-  timer: ReturnType<typeof setTimeout> | null;
+  poller: VisibilityAwarePoller | null;
   invalidationUnsub: () => void;
 }
 
@@ -136,28 +138,6 @@ function setQueryState(key: string, next: OverviewQueryState<unknown>): void {
     return;
   }
   appAtomRegistry.set(atom, next);
-}
-
-function clearQueryTimer(controller: QueryController): void {
-  if (controller.timer !== null) {
-    clearTimeout(controller.timer);
-    controller.timer = null;
-  }
-}
-
-function scheduleNextQueryFetch(controller: QueryController): void {
-  clearQueryTimer(controller);
-  if (controller.subscriberCount <= 0) {
-    return;
-  }
-  const interval = controller.spec.resolveIntervalMs(getQueryState(controller.spec.key).data);
-  if (interval === false || interval <= 0) {
-    return;
-  }
-  controller.timer = setTimeout(() => {
-    controller.timer = null;
-    void runQueryFetch(controller);
-  }, interval);
 }
 
 async function runQueryFetch(controller: QueryController): Promise<void> {
@@ -188,10 +168,6 @@ async function runQueryFetch(controller: QueryController): Promise<void> {
       isLoading: false,
       isFetching: false,
     });
-  } finally {
-    if (token === controller.token) {
-      scheduleNextQueryFetch(controller);
-    }
   }
 }
 
@@ -201,9 +177,7 @@ function watchOverviewQuery(spec: QuerySpec): () => void {
     existing.spec = spec;
     existing.subscriberCount += 1;
     if (Date.now() - existing.lastFetchedAt >= spec.staleTimeMs) {
-      void runQueryFetch(existing);
-    } else {
-      scheduleNextQueryFetch(existing);
+      void existing.poller?.refresh();
     }
     return () => unwatchOverviewQuery(spec.key);
   }
@@ -213,14 +187,20 @@ function watchOverviewQuery(spec: QuerySpec): () => void {
     subscriberCount: 1,
     token: 0,
     lastFetchedAt: 0,
-    timer: null,
+    poller: null,
     invalidationUnsub: NOOP,
   };
   queryControllers.set(spec.key, controller);
   controller.invalidationUnsub = subscribeInvalidationScope(spec.scope, () => {
-    void runQueryFetch(controller);
+    void controller.poller?.refresh();
   });
-  void runQueryFetch(controller);
+  controller.poller = createVisibilityAwarePoller({
+    lifecycle: webAppLifecycle,
+    run: () => runQueryFetch(controller),
+    resolveDelayMs: () =>
+      controller.spec.resolveIntervalMs(getQueryState(controller.spec.key).data),
+    jitterRatio: 0.05,
+  });
   return () => unwatchOverviewQuery(spec.key);
 }
 
@@ -233,7 +213,7 @@ function unwatchOverviewQuery(key: string): void {
   if (controller.subscriberCount > 0) {
     return;
   }
-  clearQueryTimer(controller);
+  controller.poller?.stop();
   controller.invalidationUnsub();
   controller.token += 1;
   queryControllers.delete(key);
@@ -489,7 +469,7 @@ const knownWorkflowRunJobsKeys = new Set<string>();
 const workflowRunJobsStateAtoms = Atom.family((key: string) => {
   knownWorkflowRunJobsKeys.add(key);
   return Atom.make(EMPTY_WORKFLOW_RUN_JOBS_MAP).pipe(
-    Atom.keepAlive,
+    Atom.setIdleTTL(120_000),
     Atom.withLabel(`overview-workflow-run-jobs:${key}`),
   );
 });
@@ -503,7 +483,8 @@ interface WorkflowRunJobsController {
   runIds: ReadonlyArray<string>;
   activeRunId: string | null;
   readonly tokensByRun: Map<string, number>;
-  timer: ReturnType<typeof setTimeout> | null;
+  readonly inFlightByRun: Map<string, Promise<void>>;
+  poller: VisibilityAwarePoller | null;
   invalidationUnsub: () => void;
 }
 
@@ -524,7 +505,7 @@ function setWorkflowRunJobsEntry(key: string, runId: string, entry: WorkflowRunJ
   appAtomRegistry.set(workflowRunJobsStateAtoms(key), next);
 }
 
-async function fetchWorkflowRunJobs(
+async function fetchWorkflowRunJobsNow(
   controller: WorkflowRunJobsController,
   runId: string,
 ): Promise<void> {
@@ -565,25 +546,18 @@ async function fetchWorkflowRunJobs(
   }
 }
 
-function clearWorkflowRunJobsTimer(controller: WorkflowRunJobsController): void {
-  if (controller.timer !== null) {
-    clearTimeout(controller.timer);
-    controller.timer = null;
+function fetchWorkflowRunJobs(controller: WorkflowRunJobsController, runId: string): Promise<void> {
+  const existing = controller.inFlightByRun.get(runId);
+  if (existing) {
+    return existing;
   }
-}
-
-function scheduleActiveWorkflowRunJobsPoll(controller: WorkflowRunJobsController): void {
-  clearWorkflowRunJobsTimer(controller);
-  if (controller.subscriberCount <= 0 || controller.activeRunId === null) {
-    return;
-  }
-  const activeRunId = controller.activeRunId;
-  controller.timer = setTimeout(() => {
-    controller.timer = null;
-    void fetchWorkflowRunJobs(controller, activeRunId).finally(() => {
-      scheduleActiveWorkflowRunJobsPoll(controller);
-    });
-  }, ACTIVE_WORKFLOW_RUN_JOBS_REFETCH_INTERVAL_MS);
+  const promise = fetchWorkflowRunJobsNow(controller, runId).finally(() => {
+    if (controller.inFlightByRun.get(runId) === promise) {
+      controller.inFlightByRun.delete(runId);
+    }
+  });
+  controller.inFlightByRun.set(runId, promise);
+  return promise;
 }
 
 function ensureWorkflowRunJobsFetched(controller: WorkflowRunJobsController): void {
@@ -642,7 +616,8 @@ export function watchOverviewWorkflowRunJobs(target: OverviewWorkflowRunJobsTarg
       runIds: [],
       activeRunId: null,
       tokensByRun: new Map(),
-      timer: null,
+      inFlightByRun: new Map(),
+      poller: null,
       invalidationUnsub: NOOP,
     };
     workflowRunJobsControllers.set(key, controller);
@@ -655,13 +630,29 @@ export function watchOverviewWorkflowRunJobs(target: OverviewWorkflowRunJobsTarg
         void fetchWorkflowRunJobs(activeController, runId);
       }
     });
+    const createdController = controller;
+    controller.poller = createVisibilityAwarePoller({
+      lifecycle: webAppLifecycle,
+      run: () => {
+        const activeRunId = createdController.activeRunId;
+        return activeRunId === null
+          ? Promise.resolve()
+          : fetchWorkflowRunJobs(createdController, activeRunId);
+      },
+      resolveDelayMs: () =>
+        createdController.activeRunId === null
+          ? false
+          : ACTIVE_WORKFLOW_RUN_JOBS_REFETCH_INTERVAL_MS,
+      runImmediately: false,
+      jitterRatio: 0.05,
+    });
   }
 
   controller.subscriberCount += 1;
   controller.runIds = [...target.runIds];
   controller.activeRunId = target.activeRunId;
   ensureWorkflowRunJobsFetched(controller);
-  scheduleActiveWorkflowRunJobsPoll(controller);
+  void controller.poller?.refresh();
 
   return () => unwatchOverviewWorkflowRunJobs(key);
 }
@@ -675,7 +666,7 @@ function unwatchOverviewWorkflowRunJobs(key: string): void {
   if (controller.subscriberCount > 0) {
     return;
   }
-  clearWorkflowRunJobsTimer(controller);
+  controller.poller?.stop();
   controller.invalidationUnsub();
   workflowRunJobsControllers.delete(key);
 }
@@ -718,13 +709,13 @@ export function selectOverviewWorkflowRunJobs(
 
 export function clearOverviewAtomState(): void {
   for (const controller of queryControllers.values()) {
-    clearQueryTimer(controller);
+    controller.poller?.stop();
     controller.invalidationUnsub();
     controller.token += 1;
   }
   queryControllers.clear();
   for (const controller of workflowRunJobsControllers.values()) {
-    clearWorkflowRunJobsTimer(controller);
+    controller.poller?.stop();
     controller.invalidationUnsub();
   }
   workflowRunJobsControllers.clear();

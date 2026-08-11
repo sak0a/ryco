@@ -3,6 +3,7 @@ import { describe, expect } from "vite-plus/test";
 import { Deferred, Effect } from "effect";
 
 import { makeKeyedCoalescingWorker } from "./KeyedCoalescingWorker.ts";
+import { latestStateQueuePolicy } from "./QueuePolicy.ts";
 
 describe("makeKeyedCoalescingWorker", () => {
   it.live("waits for latest work enqueued during active processing before draining the key", () =>
@@ -15,6 +16,7 @@ describe("makeKeyedCoalescingWorker", () => {
         const releaseSecond = yield* Deferred.make<void>();
 
         const worker = yield* makeKeyedCoalescingWorker<string, string, never, never>({
+          policy: latestStateQueuePolicy({ component: "coalescing-test", capacity: 2 }),
           merge: (_current, next) => next,
           process: (key, value) =>
             Effect.gen(function* () {
@@ -52,6 +54,11 @@ describe("makeKeyedCoalescingWorker", () => {
         yield* Deferred.await(drained);
 
         expect(processed).toEqual(["terminal-1:first", "terminal-1:second"]);
+        expect(yield* worker.metrics).toMatchObject({
+          component: "coalescing-test",
+          coalescedCount: 1,
+          depth: 0,
+        });
       }),
     ),
   );
@@ -65,6 +72,7 @@ describe("makeKeyedCoalescingWorker", () => {
         const secondProcessed = yield* Deferred.make<void>();
 
         const worker = yield* makeKeyedCoalescingWorker<string, string, string, never>({
+          policy: latestStateQueuePolicy({ component: "failure-test", capacity: 2 }),
           merge: (_current, next) => next,
           process: (key, value) =>
             Effect.gen(function* () {
@@ -90,6 +98,7 @@ describe("makeKeyedCoalescingWorker", () => {
         yield* worker.drainKey("terminal-1");
 
         expect(processed).toEqual(["terminal-1:first", "terminal-1:second"]);
+        expect((yield* worker.metrics).recoveryCount).toBe(1);
       }),
     ),
   );

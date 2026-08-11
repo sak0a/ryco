@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { ThreadId } from "@ryco/contracts";
-import { RotatingFileSink } from "@ryco/shared/logging";
+import { AsyncRotatingFileSink } from "@ryco/shared/logging";
 import { Effect, SynchronizedRef } from "effect";
 
 import { toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
@@ -51,6 +51,8 @@ interface LoggerState {
 interface ThreadWriterState {
   readonly buffer: Array<string>;
   timer: ReturnType<typeof setTimeout> | undefined;
+  activeFlush: Promise<void> | undefined;
+  activeRecords: number;
   closed: boolean;
 }
 
@@ -123,7 +125,7 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
     try {
       return {
         ok: true as const,
-        sink: new RotatingFileSink({
+        sink: new AsyncRotatingFileSink({
           filePath: input.filePath,
           maxBytes: input.maxBytes,
           maxFiles: input.maxFiles,
@@ -151,6 +153,8 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
   const state: ThreadWriterState = {
     buffer: [],
     timer: undefined,
+    activeFlush: undefined,
+    activeRecords: 0,
     closed: false,
   };
 
@@ -161,29 +165,44 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
       maxQueueSize: input.maxQueueSize,
     });
 
-  const flushBufferedSync = () => {
+  const flushBuffered = (): Promise<void> => {
     if (state.timer !== undefined) {
       clearTimeout(state.timer);
       state.timer = undefined;
     }
 
+    if (state.activeFlush) {
+      return state.activeFlush;
+    }
     if (state.buffer.length === 0) {
-      return;
+      return sink.flush();
     }
 
     const messages = state.buffer.splice(0, state.buffer.length);
-    try {
-      for (const message of messages) {
-        sink.write(message);
+    state.activeRecords = messages.length;
+    let operation: Promise<void>;
+    operation = (async () => {
+      try {
+        for (const message of messages) {
+          await sink.write(message);
+        }
+      } catch (error) {
+        runWarning(
+          logWarning("provider event log batch flush failed", {
+            filePath: input.filePath,
+            error,
+          }),
+        );
+      } finally {
+        state.activeRecords = 0;
+        state.activeFlush = undefined;
+        if (!state.closed && state.buffer.length > 0) {
+          scheduleFlush();
+        }
       }
-    } catch (error) {
-      runWarning(
-        logWarning("provider event log batch flush failed", {
-          filePath: input.filePath,
-          error,
-        }),
-      );
-    }
+    })();
+    state.activeFlush = operation;
+    return operation;
   };
 
   const scheduleFlush = () => {
@@ -191,7 +210,9 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
       return;
     }
 
-    state.timer = setTimeout(flushBufferedSync, input.batchWindowMs);
+    state.timer = setTimeout(() => {
+      void flushBuffered();
+    }, input.batchWindowMs);
     if (typeof state.timer === "object" && "unref" in state.timer) {
       state.timer.unref();
     }
@@ -202,7 +223,7 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
       return "queue_closed";
     }
 
-    if (state.buffer.length >= input.maxQueueSize) {
+    if (state.buffer.length + state.activeRecords >= input.maxQueueSize) {
       return "queue_full";
     }
 
@@ -211,9 +232,17 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
     return undefined;
   };
 
-  const closeSync = () => {
+  const closeAsync = async () => {
     state.closed = true;
-    flushBufferedSync();
+    if (state.timer !== undefined) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+    if (state.activeFlush) {
+      await state.activeFlush;
+    }
+    await flushBuffered();
+    await sink.flush();
   };
 
   const flushOnWriteFailure = (error: unknown) =>
@@ -232,9 +261,9 @@ const makeThreadWriter = Effect.fn("makeThreadWriter")(function* (input: {
       }
     });
 
-  const safelyClose = Effect.sync(() => {
+  const safelyClose = Effect.promise(async () => {
     try {
-      closeSync();
+      await closeAsync();
     } catch (error) {
       runWarning(
         logWarning("provider event log close failed", {

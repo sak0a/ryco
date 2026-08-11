@@ -54,7 +54,7 @@ export const makeManagedServerProvider = Effect.fn("makeManagedServerProvider")(
 }): Effect.fn.Return<ServerProviderShape, ServerSettingsError, Scope.Scope> {
   const refreshSemaphore = yield* Semaphore.make(1);
   const changesPubSub = yield* Effect.acquireRelease(
-    PubSub.unbounded<ServerProvider>(),
+    PubSub.sliding<ServerProvider>(1),
     PubSub.shutdown,
   );
   const initialSettings = yield* input.getSettings;
