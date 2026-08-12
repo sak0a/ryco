@@ -24,7 +24,6 @@ const ALL_ROUTES: readonly HubRoute[] = [
   { kind: "nodes-enroll" },
   { kind: "account", section: "overview" },
   { kind: "account", section: "security" },
-  { kind: "account", section: "email" },
   { kind: "account", section: "appearance" },
 ];
 
@@ -60,10 +59,10 @@ describe("hub routes", () => {
     expect(parseHubRoute("/account/nonsense")).toEqual({ kind: "account", section: "overview" });
   });
 
-  // The Hub server builds these three in mail bodies from its configured public
-  // origin (outboxEmailProvider.ts, publicPasswordService.ts,
-  // publicSignupService.ts). A mailed link and the page it lands on must be the
-  // same address.
+  // A compatible Hub builds these three in the mail it sends, from its
+  // configured public origin. They are a server contract: a mailed link and the
+  // page it lands on must be the same address, so changing one of these strings
+  // breaks every link already in someone's inbox.
   it("keeps the Hub server's mail pathnames verbatim", () => {
     expect(hubRoutePathname({ kind: "email-verification" })).toBe("/email-verification");
     expect(hubRoutePathname({ kind: "reset-password" })).toBe("/password-reset");

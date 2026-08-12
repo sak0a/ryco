@@ -306,11 +306,13 @@ describe("hosted connection controls", () => {
     expect(navigate).toHaveBeenCalledWith({ to: "/", replace: true });
   });
 
-  it("closes the desktop menu before opening account settings over it", async () => {
-    // The phone twin closes its sheet before `openSettings("account")` and says
-    // why. The desktop menu did not, so the modal settings dialog opened on top
+  it("closes the desktop menu before navigating to account settings", async () => {
+    // The phone twin closes its sheet before leaving for account settings and
+    // says why. The desktop menu did not, so the settings surface opened on top
     // of a still-open disclosure: two owners of one dismissal, and an Escape
     // that returns focus into a popover the user believes they already left.
+    // The destination is a Hub page now rather than a modal dialog; the menu
+    // must still close before the navigation.
     seedConnectedState();
     useHostedHubStore.setState({ transportStatus: "reconnecting", sessionStatus: "stale" });
     mounted = await render(<HostedNodeMenu />);
@@ -321,9 +323,8 @@ describe("hosted connection controls", () => {
     expect(disclosure!.open, "the menu did not open, so this proves nothing").toBe(true);
 
     await page.getByRole("button", { name: "Account" }).click();
-    expect(useSettingsDialogStore.getState().open).toBe(true);
-    expect(useSettingsDialogStore.getState().section).toBe("account");
-    expect(disclosure!.open, "the menu stayed open under the settings dialog").toBe(false);
+    expect(window.location.pathname).toBe("/account/security");
+    expect(disclosure!.open, "the menu stayed open behind the account page").toBe(false);
   });
 
   it("opens the phone connection sheet from the pill with the full bounded control set", async () => {

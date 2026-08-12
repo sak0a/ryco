@@ -62,15 +62,20 @@ describe("hosted settings capabilities", () => {
     expect(hostedSettingsSectionAllowed("security", "owner")).toBe(true);
   });
 
-  it("offers account management to every signed-in role, and only in the hosted client", () => {
-    // The account is the signed-in user's own, so unlike the node-scoped
-    // sections the answer does not wait on a fresh role snapshot.
-    expect(hostedSettingsSectionAllowed("account", null)).toBe(true);
-    expect(hostedSettingsSectionAllowed("account", "viewer")).toBe(true);
-    expect(hostedSettingsSectionAllowed("account", "owner")).toBe(true);
+  it("no longer offers account management from this dialog in the hosted client", () => {
+    // Account management is a Hub page now — `/account/*`, rendered by
+    // `components/hostedHub/HubAccountPage.tsx` — not tab one of a thirteen-tab
+    // IDE preferences modal. The gate stays closed for every role rather than
+    // being deleted, so a stale caller asking this dialog for the section is
+    // refused instead of being shown a section it no longer renders.
+    expect(hostedSettingsSectionAllowed("account", null)).toBe(false);
+    expect(hostedSettingsSectionAllowed("account", "viewer")).toBe(false);
+    expect(hostedSettingsSectionAllowed("account", "owner")).toBe(false);
 
-    expect(settingsSectionAvailable("account", true)).toBe(true);
+    // Unchanged: the standard (local-server) client has no Hub account at all,
+    // so the section does not exist there either.
     expect(settingsSectionAvailable("account", false)).toBe(false);
+    expect(settingsSectionAvailable("account", true)).toBe(true);
   });
 
   it("leaves every other section reachable in the standard client", () => {

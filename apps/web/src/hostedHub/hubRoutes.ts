@@ -44,7 +44,7 @@ import {
  * a search parameter or a history entry.
  */
 
-export type HubAccountSection = "overview" | "security" | "email" | "appearance";
+export type HubAccountSection = "overview" | "security" | "appearance";
 
 export type HubRoute =
   | { readonly kind: "sign-in" }
@@ -66,7 +66,6 @@ export const HUB_ROOT_PATHNAME = "/";
 const ACCOUNT_SECTION_BY_SUFFIX: Readonly<Record<string, HubAccountSection>> = Object.freeze({
   "": "overview",
   security: "security",
-  email: "email",
   appearance: "appearance",
 });
 
@@ -172,9 +171,7 @@ export function hubRouteTitle(route: HubRoute): string {
         ? "Account"
         : route.section === "security"
           ? "Security"
-          : route.section === "email"
-            ? "Email"
-            : "Appearance";
+          : "Appearance";
   }
 }
 

@@ -24,7 +24,6 @@ import {
   type RefObject,
 } from "react";
 
-import { LazySettingsDialogMount } from "../AppSidebarLayout";
 import { RootAppShell } from "../RootAppShell";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
@@ -39,7 +38,6 @@ import {
 import { Input, TOUCH_INPUT_CLASS_NAME } from "../ui/input";
 import { Label } from "../ui/label";
 import { Skeleton } from "../ui/skeleton";
-import { AnchoredToastProvider, ToastProvider } from "../ui/toast";
 import { formatRecoveryCodesForClipboard } from "../settings/AccountSettings.logic";
 import { useRelativeTimeTick } from "../settings/settingsLayout";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
@@ -65,7 +63,6 @@ import {
 import type { HostedHubNode } from "../../hostedHub/types";
 import { useHostedBrowserLifecycle } from "../../hostedHub/useHostedBrowserLifecycle";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
-import { useSettingsDialogStore } from "../../settingsDialogStore";
 import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredActions";
 import {
   HostedConnectionControl,
@@ -73,6 +70,7 @@ import {
   useHostedConnectionActions,
 } from "./HostedConnectionControls";
 import { HostedNodeDetail } from "./HostedNodeDetail";
+import { HubAccountPage } from "./HubAccountPage";
 import { HubGateway } from "./shell/HubGateway";
 import { HubPage } from "./shell/HubPage";
 import { HubShell } from "./shell/HubShell";
@@ -122,35 +120,24 @@ function consumeInitialEmailVerificationLink(): EmailVerificationLink | null {
   return pendingEmailVerificationLink;
 }
 
-/**
- * The chrome an authenticated hosted surface needs before a node is selected.
+/*
+ * `HostedEntryChrome` is gone, and with it the second `LazySettingsDialogMount`.
  *
- * `LazySettingsDialogMount` used to be rendered from exactly one place —
- * `AppSidebarLayout`, inside `RootAppShell` — which `HostedHubRoot` only ever
- * reaches at its last gate. A user with zero nodes, only offline nodes, or only
- * revoked nodes therefore could not open account settings at all: `openSettings`
- * is a global singleton and flipped silently against no mount.
+ * It existed because a hosted user with zero, offline or revoked nodes never
+ * reached `AppSidebarLayout` — the dialog's only other mount — and so could not
+ * open account settings at all: `openSettings` is a global singleton and
+ * flipped silently against no mount. Its toast providers were equally load
+ * bearing, because the two sections a node-less session could reach both raise
+ * toasts.
  *
- * The toast providers are required rather than decorative. `AppearanceSettings`
- * — one of the two sections a hosted session can reach before it has a node —
- * calls the module-level `toastManager` at five sites, and without a mounted
- * host those toasts queue and never render.
- *
- * **Invariant:** exactly one `LazySettingsDialogMount` exists at any moment. The
- * surfaces wrapped here and `RootAppShell` are opposite branches of the same
- * switch in `HostedHubRoot`, so they are mutually exclusive by construction.
- * Never add a third mount.
+ * Both needs are answered by construction now. Account and appearance are Hub
+ * *pages* (`HubAccountPage`), so nothing on a node-less surface opens the node
+ * app's settings dialog, and `HubShell` mounts the toast hosts for every
+ * signed-in Hub page. The dialog keeps exactly one mount, in `AppSidebarLayout`,
+ * reachable only from inside a node session where its node-scoped sections
+ * mean something — which makes the old "never add a third mount" invariant
+ * simply "there is one".
  */
-function HostedEntryChrome({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <ToastProvider>
-      <AnchoredToastProvider>
-        {children}
-        <LazySettingsDialogMount />
-      </AnchoredToastProvider>
-    </ToastProvider>
-  );
-}
 
 /**
  * Names the page in the title bar, browser history and password-manager
@@ -184,6 +171,7 @@ export function HostedHubRoot() {
   // tier shells mount no lifecycle listeners of their own.
   useHostedBrowserLifecycle();
   useHubDocumentTitle();
+  const hubRoute = useHubRoute();
 
   if (
     emailVerificationLink?.kind === "email-verification" ||
@@ -200,7 +188,7 @@ export function HostedHubRoot() {
     );
   }
 
-  // Not wrapped in `HostedEntryChrome`: there is no account to configure yet.
+  // No shell: there is no account to configure yet.
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
   // The post-bootstrap "save your codes" step owns the viewport because at that
   // point there is no shell to show it inside. Once a surface within the running
@@ -212,39 +200,27 @@ export function HostedHubRoot() {
   // over and puts them in front of the user rather than leaving the account
   // holding codes its owner never saw.
   //
-  // Also not wrapped in `HostedEntryChrome`: this is a one-shot secret display
-  // and nothing may compete with its acknowledgement.
+  // Owns the viewport unwrapped by any shell: this is a one-shot secret
+  // display and nothing may compete with its acknowledgement.
   if (recoveryCodes.length > 0 && !recoveryCodesLeased) return <RecoveryCodesSurface />;
+  // Account management is a Hub page, above the node gates: it is about the
+  // account rather than any node, so it is reachable with none selected, with
+  // one connecting, and from inside a node session.
+  if (hubRoute?.kind === "account") return <HubAccountPage section={hubRoute.section} />;
   if (!selectedNode) {
     // A routed node segment is pending fail-closed validation: keep the UI on
     // a read-only restoring surface instead of flashing the directory. The
     // orchestrator either selects the node or clears the segment.
     if (routedNode.nodeId !== null) {
-      return (
-        <HostedEntryChrome>
-          <HostedNodeRestoringSurface />
-        </HostedEntryChrome>
-      );
+      return <HostedNodeRestoringSurface />;
     }
-    return (
-      <HostedEntryChrome>
-        <HostedNodeDirectory />
-      </HostedEntryChrome>
-    );
+    return <HostedNodeDirectory />;
   }
   if (transportStatus === "terminal-failure") {
-    return (
-      <HostedEntryChrome>
-        <HostedNodeFailureSurface node={selectedNode} message={errorMessage} />
-      </HostedEntryChrome>
-    );
+    return <HostedNodeFailureSurface node={selectedNode} message={errorMessage} />;
   }
   if (!sessionEstablished) {
-    return (
-      <HostedEntryChrome>
-        <HostedNodeStartingSurface node={selectedNode} />
-      </HostedEntryChrome>
-    );
+    return <HostedNodeStartingSurface node={selectedNode} />;
   }
 
   // The hosted connection controls render inside the shell (workspace header
@@ -1114,7 +1090,6 @@ function HostedNodeDirectory() {
   const account = useHostedHubStore((state) => state.account);
   const selection = useHostedHubStore((state) => state.selectionStatus);
   const routeNotice = useHostedNodeRouteNotice();
-  const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const navigate = useNavigate();
   const isPhoneTier = usePresentationTier() === "phone";
   // Enrollment is a page, not a flag: `/nodes/enroll` survives a refresh and
@@ -1185,7 +1160,7 @@ function HostedNodeDirectory() {
       variant="ghost"
       className="min-h-11 flex-1"
       onClick={() => {
-        openSettings("account");
+        navigateHub({ kind: "account", section: "security" });
       }}
     >
       <UserRoundIcon aria-hidden /> Account
@@ -1242,7 +1217,7 @@ function HostedNodeDirectory() {
             variant="ghost"
             aria-label="Account settings"
             onClick={() => {
-              openSettings("account");
+              navigateHub({ kind: "account", section: "security" });
             }}
           >
             <UserRoundIcon aria-hidden />
