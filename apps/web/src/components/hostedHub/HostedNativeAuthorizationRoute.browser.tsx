@@ -48,6 +48,47 @@ afterEach(async () => {
 });
 
 describe("HostedNativeAuthorizationRoute", () => {
+  it("requires recovery-code acknowledgement before device consent", async () => {
+    const recoveryCode = "recovery-native-authorization-canary";
+    useHostedHubStore.setState({ recoveryCodes: [recoveryCode] });
+    vi.spyOn(hostedHubApi, "getNativeHandoffPresentation").mockResolvedValue({
+      status: "pending",
+      deviceLabel: "Phone",
+      expiresAt: Date.now() + 60_000,
+    });
+    const approve = vi.spyOn(hostedHubApi, "approveNativeHandoff");
+    const cancel = vi.spyOn(hostedHubApi, "cancelNativeHandoff");
+    const navigate = vi.fn();
+
+    mounted = await render(
+      <HostedNativeAuthorizationRoute handoffId={handoffId} navigate={navigate} />,
+    );
+
+    await expect
+      .element(page.getByRole("heading", { name: "Save your recovery codes" }))
+      .toBeVisible();
+    await expect.element(page.getByText(recoveryCode)).toBeVisible();
+    await expect
+      .element(page.getByRole("heading", { name: "Continue on this device?" }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Continue as Ada" }))
+      .not.toBeInTheDocument();
+    expect(approve).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+
+    await page.getByRole("button", { name: "I saved the codes" }).click();
+
+    await expect
+      .element(page.getByRole("heading", { name: "Continue on this device?" }))
+      .toBeVisible();
+    await expect.element(page.getByText(recoveryCode)).not.toBeInTheDocument();
+    expect(useHostedHubStore.getState().recoveryCodes).toEqual([]);
+    expect(approve).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("requires explicit consent and shows the exact account and requesting device", async () => {
     vi.spyOn(hostedHubApi, "getNativeHandoffPresentation").mockResolvedValue({
       status: "pending",
