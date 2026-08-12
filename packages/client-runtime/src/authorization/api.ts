@@ -1042,6 +1042,189 @@ export class HostedHubApi {
     return result;
   }
 
+  async startNativeIdentityEmail(
+    request: HostedIdentity.NativeIdentityEmailStartRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityEmailStartResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_EMAIL_START_PATH,
+      HostedIdentity.NativeIdentityEmailStartRequest,
+      HostedIdentity.NativeIdentityEmailStartResponse,
+      request,
+      signal,
+    );
+  }
+
+  async verifyNativeIdentityEmail(
+    request: HostedIdentity.NativeIdentityEmailVerifyRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityEmailVerifyResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_EMAIL_VERIFY_PATH,
+      HostedIdentity.NativeIdentityEmailVerifyRequest,
+      HostedIdentity.NativeIdentityEmailVerifyResponse,
+      request,
+      signal,
+    );
+  }
+
+  async claimNativeIdentityUsername(
+    request: HostedIdentity.NativeIdentitySignupUsernameRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentitySignupUsernameResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_SIGNUP_USERNAME_PATH,
+      HostedIdentity.NativeIdentitySignupUsernameRequest,
+      HostedIdentity.NativeIdentitySignupUsernameResponse,
+      request,
+      signal,
+    );
+  }
+
+  async finishNativeIdentitySignupWithPasskey(
+    request: HostedIdentity.NativeIdentitySignupPasskeyOptionsRequest & {
+      readonly idempotencyKey: HostedIdentity.NativeIdentitySignupPasskeyFinishRequest["idempotencyKey"];
+    },
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentitySignupFinishResponse> {
+    this.#requireBearerTransport();
+    const boundedRequest = decodeContract(
+      HostedIdentity.NativeIdentitySignupPasskeyFinishRequest,
+      { ...request, response: {} },
+      "invalid_request",
+    );
+    const activation = decodeContract(
+      HostedIdentity.NativeIdentitySignupPasskeyOptionsRequest,
+      {
+        attemptId: boundedRequest.attemptId,
+        activationSecret: boundedRequest.activationSecret,
+      },
+      "invalid_request",
+    );
+    const options = await this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_SIGNUP_PASSKEY_OPTIONS_PATH,
+      HostedIdentity.NativeIdentitySignupPasskeyOptionsRequest,
+      HostedIdentity.NativeIdentitySignupPasskeyOptionsResponse,
+      activation,
+      signal,
+    );
+    const response = await this.#passkeyCeremony.register(
+      validatePasskeyRegistrationOptions(options.options),
+      signal,
+    );
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_SIGNUP_PASSKEY_FINISH_PATH,
+      HostedIdentity.NativeIdentitySignupPasskeyFinishRequest,
+      HostedIdentity.NativeIdentitySignupFinishResponse,
+      { ...boundedRequest, response },
+      signal,
+    );
+  }
+
+  async finishNativeIdentitySignupWithPassword(
+    request: HostedIdentity.NativeIdentitySignupPasswordFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentitySignupFinishResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_SIGNUP_PASSWORD_FINISH_PATH,
+      HostedIdentity.NativeIdentitySignupPasswordFinishRequest,
+      HostedIdentity.NativeIdentitySignupFinishResponse,
+      request,
+      signal,
+    );
+  }
+
+  async startNativeIdentityPasswordLogin(
+    request: HostedIdentity.NativeIdentityPasswordStartRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityPasswordStartResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_PASSWORD_START_PATH,
+      HostedIdentity.NativeIdentityPasswordStartRequest,
+      HostedIdentity.NativeIdentityPasswordStartResponse,
+      request,
+      signal,
+    );
+  }
+
+  async finishNativeIdentityPasswordLogin(
+    request: HostedIdentity.NativeIdentityPasswordFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentitySessionResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_PASSWORD_FINISH_PATH,
+      HostedIdentity.NativeIdentityPasswordFinishRequest,
+      HostedIdentity.NativeIdentitySessionResponse,
+      request,
+      signal,
+    );
+  }
+
+  async signInNativeIdentityWithRecoveryCode(
+    request: HostedIdentity.NativeIdentityRecoveryCodeRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityRecoveryResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_RECOVERY_CODE_PATH,
+      HostedIdentity.NativeIdentityRecoveryCodeRequest,
+      HostedIdentity.NativeIdentityRecoveryResponse,
+      request,
+      signal,
+    );
+  }
+
+  async requestNativeIdentityPasswordReset(
+    request: HostedIdentity.NativeIdentityPasswordResetRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityPasswordResetResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_PASSWORD_RESET_REQUEST_PATH,
+      HostedIdentity.NativeIdentityPasswordResetRequest,
+      HostedIdentity.NativeIdentityPasswordResetResponse,
+      request,
+      signal,
+    );
+  }
+
+  async verifyNativeIdentityPasswordReset(
+    request: HostedIdentity.NativeIdentityPasswordResetVerifyRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityPasswordResetVerifyResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_PASSWORD_RESET_VERIFY_PATH,
+      HostedIdentity.NativeIdentityPasswordResetVerifyRequest,
+      HostedIdentity.NativeIdentityPasswordResetVerifyResponse,
+      request,
+      signal,
+    );
+  }
+
+  async finishNativeIdentityPasswordReset(
+    request: HostedIdentity.NativeIdentityPasswordResetFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityPasswordResetFinishResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH,
+      HostedIdentity.NativeIdentityPasswordResetFinishRequest,
+      HostedIdentity.NativeIdentityPasswordResetFinishResponse,
+      request,
+      signal,
+    );
+  }
+
+  async cancelNativeIdentityAttempt(
+    request: HostedIdentity.NativeIdentityAttemptCancelRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.NativeIdentityAttemptCancelResponse> {
+    return this.#nativeIdentityMutation(
+      HostedIdentity.NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH,
+      HostedIdentity.NativeIdentityAttemptCancelRequest,
+      HostedIdentity.NativeIdentityAttemptCancelResponse,
+      request,
+      signal,
+    );
+  }
+
   async switchActiveSpace(
     request: HostedIdentity.ActiveSpaceSwitchRequest,
     signal?: AbortSignal,
@@ -1302,6 +1485,30 @@ export class HostedHubApi {
 
   #requireBearerTransport(): void {
     if (!this.#isBearer) throw new HostedHubApiError("native_only_transport", 400);
+  }
+
+  async #nativeIdentityMutation<
+    RequestSchema extends Schema.Top,
+    ResponseSchema extends Schema.Top,
+  >(
+    pathname: string,
+    requestSchema: RequestSchema,
+    responseSchema: ResponseSchema,
+    request: RequestSchema["Type"],
+    signal?: AbortSignal,
+  ): Promise<ResponseSchema["Type"]> {
+    this.#requireBearerTransport();
+    const body = decodeContract(requestSchema, request, "invalid_request");
+    return decodeContract(
+      responseSchema,
+      await this.#request(pathname, {
+        method: "POST",
+        body,
+        dpop: "mint",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
   }
 
   async redeemInvitation(

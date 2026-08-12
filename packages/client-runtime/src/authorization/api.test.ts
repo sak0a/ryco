@@ -2690,3 +2690,265 @@ describe("HostedHubApi public hosted identity contracts", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
+
+describe("HostedHubApi native identity v2 transport", () => {
+  const opaque = "A".repeat(43);
+  const opaqueB = "B".repeat(43);
+  const opaqueC = "C".repeat(43);
+  const issuedAt = 1_752_710_400_000;
+  const expiresAt = issuedAt + 900_000;
+  const identity = {
+    account: {
+      id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
+      username: "ada_dev",
+      displayName: "Ada",
+      createdAt: issuedAt,
+      disabledAt: null,
+    },
+    session: {
+      id: "sess_aaaaaaaaaaaaaaaaaaaaaa",
+      accountId: "acct_aaaaaaaaaaaaaaaaaaaaaa",
+      activeSpaceId: "space_aaaaaaaaaaaaaaaaaaaaaa",
+      createdAt: issuedAt,
+      expiresAt: issuedAt + 86_400_000,
+      lastSeenAt: issuedAt,
+      revokedAt: null,
+      revocationReasonCode: null,
+    },
+    activeSpace: {
+      id: "space_aaaaaaaaaaaaaaaaaaaaaa",
+      kind: "personal",
+      displayName: "Ada's space",
+      role: "owner",
+    },
+    spaces: [
+      {
+        id: "space_aaaaaaaaaaaaaaaaaaaaaa",
+        kind: "personal",
+        displayName: "Ada's space",
+        role: "owner",
+      },
+    ],
+  } as const;
+  const completed = { status: "complete", identity, token: opaqueC } as const;
+  const signupCompleted = {
+    ...completed,
+    recoveryCodes: ["recovery-sensitive-canary"],
+  } as const;
+
+  it("uses mint DPoP for every native leg and leaves completion adoption to the platform owner", async () => {
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    const credentials = inMemoryBearerCredentials();
+    const { calls, service } = recordingDpopSigner();
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const pathname = new URL(String(input)).pathname;
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      switch (pathname) {
+        case "/api/auth/native/identity/email/start":
+          return response({
+            status: "accepted",
+            attemptId: "nident_aaaaaaaaaaaaaaaaaaaaaa",
+            attemptSecret: opaque,
+            resendAfterMs: 30_000,
+            issuedAt,
+            expiresAt,
+          });
+        case "/api/auth/native/identity/email/verify":
+          return response({
+            status: "new_account",
+            attemptId: "nident_aaaaaaaaaaaaaaaaaaaaaa",
+            activationSecret: opaqueB,
+            issuedAt,
+            expiresAt,
+          });
+        case "/api/auth/native/identity/signup/username":
+          return response({ status: "claimed" });
+        case "/api/auth/native/identity/signup/password/finish":
+          return response(signupCompleted);
+        case "/api/auth/native/identity/password/start":
+          return response({
+            status: "factor_required",
+            attemptId: "nlogin_aaaaaaaaaaaaaaaaaaaaaa",
+            attemptSecret: opaque,
+            factor: "email_code",
+            issuedAt,
+            expiresAt,
+          });
+        case "/api/auth/native/identity/password/finish":
+          return response(completed);
+        case "/api/auth/native/identity/recovery-code":
+          return response({ ...completed, recoveryCodes: ["rotated-recovery-canary"] });
+        case "/api/auth/native/identity/password-reset/request":
+          return response({
+            status: "accepted",
+            attemptId: "nreset_aaaaaaaaaaaaaaaaaaaaaa",
+            attemptSecret: opaque,
+            resendAfterMs: 30_000,
+            issuedAt,
+            expiresAt,
+          });
+        case "/api/auth/native/identity/password-reset/verify":
+          return response({
+            status: "verified",
+            attemptId: "nreset_aaaaaaaaaaaaaaaaaaaaaa",
+            resetSecret: opaqueB,
+            requiresTotp: false,
+            issuedAt,
+            expiresAt,
+          });
+        case "/api/auth/native/identity/password-reset/finish":
+          return response({ status: "complete" });
+        case "/api/auth/native/identity/attempt/cancel":
+          return response({ status: "cancelled" });
+        default:
+          throw new Error(`Unexpected native identity path: ${pathname}`);
+      }
+    });
+    const api = createBearerApi(service, credentials);
+
+    const started = await api.startNativeIdentityEmail({
+      email: "ada@example.test",
+      antiBotAssertion: "anti-bot-sensitive-canary",
+    } as never);
+    const verified = await api.verifyNativeIdentityEmail({
+      attemptId: started.attemptId,
+      attemptSecret: started.attemptSecret,
+      proof: { kind: "email_code", code: "123456" },
+    });
+    await api.claimNativeIdentityUsername({
+      attemptId: verified.attemptId,
+      activationSecret: verified.activationSecret,
+      username: "ada_dev",
+    } as never);
+    const signup = await api.finishNativeIdentitySignupWithPassword({
+      attemptId: verified.attemptId,
+      activationSecret: verified.activationSecret,
+      password: "password-sensitive-canary",
+      idempotencyKey: opaqueC,
+    });
+    const login = await api.startNativeIdentityPasswordLogin({
+      kind: "username",
+      username: "ada_dev",
+      password: "password-sensitive-canary",
+    } as never);
+    const sessionResult = await api.finishNativeIdentityPasswordLogin({
+      attemptId: login.attemptId,
+      attemptSecret: login.attemptSecret,
+      factor: login.factor,
+      code: "123456",
+    });
+    const recovered = await api.signInNativeIdentityWithRecoveryCode({
+      code: "recovery-sensitive-canary",
+      idempotencyKey: opaque,
+    } as never);
+    const reset = await api.requestNativeIdentityPasswordReset({ identifier: "ada_dev" } as never);
+    const resetVerified = await api.verifyNativeIdentityPasswordReset({
+      attemptId: reset.attemptId,
+      attemptSecret: reset.attemptSecret,
+      proof: { kind: "email_code", code: "123456" },
+    });
+    await api.finishNativeIdentityPasswordReset({
+      attemptId: resetVerified.attemptId,
+      resetSecret: resetVerified.resetSecret,
+      password: "new-password-sensitive-canary",
+      factor: { kind: "none" },
+    });
+    await api.cancelNativeIdentityAttempt({
+      attemptId: started.attemptId,
+      attemptSecret: started.attemptSecret,
+    });
+
+    expect(signup).toEqual(signupCompleted);
+    expect(sessionResult).toEqual(completed);
+    expect(recovered.recoveryCodes).toEqual(["rotated-recovery-canary"]);
+    expect(credentials.current()).toBeNull();
+    expect(api.hasSessionMaterial).toBe(false);
+    expect(requests.map(({ input }) => new URL(input).pathname)).toEqual([
+      "/api/auth/native/identity/email/start",
+      "/api/auth/native/identity/email/verify",
+      "/api/auth/native/identity/signup/username",
+      "/api/auth/native/identity/signup/password/finish",
+      "/api/auth/native/identity/password/start",
+      "/api/auth/native/identity/password/finish",
+      "/api/auth/native/identity/recovery-code",
+      "/api/auth/native/identity/password-reset/request",
+      "/api/auth/native/identity/password-reset/verify",
+      "/api/auth/native/identity/password-reset/finish",
+      "/api/auth/native/identity/attempt/cancel",
+    ]);
+    expect(calls).toHaveLength(requests.length);
+    expect(calls.every((call) => call.token === undefined)).toBe(true);
+    for (const request of requests) {
+      const headers = headersOf(request.init);
+      expect(headers.get("DPoP")).toMatch(/:no-ath$/);
+      expect(headers.get("Authorization")).toBeNull();
+      expect(headers.get("X-Ryco-CSRF")).toBeNull();
+      expect(request.init?.credentials).toBe("omit");
+      expect(request.init?.cache).toBe("no-store");
+    }
+  });
+
+  it("runs native signup passkey registration without adopting the returned token", async () => {
+    const requests: string[] = [];
+    const credentials = inMemoryBearerCredentials();
+    const { calls, service } = recordingDpopSigner();
+    const register = vi.fn(async () => ({ id: "passkey-response" }) as never);
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return requests.length === 1
+        ? response({ options: registrationOptions })
+        : response(signupCompleted);
+    });
+    const api = createBearerApi(service, credentials, { register });
+
+    await expect(
+      api.finishNativeIdentitySignupWithPasskey({
+        attemptId: "nident_aaaaaaaaaaaaaaaaaaaaaa",
+        activationSecret: opaqueB,
+        idempotencyKey: opaqueC,
+      } as never),
+    ).resolves.toEqual(signupCompleted);
+
+    expect(requests.map((input) => new URL(input).pathname)).toEqual([
+      "/api/auth/native/identity/signup/passkey/options",
+      "/api/auth/native/identity/signup/passkey/finish",
+    ]);
+    expect(register).toHaveBeenCalledOnce();
+    expect(calls.every((call) => call.token === undefined)).toBe(true);
+    expect(credentials.current()).toBeNull();
+  });
+
+  it("rejects cross-transport and malformed completion before changing existing credentials", async () => {
+    const browser = createApi();
+    const browserFetch = vi.fn(async () => response(completed));
+    globalThis.fetch = browserFetch;
+    await expect(
+      browser.finishNativeIdentityPasswordLogin({
+        attemptId: "nlogin_aaaaaaaaaaaaaaaaaaaaaa",
+        attemptSecret: opaque,
+        factor: "totp",
+        code: "123456",
+      } as never),
+    ).rejects.toMatchObject({ code: "native_only_transport" });
+    expect(browserFetch).not.toHaveBeenCalled();
+
+    const credentials = inMemoryBearerCredentials();
+    credentials.writeBearerToken?.("existing-token-sensitive-canary");
+    const { calls, service } = recordingDpopSigner();
+    globalThis.fetch = vi.fn(async () =>
+      response({ ...completed, identity: { ...identity, csrfToken: "csrf-must-not-survive" } }),
+    );
+    const native = createBearerApi(service, credentials);
+    await expect(
+      native.finishNativeIdentityPasswordLogin({
+        attemptId: "nlogin_aaaaaaaaaaaaaaaaaaaaaa",
+        attemptSecret: opaque,
+        factor: "totp",
+        code: "123456",
+      } as never),
+    ).rejects.toMatchObject({ code: "invalid_response" });
+    expect(credentials.current()).toBe("existing-token-sensitive-canary");
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.token).toBeUndefined();
+  });
+});
