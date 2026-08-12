@@ -1,350 +1,344 @@
-# Ryco Mobile Hub-First Onboarding Implementation Plan
+# Ryco Mobile Native Identity Blocker Implementation Plan
 
-**Goal:** Ship the approved first-run Hub selection, honest account-choice handoff, automatic
-callback completion, authorized-node summary, and browser recovery-code precedence fix without
-changing native handoff v1 or the private Hub.
+**Design:** `docs/superpowers/specs/2026-08-12-mobile-hub-first-onboarding-design.md`
 
-**Design spec:** `docs/superpowers/specs/2026-08-12-mobile-hub-first-onboarding-design.md`
+**Status:** design approved; ready for staged implementation
 
-**Status:** Ready for implementation
+**Public working branch:** `codex/mobile-hub-onboarding`
 
-**Execution:** Sequential and test-first, with a focused verification and commit boundary after
-each behavior slice.
+**Hub counterpart:** maintained separately in the Hub repository so private implementation and
+operational details never enter this public plan
 
-## Execution rules
+**Objective:** replace the current first-run sheet/browser handoff with an authoritative full-screen
+startup gate and a complete native Hub identity experience, while preserving browser identity v1,
+native passkey v1, direct-node authorization, and relay/E2EE boundaries.
 
-- Work only in the fresh `codex/mobile-hub-onboarding` worktree and leave unrelated worktrees and
-  the private Hub repository untouched.
-- Create the required repository-root `.env.local` from the owner-supplied development values,
-  verify it is ignored, and never stage or print its contents.
-- Never commit a deployment hostname, account detail, credential, callback, recovery code, or
-  operational identifier.
-- Add or update a failing focused test before each behavior change.
-- Keep React Native imports out of node-tested model modules. Manually inspect every changed
-  `.tsx` mount/focus effect because the mobile Node runner cannot render React Native.
-- Reuse `hostedHubController`, `hubProfile`, `hubCapability`, the direct catalog, the Hub node
-  model, and the safe reset plan. Do not create alternate auth, token, relay, or directory state.
-- Keep direct saved environments and direct credentials outside every Hub mutation.
-- Keep native handoff v1, Hub public pins, PKCE, DPoP, callback validation, and token adoption
-  unchanged.
-- Never run `bun test`; use package-scoped scripts.
-- Before every commit, run `git diff --check`, inspect the full staged diff, and verify that
-  `.env.local` and QA secrets are not staged.
+## Delivery topology
 
-## Task 0: Establish the implementation baseline
+This is three sequential delivery phases, not one deployable diff:
 
-**Files**
+1. **Public protocol/runtime PR.** Reuse the current public PR branch, remove the obsolete sheet
+   implementation, and land additive native identity v2 contracts plus reusable runtime methods.
+2. **Private Hub PR.** After the public contract commit is merged and reachable from public `main`,
+   update the Hub pin and implement v2 behind a dark capability.
+3. **Public mobile PR.** Branch from the merged public protocol revision only after the configured
+   Hub can advertise v2; implement and enable the root blocker there.
 
-- Create ignored repository-root `.env.local` only; do not stage it
+The mobile gate must not merge before the Hub dependency. The public contract package is canonical;
+Hub never copies schemas or fixtures. Public and private commits, reviews, evidence, and PR text stay
+separate.
 
-**Work**
+## Cross-cutting rules
 
-- Verify the branch starts from the latest intended `origin/main` plus the approved spec commit.
-- Create the development configuration through the existing environment-variable seams and prove
-  `git check-ignore` recognizes `.env.local`.
-- Install the pinned workspace with `bun install --frozen-lockfile`.
-- Record clean baseline results for mobile tests, mobile typecheck, the focused native-authorization
-  browser suite, and Expo development config.
-- Confirm the installed app/simulator baseline without performing account ceremonies.
+- Add a failing focused test before each behavior change and keep every checkpoint runnable.
+- Never run `bun test`; use `bun run test` or focused package scripts.
+- Use the Bun version pinned by the applicable repository and frozen installs.
+- Never commit a real Hub origin, private issue/deployment identifier, email, username tied to a
+  real account, password, TOTP/email/recovery code, DPoP proof, token, callback, provider assertion,
+  or private qualification evidence.
+- Keep `packages/contracts` schema-only and `packages/client-runtime` free of DOM, React Native,
+  Expo, and Node dependencies.
+- Preserve browser cookie/CSRF and native DPoP transports as disjoint API paths and response types.
+- Keep hosted and direct credentials independent. No hosted change touches the direct catalog or
+  direct SecretKV keys.
+- No software DPoP key fallback, embedded Hub login website, or generalized WebView.
+- Before every commit: run focused checks, `git diff --check`, inspect the staged diff, and scan for
+  secrets/private identifiers.
 
-**Verification**
+## Phase P — public protocol and runtime
+
+### P0 — Remove the superseded sheet implementation
+
+**Revert behavior introduced by these commits, in reverse order, without rewriting branch history:**
+
+- `92733a464` — onboarding form-sheet render fix
+- `088a2b53c` — sheet/browser onboarding documentation
+- `c0a51a384` — browser recovery-code consent change
+- `0b9d78fd6` — Hub-first sheet
+- `61004f936` — browser-handoff onboarding phases
+- `43d3f97d3` — sheet-driven Hub profile extraction
+- `174161fe3` — completion-preference onboarding model
+
+Use a single reviewed revert checkpoint. Retain the approved replacement design and this plan.
+After the revert, the branch diff against `origin/main` must contain no `OnboardingRouteScreen`,
+`FirstRunOnboardingCoordinator`, onboarding-progress KV, browser recovery-consent, or unrelated
+mobile documentation change.
+
+**Tests before/after:** existing mobile onboarding/route tests and the focused hosted native
+authorization browser test must return to the `origin/main` baseline.
+
+**Commit:** `revert: remove superseded onboarding sheet`
+
+### P1 — Extend the canonical capability and identity schemas
+
+**Modify:**
+
+- `packages/contracts/src/nativeHandoff.ts`
+- `packages/contracts/src/nativeHandoff.test.ts`
+- `packages/contracts/src/hostedIdentity.ts`
+- `packages/contracts/src/hostedIdentity.test.ts`
+
+**Work:**
+
+1. Extend the existing exact Hub capability document with an additive `nativeIdentity` member:
+   version 2, signup state, verified-email policy, primary credentials, login/recovery methods,
+   password-factor policy, reset support, and bounded anti-bot presentation.
+2. Keep native handoff v1 members unchanged so old clients continue to decode capability documents.
+   Update strict schema tests to prove supported additive v2 and reject partial/unknown policy.
+3. Add exact v2 native paths and strict request/response schemas for:
+   - email-first signup config/start/verify/username claim;
+   - signup passkey options/finish and password finish;
+   - identifier/email mailbox routing;
+   - password login start/finish;
+   - recovery-code login;
+   - password-reset request/verify/finish; and
+   - explicit attempt cancellation where server cleanup is required.
+4. Define a native identity/session projection that contains bounded public account/session/space
+   data plus one native token and optional recovery codes, and can never contain CSRF material.
+5. Preserve all browser v1 schemas and paths byte-for-byte except shared primitive extraction.
+6. Reject excess fields, browser/native response mixing, malformed identifiers/timestamps, invalid
+   method combinations, overlong provider payloads, and inconsistent account/session/space data.
+7. Add obvious canary values only inside negative decoder tests; never stringify a secret-bearing
+   schema in diagnostics.
+
+**Focused verification:**
+
+```sh
+bun run --cwd packages/contracts test -- src/nativeHandoff.test.ts src/hostedIdentity.test.ts
+bun run typecheck --filter=@ryco/contracts
+git diff --check
+```
+
+**Commit:** `feat(contracts): add native identity protocol v2`
+
+### P2 — Add transport-safe client-runtime methods
+
+**Add:**
+
+- `packages/client-runtime/src/authorization/nativeIdentity.ts`
+- `packages/client-runtime/src/authorization/nativeIdentity.test.ts`
+
+**Modify:**
+
+- `packages/client-runtime/src/authorization/api.ts`
+- `packages/client-runtime/src/authorization/api.test.ts`
+- `packages/client-runtime/src/authorization/index.ts`
+- `packages/client-runtime/src/authorization/types.ts` only for public, secret-free state types
+
+**Work:**
+
+1. Add `HostedHubApi` methods for every native v2 leg. Pre-session calls use `dpop: "mint"`, omit
+   credentials/cookies/Authorization/CSRF, and adopt no token during intermediate legs.
+2. Keep browser v1 methods cookie-only. Calling them in bearer mode still returns
+   `browser_only_transport`; native callers use distinct methods and paths.
+3. Decode a native completion fully before exposing it. Separate decoding proves a response cannot
+   substitute browser identity+CSRF for native token state or vice versa.
+4. Add a platform-neutral transaction coordinator for generations, exact origin, attempt expiry,
+   cancellation, idempotency keys, passkey ceremony delegation, and bounded secret-free phases.
+   It holds transient request secrets only for the duration of one call; mobile durable storage is
+   injected later and remains platform-owned.
+5. Return completion material to the platform transaction owner instead of writing the bearer token
+   directly. Mobile must durably journal recovery codes/token before normal credential adoption.
+6. Preserve the current `signIn()` system-browser/native-passkey compatibility behavior until the
+   later mobile PR explicitly calls v2. No startup behavior changes in this phase.
+7. Test exact DPoP mint mode, missing token/`ath`, request cancellation, stale generations, wrong
+   origin/attempt, strict completion decode, idempotent retry, malformed recovery sets, platform
+   passkey cancellation, and proof that malformed responses never replace credentials.
+
+**Focused verification:**
+
+```sh
+bun run --cwd packages/client-runtime test -- \
+  src/authorization/nativeIdentity.test.ts src/authorization/api.test.ts
+bun run typecheck --filter=@ryco/client-runtime
+git diff --check
+```
+
+**Commit:** `feat(client-runtime): add native identity v2 transport`
+
+### P3 — Public protocol documentation and PR gate
+
+**Modify as required:**
+
+- public mobile/auth documentation that currently describes only system-browser handoff
+- the approved design status after its written approval
+- this plan's checkpoint status
+
+**Work:**
+
+1. Document v2 as additive and disabled until advertised by a compatible Hub.
+2. Document cookie/DPoP separation, token adoption boundary, absence of mobile UI change, and future
+   mobile/Hub dependency order.
+3. Scan the entire PR diff for the old sheet/completion behavior and private deployment leakage.
+4. Run the proportional public gate; because this phase touches two shared packages, include their
+   complete tests/typechecks plus formatting/linting required by the root guidance.
+5. Push the public branch, update the existing draft PR to protocol/runtime scope, and wait for CI
+   and review. Do not begin the Hub pin until the resulting immutable commit is on public `main`.
+
+**Verification:**
 
 ```sh
 bun install --frozen-lockfile
+bun fmt
+bun run fmt:check
+bun lint
+bun typecheck
+bun run test
+git diff --check
+```
+
+**Commit:** `docs: document native identity v2 transport`
+
+## Phase M — mobile root blocker after Hub v2
+
+Create a fresh public branch/worktree from the merged protocol revision. Do not stack mobile UI on
+an unmerged Hub pin.
+
+### M0 — Prove dependency and record baseline
+
+- Prove the public v2 commit is reachable from public `main`.
+- Prove the Hub v2 commit/pin is merged and its configured test/staging capability can advertise
+  native identity v2 while public signup remains operator-controlled.
+- Install frozen dependencies and record clean mobile tests/typecheck/Expo config.
+- Confirm build configuration injects the official Hub and relying party without printing or
+  staging `.env.local`.
+
+### M1 — Implement the authoritative access model
+
+**Add:**
+
+- `apps/mobile/src/features/access/appAccessModel.ts`
+- `apps/mobile/src/features/access/appAccessModel.test.ts`
+- `apps/mobile/src/features/access/AppAccessGate.tsx`
+- focused access-gate integration tests using platform/runtime fakes
+
+**Modify:**
+
+- `apps/mobile/src/App.tsx`
+- `apps/mobile/src/Stack.tsx`
+- direct catalog hydration/controller seams only as required to expose credential-readable status
+- hosted session bootstrap only through existing shared runtime state
+
+**Remove:**
+
+- `apps/mobile/src/features/onboarding/FirstRunOnboardingCoordinator.tsx`
+- `apps/mobile/src/features/onboarding/firstRunCoordinatorModel.ts`
+- `apps/mobile/src/features/onboarding/onboardingProgress.ts`
+- the `Onboarding` workspace route and its sheet presentation
+
+**Work:**
+
+1. Derive `hydrating | locked | unlocked(hosted-session|direct-node|both)` solely from revalidated
+   hosted session and saved direct node with readable credential material.
+2. Mount either the locked navigator or workspace navigator, never both. Move workspace bootstrap
+   effects that could fetch protected data below the unlocked branch.
+3. Prove stored token/profile/former completion values cannot unlock, and sign-out/revocation/final
+   direct removal returns to locked state when appropriate.
+4. Queue at most one bounded workspace deep link while locked. Route auth/reset/direct-pair links
+   only into the blocker and resolve the workspace destination after unlock.
+
+**Commit:** `feat(mobile): gate startup on authoritative access`
+
+### M2 — Add secure identity transaction and completion journal
+
+**Add:**
+
+- `apps/mobile/src/features/identity/nativeIdentityTransaction.ts`
+- `apps/mobile/src/features/identity/nativeIdentityTransaction.test.ts`
+- `apps/mobile/src/features/identity/completionJournal.ts`
+- `apps/mobile/src/features/identity/completionJournal.test.ts`
+
+**Modify:**
+
+- `apps/mobile/src/platform/secretKv.ts`
+- `apps/mobile/src/platform/sessionCredentials.ts`
+- platform deep-link/privacy adapters as required
+
+**Work:**
+
+1. Persist only the approved versioned attempt record in dedicated SecretKV; exclude email,
+   password, TOTP/code, provider assertion, passkey payload, and raw mail token.
+2. Implement generation/origin/attempt fences and cleanup for completion, cancellation, expiry,
+   background privacy, key mismatch, and Hub switch.
+3. Implement one-item journal transitions:
+   `recovery-pending → credential-committed → normal session token → journal removed`.
+4. Make secure persistence failure blocking and retryable. Require normal token read-back before
+   hosted unlock. Test a simulated crash/failure at every write/remove boundary.
+5. Parse auth/reset link fragments immediately into the transaction owner and scrub navigation
+   state; reject bearer query parameters.
+
+**Commit:** `feat(mobile): persist native identity transactions safely`
+
+### M3 — Build the full-screen identity stack
+
+**Add focused pure models and screens under:**
+
+- `apps/mobile/src/features/identity/`
+
+**Expected surfaces:**
+
+- entry (`Email or username`, Continue, passkey, Ryco Hub annotation, custom Hub, direct pair)
+- custom Hub validation and confirmation
+- mailbox proof/resend
+- username claim
+- passkey/password credential choice
+- password and second factor
+- recovery code
+- password reset
+- recovery-code custody
+- bounded loading/offline/error states
+
+**Work:**
+
+1. Use `assets/logo_letter_only.svg` as the real Ryco `R` source.
+2. Match the approved sparse full-screen composition; no sheet, grabber, dismiss gesture, workspace
+   backdrop, nested card stack, or browser handoff.
+3. Show the build-configured origin only as “Ryco Hub.” Keep custom Hub and direct pairing visually
+   secondary but reachable and accessible.
+4. Route username, email-mailbox proof, identifierless passkey, signup, password/TOTP/email factor,
+   reset, and recovery through the new shared runtime methods.
+5. Reuse existing strict profile checking/safe replacement and direct-pair controller. A custom Hub
+   must advertise compatible v2 policy before native identity forms appear.
+6. Keep password/TOTP/email/recovery input in focused component state only and clear it on submit,
+   unmount, privacy background, and failure.
+7. Require recovery acknowledgement and journal transition before the workspace branch mounts.
+
+**Commit:** `feat(mobile): add full-screen native Hub identity`
+
+### M4 — Mobile tests, documentation, and Simulator QA
+
+1. Run all focused access/identity/profile/direct/session tests, mobile typecheck, Expo development
+   config, formatting, linting, and public backstop proportional to the cross-cutting root change.
+2. Use Computer Use for fresh-install Simulator QA on compact/current devices: keyboard, focus,
+   light/dark, Dynamic Type, VoiceOver labels, reduced motion, offline/retry, custom Hub, direct
+   pairing, locked deep links, and termination/resume at every journal step.
+3. Capture secret-free compact screenshots proving the full-screen `R` blocker and absence of any
+   workspace frame.
+4. Perform owner-assisted real-device ceremonies only after the Hub canary gate: hardware DPoP,
+   passkey create/login, mailbox code/link, password/TOTP, reset, recovery rotation, background
+   privacy, revocation, and direct-plane preservation.
+5. Update public mobile/status docs without private origin or Hub operational evidence. Open a
+   separate mobile PR and wait for CI/review.
+
+**Verification:**
+
+```sh
+bun install --frozen-lockfile
+bun fmt
+bun run fmt:check
+bun lint
+bun typecheck
+bun run test
 bun run --cwd apps/mobile test
 bun run --cwd apps/mobile typecheck
-bun run --cwd apps/web test:browser -- src/components/hostedHub/HostedNativeAuthorizationRoute.browser.tsx
 cd apps/mobile && APP_VARIANT=development ./node_modules/.bin/expo config
 git diff --check
 ```
 
-No commit: `.env.local` remains ignored and baseline evidence stays in the task record.
+## Completion audit
 
-## Task 1: Add durable progress and the pure onboarding model
-
-**Files**
-
-- Add `apps/mobile/src/features/onboarding/onboardingProgress.ts`
-- Add `apps/mobile/src/features/onboarding/onboardingProgress.test.ts`
-- Add `apps/mobile/src/features/onboarding/onboardingModel.ts`
-- Add `apps/mobile/src/features/onboarding/onboardingModel.test.ts`
-
-**Work**
-
-- Implement the strict version-1 `in-progress` / `completed` KV codec, cache/hydration fencing, and
-  explicit write helpers. Malformed and unknown versions decode as absent, never completed.
-- Define the React-free startup snapshot and migration rule for stored Hub profile, direct saved
-  environments, and restored hosted session.
-- Model the six rendering-precedence tiers, screen transitions, local-only account intent, fixed
-  bounded errors, action labels, accessibility labels, and completion effects.
-- Derive the resume screen from authoritative profile/runtime state rather than persisting a wizard
-  step.
-- Make direct pairing, Inbox, and Nodes the only explicit completion events.
-- Exhaustively test fresh install, build-default prefill, existing-user migration, in-progress
-  resume, invalid state, account choices, authenticated completion, recovery precedence, directory
-  states, accessibility labels, and bounded copy.
-
-**Focused verification**
-
-```sh
-bun run --cwd apps/mobile test -- \
-  src/features/onboarding/onboardingProgress.test.ts \
-  src/features/onboarding/onboardingModel.test.ts
-bun run --cwd apps/mobile typecheck
-```
-
-**Commit:** `feat(mobile): model first-run Hub onboarding`
-
-## Task 2: Share compatibility checking and safe Hub replacement
-
-**Files**
-
-- Add `apps/mobile/src/hostedHub/hubProfileEditor.ts`
-- Add `apps/mobile/src/hostedHub/hubProfileEditor.test.ts`
-- Add `apps/mobile/src/hostedHub/hubProfileReplacement.ts`
-- Add `apps/mobile/src/hostedHub/hubProfileReplacement.test.ts`
-- Update `apps/mobile/src/features/settings/HubDomainEditor.tsx`
-- Update `apps/mobile/src/features/settings/SettingsHubRouteScreen.tsx`
-- Update `apps/mobile/src/features/settings/SettingsHubRouteScreen.test.tsx`
-
-**Work**
-
-- Extract strict origin-error projection, draft/check state, compatible profile construction, and
-  the async generation/origin fence from `HubDomainEditor` into a React-free model/coordinator.
-- Abort the previous capability request on every new check or relevant draft change. Accept a result
-  only for the current generation and normalized origin.
-- Preserve the existing capability client and profile codec as the only compatibility authorities.
-- Extract Settings' domain replacement sequence into one injected service over
-  `buildHubDomainResetPlan` / `executeHubDomainResetPlan`.
-- Keep confirmation in the calling surface, but make sign-out, local Hub cleanup, old-origin trust
-  cleanup, profile persistence, runtime invalidation, and re-bootstrap one shared ordered operation.
-- Refactor Settings to use both shared units without changing its rendered behavior.
-- Prove same-origin replacement, confirmed origin change, failure behavior, stale results, and
-  direct catalog/credential non-interaction in tests.
-
-**Focused verification**
-
-```sh
-bun run --cwd apps/mobile test -- \
-  src/hostedHub/hubProfile.test.ts \
-  src/hostedHub/hubCapability.test.ts \
-  src/hostedHub/hubProfileEditor.test.ts \
-  src/hostedHub/hubProfileReplacement.test.ts \
-  src/features/settings/SettingsHubRouteScreen.test.tsx
-bun run --cwd apps/mobile typecheck
-```
-
-**Commit:** `refactor(mobile): share Hub profile setup`
-
-## Task 3: Model public signup availability and browser handoff phase
-
-**Files**
-
-- Add `apps/mobile/src/features/onboarding/publicSignupCapability.ts`
-- Add `apps/mobile/src/features/onboarding/publicSignupCapability.test.ts`
-- Add `apps/mobile/src/features/onboarding/nativeAuthorizationState.ts`
-- Add `apps/mobile/src/features/onboarding/nativeAuthorizationState.test.ts`
-- Update `apps/mobile/src/platform/nativeAuthorization.ts`
-- Update `apps/mobile/src/platform/nativeAuthorization.test.ts`
-
-**Work**
-
-- Implement an injected, abortable public signup configuration probe against the shared hosted
-  identity path and strict response schema.
-- Send a cache-bypassed GET with omitted credentials. Persist no response; project only checking,
-  enabled, disabled, or bounded unavailable state.
-- Fence results by generation and exact selected origin, including retry and origin-change cases.
-- Add a tiny secret-free observable phase store for `idle`, `opening`, `waiting`, and `cancelled`.
-- Instrument the existing `openAuthSessionAsync` adapter at lifecycle boundaries while leaving its
-  result, callback URI, reusable system-browser session, abort semantics, and runtime ownership
-  unchanged.
-- Test signup enabled/disabled/malformed/unreachable/stale behavior and browser open/success/
-  dismiss/cancel/abort/locked behavior without exposing URLs or callback parameters through state.
-
-**Focused verification**
-
-```sh
-bun run --cwd apps/mobile test -- \
-  src/features/onboarding/publicSignupCapability.test.ts \
-  src/features/onboarding/nativeAuthorizationState.test.ts \
-  src/platform/nativeAuthorization.test.ts
-bun run --cwd apps/mobile typecheck
-```
-
-**Commit:** `feat(mobile): expose onboarding handoff states`
-
-## Task 4: Build the Hub-first sheet and automatic presentation coordinator
-
-**Files**
-
-- Add `apps/mobile/src/features/onboarding/FirstRunOnboardingCoordinator.tsx`
-- Add `apps/mobile/src/features/onboarding/firstRunCoordinatorModel.ts`
-- Add `apps/mobile/src/features/onboarding/firstRunCoordinatorModel.test.ts`
-- Rebuild `apps/mobile/src/features/onboarding/OnboardingRouteScreen.tsx`
-- Update `apps/mobile/src/Stack.tsx`
-- Update `apps/mobile/src/App.tsx` only if the startup readiness owner must move above navigation
-- Reuse components from `apps/mobile/src/features/hostedHub/HostedSurfaceParts.tsx`
-- Reuse `apps/mobile/src/features/hostedHub/HostedRecoveryCodes.tsx`
-- Reuse the Hub node projection from `apps/mobile/src/features/hostedHub/HubNodeSection.tsx`
-
-**Work**
-
-- Mount one coordinator inside the existing provider/navigation ownership boundary.
-- Hydrate onboarding progress, Hub profile, direct catalog, and hosted session concurrently; apply
-  migration exactly once and auto-present only when the neutral root route is current.
-- Defer to an incoming deep link for that launch and keep `in-progress` for the next neutral launch.
-- Guard against duplicate navigation across rerenders, Fast Refresh, and late async completion.
-- Build the four internal sheet screens with the approved hierarchy, compact-width scrolling,
-  keyboard avoidance, bounded errors, disabled states, and accessibility labels.
-- Prefill the build default, check before save, and use the shared replacement service for every
-  save/change.
-- Probe signup after compatible save. Both account actions set local explanatory intent and call the
-  same `hostedHubController.signIn()` transaction.
-- Render runtime-owned recovery codes first, then browser phase/errors, then authenticated
-  completion and the authorized-node directory summary.
-- Make “Go to Inbox”, “View Nodes”, and “Pair a device instead” persist completion before navigating.
-  A failed completion write stays on the sheet with retry rather than silently losing first-run
-  state.
-- Keep the existing `Onboarding` route and `mvpRouteConfig` exact list unchanged.
-- Add pure tests for coordinator decisions and model transitions; manually inspect every mount/focus
-  effect after the build runs.
-
-**Focused verification**
-
-```sh
-bun run --cwd apps/mobile test -- \
-  src/features/onboarding \
-  src/features/hostedHub/hostedAuthModel.test.ts \
-  src/features/hostedHub/HubNodeSection.test.ts \
-  src/navigation/mvpRouteConfig.test.ts
-bun run --cwd apps/mobile typecheck
-git diff --check
-```
-
-**Commit:** `feat(mobile): add Hub-first onboarding flow`
-
-## Task 5: Require browser recovery-code acknowledgement before consent
-
-**Files**
-
-- Update `apps/web/src/components/hostedHub/HostedHubRoot.tsx`
-- Update `apps/web/src/components/hostedHub/HostedNativeAuthorizationRoute.tsx`
-- Update `apps/web/src/components/hostedHub/HostedNativeAuthorizationRoute.browser.tsx`
-
-**Work**
-
-- Export/reuse the existing recovery-code takeover rather than creating a second code display or
-  acknowledgement path.
-- Read the existing recovery-code lease and store state in the native-authorization route.
-- Render recovery codes after authentication but before device consent whenever codes exist and no
-  other surface owns the lease.
-- Keep codes only in the runtime slot. Do not copy them into route state, logs, URLs, snapshots, or
-  callbacks.
-- Prove consent and callback navigation cannot run while codes are pending; acknowledgement reveals
-  the original consent surface; no-codes and account-switch behavior remain unchanged.
-
-**Focused verification**
-
-```sh
-bun run --cwd apps/web test:browser -- \
-  src/components/hostedHub/HostedNativeAuthorizationRoute.browser.tsx
-bun run --cwd apps/web typecheck
-git diff --check
-```
-
-**Commit:** `fix(web): show recovery codes before native consent`
-
-## Task 6: Update public documentation and run code gates
-
-**Files**
-
-- Update `apps/mobile/README.md`
-- Update `docs/mobile-native-status.md`
-- Update the approved spec/plan only for implementation discoveries that do not change the design
-
-**Work**
-
-- Document first-run auto-presentation, migration, build default/custom compatible Hub behavior,
-  live signup eligibility, system-browser ownership, direct-pair escape, completion, directory
-  refresh, and unchanged security boundaries.
-- State Simulator/hardware limitations precisely and avoid claiming ceremonies not performed.
-- Run formatting only on touched files if required by repository tooling; do not mechanically
-  rewrite unrelated files.
-- Run the full required mobile checks and affected web checks. Use command exit codes; never grep
-  ANSI-formatted typecheck output as a substitute.
-- Search the complete branch diff for forbidden deployment/account material.
-
-**Verification**
-
-```sh
-bun run --cwd apps/mobile test
-bun run --cwd apps/mobile typecheck
-bun run --cwd apps/web test:browser -- src/components/hostedHub/HostedNativeAuthorizationRoute.browser.tsx
-bun run --cwd apps/web typecheck
-cd apps/mobile && APP_VARIANT=development ./node_modules/.bin/expo config
-git diff --check
-```
-
-**Commit:** `docs(mobile): document Hub-first onboarding`
-
-## Task 7: Perform Simulator qualification and capture evidence
-
-**Files**
-
-- Save user-facing screenshots and a concise Markdown QA record under the task `outputs/` directory
-- Do not commit screenshots containing deployment or account information
-
-**Work**
-
-- Build or start the development client through the repository's documented Expo path.
-- Use the designated compact-phone Simulator and the computer-control workflow for visual/keyboard
-  QA; use clipboard paste for URLs on non-US host keyboard layouts.
-- Exercise fresh install, default prefill, custom compatible/incompatible origins, keyboard/scroll,
-  browser open/cancel, callback, successful sign-in, authenticated restart, offline/reconnect,
-  domain confirmation, direct-connection preservation, configured appearance, and compact width.
-- Start the existing enrolled QA node only if needed, using its existing identity and current LAN
-  address. Never delete, move, reset, or recreate its identity.
-- Stop for the owner whenever login, passkey, recovery-code, anti-bot, signup-email, or other account
-  ceremony is required.
-- Redact/avoid account names, node/project/thread details, private origins, callbacks, credentials,
-  and recovery codes in evidence.
-- Re-run affected gates after every QA-driven change.
-
-**Acceptance evidence**
-
-- A screenshot set showing Hub selection, account choice, browser waiting/cancelled behavior, and a
-  secret-free connected state at compact width.
-- A QA record mapping every requested row to pass, blocked-owner-ceremony, or not-applicable with
-  exact non-sensitive evidence.
-- Explicit manual review of every changed `.tsx` mount/focus effect.
-
-No commit unless QA drives a source correction; output artifacts remain outside the repository.
-
-## Task 8: Final branch audit and focused public PR
-
-**Work**
-
-- Rebase/merge only if needed and safe; never discard user work.
-- Re-run the required gates on the final commit.
-- Inspect `git diff origin/main...HEAD`, commit history, ignored-file status, and sensitive-string
-  scans.
-- Confirm no unrelated generalized inspector, terminal, VCS, notifications, inbox, or composer work
-  entered the branch.
-- Push `codex/mobile-hub-onboarding` and open one focused public draft PR targeting `main` with the
-  design, implementation, test results, Simulator QA, limitations, and no private evidence.
-- Do not create a private Hub PR unless implementation proves the approved browser behavior cannot
-  be supported without a protocol/private change; stop for owner direction before expanding scope.
-
-**Final verification**
-
-```sh
-bun run --cwd apps/mobile test
-bun run --cwd apps/mobile typecheck
-bun run --cwd apps/web test:browser -- src/components/hostedHub/HostedNativeAuthorizationRoute.browser.tsx
-bun run --cwd apps/web typecheck
-cd apps/mobile && APP_VARIANT=development ./node_modules/.bin/expo config
-git diff --check
-git status --short
-```
-
-**PR title:** `feat(mobile): add Hub-first onboarding`
+Before claiming completion, map every numbered required outcome and acceptance criterion in the
+design to authoritative evidence: exact source, focused negative test, full gate output, Simulator
+screenshot/interaction record, real-device result, Hub capability response, deployment canary, or
+PR/CI state. Missing or indirect evidence remains incomplete. GitHub OAuth is documented only as a
+future seam and is not counted as delivered.

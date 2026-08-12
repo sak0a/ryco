@@ -1,7 +1,7 @@
 # Ryco Mobile Hub-First Native Identity Blocker Design
 
 - **Visual design status:** owner-approved, 2026-08-12
-- **Written specification status:** awaiting owner review
+- **Written specification status:** owner-approved, 2026-08-12
 - **Public scope:** `apps/mobile`, `packages/contracts`, and `packages/client-runtime`
 - **Hub scope:** the canonical Hub identity contracts, persistence, HTTP routes, security controls,
   and operator documentation
