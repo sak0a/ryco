@@ -367,6 +367,55 @@ describe("hosted registration and directory state", () => {
     expect(hostedHubStore.getState().recoveryCodes).toEqual([]);
   });
 
+  it("adopts a decoded public signup identity and publishes recovery codes atomically", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+    await hostedHubController.adoptPublicBrowserIdentity(
+      {
+        account: {
+          id: "acct_aaaaaaaaaaaaaaaaaaaaaa",
+          username: "ada",
+          displayName: "Ada",
+          createdAt: 1,
+          disabledAt: null,
+        },
+        session: {
+          id: "sess_aaaaaaaaaaaaaaaaaaaaaa",
+          accountId: "acct_aaaaaaaaaaaaaaaaaaaaaa",
+          activeSpaceId: "space_aaaaaaaaaaaaaaaaaaaaaa",
+          createdAt: 1,
+          expiresAt: 2,
+          lastSeenAt: 1,
+          revokedAt: null,
+          revocationReasonCode: null,
+        },
+        activeSpace: {
+          id: "space_aaaaaaaaaaaaaaaaaaaaaa",
+          kind: "personal",
+          displayName: "Ada's space",
+          role: "owner",
+        },
+        spaces: [
+          {
+            id: "space_aaaaaaaaaaaaaaaaaaaaaa",
+            kind: "personal",
+            displayName: "Ada's space",
+            role: "owner",
+          },
+        ],
+        csrfToken: "csrf-sensitive-canary",
+      } as never,
+      ["recovery-sensitive-canary"],
+    );
+    expect(hostedHubStore.getState()).toMatchObject({
+      accountStatus: "authenticated",
+      account: { id: "acct_aaaaaaaaaaaaaaaaaaaaaa", role: "owner" },
+      session: { id: "sess_aaaaaaaaaaaaaaaaaaaaaa" },
+      recoveryCodes: ["recovery-sensitive-canary"],
+      bootstrapAvailable: false,
+    });
+  });
+
   it.each([
     ["denial", new HostedHubApiError("forbidden", 403)],
     ["expiry", new HostedHubApiError("invalid_request", 400)],

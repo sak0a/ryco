@@ -25,6 +25,7 @@ import {
   PUBLIC_SIGNUP_PASSKEY_FINISH_PATH,
   PUBLIC_SIGNUP_PASSKEY_OPTIONS_PATH,
   PUBLIC_SIGNUP_PASSWORD_FINISH_PATH,
+  PUBLIC_SIGNUP_CONFIG_PATH,
   PUBLIC_SIGNUP_START_PATH,
   PUBLIC_SIGNUP_VERIFY_PATH,
   PasswordLoginFinishRequest,
@@ -37,6 +38,7 @@ import {
   PasswordResetVerifyRequest,
   PasswordResetVerifyResponse,
   PublicSignupFinishResponse,
+  PublicSignupConfigResponse,
   PublicSignupPasskeyFinishRequest,
   PublicSignupPasskeyOptionsRequest,
   PublicSignupPasskeyOptionsResponse,
@@ -96,6 +98,7 @@ describe("hosted identity route and version constants", () => {
   it("pins all public identity and native claim routes", () => {
     expect({
       PUBLIC_SIGNUP_START_PATH,
+      PUBLIC_SIGNUP_CONFIG_PATH,
       PUBLIC_SIGNUP_VERIFY_PATH,
       PUBLIC_SIGNUP_PASSKEY_OPTIONS_PATH,
       PUBLIC_SIGNUP_PASSKEY_FINISH_PATH,
@@ -110,6 +113,7 @@ describe("hosted identity route and version constants", () => {
       NATIVE_NODE_CLAIM_FINISH_PATH,
     }).toEqual({
       PUBLIC_SIGNUP_START_PATH: "/api/public-signup/start",
+      PUBLIC_SIGNUP_CONFIG_PATH: "/api/public-signup/config",
       PUBLIC_SIGNUP_VERIFY_PATH: "/api/public-signup/verify",
       PUBLIC_SIGNUP_PASSKEY_OPTIONS_PATH: "/api/public-signup/passkey/options",
       PUBLIC_SIGNUP_PASSKEY_FINISH_PATH: "/api/public-signup/passkey/finish",
@@ -184,6 +188,35 @@ describe("hosted username, email, and space authority", () => {
     ]) {
       expect(() => strictDecode(HubBrowserSessionResponse, invalid)).toThrow();
     }
+  });
+});
+
+describe("public signup configuration", () => {
+  it("accepts only disabled, development bypass, or bounded Turnstile configuration", () => {
+    expect(strictDecode(PublicSignupConfigResponse, { status: "disabled" })).toEqual({
+      status: "disabled",
+    });
+    expect(
+      strictDecode(PublicSignupConfigResponse, {
+        status: "enabled",
+        antiBot: { provider: "bypass" },
+      }),
+    ).toEqual({ status: "enabled", antiBot: { provider: "bypass" } });
+    expect(
+      strictDecode(PublicSignupConfigResponse, {
+        status: "enabled",
+        antiBot: { provider: "turnstile", siteKey: "0x4AAAAAAAAAAABBBBBBBBBB" },
+      }),
+    ).toEqual({
+      status: "enabled",
+      antiBot: { provider: "turnstile", siteKey: "0x4AAAAAAAAAAABBBBBBBBBB" },
+    });
+    expect(() =>
+      strictDecode(PublicSignupConfigResponse, {
+        status: "enabled",
+        antiBot: { provider: "turnstile", siteKey: "short" },
+      }),
+    ).toThrow();
   });
 });
 

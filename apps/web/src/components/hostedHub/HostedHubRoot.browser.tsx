@@ -50,6 +50,19 @@ const session = {
   revokedAt: null,
   revocationReasonCode: null,
 };
+const activeSpace = {
+  id: "space_aaaaaaaaaaaaaaaaaaaaaa",
+  kind: "personal" as const,
+  displayName: "Ada's space",
+  role: "owner" as const,
+};
+const publicIdentity = {
+  account: { ...account, username: "ada" },
+  session: { ...session, activeSpaceId: activeSpace.id },
+  activeSpace,
+  spaces: [activeSpace],
+  csrfToken: "csrf-sensitive-browser-canary",
+} as never;
 
 function node(id: string, online: boolean, role: "viewer" | "operator" | "owner"): HostedHubNode {
   return {
@@ -80,10 +93,15 @@ beforeEach(() => {
   // case would render this one's disclosure at the wrong claim.
   resetWebE2eeSession();
   navigate.mockClear();
+  window.history.replaceState(null, "", "/");
+  vi.spyOn(hostedHubApi, "getPublicSignupConfiguration").mockResolvedValue({
+    status: "disabled",
+  });
 });
 
 afterEach(async () => {
   await mounted?.unmount();
+  await page.viewport(1_280, 720);
   mounted = null;
   hostedHubController.resetForTests();
   resetWebE2eeSession();
@@ -302,45 +320,73 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
   });
 
   it("offers every browser fallback sign-in without retaining submitted credentials", async () => {
-    const passwordSignIn = vi.spyOn(hostedHubApi, "signInWithPassword").mockResolvedValue({
-      account,
-      session,
-    });
+    await page.viewport(1_280, 577);
+    const passwordStart = vi.spyOn(hostedHubApi, "startPasswordLogin").mockResolvedValue({
+      status: "factor_required",
+      attemptId: "login_aaaaaaaaaaaaaaaaaaaaaa",
+      attemptSecret: "A".repeat(43),
+      factor: "email_code",
+      issuedAt: 1,
+      expiresAt: 2,
+    } as never);
+    const passwordFinish = vi
+      .spyOn(hostedHubApi, "finishPasswordLogin")
+      .mockResolvedValue(publicIdentity);
+    const adopt = vi.spyOn(hostedHubController, "adoptPublicBrowserIdentity").mockResolvedValue();
     const recoverySignIn = vi.spyOn(hostedHubApi, "signInWithRecoveryCode").mockResolvedValue({
       account,
       session,
     });
-    const requestEmailRecovery = vi.spyOn(hostedHubApi, "requestEmailRecovery").mockResolvedValue();
     const bootstrap = vi.spyOn(hostedHubController, "bootstrap").mockResolvedValue();
     mounted = await render(<HostedHubRoot />);
 
-    await page.getByRole("button", { name: "Password, recovery code, or email" }).click();
-    await page.getByLabelText("Verified email").fill("ada@example.test");
-    await page.getByLabelText("Password").fill("password-sensitive-browser-canary");
-    await page.getByLabelText(/Authenticator code/).fill("123456");
-    await page.getByRole("button", { name: "Sign in with password" }).click();
-    expect(passwordSignIn).toHaveBeenCalledWith({
-      email: "ada@example.test",
-      password: "password-sensitive-browser-canary",
-      totpCode: "123456",
+    await page.getByRole("button", { name: "Password, recovery code, or reset" }).click();
+    const recoveryChoice = page.getByRole("button", { name: "Use recovery code" });
+    const resetChoice = page.getByRole("button", { name: "Forgot password?" });
+    await expect.element(recoveryChoice).toBeVisible();
+    await expect.element(resetChoice).toBeVisible();
+    const fallbackScroller = userScrollableAncestor(recoveryChoice.element() as HTMLElement);
+    expect(
+      fallbackScroller,
+      "fallback choices must have a user-scrollable ancestor",
+    ).not.toBeNull();
+    fallbackScroller!.scrollTop = fallbackScroller!.scrollHeight;
+    await vi.waitFor(() => {
+      for (const choice of [recoveryChoice, resetChoice]) {
+        const rect = choice.element().getBoundingClientRect();
+        expect(rect.top).toBeGreaterThanOrEqual(0);
+        expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight);
+      }
     });
-    expect(bootstrap).toHaveBeenCalledOnce();
-    await expect.element(page.getByLabelText("Password")).toHaveValue("");
-    await expect.element(page.getByLabelText(/Authenticator code/)).toHaveValue("");
+    await expect
+      .element(page.getByRole("button", { name: "Back to sign in" }))
+      .not.toBeInTheDocument();
+    await page.getByLabelText("Username or verified email").fill("Ada");
+    await page.getByLabelText("Password").fill("password-sensitive-browser-canary");
+    await page.getByRole("button", { name: "Continue" }).click();
+    expect(passwordStart).toHaveBeenCalledWith({
+      identifier: "ada",
+      password: "password-sensitive-browser-canary",
+    });
+    await expect.element(page.getByLabelText("Password")).not.toBeInTheDocument();
+    await page.getByLabelText("Email code").fill("123456");
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    expect(passwordFinish).toHaveBeenCalledWith({
+      attemptId: "login_aaaaaaaaaaaaaaaaaaaaaa",
+      attemptSecret: "A".repeat(43),
+      factor: "email_code",
+      code: "123456",
+    });
+    expect(adopt).toHaveBeenCalledWith(publicIdentity);
+    await expect.element(page.getByLabelText("Email code")).toHaveValue("");
 
-    await page.getByRole("button", { name: "Recovery code" }).click();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await page.getByRole("button", { name: "Use recovery code" }).click();
     await page.getByLabelText("Recovery code").fill("recovery-sensitive-browser-canary");
     await page.getByRole("button", { name: "Use recovery code" }).click();
     expect(recoverySignIn).toHaveBeenCalledWith("recovery-sensitive-browser-canary");
+    expect(bootstrap).toHaveBeenCalledOnce();
     await expect.element(page.getByLabelText("Recovery code")).toHaveValue("");
-
-    await page.getByRole("button", { name: "Email" }).click();
-    await page.getByLabelText("Verified email").fill("ada@example.test");
-    await page.getByRole("button", { name: "Send recovery email" }).click();
-    expect(requestEmailRecovery).toHaveBeenCalledWith("ada@example.test");
-    await expect
-      .element(page.getByText(/If that verified address belongs to an account/))
-      .toBeVisible();
 
     for (const sensitive of [
       "password-sensitive-browser-canary",
@@ -351,6 +397,106 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       expect(JSON.stringify(sessionStorage)).not.toContain(sensitive);
       expect(location.href).not.toContain(sensitive);
     }
+  });
+
+  it("creates a public password account after mailbox verification and preserves recovery codes", async () => {
+    await page.viewport(320, 568);
+    vi.mocked(hostedHubApi.getPublicSignupConfiguration).mockResolvedValue({
+      status: "enabled",
+      antiBot: { provider: "bypass" },
+    });
+    const start = vi.spyOn(hostedHubApi, "startPublicSignup").mockResolvedValue({
+      status: "accepted",
+      attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+      attemptSecret: "A".repeat(43),
+      resendAfterMs: 30_000,
+      issuedAt: 1,
+      expiresAt: 2,
+    } as never);
+    const verify = vi.spyOn(hostedHubApi, "verifyPublicSignup").mockResolvedValue({
+      status: "verified",
+      attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+      activationSecret: "B".repeat(43),
+      issuedAt: 1,
+      expiresAt: 2,
+    } as never);
+    const finish = vi.spyOn(hostedHubApi, "finishPublicSignupWithPassword").mockResolvedValue({
+      status: "complete",
+      identity: publicIdentity,
+      recoveryCodes: ["recovery-one", "recovery-two"],
+    });
+    const adopt = vi.spyOn(hostedHubController, "adoptPublicBrowserIdentity").mockResolvedValue();
+    mounted = await render(<HostedHubRoot />);
+
+    const createAccount = page.getByRole("button", { name: "Create account" });
+    const signupScroller = userScrollableAncestor(createAccount.element() as HTMLElement);
+    expect(signupScroller, "signup must live in the hosted surface scroller").not.toBeNull();
+    signupScroller!.scrollTop = signupScroller!.scrollHeight;
+    expect(signupScroller!.scrollTop).toBeGreaterThan(0);
+    await createAccount.click();
+    await vi.waitFor(() => expect(signupScroller!.scrollTop).toBe(0));
+    await page.getByLabelText("Username").fill("Ada_2026");
+    await page.getByLabelText("Email").fill("ADA@example.test");
+    await page.getByRole("button", { name: "Send verification email" }).click();
+    expect(start).toHaveBeenCalledWith({
+      username: "ada_2026",
+      email: "ada@example.test",
+      antiBotAssertion: "development",
+    });
+
+    await page.getByLabelText("Verification code").fill("123456");
+    await page.getByRole("button", { name: "Verify email" }).click();
+    expect(verify).toHaveBeenCalledWith({
+      attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+      attemptSecret: "A".repeat(43),
+      proof: { kind: "email_code", code: "123456" },
+    });
+    await page.getByRole("button", { name: "Use a password instead" }).click();
+    await page.getByLabelText("Password", { exact: true }).fill("correct horse battery");
+    await page.getByLabelText("Repeat password").fill("correct horse battery");
+    await page.getByRole("button", { name: "Create account" }).click();
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attemptId: "signup_aaaaaaaaaaaaaaaaaaaaaa",
+        activationSecret: "B".repeat(43),
+        password: "correct horse battery",
+        idempotencyKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      }),
+    );
+    expect(adopt).toHaveBeenCalledWith(publicIdentity, ["recovery-one", "recovery-two"]);
+  });
+
+  it("consumes a fragment reset link, changes the password, and keeps the bearer out of history", async () => {
+    const token = "C".repeat(43);
+    window.history.replaceState(null, "", `/password-reset#token=${token}`);
+    const verify = vi.spyOn(hostedHubApi, "verifyPasswordReset").mockResolvedValue({
+      status: "verified",
+      attemptId: "reset_aaaaaaaaaaaaaaaaaaaaaa",
+      attemptSecret: "D".repeat(43),
+      requiresTotp: true,
+      issuedAt: 1,
+      expiresAt: 2,
+    } as never);
+    const finish = vi.spyOn(hostedHubApi, "finishPasswordReset").mockResolvedValue({
+      status: "complete",
+    });
+    mounted = await render(<HostedHubRoot />);
+
+    await expect.element(page.getByLabelText("New password")).toBeVisible();
+    expect(verify).toHaveBeenCalledWith({ token }, expect.any(AbortSignal));
+    expect(window.location.hash).toBe("");
+    expect(window.location.href).not.toContain(token);
+    await page.getByLabelText("New password").fill("correct horse battery");
+    await page.getByLabelText("Repeat password").fill("correct horse battery");
+    await page.getByLabelText("Authenticator code").fill("123456");
+    await page.getByRole("button", { name: "Change password" }).click();
+    expect(finish).toHaveBeenCalledWith({
+      attemptId: "reset_aaaaaaaaaaaaaaaaaaaaaa",
+      attemptSecret: "D".repeat(43),
+      password: "correct horse battery",
+      factor: { kind: "totp", code: "123456" },
+    });
+    await expect.element(page.getByText("Password changed")).toBeVisible();
   });
 
   it("hides unavailable bootstrap without hiding invitation redemption", async () => {
