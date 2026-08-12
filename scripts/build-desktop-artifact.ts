@@ -754,6 +754,8 @@ export function resolveDesktopProductName(version: string): string {
 
 export const DESKTOP_BUILD_FILES = [
   "**/*",
+  "!apps/desktop/resources/ryco-desktop-security-helper",
+  "!apps/desktop/prod-resources/ryco-desktop-security-helper",
   "!node_modules/@github/copilot/**",
   "!node_modules/@github/copilot-darwin-arm64/**",
   "!node_modules/@github/copilot-darwin-x64/**",
@@ -944,6 +946,18 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   }
 
   if (platform === "mac") {
+    buildConfig.protocols = [
+      {
+        name: "Ryco Hosted Authorization",
+        schemes: [updateChannel === "nightly" ? "ryco-preview" : "ryco"],
+      },
+    ];
+    buildConfig.extraResources = [
+      {
+        from: "apps/desktop/resources/ryco-desktop-security-helper",
+        to: "ryco-desktop-security-helper",
+      },
+    ];
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",

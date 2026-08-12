@@ -6,6 +6,7 @@ export * from "./relay.ts";
 export * from "./nativeHandoff.ts";
 export * from "./hostedIdentity.ts";
 export * from "./localIntroduction.ts";
+export * from "./desktopNativeNodeClaim.ts";
 export * from "./hubConnector.ts";
 export * from "./ipc.ts";
 export * from "./terminal.ts";

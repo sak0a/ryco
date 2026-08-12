@@ -358,6 +358,9 @@ const createDesktopBridgeStub = (overrides?: {
   readonly setUpdateChannel?: DesktopBridge["setUpdateChannel"];
   readonly getHubLaunchConfig?: DesktopBridge["getHubLaunchConfig"];
   readonly setHubLaunchConfig?: DesktopBridge["setHubLaunchConfig"];
+  readonly getHostedIdentityState?: NonNullable<DesktopBridge["getHostedIdentityState"]>;
+  readonly connectHostedIdentity?: NonNullable<DesktopBridge["connectHostedIdentity"]>;
+  readonly disconnectHostedIdentity?: NonNullable<DesktopBridge["disconnectHostedIdentity"]>;
   readonly confirm?: DesktopBridge["confirm"];
   readonly openExternal?: DesktopBridge["openExternal"];
 }): DesktopBridge => {
@@ -389,6 +392,15 @@ const createDesktopBridgeStub = (overrides?: {
         fileSecretStoreFallbackSupported: true,
       })),
     setHubLaunchConfig: overrides?.setHubLaunchConfig ?? vi.fn().mockResolvedValue(undefined),
+    ...(overrides?.getHostedIdentityState === undefined
+      ? {}
+      : { getHostedIdentityState: overrides.getHostedIdentityState }),
+    ...(overrides?.connectHostedIdentity === undefined
+      ? {}
+      : { connectHostedIdentity: overrides.connectHostedIdentity }),
+    ...(overrides?.disconnectHostedIdentity === undefined
+      ? {}
+      : { disconnectHostedIdentity: overrides.disconnectHostedIdentity }),
     validateHubOrigin: async () => ({ ok: false as const, reason: "empty" as const }),
     getAppBranding: vi.fn().mockReturnValue(null),
     getLocalEnvironmentBootstrap: () => ({
@@ -1676,6 +1688,28 @@ describe("ConnectionsSettings Hub section", () => {
     await expect.element(page.getByRole("button", { name: "Enable" })).toBeInTheDocument();
     // Nothing enrolled, so the address is editable.
     await expect.element(page.getByPlaceholder("https://…")).toBeEnabled();
+  });
+
+  it("runs automatic native account setup without exposing Hub identifiers", async () => {
+    const connectHostedIdentity = vi.fn().mockResolvedValue({ status: "ready" as const });
+    stubHubFetch({
+      status: { ...baseStatus, state: "online" },
+      identity: { enrolled: "active" },
+    });
+    await renderHub(
+      { enabled: true, origin: "https://hub.example.com" },
+      {
+        getHostedIdentityState: vi.fn().mockResolvedValue({ status: "signed-out" }),
+        connectHostedIdentity,
+      },
+    );
+
+    await expect.element(page.getByText("Not signed in")).toBeInTheDocument();
+    await page.getByRole("button", { name: "Connect account" }).click();
+    await expect.element(page.getByText("Secure setup complete")).toBeInTheDocument();
+    expect(connectHostedIdentity).toHaveBeenCalledOnce();
+    expect(document.body.textContent).not.toContain("account-");
+    expect(document.body.textContent).not.toContain("node-");
   });
 
   it("saves a trimmed pre-enrollment node name", async () => {

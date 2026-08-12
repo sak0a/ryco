@@ -470,6 +470,7 @@ describe("native automatic-node claim contracts", () => {
         disposition: "created",
         node: {
           id: "node_aaaaaaaaaaaaaaaaaaaaaa",
+          activeKeyId: "nkey_aaaaaaaaaaaaaaaaaaaaaa",
           environmentId,
           label: node.label,
           fingerprint,

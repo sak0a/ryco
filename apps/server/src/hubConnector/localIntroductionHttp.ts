@@ -21,12 +21,12 @@ import { HubConnectorService } from "./HubConnectorLive.ts";
 
 const CONTROL_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const LOOPBACK_BIND_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
-const NO_STORE_HEADERS = {
+export const DESKTOP_LOCAL_NO_STORE_HEADERS = {
   "Cache-Control": "no-store",
   "X-Content-Type-Options": "nosniff",
 } as const;
 
-class DesktopLocalControlRefused extends Data.TaggedError("DesktopLocalControlRefused")<{
+export class DesktopLocalControlRefused extends Data.TaggedError("DesktopLocalControlRefused")<{
   readonly reason: "authentication" | "body";
 }> {}
 
@@ -77,7 +77,7 @@ export function desktopLocalControlIsAuthorized(input: {
   );
 }
 
-const requireDesktopLocalControl = Effect.gen(function* () {
+export const requireDesktopLocalControl = Effect.gen(function* () {
   const request = yield* HttpServerRequest.HttpServerRequest;
   const config = yield* ServerConfig;
   if (
@@ -94,20 +94,21 @@ const requireDesktopLocalControl = Effect.gen(function* () {
   }
 });
 
-const requireBoundedJsonBody = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const contentLength = Number(request.headers["content-length"]);
-  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
-  if (
-    !Number.isSafeInteger(contentLength) ||
-    contentLength <= 0 ||
-    contentLength > LOCAL_INTRODUCTION_MAX_BODY_BYTES ||
-    request.headers["transfer-encoding"] !== undefined ||
-    contentType !== "application/json"
-  ) {
-    return yield* new DesktopLocalControlRefused({ reason: "body" });
-  }
-});
+export const requireBoundedDesktopJsonBody = (maxBodyBytes: number) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const contentLength = Number(request.headers["content-length"]);
+    const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+    if (
+      !Number.isSafeInteger(contentLength) ||
+      contentLength <= 0 ||
+      contentLength > maxBodyBytes ||
+      request.headers["transfer-encoding"] !== undefined ||
+      contentType !== "application/json"
+    ) {
+      return yield* new DesktopLocalControlRefused({ reason: "body" });
+    }
+  });
 
 function errorStatus(code: NodeLocalIntroductionErrorCode): number {
   switch (code) {
@@ -123,7 +124,10 @@ function errorStatus(code: NodeLocalIntroductionErrorCode): number {
 
 function errorResponse(code: NodeLocalIntroductionErrorCode, status = errorStatus(code)) {
   const body: LocalIntroductionErrorResponse = { error: code };
-  return HttpServerResponse.jsonUnsafe(body, { status, headers: NO_STORE_HEADERS });
+  return HttpServerResponse.jsonUnsafe(body, {
+    status,
+    headers: DESKTOP_LOCAL_NO_STORE_HEADERS,
+  });
 }
 
 const handleLocalControlFailure = (error: unknown) => {
@@ -167,7 +171,7 @@ export const desktopLocalIntroductionDescriptorRouteLayer = HttpRouter.add(
         nodeContinuityId: descriptor.nodeContinuityId,
         nodePolicyGeneration: descriptor.nodePolicyGeneration,
       },
-      { status: 200, headers: NO_STORE_HEADERS },
+      { status: 200, headers: DESKTOP_LOCAL_NO_STORE_HEADERS },
     );
   }).pipe(Effect.catch(handleLocalControlFailure)),
 );
@@ -177,7 +181,7 @@ export const desktopLocalIntroductionCompleteRouteLayer = HttpRouter.add(
   LOCAL_INTRODUCTION_COMPLETE_PATH,
   Effect.gen(function* () {
     yield* requireDesktopLocalControl;
-    yield* requireBoundedJsonBody;
+    yield* requireBoundedDesktopJsonBody(LOCAL_INTRODUCTION_MAX_BODY_BYTES);
     const body = yield* HttpServerRequest.schemaBodyJson(LocalIntroductionCompleteRequest).pipe(
       Effect.mapError(() => new DesktopLocalControlRefused({ reason: "body" })),
     );
@@ -197,7 +201,7 @@ export const desktopLocalIntroductionCompleteRouteLayer = HttpRouter.add(
         approvalTbs: Buffer.from(result.approvalTbs).toString("base64url"),
         approvalSignature: Buffer.from(result.approvalSignature).toString("base64url"),
       },
-      { status: 200, headers: NO_STORE_HEADERS },
+      { status: 200, headers: DESKTOP_LOCAL_NO_STORE_HEADERS },
     );
   }).pipe(Effect.catch(handleLocalControlFailure)),
 );

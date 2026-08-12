@@ -148,6 +148,7 @@ import {
 import {
   stubE2eeOperator,
   stubLocalIntroductionService,
+  stubNativeNodeClaimService,
 } from "./hubConnector/testUtils/e2eeOperatorStub.ts";
 
 const defaultProjectId = ProjectId.make("project-default");
@@ -673,6 +674,7 @@ const buildAppUnderTest = (options?: {
             },
             stop: async () => undefined,
             localIntroduction: stubLocalIntroductionService(),
+            nativeNodeClaim: stubNativeNodeClaimService(),
             e2ee: stubE2eeOperator(),
             ...options?.layers?.hubConnector,
           }),

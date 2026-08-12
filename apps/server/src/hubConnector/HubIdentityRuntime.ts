@@ -45,6 +45,10 @@ import {
   makeNodeLocalIntroductionService,
   type NodeLocalIntroductionService,
 } from "../hubIdentity/NodeLocalIntroductionService.ts";
+import {
+  makeNodeNativeClaimService,
+  type NodeNativeClaimService,
+} from "../hubIdentity/NodeNativeClaimService.ts";
 import type { NodeE2eeChannelAuthorization } from "./NodeE2eeChannelSession.ts";
 import {
   makeNodeE2eeCapabilityStatementClient,
@@ -217,6 +221,8 @@ export interface HubIdentityRuntimeShape {
   ) => Promise<StartedHubEnrollment>;
   readonly pollEnrollment: (hubOrigin: string) => Promise<HubEnrollmentPollResponse>;
   readonly cancelEnrollment: (hubOrigin: string) => Promise<void>;
+  /** Exact-child automatic claim, reachable only from Desktop's private control channel. */
+  readonly nativeNodeClaim: NodeNativeClaimService;
   readonly createRelayAuthenticationFrame: (
     hubOrigin: string,
     protocol: { readonly protocolMajor: number; readonly protocolMinor: number },
@@ -774,6 +780,11 @@ export async function makeHubIdentityRuntime(options: {
       : { makeFileStore: options.makeFileSecretStore }),
   });
   const signingIdentity = makeNodeSigningIdentity(secretStore);
+  const nativeNodeClaim = makeNodeNativeClaimService({
+    stateStore,
+    signingIdentity,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
   const now = options.now ?? (() => Date.now());
   const prekeyStore = await makeNodeE2eePrekeyStore({
     path: options.prekeyStatePath ?? join(stateDirectory, "hub-e2ee-prekey.json"),
@@ -1321,7 +1332,13 @@ export async function makeHubIdentityRuntime(options: {
         const pending = state.pendingEnrollment;
         // A ceremony being torn down is not one an approver should still be
         // shown, so a cleanup-marked record reads as absent.
-        if (pending === null || pending.cleanupRequested) return null;
+        if (
+          pending === null ||
+          (pending.kind ?? "device-code") !== "device-code" ||
+          pending.cleanupRequested
+        ) {
+          return null;
+        }
         if (pending.hubOrigin !== canonicalizeHubOrigin(hubOrigin)) return null;
         const descriptor = await signingIdentity.getPublicDescriptor(pending.keySecretName);
         return {
@@ -1345,6 +1362,18 @@ export async function makeHubIdentityRuntime(options: {
     },
     cancelEnrollment: (hubOrigin) =>
       bounded("enrollment_failed", () => enrollment.cancel(hubOrigin)),
+    nativeNodeClaim: {
+      prepare: (hubOrigin) => nativeNodeClaim.prepare(hubOrigin),
+      sign: (input) => nativeNodeClaim.sign(input),
+      commit: async (input) => {
+        const active = await nativeNodeClaim.commit(input);
+        // The identity commit is authoritative and has already landed. Prekey
+        // issuance is the same best-effort post-commit maintenance used by
+        // device-code enrollment; the advertised path repairs it on demand.
+        await maintainPrekeyQuietly();
+        return active;
+      },
+    },
     createRelayAuthenticationFrame: async (hubOrigin, protocol) => {
       try {
         return await proof.createRelayAuthenticationFrame(hubOrigin, protocol);

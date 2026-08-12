@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist-electron/**"],
+      "outputs": ["dist-electron/**", "resources/ryco-desktop-security-helper"],
     },
     "dev": {
       "dependsOn": ["ryco-cli#build"],

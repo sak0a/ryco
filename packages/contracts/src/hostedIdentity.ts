@@ -488,6 +488,10 @@ export const NativeNodeClaimFinishResponse = strict(
     node: strict(
       Schema.Struct({
         id: RelayNodeId,
+        activeKeyId: Schema.String.check(
+          Schema.isPattern(/^nkey_[A-Za-z0-9_-]{22}$/),
+          Schema.isMaxLength(27),
+        ),
         environmentId: NativeNodeClaimEnvironmentId,
         label: Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(100)),
         fingerprint: HubNodePublicKeyFingerprint,

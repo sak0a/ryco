@@ -19,6 +19,7 @@ import { websocketRpcRouteLayer } from "./ws.ts";
 import { HubConnectorLive } from "./hubConnector/HubConnectorLive.ts";
 import { hubConnectorRoutesLayer } from "./hubConnector/http.ts";
 import { desktopLocalIntroductionRoutesLayer } from "./hubConnector/localIntroductionHttp.ts";
+import { desktopNativeNodeClaimRoutesLayer } from "./hubConnector/desktopNativeNodeClaimHttp.ts";
 import { OpenLive } from "./open.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
@@ -385,6 +386,7 @@ export const makeRoutesLayer = Layer.mergeAll(
   websocketRpcRouteLayer,
   hubConnectorRoutesLayer,
   desktopLocalIntroductionRoutesLayer,
+  desktopNativeNodeClaimRoutesLayer,
 ).pipe(Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(

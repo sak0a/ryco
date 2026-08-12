@@ -20,6 +20,7 @@ import { makeLocalHubIdentityStateStore } from "../hubIdentity/LocalHubIdentityS
 import type { NodeE2eeAdvertisementResult } from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
 import type { NodeE2eeFallbackState } from "../hubIdentity/NodeE2eeFallbackCounter.ts";
 import type { NodeLocalIntroductionService } from "../hubIdentity/NodeLocalIntroductionService.ts";
+import type { NodeNativeClaimService } from "../hubIdentity/NodeNativeClaimService.ts";
 import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import { makeHubRelayTransport } from "./HubRelayTransport.ts";
 import { makeNodeE2eeChannelAdvertiser } from "./NodeE2eeChannelAdvertiser.ts";
@@ -145,6 +146,8 @@ export interface HubConnectorServiceShape {
   readonly stop: HubConnector["stop"];
   /** Desktop-main-only trust introduction; never exposed through WS RPC. */
   readonly localIntroduction: NodeLocalIntroductionService;
+  /** Desktop-main-only automatic node claim; never exposed through WS RPC. */
+  readonly nativeNodeClaim: NodeNativeClaimService;
   readonly e2ee: HubConnectorE2eeOperator;
 }
 
@@ -238,6 +241,11 @@ const offlineE2eeSurface = {
     descriptor: e2eeOperatorUnavailable,
     complete: e2eeOperatorUnavailable,
   },
+  nativeNodeClaim: {
+    prepare: e2eeOperatorUnavailable,
+    sign: e2eeOperatorUnavailable,
+    commit: e2eeOperatorUnavailable,
+  },
   // 0 is the generation that has never been issued, which is the truthful
   // reading for a runtime that must not advertise at all (§5.7).
   e2eeGeneration: () => 0,
@@ -265,6 +273,7 @@ const offlineE2eeSurface = {
   | "e2eeClientAuthorization"
   | "e2eeAuthorizationAdmin"
   | "localIntroduction"
+  | "nativeNodeClaim"
   | "e2eeGeneration"
   | "applyE2eePolicy"
   | "previewE2eePolicy"
@@ -622,6 +631,7 @@ export const HubConnectorLive = Layer.effect(
       cancelEnrollment: () => connector.cancelEnrollment(),
       stop: () => connector.stop(),
       localIntroduction: identity.localIntroduction,
+      nativeNodeClaim: identity.nativeNodeClaim,
       e2ee: makeNodeE2eeOperator({
         identity,
         sessions: sessionDirectory,

@@ -5,10 +5,11 @@
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
-    "dev": "bun run --parallel dev:bundle dev:electron",
+    "dev": "bun run build:native && bun run --parallel dev:bundle dev:electron",
     "dev:bundle": "tsdown --watch",
     "dev:electron": "node scripts/dev-electron.mjs",
-    "build": "tsdown",
+    "build": "bun run build:native && tsdown",
+    "build:native": "node scripts/build-native-security-helper.mjs",
     "start": "node scripts/start-electron.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vp test run --passWithNoTests",
@@ -22,6 +23,7 @@
     "electron-updater": "^6.8.9"
   },
   "devDependencies": {
+    "@ryco/client-runtime": "workspace:*",
     "@ryco/contracts": "workspace:*",
     "@ryco/shared": "workspace:*",
     "@ryco/ssh": "workspace:*",
