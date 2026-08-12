@@ -139,6 +139,16 @@ export function useSidebarWorktreeActions(params: {
 
   const archiveWorktree = useCallback(
     (worktreeNode: SidebarTreeWorktree) => {
+      if (isSyntheticWorktreeId(worktreeNode.worktree.worktreeId)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Nothing to archive",
+            description: "This group is derived from its sessions, not a registered worktree.",
+          }),
+        );
+        return;
+      }
       const api = readEnvironmentApi(resolveWorktreeEnvironmentId(worktreeNode));
       const archive = api?.git.archiveWorktree;
       if (!archive) {
@@ -170,6 +180,21 @@ export function useSidebarWorktreeActions(params: {
   const deleteWorktree = useCallback(
     (worktreeNode: SidebarTreeWorktree) => {
       void (async () => {
+        // A synthetic node is a grouping the sidebar derived from its sessions,
+        // not a worktree the server knows about. There is nothing to delete —
+        // and deleting the sessions to "empty" it would destroy the only copy
+        // of that history.
+        if (isSyntheticWorktreeId(worktreeNode.worktree.worktreeId)) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Nothing to delete",
+              description:
+                "This group is derived from its sessions, not a registered worktree. Delete the sessions individually, or remove the directory with git.",
+            }),
+          );
+          return;
+        }
         const localApi = readLocalApi();
         if (localApi) {
           const confirmed = await localApi.dialogs.confirm(
@@ -199,10 +224,6 @@ export function useSidebarWorktreeActions(params: {
           await deleteThread(scopeThreadRef(thread.environmentId, thread.id), {
             optimistic: true,
           });
-        }
-
-        if (isSyntheticWorktreeId(worktreeIdRaw)) {
-          return;
         }
 
         const deleteRpc = api.git.deleteWorktree;

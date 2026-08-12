@@ -229,6 +229,40 @@ describe("composeSidebarTree", () => {
     ).toEqual([ThreadId.make("thread-moved")]);
   });
 
+  it("keeps a session on its linked worktree when its directory is spelled differently", () => {
+    const tree = composeSidebarTree({
+      isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [
+        makeThread({
+          id: ThreadId.make("thread-symlinked"),
+          branch: "feature/a",
+          worktreeId: "worktree-a",
+          // The same directory reached through a symlinked home.
+          worktreePath: "/link/worktrees/a",
+        }),
+      ],
+      worktrees: [
+        makeWorktree({
+          branch: "feature/a",
+          origin: "branch",
+          worktreeId: "worktree-a",
+          worktreePath: "/repo/worktrees/a",
+        }),
+      ],
+    });
+
+    const worktrees = tree.projects[0]?.worktrees ?? [];
+    expect(
+      worktrees
+        .find((entry) => entry.worktree.worktreeId === "worktree-a")
+        ?.sessions.map((thread) => thread.id),
+    ).toEqual([ThreadId.make("thread-symlinked")]);
+    // No phantom node splits off for the second spelling of the directory.
+    expect(worktrees.filter((entry) => entry.sessions.length > 0)).toHaveLength(1);
+  });
+
   it("renders one session when duplicate inputs share a scoped thread id", () => {
     const thread = makeThread({
       id: ThreadId.make("thread-duplicate"),
