@@ -1,5 +1,9 @@
 # Ryco Native Mobile App — iOS MVP Design
 
+> **Historical scope note.** The MVP described here and the file-browser v1.1 slice shipped; the
+> latter merged in PR #330. For current merged/open/not-yet-delivered status, read
+> [`docs/mobile-native-status.md`](../../mobile-native-status.md).
+
 - **Status:** Owner-approved, 2026-07-23
 - **Scope:** `apps/mobile` (public, `sak0a/ryco`). New Expo/React Native app consuming
   the completed `@ryco/client-runtime`. No changes to `apps/web`, the runtime package,

@@ -1,5 +1,10 @@
 # Ryco native mobile — program status
 
+> **Superseded for current delivery status.** Read
+> [`docs/mobile-native-status.md`](../../mobile-native-status.md) for the 2026-08-12 delivery
+> ledger and PR #330 applicability audit. The remainder of this file is retained as the detailed
+> 2026-07-27 verification record.
+
 **Re-verified at `ffb0dd871` (main, 2026-07-27),** after the core-workspace redesign (#244)
 and the Hub auth / account-security stabilization (#245) merged. Everything below was checked
 against the tree and the commands were run; where a claim could not be verified from this
@@ -266,8 +271,9 @@ than an unimplemented path.
 5. A **live enrolled node** for the relay path (rows 4–6). Ticket issuance returns 409
    `node_offline` otherwise.
 
-Separately: the **C2 email flows are code-complete on the Hub but deliver nothing** until an
-operator wires a sending domain. "No email arrived" is not a client bug.
+Separately: this snapshot predated the Hub email-delivery rollout. Email delivery is now a
+deployment capability and the mobile client handles verification links; provider configuration,
+delivery qualification, and public-signup admission remain Hub operator responsibilities.
 
 ---
 
