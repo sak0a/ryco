@@ -12,6 +12,45 @@ import {
   NATIVE_NODE_CLAIM_FINISH_PATH,
   NATIVE_NODE_CLAIM_START_PATH,
   NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION,
+  NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH,
+  NATIVE_IDENTITY_EMAIL_START_PATH,
+  NATIVE_IDENTITY_EMAIL_VERIFY_PATH,
+  NATIVE_IDENTITY_PASSWORD_FINISH_PATH,
+  NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH,
+  NATIVE_IDENTITY_PASSWORD_RESET_REQUEST_PATH,
+  NATIVE_IDENTITY_PASSWORD_RESET_VERIFY_PATH,
+  NATIVE_IDENTITY_PASSWORD_START_PATH,
+  NATIVE_IDENTITY_PROTOCOL_VERSION,
+  NATIVE_IDENTITY_RECOVERY_CODE_PATH,
+  NATIVE_IDENTITY_SIGNUP_PASSKEY_FINISH_PATH,
+  NATIVE_IDENTITY_SIGNUP_PASSKEY_OPTIONS_PATH,
+  NATIVE_IDENTITY_SIGNUP_PASSWORD_FINISH_PATH,
+  NATIVE_IDENTITY_SIGNUP_USERNAME_PATH,
+  NativeIdentityAttemptCancelRequest,
+  NativeIdentityAttemptCancelResponse,
+  NativeIdentityEmailStartRequest,
+  NativeIdentityEmailStartResponse,
+  NativeIdentityEmailVerifyRequest,
+  NativeIdentityEmailVerifyResponse,
+  NativeIdentityPasswordFinishRequest,
+  NativeIdentityPasswordResetFinishRequest,
+  NativeIdentityPasswordResetFinishResponse,
+  NativeIdentityPasswordResetRequest,
+  NativeIdentityPasswordResetResponse,
+  NativeIdentityPasswordResetVerifyRequest,
+  NativeIdentityPasswordResetVerifyResponse,
+  NativeIdentityPasswordStartRequest,
+  NativeIdentityPasswordStartResponse,
+  NativeIdentityRecoveryCodeRequest,
+  NativeIdentityRecoveryResponse,
+  NativeIdentitySessionResponse,
+  NativeIdentitySignupFinishResponse,
+  NativeIdentitySignupPasskeyFinishRequest,
+  NativeIdentitySignupPasskeyOptionsRequest,
+  NativeIdentitySignupPasskeyOptionsResponse,
+  NativeIdentitySignupPasswordFinishRequest,
+  NativeIdentitySignupUsernameRequest,
+  NativeIdentitySignupUsernameResponse,
   NativeNodeClaimError,
   NativeNodeClaimFinishRequest,
   NativeNodeClaimFinishResponse,
@@ -111,6 +150,19 @@ describe("hosted identity route and version constants", () => {
       ACTIVE_SPACE_SWITCH_PATH,
       NATIVE_NODE_CLAIM_START_PATH,
       NATIVE_NODE_CLAIM_FINISH_PATH,
+      NATIVE_IDENTITY_EMAIL_START_PATH,
+      NATIVE_IDENTITY_EMAIL_VERIFY_PATH,
+      NATIVE_IDENTITY_SIGNUP_USERNAME_PATH,
+      NATIVE_IDENTITY_SIGNUP_PASSKEY_OPTIONS_PATH,
+      NATIVE_IDENTITY_SIGNUP_PASSKEY_FINISH_PATH,
+      NATIVE_IDENTITY_SIGNUP_PASSWORD_FINISH_PATH,
+      NATIVE_IDENTITY_PASSWORD_START_PATH,
+      NATIVE_IDENTITY_PASSWORD_FINISH_PATH,
+      NATIVE_IDENTITY_RECOVERY_CODE_PATH,
+      NATIVE_IDENTITY_PASSWORD_RESET_REQUEST_PATH,
+      NATIVE_IDENTITY_PASSWORD_RESET_VERIFY_PATH,
+      NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH,
+      NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH,
     }).toEqual({
       PUBLIC_SIGNUP_START_PATH: "/api/public-signup/start",
       PUBLIC_SIGNUP_CONFIG_PATH: "/api/public-signup/config",
@@ -126,9 +178,246 @@ describe("hosted identity route and version constants", () => {
       ACTIVE_SPACE_SWITCH_PATH: "/api/auth/spaces/active",
       NATIVE_NODE_CLAIM_START_PATH: "/api/native/node-claims/start",
       NATIVE_NODE_CLAIM_FINISH_PATH: "/api/native/node-claims/finish",
+      NATIVE_IDENTITY_EMAIL_START_PATH: "/api/auth/native/identity/email/start",
+      NATIVE_IDENTITY_EMAIL_VERIFY_PATH: "/api/auth/native/identity/email/verify",
+      NATIVE_IDENTITY_SIGNUP_USERNAME_PATH: "/api/auth/native/identity/signup/username",
+      NATIVE_IDENTITY_SIGNUP_PASSKEY_OPTIONS_PATH:
+        "/api/auth/native/identity/signup/passkey/options",
+      NATIVE_IDENTITY_SIGNUP_PASSKEY_FINISH_PATH: "/api/auth/native/identity/signup/passkey/finish",
+      NATIVE_IDENTITY_SIGNUP_PASSWORD_FINISH_PATH:
+        "/api/auth/native/identity/signup/password/finish",
+      NATIVE_IDENTITY_PASSWORD_START_PATH: "/api/auth/native/identity/password/start",
+      NATIVE_IDENTITY_PASSWORD_FINISH_PATH: "/api/auth/native/identity/password/finish",
+      NATIVE_IDENTITY_RECOVERY_CODE_PATH: "/api/auth/native/identity/recovery-code",
+      NATIVE_IDENTITY_PASSWORD_RESET_REQUEST_PATH:
+        "/api/auth/native/identity/password-reset/request",
+      NATIVE_IDENTITY_PASSWORD_RESET_VERIFY_PATH: "/api/auth/native/identity/password-reset/verify",
+      NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH: "/api/auth/native/identity/password-reset/finish",
+      NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH: "/api/auth/native/identity/attempt/cancel",
     });
     expect(HOSTED_IDENTITY_PROTOCOL_VERSION).toBe(1);
     expect(NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION).toBe(1);
+    expect(NATIVE_IDENTITY_PROTOCOL_VERSION).toBe(2);
+  });
+});
+
+describe("native identity v2 contracts", () => {
+  const attemptId = "nident_aaaaaaaaaaaaaaaaaaaaaa";
+  const loginAttemptId = "nlogin_aaaaaaaaaaaaaaaaaaaaaa";
+  const resetAttemptId = "nreset_aaaaaaaaaaaaaaaaaaaaaa";
+  const activation = { attemptId, activationSecret: opaqueB } as const;
+  const nativeIdentity = {
+    account: browserIdentity.account,
+    session: browserIdentity.session,
+    activeSpace,
+    spaces: [activeSpace],
+  } as const;
+  const nativeSession = {
+    status: "complete",
+    identity: nativeIdentity,
+    token: opaqueC,
+  } as const;
+
+  it("starts with email only and reveals the account branch only after mailbox proof", () => {
+    const start = {
+      email: "ada@example.test",
+      antiBotAssertion: "anti-bot-sensitive-canary",
+    } as const;
+    const started = {
+      status: "accepted",
+      attemptId,
+      attemptSecret: opaque,
+      resendAfterMs: 30_000,
+      issuedAt,
+      expiresAt,
+    } as const;
+    expect(strictDecode(NativeIdentityEmailStartRequest, start)).toEqual(start);
+    expect(strictDecode(NativeIdentityEmailStartResponse, started)).toEqual(started);
+    expect(() =>
+      strictDecode(NativeIdentityEmailStartRequest, { ...start, username: "too_early" }),
+    ).toThrow();
+
+    const verify = {
+      attemptId,
+      attemptSecret: opaque,
+      proof: { kind: "email_code", code: "123456" },
+    } as const;
+    expect(strictDecode(NativeIdentityEmailVerifyRequest, verify)).toEqual(verify);
+    for (const status of ["existing_account", "new_account"] as const) {
+      const response = {
+        status,
+        attemptId,
+        activationSecret: opaqueB,
+        issuedAt,
+        expiresAt,
+      } as const;
+      expect(strictDecode(NativeIdentityEmailVerifyResponse, response)).toEqual(response);
+    }
+    expect(() =>
+      strictDecode(NativeIdentityEmailVerifyResponse, {
+        status: "new_account",
+        attemptId,
+        activationSecret: opaqueB,
+        accountId,
+        issuedAt,
+        expiresAt,
+      }),
+    ).toThrow();
+  });
+
+  it("claims username only after proof and completes signup with one primary credential", () => {
+    expect(
+      strictDecode(NativeIdentitySignupUsernameRequest, { ...activation, username: "ada_dev" }),
+    ).toBeTruthy();
+    expect(strictDecode(NativeIdentitySignupUsernameResponse, { status: "claimed" })).toBeTruthy();
+    expect(strictDecode(NativeIdentitySignupPasskeyOptionsRequest, activation)).toEqual(activation);
+    expect(
+      strictDecode(NativeIdentitySignupPasskeyOptionsResponse, {
+        options: { challenge: opaque, rp: { name: "Ryco Hub" } },
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentitySignupPasskeyFinishRequest, {
+        ...activation,
+        response: { id: "credential" },
+        idempotencyKey: opaqueC,
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentitySignupPasswordFinishRequest, {
+        ...activation,
+        password: "password-sensitive-canary",
+        idempotencyKey: opaqueC,
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentitySignupFinishResponse, {
+        ...nativeSession,
+        recoveryCodes: ["recovery-sensitive-canary"],
+      }),
+    ).toBeTruthy();
+  });
+
+  it("separates username and mailbox-proven password starts and mints no browser state", () => {
+    const usernameStart = {
+      kind: "username",
+      username: "ada_dev",
+      password: "password-sensitive-canary",
+    } as const;
+    const mailboxStart = {
+      kind: "verified_email",
+      attemptId,
+      activationSecret: opaqueB,
+      password: "password-sensitive-canary",
+    } as const;
+    expect(strictDecode(NativeIdentityPasswordStartRequest, usernameStart)).toEqual(usernameStart);
+    expect(strictDecode(NativeIdentityPasswordStartRequest, mailboxStart)).toEqual(mailboxStart);
+
+    const started = {
+      status: "factor_required",
+      attemptId: loginAttemptId,
+      attemptSecret: opaque,
+      factor: "totp",
+      issuedAt,
+      expiresAt,
+    } as const;
+    expect(strictDecode(NativeIdentityPasswordStartResponse, started)).toEqual(started);
+    expect(
+      strictDecode(NativeIdentityPasswordFinishRequest, {
+        attemptId: loginAttemptId,
+        attemptSecret: opaque,
+        factor: "totp",
+        code: "123456",
+      }),
+    ).toBeTruthy();
+    expect(strictDecode(NativeIdentitySessionResponse, nativeSession)).toEqual(nativeSession);
+    expect(() =>
+      strictDecode(NativeIdentitySessionResponse, {
+        ...nativeSession,
+        identity: { ...nativeIdentity, csrfToken: "csrf-must-not-survive" },
+      }),
+    ).toThrow();
+    expect(() =>
+      strictDecode(HubBrowserSessionResponse, { ...browserIdentity, token: opaqueC }),
+    ).toThrow();
+  });
+
+  it("rotates recovery codes and keeps password reset explicitly sessionless", () => {
+    expect(
+      strictDecode(NativeIdentityRecoveryCodeRequest, {
+        code: "recovery-sensitive-canary",
+        idempotencyKey: opaque,
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentityRecoveryResponse, {
+        ...nativeSession,
+        recoveryCodes: ["rotated-recovery-sensitive-canary"],
+      }),
+    ).toBeTruthy();
+
+    const reset = { identifier: "ada_dev" } as const;
+    expect(strictDecode(NativeIdentityPasswordResetRequest, reset)).toEqual(reset);
+    const resetStarted = {
+      status: "accepted",
+      attemptId: resetAttemptId,
+      attemptSecret: opaque,
+      resendAfterMs: 30_000,
+      issuedAt,
+      expiresAt,
+    } as const;
+    expect(strictDecode(NativeIdentityPasswordResetResponse, resetStarted)).toEqual(resetStarted);
+    expect(
+      strictDecode(NativeIdentityPasswordResetVerifyRequest, {
+        attemptId: resetAttemptId,
+        attemptSecret: opaque,
+        proof: { kind: "link_token", token: opaqueB },
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentityPasswordResetVerifyResponse, {
+        status: "verified",
+        attemptId: resetAttemptId,
+        resetSecret: opaqueC,
+        requiresTotp: true,
+        issuedAt,
+        expiresAt,
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentityPasswordResetFinishRequest, {
+        attemptId: resetAttemptId,
+        resetSecret: opaqueC,
+        password: "new-password-sensitive-canary",
+        factor: { kind: "totp", code: "123456" },
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentityPasswordResetFinishResponse, { status: "complete" }),
+    ).toBeTruthy();
+    expect(() =>
+      strictDecode(NativeIdentityPasswordResetFinishResponse, {
+        status: "complete",
+        token: opaqueC,
+      }),
+    ).toThrow();
+  });
+
+  it("cancels only an exact bound attempt envelope", () => {
+    expect(
+      strictDecode(NativeIdentityAttemptCancelRequest, {
+        attemptId,
+        attemptSecret: opaque,
+      }),
+    ).toBeTruthy();
+    expect(strictDecode(NativeIdentityAttemptCancelResponse, { status: "cancelled" })).toBeTruthy();
+    expect(() =>
+      strictDecode(NativeIdentityAttemptCancelRequest, {
+        attemptId,
+        attemptSecret: opaque,
+        origin: "https://hub.example.test",
+      }),
+    ).toThrow();
   });
 });
 

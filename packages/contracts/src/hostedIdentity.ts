@@ -17,9 +17,34 @@ export const PASSWORD_RESET_FINISH_PATH = "/api/auth/password-reset/finish" as c
 export const ACTIVE_SPACE_SWITCH_PATH = "/api/auth/spaces/active" as const;
 export const NATIVE_NODE_CLAIM_START_PATH = "/api/native/node-claims/start" as const;
 export const NATIVE_NODE_CLAIM_FINISH_PATH = "/api/native/node-claims/finish" as const;
+export const NATIVE_IDENTITY_EMAIL_START_PATH = "/api/auth/native/identity/email/start" as const;
+export const NATIVE_IDENTITY_EMAIL_VERIFY_PATH = "/api/auth/native/identity/email/verify" as const;
+export const NATIVE_IDENTITY_SIGNUP_USERNAME_PATH =
+  "/api/auth/native/identity/signup/username" as const;
+export const NATIVE_IDENTITY_SIGNUP_PASSKEY_OPTIONS_PATH =
+  "/api/auth/native/identity/signup/passkey/options" as const;
+export const NATIVE_IDENTITY_SIGNUP_PASSKEY_FINISH_PATH =
+  "/api/auth/native/identity/signup/passkey/finish" as const;
+export const NATIVE_IDENTITY_SIGNUP_PASSWORD_FINISH_PATH =
+  "/api/auth/native/identity/signup/password/finish" as const;
+export const NATIVE_IDENTITY_PASSWORD_START_PATH =
+  "/api/auth/native/identity/password/start" as const;
+export const NATIVE_IDENTITY_PASSWORD_FINISH_PATH =
+  "/api/auth/native/identity/password/finish" as const;
+export const NATIVE_IDENTITY_RECOVERY_CODE_PATH =
+  "/api/auth/native/identity/recovery-code" as const;
+export const NATIVE_IDENTITY_PASSWORD_RESET_REQUEST_PATH =
+  "/api/auth/native/identity/password-reset/request" as const;
+export const NATIVE_IDENTITY_PASSWORD_RESET_VERIFY_PATH =
+  "/api/auth/native/identity/password-reset/verify" as const;
+export const NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH =
+  "/api/auth/native/identity/password-reset/finish" as const;
+export const NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH =
+  "/api/auth/native/identity/attempt/cancel" as const;
 
 export const HOSTED_IDENTITY_PROTOCOL_VERSION = 1 as const;
 export const NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION = 1 as const;
+export const NATIVE_IDENTITY_PROTOCOL_VERSION = 2 as const;
 
 export const HUB_USERNAME_MIN_CHARS = 3;
 export const HUB_USERNAME_MAX_CHARS = 32;
@@ -65,6 +90,12 @@ const SignupAttemptSecret = Opaque256.pipe(Schema.brand("PublicSignupAttemptSecr
 const SignupActivationSecret = Opaque256.pipe(Schema.brand("PublicSignupActivationSecret"));
 const PasswordLoginAttemptSecret = Opaque256.pipe(Schema.brand("PasswordLoginAttemptSecret"));
 const PasswordResetAttemptSecret = Opaque256.pipe(Schema.brand("PasswordResetAttemptSecret"));
+const NativeIdentityAttemptSecret = Opaque256.pipe(Schema.brand("NativeIdentityAttemptSecret"));
+const NativeIdentityActivationSecret = Opaque256.pipe(
+  Schema.brand("NativeIdentityActivationSecret"),
+);
+const NativeIdentityResetSecret = Opaque256.pipe(Schema.brand("NativeIdentityResetSecret"));
+const NativeIdentitySessionToken = Opaque256.pipe(Schema.brand("NativeIdentitySessionToken"));
 const MailToken = Opaque256.pipe(Schema.brand("HostedIdentityMailToken"));
 const EmailCode = Schema.String.check(Schema.isPattern(/^[0-9]{6}$/));
 const TotpCode = Schema.String.check(Schema.isPattern(/^[0-9]{6}$/));
@@ -211,30 +242,317 @@ const HubSpaces = Schema.Array(HubActiveSpaceSummary).check(
   Schema.isMaxLength(HOSTED_IDENTITY_MAX_SPACES),
 );
 
+const HubSessionIdentityFields = {
+  account: HubPublicAccount,
+  session: HubPublicBrowserSession,
+  activeSpace: HubActiveSpaceSummary,
+  spaces: HubSpaces,
+} as const;
+
+function hubSessionIdentityConsistency(value: {
+  readonly account: { readonly id: string };
+  readonly session: { readonly accountId: string; readonly activeSpaceId: string };
+  readonly activeSpace: { readonly id: string; readonly role: string };
+  readonly spaces: ReadonlyArray<{ readonly id: string; readonly role: string }>;
+}): string | undefined {
+  if (value.session.accountId !== value.account.id) return "session account does not match";
+  if (value.session.activeSpaceId !== value.activeSpace.id) {
+    return "session active space does not match";
+  }
+  if (new Set(value.spaces.map((space) => space.id)).size !== value.spaces.length) {
+    return "spaces must contain unique ids";
+  }
+  const matches = value.spaces.filter((space) => space.id === value.activeSpace.id);
+  return matches.length === 1 && matches[0]?.role === value.activeSpace.role
+    ? undefined
+    : "active space must appear exactly once in spaces";
+}
+
 export const HubBrowserSessionResponse = strict(
   Schema.Struct({
-    account: HubPublicAccount,
-    session: HubPublicBrowserSession,
-    activeSpace: HubActiveSpaceSummary,
-    spaces: HubSpaces,
+    ...HubSessionIdentityFields,
     csrfToken: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)),
-  }).check(
-    Schema.makeFilter((value) => {
-      if (value.session.accountId !== value.account.id) return "session account does not match";
-      if (value.session.activeSpaceId !== value.activeSpace.id) {
-        return "session active space does not match";
-      }
-      if (new Set(value.spaces.map((space) => space.id)).size !== value.spaces.length) {
-        return "spaces must contain unique ids";
-      }
-      const matches = value.spaces.filter((space) => space.id === value.activeSpace.id);
-      return matches.length === 1 && matches[0]?.role === value.activeSpace.role
-        ? undefined
-        : "active space must appear exactly once in spaces";
-    }),
-  ),
+  }).check(Schema.makeFilter(hubSessionIdentityConsistency)),
 );
 export type HubBrowserSessionResponse = typeof HubBrowserSessionResponse.Type;
+
+export const HubSessionIdentity = strict(
+  Schema.Struct(HubSessionIdentityFields).check(Schema.makeFilter(hubSessionIdentityConsistency)),
+);
+export type HubSessionIdentity = typeof HubSessionIdentity.Type;
+
+export const NativeIdentityAttemptId = Schema.String.check(
+  Schema.isPattern(/^nident_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(50),
+).pipe(Schema.brand("NativeIdentityAttemptId"));
+export type NativeIdentityAttemptId = typeof NativeIdentityAttemptId.Type;
+
+export const NativeIdentityLoginAttemptId = Schema.String.check(
+  Schema.isPattern(/^nlogin_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(50),
+).pipe(Schema.brand("NativeIdentityLoginAttemptId"));
+export type NativeIdentityLoginAttemptId = typeof NativeIdentityLoginAttemptId.Type;
+
+export const NativeIdentityResetAttemptId = Schema.String.check(
+  Schema.isPattern(/^nreset_[A-Za-z0-9_-]{22,43}$/),
+  Schema.isMaxLength(50),
+).pipe(Schema.brand("NativeIdentityResetAttemptId"));
+export type NativeIdentityResetAttemptId = typeof NativeIdentityResetAttemptId.Type;
+
+const NativeIdentityTimedAttempt = {
+  attemptId: NativeIdentityAttemptId,
+  attemptSecret: NativeIdentityAttemptSecret,
+  resendAfterMs: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(15 * 60_000),
+  ),
+} as const;
+
+export const NativeIdentityEmailStartRequest = strict(
+  Schema.Struct({
+    email: HubNormalizedEmail,
+    antiBotAssertion: AntiBotAssertion,
+  }),
+);
+export type NativeIdentityEmailStartRequest = typeof NativeIdentityEmailStartRequest.Type;
+
+export const NativeIdentityEmailStartResponse = strictTimed({
+  status: Schema.Literal("accepted"),
+  ...NativeIdentityTimedAttempt,
+});
+export type NativeIdentityEmailStartResponse = typeof NativeIdentityEmailStartResponse.Type;
+
+export const NativeIdentityMailboxProof = Schema.Union([
+  strict(Schema.Struct({ kind: Schema.Literal("link_token"), token: MailToken })),
+  strict(Schema.Struct({ kind: Schema.Literal("email_code"), code: EmailCode })),
+]);
+export type NativeIdentityMailboxProof = typeof NativeIdentityMailboxProof.Type;
+
+export const NativeIdentityEmailVerifyRequest = strict(
+  Schema.Struct({
+    attemptId: NativeIdentityAttemptId,
+    attemptSecret: NativeIdentityAttemptSecret,
+    proof: NativeIdentityMailboxProof,
+  }),
+);
+export type NativeIdentityEmailVerifyRequest = typeof NativeIdentityEmailVerifyRequest.Type;
+
+export const NativeIdentityEmailVerifyResponse = Schema.Union([
+  strictTimed({
+    status: Schema.Literal("existing_account"),
+    attemptId: NativeIdentityAttemptId,
+    activationSecret: NativeIdentityActivationSecret,
+  }),
+  strictTimed({
+    status: Schema.Literal("new_account"),
+    attemptId: NativeIdentityAttemptId,
+    activationSecret: NativeIdentityActivationSecret,
+  }),
+]);
+export type NativeIdentityEmailVerifyResponse = typeof NativeIdentityEmailVerifyResponse.Type;
+
+const NativeIdentityActivation = {
+  attemptId: NativeIdentityAttemptId,
+  activationSecret: NativeIdentityActivationSecret,
+} as const;
+
+export const NativeIdentitySignupUsernameRequest = strict(
+  Schema.Struct({ ...NativeIdentityActivation, username: HubUsername }),
+);
+export type NativeIdentitySignupUsernameRequest = typeof NativeIdentitySignupUsernameRequest.Type;
+
+export const NativeIdentitySignupUsernameResponse = strict(
+  Schema.Struct({ status: Schema.Literal("claimed") }),
+);
+export type NativeIdentitySignupUsernameResponse = typeof NativeIdentitySignupUsernameResponse.Type;
+
+export const NativeIdentitySignupPasskeyOptionsRequest = strict(
+  Schema.Struct(NativeIdentityActivation),
+);
+export type NativeIdentitySignupPasskeyOptionsRequest =
+  typeof NativeIdentitySignupPasskeyOptionsRequest.Type;
+
+export const NativeIdentitySignupPasskeyOptionsResponse = strict(
+  Schema.Struct({ options: JsonObject }),
+);
+export type NativeIdentitySignupPasskeyOptionsResponse =
+  typeof NativeIdentitySignupPasskeyOptionsResponse.Type;
+
+export const NativeIdentitySignupPasskeyFinishRequest = strict(
+  Schema.Struct({
+    ...NativeIdentityActivation,
+    response: JsonObject,
+    idempotencyKey: IdempotencyKey,
+  }),
+);
+export type NativeIdentitySignupPasskeyFinishRequest =
+  typeof NativeIdentitySignupPasskeyFinishRequest.Type;
+
+export const NativeIdentitySignupPasswordFinishRequest = strict(
+  Schema.Struct({
+    ...NativeIdentityActivation,
+    password: BoundedPassword,
+    idempotencyKey: IdempotencyKey,
+  }),
+);
+export type NativeIdentitySignupPasswordFinishRequest =
+  typeof NativeIdentitySignupPasswordFinishRequest.Type;
+
+export const NativeIdentitySessionResponse = strict(
+  Schema.Struct({
+    status: Schema.Literal("complete"),
+    identity: HubSessionIdentity,
+    token: NativeIdentitySessionToken,
+  }),
+);
+export type NativeIdentitySessionResponse = typeof NativeIdentitySessionResponse.Type;
+
+const NativeIdentityRecoveryCodes = Schema.Array(
+  Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+).check(Schema.isMinLength(1), Schema.isMaxLength(256));
+
+export const NativeIdentitySignupFinishResponse = strict(
+  Schema.Struct({
+    status: Schema.Literal("complete"),
+    identity: HubSessionIdentity,
+    token: NativeIdentitySessionToken,
+    recoveryCodes: NativeIdentityRecoveryCodes,
+  }),
+);
+export type NativeIdentitySignupFinishResponse = typeof NativeIdentitySignupFinishResponse.Type;
+
+export const NativeIdentityPasswordStartRequest = Schema.Union([
+  strict(
+    Schema.Struct({
+      kind: Schema.Literal("username"),
+      username: HubUsername,
+      password: BoundedPassword,
+      antiBotAssertion: Schema.optionalKey(AntiBotAssertion),
+    }),
+  ),
+  strict(
+    Schema.Struct({
+      kind: Schema.Literal("verified_email"),
+      ...NativeIdentityActivation,
+      password: BoundedPassword,
+    }),
+  ),
+]);
+export type NativeIdentityPasswordStartRequest = typeof NativeIdentityPasswordStartRequest.Type;
+
+export const NativeIdentityPasswordStartResponse = strictTimed({
+  status: Schema.Literal("factor_required"),
+  attemptId: NativeIdentityLoginAttemptId,
+  attemptSecret: NativeIdentityAttemptSecret,
+  factor: Schema.Literals(["totp", "email_code"]),
+});
+export type NativeIdentityPasswordStartResponse = typeof NativeIdentityPasswordStartResponse.Type;
+
+export const NativeIdentityPasswordFinishRequest = Schema.Union([
+  strict(
+    Schema.Struct({
+      attemptId: NativeIdentityLoginAttemptId,
+      attemptSecret: NativeIdentityAttemptSecret,
+      factor: Schema.Literal("totp"),
+      code: TotpCode,
+    }),
+  ),
+  strict(
+    Schema.Struct({
+      attemptId: NativeIdentityLoginAttemptId,
+      attemptSecret: NativeIdentityAttemptSecret,
+      factor: Schema.Literal("email_code"),
+      code: EmailCode,
+    }),
+  ),
+]);
+export type NativeIdentityPasswordFinishRequest = typeof NativeIdentityPasswordFinishRequest.Type;
+
+export const NativeIdentityRecoveryCodeRequest = strict(
+  Schema.Struct({
+    code: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(512)),
+    idempotencyKey: IdempotencyKey,
+  }),
+);
+export type NativeIdentityRecoveryCodeRequest = typeof NativeIdentityRecoveryCodeRequest.Type;
+
+export const NativeIdentityRecoveryResponse = NativeIdentitySignupFinishResponse;
+export type NativeIdentityRecoveryResponse = typeof NativeIdentityRecoveryResponse.Type;
+
+export const NativeIdentityPasswordResetRequest = strict(
+  Schema.Struct({
+    identifier: HubLoginIdentifier,
+    antiBotAssertion: Schema.optionalKey(AntiBotAssertion),
+  }),
+);
+export type NativeIdentityPasswordResetRequest = typeof NativeIdentityPasswordResetRequest.Type;
+
+export const NativeIdentityPasswordResetResponse = strictTimed({
+  status: Schema.Literal("accepted"),
+  attemptId: NativeIdentityResetAttemptId,
+  attemptSecret: NativeIdentityAttemptSecret,
+  resendAfterMs: Schema.Int.check(
+    Schema.isGreaterThanOrEqualTo(0),
+    Schema.isLessThanOrEqualTo(15 * 60_000),
+  ),
+});
+export type NativeIdentityPasswordResetResponse = typeof NativeIdentityPasswordResetResponse.Type;
+
+export const NativeIdentityPasswordResetVerifyRequest = strict(
+  Schema.Struct({
+    attemptId: NativeIdentityResetAttemptId,
+    attemptSecret: NativeIdentityAttemptSecret,
+    proof: NativeIdentityMailboxProof,
+  }),
+);
+export type NativeIdentityPasswordResetVerifyRequest =
+  typeof NativeIdentityPasswordResetVerifyRequest.Type;
+
+export const NativeIdentityPasswordResetVerifyResponse = strictTimed({
+  status: Schema.Literal("verified"),
+  attemptId: NativeIdentityResetAttemptId,
+  resetSecret: NativeIdentityResetSecret,
+  requiresTotp: Schema.Boolean,
+});
+export type NativeIdentityPasswordResetVerifyResponse =
+  typeof NativeIdentityPasswordResetVerifyResponse.Type;
+
+export const NativeIdentityPasswordResetFinishRequest = strict(
+  Schema.Struct({
+    attemptId: NativeIdentityResetAttemptId,
+    resetSecret: NativeIdentityResetSecret,
+    password: BoundedPassword,
+    factor: Schema.Union([
+      strict(Schema.Struct({ kind: Schema.Literal("none") })),
+      strict(Schema.Struct({ kind: Schema.Literal("totp"), code: TotpCode })),
+    ]),
+  }),
+);
+export type NativeIdentityPasswordResetFinishRequest =
+  typeof NativeIdentityPasswordResetFinishRequest.Type;
+
+export const NativeIdentityPasswordResetFinishResponse = strict(
+  Schema.Struct({ status: Schema.Literal("complete") }),
+);
+export type NativeIdentityPasswordResetFinishResponse =
+  typeof NativeIdentityPasswordResetFinishResponse.Type;
+
+export const NativeIdentityAttemptCancelRequest = strict(
+  Schema.Struct({
+    attemptId: Schema.Union([
+      NativeIdentityAttemptId,
+      NativeIdentityLoginAttemptId,
+      NativeIdentityResetAttemptId,
+    ]),
+    attemptSecret: NativeIdentityAttemptSecret,
+  }),
+);
+export type NativeIdentityAttemptCancelRequest = typeof NativeIdentityAttemptCancelRequest.Type;
+
+export const NativeIdentityAttemptCancelResponse = strict(
+  Schema.Struct({ status: Schema.Literal("cancelled") }),
+);
+export type NativeIdentityAttemptCancelResponse = typeof NativeIdentityAttemptCancelResponse.Type;
 
 export const PublicSignupAttemptId = Schema.String.check(
   Schema.isPattern(/^signup_[A-Za-z0-9_-]{22,43}$/),

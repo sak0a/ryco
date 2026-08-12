@@ -4,6 +4,11 @@ The Ryco iOS-first native app (Expo / React Native), consuming
 `@ryco/client-runtime`. It ships the scaffold, platform adapters, direct-node
 bearer pairing loop, and hosted Hub system-browser authorization handoff.
 
+The shared contracts/runtime also define an additive native identity v2 transport for a future
+full-screen mobile access gate. It remains disabled unless a compatible Hub explicitly advertises
+the v2 capability. This app still uses the existing system-browser handoff; the protocol dependency
+alone does not change startup UI or adopt returned native session material.
+
 ## Prerequisites
 
 - The repo's pinned Bun (`bun --version` must match `package.json`'s
