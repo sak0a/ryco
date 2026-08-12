@@ -1,4 +1,5 @@
 import {
+  encodeNativeNodeClaimTranscript,
   encodeNodeAuthenticationTranscript,
   encodeNodeKeyRotationTranscript,
   fingerprintNodePublicKey,
@@ -55,6 +56,21 @@ export function generateNodeIdentityFixtureManifest(): string {
     challengeExpiresAt: 1_784_160_030_000,
     challenge: new Uint8Array(32).fill(0xa5),
   });
+  const nativeNodeClaimTranscript = encodeNativeNodeClaimTranscript({
+    hubOrigin: "https://hub.example.com",
+    protocolVersion: 1,
+    transcriptVersion: 1,
+    claimId: "nclaim_CCCCCCCCCCCCCCCCCCCCCC",
+    accountId: "acct_DDDDDDDDDDDDDDDDDDDDDD",
+    spaceId: "space_EEEEEEEEEEEEEEEEEEEEEE",
+    sessionId: "sess_FFFFFFFFFFFFFFFFFFFFFF",
+    dpopKeyThumbprint: new Uint8Array(32).fill(0x6b),
+    installationId: "install_GGGGGGGGGGGGGGGGGGGGGG",
+    environmentId: "env_HHHHHHHHHHHHHHHHHHHHHH",
+    nodeKey: { algorithm: "ed25519", publicKey },
+    claimExpiresAt: 1_784_160_030_000,
+    challenge: new Uint8Array(32).fill(0x7c),
+  });
 
   const manifest = {
     formatVersion: 1,
@@ -73,6 +89,11 @@ export function generateNodeIdentityFixtureManifest(): string {
       transcriptHex: hex(rotationTranscript),
       transcriptSha256: sha256(rotationTranscript),
       signatureHex: sign(null, rotationTranscript, privateKey).toString("hex"),
+    },
+    nativeNodeClaim: {
+      transcriptHex: hex(nativeNodeClaimTranscript),
+      transcriptSha256: sha256(nativeNodeClaimTranscript),
+      signatureHex: sign(null, nativeNodeClaimTranscript, privateKey).toString("hex"),
     },
   } as const;
   return `${JSON.stringify(manifest, null, 2)}\n`;
