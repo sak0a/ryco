@@ -17,6 +17,11 @@ import { buildTemporaryWorktreeBranchName } from "@ryco/shared/git";
 import type { OrchestrationDispatchError } from "../../orchestration/Errors.ts";
 import { resolveManagedWorktreesRoot, type ServerConfigShape } from "../../config.ts";
 import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
+import {
+  canonicalizeFilesystemPath,
+  isCaseSensitiveFileSystem,
+  planWorktreeReconciliation,
+} from "../../git/worktreeReconciliation.ts";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { resolveProjectWorktreesDir } from "../../project/projectMetadataPaths.ts";
 import type { ProjectSetupScriptRunnerShape } from "../../project/Services/ProjectSetupScriptRunner.ts";
@@ -39,6 +44,12 @@ import {
   ignoreAlreadyMissingGitResource,
   toGitManagerError,
 } from "./gitErrors.ts";
+
+const RECONCILIATION_THROTTLE_MS = 5 * 60 * 1000;
+
+// Process-wide: the WS context is rebuilt per connection, but the on-disk state
+// this sweep inspects is shared by all of them.
+let lastReconciliationAtMs = 0;
 
 type AppendSetupScriptActivity = (input: {
   readonly threadId: ThreadId;
@@ -621,6 +632,164 @@ export const makeWorktreeOperations = (deps: {
       return { worktreeId, sessionId: threadId };
     });
 
+  /**
+   * Realigns a project's worktree rows with what git reports on disk.
+   *
+   * Sessions record the directory they ran in independently of the worktree
+   * rows, so the two drift whenever a worktree is removed outside Ryco or a
+   * directory is reached through another spelling of the same path. Without
+   * this pass the sidebar renders those sessions under a phantom worktree node
+   * named after their branch — a second "main" that no worktree backs.
+   */
+  const reconcileProjectWorktrees = (projectId: ProjectId) =>
+    Effect.gen(function* () {
+      const operation = "git.reconcileProjectWorktrees";
+      const project = yield* loadProjectForGitWorkflow(operation, projectId);
+      const gitWorktreePaths = yield* gitWorkflow
+        .listWorktreePaths(project.workspaceRoot)
+        .pipe(
+          Effect.mapError((cause) =>
+            toGitManagerError(operation, "Failed to inspect git worktrees.", cause),
+          ),
+        );
+      const snapshot = yield* projectionSnapshotQuery
+        .getShellSnapshot()
+        .pipe(
+          Effect.mapError((cause) =>
+            toGitManagerError(operation, "Failed to load project sessions.", cause),
+          ),
+        );
+      const plan = planWorktreeReconciliation({
+        canonicalizePath: canonicalizeFilesystemPath,
+        caseSensitiveFileSystem: isCaseSensitiveFileSystem(),
+        gitWorktreePaths,
+        project: { id: project.id, workspaceRoot: project.workspaceRoot },
+        threads: snapshot.threads,
+        worktrees: snapshot.worktrees ?? [],
+      });
+      if (plan.adopt.length === 0 && plan.attach.length === 0 && plan.detach.length === 0) {
+        return;
+      }
+
+      const now = new Date().toISOString();
+      for (const adoption of plan.adopt) {
+        // Restricted workspaces must not gain rows for directories outside the
+        // configured root; leave those sessions as they are.
+        const authorized = yield* authorizeWorktreePath(
+          operation,
+          adoption.worktreePath,
+          true,
+        ).pipe(
+          Effect.as(true),
+          Effect.catch(() => Effect.succeed(false)),
+        );
+        if (!authorized) {
+          continue;
+        }
+        const worktreeId = WorktreeId.make(`worktree-${crypto.randomUUID()}`);
+        yield* dispatchWorktreeCommand(
+          {
+            type: "worktree.create",
+            commandId: serverCommandId("worktree-reconcile-adopt"),
+            worktreeId,
+            projectId: project.id,
+            branch: adoption.branch,
+            worktreePath: adoption.worktreePath,
+            origin: "manual",
+            prNumber: null,
+            issueNumber: null,
+            prTitle: null,
+            issueTitle: null,
+            createdAt: now,
+          },
+          operation,
+        );
+        // A worktree checked out on `main` would otherwise render beside the
+        // project root under the same name; the directory name disambiguates.
+        yield* dispatchWorktreeCommand(
+          {
+            type: "worktree.meta.update",
+            commandId: serverCommandId("worktree-reconcile-title"),
+            worktreeId,
+            title: adoption.title,
+            changedAt: now,
+          },
+          operation,
+        );
+        for (const threadId of adoption.threadIds) {
+          yield* dispatchWorktreeCommand(
+            {
+              type: "thread.attach-to-worktree",
+              commandId: serverCommandId("worktree-reconcile-attach"),
+              threadId,
+              worktreeId,
+              attachedAt: now,
+            },
+            operation,
+          );
+        }
+      }
+
+      for (const attachment of plan.attach) {
+        yield* dispatchWorktreeCommand(
+          {
+            type: "thread.attach-to-worktree",
+            commandId: serverCommandId("worktree-reconcile-attach"),
+            threadId: attachment.threadId,
+            worktreeId: attachment.worktreeId,
+            attachedAt: now,
+          },
+          operation,
+        );
+      }
+
+      for (const threadId of plan.detach) {
+        yield* dispatchWorktreeCommand(
+          {
+            type: "thread.meta.update",
+            commandId: serverCommandId("worktree-reconcile-detach"),
+            threadId,
+            worktreePath: null,
+          },
+          operation,
+        );
+      }
+
+      yield* Effect.logInfo("worktree reconciliation applied", {
+        projectId: project.id,
+        adopted: plan.adopt.length,
+        attached: plan.attach.length,
+        detached: plan.detach.length,
+      });
+    });
+
+  /**
+   * Best-effort reconciliation across every active project, throttled per
+   * process so a reconnect loop cannot turn into a `git worktree list` storm.
+   */
+  const reconcileAllWorktrees = Effect.gen(function* () {
+    const nowMs = Date.now();
+    if (nowMs - lastReconciliationAtMs < RECONCILIATION_THROTTLE_MS) {
+      return;
+    }
+    lastReconciliationAtMs = nowMs;
+
+    const snapshot = yield* projectionSnapshotQuery.getShellSnapshot();
+    yield* Effect.forEach(
+      snapshot.projects,
+      (project) =>
+        reconcileProjectWorktrees(project.id).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("worktree reconciliation failed", {
+              projectId: project.id,
+              cause,
+            }),
+          ),
+        ),
+      { concurrency: 4, discard: true },
+    );
+  }).pipe(Effect.ignoreCause({ log: true }));
+
   const archiveWorktree = (input: {
     readonly worktreeId: WorktreeId;
     readonly deleteBranch: boolean;
@@ -785,6 +954,17 @@ export const makeWorktreeOperations = (deps: {
         },
         operation,
       );
+      // Sessions recorded under a different spelling of the removed directory
+      // survive the delete cascade; fold them back into the project root rather
+      // than leaving a worktree node with nothing behind it.
+      yield* reconcileProjectWorktrees(project.id).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("worktree reconciliation after delete failed", {
+            projectId: project.id,
+            cause,
+          }),
+        ),
+      );
       yield* refreshGitStatus(project.workspaceRoot);
       return {};
     });
@@ -852,5 +1032,7 @@ export const makeWorktreeOperations = (deps: {
     restoreWorktree,
     deleteWorktree,
     initializeGitForProject,
+    reconcileAllWorktrees,
+    reconcileProjectWorktrees,
   };
 };

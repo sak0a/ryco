@@ -125,7 +125,8 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
         threads: allThreadsByProjectId.get(project.id) ?? [],
         worktrees: explicitWorktreesByProjectId.get(project.id) ?? [],
       });
-      const mergedProjectWorktrees = mergeEquivalentWorktrees(project, projectWorktrees);
+      const mergedNodes = mergeEquivalentWorktrees(project, projectWorktrees);
+      const mergedProjectWorktrees = mergedNodes.worktrees;
 
       return {
         archivedSessions,
@@ -136,7 +137,7 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
               diffStats: getDiffStats(input, worktree.worktreeId),
               nowMs: input.nowMs,
               threads: projectThreads.filter((thread) =>
-                belongsToWorktree(thread, worktree, project),
+                belongsToWorktree(thread, worktree, project, mergedNodes),
               ),
               worktree,
             }),
@@ -151,7 +152,7 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
               diffStats: getDiffStats(input, worktree.worktreeId),
               nowMs: input.nowMs,
               threads: projectThreads.filter((thread) =>
-                belongsToWorktree(thread, worktree, project),
+                belongsToWorktree(thread, worktree, project, mergedNodes),
               ),
               worktree,
             }),
@@ -263,9 +264,25 @@ function belongsToWorktree(
   thread: SidebarTreeThread,
   worktree: SidebarWorktree,
   project: Project,
+  nodes: MergedSidebarWorktrees,
 ): boolean {
   const threadDirectoryKey = threadDirectoryGroupKey(thread, project);
   const worktreeDirectoryKey = worktreeDirectoryGroupKey(worktree, project);
+  if (threadDirectoryKey !== null && nodes.directoryKeys.has(threadDirectoryKey)) {
+    // The directory a session ran in outranks a worktree id it may have
+    // outgrown, as long as some node actually covers that directory.
+    return threadDirectoryKey === worktreeDirectoryKey;
+  }
+
+  // Otherwise fall back to the recorded link. The server resolves symlinks when
+  // it attaches a thread, so a directory spelled two ways still lands on the
+  // node its worktree owns instead of splitting off a duplicate.
+  const linkedNodeId =
+    thread.worktreeId == null ? undefined : nodes.nodeIdByWorktreeId.get(thread.worktreeId);
+  if (linkedNodeId !== undefined) {
+    return linkedNodeId === worktree.worktreeId;
+  }
+
   if (threadDirectoryKey !== null && worktreeDirectoryKey !== null) {
     return threadDirectoryKey === worktreeDirectoryKey;
   }
@@ -287,17 +304,42 @@ function belongsToWorktree(
   );
 }
 
+interface MergedSidebarWorktrees {
+  /** Directories the merged nodes cover, for deciding if a session's fits one. */
+  readonly directoryKeys: ReadonlySet<string>;
+  /** Every input worktree id mapped to the id of the node it ended up in. */
+  readonly nodeIdByWorktreeId: ReadonlyMap<string, string>;
+  readonly worktrees: ReadonlyArray<SidebarWorktree>;
+}
+
 function mergeEquivalentWorktrees(
   project: Project,
   worktrees: ReadonlyArray<SidebarWorktree>,
-): ReadonlyArray<SidebarWorktree> {
+): MergedSidebarWorktrees {
   const mergedByKey = new Map<string, SidebarWorktree>();
+  const keyByWorktreeId = new Map<string, string>();
   for (const worktree of worktrees) {
     const key = canonicalWorktreeGroupKey(project, worktree);
     const existing = mergedByKey.get(key);
+    keyByWorktreeId.set(worktree.worktreeId, key);
     mergedByKey.set(key, existing ? mergeWorktree(existing, worktree) : worktree);
   }
-  return [...mergedByKey.values()];
+
+  const directoryKeys = new Set<string>();
+  const nodeIdByWorktreeId = new Map<string, string>();
+  for (const [worktreeId, key] of keyByWorktreeId) {
+    const node = mergedByKey.get(key);
+    if (node) {
+      nodeIdByWorktreeId.set(worktreeId, node.worktreeId);
+    }
+  }
+  for (const node of mergedByKey.values()) {
+    const directoryKey = worktreeDirectoryGroupKey(node, project);
+    if (directoryKey !== null) {
+      directoryKeys.add(directoryKey);
+    }
+  }
+  return { directoryKeys, nodeIdByWorktreeId, worktrees: [...mergedByKey.values()] };
 }
 
 function canonicalWorktreeGroupKey(project: Project, worktree: SidebarWorktree): string {
@@ -407,9 +449,15 @@ function ensureProjectWorktrees(input: {
   threads: ReadonlyArray<SidebarTreeThread>;
   worktrees: ReadonlyArray<SidebarWorktree>;
 }): ReadonlyArray<SidebarWorktree> {
+  const explicitWorktreeIds = new Set(input.worktrees.map((worktree) => worktree.worktreeId));
   return [
     ...input.worktrees,
-    ...input.threads.map((thread) => synthesizeWorktreeForThread(input.project, thread)),
+    // A session already linked to a known worktree belongs to that node. Deriving
+    // a second node from its recorded directory would split it off under its
+    // branch name — the phantom "main" beside the project root.
+    ...input.threads
+      .filter((thread) => thread.worktreeId == null || !explicitWorktreeIds.has(thread.worktreeId))
+      .map((thread) => synthesizeWorktreeForThread(input.project, thread)),
   ];
 }
 

@@ -603,6 +603,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       restoreWorktree,
       deleteWorktree,
       initializeGitForProject,
+      reconcileAllWorktrees,
     } = makeWorktreeOperations({
       projectionSnapshotQuery,
       projectionWorktrees,
@@ -711,6 +712,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       restoreWorktree,
       deleteWorktree,
       initializeGitForProject,
+      reconcileAllWorktrees,
       callSourceControlWorkflowMethod,
     };
   });

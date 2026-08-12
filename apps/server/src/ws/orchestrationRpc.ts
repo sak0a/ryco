@@ -49,6 +49,7 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     makeReplayableShellStream,
     makeReplayableThreadStream,
     recordThreadSnapshotDurationMs,
+    reconcileAllWorktrees,
   } = ctx;
 
   /**
@@ -411,24 +412,29 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
     [ORCHESTRATION_WS_METHODS.subscribeShell]: (_input) =>
       observeRpcStreamEffect(
         ORCHESTRATION_WS_METHODS.subscribeShell,
-        Effect.succeed(
-          makeReplayableShellStream(
-            projectionSnapshotQuery.getShellSnapshot().pipe(
-              Effect.tapError((cause) =>
-                Effect.logError("orchestration shell snapshot load failed", { cause }),
+        // Realign worktree rows with disk while the shell loads. Any correction
+        // it dispatches reaches this same subscription as an ordinary event.
+        reconcileAllWorktrees.pipe(
+          Effect.forkDetach,
+          Effect.as(
+            makeReplayableShellStream(
+              projectionSnapshotQuery.getShellSnapshot().pipe(
+                Effect.tapError((cause) =>
+                  Effect.logError("orchestration shell snapshot load failed", { cause }),
+                ),
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationGetSnapshotError({
+                      message: "Failed to load orchestration shell snapshot",
+                      cause,
+                    }),
+                ),
               ),
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationGetSnapshotError({
-                    message: "Failed to load orchestration shell snapshot",
-                    cause,
-                  }),
-              ),
-            ),
-          ).pipe(
-            Stream.tap((item) =>
-              Effect.sync(() =>
-                recordServerPerfPayload("server.ws.orchestration.subscribeShell", item),
+            ).pipe(
+              Stream.tap((item) =>
+                Effect.sync(() =>
+                  recordServerPerfPayload("server.ws.orchestration.subscribeShell", item),
+                ),
               ),
             ),
           ),

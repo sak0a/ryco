@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type {
   OrchestrationCommand,
   OrchestrationProject,
@@ -165,6 +167,24 @@ export function listThreadsByProjectId(
   return readModel.threads.filter((thread) => thread.projectId === projectId);
 }
 
+/**
+ * Compares two recorded workspace paths. Paths reach the projection from
+ * several sources (composer input, git output, RPC payloads), so the same
+ * directory shows up with trailing separators or unresolved segments. Comparing
+ * the raw strings leaves threads stranded on a worktree that was deleted around
+ * them. Symlinked spellings need the filesystem to resolve and are handled by
+ * the worktree reconciliation sweep instead.
+ */
+function isSamePathText(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const resolved = path.resolve(value).replace(/[\\/]+$/g, "");
+    return process.platform === "win32" || process.platform === "darwin"
+      ? resolved.toLowerCase()
+      : resolved;
+  };
+  return normalize(left) === normalize(right);
+}
+
 export function listThreadsByWorktree(
   readModel: OrchestrationReadModel,
   worktree: OrchestrationWorktreeShell,
@@ -179,7 +199,8 @@ export function listThreadsByWorktree(
     return (
       thread.worktreeId == null &&
       worktree.worktreePath !== null &&
-      thread.worktreePath === worktree.worktreePath
+      thread.worktreePath !== null &&
+      isSamePathText(thread.worktreePath, worktree.worktreePath)
     );
   });
 }
