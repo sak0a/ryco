@@ -317,20 +317,20 @@ explanation and the direct-pair escape. There is no software-key fallback.
 
 ## Failure behavior
 
-| Failure | User-visible result | State/data rule |
-| --- | --- | --- |
-| Invalid Hub URL | Inline bounded validation message | Draft retained; no request |
-| Incompatible capability | Specific bounded incompatibility message | Draft retained; profile not saved |
-| Hub offline/unreachable | Retryable reachability message | Draft/current profile retained |
-| Stale capability/signup result | No visible state change | Result discarded by generation/origin fence |
-| Signup disabled | Create visible and disabled with explanation | Sign in remains active |
-| Signup probe unavailable | Create visible and disabled with Retry | Nothing persisted |
-| Profile switch fails | Current Hub remains active | Direct plane unchanged |
-| Hardware key unavailable | Hosted path unavailable; pair-device escape | Fail closed |
-| Browser dismissed/cancelled | Bounded cancelled state and Retry | Runtime transaction aborted |
-| Handoff expired/superseded/rejected | Runtime's bounded error and Retry | No manual replay or token write |
-| Callback validation fails | Bounded failure and Retry | Runtime rejects before redemption/adoption |
-| Directory refresh fails | Authenticated offline/retry presentation | No invented node authority |
+| Failure                             | User-visible result                          | State/data rule                             |
+| ----------------------------------- | -------------------------------------------- | ------------------------------------------- |
+| Invalid Hub URL                     | Inline bounded validation message            | Draft retained; no request                  |
+| Incompatible capability             | Specific bounded incompatibility message     | Draft retained; profile not saved           |
+| Hub offline/unreachable             | Retryable reachability message               | Draft/current profile retained              |
+| Stale capability/signup result      | No visible state change                      | Result discarded by generation/origin fence |
+| Signup disabled                     | Create visible and disabled with explanation | Sign in remains active                      |
+| Signup probe unavailable            | Create visible and disabled with Retry       | Nothing persisted                           |
+| Profile switch fails                | Current Hub remains active                   | Direct plane unchanged                      |
+| Hardware key unavailable            | Hosted path unavailable; pair-device escape  | Fail closed                                 |
+| Browser dismissed/cancelled         | Bounded cancelled state and Retry            | Runtime transaction aborted                 |
+| Handoff expired/superseded/rejected | Runtime's bounded error and Retry            | No manual replay or token write             |
+| Callback validation fails           | Bounded failure and Retry                    | Runtime rejects before redemption/adoption  |
+| Directory refresh fails             | Authenticated offline/retry presentation     | No invented node authority                  |
 
 All model-owned errors have fixed bounded vocabulary. Arbitrary response bodies, origins beyond the
 already selected public profile, account identifiers, and callback data are never interpolated into
