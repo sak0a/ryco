@@ -8,7 +8,7 @@ interface TurnstileApi {
     container: HTMLElement,
     options: {
       readonly sitekey: string;
-      readonly theme: "auto";
+      readonly theme: "auto" | "dark" | "light";
       readonly callback: (token: string) => void;
       readonly "expired-callback": () => void;
       readonly "error-callback": () => void;
@@ -73,7 +73,12 @@ export function TurnstileWidget({
         if (disposed || containerRef.current === null) return;
         const id = api.render(containerRef.current, {
           sitekey: siteKey,
-          theme: "auto",
+          // The app's resolved scheme, not `"auto"`. Turnstile's `auto` follows
+          // the OS `prefers-color-scheme`, while Ryco's is chosen in-app and
+          // applied as a `dark` class on the root — so a light OS with a dark
+          // Ryco dropped a white third-party box into the middle of a dark
+          // sign-up card.
+          theme: document.documentElement.classList.contains("dark") ? "dark" : "light",
           callback: (token) => {
             if (!disposed) onToken(token);
           },
@@ -101,7 +106,11 @@ export function TurnstileWidget({
 
   return (
     <div className="space-y-2">
-      <div ref={containerRef} aria-label="Anti-bot verification" />
+      {/* The widget's own height, reserved before it loads. Turnstile's managed
+          widget renders at 65px, and injecting that into a form that had
+          collapsed to nothing moved every control below it once the script
+          arrived. */}
+      <div ref={containerRef} aria-label="Anti-bot verification" className="min-h-[65px]" />
       {failed ? (
         <p role="alert" className="text-sm text-destructive">
           Verification could not load. Check your connection and try again.

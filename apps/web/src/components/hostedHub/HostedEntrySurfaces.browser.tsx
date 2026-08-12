@@ -698,9 +698,11 @@ describe("hosted entry surfaces", () => {
     expect(scroller.scrollWidth).toBeLessThanOrEqual(scroller.clientWidth);
   });
 
-  it("leaves the desktop entry card, its top-right sign-out, and its static actions unchanged", async () => {
-    // Desktop regression for every phone-gated change: the anchoring, the
-    // receding card chrome, and the sign-out relocation are all phone-only.
+  it("puts the desktop directory in the Hub shell with its account controls in the Hub bar", async () => {
+    // Desktop regression for every phone-gated change: the anchoring and the
+    // receding chrome are still phone-only, and the desktop tier now renders
+    // the standalone Hub shell — a bar above a page — rather than the floating
+    // settings-style card the directory used to share with the node app.
     await page.viewport(1_280, 720);
     await vi.waitFor(() => {
       expect(document.documentElement.getAttribute("data-tier")).toBe("desktop");
@@ -710,23 +712,35 @@ describe("hosted entry surfaces", () => {
     const signOut = document.querySelector<HTMLElement>('button[aria-label="Sign out"]');
     expect(signOut, "desktop keeps the icon-only sign-out control").not.toBeNull();
     expect(signOut!.textContent?.trim()).toBe("");
-    const signOutRect = signOut!.getBoundingClientRect();
-    const card = document.querySelector<HTMLElement>("main section")!;
-    const cardRect = card.getBoundingClientRect();
-    // Still the card's top-right corner.
-    expect(signOutRect.right).toBeGreaterThan(cardRect.left + cardRect.width / 2);
-    expect(signOutRect.top).toBeLessThan(cardRect.top + cardRect.height / 3);
 
-    // The card is still a floating card, and its action group is still in flow.
-    const cardStyle = getComputedStyle(card);
-    expect(Number.parseFloat(cardStyle.borderTopLeftRadius)).toBeGreaterThan(0);
-    expect(Number.parseFloat(cardStyle.borderTopWidth)).toBeGreaterThan(0);
-    expect(cardStyle.display).not.toBe("flex");
+    // The account controls belong to the Hub, not to the node list, so they
+    // live in the Hub bar. The bar is a sibling of the scroll container rather
+    // than a `sticky` child of it, which is what keeps the page's own
+    // `overscroll-contain` scroller clean.
+    const bar = document.querySelector<HTMLElement>("header");
+    expect(bar, "the desktop Hub renders its own top bar").not.toBeNull();
+    expect(bar!.contains(signOut!), "sign-out sits in the Hub bar").toBe(true);
+    const scroller = surfaceScroller();
+    expect(bar!.contains(scroller), "the bar is not an ancestor of the scroller").toBe(false);
+    expect(scroller.contains(bar!), "the bar does not scroll with the page").toBe(false);
+    // Still top-right of the chrome, and above the page it labels.
+    expect(signOut!.getBoundingClientRect().right).toBeGreaterThan(window.innerWidth / 2);
+    expect(signOut!.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      scroller.getBoundingClientRect().top + 1,
+    );
 
+    // The page column is a page, not a floating card: no border, no radius.
+    // The phone assertion above requires the same three values, which is what
+    // makes the two tiers differ in chrome and layout rather than in geometry.
+    const column = document.querySelector<HTMLElement>("main section")!;
+    const columnStyle = getComputedStyle(column);
+    expect(Number.parseFloat(columnStyle.borderTopLeftRadius)).toBe(0);
+    expect(Number.parseFloat(columnStyle.borderTopWidth)).toBe(0);
+
+    // The action group is still in flow: the bottom anchoring is phone-only.
     const refresh = control("Refresh nodes");
     const actionGroup = refresh.parentElement!;
     expect(getComputedStyle(actionGroup).position).toBe("static");
-    expect(getComputedStyle(actionGroup).marginTop).toBe("0px");
 
     // Desktop density is untouched: the entry buttons keep their compact size.
     expect(refresh.getBoundingClientRect().height).toBeLessThan(TOUCH_FLOOR_PX);

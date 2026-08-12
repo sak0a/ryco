@@ -40,7 +40,6 @@ import { Input, TOUCH_INPUT_CLASS_NAME } from "../ui/input";
 import { Label } from "../ui/label";
 import { Skeleton } from "../ui/skeleton";
 import { AnchoredToastProvider, ToastProvider } from "../ui/toast";
-import { APP_DISPLAY_NAME } from "../../branding";
 import { formatRecoveryCodesForClipboard } from "../settings/AccountSettings.logic";
 import { useRelativeTimeTick } from "../settings/settingsLayout";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
@@ -50,7 +49,7 @@ import {
   useHostedHubStore,
   useHostedRecoveryCodeDisplayStore,
 } from "../../hostedHub/state";
-import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
+import { hostedHubApi } from "../../hostedHub/api";
 import {
   consumeHostedIdentityLink,
   type HostedIdentityLink,
@@ -72,6 +71,9 @@ import {
   useHostedConnectionActions,
 } from "./HostedConnectionControls";
 import { HostedNodeDetail } from "./HostedNodeDetail";
+import { HubGateway } from "./shell/HubGateway";
+import { HubPage } from "./shell/HubPage";
+import { HubShell } from "./shell/HubShell";
 import {
   directoryCountLine,
   lastSeenLabel,
@@ -262,40 +264,36 @@ function HostedEmailVerificationSurface({
   }, [link]);
 
   return (
-    <Surface
+    <HubGateway
+      title={
+        status === "verifying"
+          ? "Verifying your email"
+          : status === "verified"
+            ? "Email verified"
+            : "This verification link is unavailable"
+      }
+      description={
+        status === "verifying"
+          ? "This will only take a moment."
+          : status === "verified"
+            ? "Your address is now available for account recovery."
+            : "The link is incomplete, expired, or has already been used. Request a new one from Account settings."
+      }
       actions={
         status === "verifying" ? undefined : (
-          <Button className="phone:min-h-11" onClick={onContinue}>
+          <Button size="cta" className="mt-6 w-full" onClick={onContinue}>
             Continue
           </Button>
         )
       }
     >
-      <div className="mb-6 flex size-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
-        {status === "verifying" ? (
-          <Loader2Icon aria-hidden className="size-5 animate-spin" />
-        ) : (
-          <ShieldCheckIcon aria-hidden className="size-5" />
-        )}
-      </div>
-      <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-        {APP_DISPLAY_NAME} Hub
-      </p>
-      <h1 className="mt-2 text-2xl font-semibold">
-        {status === "verifying"
-          ? "Verifying your email"
-          : status === "verified"
-            ? "Email verified"
-            : "This verification link is unavailable"}
-      </h1>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        {status === "verifying"
-          ? "This will only take a moment."
-          : status === "verified"
-            ? "Your address is now available for account recovery."
-            : "The link is incomplete, expired, or has already been used. Request a new one from Account settings."}
-      </p>
-    </Surface>
+      {status === "verifying" ? (
+        <p role="status" aria-live="polite" className="text-muted-foreground text-sm">
+          <InlineProgress />
+          Confirming the link…
+        </p>
+      ) : null}
+    </HubGateway>
   );
 }
 
@@ -324,23 +322,60 @@ function HostedNodeFailureSurface({
   readonly message: string | null;
 }) {
   return (
-    <Surface>
-      {/* Already carries "All nodes", "Refresh", "Account" and "Sign out", so
-          the terminal-failure state needs no escape of its own. */}
-      <div className="mb-4 flex justify-end">
-        <HostedConnectionControl />
-      </div>
-      <TriangleAlertIcon aria-hidden className="size-8 text-destructive" />
-      <h1 className="mt-4 text-2xl font-semibold">Unable to connect to {node.label}</h1>
-      <p role="alert" className="mt-2 text-sm text-muted-foreground">
-        {message ?? "The relay session could not be established. Choose another node or retry."}
-      </p>
-      {message === HOSTED_SESSION_SYNC_FAILURE_MESSAGE ? (
-        <Button className="mt-5" onClick={() => void hostedHubController.retrySelectedNode()}>
-          <RefreshCwIcon aria-hidden /> Retry
-        </Button>
-      ) : null}
-    </Surface>
+    // The connection control already carries "All nodes", "Refresh", "Account"
+    // and "Sign out", so the terminal-failure state needs no escape of its own.
+    // It moves into the Hub bar rather than floating above the message, which
+    // is where a page-level control belongs.
+    <HubShell measure="content" trailing={<HostedConnectionControl />}>
+      <HubStatus
+        tone="destructive"
+        icon={<TriangleAlertIcon aria-hidden className="size-8 text-destructive" />}
+        title={`Unable to connect to ${node.label}`}
+      >
+        <p role="alert" className="text-muted-foreground text-sm">
+          {message ?? "The relay session could not be established. Choose another node or retry."}
+        </p>
+        {message === HOSTED_SESSION_SYNC_FAILURE_MESSAGE ? (
+          <Button className="mt-5" onClick={() => void hostedHubController.retrySelectedNode()}>
+            <RefreshCwIcon aria-hidden /> Retry
+          </Button>
+        ) : null}
+      </HubStatus>
+    </HubShell>
+  );
+}
+
+/**
+ * A centred status page for the Hub's transitional and terminal states —
+ * restoring, connecting, failed.
+ *
+ * These are not forms and not lists, so they take neither the gateway's panel
+ * nor a page header: a glyph, a sentence about what is happening, and at most
+ * one action, centred in the page's measure.
+ */
+function HubStatus({
+  children,
+  icon,
+  title,
+  tone = "default",
+}: {
+  readonly children: React.ReactNode;
+  readonly icon: React.ReactNode;
+  readonly title: string;
+  readonly tone?: "default" | "destructive";
+}) {
+  return (
+    <div className="mx-auto flex max-w-lg flex-col items-center pt-10 text-center">
+      {icon}
+      <h1
+        className={`mt-4 font-semibold text-2xl tracking-tight ${
+          tone === "destructive" ? "text-foreground" : ""
+        }`}
+      >
+        {title}
+      </h1>
+      <div className="mt-2">{children}</div>
+    </div>
   );
 }
 
@@ -349,104 +384,44 @@ function HostedNodeRestoringSurface() {
   // validation whose URL the route orchestrator owns, and an escape would race
   // the reconcile.
   return (
-    <Surface>
-      <ServerIcon aria-hidden className="size-8 text-primary" />
-      <h1 className="mt-4 text-2xl font-semibold">Restoring your node</h1>
-      <p role="status" aria-live="polite" className="mt-2 text-sm text-muted-foreground">
-        <InlineProgress />
-        Checking your access before reconnecting…
-      </p>
-    </Surface>
+    <HubShell measure="content">
+      <HubStatus
+        icon={<ServerIcon aria-hidden className="size-8 text-primary" />}
+        title="Restoring your node"
+      >
+        <p role="status" aria-live="polite" className="text-muted-foreground text-sm">
+          <InlineProgress />
+          Checking your access before reconnecting…
+        </p>
+      </HubStatus>
+    </HubShell>
   );
 }
 
 function HostedNodeStartingSurface({ node }: { readonly node: HostedHubNode }) {
   const { returnToAllNodes } = useHostedConnectionActions();
   return (
-    <Surface
-      actions={
-        // Until now the only way out of "Connecting to X" was to wait or to
-        // reload the page. This uses the same history-back-equivalent teardown
-        // the connection controls already use.
-        <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
-          <Button
-            variant="outline"
-            className="mt-5 phone:min-h-11"
-            onClick={() => void returnToAllNodes()}
-          >
-            Back to nodes
-          </Button>
-        </div>
-      }
-    >
-      <ServerIcon aria-hidden className="size-8 text-primary" />
-      <h1 className="mt-4 text-2xl font-semibold">Connecting to {node.label}</h1>
-      <p role="status" aria-live="polite" className="mt-2 text-sm text-muted-foreground">
-        <InlineProgress />
-        Preparing a private relay session and synchronizing Ryco state…
-      </p>
-    </Surface>
-  );
-}
-
-function Surface({
-  children,
-  actions,
-  trailing,
-  scrollRef,
-  width = "narrow",
-}: {
-  readonly children: React.ReactNode;
-  /**
-   * The surface's action group. Bottom-anchored on the phone tier by its own
-   * `phone:` classes; it may be absent in a state that has no action group.
-   */
-  readonly actions?: React.ReactNode;
-  /**
-   * Content that must mount in **every** state of the surface and must stay
-   * last in the DOM — live regions and recovery affordances. Kept separate
-   * from `actions` precisely so it cannot be swallowed by a conditional that
-   * only applies to the action group.
-   */
-  readonly trailing?: React.ReactNode;
-  /** Optional owner for mode changes that must reset this surface's local scroll position. */
-  readonly scrollRef?: RefObject<HTMLElement | null>;
-  /**
-   * The desktop card's measure. `wide` is the node directory alone: a list of
-   * rows carrying four facts each reads badly in the `max-w-lg` column that
-   * suits a single-column form. Nothing else about the card changes — border,
-   * radius, elevation, and every `phone:` override are identical.
-   */
-  readonly width?: "narrow" | "wide";
-}) {
-  // Phone layout system: safe-area-aware edge padding so hosted entry
-  // surfaces stay fully reachable on notched, edge-to-edge phone viewports.
-  // The gating order of the surfaces themselves is unchanged.
-  //
-  // `#root` is `overflow-y: hidden`, so a card taller than the viewport used to
-  // be clipped with no way to reach its primary action (at 320x568 "Sign in
-  // with passkey" fell below the fold). The surface owns its own vertical
-  // scroll, and the card is centred with `my-auto` on a `min-h-full` track
-  // instead of `items-center`, which would clip the overflowing top edge.
-  //
-  // On the phone tier the card chrome recedes and the surface fills the
-  // viewport instead: no rounded floating card, no centring, and the content
-  // column grows so the action group below it can be bottom-anchored.
-  return (
-    <main
-      ref={scrollRef}
-      className="h-dvh overflow-x-hidden overflow-y-auto overscroll-contain bg-background text-foreground"
-    >
-      <div className="flex min-h-full flex-col px-4 py-10 sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
-        <section
-          className={`my-auto w-full ${width === "wide" ? "max-w-2xl" : "max-w-lg"} self-center rounded-2xl border border-border bg-card p-5 shadow-lg shadow-black/5 sm:p-8 phone:my-0 phone:flex phone:max-w-none phone:flex-1 phone:flex-col phone:rounded-none phone:border-0 phone:bg-transparent phone:p-0 phone:shadow-none`}
+    <HubShell measure="content">
+      <HubStatus
+        icon={<ServerIcon aria-hidden className="size-8 text-primary" />}
+        title={`Connecting to ${node.label}`}
+      >
+        <p role="status" aria-live="polite" className="text-muted-foreground text-sm">
+          <InlineProgress />
+          Preparing a private relay session and synchronizing Ryco state…
+        </p>
+        {/* Until this existed the only way out of "Connecting to X" was to wait
+            or reload. It uses the same history-back-equivalent teardown the
+            connection controls already use. */}
+        <Button
+          variant="outline"
+          className="mt-5 phone:min-h-11"
+          onClick={() => void returnToAllNodes()}
         >
-          {children}
-          {actions}
-          {trailing}
-        </section>
-      </div>
-    </main>
+          Back to nodes
+        </Button>
+      </HubStatus>
+    </HubShell>
   );
 }
 
@@ -552,7 +527,13 @@ export function HostedAuthenticationSurface({
     // group's content out from under the user before they have touched it.
     if (registrationMode === "invitation" || registrationMode === "bootstrap") {
       registrationInputRef.current?.focus({ preventScroll: true });
-    } else if (!fallbackMode) headingRef.current?.focus({ preventScroll: true });
+    } else {
+      // Every ceremony is now its own page with its own heading, so a mode
+      // change lands on that page's title rather than leaving focus wherever
+      // the previous page left it. Previously the fallback modes were appended
+      // to the landing page and had no heading of their own to move to.
+      headingRef.current?.focus({ preventScroll: true });
+    }
   }, [fallbackMode, registrationMode]);
 
   useEffect(() => {
@@ -694,38 +675,149 @@ export function HostedAuthenticationSurface({
     </>
   );
 
+  // Mounted on every page of the gateway, not only the landing one. An
+  // authentication error is a property of the account state, and each ceremony
+  // below can produce one.
+  const authError = error ? (
+    <div className="mt-4">
+      <Alert variant="error">
+        <TriangleAlertIcon aria-hidden />
+        <AlertTitle>Sign-in did not complete</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    </div>
+  ) : null;
+
+  // One page per ceremony.
+  //
+  // These used to be modes appended *below* the landing page's content inside a
+  // single card, so opening password sign-in left "Connect to your Ryco nodes",
+  // the relay-trust notice, the "New to this Hub?" disclosure and the PWA
+  // install buttons stacked above the fields — a form under someone else's
+  // headline. Each ceremony now owns the column and states its own purpose.
+  //
+  // `signInTrailing` rides every page for the reason its own comment gives: the
+  // polite live region must be mounted while a WebAuthn ceremony runs, and
+  // invitation and bootstrap drive `accountStatus` to `authenticating` exactly
+  // as sign-in does.
+  if (registrationMode === "public") {
+    return (
+      <HubGateway
+        title="Create your account"
+        description="Pick a username and confirm your email. You choose a passkey or a password at the end."
+        trailing={signInTrailing}
+        scrollRef={surfaceScrollRef}
+        titleRef={headingRef}
+      >
+        {authError}
+        <PublicSignupFlow
+          config={publicSignupConfig?.status === "enabled" ? publicSignupConfig : null}
+          initialLink={identityLink}
+          onConsumeLink={clearIdentityLink}
+          onCancel={() => {
+            clearIdentityLink();
+            setRegistrationMode(null);
+          }}
+        />
+      </HubGateway>
+    );
+  }
+
+  if (registrationMode === "invitation" || registrationMode === "bootstrap") {
+    return (
+      <HubGateway
+        title={registrationMode === "invitation" ? "Redeem your invitation" : "Claim this Hub"}
+        description={
+          registrationMode === "invitation"
+            ? "Enter the invitation code an owner sent you. Your browser creates a passkey at the same time."
+            : "No owner exists yet. The bootstrap credential from whoever deployed this Hub makes you its first owner."
+        }
+        actions={registrationActions}
+        trailing={signInTrailing}
+        scrollRef={surfaceScrollRef}
+        titleRef={headingRef}
+      >
+        {authError}
+        <RegistrationForm mode={registrationMode} credentialRef={registrationInputRef} />
+      </HubGateway>
+    );
+  }
+
+  if (fallbackMode !== null) {
+    const fallbackPage = {
+      password: {
+        title: "Sign in with a password",
+        description:
+          "Password sign-in always asks for a second factor — an authenticator code, or a code sent to your verified email.",
+      },
+      "recovery-code": {
+        title: "Use a recovery code",
+        description:
+          "One of the single-use codes you saved when your account was created. Each code works once.",
+      },
+      "password-reset": {
+        title: "Reset your password",
+        description:
+          "We email a single-use link. Setting a new password signs out every device, including this one.",
+      },
+    }[fallbackMode];
+
+    return (
+      <HubGateway
+        title={fallbackPage.title}
+        description={fallbackPage.description}
+        trailing={signInTrailing}
+        scrollRef={surfaceScrollRef}
+        titleRef={headingRef}
+      >
+        {authError}
+        {fallbackMode === "password" ? (
+          <PasswordLoginFlow
+            onCancel={() => setFallbackMode(null)}
+            onUseRecoveryCode={() => setFallbackMode("recovery-code")}
+            onResetPassword={() => setFallbackMode("password-reset")}
+          />
+        ) : fallbackMode === "recovery-code" ? (
+          <RecoveryCodeFlow onCancel={() => setFallbackMode(null)} />
+        ) : (
+          <PasswordResetFlow
+            initialLink={identityLink}
+            onConsumeLink={clearIdentityLink}
+            onCancel={() => {
+              clearIdentityLink();
+              setFallbackMode(null);
+            }}
+          />
+        )}
+      </HubGateway>
+    );
+  }
+
   return (
-    <Surface
-      actions={signInActions ?? registrationActions}
-      trailing={signInTrailing}
-      scrollRef={surfaceScrollRef}
-    >
-      <div className="mb-6 flex size-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
-        <ShieldCheckIcon aria-hidden className="size-5" />
-      </div>
-      <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
-        {APP_DISPLAY_NAME} Hub
-      </p>
-      <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-2xl font-semibold outline-none">
-        {context === "native-authorization"
+    <HubGateway
+      title={
+        context === "native-authorization"
           ? "Sign in to continue on your device"
           : status === "session-expired"
             ? "Your session expired"
-            : "Connect to your Ryco nodes"}
-      </h1>
-      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-        {context === "native-authorization"
+            : "Connect to your Ryco nodes"
+      }
+      description={
+        context === "native-authorization"
           ? "Authenticate in this browser first. Ryco will ask again before it authorizes the mobile app."
-          : "Ryco Hub reaches the developer machines an owner has authorized for your account. Your session lives in an HttpOnly cookie — nothing about it is readable by this page."}
-      </p>
-      <div className="mt-4">
-        <HostedRelayTrustNotice />
-      </div>
+          : "Ryco Hub reaches the developer machines an owner has authorized for your account. Your session lives in an HttpOnly cookie — nothing about it is readable by this page."
+      }
+      actions={signInActions}
+      trailing={signInTrailing}
+      scrollRef={surfaceScrollRef}
+      titleRef={headingRef}
+    >
+      <HostedRelayTrustNotice />
       <NewToThisHubDisclosure
         bootstrapAvailable={bootstrapAvailable}
         publicSignupEnabled={publicSignupConfig?.status === "enabled"}
       />
-      {!registrationMode && !fallbackMode && status !== "authenticating" ? (
+      {status !== "authenticating" ? (
         <Button
           variant="ghost"
           size="sm"
@@ -737,47 +829,8 @@ export function HostedAuthenticationSurface({
         </Button>
       ) : null}
       <HostedPwaControls />
-      {error ? (
-        <div className="mt-4">
-          <Alert variant="error">
-            <TriangleAlertIcon aria-hidden />
-            <AlertTitle>Sign-in did not complete</AlertTitle>
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        </div>
-      ) : null}
-      {registrationMode === "public" ? (
-        <PublicSignupFlow
-          config={publicSignupConfig?.status === "enabled" ? publicSignupConfig : null}
-          initialLink={identityLink}
-          onConsumeLink={clearIdentityLink}
-          onCancel={() => {
-            clearIdentityLink();
-            setRegistrationMode(null);
-          }}
-        />
-      ) : registrationMode ? (
-        <RegistrationForm mode={registrationMode} credentialRef={registrationInputRef} />
-      ) : null}
-      {fallbackMode === "password" ? (
-        <PasswordLoginFlow
-          onCancel={() => setFallbackMode(null)}
-          onUseRecoveryCode={() => setFallbackMode("recovery-code")}
-          onResetPassword={() => setFallbackMode("password-reset")}
-        />
-      ) : fallbackMode === "recovery-code" ? (
-        <RecoveryCodeFlow onCancel={() => setFallbackMode(null)} />
-      ) : fallbackMode === "password-reset" ? (
-        <PasswordResetFlow
-          initialLink={identityLink}
-          onConsumeLink={clearIdentityLink}
-          onCancel={() => {
-            clearIdentityLink();
-            setFallbackMode(null);
-          }}
-        />
-      ) : null}
-    </Surface>
+      {authError}
+    </HubGateway>
   );
 }
 
@@ -869,7 +922,17 @@ function RecoveryCodesSurface() {
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   return (
-    <Surface
+    // Keeps owning the viewport, unwrapped by any shell: this is a one-shot
+    // secret display and nothing may compete with its acknowledgement.
+    <HubGateway
+      title="Save your recovery codes"
+      description={
+        // The count comes from the set. The Hub validates 1..256 codes, so copy
+        // or a two-column-of-five layout that assumes a number is wrong the day
+        // an operator changes it — and "Save your 1 recovery codes" is what
+        // putting it in the heading produces.
+        `Save all ${String(recoveryCodes.length)} codes — they are shown once and cannot be retrieved later. Ryco does not save them in browser storage.`
+      }
       actions={
         <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
           {/* Above the acknowledgement, so the acknowledgement stays the
@@ -878,7 +941,7 @@ function RecoveryCodesSurface() {
               secret at the moment the user needs it most had none. */}
           <Button
             variant="outline"
-            className="mt-5 phone:min-h-11 phone:w-full"
+            className="mt-5 w-full phone:min-h-11"
             onClick={() =>
               copyToClipboard(formatRecoveryCodesForClipboard(recoveryCodes), undefined)
             }
@@ -887,7 +950,8 @@ function RecoveryCodesSurface() {
             {isCopied ? "Copied" : "Copy codes"}
           </Button>
           <Button
-            className="mt-3 phone:min-h-11 phone:w-full"
+            size="cta"
+            className="mt-3 w-full"
             onClick={() => hostedHubController.dismissRecoveryCodes()}
           >
             I saved the codes
@@ -895,25 +959,15 @@ function RecoveryCodesSurface() {
         </div>
       }
     >
-      <ShieldCheckIcon aria-hidden className="size-8 text-primary" />
-      <h1 className="mt-4 text-2xl font-semibold">Save your recovery codes</h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        {/* The count comes from the set. The Hub validates 1..256 codes, so
-            copy or a two-column-of-five layout that assumes a number is wrong
-            the day an operator changes it — and "Save your 1 recovery codes"
-            is what putting it in the heading produces. */}
-        Save all {String(recoveryCodes.length)} codes — they are shown once and cannot be retrieved
-        later. Ryco does not save them in browser storage.
-      </p>
       <ul
         aria-label="Recovery codes"
-        className="mt-5 grid gap-2 rounded-xl border border-border bg-background p-4 font-mono text-sm break-all sm:grid-cols-2"
+        className="grid gap-2 rounded-xl border border-border bg-background p-4 font-mono text-sm break-all sm:grid-cols-2"
       >
         {recoveryCodes.map((code) => (
           <li key={code}>{code}</li>
         ))}
       </ul>
-    </Surface>
+    </HubGateway>
   );
 }
 
@@ -1051,9 +1105,9 @@ function HostedNodeDirectory() {
 
   if (enrolling) {
     return (
-      <Surface>
+      <HubShell measure="content">
         <HostedNodeEnrollmentFlow onClose={() => setEnrolling(false)} />
-      </Surface>
+      </HubShell>
     );
   }
 
@@ -1094,13 +1148,16 @@ function HostedNodeDirectory() {
   // `phone:w-full` is what makes the anchored group three stacked rows rather
   // than inline-flex buttons flowing onto one line at 390px.
   const enrollButton = (
-    <Button className="mt-3 phone:min-h-11 phone:w-full" onClick={() => setEnrolling(true)}>
+    <Button
+      className={isPhoneTier ? "mt-3 phone:min-h-11 phone:w-full" : undefined}
+      onClick={() => setEnrolling(true)}
+    >
       <ServerIcon aria-hidden /> Enroll node
     </Button>
   );
   const refreshButton = (
     <Button
-      className={isPhoneTier ? "mt-3 phone:min-h-11 phone:w-full" : "mt-5"}
+      className={isPhoneTier ? "mt-3 phone:min-h-11 phone:w-full" : undefined}
       variant="outline"
       disabled={status === "loading"}
       onClick={() => void hostedHubController.refreshDirectory()}
@@ -1118,73 +1175,68 @@ function HostedNodeDirectory() {
   );
 
   return (
-    <Surface
-      width="wide"
-      actions={
-        // Three rows at most on the phone tier, primary last: this is what
-        // makes the fold assertion hold by construction rather than by a
-        // 15-pixel margin, and it puts the most-used control nearest the thumb.
-        // The group itself carries no margin of its own — all spacing lives on
-        // the children — which is what keeps the desktop group static.
-        <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
-          {isPhoneTier ? (
-            <div className="mt-5 flex flex-wrap gap-2">
-              {accountButton}
-              {signOutButton}
-            </div>
-          ) : null}
-          {isPhoneTier ? null : refreshButton}
-          {enrollInActions ? enrollButton : null}
-          {isPhoneTier ? refreshButton : null}
-        </div>
+    <HubShell
+      trailing={
+        // The account and sign-out controls belong to the Hub, not to the node
+        // list, so on desktop they move out of the page and into the Hub bar.
+        // On the phone tier they stay in the anchored action group below — see
+        // the note there.
+        <>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Account settings"
+            onClick={() => {
+              openSettings("account");
+            }}
+          >
+            <UserRoundIcon aria-hidden />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            aria-label="Sign out"
+            onClick={() => void hostedHubController.signOut()}
+          >
+            <LogOutIcon aria-hidden />
+          </Button>
+        </>
       }
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold outline-none">
-            {nodes.length === 1 ? "Your node" : "Your nodes"}
-          </h1>
-          <p className="mt-1 truncate text-sm text-muted-foreground">
-            Signed in as {account?.displayName ?? "Hub account"}
-            {account ? ` · ${account.role.charAt(0).toUpperCase()}${account.role.slice(1)}` : ""}
-          </p>
-          {nodes.length > 1 ? (
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {directoryCountLine(nodes)}
+      <HubPage
+        titleRef={headingRef}
+        title={nodes.length === 1 ? "Your node" : "Your nodes"}
+        description={
+          <>
+            <p className="truncate">
+              Signed in as {account?.displayName ?? "Hub account"}
+              {account ? ` · ${account.role.charAt(0).toUpperCase()}${account.role.slice(1)}` : ""}
             </p>
-          ) : null}
-        </div>
-        {isPhoneTier ? null : (
-          <div className="flex shrink-0 items-center gap-1">
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Account settings"
-              onClick={() => {
-                openSettings("account");
-              }}
-            >
-              <UserRoundIcon aria-hidden />
-            </Button>
-            <Button
-              size="icon"
-              variant="ghost"
-              aria-label="Sign out"
-              onClick={() => void hostedHubController.signOut()}
-            >
-              <LogOutIcon aria-hidden />
-            </Button>
-          </div>
-        )}
-      </div>
-      {/* Advisory, and it explains why the rows are disabled — so `status`,
+            {nodes.length > 1 ? (
+              <p className="mt-0.5 truncate text-xs">{directoryCountLine(nodes)}</p>
+            ) : null}
+          </>
+        }
+        actions={
+          // Page-level actions sit with the page title on desktop. On the phone
+          // tier the page header carries none and they stay in the anchored
+          // group, which is what the fold assertions measure.
+          isPhoneTier ? undefined : (
+            <>
+              {refreshButton}
+              {enrollInActions ? enrollButton : null}
+            </>
+          )
+        }
+      >
+        {/* Advisory, and it explains why the rows are disabled — so `status`,
           not the `Alert` default `alert`, which would interrupt. */}
-      {status === "stale" ? (
-        <div className="mt-4">
-          <Alert variant="warning" role="status">
-            <TriangleAlertIcon aria-hidden />
-            <AlertDescription>
-              {/* Names the action it actually describes. `nodeSelectionBlocked`
+        {status === "stale" ? (
+          <div className="mt-4">
+            <Alert variant="warning" role="status">
+              <TriangleAlertIcon aria-hidden />
+              <AlertDescription>
+                {/* Names the action it actually describes. `nodeSelectionBlocked`
                   gates CONNECTING and nothing else — details, Rename and Revoke
                   are all live in this state, deliberately: a directory whose
                   poll is failing is not the same thing as a Hub that cannot take
@@ -1192,124 +1244,140 @@ function HostedNodeDirectory() {
                   on a stale read would disable it during exactly the incident it
                   exists for. What could not stand was the banner saying
                   otherwise directly above it. */}
-              Directory data is stale. Connecting is unavailable until it refreshes.
-            </AlertDescription>
-          </Alert>
-        </div>
-      ) : null}
-      {revokedNotice ? (
-        <div className="mt-4">
-          {/* `status`, not `alert`: the revocation succeeded, and an assertive
+                Directory data is stale. Connecting is unavailable until it refreshes.
+              </AlertDescription>
+            </Alert>
+          </div>
+        ) : null}
+        {revokedNotice ? (
+          <div className="mt-4">
+            {/* `status`, not `alert`: the revocation succeeded, and an assertive
               live region would interrupt a screen reader mid-sentence to say so.
               It is not auto-dismissed — the next poll may not remove the row, and
               a receipt that outlives the thing it is evidence for is the point. */}
-          <Alert variant="warning" role="status">
-            <TriangleAlertIcon aria-hidden />
-            <AlertDescription>{revokedNotice}</AlertDescription>
-          </Alert>
-        </div>
-      ) : null}
-      {/* One error region, first match wins. Three simultaneous red paragraphs
+            <Alert variant="warning" role="status">
+              <TriangleAlertIcon aria-hidden />
+              <AlertDescription>{revokedNotice}</AlertDescription>
+            </Alert>
+          </div>
+        ) : null}
+        {/* One error region, first match wins. Three simultaneous red paragraphs
           above a list of disabled rows read as breakage, and only the first is
           ever actionable. The `status !== "stale"` suppression on the store's
           own message is preserved exactly. */}
-      <DirectoryError
-        selection={selection}
-        routeNotice={routeNotice}
-        error={status === "stale" ? null : error}
-      />
-      {showEmptyState ? (
-        <DirectoryEmptyState isOwner={isOwner} onEnroll={() => setEnrolling(true)} />
-      ) : (
-        <>
-          <ul role="list" className="mt-5 space-y-2" aria-busy={status === "loading"}>
-            {ordered.map((node) => (
-              <NodeRow
-                key={`${node.id}:${node.environmentId}`}
-                node={node}
-                nowMs={nowMs}
-                disabled={nodeSelectionBlocked({ directoryStatus: status, browserStatus, node })}
-                onConnect={() => void select(node)}
-                onOpenDetail={() => setDetailNodeId(node.id)}
-              />
-            ))}
-            {status === "loading" && nodes.length === 0 ? (
-              <>
-                {/* Skeletons only when there is nothing to keep: a refresh over
+        <DirectoryError
+          selection={selection}
+          routeNotice={routeNotice}
+          error={status === "stale" ? null : error}
+        />
+        {showEmptyState ? (
+          <DirectoryEmptyState isOwner={isOwner} onEnroll={() => setEnrolling(true)} />
+        ) : (
+          <>
+            <ul role="list" className="mt-5 space-y-2" aria-busy={status === "loading"}>
+              {ordered.map((node) => (
+                <NodeRow
+                  key={`${node.id}:${node.environmentId}`}
+                  node={node}
+                  nowMs={nowMs}
+                  disabled={nodeSelectionBlocked({ directoryStatus: status, browserStatus, node })}
+                  onConnect={() => void select(node)}
+                  onOpenDetail={() => setDetailNodeId(node.id)}
+                />
+              ))}
+              {status === "loading" && nodes.length === 0 ? (
+                <>
+                  {/* Skeletons only when there is nothing to keep: a refresh over
                     a live list keeps the rows and reports itself on the control
                     that was pressed. Skeletons carry no operable element. */}
-                {[0, 1, 2].map((index) => (
-                  <li key={index}>
-                    <Skeleton className="h-16 w-full rounded-xl" />
-                  </li>
-                ))}
-              </>
+                  {[0, 1, 2].map((index) => (
+                    <li key={index}>
+                      <Skeleton className="h-16 w-full rounded-xl" />
+                    </li>
+                  ))}
+                </>
+              ) : null}
+            </ul>
+            {status === "loading" && nodes.length === 0 ? (
+              <p role="status" aria-live="polite" className="sr-only">
+                Loading authorized nodes…
+              </p>
             ) : null}
-          </ul>
-          {status === "loading" && nodes.length === 0 ? (
-            <p role="status" aria-live="polite" className="sr-only">
-              Loading authorized nodes…
-            </p>
-          ) : null}
-          {nodes.length > 0 ? (
-            // The honest counterweight to a green pill that can be 20 seconds
-            // stale — longer while the tab is backgrounded.
-            <p className="mt-2 px-1 text-[11px] text-muted-foreground">
-              Presence refreshes about every 20 seconds.
-            </p>
-          ) : null}
-        </>
-      )}
-      <div className="mt-5">
-        <HostedRelayTrustNotice />
-      </div>
-      <HostedPwaControls />
-      <HostedNodeDetail
-        node={detailNode}
-        directoryStatus={status}
-        browserStatus={browserStatus}
-        canRename={isOwner}
-        canRevoke={isOwner}
-        onOpenChange={(open) => {
-          if (!open) setDetailNodeId(null);
-        }}
-        onConnect={(node) => void select(node)}
-        onRename={async (node, label) => {
-          await hostedHubApi.renameNode(node.id, label);
-          await hostedHubController.refreshDirectory();
-        }}
-        onRevoke={async (node) => {
-          // The Hub answers first, and only then is the list re-read. Nothing
-          // here removes the row ahead of that answer: an optimistic removal
-          // that has to be undone is a worse report of a refused revocation than
-          // a control that stayed busy, and this is the one action in the
-          // directory that cannot be taken back if it did land.
-          //
-          // The row goes away because the node stops being in the directory at
-          // all — `authorizedDirectoryEntry` resolves to nothing once `revokedAt`
-          // is set — so this needs no removal of its own. `refreshDirectory`
-          // settles its own failures into `directoryStatus`, so only the
-          // mutation above can reject here, and only its failure reaches the
-          // confirmation.
-          //
-          // WHICH IS ALSO WHY THE ROW IS NOT THE RECEIPT. That same swallowed
-          // failure leaves `nodes` untouched, so the re-read below is allowed to
-          // return a list that still has this node on it. The acknowledgement is
-          // therefore taken from `revokeNode` resolving — the one fact the
-          // client actually has — and is set before the re-read is even
-          // attempted.
-          await hostedHubApi.revokeNode(node.id, HOSTED_NODE_REVOKE_REASON_CODE);
-          setRevokedNotice(hostedNodeRevokedNotice(node.label));
-          await hostedHubController.refreshDirectory();
-          // Load-bearing exactly when the refresh above failed or came back
-          // stale: `detailNode` is re-resolved from `nodes` every render, so on
-          // the happy path the sheet closes itself. On the unhappy one this is
-          // the only thing standing between the owner and a live Revoke button
-          // on a machine that has just been revoked.
-          setDetailNodeId(null);
-        }}
-      />
-    </Surface>
+            {nodes.length > 0 ? (
+              // The honest counterweight to a green pill that can be 20 seconds
+              // stale — longer while the tab is backgrounded.
+              <p className="mt-2 px-1 text-[11px] text-muted-foreground">
+                Presence refreshes about every 20 seconds.
+              </p>
+            ) : null}
+          </>
+        )}
+        <div className="mt-5">
+          <HostedRelayTrustNotice />
+        </div>
+        <HostedPwaControls />
+        <HostedNodeDetail
+          node={detailNode}
+          directoryStatus={status}
+          browserStatus={browserStatus}
+          canRename={isOwner}
+          canRevoke={isOwner}
+          onOpenChange={(open) => {
+            if (!open) setDetailNodeId(null);
+          }}
+          onConnect={(node) => void select(node)}
+          onRename={async (node, label) => {
+            await hostedHubApi.renameNode(node.id, label);
+            await hostedHubController.refreshDirectory();
+          }}
+          onRevoke={async (node) => {
+            // The Hub answers first, and only then is the list re-read. Nothing
+            // here removes the row ahead of that answer: an optimistic removal
+            // that has to be undone is a worse report of a refused revocation than
+            // a control that stayed busy, and this is the one action in the
+            // directory that cannot be taken back if it did land.
+            //
+            // The row goes away because the node stops being in the directory at
+            // all — `authorizedDirectoryEntry` resolves to nothing once `revokedAt`
+            // is set — so this needs no removal of its own. `refreshDirectory`
+            // settles its own failures into `directoryStatus`, so only the
+            // mutation above can reject here, and only its failure reaches the
+            // confirmation.
+            //
+            // WHICH IS ALSO WHY THE ROW IS NOT THE RECEIPT. That same swallowed
+            // failure leaves `nodes` untouched, so the re-read below is allowed to
+            // return a list that still has this node on it. The acknowledgement is
+            // therefore taken from `revokeNode` resolving — the one fact the
+            // client actually has — and is set before the re-read is even
+            // attempted.
+            await hostedHubApi.revokeNode(node.id, HOSTED_NODE_REVOKE_REASON_CODE);
+            setRevokedNotice(hostedNodeRevokedNotice(node.label));
+            await hostedHubController.refreshDirectory();
+            // Load-bearing exactly when the refresh above failed or came back
+            // stale: `detailNode` is re-resolved from `nodes` every render, so on
+            // the happy path the sheet closes itself. On the unhappy one this is
+            // the only thing standing between the owner and a live Revoke button
+            // on a machine that has just been revoked.
+            setDetailNodeId(null);
+          }}
+        />
+      </HubPage>
+      {isPhoneTier ? (
+        // The phone tier's action group, unchanged in composition and order:
+        // three rows at most, primary last. That is what makes the fold
+        // assertion hold by construction rather than by a 15-pixel margin, and
+        // it puts the most-used control nearest the thumb. The group carries no
+        // margin of its own — all spacing lives on the children.
+        <div className={`mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {accountButton}
+            {signOutButton}
+          </div>
+          {enrollInActions ? enrollButton : null}
+          {refreshButton}
+        </div>
+      ) : null}
+    </HubShell>
   );
 }
 

@@ -16,6 +16,19 @@ const buttonVariants = cva(
     },
     variants: {
       size: {
+        /**
+         * A full-measure call to action: the primary control of a Hub page,
+         * where there is one obvious next step and it should look like it.
+         *
+         * Two departures from `xl`, both required rather than stylistic. It
+         * keeps its 44px height on every viewport instead of shrinking at `sm`,
+         * because it is the touch target for the whole page. And it overrides
+         * the base `whitespace-nowrap` so a label that has doubled at 200% text
+         * wraps to a second line and grows the box, rather than overflowing a
+         * fixed-height button — the failure that put "Sign in with passkey"
+         * past the edge at 320px.
+         */
+        cta: "h-auto min-h-11 whitespace-normal px-[calc(--spacing(4)-1px)] py-2 text-base [&_svg:not([class*='size-'])]:size-5",
         default: "h-9 px-[calc(--spacing(3)-1px)] sm:h-8",
         icon: "size-9 sm:size-8",
         "icon-lg": "size-10 sm:size-9",

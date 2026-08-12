@@ -147,7 +147,10 @@ const ENTRY_SURFACES: readonly EntrySurface[] = [
       await page.getByRole("button", { name: "Redeem invitation" }).click();
       await expect.element(page.getByLabelText("Invitation code")).toBeVisible();
     },
-    marker: () => waitForVisibleByText("Connect to your Ryco nodes"),
+    // Each ceremony is its own Hub page with its own heading now. It used to be
+    // a form appended below the sign-in page's copy, which is why this marker
+    // was the sign-in headline.
+    marker: () => waitForVisibleByText("Redeem your invitation"),
     primaryAction: () => findButtonByText("Create account and passkey"),
   },
   {
@@ -1107,9 +1110,9 @@ const PROVING_TESTS: readonly ProvingCell[] = [
     test: "keeps the polite ceremony announcement and Hub recovery mounted in registration mode",
   },
   {
-    cell: "step8 entry — desktop unchanged",
+    cell: "step8 entry — desktop tier keeps flow layout and compact density",
     file: "HES",
-    test: "leaves the desktop entry card, its top-right sign-out, and its static actions unchanged",
+    test: "puts the desktop directory in the Hub shell with its account controls in the Hub bar",
   },
   {
     cell: "step8 pairing — reachable + 44px",
