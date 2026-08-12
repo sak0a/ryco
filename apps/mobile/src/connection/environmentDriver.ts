@@ -21,6 +21,7 @@ import {
   useStore,
 } from "../state/threadsRuntime";
 import { invalidateAllCheckpointDiffs } from "../rpc/checkpointDiffAtoms";
+import { invalidateProjectFilesState } from "../rpc/projectFilesAtoms";
 import { createHostedPrimaryConnection } from "../hostedHub/primaryConnection";
 import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
@@ -181,12 +182,16 @@ export function createMobileEnvironmentDriver(
   let supervisor: EnvironmentConnectionSupervisor;
   const getSupervisor = () => supervisor;
 
-  // Coalesced checkpoint-diff cache invalidation (§6): the sink marks it needed
-  // (and pokes the supervisor throttle); the throttle flushes it.
+  // Coalesced provider-cache invalidation (§6): the sink marks it needed (and
+  // pokes the supervisor throttle); the throttle flushes it. Every cache holding
+  // node-owned state hangs off this one flush — the checkpoint diffs and the
+  // workspace file listings/reads/searches — mirroring the web service
+  // (apps/web/src/environments/runtime/service.ts).
   let needsProviderInvalidation = false;
   const flushProviderInvalidation = () => {
     needsProviderInvalidation = false;
     invalidateAllCheckpointDiffs();
+    invalidateProjectFilesState();
   };
 
   // Give the sink the supervisor handle so live thread-upserted/removed events

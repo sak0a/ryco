@@ -107,6 +107,7 @@ function HeaderActions(props: {
   readonly model: ThreadHeaderModel;
   readonly iconColor: string;
   readonly onReview: () => void;
+  readonly onFiles: () => void;
   readonly onMore: () => void;
 }) {
   return (
@@ -119,6 +120,16 @@ function HeaderActions(props: {
           className="h-11 items-center justify-center rounded-full px-3 active:bg-subtle-strong"
         >
           <Text className="text-sm font-ryco-bold text-foreground">Review</Text>
+        </Pressable>
+      ) : null}
+      {props.model.filesVisible ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Open files"
+          onPress={props.onFiles}
+          className="h-11 w-11 items-center justify-center rounded-full active:bg-subtle-strong"
+        >
+          <SymbolView name="folder" size={21} tintColor={props.iconColor} type="monochrome" />
         </Pressable>
       ) : null}
       <Pressable
@@ -274,6 +285,15 @@ export function ThreadDetailScreen(props: {
     [environmentId, navigation, threadId],
   );
 
+  const openFiles = useCallback(
+    () =>
+      navigation.navigate("ThreadFiles", {
+        environmentId,
+        threadId,
+      }),
+    [environmentId, navigation, threadId],
+  );
+
   useLayoutEffect(() => {
     navigation.setOptions({
       title: headerModel?.title ?? "Task",
@@ -283,6 +303,7 @@ export function ThreadDetailScreen(props: {
               model={headerModel}
               iconColor={iconColor}
               onReview={openReview}
+              onFiles={openFiles}
               onMore={() => {
                 setActionError(null);
                 setActionsVisible(true);
@@ -291,7 +312,7 @@ export function ThreadDetailScreen(props: {
           )
         : undefined,
     });
-  }, [headerModel, iconColor, navigation, openReview]);
+  }, [headerModel, iconColor, navigation, openFiles, openReview]);
 
   const onSend = async (
     text: string,

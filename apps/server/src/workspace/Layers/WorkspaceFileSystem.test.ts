@@ -3,6 +3,7 @@ import fsPromises from "node:fs/promises";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path } from "effect";
+import { PROJECT_READ_FILE_BINARY_MAX_BYTES } from "@ryco/contracts";
 
 import { ServerConfig } from "../../config.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
@@ -41,6 +42,51 @@ const TestLayer = Layer.empty.pipe(
   ),
   Layer.provideMerge(NodeServices.layer),
 );
+
+/** A real 1x1 PNG, so magic-byte acceptance is exercised against actual encoder output. */
+const TINY_PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+function isoBaseMediaBytes(brand: string): Buffer {
+  return Buffer.concat([
+    Buffer.from([0x00, 0x00, 0x00, 0x20]),
+    Buffer.from(`ftyp${brand}`, "latin1"),
+  ]);
+}
+
+const RASTER_SIGNATURE_FIXTURES: Readonly<
+  Record<string, { readonly bytes: Buffer; readonly mimeType: string }>
+> = {
+  "pixel.png": { bytes: TINY_PNG_BYTES, mimeType: "image/png" },
+  "photo.jpg": {
+    bytes: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]),
+    mimeType: "image/jpeg",
+  },
+  "loop.gif": {
+    bytes: Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00]),
+    mimeType: "image/gif",
+  },
+  "shot.webp": {
+    bytes: Buffer.concat([
+      Buffer.from("RIFF", "latin1"),
+      Buffer.from([0x1a, 0x00, 0x00, 0x00]),
+      Buffer.from("WEBPVP8 ", "latin1"),
+    ]),
+    mimeType: "image/webp",
+  },
+  "raster.bmp": {
+    bytes: Buffer.concat([Buffer.from("BM", "latin1"), Buffer.from([0x1e, 0x00, 0x00, 0x00])]),
+    mimeType: "image/bmp",
+  },
+  "favicon.ico": {
+    bytes: Buffer.from([0x00, 0x00, 0x01, 0x00, 0x01, 0x00]),
+    mimeType: "image/x-icon",
+  },
+  "modern.avif": { bytes: isoBaseMediaBytes("avif"), mimeType: "image/avif" },
+  "camera.heic": { bytes: isoBaseMediaBytes("heic"), mimeType: "image/heic" },
+};
 
 const makeTempDir = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -189,6 +235,7 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           throw new Error("Expected WorkspaceFileSystemError detail for oversized preview.");
         }
         expect(error.detail).toContain("File is too large to preview");
+        expect(error.detail).toContain("Limit is 524288 bytes.");
       }),
     );
 
@@ -321,6 +368,169 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
         if ("detail" in error) {
           expect(error.detail).not.toContain("File is too large to preview");
         }
+      }),
+    );
+  });
+
+  describe("readFileBinary", () => {
+    it.effect("returns base64 bytes with a mime type derived from magic bytes", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeBinaryFile(cwd, "assets/pixel.png", TINY_PNG_BYTES);
+
+        const result = yield* workspaceFileSystem.readFileBinary({
+          cwd,
+          relativePath: "assets/pixel.png",
+        });
+
+        expect(result.relativePath).toBe("assets/pixel.png");
+        expect(result.mimeType).toBe("image/png");
+        expect(result.sizeBytes).toBe(TINY_PNG_BYTES.byteLength);
+        expect(Array.from(Buffer.from(result.dataBase64, "base64"))).toEqual(
+          Array.from(TINY_PNG_BYTES),
+        );
+      }),
+    );
+
+    it.effect("trusts the bytes over the file extension", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeBinaryFile(cwd, "assets/mislabeled.jpg", TINY_PNG_BYTES);
+
+        const result = yield* workspaceFileSystem.readFileBinary({
+          cwd,
+          relativePath: "assets/mislabeled.jpg",
+        });
+
+        expect(result.mimeType).toBe("image/png");
+      }),
+    );
+
+    it.effect("recognizes every supported raster signature", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        for (const [name, { bytes, mimeType }] of Object.entries(RASTER_SIGNATURE_FIXTURES)) {
+          yield* writeBinaryFile(cwd, `assets/${name}`, bytes);
+          const result = yield* workspaceFileSystem.readFileBinary({
+            cwd,
+            relativePath: `assets/${name}`,
+          });
+          expect(result.mimeType).toBe(mimeType);
+        }
+      }),
+    );
+
+    it.effect("refuses bytes that are not a supported image", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "notes/plain.png", "# Not an image\n");
+
+        const error = yield* workspaceFileSystem
+          .readFileBinary({
+            cwd,
+            relativePath: "notes/plain.png",
+          })
+          .pipe(Effect.flip);
+
+        if (!("detail" in error)) {
+          throw new Error("Expected WorkspaceFileSystemError detail for unsupported image bytes.");
+        }
+        expect(error.detail).toBe("Not a supported image.");
+      }),
+    );
+
+    it.effect("refuses video containers that share the ISO base-media header", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeBinaryFile(cwd, "assets/clip.heic", isoBaseMediaBytes("isom"));
+
+        const error = yield* workspaceFileSystem
+          .readFileBinary({
+            cwd,
+            relativePath: "assets/clip.heic",
+          })
+          .pipe(Effect.flip);
+
+        if (!("detail" in error)) {
+          throw new Error("Expected WorkspaceFileSystemError detail for a video container.");
+        }
+        expect(error.detail).toBe("Not a supported image.");
+      }),
+    );
+
+    it.effect("rejects reads outside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        const error = yield* workspaceFileSystem
+          .readFileBinary({
+            cwd,
+            relativePath: "../escape.png",
+          })
+          .pipe(Effect.flip);
+
+        expect(error.message).toContain(
+          "Workspace file path must be relative to the project root: ../escape.png",
+        );
+      }),
+    );
+
+    it.effect("rejects symlinked images that resolve outside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const path = yield* Path.Path;
+
+        const externalDir = `${cwd}-outside`;
+        yield* Effect.promise(() => fsPromises.mkdir(externalDir, { recursive: true })).pipe(
+          Effect.orDie,
+        );
+        yield* Effect.promise(() =>
+          fsPromises.writeFile(path.join(externalDir, "secret.png"), TINY_PNG_BYTES),
+        ).pipe(Effect.orDie);
+        yield* writeDirectorySymlink(cwd, "linked", externalDir);
+
+        const error = yield* workspaceFileSystem
+          .readFileBinary({
+            cwd,
+            relativePath: "linked/secret.png",
+          })
+          .pipe(Effect.flip);
+
+        expect(error.message).toContain(
+          "Workspace file path must be relative to the project root: linked/secret.png",
+        );
+      }),
+    );
+
+    it.effect("rejects images above the binary preview limit", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const oversized = Buffer.alloc(PROJECT_READ_FILE_BINARY_MAX_BYTES + 1);
+        TINY_PNG_BYTES.copy(oversized);
+        yield* writeBinaryFile(cwd, "assets/huge.png", oversized);
+
+        const error = yield* workspaceFileSystem
+          .readFileBinary({
+            cwd,
+            relativePath: "assets/huge.png",
+          })
+          .pipe(Effect.flip);
+
+        if (!("detail" in error)) {
+          throw new Error("Expected WorkspaceFileSystemError detail for oversized image.");
+        }
+        expect(error.detail).toBe(
+          `File is too large to preview (${oversized.byteLength} bytes). Limit is 4194304 bytes.`,
+        );
       }),
     );
   });

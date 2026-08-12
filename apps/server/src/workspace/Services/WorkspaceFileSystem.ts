@@ -10,6 +10,8 @@ import { Schema, Context } from "effect";
 import type { Effect } from "effect";
 
 import type {
+  ProjectReadFileBinaryInput,
+  ProjectReadFileBinaryResult,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectStageFileReferenceInput,
@@ -80,6 +82,21 @@ export interface WorkspaceFileSystemShape {
     input: ProjectReadFileInput,
   ) => Effect.Effect<
     ProjectReadFileResult,
+    WorkspaceFileSystemError | WorkspacePathOutsideRootError
+  >;
+
+  /**
+   * Read a raster image relative to the workspace root as base64.
+   *
+   * Rejects paths that escape the workspace root, files above the binary
+   * preview budget, and bytes whose magic number is not a supported raster
+   * image — the returned mime type is derived from those bytes, never from the
+   * path's extension.
+   */
+  readonly readFileBinary: (
+    input: ProjectReadFileBinaryInput,
+  ) => Effect.Effect<
+    ProjectReadFileBinaryResult,
     WorkspaceFileSystemError | WorkspacePathOutsideRootError
   >;
 

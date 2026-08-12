@@ -5,6 +5,12 @@ const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 export const PROJECT_STAGE_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const PROJECT_STAGE_FILE_MAX_BASE64_CHARS = Math.ceil((PROJECT_STAGE_FILE_MAX_BYTES * 4) / 3) + 4;
+/**
+ * Raster image previews travel as base64 over the same frame budget that already
+ * carries 10 MiB staged uploads, so 4 MiB of raw bytes (~5.4 MiB encoded) stays
+ * comfortably inside proven transport limits.
+ */
+export const PROJECT_READ_FILE_BINARY_MAX_BYTES = 4 * 1024 * 1024;
 
 export const ProjectFileEncoding = Schema.Literals(["utf8", "utf8-bom"]);
 export type ProjectFileEncoding = typeof ProjectFileEncoding.Type;
@@ -67,6 +73,33 @@ export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
 export class ProjectReadFileError extends Schema.TaggedError<ProjectReadFileError>()(
   "ProjectReadFileError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export const ProjectReadFileBinaryInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
+});
+export type ProjectReadFileBinaryInput = typeof ProjectReadFileBinaryInput.Type;
+
+/**
+ * The mime type is derived from the file's magic bytes, never from its
+ * extension — the client renders these bytes, so the server decides what they
+ * actually are.
+ */
+export const ProjectReadFileBinaryResult = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  dataBase64: Schema.String,
+  mimeType: TrimmedNonEmptyString,
+  sizeBytes: NonNegativeInt,
+});
+export type ProjectReadFileBinaryResult = typeof ProjectReadFileBinaryResult.Type;
+
+export class ProjectReadFileBinaryError extends Schema.TaggedError<ProjectReadFileBinaryError>()(
+  "ProjectReadFileBinaryError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

@@ -1,6 +1,14 @@
+import { resolveThreadWorkspaceRoot } from "@ryco/client-runtime/state/files";
 import type { Project, SidebarWorktreeSummary, Thread } from "@ryco/client-runtime/state/threads";
 
 import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
+
+/**
+ * Worktree matching lives in client-runtime so the file browser can resolve a
+ * workspace root without depending on the thread header. Re-exported here to
+ * keep the existing import sites intact.
+ */
+export { findThreadWorktree } from "@ryco/client-runtime/state/files";
 
 export type ThreadMoreAction = "rename" | "archive" | "unarchive" | "stop" | "details";
 
@@ -12,6 +20,12 @@ export interface ThreadHeaderModel {
   readonly statusLabel: "Ready" | "Running" | "Needs approval" | "Input needed" | "Archived";
   readonly contextAccessibilityLabel: string;
   readonly reviewVisible: boolean;
+  /**
+   * Whether the file browser has a directory to list. A thread whose worktree,
+   * own path and project checkout are all unknown has nothing to browse, so the
+   * action is withheld rather than opening onto an empty screen.
+   */
+  readonly filesVisible: boolean;
   readonly moreActions: ReadonlyArray<ThreadMoreAction>;
   /** Last known pull request / work item for the thread's worktree, if any. */
   readonly changeRequest: ChangeRequestBadge | null;
@@ -20,28 +34,6 @@ export interface ThreadHeaderModel {
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
   return parts.at(-1) ?? path;
-}
-
-export function findThreadWorktree(
-  thread: Pick<Thread, "environmentId" | "projectId" | "worktreeId" | "worktreePath" | "branch">,
-  worktrees: ReadonlyArray<SidebarWorktreeSummary>,
-): SidebarWorktreeSummary | null {
-  const candidates = worktrees.filter(
-    (worktree) =>
-      worktree.environmentId === thread.environmentId && worktree.projectId === thread.projectId,
-  );
-  if (thread.worktreeId) {
-    const byId = candidates.find((worktree) => worktree.id === thread.worktreeId);
-    if (byId) return byId;
-  }
-  if (thread.worktreePath) {
-    const byPath = candidates.find((worktree) => worktree.worktreePath === thread.worktreePath);
-    if (byPath) return byPath;
-  }
-  if (thread.branch) {
-    return candidates.find((worktree) => worktree.branch === thread.branch) ?? null;
-  }
-  return null;
 }
 
 export function buildThreadHeaderModel(input: {
@@ -55,11 +47,12 @@ export function buildThreadHeaderModel(input: {
     | "branch"
     | "worktreePath"
   >;
-  readonly project: Pick<Project, "name"> | null;
+  readonly project: Pick<Project, "name" | "cwd"> | null;
   readonly worktree: Pick<
     SidebarWorktreeSummary,
     | "title"
     | "branch"
+    | "worktreePath"
     | "prNumber"
     | "prState"
     | "prIsDraft"
@@ -104,6 +97,12 @@ export function buildThreadHeaderModel(input: {
     statusLabel,
     contextAccessibilityLabel: `Working in node ${nodeLabel}, project ${projectLabel}, worktree ${worktreeLabel}. ${statusLabel}.`,
     reviewVisible: input.thread.turnDiffSummaries.some((summary) => summary.files.length > 0),
+    filesVisible:
+      resolveThreadWorkspaceRoot({
+        thread: input.thread,
+        worktree: input.worktree,
+        project: input.project,
+      }) !== null,
     moreActions,
     changeRequest: buildChangeRequestBadge(input.worktree),
   };

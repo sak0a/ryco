@@ -19,6 +19,9 @@ import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteSc
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { E2eeNodeSecurityRouteScreen } from "./features/e2ee/E2eeNodeSecurityRouteScreen";
 import { E2eeNodeVerificationRouteScreen } from "./features/e2ee/E2eeNodeVerificationRouteScreen";
+import { FileWorkspaceLayout } from "./features/files/FileWorkspaceLayout";
+import { ThreadFileRouteScreen } from "./features/files/ThreadFileRouteScreen";
+import { ThreadFilesRouteScreen } from "./features/files/ThreadFilesRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
 import { NewTaskRouteScreen } from "./features/newTask/NewTaskRouteScreen";
@@ -262,13 +265,9 @@ function RootStackLayout(props: {
   const path = getPathFromState(props.state, navigationPathConfig);
   const pathname = path.startsWith("/") ? path : `/${path}`;
 
-  // NOTE (divergence, recorded): upstream wraps children in AdaptiveWorkspaceLayout
-  // (the tablet split view). B2 is phone-first; the adaptive layout + thread
-  // sidebar land with the Home data wave (Task 3). The nav shell is fully
-  // functional on phone without it.
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
-      {props.children}
+      <FileWorkspaceLayout>{props.children}</FileWorkspaceLayout>
     </HardwareKeyboardCommandProvider>
   );
 }
@@ -350,6 +349,18 @@ export const ROOT_STACK_SCREENS = {
     screen: ReviewCommentComposerSheet,
     linking: MVP_ROOT_ROUTES.ThreadReviewComment.linking,
     options: routeOptions("ThreadReviewComment"),
+  }),
+  ThreadFiles: createNativeStackScreen({
+    screen: ThreadFilesRouteScreen,
+    linking: MVP_ROOT_ROUTES.ThreadFiles.linking,
+    options: routeOptions("ThreadFiles", { title: "Files" }),
+  }),
+  ThreadFile: createNativeStackScreen({
+    screen: ThreadFileRouteScreen,
+    linking: MVP_ROOT_ROUTES.ThreadFile.linking,
+    // The title is the file's basename, which only the screen knows; it sets it
+    // through `navigation.setOptions` once the path param has been normalized.
+    options: routeOptions("ThreadFile"),
   }),
   Connections: createNativeStackScreen({
     screen: ConnectionsRouteScreen,

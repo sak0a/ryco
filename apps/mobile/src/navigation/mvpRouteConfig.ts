@@ -85,6 +85,33 @@ export const MVP_ROOT_ROUTES = {
     },
     android: { presentation: "fullScreenModal", sheetGrabberVisible: false },
   },
+  // Read-only workspace browser for the thread's checkout. A card rather than a
+  // sheet on both platforms: browsing is a destination the user drills into and
+  // backs out of, and the file screen below pushes on top of it.
+  ThreadFiles: {
+    linking: `${THREAD}/files`,
+    overlay: false,
+    headerPreset: "glass",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
+  /**
+   * One file's preview. `:path*` is a SEGMENT WILDCARD: a workspace-relative
+   * path contains slashes, so it cannot ride in a single `:path` param, and
+   * navigation hands the segments back as an already-decoded array the screen
+   * rejoins. `?line=` is read off the same params.
+   *
+   * A solid header, unlike the browser's glass: the source view scrolls
+   * horizontally as well as vertically, and code sliding under a translucent
+   * header is unreadable.
+   */
+  ThreadFile: {
+    linking: `${THREAD}/files/:path*`,
+    overlay: false,
+    headerPreset: "solid",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
   Connections: {
     linking: "connections",
     overlay: true,

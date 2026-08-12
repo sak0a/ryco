@@ -157,10 +157,11 @@ describe("thread header change-request badge", () => {
     // every PR field before a consumer could see it. This pins the widening.
     const model = buildThreadHeaderModel({
       thread: thread(),
-      project: { name: "Ryco" },
+      project: { name: "Ryco", cwd: "/repo" },
       worktree: {
         title: "Mobile redesign",
         branch: "feat/mobile",
+        worktreePath: "/repo/.worktrees/mobile",
         prNumber: 42,
         prState: "merged",
         prIsDraft: false,
@@ -182,12 +183,44 @@ describe("thread header change-request badge", () => {
   it("leaves the badge null when there is no worktree at all", () => {
     const model = buildThreadHeaderModel({
       thread: thread(),
-      project: { name: "Ryco" },
+      project: { name: "Ryco", cwd: "/repo" },
       worktree: null,
       nodeLabel: "Studio",
       hasPendingApproval: false,
       hasPendingUserInput: false,
     });
     expect(model.changeRequest).toBeNull();
+  });
+});
+
+describe("thread header files action", () => {
+  function headerModel(
+    project: { readonly name: string; readonly cwd: string } | null,
+    worktree: { readonly worktreePath: string | null } | null,
+    worktreePath: string | null,
+  ) {
+    return buildThreadHeaderModel({
+      thread: thread({ worktreePath }),
+      project: project as Project | null,
+      worktree:
+        worktree === null
+          ? null
+          : ({ branch: "feat/mobile", ...worktree } as SidebarWorktreeSummary),
+      nodeLabel: "Studio",
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+    });
+  }
+
+  it("offers the browser whenever any link in the workspace-root chain resolves", () => {
+    expect(headerModel(null, { worktreePath: "/repo/.worktrees/a" }, null).filesVisible).toBe(true);
+    expect(headerModel(null, null, "/repo/.worktrees/b").filesVisible).toBe(true);
+    // The project checkout is the fallback threads started outside a worktree
+    // rely on.
+    expect(headerModel({ name: "Ryco", cwd: "/repo" }, null, null).filesVisible).toBe(true);
+  });
+
+  it("withholds it when the node manages the worktree without exposing a path", () => {
+    expect(headerModel(null, { worktreePath: null }, null).filesVisible).toBe(false);
   });
 });

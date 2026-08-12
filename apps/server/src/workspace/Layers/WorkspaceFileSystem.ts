@@ -4,7 +4,7 @@ import * as NodeFs from "node:fs/promises";
 import * as NodePath from "node:path";
 
 import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect";
-import { PROJECT_STAGE_FILE_MAX_BYTES } from "@ryco/contracts";
+import { PROJECT_READ_FILE_BINARY_MAX_BYTES, PROJECT_STAGE_FILE_MAX_BYTES } from "@ryco/contracts";
 
 import {
   WorkspaceFileConflictError,
@@ -23,8 +23,60 @@ const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
 const STAGED_FILE_ROOT = ".ryco/attachments";
 const UNSAFE_PATH_SEGMENT_CHARS = new Set(["<", ">", ":", '"', "/", "\\", "|", "?", "*"]);
 
+const PNG_MAGIC_BYTES = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const JPEG_MAGIC_BYTES = [0xff, 0xd8, 0xff];
+const GIF_MAGIC_BYTES = [0x47, 0x49, 0x46, 0x38];
+const BMP_MAGIC_BYTES = [0x42, 0x4d];
+const ICO_MAGIC_BYTES = [0x00, 0x00, 0x01, 0x00];
+const RIFF_MAGIC_BYTES = [0x52, 0x49, 0x46, 0x46];
+const WEBP_MAGIC_BYTES = [0x57, 0x45, 0x42, 0x50];
+const ISO_BASE_MEDIA_FTYP_BYTES = [0x66, 0x74, 0x79, 0x70];
+const ISO_BASE_MEDIA_IMAGE_BRANDS: Readonly<Record<string, string>> = {
+  avif: "image/avif",
+  avis: "image/avif",
+  heic: "image/heic",
+  heim: "image/heic",
+  heis: "image/heic",
+  heix: "image/heic",
+  hevc: "image/heic",
+  hevm: "image/heic",
+  hevs: "image/heic",
+  hevx: "image/heic",
+  mif1: "image/heic",
+  msf1: "image/heic",
+};
+
 function isLikelyBinaryPreview(bytes: Uint8Array): boolean {
   return bytes.subarray(0, Math.min(bytes.length, 8_192)).includes(0);
+}
+
+function hasMagicBytes(bytes: Uint8Array, magic: ReadonlyArray<number>, offset = 0): boolean {
+  if (bytes.length < offset + magic.length) return false;
+  return magic.every((value, index) => bytes[offset + index] === value);
+}
+
+/**
+ * Raster previews are typed by what the bytes are, never by what the path
+ * claims: the client renders these bytes in an image view, so a mislabelled
+ * extension must not decide the mime type. Unsupported magic numbers are
+ * refused rather than guessed at.
+ */
+function detectRasterImageMimeType(bytes: Uint8Array): string | null {
+  if (hasMagicBytes(bytes, PNG_MAGIC_BYTES)) return "image/png";
+  if (hasMagicBytes(bytes, JPEG_MAGIC_BYTES)) return "image/jpeg";
+  if (hasMagicBytes(bytes, GIF_MAGIC_BYTES)) return "image/gif";
+  if (hasMagicBytes(bytes, RIFF_MAGIC_BYTES) && hasMagicBytes(bytes, WEBP_MAGIC_BYTES, 8)) {
+    return "image/webp";
+  }
+  if (hasMagicBytes(bytes, BMP_MAGIC_BYTES)) return "image/bmp";
+  if (hasMagicBytes(bytes, ICO_MAGIC_BYTES)) return "image/x-icon";
+  if (hasMagicBytes(bytes, ISO_BASE_MEDIA_FTYP_BYTES, 4)) {
+    // Video containers share the ISO base-media ftyp header, so only the
+    // still-image brands are accepted; an mp4 brand falls through to refusal.
+    const brand = Buffer.from(bytes.subarray(8, 12)).toString("latin1");
+    return ISO_BASE_MEDIA_IMAGE_BRANDS[brand] ?? null;
+  }
+  return null;
 }
 
 function fileVersion(bytes: Uint8Array): string {
@@ -89,7 +141,15 @@ function pathStaysWithinRoot(rootPath: string, targetPath: string): boolean {
   );
 }
 
-async function readStableFileBytes(filePath: string): Promise<{
+/**
+ * `maxBytes` is a parameter because text and raster previews ride different
+ * budgets; the stability checks and refusal wording stay identical so clients
+ * keep mapping both limits with one set of strings.
+ */
+async function readStableFileBytes(
+  filePath: string,
+  maxBytes: number,
+): Promise<{
   readonly bytes: Buffer;
   readonly stat: BigIntStats;
 }> {
@@ -99,9 +159,9 @@ async function readStableFileBytes(filePath: string): Promise<{
     if (!beforeReadStat.isFile()) {
       throw new Error("Only regular files can be previewed.");
     }
-    if (beforeReadStat.size > BigInt(WORKSPACE_PREVIEW_MAX_BYTES)) {
+    if (beforeReadStat.size > BigInt(maxBytes)) {
       throw new Error(
-        `File is too large to preview (${beforeReadStat.size} bytes). Limit is ${WORKSPACE_PREVIEW_MAX_BYTES} bytes.`,
+        `File is too large to preview (${beforeReadStat.size} bytes). Limit is ${maxBytes} bytes.`,
       );
     }
     const bytes = await handle.readFile();
@@ -126,7 +186,7 @@ async function readCurrentFileVersion(input: {
   readonly filePath: string;
 }): Promise<{ readonly version: string; readonly stat: BigIntStats }> {
   try {
-    const { bytes, stat } = await readStableFileBytes(input.filePath);
+    const { bytes, stat } = await readStableFileBytes(input.filePath, WORKSPACE_PREVIEW_MAX_BYTES);
     return { version: fileVersion(bytes), stat };
   } catch (cause) {
     if (isEnoentError(cause)) {
@@ -392,7 +452,7 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
         target.absolutePath,
       );
       const { bytes } = yield* Effect.tryPromise({
-        try: () => readStableFileBytes(realTargetPath),
+        try: () => readStableFileBytes(realTargetPath, WORKSPACE_PREVIEW_MAX_BYTES),
         catch: toWorkspaceFileSystemError(input, "workspaceFileSystem.readFile"),
       });
       if (isLikelyBinaryPreview(bytes)) {
@@ -425,6 +485,40 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
       };
     },
   );
+
+  const readFileBinary: WorkspaceFileSystemShape["readFileBinary"] = Effect.fn(
+    "WorkspaceFileSystem.readFileBinary",
+  )(function* (input) {
+    const target = yield* workspacePaths.resolveRelativePathWithinRoot({
+      workspaceRoot: input.cwd,
+      relativePath: input.relativePath,
+    });
+
+    const { realTargetPath } = yield* ensureResolvedPathStaysWithinWorkspace(
+      input,
+      target.absolutePath,
+    );
+    const { bytes } = yield* Effect.tryPromise({
+      try: () => readStableFileBytes(realTargetPath, PROJECT_READ_FILE_BINARY_MAX_BYTES),
+      catch: toWorkspaceFileSystemError(input, "workspaceFileSystem.readFileBinary"),
+    });
+    const mimeType = detectRasterImageMimeType(bytes);
+    if (mimeType === null) {
+      return yield* new WorkspaceFileSystemError({
+        cwd: input.cwd,
+        relativePath: input.relativePath,
+        operation: "workspaceFileSystem.readFileBinary.magicBytes",
+        detail: "Not a supported image.",
+      });
+    }
+
+    return {
+      relativePath: target.relativePath,
+      dataBase64: bytes.toString("base64"),
+      mimeType,
+      sizeBytes: bytes.byteLength,
+    };
+  });
 
   const writeFile: WorkspaceFileSystemShape["writeFile"] = Effect.fn(
     "WorkspaceFileSystem.writeFile",
@@ -557,7 +651,12 @@ export const makeWorkspaceFileSystem = Effect.gen(function* () {
     return { relativePath: target.relativePath, sizeBytes: bytes.byteLength };
   });
 
-  return { readFile, writeFile, stageFileReference } satisfies WorkspaceFileSystemShape;
+  return {
+    readFile,
+    readFileBinary,
+    writeFile,
+    stageFileReference,
+  } satisfies WorkspaceFileSystemShape;
 });
 
 export const WorkspaceFileSystemLive = Layer.effect(WorkspaceFileSystem, makeWorkspaceFileSystem);
