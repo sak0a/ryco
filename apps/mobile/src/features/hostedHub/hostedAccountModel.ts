@@ -547,8 +547,10 @@ const PASSWORD_FOOTNOTE =
   "A password is a fallback credential. It is weaker than a passkey and never replaces one.";
 const TOTP_FOOTNOTE =
   "An authenticator app protects the fallback ways of signing in. Setting one up needs a passkey session on this device.";
-const EMAIL_FOOTNOTE =
+const EMAIL_DISABLED_FOOTNOTE =
   "This Hub has no mail transport configured, so no message will arrive. The request is accepted and recorded either way.";
+const EMAIL_CONFIGURED_FOOTNOTE =
+  "Used for account recovery after verification. The Hub accepts the request without confirming whether an address is already known.";
 
 const MAX_LABEL_LENGTH = 64;
 const MAX_PASSWORD_LENGTH = 256;
@@ -659,9 +661,9 @@ export function deriveHostedAccountManagementView(
       })
     : null;
   const emailFootnote =
-    security === null || security.email === null
-      ? EMAIL_FOOTNOTE
-      : `${security.email.verified ? "Verified" : "Verification pending"} for ${security.email.address}. ${EMAIL_FOOTNOTE}`;
+    security === null
+      ? EMAIL_DISABLED_FOOTNOTE
+      : `${security.email === null ? "" : `${security.email.verified ? "Verified" : "Verification pending"} for ${security.email.address}. `}${security.emailDeliveryConfigured ? EMAIL_CONFIGURED_FOOTNOTE : EMAIL_DISABLED_FOOTNOTE}`;
 
   const sections: ReadonlyArray<HostedAccountSection> = [
     {
@@ -1144,15 +1146,18 @@ function promptSpec(
 
     case "verify-email": {
       const email = draft.text.trim();
+      const deliveryConfigured = input.accountState.security?.emailDeliveryConfigured === true;
       return {
         title: "Send a verification email",
         message: "Your Hub records the address and generates a verification link for it.",
-        notice:
-          "This Hub has no mail transport configured, so the message is discarded rather than delivered. Nothing will arrive in your inbox until an operator wires one up.",
+        notice: deliveryConfigured
+          ? null
+          : "This Hub has no mail transport configured, so the message is discarded rather than delivered. Nothing will arrive in your inbox until an operator wires one up.",
         destructive: false,
         submitLabel: "Send",
-        completionMessage:
-          "Your Hub accepted the request. It cannot deliver mail yet, so no message will arrive.",
+        completionMessage: deliveryConfigured
+          ? "Your Hub accepted the request. Check your inbox and spam folder; delivery may take a moment."
+          : "Your Hub accepted the request. It cannot deliver mail yet, so no message will arrive.",
         fields: withStepUp([
           field("text", "Email address", "you@example.com", draft.text, {
             keyboardType: "email-address",

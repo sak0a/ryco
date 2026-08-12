@@ -1042,6 +1042,7 @@ function FallbackSignInSection({
         busy={busy}
         actionStatus={actionStatus}
         email={security === null ? undefined : security.email}
+        deliveryConfigured={security?.emailDeliveryConfigured}
         run={run}
       />
 
@@ -1152,12 +1153,14 @@ function EmailRows({
   busy,
   actionStatus,
   email: configuredEmail,
+  deliveryConfigured,
   run,
 }: {
   readonly busy: boolean;
   readonly actionStatus: string;
   /** `undefined` means the security read has not produced a value yet. */
   readonly email: HostedAccountSecurity["email"] | undefined;
+  readonly deliveryConfigured: boolean | undefined;
   readonly run: RunAccountAction;
 }) {
   const [email, setEmail] = useState("");
@@ -1189,20 +1192,26 @@ function EmailRows({
 
   return (
     <>
-      <div className="border-t border-border/60 px-4 pt-3.5 sm:px-5">
-        <Alert variant="warning">
-          <TriangleAlertIcon aria-hidden />
-          <AlertTitle>No mail will arrive yet</AlertTitle>
-          <AlertDescription>
-            This Hub has no mail transport configured, so verification messages are generated and
-            discarded. The request below will be accepted and nothing will be delivered until an
-            operator wires one up. Do not rely on email as your way back into the account.
-          </AlertDescription>
-        </Alert>
-      </div>
+      {deliveryConfigured === false ? (
+        <div className="border-t border-border/60 px-4 pt-3.5 sm:px-5">
+          <Alert variant="warning">
+            <TriangleAlertIcon aria-hidden />
+            <AlertTitle>No mail will arrive yet</AlertTitle>
+            <AlertDescription>
+              This Hub has no mail transport configured, so verification messages are generated and
+              discarded. The request below will be accepted and nothing will be delivered until an
+              operator wires one up. Do not rely on email as your way back into the account.
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
       <SettingsRow
         title="Recovery email"
-        description="Used for account recovery once mail delivery is switched on. The Hub answers the same way whether or not the address is already known, so this never confirms who owns it."
+        description={
+          deliveryConfigured
+            ? "Used for account recovery after verification. The Hub answers the same way whether or not the address is already known, so this never confirms who owns it."
+            : "Used for account recovery once mail delivery is switched on. The Hub answers the same way whether or not the address is already known, so this never confirms who owns it."
+        }
         status={
           configuredEmail === undefined
             ? "Checking current state…"
@@ -1251,8 +1260,9 @@ function EmailRows({
             ) : null}
             {accepted ? (
               <p role="status" className="pt-2 text-xs text-muted-foreground">
-                Request accepted by the Hub. No message will be delivered until a mail transport is
-                configured.
+                {deliveryConfigured
+                  ? "Verification email requested. Check your inbox and spam folder; delivery may take a moment."
+                  : "Request accepted by the Hub. No message will be delivered until a mail transport is configured."}
               </p>
             ) : null}
           </form>

@@ -114,7 +114,12 @@ const MAX_AUTH_PASSWORD_LENGTH = 256;
 const MAX_AUTH_TOTP_LENGTH = 16;
 const MAX_AUTH_RECOVERY_CODE_LENGTH = 128;
 const AUTH_EMAIL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const ACCOUNT_SECURITY_KEYS = new Set(["passwordConfigured", "totpEnrolled", "email"]);
+const ACCOUNT_SECURITY_KEYS = new Set([
+  "passwordConfigured",
+  "totpEnrolled",
+  "emailDeliveryConfigured",
+  "email",
+]);
 const ACCOUNT_SECURITY_EMAIL_KEYS = new Set(["address", "verified"]);
 
 /**
@@ -527,13 +532,18 @@ function accountSecurityValue(value: unknown): HostedAccountSecurity | null {
   ) {
     return null;
   }
-  if (typeof record.passwordConfigured !== "boolean" || typeof record.totpEnrolled !== "boolean") {
+  if (
+    typeof record.passwordConfigured !== "boolean" ||
+    typeof record.totpEnrolled !== "boolean" ||
+    typeof record.emailDeliveryConfigured !== "boolean"
+  ) {
     return null;
   }
   if (record.email === null) {
     return {
       passwordConfigured: record.passwordConfigured,
       totpEnrolled: record.totpEnrolled,
+      emailDeliveryConfigured: record.emailDeliveryConfigured,
       email: null,
     };
   }
@@ -553,6 +563,7 @@ function accountSecurityValue(value: unknown): HostedAccountSecurity | null {
   return {
     passwordConfigured: record.passwordConfigured,
     totpEnrolled: record.totpEnrolled,
+    emailDeliveryConfigured: record.emailDeliveryConfigured,
     email: { address: email.address, verified: email.verified },
   };
 }

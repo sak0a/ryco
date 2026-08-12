@@ -642,6 +642,7 @@ describe("HostedHubApi", () => {
         : response({
             passwordConfigured: true,
             totpEnrolled: false,
+            emailDeliveryConfigured: true,
             email: { address: "ada@example.test", verified: true },
           });
     });
@@ -651,6 +652,7 @@ describe("HostedHubApi", () => {
     await expect(api.getAccountSecurity()).resolves.toEqual({
       passwordConfigured: true,
       totpEnrolled: false,
+      emailDeliveryConfigured: true,
       email: { address: "ada@example.test", verified: true },
     });
     expect(requests[1]?.input).toBe("/api/account/security");
@@ -668,15 +670,28 @@ describe("HostedHubApi", () => {
 
     for (const payload of [
       { passwordConfigured: false, totpEnrolled: false },
-      { passwordConfigured: "false", totpEnrolled: false, email: null },
+      {
+        passwordConfigured: "false",
+        totpEnrolled: false,
+        emailDeliveryConfigured: false,
+        email: null,
+      },
       {
         passwordConfigured: false,
         totpEnrolled: false,
+        emailDeliveryConfigured: "false",
+        email: null,
+      },
+      {
+        passwordConfigured: false,
+        totpEnrolled: false,
+        emailDeliveryConfigured: false,
         email: { address: "ada@example.test", verified: false, token: "sensitive-canary" },
       },
       {
         passwordConfigured: false,
         totpEnrolled: false,
+        emailDeliveryConfigured: false,
         email: null,
         passwordHash: "sensitive-canary",
       },
@@ -1822,6 +1837,7 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
         return response({
           passwordConfigured: false,
           totpEnrolled: true,
+          emailDeliveryConfigured: true,
           email: null,
         });
       }
@@ -1848,6 +1864,7 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     await expect(api.getAccountSecurity()).resolves.toEqual({
       passwordConfigured: false,
       totpEnrolled: true,
+      emailDeliveryConfigured: true,
       email: null,
     });
     await expect(api.regenerateRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
