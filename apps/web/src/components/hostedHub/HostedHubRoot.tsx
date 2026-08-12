@@ -125,6 +125,16 @@ function HostedEntryChrome({ children }: { readonly children: React.ReactNode })
 }
 
 export function HostedHubRoot() {
+  const [emailVerificationLink, setEmailVerificationLink] = useState<HostedIdentityLink | null>(
+    () =>
+      window.location.pathname === "/email-verification"
+        ? consumeHostedIdentityLink({
+            href: window.location.href,
+            historyState: window.history.state,
+            replaceState: (state, unused, url) => window.history.replaceState(state, unused, url),
+          })
+        : null,
+  );
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
   const selectedNode = useHostedHubStore((state) => state.selectedNode);
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
@@ -137,6 +147,21 @@ export function HostedHubRoot() {
   // The single browser lifecycle owner, above the presentation-tier seam: the
   // tier shells mount no lifecycle listeners of their own.
   useHostedBrowserLifecycle();
+
+  if (
+    emailVerificationLink?.kind === "email-verification" ||
+    emailVerificationLink?.kind === "invalid-email-verification"
+  ) {
+    return (
+      <HostedEmailVerificationSurface
+        link={emailVerificationLink}
+        onContinue={() => {
+          window.history.replaceState(window.history.state, "", "/");
+          setEmailVerificationLink(null);
+        }}
+      />
+    );
+  }
 
   // Not wrapped in `HostedEntryChrome`: there is no account to configure yet.
   if (accountStatus !== "authenticated") return <HostedAuthenticationSurface />;
@@ -188,6 +213,70 @@ export function HostedHubRoot() {
   // The hosted connection controls render inside the shell (workspace header
   // on desktop, app-bar pill on the phone tier) — never as a floating overlay.
   return <RootAppShell authGateState={{ status: "hosted-hub" }} />;
+}
+
+function HostedEmailVerificationSurface({
+  link,
+  onContinue,
+}: {
+  readonly link: Extract<
+    HostedIdentityLink,
+    { readonly kind: "email-verification" | "invalid-email-verification" }
+  >;
+  readonly onContinue: () => void;
+}) {
+  const [status, setStatus] = useState<"verifying" | "verified" | "invalid">(
+    link.kind === "email-verification" ? "verifying" : "invalid",
+  );
+
+  useEffect(() => {
+    if (link.kind !== "email-verification") return;
+    const operation = new AbortController();
+    void hostedHubApi
+      .confirmEmailVerification(link.token, operation.signal)
+      .then(() => setStatus("verified"))
+      .catch(() => {
+        if (!operation.signal.aborted) setStatus("invalid");
+      });
+    return () => operation.abort();
+  }, [link]);
+
+  return (
+    <Surface
+      actions={
+        status === "verifying" ? undefined : (
+          <Button className="phone:min-h-11" onClick={onContinue}>
+            Continue
+          </Button>
+        )
+      }
+    >
+      <div className="mb-6 flex size-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
+        {status === "verifying" ? (
+          <Loader2Icon aria-hidden className="size-5 animate-spin" />
+        ) : (
+          <ShieldCheckIcon aria-hidden className="size-5" />
+        )}
+      </div>
+      <p className="text-xs font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+        {APP_DISPLAY_NAME} Hub
+      </p>
+      <h1 className="mt-2 text-2xl font-semibold">
+        {status === "verifying"
+          ? "Verifying your email"
+          : status === "verified"
+            ? "Email verified"
+            : "This verification link is unavailable"}
+      </h1>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+        {status === "verifying"
+          ? "This will only take a moment."
+          : status === "verified"
+            ? "Your address is now available for account recovery."
+            : "The link is incomplete, expired, or has already been used. Request a new one from Account settings."}
+      </p>
+    </Surface>
+  );
 }
 
 /**

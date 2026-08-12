@@ -5,7 +5,7 @@ import { consumeHostedIdentityLink, parseHostedIdentityLink } from "./hostedIden
 const opaque = "A".repeat(43);
 
 describe("hosted identity email links", () => {
-  it("parses signup and reset bearer material only from URL fragments", () => {
+  it("parses signup, reset, and email-verification bearer material only from URL fragments", () => {
     expect(
       parseHostedIdentityLink(
         new URL(
@@ -24,6 +24,12 @@ describe("hosted identity email links", () => {
     expect(
       parseHostedIdentityLink(new URL(`https://hub.example/password-reset?token=${opaque}`)),
     ).toEqual({ kind: "invalid-password-reset" });
+    expect(
+      parseHostedIdentityLink(new URL(`https://hub.example/email-verification#token=${opaque}`)),
+    ).toEqual({ kind: "email-verification", token: opaque });
+    expect(
+      parseHostedIdentityLink(new URL(`https://hub.example/email-verification?token=${opaque}`)),
+    ).toEqual({ kind: "invalid-email-verification" });
   });
 
   it("scrubs valid and malformed identity fragments immediately", () => {

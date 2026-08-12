@@ -9,10 +9,12 @@ export type HostedIdentityLink =
       readonly token: string;
     }
   | { readonly kind: "password-reset"; readonly token: string }
+  | { readonly kind: "email-verification"; readonly token: string }
   | { readonly kind: "invalid-signup-verification" }
-  | { readonly kind: "invalid-password-reset" };
+  | { readonly kind: "invalid-password-reset" }
+  | { readonly kind: "invalid-email-verification" };
 
-/** Parse only the two secret-bearing public identity fragments. */
+/** Parse only the secret-bearing public identity fragments. */
 export function parseHostedIdentityLink(url: URL): HostedIdentityLink | null {
   if (url.pathname === "/public-signup/verify") {
     const fragment = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
@@ -34,6 +36,13 @@ export function parseHostedIdentityLink(url: URL): HostedIdentityLink | null {
     return token !== null && OPAQUE_256_PATTERN.test(token)
       ? { kind: "password-reset", token }
       : { kind: "invalid-password-reset" };
+  }
+  if (url.pathname === "/email-verification") {
+    const fragment = new URLSearchParams(url.hash.startsWith("#") ? url.hash.slice(1) : url.hash);
+    const token = fragment.get("token");
+    return token !== null && OPAQUE_256_PATTERN.test(token)
+      ? { kind: "email-verification", token }
+      : { kind: "invalid-email-verification" };
   }
   return null;
 }

@@ -499,6 +499,20 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     await expect.element(page.getByText("Password changed")).toBeVisible();
   });
 
+  it("verifies an existing-account email from a scrubbed fragment link", async () => {
+    const token = "E".repeat(43);
+    window.history.replaceState(null, "", `/email-verification#token=${token}`);
+    const confirm = vi.spyOn(hostedHubApi, "confirmEmailVerification").mockResolvedValue();
+    mounted = await render(<HostedHubRoot />);
+
+    await expect.element(page.getByText("Email verified")).toBeVisible();
+    expect(confirm).toHaveBeenCalledWith(token, expect.any(AbortSignal));
+    expect(window.location.hash).toBe("");
+    expect(window.location.href).not.toContain(token);
+    await page.getByRole("button", { name: "Continue" }).click();
+    expect(window.location.pathname).toBe("/");
+  });
+
   it("hides unavailable bootstrap without hiding invitation redemption", async () => {
     mounted = await render(<HostedHubRoot />);
     await expect.element(page.getByRole("button", { name: "Redeem invitation" })).toBeVisible();
