@@ -46,6 +46,7 @@ vi.mock("../../env", async (importOriginal) => ({
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot } from "./HostedHubRoot";
@@ -99,15 +100,6 @@ function seedDirectory(nodes: ReadonlyArray<HostedHubNode>, overrides: object = 
     nodes: [...nodes],
     ...overrides,
   });
-}
-
-/** The settings dialog's visible section list, which is client-mode dependent. */
-function navSections(): ReadonlyArray<string> {
-  const dialog = document.querySelector<HTMLElement>('[data-slot="dialog-popup"]');
-  if (!dialog) return [];
-  return [...dialog.querySelectorAll<HTMLElement>("nav button")].map(
-    (button) => button.textContent?.trim() ?? "",
-  );
 }
 
 /**
@@ -170,6 +162,7 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   useSettingsDialogStore.setState({ open: false, section: "general" });
   navigate.mockClear();
 });
@@ -178,6 +171,7 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = null;
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   useSettingsDialogStore.setState({ open: false, section: "general" });
   vi.restoreAllMocks();
   document.body.innerHTML = "";
@@ -432,6 +426,7 @@ describe("hosted node directory", () => {
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 
@@ -448,6 +443,7 @@ describe("hosted node directory", () => {
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     await page.viewport(390, 720);
     await vi.waitFor(() => {
       expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
@@ -467,6 +463,7 @@ describe("hosted node directory", () => {
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     seedDirectory([
       node({ grant: { id: "grant_a", role: "operator" }, effectiveRole: "operator" }),
     ]);
@@ -938,6 +935,7 @@ describe("hosted node revocation", () => {
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 
@@ -1002,50 +1000,46 @@ describe("hosted node revocation", () => {
 });
 
 describe("account settings reachability", () => {
-  it("mounts the settings host on the node directory", async () => {
-    // Regression: `LazySettingsDialogMount` was rendered from exactly one place
-    // — inside `RootAppShell`, which the hosted root only reaches once a relay
-    // session is live. An account with zero nodes, only offline nodes, or only
-    // revoked nodes could not open account settings at all: `openSettings` is a
-    // global singleton and flipped silently against no mount.
+  it("reaches account security from the node directory, with no node at all", async () => {
+    // Regression, in its new shape. `LazySettingsDialogMount` used to be
+    // rendered from exactly one place — inside `RootAppShell`, which the hosted
+    // root only reaches once a relay session is live — so an account with zero
+    // nodes, only offline nodes, or only revoked ones could not open account
+    // settings at all: `openSettings` is a global singleton and flipped
+    // silently against no mount.
+    //
+    // Account management is a Hub page now, so the reachability that used to
+    // depend on a dialog host being mounted is a navigation, and the surface it
+    // lands on renders with no node present.
     seedDirectory([]);
     mounted = await render(<HostedHubRoot />);
 
     await page.getByRole("button", { name: "Account settings" }).click();
-    expect(useSettingsDialogStore.getState().open).toBe(true);
 
-    // The host actually renders, rather than the store flipping into a void —
-    // and it renders the HOSTED dialog. Without the client-mode mock at the top
-    // of this file, `settingsSectionAvailable("account", false)` is false, the
-    // Account item is filtered out of the nav entirely, and `SettingsDialog`'s
-    // own effect rewrites `section` to `"general"`. A bare "a popup exists"
-    // assertion passes against that standard dialog without noticing.
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-slot="dialog-popup"]')).not.toBeNull();
-      expect(navSections(), "the standard dialog rendered instead of the hosted one").toContain(
-        "Account",
-      );
-    });
-    // Asserted after the dialog has rendered, so it is the settled value rather
-    // than a read that beat the reconciliation effect to it.
-    expect(useSettingsDialogStore.getState().section).toBe("account");
+    await expect.element(page.getByRole("heading", { name: "Account", level: 1 })).toBeVisible();
+    expect(window.location.pathname).toBe("/account/security");
+    // The node app's settings dialog is not what opened.
+    expect(useSettingsDialogStore.getState().open).toBe(false);
+    expect(document.querySelector('[data-slot="dialog-popup"]')).toBeNull();
   });
 
-  it("mounts exactly one settings host, never one per surface", async () => {
+  it("mounts no settings dialog host on a Hub surface", async () => {
+    // The Hub used to carry a second `LazySettingsDialogMount` so node-less
+    // surfaces could open account settings. Nothing on a Hub page opens that
+    // dialog now, so the mount is gone and the invariant is simply that one
+    // host exists — in `AppSidebarLayout`, inside a node session.
     seedDirectory([node()]);
     mounted = await render(<HostedHubRoot />);
     useSettingsDialogStore.setState({ open: true, section: "account" });
 
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-slot="dialog-popup"]')).not.toBeNull();
-    });
+    await expect.element(page.getByRole("heading", { name: /Your node/ })).toBeVisible();
     expect(
       document.querySelectorAll('[data-slot="dialog-popup"]'),
-      "the wrapped entry surfaces and the app shell are opposite branches of one switch",
-    ).toHaveLength(1);
+      "a Hub surface rendered the node app's settings dialog",
+    ).toHaveLength(0);
   });
 
-  it("keeps settings reachable from the surface a terminal relay failure lands on", async () => {
+  it("keeps account settings reachable from the surface a terminal relay failure lands on", async () => {
     // The state where a user most needs to check their credentials is the one
     // where their node stopped answering.
     const selected = node();
@@ -1058,22 +1052,12 @@ describe("account settings reachability", () => {
     await expect.element(page.getByRole("heading", { name: /Unable to connect/ })).toBeVisible();
 
     // The desktop connection control is a `<details>` disclosure; its contents
-    // are the bounded control set, and Account now sits with Refresh and Sign
-    // out inside it.
+    // are the bounded control set, and Account sits with Refresh and Sign out
+    // inside it.
     document.querySelector<HTMLElement>("summary")?.click();
     await page.getByRole("button", { name: "Account" }).click();
-    expect(useSettingsDialogStore.getState().open).toBe(true);
 
-    // Same reason as above, and this assertion is why the mock exists: read
-    // straight after the click, `section` races `SettingsDialog`'s own
-    // reconciliation effect, which in standard mode rewrites it to `"general"`.
-    // This failed roughly one run in six.
-    await vi.waitFor(() => {
-      expect(document.querySelector('[data-slot="dialog-popup"]')).not.toBeNull();
-      expect(navSections(), "the standard dialog rendered instead of the hosted one").toContain(
-        "Account",
-      );
-    });
-    expect(useSettingsDialogStore.getState().section).toBe("account");
+    await expect.element(page.getByRole("heading", { name: "Account", level: 1 })).toBeVisible();
+    expect(window.location.pathname).toBe("/account/security");
   });
 });

@@ -96,7 +96,22 @@ const TRANSPARENCY_PREVIEW_OPACITY: Record<string, number> = {
   glass: 0.72,
 };
 
-export function AppearanceSettingsPanel() {
+export function AppearanceSettingsPanel({
+  surface = "node",
+}: {
+  /**
+   * Which product is showing this panel.
+   *
+   * `hub` is the Hub website's `/account/appearance` page, which offers only
+   * the controls that mean something there — colour mode, theme palette, fonts,
+   * text size, primary colour, transparency. The code font, the corner radius,
+   * the panel layout and the composer controls all describe a node workspace,
+   * and a hosted user may have no node at all; they stay in the node app's own
+   * settings, reachable from inside a node session.
+   */
+  readonly surface?: "node" | "hub";
+} = {}) {
+  const isHub = surface === "hub";
   const { theme, setTheme, resolvedTheme, activeThemeId, setActiveTheme } = useTheme();
   const wideComposerControlsAutoCollapse = useUiStateStore(
     (state) => state.wideComposerControlsAutoCollapse,
@@ -329,28 +344,30 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
-        <SettingsRow
-          title="Code font"
-          description="Code blocks, diffs, file paths, and terminal surfaces."
-          resetAction={
-            hasAppearancePreferenceOverride("fontFamilyMono") ? (
-              <SettingResetButton
-                label="code font"
-                onClick={() => handleAppearancePreferenceReset("fontFamilyMono")}
+        {isHub ? null : (
+          <SettingsRow
+            title="Code font"
+            description="Code blocks, diffs, file paths, and terminal surfaces."
+            resetAction={
+              hasAppearancePreferenceOverride("fontFamilyMono") ? (
+                <SettingResetButton
+                  label="code font"
+                  onClick={() => handleAppearancePreferenceReset("fontFamilyMono")}
+                />
+              ) : null
+            }
+            control={
+              <FontPreferencePicker
+                ariaLabel="Code font"
+                icon={<Code2Icon className="size-3.5" />}
+                options={FONT_FAMILY_MONO_OPTIONS}
+                value={appearancePreferences.fontFamilyMono}
+                sample="const answer = 42"
+                onChange={(value) => handleAppearancePreferenceChange("fontFamilyMono", value)}
               />
-            ) : null
-          }
-          control={
-            <FontPreferencePicker
-              ariaLabel="Code font"
-              icon={<Code2Icon className="size-3.5" />}
-              options={FONT_FAMILY_MONO_OPTIONS}
-              value={appearancePreferences.fontFamilyMono}
-              sample="const answer = 42"
-              onChange={(value) => handleAppearancePreferenceChange("fontFamilyMono", value)}
-            />
-          }
-        />
+            }
+          />
+        )}
         <SettingsRow
           title="Text size"
           description="Scale the interface independently from the active theme."
@@ -377,39 +394,41 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
-        <SettingsRow
-          title="Corner radius"
-          description="Adjust rounding for panels, buttons, inputs, and menus globally."
-          resetAction={
-            hasAppearancePreferenceOverride("radius") ? (
-              <SettingResetButton
-                label="corner radius"
-                onClick={() => handleAppearancePreferenceReset("radius")}
+        {isHub ? null : (
+          <SettingsRow
+            title="Corner radius"
+            description="Adjust rounding for panels, buttons, inputs, and menus globally."
+            resetAction={
+              hasAppearancePreferenceOverride("radius") ? (
+                <SettingResetButton
+                  label="corner radius"
+                  onClick={() => handleAppearancePreferenceReset("radius")}
+                />
+              ) : null
+            }
+            control={
+              <AppearancePreferenceSlider
+                ariaLabel="Corner radius"
+                icon={<RadiusIcon className="size-3.5" />}
+                options={RADIUS_OPTIONS}
+                value={appearancePreferences.radius}
+                onChange={(value) => handleAppearancePreferenceChange("radius", value)}
+                preview={
+                  <span className="grid h-9 min-w-14 grid-cols-2 gap-1 rounded-md border border-border/70 bg-background p-1.5 shadow-xs/5">
+                    <span
+                      className="border border-primary/55 bg-primary/15"
+                      style={{ borderRadius: appearancePreferences.radius }}
+                    />
+                    <span
+                      className="border border-muted-foreground/30 bg-muted"
+                      style={{ borderRadius: appearancePreferences.radius }}
+                    />
+                  </span>
+                }
               />
-            ) : null
-          }
-          control={
-            <AppearancePreferenceSlider
-              ariaLabel="Corner radius"
-              icon={<RadiusIcon className="size-3.5" />}
-              options={RADIUS_OPTIONS}
-              value={appearancePreferences.radius}
-              onChange={(value) => handleAppearancePreferenceChange("radius", value)}
-              preview={
-                <span className="grid h-9 min-w-14 grid-cols-2 gap-1 rounded-md border border-border/70 bg-background p-1.5 shadow-xs/5">
-                  <span
-                    className="border border-primary/55 bg-primary/15"
-                    style={{ borderRadius: appearancePreferences.radius }}
-                  />
-                  <span
-                    className="border border-muted-foreground/30 bg-muted"
-                    style={{ borderRadius: appearancePreferences.radius }}
-                  />
-                </span>
-              }
-            />
-          }
-        />
+            }
+          />
+        )}
         <SettingsRow
           title="Primary color"
           description="Theme palettes control buttons by default; enable a custom color to pin one app accent."
@@ -461,34 +480,36 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
-        <SettingsRow
-          title="Panel layout"
-          description="Choose how the overview panel arranges source control, status, plan, subagents, and the pull request."
-          resetAction={
-            hasAppearancePreferenceOverride("panelLayout") ? (
-              <SettingResetButton
-                label="panel layout"
-                onClick={() => handleAppearancePreferenceReset("panelLayout")}
+        {isHub ? null : (
+          <SettingsRow
+            title="Panel layout"
+            description="Choose how the overview panel arranges source control, status, plan, subagents, and the pull request."
+            resetAction={
+              hasAppearancePreferenceOverride("panelLayout") ? (
+                <SettingResetButton
+                  label="panel layout"
+                  onClick={() => handleAppearancePreferenceReset("panelLayout")}
+                />
+              ) : null
+            }
+            control={
+              <AppearancePreferenceSlider
+                ariaLabel="Panel layout"
+                icon={<PanelRightIcon className="size-3.5" />}
+                options={PANEL_LAYOUT_OPTIONS}
+                value={appearancePreferences.panelLayout}
+                onChange={(value) => handleAppearancePreferenceChange("panelLayout", value)}
+                preview={
+                  <span className="flex h-9 min-w-14 flex-col justify-center gap-1 rounded-md border border-border/70 bg-background p-1.5 shadow-xs/5">
+                    <span className="h-1 rounded-full bg-primary/45" />
+                    <span className="h-1 w-2/3 rounded-full bg-muted-foreground/30" />
+                    <span className="h-1 rounded-full bg-muted-foreground/30" />
+                  </span>
+                }
               />
-            ) : null
-          }
-          control={
-            <AppearancePreferenceSlider
-              ariaLabel="Panel layout"
-              icon={<PanelRightIcon className="size-3.5" />}
-              options={PANEL_LAYOUT_OPTIONS}
-              value={appearancePreferences.panelLayout}
-              onChange={(value) => handleAppearancePreferenceChange("panelLayout", value)}
-              preview={
-                <span className="flex h-9 min-w-14 flex-col justify-center gap-1 rounded-md border border-border/70 bg-background p-1.5 shadow-xs/5">
-                  <span className="h-1 rounded-full bg-primary/45" />
-                  <span className="h-1 w-2/3 rounded-full bg-muted-foreground/30" />
-                  <span className="h-1 rounded-full bg-muted-foreground/30" />
-                </span>
-              }
-            />
-          }
-        />
+            }
+          />
+        )}
       </SettingsSection>
 
       <SettingsSection
@@ -661,46 +682,48 @@ export function AppearanceSettingsPanel() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Composer controls">
-        <SettingsRow
-          title="Auto-collapse wide composer labels"
-          description="Show long composer mode labels only on hover or focus."
-          resetAction={
-            !wideComposerControlsAutoCollapse ? (
-              <SettingResetButton
-                label="wide composer labels"
-                onClick={() => setWideComposerControlsAutoCollapse(true)}
+      {isHub ? null : (
+        <SettingsSection title="Composer controls">
+          <SettingsRow
+            title="Auto-collapse wide composer labels"
+            description="Show long composer mode labels only on hover or focus."
+            resetAction={
+              !wideComposerControlsAutoCollapse ? (
+                <SettingResetButton
+                  label="wide composer labels"
+                  onClick={() => setWideComposerControlsAutoCollapse(true)}
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={wideComposerControlsAutoCollapse}
+                onCheckedChange={(checked) => setWideComposerControlsAutoCollapse(Boolean(checked))}
+                aria-label="Auto-collapse wide composer labels"
               />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={wideComposerControlsAutoCollapse}
-              onCheckedChange={(checked) => setWideComposerControlsAutoCollapse(Boolean(checked))}
-              aria-label="Auto-collapse wide composer labels"
-            />
-          }
-        />
-        <SettingsRow
-          title="Always use Build mode"
-          description="Hide the mode selector in the composer and send every turn in Build mode."
-          resetAction={
-            alwaysUseBuildMode ? (
-              <SettingResetButton
-                label="always use Build mode"
-                onClick={() => setAlwaysUseBuildMode(false)}
+            }
+          />
+          <SettingsRow
+            title="Always use Build mode"
+            description="Hide the mode selector in the composer and send every turn in Build mode."
+            resetAction={
+              alwaysUseBuildMode ? (
+                <SettingResetButton
+                  label="always use Build mode"
+                  onClick={() => setAlwaysUseBuildMode(false)}
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={alwaysUseBuildMode}
+                onCheckedChange={(checked) => setAlwaysUseBuildMode(Boolean(checked))}
+                aria-label="Always use Build mode"
               />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={alwaysUseBuildMode}
-              onCheckedChange={(checked) => setAlwaysUseBuildMode(Boolean(checked))}
-              aria-label="Always use Build mode"
-            />
-          }
-        />
-      </SettingsSection>
+            }
+          />
+        </SettingsSection>
+      )}
 
       <SettingsSection title="Color mode">
         <SettingsRow

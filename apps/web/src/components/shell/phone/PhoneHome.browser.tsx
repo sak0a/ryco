@@ -44,6 +44,7 @@ import {
 } from "../../../../test/hostedConnectionVocabulary";
 import { resetWebE2eeSession } from "../../../hostedHub/e2eeSession";
 import { hostedHubController, useHostedHubStore } from "../../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../../hostedHub/hubRoutes";
 import type { HostedHubNode } from "../../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../../lib/presentationTier";
 import { useStore, type EnvironmentState } from "../../../store";
@@ -258,6 +259,7 @@ describe("PhoneHome", () => {
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     // Module state, not store state: `resetForTests()` does not reach the §13
     // projection, and a channel left locked would rename every later status.
     resetWebE2eeSession();

@@ -21,6 +21,11 @@ export type HostedSettingsRole = "viewer" | "operator" | "owner" | null;
  * Sections that exist only in the hosted client. Account management is one:
  * there is no Hub account to manage in the standard (local-server) mode, so the
  * section is filtered out entirely rather than rendered empty.
+ *
+ * Still hosted-only even though the hosted client no longer opens this dialog on
+ * it — see `hostedSettingsSectionAllowed`. The two gates answer different
+ * questions: this one is "does the section exist in this build", which has not
+ * changed, and that one is "does the hosted client route here", which has.
  */
 const HOSTED_ONLY_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(["account"]);
 
@@ -51,10 +56,12 @@ export function hostedSettingsSectionAllowed(
 ): boolean {
   if (section === "connections") return false;
   if (section === "appearance") return true;
-  // Every signed-in account owns its own credentials, whatever role it holds on
-  // the nodes it can reach — and, unlike the node-scoped sections, the answer
-  // does not depend on a role snapshot being fresh.
-  if (section === "account") return true;
+  // Account management is a Hub page now, not a tab of this dialog, so the
+  // hosted client never opens the dialog on it. Kept closed rather than
+  // deleted: `SettingsSectionId` still carries the id, and a stale caller
+  // asking for it must not be answered with a section this dialog no longer
+  // renders in hosted mode.
+  if (section === "account") return false;
   if (section === "archived") return role !== null;
   return role === "owner" && HOSTED_OWNER_SECTIONS.has(section);
 }

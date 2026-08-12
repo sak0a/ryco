@@ -27,6 +27,7 @@ vi.mock("../../env", async (importOriginal) => ({
 }));
 
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import {
   installHostedNodeHistory,
   resetHostedNodeRoutesForTests,
@@ -85,6 +86,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   resetHostedNodeRouteOrchestratorForTests();
   resetHostedNodeRoutesForTests();
   navigate.mockClear();
@@ -94,6 +96,7 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = null;
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   resetHostedNodeRouteOrchestratorForTests();
   resetHostedNodeRoutesForTests();
   fakeWindow = null;

@@ -21,6 +21,7 @@ import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredAction
 import { Button } from "../ui/button";
 import { Input, TOUCH_INPUT_CLASS_NAME } from "../ui/input";
 import { Label } from "../ui/label";
+import { HubStepIndicator } from "./shell/HubStepIndicator";
 import { TurnstileWidget } from "./TurnstileWidget";
 
 type EnabledSignupConfig = Extract<PublicSignupConfigResponse, { readonly status: "enabled" }>;
@@ -241,8 +242,26 @@ export function PublicSignupFlow({
     }
   };
 
+  // Signup is four steps and used to give no sign of it, so a person entering
+  // an email code could not tell whether they were nearly finished or nearly
+  // starting. `verifying` is not a step of its own — it is the mailbox step
+  // completing itself from a link — so it reports as step 2.
+  const signupStep =
+    stage === "details" ? 1 : stage === "check-email" || stage === "verifying" ? 2 : 3;
+
   return (
-    <div className="mt-6 flex flex-1 flex-col">
+    <div className="flex flex-1 flex-col">
+      <HubStepIndicator
+        step={signupStep}
+        total={3}
+        label={
+          signupStep === 1
+            ? "Your details"
+            : signupStep === 2
+              ? "Verify your email"
+              : "Choose how you sign in"
+        }
+      />
       {stage === "details" ? (
         <form className="space-y-4" onSubmit={(event) => void start(event)}>
           <div className="space-y-1.5">
@@ -639,8 +658,26 @@ export function PasswordResetFlow({
     }
   };
 
+  // `verifying` is the mail token being confirmed on arrival, which is the
+  // second step completing itself; `complete` is the outcome, not a step.
+  const resetStep =
+    stage === "request" ? 1 : stage === "check-email" || stage === "verifying" ? 2 : 3;
+
   return (
-    <form className="mt-6 flex flex-1 flex-col space-y-4" onSubmit={(event) => void submit(event)}>
+    <form className="flex flex-1 flex-col space-y-4" onSubmit={(event) => void submit(event)}>
+      {stage === "complete" ? null : (
+        <HubStepIndicator
+          step={resetStep}
+          total={3}
+          label={
+            resetStep === 1
+              ? "Find your account"
+              : resetStep === 2
+                ? "Check your email"
+                : "Set a new password"
+          }
+        />
+      )}
       {stage === "request" ? (
         <div className="space-y-1.5">
           <Label htmlFor="hub-reset-identifier">Username or verified email</Label>

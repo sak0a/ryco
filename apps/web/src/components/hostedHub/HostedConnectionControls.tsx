@@ -14,7 +14,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { useSettingsDialogStore } from "../../settingsDialogStore";
+import { navigateHub } from "../../hostedHub/hubRoutes";
 import { Button } from "../ui/button";
 import { MobileListRow } from "../mobile/MobileListRow";
 import {
@@ -175,7 +175,6 @@ export function HostedNodeMenu() {
   // docs/relay-e2ee-protocol.md §12.2: every user-facing surface, and this is
   // one of the three.
   const e2eeStatus = useWebE2eeChannelStatus();
-  const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
   const disclosureRef = useRef<HTMLDetailsElement>(null);
   if (!node) return null;
@@ -269,7 +268,7 @@ export function HostedNodeMenu() {
                 // Escape closes the dialog and returns focus into a popover the
                 // user believes they already left.
                 if (disclosureRef.current) disclosureRef.current.open = false;
-                openSettings("account");
+                navigateHub({ kind: "account", section: "security" });
               }}
             >
               <UserRoundIcon aria-hidden /> Account
@@ -316,7 +315,6 @@ export function HostedConnectionSheet({
   const error = useHostedHubStore((state) => state.errorMessage);
   const browserStatus = useHostedHubStore((state) => state.browserStatus);
   const e2eeStatus = useWebE2eeChannelStatus();
-  const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const { switchNode, returnToAllNodes } = useHostedConnectionActions();
   if (!node) return null;
 
@@ -364,7 +362,7 @@ export function HostedConnectionSheet({
               // Close first: the settings surface is its own full-screen sheet
               // and must not open behind this one.
               onOpenChange(false);
-              openSettings("account");
+              navigateHub({ kind: "account", section: "security" });
             }}
           />
           <MobileListRow

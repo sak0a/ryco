@@ -9481,6 +9481,34 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Unable to find the composer form.",
       );
       const sendButton = await waitForSendButton();
+
+      // Settle before the baseline is taken, not after.
+      //
+      // The composer's position depends on the virtualized timeline above it,
+      // which converges over several frames after mount. Reading immediately
+      // captured a mid-convergence position, and the comparison below then
+      // attributed the remaining settling to the resize under test — a
+      // ~313px "movement" that no resize caused.
+      //
+      // That made the assertion sensitive to anything that changes how long
+      // style recalculation takes, including the *size of the stylesheet*:
+      // adding 80 lines of inert CSS that no element in this suite matches was
+      // enough to flip it, reproducibly. Waiting for two consecutive identical
+      // readings measures what the test is named for — that a resize with no
+      // keyboard inset moves nothing — instead of racing the timeline.
+      // Stability is required across consecutive frames, not merely between two
+      // reads: the timeline settles in bursts, so two samples taken inside one
+      // quiet gap can agree while convergence is still in progress.
+      let stableFrames = 0;
+      let previousTop = Number.NaN;
+      for (let attempt = 0; attempt < 600 && stableFrames < 8; attempt += 1) {
+        await nextFrame();
+        const top = composerForm.getBoundingClientRect().top;
+        stableFrames = top === previousTop ? stableFrames + 1 : 0;
+        previousTop = top;
+      }
+      expect(stableFrames, "composer geometry never stopped converging").toBeGreaterThanOrEqual(8);
+
       const baselineFormRect = composerForm.getBoundingClientRect();
       const baselineSendRect = sendButton.getBoundingClientRect();
 

@@ -728,6 +728,70 @@ code {
       var(--app-chrome-background);
   }
 
+  /* The Hub website's ambient layer. Same idea as `.app-ambient` and the same
+     derivation from --primary, so themes re-tint it for free — but composed for
+     a centred page rather than a sidebar-plus-workspace shell: the light comes
+     from above the content column instead of the top-right chrome corner, and
+     the washes are larger and softer so a short page does not sit in a visible
+     hotspot.
+
+     Only ever painted on a Hub surface: `lib/hubSurface.ts` stamps
+     `data-surface="hub"` in hosted-hub builds alone, and only Hub components
+     carry this class.
+
+     Deliberately a plain class rather than a registered `hub:` Tailwind
+     variant. Registering one — `@custom-variant hub (&:is([data-surface="hub"],
+     [data-surface="hub"] *))` beside the dark/wco/phone registrations above —
+     reproducibly moves the chat composer 313px in
+     `ChatView.browser.tsx > publishes no keyboard variables and changes no
+     composer geometry without an inset`, because adding a variant perturbs the
+     order Tailwind emits utilities in and that layout depends on the order.
+     Verified by bisection: the Hub rules in this file are green, the
+     registration alone is red. The Hub needs no variant — attribute-scoped
+     rules give the same isolation without touching the node app's CSS. */
+  .hub-ambient {
+    background:
+      radial-gradient(
+        90% 60% at 50% -14%,
+        color-mix(in srgb, var(--primary) 14%, transparent),
+        transparent 68%
+      ),
+      radial-gradient(
+        62% 50% at 88% 6%,
+        color-mix(in srgb, var(--primary) 8%, transparent),
+        transparent 72%
+      ),
+      radial-gradient(
+        66% 52% at 8% 96%,
+        color-mix(in srgb, var(--foreground) 6%, transparent),
+        transparent 70%
+      ),
+      var(--app-chrome-background);
+  }
+
+  /* Decorative lighting only: in forced colours it is noise between the system
+     canvas and the text painted over it. */
+  @media (forced-colors: active) {
+    .hub-ambient {
+      background: Canvas;
+    }
+  }
+
+  /* The gateway panel's phone dissolve.
+     On the phone tier the Hub gateway drops its card chrome and fills the
+     viewport, which is what lets its action group bottom-anchor — the same
+     behaviour the surface it replaces had. This is a RESET, not a material:
+     it removes `app-surface`'s plate and filter rather than declaring new
+     ones, so it needs no coverage floor. It exists as a rule because
+     `app-surface` is a component class and a Tailwind variant cannot
+     conditionally un-apply one; without it the panel would keep compositing a
+     backdrop-filter behind a fully transparent background. */
+  [data-tier="phone"] .hub-gateway-panel {
+    background-color: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   /* Experimental composer liquid glass (ComposerLiquidGlass.tsx). When the
      layer is active, the host's plate and blur move onto the empty warp
      layer beneath the content — in Chromium the warp also carries the SVG
