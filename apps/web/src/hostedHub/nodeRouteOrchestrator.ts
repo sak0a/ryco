@@ -10,6 +10,7 @@ import {
   subscribeRoutedHostedNode,
   type RoutedHostedNode,
 } from "./nodeRoutes";
+import { HUB_ROUTE_TOP_SEGMENTS } from "./hubRoutes";
 import { hostedHubController, useHostedHubStore } from "./state";
 
 /**
@@ -64,8 +65,23 @@ export function useRoutedHostedNode(): RoutedHostedNode {
   return useSyncExternalStore(subscribeRoutedHostedNode, getRoutedHostedNode);
 }
 
-/** Route segments that can never be a legacy `/$environmentId/$threadId` pair. */
-const RESERVED_TOP_SEGMENTS = new Set(["node", "draft", "pair", "diagnostics"]);
+/**
+ * Route segments that can never be a legacy `/$environmentId/$threadId` pair.
+ *
+ * Includes every segment the Hub website owns. Without them a two-segment Hub
+ * address is silently reinterpreted as a thread: `/account/security` matches
+ * the legacy pattern exactly and would be adopted as environment `account`,
+ * thread `security`. `hubRoutes.test.ts` asserts this set stays a superset of
+ * `HUB_ROUTE_TOP_SEGMENTS`, so a Hub route added later cannot reintroduce that
+ * hole by omission.
+ */
+export const RESERVED_TOP_SEGMENTS = new Set([
+  "node",
+  "draft",
+  "pair",
+  "diagnostics",
+  ...HUB_ROUTE_TOP_SEGMENTS,
+]);
 
 function readLegacyThreadEnvironmentId(pathname: string): string | null {
   const match = /^\/([^/]+)\/([^/]+)\/?$/.exec(pathname);

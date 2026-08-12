@@ -54,6 +54,8 @@ import {
   consumeHostedIdentityLink,
   type HostedIdentityLink,
 } from "../../hostedHub/hostedIdentityLinks";
+import { hubRouteTitle, navigateHub, useHubRoute } from "../../hostedHub/hubRoutes";
+import { hubPageTitle } from "../../hubBranding";
 import {
   selectHostedNodeRoute,
   useHostedNodeRouteNotice,
@@ -150,6 +152,21 @@ function HostedEntryChrome({ children }: { readonly children: React.ReactNode })
   );
 }
 
+/**
+ * Names the page in the title bar, browser history and password-manager
+ * prompts.
+ *
+ * The hosted build used to set one static title for the entire site, so every
+ * Hub page appeared in history under the same name and a password manager had
+ * no page to associate a credential with.
+ */
+function useHubDocumentTitle(): void {
+  const route = useHubRoute();
+  useEffect(() => {
+    document.title = hubPageTitle(route === null ? undefined : hubRouteTitle(route));
+  }, [route]);
+}
+
 export function HostedHubRoot() {
   const [emailVerificationLink, setEmailVerificationLink] = useState<EmailVerificationLink | null>(
     consumeInitialEmailVerificationLink,
@@ -166,6 +183,7 @@ export function HostedHubRoot() {
   // The single browser lifecycle owner, above the presentation-tier seam: the
   // tier shells mount no lifecycle listeners of their own.
   useHostedBrowserLifecycle();
+  useHubDocumentTitle();
 
   if (
     emailVerificationLink?.kind === "email-verification" ||
@@ -502,21 +520,54 @@ export function HostedAuthenticationSurface({
   );
   const clearIdentityLink = useCallback(() => setIdentityLink(null), []);
   const { config: publicSignupConfig } = usePublicSignupConfiguration();
-  const [registrationMode, setRegistrationMode] = useState<
-    "public" | "invitation" | "bootstrap" | null
-  >(
-    identityLink?.kind === "signup-verification" ||
-      identityLink?.kind === "invalid-signup-verification"
+  // Which ceremony is on screen comes from the URL, not from local state.
+  //
+  // These were two `useState` discriminators, so every signed-out screen lived
+  // at `/` with no address: a refresh dropped you back to sign-in, Back left the
+  // Hub instead of stepping out of the flow, and nothing could be linked. The
+  // mailed-link arrivals are the same routes — `/public-signup/verify` and
+  // `/password-reset` are the Hub server's own mail pathnames — so a reload of
+  // one now lands on the page that ceremony belongs to rather than reporting an
+  // expired link.
+  const hubRoute = useHubRoute();
+  const registrationMode =
+    hubRoute?.kind === "sign-up" || hubRoute?.kind === "sign-up-verify"
       ? "public"
-      : null,
-  );
-  const [fallbackMode, setFallbackMode] = useState<
-    "password" | "recovery-code" | "password-reset" | null
-  >(
-    identityLink?.kind === "password-reset" || identityLink?.kind === "invalid-password-reset"
-      ? "password-reset"
-      : null,
-  );
+      : hubRoute?.kind === "invitation"
+        ? "invitation"
+        : hubRoute?.kind === "setup"
+          ? "bootstrap"
+          : null;
+  const fallbackMode =
+    hubRoute?.kind === "sign-in-password"
+      ? "password"
+      : hubRoute?.kind === "sign-in-recovery-code"
+        ? "recovery-code"
+        : hubRoute?.kind === "reset-password"
+          ? "password-reset"
+          : null;
+  const setRegistrationMode = (mode: "public" | "invitation" | "bootstrap" | null) => {
+    navigateHub(
+      mode === "public"
+        ? { kind: "sign-up" }
+        : mode === "invitation"
+          ? { kind: "invitation" }
+          : mode === "bootstrap"
+            ? { kind: "setup" }
+            : { kind: "sign-in" },
+    );
+  };
+  const setFallbackMode = (mode: "password" | "recovery-code" | "password-reset" | null) => {
+    navigateHub(
+      mode === "password"
+        ? { kind: "sign-in-password" }
+        : mode === "recovery-code"
+          ? { kind: "sign-in-recovery-code" }
+          : mode === "password-reset"
+            ? { kind: "reset-password" }
+            : { kind: "sign-in" },
+    );
+  };
   const headingRef = useRef<HTMLHeadingElement>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
   const surfaceScrollRef = useRef<HTMLElement>(null);
@@ -1066,7 +1117,11 @@ function HostedNodeDirectory() {
   const openSettings = useSettingsDialogStore((state) => state.openSettings);
   const navigate = useNavigate();
   const isPhoneTier = usePresentationTier() === "phone";
-  const [enrolling, setEnrolling] = useState(false);
+  // Enrollment is a page, not a flag: `/nodes/enroll` survives a refresh and
+  // Back steps out of the wizard instead of leaving the Hub.
+  const enrolling = useHubRoute()?.kind === "nodes-enroll";
+  const setEnrolling = (next: boolean) =>
+    navigateHub(next ? { kind: "nodes-enroll" } : { kind: "nodes" });
   // The *id*, never the node object. `listNodes` polls every 20 seconds and
   // replaces every row, so a captured `HostedHubNode` is a snapshot of the
   // moment the sheet was opened and stops tracking the machine it describes: a

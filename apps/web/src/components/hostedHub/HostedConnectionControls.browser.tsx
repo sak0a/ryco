@@ -60,6 +60,7 @@ import {
 } from "./HostedE2eeVerification.logic";
 import { resetWebE2eeSession } from "../../hostedHub/e2eeSession";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
@@ -178,6 +179,7 @@ describe("hosted connection controls", () => {
   beforeEach(() => {
     localStorage.clear();
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     useSettingsDialogStore.setState({ open: false, section: "general" });
     navigate.mockClear();
   });
@@ -186,6 +188,7 @@ describe("hosted connection controls", () => {
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     useSettingsDialogStore.setState({ open: false, section: "general" });
     resetPrimaryEnvironmentDescriptorForTests();
     // The §13 projection is module state, not store state, so

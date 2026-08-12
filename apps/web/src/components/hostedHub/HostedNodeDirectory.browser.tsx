@@ -46,6 +46,7 @@ vi.mock("../../env", async (importOriginal) => ({
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { useSettingsDialogStore } from "../../settingsDialogStore";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot } from "./HostedHubRoot";
@@ -170,6 +171,7 @@ beforeEach(async () => {
   localStorage.clear();
   sessionStorage.clear();
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   useSettingsDialogStore.setState({ open: false, section: "general" });
   navigate.mockClear();
 });
@@ -178,6 +180,7 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = null;
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   useSettingsDialogStore.setState({ open: false, section: "general" });
   vi.restoreAllMocks();
   document.body.innerHTML = "";
@@ -432,6 +435,7 @@ describe("hosted node directory", () => {
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 
@@ -448,6 +452,7 @@ describe("hosted node directory", () => {
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     await page.viewport(390, 720);
     await vi.waitFor(() => {
       expect(document.documentElement.getAttribute("data-tier")).toBe("phone");
@@ -467,6 +472,7 @@ describe("hosted node directory", () => {
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     seedDirectory([
       node({ grant: { id: "grant_a", role: "operator" }, effectiveRole: "operator" }),
     ]);
@@ -938,6 +944,7 @@ describe("hosted node revocation", () => {
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 

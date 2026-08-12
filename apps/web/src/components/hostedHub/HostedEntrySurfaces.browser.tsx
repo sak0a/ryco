@@ -51,6 +51,7 @@ import { resetPointerEmulation, setCoarsePointerEmulation } from "../../../test/
 import { measureEffectiveHitTarget } from "../../../test/touchTargets";
 import { syncDocumentPresentationTier } from "../../lib/presentationTier";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot } from "./HostedHubRoot";
 
@@ -220,6 +221,7 @@ describe("hosted entry surfaces", () => {
     localStorage.clear();
     sessionStorage.clear();
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     navigate.mockClear();
   });
 
@@ -227,6 +229,7 @@ describe("hosted entry surfaces", () => {
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
     document.documentElement.style.fontSize = "";
@@ -296,6 +299,7 @@ describe("hosted entry surfaces", () => {
         await mounted?.unmount();
         mounted = null;
         hostedHubController.resetForTests();
+        resetHubRoutesForTests();
       }
     }
   });
@@ -371,6 +375,7 @@ describe("hosted entry surfaces", () => {
       await mounted?.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 
@@ -411,6 +416,7 @@ describe("hosted entry surfaces", () => {
       mounted = null;
       document.documentElement.style.fontSize = "";
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 
@@ -532,6 +538,7 @@ describe("hosted entry surfaces", () => {
       await mounted?.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 
@@ -560,6 +567,7 @@ describe("hosted entry surfaces", () => {
       await mounted?.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 
@@ -597,6 +605,7 @@ describe("hosted entry surfaces", () => {
       await mounted?.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
     }
   });
 

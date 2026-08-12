@@ -43,6 +43,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 }));
 
 import { hostedHubController, useHostedHubStore } from "../hostedHub/state";
+import { resetHubRoutesForTests } from "../hostedHub/hubRoutes";
 import type { HostedHubNode } from "../hostedHub/types";
 import { syncDocumentPresentationTier } from "../lib/presentationTier";
 import {
@@ -242,6 +243,7 @@ async function sweepEntrySurfaces(options: {
   expect(surfaces.length).toBeGreaterThan(0);
   for (const surface of surfaces) {
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     surface.seed();
     mounted = await render(<HostedHubRoot />);
     await surface.prepare?.();
@@ -296,6 +298,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     localStorage.clear();
     sessionStorage.clear();
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     navigate.mockClear();
   });
 
@@ -303,6 +306,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
     await resetPointerEmulation();
@@ -353,6 +357,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
       // Desktop-density guard: the phone-only 44px floor must not leak into
       // the desktop tier (size="lg" resolves below 44px there).
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
       useHostedHubStore.setState({ bootstrapAvailable: true });
       mounted = await render(<HostedHubRoot />);
       const signIn = await vi.waitFor(() => {
@@ -421,6 +426,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
 
       useHostedHubStore.setState({
         accountStatus: "authenticated",
@@ -508,6 +514,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
 
     // 844×390 coarse landscape: the pill grows to the coarse 44px floor and
     // the sheet stays contained; with reduced motion emulated, the popup's
