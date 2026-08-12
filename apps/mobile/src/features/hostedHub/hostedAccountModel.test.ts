@@ -104,6 +104,7 @@ function accountState(overrides: Partial<HostedAccountState> = {}): HostedAccoun
     security: {
       passwordConfigured: false,
       totpEnrolled: false,
+      emailDeliveryConfigured: false,
       email: null,
     },
     securityStatus: "ready",
@@ -323,6 +324,7 @@ describe("hosted account management surface", () => {
         security: {
           passwordConfigured: true,
           totpEnrolled: true,
+          emailDeliveryConfigured: false,
           email: { address: "ada@example.test", verified: true },
         },
       },
@@ -1292,6 +1294,30 @@ describe("email verification", () => {
     // the address is known — and never that a message is on its way.
     expect(test.prompt().message).toBe(
       "Your Hub accepted the request. It cannot deliver mail yet, so no message will arrive.",
+    );
+  });
+
+  it("describes real delivery when the Hub has mail configured", async () => {
+    const test = harness({
+      account: {
+        security: {
+          passwordConfigured: false,
+          totpEnrolled: false,
+          emailDeliveryConfigured: true,
+          email: null,
+        },
+      },
+    });
+    const section = test.view().sections.find((candidate) => candidate.id === "email");
+    expect(section?.footnote).not.toContain("no mail transport configured");
+
+    test.open("verify-email");
+    expect(test.prompt().notice).toBeNull();
+    test.type({ text: "ada@example.com" });
+    test.prompt().submit?.run();
+    await flush();
+    expect(test.prompt().message).toBe(
+      "Your Hub accepted the request. Check your inbox and spam folder; delivery may take a moment.",
     );
   });
 

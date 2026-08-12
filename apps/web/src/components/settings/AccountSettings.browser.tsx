@@ -332,6 +332,7 @@ describe("AccountSettingsPanel", () => {
         security: {
           passwordConfigured: false,
           totpEnrolled: false,
+          emailDeliveryConfigured: false,
           email: null,
         },
         securityStatus: "ready",
@@ -431,6 +432,7 @@ describe("AccountSettingsPanel", () => {
       security: {
         passwordConfigured: true,
         totpEnrolled: true,
+        emailDeliveryConfigured: false,
         email: { address: "ada@example.com", verified: true },
       },
       securityStatus: "ready",
@@ -476,6 +478,7 @@ describe("AccountSettingsPanel", () => {
       security: {
         passwordConfigured: true,
         totpEnrolled: false,
+        emailDeliveryConfigured: false,
         email: null,
       },
       securityStatus: "stale",
@@ -734,6 +737,7 @@ describe("AccountSettingsPanel", () => {
       security: {
         passwordConfigured: false,
         totpEnrolled: true,
+        emailDeliveryConfigured: false,
         email: null,
       },
       securityStatus: "ready",
@@ -1285,6 +1289,24 @@ describe("AccountSettingsPanel", () => {
     await mount();
     await expect.element(page.getByText("No mail will arrive yet")).toBeVisible();
     await expect.element(page.getByText(/no mail transport configured/i)).toBeVisible();
+  });
+
+  it("does not show the no-delivery warning when account email is configured", async () => {
+    hostedAccountStore.setState({
+      security: {
+        passwordConfigured: false,
+        totpEnrolled: false,
+        emailDeliveryConfigured: true,
+        email: null,
+      },
+      securityStatus: "ready",
+    });
+
+    await mount();
+    await expect.element(page.getByText("No mail will arrive yet")).not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(/Used for account recovery after verification/i))
+      .toBeVisible();
   });
 
   it("never presents a fallback credential as the equal of a passkey", async () => {

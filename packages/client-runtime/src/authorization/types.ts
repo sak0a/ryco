@@ -183,6 +183,8 @@ export interface HostedHubPasskey {
 export interface HostedAccountSecurity {
   readonly passwordConfigured: boolean;
   readonly totpEnrolled: boolean;
+  /** Whether this Hub can deliver account email outside the service. */
+  readonly emailDeliveryConfigured: boolean;
   readonly email: {
     readonly address: string;
     readonly verified: boolean;

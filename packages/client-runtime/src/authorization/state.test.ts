@@ -164,6 +164,7 @@ const sessionResponse: HostedHubSessionResponse = {
 const emptySecurity = {
   passwordConfigured: false,
   totpEnrolled: false,
+  emailDeliveryConfigured: false,
   email: null,
 } as const;
 
@@ -1348,6 +1349,7 @@ describe("hosted account management state", () => {
     const configured = {
       passwordConfigured: true,
       totpEnrolled: true,
+      emailDeliveryConfigured: true,
       email: { address: "ada@example.test", verified: true },
     } as const;
     vi.spyOn(hostedHubApi, "getAccountSecurity").mockResolvedValueOnce(configured);
