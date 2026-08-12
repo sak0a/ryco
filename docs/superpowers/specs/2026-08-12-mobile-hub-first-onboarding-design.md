@@ -451,25 +451,25 @@ the same native screen.
 
 ## Failure behavior
 
-| Failure | User-visible result | State and security rule |
-| --- | --- | --- |
-| Startup hydration | Full-screen Ryco loading mark | Workspace remains unmounted |
-| Official Hub missing/misconfigured | Bounded retryable configuration message | No guessed origin; custom/direct remain available |
-| Invalid custom origin | Inline validation | No request and no profile mutation |
-| Incompatible capability/version | Explain required native identity support | Current Hub/session/direct state unchanged |
-| Hub offline | Retry on current screen | Inputs retained except one-time secrets; no false unlock |
-| Anti-bot unavailable/rejected | Retry challenge | Assertion cleared; attempt not created |
-| Mail delivery accepted/unknown address | Same “check your email” screen | No account-existence disclosure |
-| Expired attempt/code/link | Explain expiry and restart nearest safe step | Secure attempt erased |
-| Wrong password/code/TOTP | Stable bounded failure | No raw Hub detail or identifier in logs |
-| Passkey cancelled/unavailable | Return to credential choice | Password/direct path remains available |
-| DPoP key changed or proof replayed | Restart ceremony with security error | Attempt/session mint denied |
-| Completion journal write fails | Blocking retry | No token adoption or unlock |
-| Recovery acknowledgement write fails | Remain on recovery screen | Codes remain in secure journal |
-| Final token persistence fails | Blocking retry | Credential-committed journal permits safe resume |
-| Password reset succeeds | Return to login | No implicit session; old sessions revoked |
-| Hosted session revoked after unlock | Disconnect hosted plane | Block only when no saved direct node remains |
-| Direct pairing save fails | Retry pairing | Gate remains locked |
+| Failure                                | User-visible result                          | State and security rule                                  |
+| -------------------------------------- | -------------------------------------------- | -------------------------------------------------------- |
+| Startup hydration                      | Full-screen Ryco loading mark                | Workspace remains unmounted                              |
+| Official Hub missing/misconfigured     | Bounded retryable configuration message      | No guessed origin; custom/direct remain available        |
+| Invalid custom origin                  | Inline validation                            | No request and no profile mutation                       |
+| Incompatible capability/version        | Explain required native identity support     | Current Hub/session/direct state unchanged               |
+| Hub offline                            | Retry on current screen                      | Inputs retained except one-time secrets; no false unlock |
+| Anti-bot unavailable/rejected          | Retry challenge                              | Assertion cleared; attempt not created                   |
+| Mail delivery accepted/unknown address | Same “check your email” screen               | No account-existence disclosure                          |
+| Expired attempt/code/link              | Explain expiry and restart nearest safe step | Secure attempt erased                                    |
+| Wrong password/code/TOTP               | Stable bounded failure                       | No raw Hub detail or identifier in logs                  |
+| Passkey cancelled/unavailable          | Return to credential choice                  | Password/direct path remains available                   |
+| DPoP key changed or proof replayed     | Restart ceremony with security error         | Attempt/session mint denied                              |
+| Completion journal write fails         | Blocking retry                               | No token adoption or unlock                              |
+| Recovery acknowledgement write fails   | Remain on recovery screen                    | Codes remain in secure journal                           |
+| Final token persistence fails          | Blocking retry                               | Credential-committed journal permits safe resume         |
+| Password reset succeeds                | Return to login                              | No implicit session; old sessions revoked                |
+| Hosted session revoked after unlock    | Disconnect hosted plane                      | Block only when no saved direct node remains             |
+| Direct pairing save fails              | Retry pairing                                | Gate remains locked                                      |
 
 All model-owned errors use a fixed bounded vocabulary. Arbitrary response bodies, stack traces,
 SQL/storage detail, tokens, proofs, account identifiers, email addresses, dynamic paths, and

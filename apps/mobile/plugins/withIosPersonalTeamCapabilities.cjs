@@ -18,5 +18,4 @@ const withIosPersonalTeamCapabilities = (config) =>
   });
 
 module.exports = withIosPersonalTeamCapabilities;
-module.exports.stripUnsupportedPersonalTeamEntitlements =
-  stripUnsupportedPersonalTeamEntitlements;
+module.exports.stripUnsupportedPersonalTeamEntitlements = stripUnsupportedPersonalTeamEntitlements;

@@ -2,7 +2,8 @@
 
 **Design:** `docs/superpowers/specs/2026-08-12-mobile-hub-first-onboarding-design.md`
 
-**Status:** design approved; ready for staged implementation
+**Status:** public protocol/runtime implemented and locally qualified; awaiting public PR CI, review,
+and merge before the Hub phase
 
 **Public working branch:** `codex/mobile-hub-onboarding`
 

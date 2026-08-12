@@ -1,6 +1,6 @@
 # Native mobile delivery status
 
-**Current as of 2026-08-12 at public `main` `921952463`.** This is the concise delivery
+**Current as of 2026-08-12 at public `main` `8fc1608d7`.** This is the concise delivery
 ledger for the native app. Older design specifications and implementation plans remain useful as
 historical records, but this file is authoritative when their status language disagrees.
 
@@ -17,6 +17,22 @@ historical records, but this file is authoritative when their status language di
   raster/SVG/sandboxed-HTML previews, deep-link parsing, and a regular-width file inspector.
 - iOS-first simulator/development-client workflows. Android code exists in several platform seams,
   but Android product QA is not complete.
+
+## Native identity v2 protocol dependency
+
+The additive native identity v2 contracts and client-runtime transport are staged as a public
+dependency for a later full-screen mobile access gate. A Hub must explicitly advertise a compatible
+`nativeIdentity` v2 capability before a client may use those endpoints; an absent capability keeps
+the protocol dark and preserves the existing native-handoff v1 document.
+
+Browser identity v1 remains a cookie/CSRF transport. Native identity v2 uses DPoP-mint requests and
+returns native session material without adopting or persisting it. The future mobile transaction
+owner must complete its recovery-code journal and durable credential transition before it unlocks
+the workspace. Browser cookies are never converted into native credentials by this path.
+
+This protocol/runtime slice does not change startup navigation, onboarding UI, or the current
+system-browser handoff. The compatible Hub implementation must land and be qualified before the
+separate mobile blocker change is built or enabled.
 
 ## Open delivery slices
 
