@@ -56,10 +56,12 @@ export function SidebarProjectDialogProvider(props: {
     readonly project: SidebarProjectSnapshot;
     readonly initialTab: NewWorktreeDialogTab;
   } | null>(null);
+  const [newWorktreeOpen, setNewWorktreeOpen] = useState(false);
   const [explorerTarget, setExplorerTarget] = useState<{
     readonly project: SidebarProjectSnapshot;
     readonly initialTab: ProjectExplorerTabId;
   } | null>(null);
+  const [explorerOpen, setExplorerOpen] = useState(false);
   const settingsDialog = useSidebarProjectSettingsDialog();
   const renameDialog = useSidebarProjectRenameDialog();
   const groupingDialog = useSidebarProjectGroupingDialog({
@@ -69,12 +71,14 @@ export function SidebarProjectDialogProvider(props: {
   const openExplorer = useCallback(
     (project: SidebarProjectSnapshot, initialTab: ProjectExplorerTabId) => {
       setExplorerTarget({ project, initialTab });
+      setExplorerOpen(true);
     },
     [],
   );
   const openNewWorktree = useCallback(
     (project: SidebarProjectSnapshot, initialTab: NewWorktreeDialogTab) => {
       setNewWorktreeTarget({ project, initialTab });
+      setNewWorktreeOpen(true);
     },
     [],
   );
@@ -101,7 +105,7 @@ export function SidebarProjectDialogProvider(props: {
 
       {newWorktreeTarget ? (
         <NewWorktreeDialog
-          open
+          open={newWorktreeOpen}
           environmentId={newWorktreeTarget.project.environmentId}
           projectId={newWorktreeTarget.project.id}
           cwd={newWorktreeTarget.project.cwd}
@@ -112,19 +116,19 @@ export function SidebarProjectDialogProvider(props: {
             );
           }}
           onOpenChange={(open) => {
-            if (!open) setNewWorktreeTarget(null);
+            setNewWorktreeOpen(open);
           }}
         />
       ) : null}
 
       {explorerTarget ? (
         <ProjectExplorerDialog
-          open
+          open={explorerOpen}
           projectName={explorerTarget.project.displayName}
           memberProjects={explorerTarget.project.memberProjects}
           initialTab={explorerTarget.initialTab}
           onOpenChange={(open) => {
-            if (!open) setExplorerTarget(null);
+            setExplorerOpen(open);
           }}
         />
       ) : null}

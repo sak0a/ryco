@@ -194,7 +194,8 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
 
   const flushAll = async (): Promise<void> => {
     await flushOnce();
-    while (buffer.length > 0 && activeFlush === null && retryDelayMs === 0) {
+    while (buffer.length > 0) {
+      if (activeFlush !== null || retryDelayMs !== 0) break;
       await flushOnce();
     }
   };

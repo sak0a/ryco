@@ -537,6 +537,8 @@ export default function ChatView(props: ChatViewProps) {
   // tier flips (rotation preserves route, draft, and panel state).
   const presentationTierRef = useRef(presentationTier);
   presentationTierRef.current = presentationTier;
+  const shouldUsePlanSidebarSheetRef = useRef(shouldUsePlanSidebarSheet);
+  shouldUsePlanSidebarSheetRef.current = shouldUsePlanSidebarSheet;
   const [inspectedContextHandoff, setInspectedContextHandoff] = useState<{
     readonly marker: ContextHandoffTimelineEntry;
     readonly trigger: HTMLButtonElement;
@@ -2334,10 +2336,10 @@ export default function ChatView(props: ChatViewProps) {
     // would drop preserved panel state on rotation).
     setPlanSidebarOpen(
       openOverviewForNextThread ||
-        (!shouldUsePlanSidebarSheet && presentationTierRef.current !== "phone"),
+        (!shouldUsePlanSidebarSheetRef.current && presentationTierRef.current !== "phone"),
     );
     planSidebarDismissedForTurnRef.current = null;
-  }, [activeThread?.id, shouldUsePlanSidebarSheet]);
+  }, [activeThread?.id]);
 
   // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
   // Don't auto-open for plans carried over from a previous turn (the user can open manually).

@@ -436,8 +436,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         };
         const handleWheel = (event: WheelEvent) => {
           if (!contentOverflows()) return;
-          markManualScrollIntent();
-          if (event.deltaY < 0) onManualNavigation?.();
+          if (event.deltaY < 0) {
+            // Upward navigation can only move away from the end. Do not arm
+            // the "user reached end" latch: a responsive remeasurement that
+            // temporarily reports the bottom must not turn live follow back
+            // on after the user deliberately left it.
+            onManualNavigation?.();
+            return;
+          }
+          if (event.deltaY > 0) markManualScrollIntent();
         };
         const handleTouchMove = () => {
           markManualScrollIntent();
