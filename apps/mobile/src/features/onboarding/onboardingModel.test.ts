@@ -189,6 +189,16 @@ describe("onboarding view", () => {
     ]);
   });
 
+  it("keeps a failed direct-pair completion on-screen with retry", () => {
+    const failed = deriveOnboardingView(snapshot({ completionStatus: "error" }));
+    expect(failed.screen).toBe("hub-selection");
+    expect(failed.errorMessage).toBe(onboardingErrorMessage("completion-save-failed"));
+    expect(failed.actions[0]?.id).toBe("retry-completion");
+
+    const saving = deriveOnboardingView(snapshot({ completionStatus: "saving" }));
+    expect(saving.actions.every((action) => action.disabled)).toBe(true);
+  });
+
   it("gives recovery codes precedence over browser, errors, and completion", () => {
     const view = deriveOnboardingView(
       snapshot({

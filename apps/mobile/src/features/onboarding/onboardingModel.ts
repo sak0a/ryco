@@ -85,6 +85,7 @@ export interface OnboardingSnapshot {
   readonly signupStatus: PublicSignupStatus;
   readonly accountIntent: OnboardingAccountIntent;
   readonly hostedAvailable: boolean;
+  readonly hostedPreparationPending?: boolean;
   readonly accountStatus: OnboardingAccountStatus;
   readonly browserPhase: NativeAuthorizationPhase;
   readonly recoveryCodeCount: number;
@@ -198,6 +199,7 @@ function signupDetail(status: PublicSignupStatus): string {
 function deriveAccountChoice(snapshot: OnboardingSnapshot): OnboardingView {
   const createEnabled = snapshot.hostedAvailable && snapshot.signupStatus === "enabled";
   const hostedDisabled = !snapshot.hostedAvailable;
+  const hostedUnavailable = hostedDisabled && !snapshot.hostedPreparationPending;
   const actions: OnboardingAction[] = [
     action(
       "create-account",
@@ -214,7 +216,7 @@ function deriveAccountChoice(snapshot: OnboardingSnapshot): OnboardingView {
   }
   actions.push(action("edit-hub", "Change Hub"), action("pair-device", "Pair a device instead"));
 
-  const errorMessage = hostedDisabled
+  const errorMessage = hostedUnavailable
     ? "This device could not create the hardware-backed key required for a Hub session. Direct pairing still works."
     : snapshot.signupStatus === "unreachable"
       ? onboardingErrorMessage("signup-unreachable")
@@ -222,7 +224,9 @@ function deriveAccountChoice(snapshot: OnboardingSnapshot): OnboardingView {
   return base(snapshot, {
     screen: "account-choice",
     title: "Continue with your account",
-    detail: signupDetail(snapshot.signupStatus),
+    detail: snapshot.hostedPreparationPending
+      ? "Ryco is preparing this device's secure Hub session."
+      : signupDetail(snapshot.signupStatus),
     errorMessage,
     actions,
   });
@@ -309,7 +313,23 @@ export function deriveOnboardingView(snapshot: OnboardingSnapshot): OnboardingVi
   if (snapshot.browserPhase !== "idle" || snapshot.accountStatus === "authenticating") {
     return deriveBrowser(snapshot);
   }
-  if (snapshot.hubEditorActive || snapshot.storedHub === null) return deriveHubSelection(snapshot);
-  if (snapshot.accountStatus === "authenticated") return deriveConnected(snapshot);
-  return deriveAccountChoice(snapshot);
+  let view: OnboardingView;
+  if (snapshot.hubEditorActive || snapshot.storedHub === null) view = deriveHubSelection(snapshot);
+  else if (snapshot.accountStatus === "authenticated") view = deriveConnected(snapshot);
+  else view = deriveAccountChoice(snapshot);
+
+  if (snapshot.completionStatus === "error" && view.screen !== "connected") {
+    return {
+      ...view,
+      errorMessage: onboardingErrorMessage("completion-save-failed"),
+      actions: [action("retry-completion", "Retry finishing setup"), ...view.actions],
+    };
+  }
+  if (snapshot.completionStatus === "saving") {
+    return {
+      ...view,
+      actions: view.actions.map((current) => ({ ...current, disabled: true })),
+    };
+  }
+  return view;
 }

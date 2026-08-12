@@ -25,6 +25,7 @@ import { ThreadFilesRouteScreen } from "./features/files/ThreadFilesRouteScreen"
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
 import { NewTaskRouteScreen } from "./features/newTask/NewTaskRouteScreen";
+import { FirstRunOnboardingCoordinator } from "./features/onboarding/FirstRunOnboardingCoordinator";
 import { OnboardingRouteScreen } from "./features/onboarding/OnboardingRouteScreen";
 import { AddProjectRouteScreen } from "./features/projects/AddProjectRouteScreen";
 import { ProjectRouteScreen } from "./features/projects/ProjectRouteScreen";
@@ -267,6 +268,7 @@ function RootStackLayout(props: {
 
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
+      <FirstRunOnboardingCoordinator navigationState={props.state} />
       <FileWorkspaceLayout>{props.children}</FileWorkspaceLayout>
     </HardwareKeyboardCommandProvider>
   );
@@ -380,7 +382,7 @@ export const ROOT_STACK_SCREENS = {
   Onboarding: createNativeStackScreen({
     screen: OnboardingRouteScreen,
     linking: MVP_ROOT_ROUTES.Onboarding.linking,
-    options: routeOptions("Onboarding", { title: "Connect", gestureEnabled: true }),
+    options: routeOptions("Onboarding", { title: "Get started", gestureEnabled: true }),
   }),
   NotFound: createNativeStackScreen({
     screen: NotFoundScreen,
