@@ -16,9 +16,13 @@ import * as NodeUtil from "node:util";
 
 export type AppVariant = "development" | "preview" | "production";
 
-const REPO_ROOT = NodePath.dirname(
-  NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url))),
-);
+export function resolveMobileRepoRoot(moduleUrl: string): string {
+  return NodePath.dirname(
+    NodePath.dirname(NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(moduleUrl)))),
+  );
+}
+
+const REPO_ROOT = resolveMobileRepoRoot(import.meta.url);
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
