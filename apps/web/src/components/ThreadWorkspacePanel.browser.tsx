@@ -16,6 +16,14 @@ vi.mock("@tanstack/react-router", () => ({
     const search = { workspaceOpen: "1" };
     return options?.select ? options.select(search) : search;
   }),
+  useBlocker: vi.fn(() => ({
+    status: "idle",
+    current: undefined,
+    next: undefined,
+    action: undefined,
+    proceed: undefined,
+    reset: undefined,
+  })),
 }));
 
 vi.mock("../rpc/serverState", async () => {
