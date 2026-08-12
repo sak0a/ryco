@@ -3,10 +3,6 @@ import type {
   NativeAuthorizationService,
 } from "@ryco/client-runtime/platform";
 
-import {
-  mobileNativeAuthorizationPhaseStore,
-  type NativeAuthorizationPhaseReporter,
-} from "../features/onboarding/nativeAuthorizationState";
 import { readMobileAppVariant, readMobileDeviceLabel, type MobileAppVariant } from "./config";
 
 type CryptoModule = typeof import("expo-crypto");
@@ -23,7 +19,6 @@ export interface MobileNativeAuthorizationDependencies {
   readonly deviceLabel: () => string;
   readonly loadCrypto: () => Promise<CryptoModule>;
   readonly loadBrowser: () => Promise<WebBrowserModule>;
-  readonly phase?: NativeAuthorizationPhaseReporter;
 }
 
 export function mobileAuthorizationCallbackUri(variant: MobileAppVariant): string {
@@ -45,12 +40,8 @@ async function openBrowser(
   authorizationUrl: string,
   callbackUri: string,
   signal?: AbortSignal,
-  phase?: NativeAuthorizationPhaseReporter,
 ): Promise<NativeAuthorizationBrowserResult> {
-  if (signal?.aborted) {
-    phase?.cancelled();
-    return { type: "cancel" };
-  }
+  if (signal?.aborted) return { type: "cancel" };
 
   const pending = browser.openAuthSessionAsync(authorizationUrl, callbackUri, {
     // Reusing the system browser's Hub session is the purpose of this handoff.
@@ -58,18 +49,7 @@ async function openBrowser(
     preferEphemeralSession: false,
     preferUniversalLinks: false,
   });
-  phase?.waiting();
-  if (!signal) {
-    try {
-      const result = browserResult(await pending);
-      if (result.type === "cancel" || result.type === "dismiss") phase?.cancelled();
-      else phase?.idle();
-      return result;
-    } catch (cause) {
-      phase?.idle();
-      throw cause;
-    }
-  }
+  if (!signal) return browserResult(await pending);
 
   return await new Promise<NativeAuthorizationBrowserResult>((resolve, reject) => {
     let settled = false;
@@ -77,8 +57,6 @@ async function openBrowser(
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", abort);
-      if (result.type === "cancel" || result.type === "dismiss") phase?.cancelled();
-      else phase?.idle();
       resolve(result);
     };
     const abort = () => {
@@ -98,7 +76,6 @@ async function openBrowser(
         if (settled) return;
         settled = true;
         signal.removeEventListener("abort", abort);
-        phase?.idle();
         reject(cause);
       });
   });
@@ -120,21 +97,8 @@ export function createMobileNativeAuthorization(
         await crypto.digest(crypto.CryptoDigestAlgorithm.SHA256, value as unknown as BufferSource),
       );
     },
-    openSystemBrowser: async (authorizationUrl, callbackUri, signal) => {
-      dependencies.phase?.opening();
-      try {
-        return await openBrowser(
-          await dependencies.loadBrowser(),
-          authorizationUrl,
-          callbackUri,
-          signal,
-          dependencies.phase,
-        );
-      } catch (cause) {
-        dependencies.phase?.idle();
-        throw cause;
-      }
-    },
+    openSystemBrowser: async (authorizationUrl, callbackUri, signal) =>
+      await openBrowser(await dependencies.loadBrowser(), authorizationUrl, callbackUri, signal),
   };
 }
 
@@ -150,5 +114,4 @@ export const mobileNativeAuthorization = createMobileNativeAuthorization({
   deviceLabel: readMobileDeviceLabel,
   loadCrypto: () => import("expo-crypto"),
   loadBrowser: () => import("expo-web-browser"),
-  phase: mobileNativeAuthorizationPhaseStore,
 });

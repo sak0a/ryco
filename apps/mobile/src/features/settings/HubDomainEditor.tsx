@@ -12,14 +12,34 @@ import {
 
 import { AppText as Text } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
-import { createHubCapabilityClient } from "../../hostedHub/hubCapability";
-import { HUB_PROFILE_LABEL_MAX_LENGTH, type HubProfile } from "../../hostedHub/hubProfile";
+import { createHubCapabilityClient, hubCapabilityFailureText } from "../../hostedHub/hubCapability";
 import {
-  createHubProfileEditor,
-  hubProfileEditorFailureText,
-} from "../../hostedHub/hubProfileEditor";
+  createHubProfile,
+  HUB_PROFILE_LABEL_MAX_LENGTH,
+  normalizeHubOrigin,
+  type HubOriginFailureReason,
+  type HubProfile,
+} from "../../hostedHub/hubProfile";
 import { createMobileHttpClient } from "../../platform/httpClient";
 import { useThemeColor } from "../../lib/useThemeColor";
+
+function originFailureText(reason: HubOriginFailureReason): string {
+  switch (reason) {
+    case "required":
+      return "Enter the full Hub domain.";
+    case "invalid-url":
+    case "invalid-host":
+      return "Enter a valid absolute Hub URL.";
+    case "https-required":
+      return "Hub domains must use HTTPS.";
+    case "credentials-not-allowed":
+      return "The Hub URL cannot contain a username or password.";
+    case "origin-only":
+      return "Use only the Hub origin, without a path, query, or fragment.";
+    case "placeholder-host":
+      return "Replace the placeholder with your real Hub domain.";
+  }
+}
 
 export function HubDomainEditor(props: {
   readonly visible: boolean;
@@ -42,31 +62,18 @@ export function HubDomainEditor(props: {
     () => createHubCapabilityClient(createMobileHttpClient(() => null)),
     [],
   );
-  const profileEditor = useMemo(
-    () =>
-      createHubProfileEditor({
-        check: capabilityClient.check,
-        allowInsecure: props.allowInsecure,
-      }),
-    [capabilityClient, props.allowInsecure],
-  );
 
   useEffect(() => {
-    profileEditor.invalidate();
     if (!props.visible) return;
     setOrigin(props.currentProfile?.origin ?? props.buildOrigin ?? "");
     setLabel(props.currentProfile?.label ?? "");
     setChecking(false);
     setError(null);
     setCheckedProfile(null);
-  }, [profileEditor, props.buildOrigin, props.currentProfile, props.visible]);
-
-  useEffect(() => () => profileEditor.dispose(), [profileEditor]);
+  }, [props.buildOrigin, props.currentProfile, props.visible]);
 
   const updateOrigin = (value: string) => {
-    profileEditor.invalidate();
     setOrigin(value);
-    setChecking(false);
     setCheckedProfile(null);
     setError(null);
   };
@@ -75,14 +82,31 @@ export function HubDomainEditor(props: {
     setChecking(true);
     setError(null);
     setCheckedProfile(null);
-    const result = await profileEditor.check({ origin, label });
-    if (result.status === "stale") return;
-    if (result.status === "invalid" || result.status === "incompatible") {
-      setError(hubProfileEditorFailureText(result));
+    const normalized = normalizeHubOrigin(origin, { allowInsecure: props.allowInsecure });
+    if (!normalized.ok) {
+      setError(originFailureText(normalized.reason));
       setChecking(false);
       return;
     }
-    setCheckedProfile(result.profile);
+    const result = await capabilityClient.check(normalized.origin);
+    if (result.status === "incompatible") {
+      setError(hubCapabilityFailureText(result.reason));
+      setChecking(false);
+      return;
+    }
+    const profile = createHubProfile({
+      origin: normalized.origin,
+      label: label || result.capability.relyingParty.displayName,
+      allowInsecure: props.allowInsecure,
+      compatibility: {
+        status: "compatible",
+        checkedAt: result.checkedAt,
+        protocolVersion: result.capability.protocolVersion,
+        handoffVersion: result.capability.nativeHandoff.version,
+        relyingPartyId: result.capability.relyingParty.id,
+      },
+    });
+    setCheckedProfile(profile);
     setChecking(false);
   };
 
@@ -145,11 +169,8 @@ export function HubDomainEditor(props: {
               accessibilityLabel="Hub name"
               value={label}
               onChangeText={(value) => {
-                profileEditor.invalidate();
                 setLabel(value);
-                setChecking(false);
                 setCheckedProfile(null);
-                setError(null);
               }}
               maxLength={HUB_PROFILE_LABEL_MAX_LENGTH}
               placeholder="Studio Hub"

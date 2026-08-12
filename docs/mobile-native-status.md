@@ -1,11 +1,10 @@
 # Native mobile delivery status
 
-**Current as of 2026-08-12, including the Hub-first onboarding change proposed from public
-`main` `921952463`.** This is the concise delivery ledger for the native app. Older design
-specifications and implementation plans remain useful as historical records, but this file is
-authoritative when their status language disagrees.
+**Current as of 2026-08-12 at public `main` `921952463`.** This is the concise delivery
+ledger for the native app. Older design specifications and implementation plans remain useful as
+historical records, but this file is authoritative when their status language disagrees.
 
-## Delivered in this public tree
+## Delivered on `main`
 
 - A dedicated Expo/React Native app with native navigation, thread/inbox surfaces, composer,
   approvals, settings, project selection, and the baseline review/diff flow.
@@ -14,28 +13,10 @@ authoritative when their status language disagrees.
 - Hosted account security, native DPoP sessions, relay E2EE trust state, and the account email
   verification-link handoff. Email transport remains a Hub deployment capability rather than a
   mobile-client responsibility.
-- Hub-first first-run onboarding: compatible-Hub selection and verification, live public-signup
-  availability, the existing system-browser authorization handoff, recovery-code-first browser
-  consent, a connected account/node summary, explicit completion exits, and a direct-node escape.
-  Existing saved Hub, direct-node, and restorable hosted-session users migrate without being
-  forced through the fresh-install path.
 - The read-only workspace file browser from PR #330: tree/search/source browsing,
   raster/SVG/sandboxed-HTML previews, deep-link parsing, and a regular-width file inspector.
 - iOS-first simulator/development-client workflows. Android code exists in several platform seams,
   but Android product QA is not complete.
-
-## Hub-first onboarding boundaries
-
-- The native app never owns account credential UI. Passwords, passkeys, verification, recovery
-  codes, and explicit authorization consent remain browser/Hub responsibilities.
-- Onboarding persistence is versioned, strict, and non-secret. Hosted session state remains the
-  authentication authority, and changing Hub resets that session before the replacement profile
-  is committed.
-- Automatic presentation waits for first-run migration and the initial deep-link check. It only
-  presents from the Home tab and does not cover actionable pairing or hosted-auth callbacks.
-- A new-account browser cannot reach consent until the existing recovery-code acknowledgement is
-  complete. This enforcement lives on the public authorization route, so it does not depend on a
-  private Hub source change.
 
 ## Open delivery slices
 

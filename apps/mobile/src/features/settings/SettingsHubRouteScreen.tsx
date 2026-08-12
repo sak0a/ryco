@@ -6,18 +6,30 @@ import { AppText as Text } from "../../components/AppText";
 import { showConfirmDialog } from "../../components/ConfirmDialogHost";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import {
+  buildHubDomainResetPlan,
+  clearMobileHubProfile,
   createHubProfile,
+  executeHubDomainResetPlan,
   hydrateMobileHubProfile,
   readCachedMobileHubProfile,
+  saveMobileHubProfile,
   type HubProfile,
 } from "../../hostedHub/hubProfile";
-import { createMobileHubProfileReplacementService } from "../../hostedHub/mobileHubProfileReplacement";
+import {
+  ensureMobileHostedSession,
+  hostedHubController,
+  hostedHubStore,
+  isMobileHostedModeAvailable,
+} from "../../hostedHub/state";
+import { invalidateMobileHostedRuntime } from "../../hostedHub/runtime";
 import { isMobileDevelopmentBuild, readMobileHostedConfig } from "../../platform/config";
+import { mobileE2eeTrustStore } from "../../platform/e2eeTrustStore";
 import {
   openHostedSignInPreview,
   resolveHostedSignInPreviewUrl,
 } from "../../platform/hostedSignInPreview";
 import { mobileKV } from "../../platform/kv";
+import { clearMobileHostedSessionToken } from "../../platform/sessionCredentials";
 import { useHostedModeAvailable } from "../hostedHub/useHostedMode";
 import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
@@ -39,7 +51,6 @@ export function SettingsHubRouteScreen() {
   const hostedAvailable = useHostedModeAvailable();
   const buildConfig = useMemo(readMobileHostedConfig, []);
   const development = isMobileDevelopmentBuild();
-  const replacementService = useMemo(createMobileHubProfileReplacementService, []);
   const [storedProfile, setStoredProfile] = useState<HubProfile | null>(
     () => readCachedMobileHubProfile() ?? null,
   );
@@ -76,6 +87,14 @@ export function SettingsHubRouteScreen() {
     };
   }, []);
 
+  const persistReplacement = async (nextProfile: HubProfile | null) => {
+    if (nextProfile) await saveMobileHubProfile(mobileKV, nextProfile);
+    else await clearMobileHubProfile(mobileKV);
+    setStoredProfile(nextProfile);
+    invalidateMobileHostedRuntime();
+    void ensureMobileHostedSession();
+  };
+
   const openSignInPreview = async () => {
     if (previewUrl === null || previewBusy) return;
     setPreviewBusy(true);
@@ -90,13 +109,50 @@ export function SettingsHubRouteScreen() {
   };
 
   const replaceProfile = (nextProfile: HubProfile | null) => {
-    const plan = replacementService.plan(profile, nextProfile);
+    const plan = buildHubDomainResetPlan(profile?.origin ?? null, nextProfile?.origin ?? null);
     const run = async () => {
       setBusy(true);
       setError(null);
       try {
-        const result = await replacementService.replace(profile, nextProfile);
-        setStoredProfile(result.profile);
+        if (!plan) {
+          await persistReplacement(nextProfile);
+        } else {
+          await executeHubDomainResetPlan(plan, {
+            attemptRemoteSignOut: async () => {
+              if (
+                !isMobileHostedModeAvailable() ||
+                hostedHubStore.getState().accountStatus !== "authenticated"
+              ) {
+                return;
+              }
+              await hostedHubController.signOut();
+              if (hostedHubStore.getState().accountStatus === "authenticated") {
+                throw new Error("remote sign-out unavailable");
+              }
+            },
+            clearLocalHubState: async () => {
+              if (
+                isMobileHostedModeAvailable() &&
+                hostedHubStore.getState().accountStatus !== "signed-out"
+              ) {
+                await hostedHubController.expireSession();
+              }
+              // The origin is about to change. Clear the native token even when
+              // the old Hub was unreachable and its controller could not run.
+              await clearMobileHostedSessionToken();
+              // And the §13 trust state recorded under the origin being left:
+              // pins, latches, owner legacy consents, the strict-legacy policy,
+              // and the `anyNodeVerified` marker. There is no generic secret-wipe
+              // path this could ride on, so the registration is by hand, and
+              // `plan.fromOrigin` is the origin the records were taken under —
+              // `profile` has not been replaced yet at this point.
+              if (plan.fromOrigin !== null) {
+                await mobileE2eeTrustStore.forgetHubOrigin(plan.fromOrigin);
+              }
+            },
+            replaceProfile: () => persistReplacement(nextProfile),
+          });
+        }
         setEditorVisible(false);
       } catch {
         setError("Ryco could not change the Hub safely. The current profile remains active.");

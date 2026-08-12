@@ -4,14 +4,6 @@ The Ryco iOS-first native app (Expo / React Native), consuming
 `@ryco/client-runtime`. It ships the scaffold, platform adapters, direct-node
 bearer pairing loop, and hosted Hub system-browser authorization handoff.
 
-On a fresh install, the app now presents a Hub-first onboarding flow before the
-normal Inbox: choose and verify a compatible Hub, create an account or sign in
-through the existing system-browser handoff, acknowledge recovery codes when the
-Hub requires it, and land on a connected summary that exposes the existing Hub
-node directory. Users who already have a saved Hub profile, a direct-node
-environment, or a restorable hosted session are migrated past onboarding without
-disrupting their current setup.
-
 ## Prerequisites
 
 - The repo's pinned Bun (`bun --version` must match `package.json`'s
@@ -69,38 +61,6 @@ browser and the app's custom callback scheme.
      supervisor's `subscribeBrowserResume` seam is bound to RN AppState, so every
      background -> foreground transition re-drives reconnect for any connection
      whose heartbeat went stale while iOS suspended the socket.
-
-### Hub-first onboarding acceptance (owner, on the iOS Simulator)
-
-Use the same development client and environment variables as the runbook above.
-Do not put credentials, recovery codes, account details, or private deployment
-origins in screenshots or logs.
-
-1. With no onboarding marker or saved connection state, relaunch the app and
-   confirm onboarding presents over the normal Home tabs exactly once for that
-   launch.
-2. Confirm the default Hub can be checked and saved, and that a custom compatible
-   Hub remains available without becoming the primary path.
-3. Confirm account creation and sign-in both open the existing system browser
-   handoff. The native app must never collect a password, passkey, recovery code,
-   or verification code.
-4. On a new-account path, confirm the browser cannot show consent until the
-   existing recovery-code acknowledgement is complete. Cancelling the browser
-   must return the app to a retryable state.
-5. After authorization, confirm the connected summary is shown before entering
-   Inbox, Nodes, or pairing a direct node. Completing any of those exits must
-   persist onboarding completion first.
-6. Relaunch after completion and confirm onboarding does not auto-present again.
-   Also confirm that opening the route manually remains safe and that an initial
-   pairing or hosted-auth callback deep link is not covered by the automatic
-   sheet.
-
-The first-run marker is a versioned, non-secret record in the existing mobile KV
-store. The hosted session and native authorization controller remain the sources
-of truth for authentication; the marker never stores account, token, recovery,
-or credential material. A changed Hub profile resets hosted session state before
-the replacement profile is persisted, preserving the existing rollback
-guarantee if either step fails.
 
 ## Relay E2EE runtime acceptance (owner, on a physical device)
 

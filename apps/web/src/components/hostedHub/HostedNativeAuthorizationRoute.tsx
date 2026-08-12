@@ -12,22 +12,13 @@ import type { NativeHandoffPresentation } from "@ryco/contracts/native-handoff";
 
 import { APP_DISPLAY_NAME } from "../../branding";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
-import {
-  hostedHubController,
-  useHostedHubStore,
-  useHostedRecoveryCodeDisplayStore,
-} from "../../hostedHub/state";
+import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button } from "../ui/button";
 
 const HostedAuthenticationSurface = lazy(() =>
   import("./HostedHubRoot").then((module) => ({
     default: module.HostedAuthenticationSurface,
-  })),
-);
-const HostedRecoveryCodesSurface = lazy(() =>
-  import("./HostedHubRoot").then((module) => ({
-    default: module.RecoveryCodesSurface,
   })),
 );
 
@@ -46,8 +37,6 @@ export function HostedNativeAuthorizationRoute({
 }) {
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
   const account = useHostedHubStore((state) => state.account);
-  const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
-  const recoveryCodesLeased = useHostedRecoveryCodeDisplayStore((state) => state.leased);
   const [presentation, setPresentation] = useState<NativeHandoffPresentation | null>(null);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<ConsentAction | null>(null);
@@ -85,19 +74,6 @@ export function HostedNativeAuthorizationRoute({
     return (
       <Suspense fallback={null}>
         <HostedAuthenticationSurface context="native-authorization" />
-      </Suspense>
-    );
-  }
-
-  // Public signup authenticates the browser and publishes one-shot recovery
-  // codes in the same state transition. They must own the viewport before
-  // this route offers device consent, exactly as they do at the general Hub
-  // root. A different live surface's lease wins; this route neither copies nor
-  // clears the codes itself.
-  if (recoveryCodes.length > 0 && !recoveryCodesLeased) {
-    return (
-      <Suspense fallback={null}>
-        <HostedRecoveryCodesSurface />
       </Suspense>
     );
   }

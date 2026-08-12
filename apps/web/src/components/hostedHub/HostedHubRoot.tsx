@@ -865,7 +865,7 @@ function RegistrationForm({
   );
 }
 
-export function RecoveryCodesSurface() {
+function RecoveryCodesSurface() {
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
   return (
