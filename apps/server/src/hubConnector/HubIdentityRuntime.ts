@@ -40,6 +40,11 @@ import {
   type NodeClientAuthorizationClient,
 } from "../hubIdentity/NodeClientAuthorizationClient.ts";
 import { makeNodeClientAuthorizationStore } from "../hubIdentity/NodeClientAuthorizationStore.ts";
+import { makeNodeLocalIntroductionLedger } from "../hubIdentity/NodeLocalIntroductionLedger.ts";
+import {
+  makeNodeLocalIntroductionService,
+  type NodeLocalIntroductionService,
+} from "../hubIdentity/NodeLocalIntroductionService.ts";
 import type { NodeE2eeChannelAuthorization } from "./NodeE2eeChannelSession.ts";
 import {
   makeNodeE2eeCapabilityStatementClient,
@@ -355,6 +360,8 @@ export interface HubIdentityRuntimeShape {
    * says it means.
    */
   readonly e2eeAuthorizationAdmin: NodeE2eeAuthorizationAdmin;
+  /** Desktop-main-only Local Trusted Introduction over its child control channel. */
+  readonly localIntroduction: NodeLocalIntroductionService;
   /** §5.7's generation the next advertisement carries, for the policy display. */
   readonly e2eeGeneration: () => number;
   /** §12.6 in full: (a) commit and bump, (b) sweep one snapshot, (c) the counts. */
@@ -725,6 +732,8 @@ export async function makeHubIdentityRuntime(options: {
   readonly e2eeFallbackStatePath?: string;
   /** The §13.6 Branch A record set. Defaults to a sibling of the identity state. */
   readonly clientAuthorizationStatePath?: string;
+  /** The bounded LTI replay ledger. Defaults to a sibling of the identity state. */
+  readonly localIntroductionStatePath?: string;
   /**
    * The operator's configured policy for this run (§12.4).
    *
@@ -807,6 +816,11 @@ export async function makeHubIdentityRuntime(options: {
   const authorizationClient = await makeNodeClientAuthorizationClient({
     store: clientAuthorizationStore,
     ...(options.now === undefined ? {} : { now: options.now }),
+  });
+  const localIntroductionLedger = await makeNodeLocalIntroductionLedger({
+    path:
+      options.localIntroductionStatePath ??
+      join(stateDirectory, "hub-e2ee-local-introductions.json"),
   });
 
   /**
@@ -1047,6 +1061,31 @@ export async function makeHubIdentityRuntime(options: {
     return descriptor.publicKey;
   };
 
+  const localIntroduction = makeNodeLocalIntroductionService({
+    active: async () => {
+      const state = await stateStore.readOrCreate();
+      const active = state.activeNode;
+      if (active === null) throw new HubIdentityRuntimeError("identity_unavailable");
+      const continuity = await evaluateContinuity(active.hubOrigin);
+      if (continuity.status !== "advertisable") {
+        throw new HubIdentityRuntimeError("identity_unavailable");
+      }
+      const selected = await rotation.authenticationKey(active.hubOrigin);
+      return {
+        hubOrigin: active.hubOrigin,
+        environmentId: state.environmentId,
+        nodeId: active.nodeId,
+        nodeIdentityPublicKey: await identityPublicKey(selected.secretName),
+        nodeContinuityId: continuity.continuityId,
+        nodePolicyGeneration: policyClient.generation(),
+        signApproval: (approvalTbs) => signingIdentity.sign(selected.secretName, approvalTbs),
+      };
+    },
+    authorization: authorizationClient,
+    ledger: localIntroductionLedger,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+
   /**
    * The §5.2 statement builder, over this runtime's own custody and stores.
    *
@@ -1139,6 +1178,7 @@ export async function makeHubIdentityRuntime(options: {
     // The admission policy does not, and is deliberately absent here: it is the
     // operator's own, and §12.4's rule is that absence never weakens one.
     await clientAuthorizationStore.reset().catch(() => undefined);
+    await localIntroductionLedger.reset().catch(() => undefined);
     // The in-memory index republished, so a synchronous §8.6 step 6 read after a
     // leave cannot answer from a record the disk no longer holds.
     await authorizationClient.reload().catch(() => undefined);
@@ -1365,6 +1405,7 @@ export async function makeHubIdentityRuntime(options: {
     registerE2eeChannel: () => policyClient.registerChannel(),
     e2eeClientAuthorization: authorizationClient,
     e2eeAuthorizationAdmin: authorizationClient,
+    localIntroduction,
     e2eeGeneration: () => policyClient.generation(),
     applyE2eePolicy: (proposal) => policyClient.applyChange(proposal),
     previewE2eePolicy: (proposal) => policyClient.preview(proposal),

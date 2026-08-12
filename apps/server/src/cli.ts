@@ -98,6 +98,13 @@ const BootstrapEnvelopeSchema = Schema.Struct({
   devUrl: Schema.optional(Schema.URLFromString),
   noBrowser: Schema.optional(Schema.Boolean),
   desktopBootstrapToken: Schema.optional(Schema.String),
+  desktopControlToken: Schema.optional(
+    Schema.String.check(
+      Schema.isMinLength(43),
+      Schema.isMaxLength(43),
+      Schema.isPattern(/^[A-Za-z0-9_-]{43}$/),
+    ),
+  ),
   autoBootstrapProjectFromCwd: Schema.optional(Schema.Boolean),
   logWebSocketEvents: Schema.optional(Schema.Boolean),
   tailscaleServeEnabled: Schema.optional(Schema.Boolean),
@@ -467,6 +474,7 @@ export const resolveServerConfig = (
       () => mode === "desktop",
     );
     const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const desktopControlToken = bootstrap?.desktopControlToken;
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
         Option.fromUndefinedOr(options?.forceAutoBootstrapProjectFromCwd),
@@ -605,6 +613,7 @@ export const resolveServerConfig = (
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,
+      ...(desktopControlToken === undefined ? {} : { desktopControlToken }),
       autoBootstrapProjectFromCwd,
       logWebSocketEvents,
       tailscaleServeEnabled,

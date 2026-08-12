@@ -44,6 +44,7 @@ import {
   stubClientListing,
   stubClientRecord,
   stubE2eeOperator,
+  stubLocalIntroductionService,
   stubPolicy,
 } from "./hubConnector/testUtils/e2eeOperatorStub.ts";
 import { E2EE_CONTINUITY_UNRESOLVABLE_REMEDY } from "./hubIdentity/NodeIdentityContinuityStore.ts";
@@ -242,6 +243,7 @@ const withLiveHubCliServer = <A, E, R>(
           }),
           cancelEnrollment: async () => ({ ...waitingStatus, state: "enrolling" as const }),
           stop: async () => undefined,
+          localIntroduction: stubLocalIntroductionService(),
           e2ee: stubE2eeOperator(e2ee),
           ...hub,
         }),

@@ -169,6 +169,16 @@ describe("HubIdentityRuntime", () => {
     expect(JSON.stringify(state)).not.toContain("UVFRUVFR");
 
     const restarted = await makeHubIdentityRuntime(options);
+    const localIntroduction = await restarted.localIntroduction.descriptor();
+    expect(localIntroduction).toMatchObject({
+      hubOrigin: "https://relay.example",
+      environmentId,
+      nodeId,
+      nodePolicyGeneration: 0,
+    });
+    expect(localIntroduction.nodeIdentityPublicKey).toEqual(started.publicKey.publicKey);
+    expect(localIntroduction.nodeIdentityFingerprint).toHaveLength(32);
+    expect(localIntroduction.nodeContinuityId).toMatch(/^nct_[A-Za-z0-9_-]{22}$/);
     const first = await restarted.createRelayAuthenticationFrame("https://relay.example", {
       protocolMajor: 1,
       protocolMinor: 2,

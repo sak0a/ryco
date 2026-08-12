@@ -281,6 +281,9 @@ let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendBindHost = DESKTOP_LOOPBACK_HOST;
 let backendBootstrapToken = "";
+// Never exposed through preload or renderer IPC. A fresh value belongs to one
+// exact backend child and authenticates Desktop-main-only local control calls.
+let backendControlToken = "";
 let backendHttpUrl = "";
 let backendWsUrl = "";
 let backendEndpointUrl: string | null = null;
@@ -2008,6 +2011,8 @@ function startBackend(): void {
   }
 
   markDesktopStartupPhase("desktop.backend.spawn", `port=${backendPort}`);
+  const childControlToken = Crypto.randomBytes(32).toString("base64url");
+  backendControlToken = childControlToken;
   const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
     cwd: resolveBackendCwd(),
     // In Electron main, process.execPath points to the Electron binary.
@@ -2029,6 +2034,7 @@ function startBackend(): void {
         host: backendBindHost,
         ...(isDevelopment ? { devUrl: resolveDesktopDevServerUrl() } : {}),
         desktopBootstrapToken: backendBootstrapToken,
+        desktopControlToken: childControlToken,
         tailscaleServeEnabled: desktopSettings.tailscaleServeEnabled,
         tailscaleServePort: desktopSettings.tailscaleServePort,
         hubConnectorEnabled: desktopSettings.hubConnectorEnabled,
@@ -2047,6 +2053,7 @@ function startBackend(): void {
     );
     bootstrapStream.end();
   } else {
+    if (backendControlToken === childControlToken) backendControlToken = "";
     child.kill("SIGTERM");
     scheduleBackendRestart("missing desktop bootstrap pipe");
     return;
@@ -2079,6 +2086,7 @@ function startBackend(): void {
     if (backendProcess === child) {
       backendProcess = null;
     }
+    if (backendControlToken === childControlToken) backendControlToken = "";
     closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
     if (wasExpected) {
       return;
@@ -2099,6 +2107,7 @@ function startBackend(): void {
     if (backendProcess === child) {
       backendProcess = null;
     }
+    if (backendControlToken === childControlToken) backendControlToken = "";
     closeBackendSession(
       `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
     );
@@ -2120,6 +2129,7 @@ function stopBackend(): void {
 
   const child = backendProcess;
   backendProcess = null;
+  backendControlToken = "";
   if (!child) return;
 
   if (child.exitCode === null && child.signalCode === null) {
@@ -2142,6 +2152,7 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
 
   const child = backendProcess;
   backendProcess = null;
+  backendControlToken = "";
   if (!child) return;
   const backendChild = child;
   if (backendChild.exitCode !== null || backendChild.signalCode !== null) return;

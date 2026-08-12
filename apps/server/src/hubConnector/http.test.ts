@@ -23,7 +23,11 @@ import { deriveServerPaths, ServerConfig, type ServerConfigShape } from "../conf
 import { layerConfig as SqlitePersistenceLayerLive } from "../persistence/Layers/Sqlite.ts";
 import { HubConnectorService, type HubConnectorE2eeOperator } from "./HubConnectorLive.ts";
 import { hubConnectorRoutesLayer } from "./http.ts";
-import { stubClientListing, stubE2eeOperator } from "./testUtils/e2eeOperatorStub.ts";
+import {
+  stubClientListing,
+  stubE2eeOperator,
+  stubLocalIntroductionService,
+} from "./testUtils/e2eeOperatorStub.ts";
 
 const ONLINE_STATUS: HubConnectorStatus = {
   state: "online",
@@ -92,6 +96,7 @@ const makeConnectorStub = (stub: ConnectorStub) => {
     readEnrollment: async () => stub.ceremony ?? null,
     cancelEnrollment: async () => stub.statuses[0]!,
     stop: async () => undefined,
+    localIntroduction: stubLocalIntroductionService(),
     e2ee: stubE2eeOperator(stub.e2ee ?? {}),
   };
   return {

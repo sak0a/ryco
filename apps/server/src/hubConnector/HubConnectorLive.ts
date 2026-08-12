@@ -19,6 +19,7 @@ import {
 import { makeLocalHubIdentityStateStore } from "../hubIdentity/LocalHubIdentityState.ts";
 import type { NodeE2eeAdvertisementResult } from "../hubIdentity/NodeE2eeCapabilityStatement.ts";
 import type { NodeE2eeFallbackState } from "../hubIdentity/NodeE2eeFallbackCounter.ts";
+import type { NodeLocalIntroductionService } from "../hubIdentity/NodeLocalIntroductionService.ts";
 import { NODE_E2EE_FAIL_CLOSED_POLICY } from "../hubIdentity/NodeE2eePolicyStore.ts";
 import { makeHubRelayTransport } from "./HubRelayTransport.ts";
 import { makeNodeE2eeChannelAdvertiser } from "./NodeE2eeChannelAdvertiser.ts";
@@ -142,6 +143,8 @@ export interface HubConnectorServiceShape {
   readonly leave: HubConnector["leave"];
   readonly cancelEnrollment: HubConnector["cancelEnrollment"];
   readonly stop: HubConnector["stop"];
+  /** Desktop-main-only trust introduction; never exposed through WS RPC. */
+  readonly localIntroduction: NodeLocalIntroductionService;
   readonly e2ee: HubConnectorE2eeOperator;
 }
 
@@ -231,6 +234,10 @@ const offlineE2eeSurface = {
     clearRefusedPairingAttempts: () => undefined,
     sweepExpired: e2eeOperatorUnavailable,
   },
+  localIntroduction: {
+    descriptor: e2eeOperatorUnavailable,
+    complete: e2eeOperatorUnavailable,
+  },
   // 0 is the generation that has never been issued, which is the truthful
   // reading for a runtime that must not advertise at all (§5.7).
   e2eeGeneration: () => 0,
@@ -257,6 +264,7 @@ const offlineE2eeSurface = {
   | "registerE2eeChannel"
   | "e2eeClientAuthorization"
   | "e2eeAuthorizationAdmin"
+  | "localIntroduction"
   | "e2eeGeneration"
   | "applyE2eePolicy"
   | "previewE2eePolicy"
@@ -613,6 +621,7 @@ export const HubConnectorLive = Layer.effect(
       leave: () => connector.leave(),
       cancelEnrollment: () => connector.cancelEnrollment(),
       stop: () => connector.stop(),
+      localIntroduction: identity.localIntroduction,
       e2ee: makeNodeE2eeOperator({
         identity,
         sessions: sessionDirectory,
