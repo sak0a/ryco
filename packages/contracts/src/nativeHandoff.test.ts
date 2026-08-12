@@ -7,6 +7,7 @@ import {
   NATIVE_HANDOFF_CODE_LIFETIME_MS,
   NATIVE_HANDOFF_PROTOCOL_VERSION,
   NATIVE_HANDOFF_TRANSACTION_LIFETIME_MS,
+  NATIVE_IDENTITY_CAPABILITY_VERSION,
   NativeHandoffApproveResponse,
   NativeHandoffCapability,
   NativeHandoffCancelResponse,
@@ -48,6 +49,64 @@ describe("NativeHandoffCapability", () => {
 
   it("accepts the exact bounded capability document", () => {
     expect(strictDecode(NativeHandoffCapability, capability)).toEqual(capability);
+  });
+
+  it("accepts an exact additive native identity v2 policy without weakening v1", () => {
+    const withNativeIdentity = {
+      ...capability,
+      nativeIdentity: {
+        version: NATIVE_IDENTITY_CAPABILITY_VERSION,
+        email: {
+          verification: "required",
+          antiBot: { provider: "turnstile", siteKey: "0x4AAAAAAAAAAABBBBBBBBBB" },
+        },
+        signup: {
+          status: "enabled",
+          primaryCredentials: ["passkey", "password"],
+        },
+        login: {
+          methods: ["passkey", "password", "recovery_code"],
+          passwordSecondFactor: {
+            totp: "when_enrolled",
+            fallback: "verified_email_code",
+          },
+        },
+        recovery: { recoveryCode: true, passwordReset: true },
+      },
+    } as const;
+
+    expect(strictDecode(NativeHandoffCapability, withNativeIdentity)).toEqual(withNativeIdentity);
+    expect(strictDecode(NativeHandoffCapability, capability)).toEqual(capability);
+    expect(
+      strictDecode(NativeHandoffCapability, {
+        ...withNativeIdentity,
+        nativeIdentity: {
+          ...withNativeIdentity.nativeIdentity,
+          signup: { status: "disabled" },
+        },
+      }),
+    ).toBeTruthy();
+
+    for (const nativeIdentity of [
+      { ...withNativeIdentity.nativeIdentity, version: 1 },
+      {
+        ...withNativeIdentity.nativeIdentity,
+        email: { ...withNativeIdentity.nativeIdentity.email, verification: "skipped" },
+      },
+      {
+        ...withNativeIdentity.nativeIdentity,
+        signup: { ...withNativeIdentity.nativeIdentity.signup, primaryCredentials: [] },
+      },
+      {
+        ...withNativeIdentity.nativeIdentity,
+        login: { ...withNativeIdentity.nativeIdentity.login, methods: ["password", "password"] },
+      },
+      { ...withNativeIdentity.nativeIdentity, internalPolicy: "must-not-survive" },
+    ]) {
+      expect(() =>
+        strictDecode(NativeHandoffCapability, { ...capability, nativeIdentity }),
+      ).toThrow();
+    }
   });
 
   it("rejects unsupported versions, modes, RP ids, and extra nested fields", () => {

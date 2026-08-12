@@ -4,6 +4,7 @@ export const NATIVE_HANDOFF_CAPABILITY_PATH = "/.well-known/ryco-hub" as const;
 export const NATIVE_HANDOFF_PROTOCOL_VERSION = 1 as const;
 export const NATIVE_HANDOFF_VERSION = 1 as const;
 export const NATIVE_HANDOFF_MODE = "system-browser" as const;
+export const NATIVE_IDENTITY_CAPABILITY_VERSION = 2 as const;
 
 export const NATIVE_HANDOFF_START_PATH = "/api/auth/native/handoff/start" as const;
 export const NATIVE_HANDOFF_REDEEM_PATH = "/api/auth/native/handoff/redeem" as const;
@@ -70,6 +71,70 @@ const RelyingPartyId = Schema.String.check(
   ),
 );
 const DisplayName = Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(64));
+const NativeIdentityTurnstileSiteKey = Schema.String.check(
+  Schema.isMinLength(10),
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/),
+);
+const NativeIdentityPrimaryCredential = Schema.Literals(["passkey", "password"]);
+const NativeIdentityLoginMethod = Schema.Literals(["passkey", "password", "recovery_code"]);
+const uniqueNonEmpty = <S extends Schema.Top>(item: S, maximum: number) =>
+  Schema.Array(item).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(maximum),
+    Schema.makeFilter((values) =>
+      new Set(values).size === values.length ? undefined : "values must be unique",
+    ),
+  );
+
+const NativeIdentityAntiBot = Schema.Union([
+  strict(Schema.Struct({ provider: Schema.Literal("bypass") })),
+  strict(
+    Schema.Struct({
+      provider: Schema.Literal("turnstile"),
+      siteKey: NativeIdentityTurnstileSiteKey,
+    }),
+  ),
+]);
+
+export const NativeIdentityCapability = strict(
+  Schema.Struct({
+    version: Schema.Literal(NATIVE_IDENTITY_CAPABILITY_VERSION),
+    email: strict(
+      Schema.Struct({
+        verification: Schema.Literal("required"),
+        antiBot: NativeIdentityAntiBot,
+      }),
+    ),
+    signup: Schema.Union([
+      strict(Schema.Struct({ status: Schema.Literal("disabled") })),
+      strict(
+        Schema.Struct({
+          status: Schema.Literal("enabled"),
+          primaryCredentials: uniqueNonEmpty(NativeIdentityPrimaryCredential, 2),
+        }),
+      ),
+    ]),
+    login: strict(
+      Schema.Struct({
+        methods: uniqueNonEmpty(NativeIdentityLoginMethod, 3),
+        passwordSecondFactor: strict(
+          Schema.Struct({
+            totp: Schema.Literal("when_enrolled"),
+            fallback: Schema.Literal("verified_email_code"),
+          }),
+        ),
+      }),
+    ),
+    recovery: strict(
+      Schema.Struct({
+        recoveryCode: Schema.Boolean,
+        passwordReset: Schema.Boolean,
+      }),
+    ),
+  }),
+);
+export type NativeIdentityCapability = typeof NativeIdentityCapability.Type;
 
 const AuthorizationUrl = Schema.String.check(
   Schema.isMaxLength(NATIVE_HANDOFF_MAX_URL_CHARS),
@@ -167,6 +232,7 @@ export const NativeHandoffCapability = strict(
         displayName: DisplayName,
       }),
     ),
+    nativeIdentity: Schema.optionalKey(NativeIdentityCapability),
   }),
 );
 export type NativeHandoffCapability = typeof NativeHandoffCapability.Type;
