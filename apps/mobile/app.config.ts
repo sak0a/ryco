@@ -295,6 +295,7 @@ const config: ExpoConfig = {
     ],
     "./plugins/withIosCocoaPodsUuidCache.cjs",
     "./plugins/withIosSceneLifecycle.cjs",
+    ...(isIosPersonalTeamBuild ? ["./plugins/withIosPersonalTeamCapabilities.cjs"] : []),
     "./plugins/withAndroidCleartextTraffic.cjs",
     "./plugins/withAndroidSecureStoreBackupExclusion.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
