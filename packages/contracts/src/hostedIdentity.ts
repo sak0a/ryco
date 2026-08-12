@@ -4,6 +4,7 @@ import { HubNodePublicKeyFingerprint } from "./hubConnector.ts";
 import { RelayNodeId } from "./relay.ts";
 
 export const PUBLIC_SIGNUP_START_PATH = "/api/public-signup/start" as const;
+export const PUBLIC_SIGNUP_CONFIG_PATH = "/api/public-signup/config" as const;
 export const PUBLIC_SIGNUP_VERIFY_PATH = "/api/public-signup/verify" as const;
 export const PUBLIC_SIGNUP_PASSKEY_OPTIONS_PATH = "/api/public-signup/passkey/options" as const;
 export const PUBLIC_SIGNUP_PASSKEY_FINISH_PATH = "/api/public-signup/passkey/finish" as const;
@@ -125,6 +126,42 @@ export const HubLoginIdentifier = Schema.Union([HubUsername, HubNormalizedEmail]
   Schema.brand("HubLoginIdentifier"),
 );
 export type HubLoginIdentifier = typeof HubLoginIdentifier.Type;
+
+const PublicSignupTurnstileSiteKey = Schema.String.check(
+  Schema.isMinLength(10),
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/),
+);
+
+/**
+ * Public, cache-bypassed configuration for the signed-out account surface.
+ *
+ * The Turnstile site key is intentionally public. The secret verification key
+ * remains server-only. `bypass` exists solely so the exact browser flow can be
+ * qualified against a development Hub without pretending an anti-bot token was
+ * produced by Turnstile.
+ */
+export const PublicSignupConfigResponse = Schema.Union([
+  strict(Schema.Struct({ status: Schema.Literal("disabled") })),
+  strict(
+    Schema.Struct({
+      status: Schema.Literal("enabled"),
+      antiBot: strict(Schema.Struct({ provider: Schema.Literal("bypass") })),
+    }),
+  ),
+  strict(
+    Schema.Struct({
+      status: Schema.Literal("enabled"),
+      antiBot: strict(
+        Schema.Struct({
+          provider: Schema.Literal("turnstile"),
+          siteKey: PublicSignupTurnstileSiteKey,
+        }),
+      ),
+    }),
+  ),
+]);
+export type PublicSignupConfigResponse = typeof PublicSignupConfigResponse.Type;
 
 export const HubActiveSpaceSummary = strict(
   Schema.Struct({

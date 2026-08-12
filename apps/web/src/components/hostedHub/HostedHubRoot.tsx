@@ -8,14 +8,21 @@ import {
   LifeBuoyIcon,
   Loader2Icon,
   LogOutIcon,
-  MailIcon,
   RefreshCwIcon,
   ServerIcon,
   ShieldCheckIcon,
   TriangleAlertIcon,
   UserRoundIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type FormEvent, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type RefObject,
+} from "react";
 
 import { LazySettingsDialogMount } from "../AppSidebarLayout";
 import { RootAppShell } from "../RootAppShell";
@@ -45,6 +52,10 @@ import {
 } from "../../hostedHub/state";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import {
+  consumeHostedIdentityLink,
+  type HostedIdentityLink,
+} from "../../hostedHub/hostedIdentityLinks";
+import {
   selectHostedNodeRoute,
   useHostedNodeRouteNotice,
   useHostedNodeRouteOrchestrator,
@@ -71,6 +82,13 @@ import {
 import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
 import { hostedNodeRevokedNotice, HOSTED_NODE_REVOKE_REASON_CODE } from "./HostedNodeRevoke.logic";
 import { HostedPwaControls } from "./HostedPwaControls";
+import {
+  PasswordLoginFlow,
+  PasswordResetFlow,
+  PublicSignupFlow,
+  RecoveryCodeFlow,
+  usePublicSignupConfiguration,
+} from "./PublicAccountFlows";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
 // Browser suites and callers keep importing the menu from the hosted root.
@@ -322,7 +340,13 @@ function Surface({
  * the returning user — who is nearly everyone, nearly every time — pays a line
  * of text for it rather than a screen of it.
  */
-function NewToThisHubDisclosure({ bootstrapAvailable }: { readonly bootstrapAvailable: boolean }) {
+function NewToThisHubDisclosure({
+  bootstrapAvailable,
+  publicSignupEnabled,
+}: {
+  readonly bootstrapAvailable: boolean;
+  readonly publicSignupEnabled: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   return (
@@ -349,8 +373,9 @@ function NewToThisHubDisclosure({ bootstrapAvailable }: { readonly bootstrapAvai
         <div id={panelId} className="mt-2 space-y-2 text-xs leading-relaxed text-muted-foreground">
           <p>
             <span className="font-medium text-foreground">Getting access.</span> Accounts are
-            created by invitation. An owner of this Hub sends you an invitation code; you redeem it
-            below and your browser creates a passkey at the same time.
+            {publicSignupEnabled
+              ? " open to signup on this Hub. Verify your email, then choose a passkey or password."
+              : " created by invitation. An owner sends you an invitation code; redeem it below to create your account."}
           </p>
           <p>
             <span className="font-medium text-foreground">What a passkey is here.</span> The passkey
@@ -378,10 +403,30 @@ export function HostedAuthenticationSurface({
   const status = useHostedHubStore((state) => state.accountStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
   const bootstrapAvailable = useHostedHubStore((state) => state.bootstrapAvailable);
-  const [registrationMode, setRegistrationMode] = useState<"invitation" | "bootstrap" | null>(null);
+  const [identityLink, setIdentityLink] = useState<HostedIdentityLink | null>(() =>
+    consumeHostedIdentityLink({
+      href: window.location.href,
+      historyState: window.history.state,
+      replaceState: (state, unused, url) => window.history.replaceState(state, unused, url),
+    }),
+  );
+  const clearIdentityLink = useCallback(() => setIdentityLink(null), []);
+  const { config: publicSignupConfig } = usePublicSignupConfiguration();
+  const [registrationMode, setRegistrationMode] = useState<
+    "public" | "invitation" | "bootstrap" | null
+  >(
+    identityLink?.kind === "signup-verification" ||
+      identityLink?.kind === "invalid-signup-verification"
+      ? "public"
+      : null,
+  );
   const [fallbackMode, setFallbackMode] = useState<
-    "email-recovery" | "password" | "recovery-code" | null
-  >(null);
+    "password" | "recovery-code" | "password-reset" | null
+  >(
+    identityLink?.kind === "password-reset" || identityLink?.kind === "invalid-password-reset"
+      ? "password-reset"
+      : null,
+  );
   const headingRef = useRef<HTMLHeadingElement>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
 
@@ -389,8 +434,9 @@ export function HostedAuthenticationSurface({
     // `preventScroll`: both targets sit at the top of a surface that owns its
     // own scroller, and a focus-driven scroll would move the anchored action
     // group's content out from under the user before they have touched it.
-    if (registrationMode) registrationInputRef.current?.focus({ preventScroll: true });
-    else if (!fallbackMode) headingRef.current?.focus({ preventScroll: true });
+    if (registrationMode === "invitation" || registrationMode === "bootstrap") {
+      registrationInputRef.current?.focus({ preventScroll: true });
+    } else if (!fallbackMode) headingRef.current?.focus({ preventScroll: true });
   }, [fallbackMode, registrationMode]);
 
   // The action group keeps the exact DOM order and desktop styling it had —
@@ -410,32 +456,35 @@ export function HostedAuthenticationSurface({
   // 320x568, the group clamped to the form's top edge and its primary action
   // landed 2.5px under the fold. As a sibling of the form its containing block
   // is the surface's own content column, exactly like the sign-in group's.
-  const registrationActions = registrationMode ? (
-    <div className={`mt-6 flex flex-wrap gap-2 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
-      <Button
-        type="submit"
-        form={REGISTRATION_FORM_ID}
-        className="phone:min-h-11"
-        disabled={status === "authenticating"}
+  const registrationActions =
+    registrationMode === "invitation" || registrationMode === "bootstrap" ? (
+      <div
+        className={`mt-6 flex flex-wrap gap-2 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}
       >
-        {registrationMode === "invitation"
-          ? "Create account and passkey"
-          : "Create owner and passkey"}
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        className="phone:min-h-11"
-        onClick={
-          status === "authenticating"
-            ? () => hostedHubController.cancelAuthentication()
-            : () => setRegistrationMode(null)
-        }
-      >
-        {status === "authenticating" ? "Cancel" : "Back"}
-      </Button>
-    </div>
-  ) : null;
+        <Button
+          type="submit"
+          form={REGISTRATION_FORM_ID}
+          className="phone:min-h-11"
+          disabled={status === "authenticating"}
+        >
+          {registrationMode === "invitation"
+            ? "Create account and passkey"
+            : "Create owner and passkey"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="phone:min-h-11"
+          onClick={
+            status === "authenticating"
+              ? () => hostedHubController.cancelAuthentication()
+              : () => setRegistrationMode(null)
+          }
+        >
+          {status === "authenticating" ? "Cancel" : "Back"}
+        </Button>
+      </div>
+    ) : null;
 
   const fallbackActions = fallbackMode ? (
     <div className={`mt-6 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
@@ -476,8 +525,18 @@ export function HostedAuthenticationSurface({
             <>
               {/* The cold visitor's real path, so it stays an outline rather than
                 sinking to ghost. */}
+              {publicSignupConfig?.status === "enabled" ? (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="phone:min-h-11"
+                  onClick={() => setRegistrationMode("public")}
+                >
+                  Create account
+                </Button>
+              ) : null}
               <Button
-                variant="outline"
+                variant="ghost"
                 size="lg"
                 className="phone:min-h-11"
                 onClick={() => setRegistrationMode("invitation")}
@@ -554,7 +613,10 @@ export function HostedAuthenticationSurface({
       <div className="mt-4">
         <HostedRelayTrustNotice />
       </div>
-      <NewToThisHubDisclosure bootstrapAvailable={bootstrapAvailable} />
+      <NewToThisHubDisclosure
+        bootstrapAvailable={bootstrapAvailable}
+        publicSignupEnabled={publicSignupConfig?.status === "enabled"}
+      />
       {!registrationMode && !fallbackMode && status !== "authenticating" ? (
         <Button
           variant="ghost"
@@ -563,7 +625,7 @@ export function HostedAuthenticationSurface({
           onClick={() => setFallbackMode("password")}
         >
           <LifeBuoyIcon aria-hidden />
-          Password, recovery code, or email
+          Password, recovery code, or reset
         </Button>
       ) : null}
       <HostedPwaControls />
@@ -576,285 +638,44 @@ export function HostedAuthenticationSurface({
           </Alert>
         </div>
       ) : null}
-      {registrationMode ? (
+      {registrationMode === "public" ? (
+        <PublicSignupFlow
+          config={publicSignupConfig?.status === "enabled" ? publicSignupConfig : null}
+          initialLink={identityLink}
+          onConsumeLink={clearIdentityLink}
+          onCancel={() => {
+            clearIdentityLink();
+            setRegistrationMode(null);
+          }}
+        />
+      ) : registrationMode ? (
         <RegistrationForm mode={registrationMode} credentialRef={registrationInputRef} />
       ) : null}
-      {fallbackMode ? (
-        <BrowserFallbackForm mode={fallbackMode} onModeChange={setFallbackMode} />
+      {fallbackMode === "password" ? (
+        <PasswordLoginFlow onCancel={() => setFallbackMode(null)} />
+      ) : fallbackMode === "recovery-code" ? (
+        <RecoveryCodeFlow onCancel={() => setFallbackMode(null)} />
+      ) : fallbackMode === "password-reset" ? (
+        <PasswordResetFlow
+          initialLink={identityLink}
+          onConsumeLink={clearIdentityLink}
+          onCancel={() => {
+            clearIdentityLink();
+            setFallbackMode(null);
+          }}
+        />
+      ) : null}
+      {fallbackMode === "password" ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setFallbackMode("recovery-code")}>
+            Use recovery code
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setFallbackMode("password-reset")}>
+            Forgot password?
+          </Button>
+        </div>
       ) : null}
     </Surface>
-  );
-}
-
-const BROWSER_FALLBACK_FORM_ID = "hub-browser-fallback-form";
-
-function BrowserFallbackForm({
-  mode,
-  onModeChange,
-}: {
-  readonly mode: "email-recovery" | "password" | "recovery-code";
-  readonly onModeChange: (mode: "email-recovery" | "password" | "recovery-code") => void;
-}) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [totpCode, setTotpCode] = useState("");
-  const [recoveryCode, setRecoveryCode] = useState("");
-  const [emailToken, setEmailToken] = useState("");
-  const [emailRequested, setEmailRequested] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const firstInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    firstInputRef.current?.focus({ preventScroll: true });
-  }, [mode]);
-
-  const authenticate = async (event: FormEvent) => {
-    event.preventDefault();
-    if (pending) return;
-    setPending(true);
-    setError(null);
-    setNotice(null);
-    try {
-      if (mode === "password") {
-        const submittedPassword = password;
-        const submittedTotpCode = totpCode.trim();
-        setPassword("");
-        setTotpCode("");
-        await hostedHubApi.signInWithPassword({
-          email: email.trim(),
-          password: submittedPassword,
-          ...(submittedTotpCode ? { totpCode: submittedTotpCode } : {}),
-        });
-        await hostedHubController.bootstrap();
-        return;
-      }
-      if (mode === "recovery-code") {
-        const submittedCode = recoveryCode;
-        setRecoveryCode("");
-        await hostedHubApi.signInWithRecoveryCode(submittedCode);
-        await hostedHubController.bootstrap();
-        return;
-      }
-      const submittedToken = emailToken.trim();
-      if (!submittedToken) {
-        await hostedHubApi.requestEmailRecovery(email.trim());
-        setEmailRequested(true);
-        setNotice(
-          "If that verified address belongs to an account, its recovery email is on the way.",
-        );
-        return;
-      }
-      const submittedTotpCode = totpCode.trim();
-      setEmailToken("");
-      setTotpCode("");
-      await hostedHubApi.confirmEmailRecovery({
-        token: submittedToken,
-        ...(submittedTotpCode ? { totpCode: submittedTotpCode } : {}),
-      });
-      await hostedHubController.bootstrap();
-    } catch (cause) {
-      setError(
-        cause instanceof HostedHubApiError
-          ? cause.message
-          : "This sign-in method is temporarily unavailable.",
-      );
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="mt-6">
-      <div
-        aria-label="Sign-in method"
-        className="grid grid-cols-3 gap-1 rounded-xl border border-border bg-background/70 p-1"
-        role="group"
-      >
-        {(
-          [
-            ["password", "Password"],
-            ["recovery-code", "Recovery code"],
-            ["email-recovery", "Email"],
-          ] as const
-        ).map(([value, label]) => (
-          <Button
-            key={value}
-            type="button"
-            size="sm"
-            variant={mode === value ? "secondary" : "ghost"}
-            className="h-auto min-h-9 whitespace-normal px-2 py-1.5 text-xs"
-            aria-pressed={mode === value}
-            onClick={() => {
-              setError(null);
-              setNotice(null);
-              onModeChange(value);
-            }}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
-
-      <form
-        id={BROWSER_FALLBACK_FORM_ID}
-        className="mt-5 space-y-4"
-        autoComplete="on"
-        onSubmit={(event) => void authenticate(event)}
-      >
-        {mode === "password" ? (
-          <>
-            <div className="space-y-1.5">
-              <Label htmlFor="hub-login-email">Verified email</Label>
-              <Input
-                ref={firstInputRef}
-                id="hub-login-email"
-                type="email"
-                autoComplete="username"
-                required
-                maxLength={254}
-                value={email}
-                className={TOUCH_INPUT_CLASS_NAME}
-                onChange={(event) => setEmail(event.currentTarget.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="hub-login-password">Password</Label>
-              <Input
-                id="hub-login-password"
-                type="password"
-                autoComplete="current-password"
-                required
-                maxLength={256}
-                value={password}
-                className={TOUCH_INPUT_CLASS_NAME}
-                onChange={(event) => setPassword(event.currentTarget.value)}
-              />
-            </div>
-            <TotpInput value={totpCode} onChange={setTotpCode} />
-          </>
-        ) : mode === "recovery-code" ? (
-          <div className="space-y-1.5">
-            <Label htmlFor="hub-login-recovery-code">Recovery code</Label>
-            <Input
-              ref={firstInputRef}
-              id="hub-login-recovery-code"
-              type="password"
-              autoComplete="one-time-code"
-              required
-              maxLength={128}
-              value={recoveryCode}
-              className={TOUCH_INPUT_CLASS_NAME}
-              onChange={(event) => setRecoveryCode(event.currentTarget.value)}
-            />
-          </div>
-        ) : (
-          <>
-            <div className="space-y-1.5">
-              <Label htmlFor="hub-recovery-email">Verified email</Label>
-              <Input
-                ref={firstInputRef}
-                id="hub-recovery-email"
-                type="email"
-                autoComplete="email"
-                required={!emailRequested && !emailToken}
-                maxLength={254}
-                value={email}
-                className={TOUCH_INPUT_CLASS_NAME}
-                onChange={(event) => setEmail(event.currentTarget.value)}
-              />
-            </div>
-            {emailRequested || emailToken ? (
-              <>
-                <div className="space-y-1.5">
-                  <Label htmlFor="hub-recovery-token">Email recovery token</Label>
-                  <Input
-                    id="hub-recovery-token"
-                    type="password"
-                    autoComplete="one-time-code"
-                    required
-                    maxLength={64}
-                    value={emailToken}
-                    className={TOUCH_INPUT_CLASS_NAME}
-                    onChange={(event) => setEmailToken(event.currentTarget.value)}
-                  />
-                </div>
-                <TotpInput value={totpCode} onChange={setTotpCode} />
-              </>
-            ) : (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="-ml-2 h-auto min-h-8 whitespace-normal"
-                onClick={() => {
-                  setEmailRequested(true);
-                  setNotice(null);
-                }}
-              >
-                I already have an email token
-              </Button>
-            )}
-          </>
-        )}
-
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        {notice ? (
-          <p role="status" className="text-sm leading-relaxed text-muted-foreground">
-            {notice}
-          </p>
-        ) : null}
-
-        <Button type="submit" className="min-h-11 w-full" disabled={pending}>
-          {pending ? (
-            <Loader2Icon aria-hidden className="animate-spin motion-reduce:animate-none" />
-          ) : mode === "email-recovery" ? (
-            <MailIcon aria-hidden />
-          ) : (
-            <KeyRoundIcon aria-hidden />
-          )}
-          {pending
-            ? "Working…"
-            : mode === "password"
-              ? "Sign in with password"
-              : mode === "recovery-code"
-                ? "Use recovery code"
-                : emailRequested || emailToken
-                  ? "Continue with email token"
-                  : "Send recovery email"}
-        </Button>
-      </form>
-    </div>
-  );
-}
-
-function TotpInput({
-  value,
-  onChange,
-}: {
-  readonly value: string;
-  readonly onChange: (value: string) => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor="hub-login-totp">
-        Authenticator code <span className="text-muted-foreground">(if enabled)</span>
-      </Label>
-      <Input
-        id="hub-login-totp"
-        inputMode="numeric"
-        autoComplete="one-time-code"
-        maxLength={16}
-        value={value}
-        className={TOUCH_INPUT_CLASS_NAME}
-        onChange={(event) => onChange(event.currentTarget.value)}
-      />
-    </div>
   );
 }
 

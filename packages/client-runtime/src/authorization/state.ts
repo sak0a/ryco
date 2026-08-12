@@ -1,4 +1,5 @@
 import type { EnvironmentId, RelayEffectiveRole } from "@ryco/contracts";
+import type * as HostedIdentity from "@ryco/contracts/hosted-identity";
 
 import { HostedHubApiError, type HostedAccountStepUp } from "./api.ts";
 import { activateHostedNode, deactivateHostedNode, suspendHostedNode } from "./environment.ts";
@@ -500,6 +501,49 @@ class HostedHubController {
     readonly passkeyLabel: string | null;
   }): Promise<void> {
     return this.#registerAccount((signal) => getHostedHubApi().bootstrapOwner(input, signal));
+  }
+
+  /**
+   * Publish a canonical browser identity that one of the public account APIs
+   * has already decoded and whose CSRF token that API has already committed to
+   * the cookie-session credential holder.
+   *
+   * Public signup is the only caller with one-shot recovery codes. Accepting
+   * them here, in the same patch as the authenticated account, guarantees the
+   * existing full-screen recovery-code takeover cannot miss the first render.
+   */
+  async adoptPublicBrowserIdentity(
+    identity: HostedIdentity.HubBrowserSessionResponse,
+    recoveryCodes: ReadonlyArray<string> = [],
+  ): Promise<void> {
+    this.#operation?.abort();
+    this.#operation = null;
+    this.#totpEnrollmentFence.bump();
+    this.#recoveryCodesFence.bump();
+    patchState({
+      accountStatus: "authenticated",
+      account: {
+        id: identity.account.id,
+        displayName: identity.account.displayName,
+        role: identity.activeSpace.role,
+        createdAt: identity.account.createdAt,
+        disabledAt: identity.account.disabledAt,
+      },
+      session: {
+        id: identity.session.id,
+        accountId: identity.session.accountId,
+        createdAt: identity.session.createdAt,
+        expiresAt: identity.session.expiresAt,
+        lastSeenAt: identity.session.lastSeenAt,
+        revokedAt: identity.session.revokedAt,
+        revocationReasonCode: identity.session.revocationReasonCode,
+      },
+      recoveryCodes: [...recoveryCodes],
+      totpEnrollment: null,
+      bootstrapAvailable: false,
+      errorMessage: null,
+    });
+    await this.refreshDirectory();
   }
 
   async #registerAccount(

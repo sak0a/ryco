@@ -748,6 +748,17 @@ export class HostedHubApi {
     return result.available;
   }
 
+  async getPublicSignupConfiguration(
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.PublicSignupConfigResponse> {
+    this.#requireCookieTransport();
+    return decodeContract(
+      HostedIdentity.PublicSignupConfigResponse,
+      await this.#request(HostedIdentity.PUBLIC_SIGNUP_CONFIG_PATH, signal ? { signal } : {}),
+      "invalid_response",
+    );
+  }
+
   async restoreSession(signal?: AbortSignal): Promise<HostedHubSessionResponse> {
     const value = await this.#request("/api/auth/session", signal ? { signal } : {});
     if (this.#isBearer) return this.#restoreNativeSession(value);

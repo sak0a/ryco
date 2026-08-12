@@ -2352,6 +2352,25 @@ describe("HostedHubApi public hosted identity contracts", () => {
     csrfToken: "public-csrf-sensitive-canary",
   } as const;
 
+  it("reads strict public signup configuration without session material", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        status: "enabled",
+        antiBot: { provider: "turnstile", siteKey: "0x4AAAAAAAAAAABBBBBBBBBB" },
+      }),
+    );
+    const api = createApi();
+    await expect(api.getPublicSignupConfiguration()).resolves.toEqual({
+      status: "enabled",
+      antiBot: { provider: "turnstile", siteKey: "0x4AAAAAAAAAAABBBBBBBBBB" },
+    });
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "/api/public-signup/config",
+      expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
+    );
+    expect(api.hasSessionMaterial).toBe(false);
+  });
+
   it("strictly decodes signup legs and adopts session material only after completion", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
