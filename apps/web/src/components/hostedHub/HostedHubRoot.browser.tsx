@@ -400,6 +400,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
   });
 
   it("creates a public password account after mailbox verification and preserves recovery codes", async () => {
+    await page.viewport(320, 568);
     vi.mocked(hostedHubApi.getPublicSignupConfiguration).mockResolvedValue({
       status: "enabled",
       antiBot: { provider: "bypass" },
@@ -427,7 +428,13 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     const adopt = vi.spyOn(hostedHubController, "adoptPublicBrowserIdentity").mockResolvedValue();
     mounted = await render(<HostedHubRoot />);
 
-    await page.getByRole("button", { name: "Create account" }).click();
+    const createAccount = page.getByRole("button", { name: "Create account" });
+    const signupScroller = userScrollableAncestor(createAccount.element() as HTMLElement);
+    expect(signupScroller, "signup must live in the hosted surface scroller").not.toBeNull();
+    signupScroller!.scrollTop = signupScroller!.scrollHeight;
+    expect(signupScroller!.scrollTop).toBeGreaterThan(0);
+    await createAccount.click();
+    await vi.waitFor(() => expect(signupScroller!.scrollTop).toBe(0));
     await page.getByLabelText("Username").fill("Ada_2026");
     await page.getByLabelText("Email").fill("ADA@example.test");
     await page.getByRole("button", { name: "Send verification email" }).click();

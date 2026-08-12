@@ -284,6 +284,7 @@ function Surface({
   children,
   actions,
   trailing,
+  scrollRef,
   width = "narrow",
 }: {
   readonly children: React.ReactNode;
@@ -299,6 +300,8 @@ function Surface({
    * only applies to the action group.
    */
   readonly trailing?: React.ReactNode;
+  /** Optional owner for mode changes that must reset this surface's local scroll position. */
+  readonly scrollRef?: RefObject<HTMLElement | null>;
   /**
    * The desktop card's measure. `wide` is the node directory alone: a list of
    * rows carrying four facts each reads badly in the `max-w-lg` column that
@@ -321,7 +324,10 @@ function Surface({
   // viewport instead: no rounded floating card, no centring, and the content
   // column grows so the action group below it can be bottom-anchored.
   return (
-    <main className="h-dvh overflow-x-hidden overflow-y-auto overscroll-contain bg-background text-foreground">
+    <main
+      ref={scrollRef}
+      className="h-dvh overflow-x-hidden overflow-y-auto overscroll-contain bg-background text-foreground"
+    >
       <div className="flex min-h-full flex-col px-4 py-10 sm:px-6 phone:px-[max(1rem,env(safe-area-inset-left),env(safe-area-inset-right))] phone:pt-[max(2.5rem,calc(env(safe-area-inset-top)+1rem))] phone:pb-[max(2.5rem,calc(env(safe-area-inset-bottom)+1rem))]">
         <section
           className={`my-auto w-full ${width === "wide" ? "max-w-2xl" : "max-w-lg"} self-center rounded-2xl border border-border bg-card p-5 shadow-lg shadow-black/5 sm:p-8 phone:my-0 phone:flex phone:max-w-none phone:flex-1 phone:flex-col phone:rounded-none phone:border-0 phone:bg-transparent phone:p-0 phone:shadow-none`}
@@ -429,6 +435,7 @@ export function HostedAuthenticationSurface({
   );
   const headingRef = useRef<HTMLHeadingElement>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
+  const surfaceScrollRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     // `preventScroll`: both targets sit at the top of a surface that owns its
@@ -437,6 +444,10 @@ export function HostedAuthenticationSurface({
     if (registrationMode === "invitation" || registrationMode === "bootstrap") {
       registrationInputRef.current?.focus({ preventScroll: true });
     } else if (!fallbackMode) headingRef.current?.focus({ preventScroll: true });
+  }, [fallbackMode, registrationMode]);
+
+  useEffect(() => {
+    surfaceScrollRef.current?.scrollTo({ top: 0, left: 0 });
   }, [fallbackMode, registrationMode]);
 
   // The action group keeps the exact DOM order and desktop styling it had —
@@ -575,7 +586,11 @@ export function HostedAuthenticationSurface({
   );
 
   return (
-    <Surface actions={signInActions ?? registrationActions} trailing={signInTrailing}>
+    <Surface
+      actions={signInActions ?? registrationActions}
+      trailing={signInTrailing}
+      scrollRef={surfaceScrollRef}
+    >
       <div className="mb-6 flex size-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
         <ShieldCheckIcon aria-hidden className="size-5" />
       </div>
