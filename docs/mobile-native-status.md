@@ -1,6 +1,6 @@
 # Native mobile delivery status
 
-**Current as of 2026-08-12 at public `main` `8fc1608d7`.** This is the concise delivery
+**Current as of 2026-08-13 at public `main` `8f910252e`.** This is the concise delivery
 ledger for the native app. Older design specifications and implementation plans remain useful as
 historical records, but this file is authoritative when their status language disagrees.
 
