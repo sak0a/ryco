@@ -1,14 +1,6 @@
 import { StackActions, useNavigation } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  TextInput,
-  View,
-} from "react-native";
+import { ActivityIndicator, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { showConfirmDialog } from "../../components/ConfirmDialogHost";
@@ -443,131 +435,126 @@ export function OnboardingRouteScreen() {
     completionStatus === "saving";
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <ScrollView
+      automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardShouldPersistTaps="handled"
       className="flex-1 bg-screen"
+      style={{ flex: 1 }}
+      contentContainerStyle={{ paddingTop: 8, paddingBottom: 44 }}
     >
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        keyboardShouldPersistTaps="handled"
-        className="flex-1 bg-screen"
-        contentContainerStyle={{ paddingTop: 8, paddingBottom: 44 }}
-      >
-        <View className="px-5 pb-1 pt-2">
-          <Text className="text-xs font-ryco-bold tracking-widest text-foreground-muted">
-            RYCO HUB
-          </Text>
-          <Text className="mt-3 text-3xl font-ryco-bold tracking-tight text-foreground">
-            {view.title}
-          </Text>
-          <Text className="mt-2 font-sans text-sm leading-relaxed text-foreground-muted">
-            {view.detail}
-          </Text>
-        </View>
+      <View className="px-5 pb-1 pt-2">
+        <Text className="text-xs font-ryco-bold tracking-widest text-foreground-muted">
+          RYCO HUB
+        </Text>
+        <Text className="mt-3 text-3xl font-ryco-bold tracking-tight text-foreground">
+          {view.title}
+        </Text>
+        <Text className="mt-2 font-sans text-sm leading-relaxed text-foreground-muted">
+          {view.detail}
+        </Text>
+      </View>
 
-        {view.screen === "hub-selection" ? (
-          <View className="mx-5 mt-5 gap-4">
-            <View className="gap-2">
-              <Text className="px-1 text-sm font-ryco-medium text-foreground-muted">
-                Hub domain
-              </Text>
-              <TextInput
-                accessibilityLabel="Hub domain"
-                value={hubDraftOrigin}
-                onChangeText={(value) => {
-                  draftTouched.current = true;
-                  profileEditor.invalidate();
-                  setHubDraftOrigin(value);
-                  setHubSetupStatus("editing");
-                  setCheckedProfile(null);
-                  setLocalError(null);
-                }}
-                placeholder="https://hub.your-domain.com"
-                placeholderTextColor={placeholderColor as string}
-                autoCapitalize="none"
-                autoCorrect={false}
-                keyboardType="url"
-                returnKeyType="next"
-                className="min-h-14 rounded-2xl border border-border bg-card px-4 py-3 font-mono text-sm"
-                style={{ color: textColor as string }}
-              />
-            </View>
-            <View className="gap-2">
-              <Text className="px-1 text-sm font-ryco-medium text-foreground-muted">
-                Hub name (optional)
-              </Text>
-              <TextInput
-                accessibilityLabel="Hub name"
-                value={hubDraftLabel}
-                onChangeText={(value) => {
-                  draftTouched.current = true;
-                  profileEditor.invalidate();
-                  setHubDraftLabel(value);
-                  setHubSetupStatus("editing");
-                  setCheckedProfile(null);
-                  setLocalError(null);
-                }}
-                maxLength={64}
-                placeholder="Studio Hub"
-                placeholderTextColor={placeholderColor as string}
-                autoCapitalize="words"
-                className="min-h-14 rounded-2xl border border-border bg-card px-4 py-3 font-sans text-base"
-                style={{ color: textColor as string }}
-              />
-            </View>
-            {checkedProfile ? (
-              <View className="rounded-2xl border border-success-border bg-success-bg p-4">
-                <Text className="text-sm font-ryco-bold text-success">Compatible Hub</Text>
-                <Text className="mt-1 font-sans text-xs leading-relaxed text-foreground-muted">
-                  System-browser handoff v
-                  {checkedProfile.compatibility.status === "compatible"
-                    ? checkedProfile.compatibility.handoffVersion
-                    : 1}{" "}
-                  is ready. Saving stores only this bounded public profile.
-                </Text>
-              </View>
-            ) : null}
-          </View>
-        ) : compatibleStoredProfile && view.screen !== "recovery-codes" ? (
-          <HubIdentityCard profile={compatibleStoredProfile} />
-        ) : null}
-
-        {view.errorMessage ? (
-          <View className="mx-5 mt-4">
-            <ErrorBanner message={view.errorMessage} />
-          </View>
-        ) : null}
-
-        {view.screen === "recovery-codes" ? (
-          <HostedRecoveryCodes codes={hostedState.recoveryCodes} />
-        ) : null}
-
-        {nodeModel ? <HubNodeSectionView model={nodeModel} /> : null}
-
-        {busy ? (
-          <View className="mt-5 items-center" accessibilityLabel="Onboarding in progress">
-            <ActivityIndicator />
-          </View>
-        ) : null}
-
-        <View className="mt-3">
-          {view.actions.map((action) => (
-            <OnboardingButton
-              key={action.id}
-              action={action}
-              primary={isPrimaryAction(action, signupStatus)}
-              onPress={() => runAction(action.id)}
+      {view.screen === "hub-selection" ? (
+        <View className="mx-5 mt-5 gap-4">
+          <View className="gap-2">
+            <Text className="px-1 text-sm font-ryco-medium text-foreground-muted">Hub domain</Text>
+            <TextInput
+              accessibilityLabel="Hub domain"
+              value={hubDraftOrigin}
+              onChangeText={(value) => {
+                draftTouched.current = true;
+                profileEditor.invalidate();
+                setHubDraftOrigin(value);
+                setHubSetupStatus("editing");
+                setCheckedProfile(null);
+                setLocalError(null);
+              }}
+              placeholder="https://hub.your-domain.com"
+              placeholderTextColor={placeholderColor as string}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              returnKeyType="next"
+              className="min-h-14 rounded-2xl border border-border bg-card px-4 py-3 font-mono text-sm"
+              style={{ color: textColor as string }}
             />
-          ))}
+          </View>
+          <View className="gap-2">
+            <Text className="px-1 text-sm font-ryco-medium text-foreground-muted">
+              Hub name (optional)
+            </Text>
+            <TextInput
+              accessibilityLabel="Hub name"
+              value={hubDraftLabel}
+              onChangeText={(value) => {
+                draftTouched.current = true;
+                profileEditor.invalidate();
+                setHubDraftLabel(value);
+                setHubSetupStatus("editing");
+                setCheckedProfile(null);
+                setLocalError(null);
+              }}
+              maxLength={64}
+              placeholder="Studio Hub"
+              placeholderTextColor={placeholderColor as string}
+              autoCapitalize="words"
+              className="min-h-14 rounded-2xl border border-border bg-card px-4 py-3 font-sans text-base"
+              style={{ color: textColor as string }}
+            />
+          </View>
+          {checkedProfile ? (
+            <View className="rounded-2xl border border-success-border bg-success-bg p-4">
+              <Text className="text-sm font-ryco-bold text-success">Compatible Hub</Text>
+              <Text className="mt-1 font-sans text-xs leading-relaxed text-foreground-muted">
+                System-browser handoff v
+                {checkedProfile.compatibility.status === "compatible"
+                  ? checkedProfile.compatibility.handoffVersion
+                  : 1}{" "}
+                is ready. Saving stores only this bounded public profile.
+              </Text>
+            </View>
+          ) : null}
         </View>
+      ) : compatibleStoredProfile && view.screen !== "recovery-codes" ? (
+        <HubIdentityCard profile={compatibleStoredProfile} />
+      ) : null}
 
-        {view.screen === "account-choice" ? (
-          <Text className="mx-7 mt-5 text-center font-sans text-xs leading-relaxed text-foreground-muted">
-            Your Hub browser session stays in the system browser. Ryco receives only a reviewed
-            one-time authorization result for this device.
-          </Text>
-        ) : null}
-      </ScrollView>
-    </KeyboardAvoidingView>
+      {view.errorMessage ? (
+        <View className="mx-5 mt-4">
+          <ErrorBanner message={view.errorMessage} />
+        </View>
+      ) : null}
+
+      {view.screen === "recovery-codes" ? (
+        <HostedRecoveryCodes codes={hostedState.recoveryCodes} />
+      ) : null}
+
+      {nodeModel ? <HubNodeSectionView model={nodeModel} /> : null}
+
+      {busy ? (
+        <View className="mt-5 items-center" accessibilityLabel="Onboarding in progress">
+          <ActivityIndicator />
+        </View>
+      ) : null}
+
+      <View className="mt-3">
+        {view.actions.map((action) => (
+          <OnboardingButton
+            key={action.id}
+            action={action}
+            primary={isPrimaryAction(action, signupStatus)}
+            onPress={() => runAction(action.id)}
+          />
+        ))}
+      </View>
+
+      {view.screen === "account-choice" ? (
+        <Text className="mx-7 mt-5 text-center font-sans text-xs leading-relaxed text-foreground-muted">
+          Your Hub browser session stays in the system browser. Ryco receives only a reviewed
+          one-time authorization result for this device.
+        </Text>
+      ) : null}
+    </ScrollView>
   );
 }
