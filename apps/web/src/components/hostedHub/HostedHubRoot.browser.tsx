@@ -4,6 +4,7 @@ import { EnvironmentId } from "@ryco/contracts";
 import { page } from "vite-plus/test/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { render } from "vitest-browser-react";
+import { StrictMode } from "react";
 
 const navigate = vi.fn(async () => undefined);
 // These suites render the hosted root outside a `RouterProvider`. The toast
@@ -503,7 +504,11 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     const token = "E".repeat(43);
     window.history.replaceState(null, "", `/email-verification#token=${token}`);
     const confirm = vi.spyOn(hostedHubApi, "confirmEmailVerification").mockResolvedValue();
-    mounted = await render(<HostedHubRoot />);
+    mounted = await render(
+      <StrictMode>
+        <HostedHubRoot />
+      </StrictMode>,
+    );
 
     await expect.element(page.getByText("Email verified")).toBeVisible();
     expect(confirm).toHaveBeenCalledWith(token, expect.any(AbortSignal));

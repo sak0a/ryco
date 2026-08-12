@@ -94,6 +94,30 @@ import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 // Browser suites and callers keep importing the menu from the hosted root.
 export { HostedNodeMenu } from "./HostedConnectionControls";
 
+type EmailVerificationLink = Extract<
+  HostedIdentityLink,
+  { readonly kind: "email-verification" | "invalid-email-verification" }
+>;
+
+// React can evaluate a newly loaded root more than once before effects run. Scrubbing during the
+// first evaluation must not make the second reinterpret the same navigation as an invalid link.
+let pendingEmailVerificationLink: EmailVerificationLink | null | undefined;
+
+function consumeInitialEmailVerificationLink(): EmailVerificationLink | null {
+  if (window.location.pathname !== "/email-verification") return null;
+  if (pendingEmailVerificationLink !== undefined) return pendingEmailVerificationLink;
+  const consumed = consumeHostedIdentityLink({
+    href: window.location.href,
+    historyState: window.history.state,
+    replaceState: (state, unused, url) => window.history.replaceState(state, unused, url),
+  });
+  pendingEmailVerificationLink =
+    consumed?.kind === "email-verification" || consumed?.kind === "invalid-email-verification"
+      ? consumed
+      : null;
+  return pendingEmailVerificationLink;
+}
+
 /**
  * The chrome an authenticated hosted surface needs before a node is selected.
  *
@@ -125,15 +149,8 @@ function HostedEntryChrome({ children }: { readonly children: React.ReactNode })
 }
 
 export function HostedHubRoot() {
-  const [emailVerificationLink, setEmailVerificationLink] = useState<HostedIdentityLink | null>(
-    () =>
-      window.location.pathname === "/email-verification"
-        ? consumeHostedIdentityLink({
-            href: window.location.href,
-            historyState: window.history.state,
-            replaceState: (state, unused, url) => window.history.replaceState(state, unused, url),
-          })
-        : null,
+  const [emailVerificationLink, setEmailVerificationLink] = useState<EmailVerificationLink | null>(
+    consumeInitialEmailVerificationLink,
   );
   const accountStatus = useHostedHubStore((state) => state.accountStatus);
   const selectedNode = useHostedHubStore((state) => state.selectedNode);
@@ -237,6 +254,9 @@ function HostedEmailVerificationSurface({
       .then(() => setStatus("verified"))
       .catch(() => {
         if (!operation.signal.aborted) setStatus("invalid");
+      })
+      .finally(() => {
+        pendingEmailVerificationLink = undefined;
       });
     return () => operation.abort();
   }, [link]);
