@@ -412,7 +412,15 @@ type LoginPending = Pick<
   "attemptId" | "attemptSecret" | "factor" | "expiresAt"
 >;
 
-export function PasswordLoginFlow({ onCancel }: { readonly onCancel: () => void }) {
+export function PasswordLoginFlow({
+  onCancel,
+  onUseRecoveryCode,
+  onResetPassword,
+}: {
+  readonly onCancel: () => void;
+  readonly onUseRecoveryCode: () => void;
+  readonly onResetPassword: () => void;
+}) {
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -506,6 +514,16 @@ export function PasswordLoginFlow({ onCancel }: { readonly onCancel: () => void 
         </div>
       )}
       <FlowError value={error} />
+      {attempt === null ? (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onUseRecoveryCode}>
+            Use recovery code
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onResetPassword}>
+            Forgot password?
+          </Button>
+        </div>
+      ) : null}
       <FlowActions
         onCancel={attempt === null ? onCancel : () => setAttempt(null)}
         pending={pending}

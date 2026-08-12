@@ -486,19 +486,6 @@ export function HostedAuthenticationSurface({
       </div>
     ) : null;
 
-  const fallbackActions = fallbackMode ? (
-    <div className={`mt-6 phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
-      <Button
-        type="button"
-        variant="outline"
-        className="phone:min-h-11"
-        onClick={() => setFallbackMode(null)}
-      >
-        Back to sign in
-      </Button>
-    </div>
-  ) : null;
-
   const signInActions =
     registrationMode || fallbackMode ? null : (
       <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
@@ -588,10 +575,7 @@ export function HostedAuthenticationSurface({
   );
 
   return (
-    <Surface
-      actions={signInActions ?? registrationActions ?? fallbackActions}
-      trailing={signInTrailing}
-    >
+    <Surface actions={signInActions ?? registrationActions} trailing={signInTrailing}>
       <div className="mb-6 flex size-11 items-center justify-center rounded-xl border border-border bg-background text-primary">
         <ShieldCheckIcon aria-hidden className="size-5" />
       </div>
@@ -652,7 +636,11 @@ export function HostedAuthenticationSurface({
         <RegistrationForm mode={registrationMode} credentialRef={registrationInputRef} />
       ) : null}
       {fallbackMode === "password" ? (
-        <PasswordLoginFlow onCancel={() => setFallbackMode(null)} />
+        <PasswordLoginFlow
+          onCancel={() => setFallbackMode(null)}
+          onUseRecoveryCode={() => setFallbackMode("recovery-code")}
+          onResetPassword={() => setFallbackMode("password-reset")}
+        />
       ) : fallbackMode === "recovery-code" ? (
         <RecoveryCodeFlow onCancel={() => setFallbackMode(null)} />
       ) : fallbackMode === "password-reset" ? (
@@ -664,16 +652,6 @@ export function HostedAuthenticationSurface({
             setFallbackMode(null);
           }}
         />
-      ) : null}
-      {fallbackMode === "password" ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setFallbackMode("recovery-code")}>
-            Use recovery code
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setFallbackMode("password-reset")}>
-            Forgot password?
-          </Button>
-        </div>
       ) : null}
     </Surface>
   );

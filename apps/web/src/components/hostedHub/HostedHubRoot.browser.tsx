@@ -101,6 +101,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await mounted?.unmount();
+  await page.viewport(1_280, 720);
   mounted = null;
   hostedHubController.resetForTests();
   resetWebE2eeSession();
@@ -319,6 +320,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
   });
 
   it("offers every browser fallback sign-in without retaining submitted credentials", async () => {
+    await page.viewport(1_280, 577);
     const passwordStart = vi.spyOn(hostedHubApi, "startPasswordLogin").mockResolvedValue({
       status: "factor_required",
       attemptId: "login_aaaaaaaaaaaaaaaaaaaaaa",
@@ -339,6 +341,26 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     mounted = await render(<HostedHubRoot />);
 
     await page.getByRole("button", { name: "Password, recovery code, or reset" }).click();
+    const recoveryChoice = page.getByRole("button", { name: "Use recovery code" });
+    const resetChoice = page.getByRole("button", { name: "Forgot password?" });
+    await expect.element(recoveryChoice).toBeVisible();
+    await expect.element(resetChoice).toBeVisible();
+    const fallbackScroller = userScrollableAncestor(recoveryChoice.element() as HTMLElement);
+    expect(
+      fallbackScroller,
+      "fallback choices must have a user-scrollable ancestor",
+    ).not.toBeNull();
+    fallbackScroller!.scrollTop = fallbackScroller!.scrollHeight;
+    await vi.waitFor(() => {
+      for (const choice of [recoveryChoice, resetChoice]) {
+        const rect = choice.element().getBoundingClientRect();
+        expect(rect.top).toBeGreaterThanOrEqual(0);
+        expect(rect.bottom).toBeLessThanOrEqual(window.innerHeight);
+      }
+    });
+    await expect
+      .element(page.getByRole("button", { name: "Back to sign in" }))
+      .not.toBeInTheDocument();
     await page.getByLabelText("Username or verified email").fill("Ada");
     await page.getByLabelText("Password").fill("password-sensitive-browser-canary");
     await page.getByRole("button", { name: "Continue" }).click();
@@ -358,6 +380,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
     expect(adopt).toHaveBeenCalledWith(publicIdentity);
     await expect.element(page.getByLabelText("Email code")).toHaveValue("");
 
+    await page.getByRole("button", { name: "Back", exact: true }).click();
     await page.getByRole("button", { name: "Use recovery code" }).click();
     await page.getByLabelText("Recovery code").fill("recovery-sensitive-browser-canary");
     await page.getByRole("button", { name: "Use recovery code" }).click();
