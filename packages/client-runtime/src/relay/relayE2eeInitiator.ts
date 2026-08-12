@@ -15,7 +15,9 @@ import {
 import {
   E2eeClientHandshake,
   type E2eeAdvertisedChannelMaterial,
+  type E2eeClientEstablishedResult,
   type E2eeClientHandshakeCredentials,
+  type E2eeClientHelloResult,
 } from "@ryco/shared/relayE2eeHandshake";
 import { eraseE2eeSessionSecrets, type E2eeSessionSecrets } from "@ryco/shared/relayE2eeSession";
 import type { NodeE2eeCapabilityStatement } from "@ryco/shared/relayE2eeTranscripts";
@@ -141,6 +143,15 @@ export interface RelayE2eeInitiatorAttempt {
     | (<A>(use: (secretKey: Uint8Array) => A) => Promise<A>)
     | undefined;
   /**
+   * Desktop-only high-level IK custody boundary.
+   *
+   * The renderer verifies the carrier and owns the record layer, but Desktop
+   * main independently verifies the same statement, constructs the IK hello,
+   * and retains the live Noise handshake. Only the established per-session
+   * secrets cross back; the durable agreement scalar never does.
+   */
+  readonly nativeHandshake?: RelayE2eeNativeHandshake | undefined;
+  /**
    * §8.3: the verified pin the selection resolved to, when it resolved to one.
    * It is the PROVENANCE of context elements 9 and 17 — an `unverified` record
    * anchors nothing and MUST NOT be passed here (§13.1).
@@ -172,6 +183,46 @@ export interface RelayE2eeInitiatorAttempt {
    * code that draws it) belongs to the surface that renders it.
    */
   readonly onWebVerificationCode?: ((code: string) => void) | undefined;
+}
+
+export interface RelayE2eeNativeHandshakeStartInput {
+  readonly statement: Uint8Array;
+  readonly channel: {
+    readonly hubOrigin: string;
+    readonly channelId: string;
+    readonly relayProtocolMajor: number;
+    readonly relayProtocolMinor: number;
+    readonly channelOpenCapability: string;
+    readonly channelOpenEffectiveRole: string;
+  };
+  readonly selectedSuite: E2eeSuiteId;
+  readonly offeredSuites: readonly number[];
+  readonly intendedCapability: string;
+  readonly intendedRole: string;
+  readonly now: number;
+}
+
+export type RelayE2eeNativeHandshakeStartResult =
+  | {
+      readonly kind: "hello";
+      readonly handle: string;
+      readonly result: Extract<E2eeClientHelloResult, { readonly kind: "hello" }>;
+    }
+  | {
+      readonly kind: "fatal";
+      readonly result: Exclude<E2eeClientHelloResult, { readonly kind: "hello" }>;
+    };
+
+export interface RelayE2eeNativeHandshake {
+  readonly start: (
+    input: RelayE2eeNativeHandshakeStartInput,
+  ) => Promise<RelayE2eeNativeHandshakeStartResult>;
+  readonly finish: (
+    handle: string,
+    payload: Uint8Array,
+    now: number,
+  ) => Promise<E2eeClientEstablishedResult>;
+  readonly destroy: (handle: string) => void | Promise<void>;
 }
 
 export interface RelayE2eeInitiatorSources {
@@ -283,6 +334,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
   /** §4.4 K4: one carrier per channel, whatever its content turned out to be. */
   let carrierConsumed = false;
   let handshake: E2eeClientHandshake | undefined;
+  let nativeHandshakeHandle: string | undefined;
   let established: RelayE2eeChannel | undefined;
   let advTimer: unknown;
   let trustCommitTimer: unknown;
@@ -315,6 +367,17 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     cancelBorrow?.();
   }
 
+  function destroyNativeHandshake(): void {
+    const handle = nativeHandshakeHandle;
+    nativeHandshakeHandle = undefined;
+    if (handle === undefined) return;
+    try {
+      void Promise.resolve(attempt.nativeHandshake?.destroy(handle)).catch(() => undefined);
+    } catch {
+      // Destruction is best-effort here; Desktop main also expires every handle.
+    }
+  }
+
   /**
    * §11.2 FATAL-PRE, in the order the procedure states it: stop processing the
    * triggering input, erase partial handshake state, close with
@@ -333,6 +396,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     clearTimers();
     handshake?.destroy();
     handshake = undefined;
+    destroyNativeHandshake();
     diagnostic({ phase: "pre_key", row });
     host.close(relayE2eeFailure("fatal_pre_key"));
     return REJECTED;
@@ -580,6 +644,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     // past `T_ADV`, so `T_ADV` is cancelled by the emit below and never by a
     // fallback that does not exist.
     return sendHello(
+      statement!,
       verification.statement,
       verification.anchor,
       verification.selectedSuite,
@@ -646,6 +711,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
   }
 
   function sendHello(
+    statementBytes: Uint8Array,
     statement: NodeE2eeCapabilityStatement,
     anchor: NodeE2eeCapabilityAnchor,
     selectedSuite: E2eeSuiteId,
@@ -656,6 +722,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     if (mode !== "negotiating" || helloSent) return REJECTED;
     const credentials = attempt.credentials;
     if (credentials.tier === "native" && !("agreementSecretKey" in credentials)) {
+      if (attempt.nativeHandshake !== undefined) {
+        return startNativeHandshakeAndSendHello(statementBytes, selectedSuite, localPreKeyDeadline);
+      }
       return borrowAgreementSecretAndSendHello(
         statement,
         anchor,
@@ -665,6 +734,100 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       );
     }
     return sendHelloWithCredentials(statement, anchor, selectedSuite, credentials);
+  }
+
+  function startNativeHandshakeAndSendHello(
+    statement: Uint8Array,
+    selectedSuite: E2eeSuiteId,
+    localPreKeyDeadline: number,
+  ): Promise<RelayE2eeInboundDisposition> {
+    const adapter = attempt.nativeHandshake;
+    if (adapter === undefined) return Promise.resolve(fatalPre("local"));
+
+    let resolveWait!: (disposition: RelayE2eeInboundDisposition) => void;
+    const wait = new Promise<RelayE2eeInboundDisposition>((resolve) => {
+      resolveWait = resolve;
+    });
+    let finished = false;
+    const cancel = (): void => finish(REJECTED);
+    const finish = (disposition: RelayE2eeInboundDisposition): void => {
+      if (finished) return;
+      finished = true;
+      if (keyBorrowTimer !== undefined) host.clearTimeout(keyBorrowTimer);
+      keyBorrowTimer = undefined;
+      if (cancelKeyBorrowWait === cancel) cancelKeyBorrowWait = undefined;
+      resolveWait(disposition);
+    };
+    cancelKeyBorrowWait = cancel;
+
+    const remaining = localPreKeyDeadline - now();
+    if (remaining <= 0) {
+      fatalPre("local");
+      finish(REJECTED);
+      return wait;
+    }
+    keyBorrowTimer = host.setTimeout(() => {
+      keyBorrowTimer = undefined;
+      if (mode === "negotiating" && !helloSent) fatalPre("local");
+      finish(REJECTED);
+    }, remaining);
+
+    let operation: Promise<RelayE2eeNativeHandshakeStartResult>;
+    try {
+      operation = adapter.start({
+        statement,
+        channel: {
+          hubOrigin: attempt.hubOrigin,
+          channelId: host.channel.channelId,
+          relayProtocolMajor: host.channel.relayProtocolMajor,
+          relayProtocolMinor: host.channel.relayProtocolMinor,
+          channelOpenCapability: host.channel.capability,
+          channelOpenEffectiveRole: host.channel.effectiveRole,
+        },
+        selectedSuite,
+        offeredSuites: attempt.localSuitePreference,
+        intendedCapability: host.channel.capability,
+        intendedRole: host.channel.effectiveRole,
+        now: now(),
+      });
+    } catch {
+      fatalPre("local");
+      finish(REJECTED);
+      return wait;
+    }
+    void operation.then(
+      (started) => {
+        if (started.kind === "fatal") {
+          if (mode === "negotiating") fatalPre(started.result.row);
+          finish(REJECTED);
+          return;
+        }
+        if (finished || mode !== "negotiating" || helloSent) {
+          void Promise.resolve(adapter.destroy(started.handle)).catch(() => undefined);
+          finish(REJECTED);
+          return;
+        }
+        const admission = host.admit(started.result.record.byteLength);
+        if (admission === undefined || !admission.send(started.result.record)) {
+          admission?.release();
+          void Promise.resolve(adapter.destroy(started.handle)).catch(() => undefined);
+          fatalPre("local");
+          finish(REJECTED);
+          return;
+        }
+        nativeHandshakeHandle = started.handle;
+        helloSent = true;
+        if (advTimer !== undefined) host.clearTimeout(advTimer);
+        advTimer = undefined;
+        armHandshakeDeadline();
+        finish(CLAIMED);
+      },
+      () => {
+        if (mode === "negotiating") fatalPre("local");
+        finish(REJECTED);
+      },
+    );
+    return wait;
   }
 
   function borrowAgreementSecretAndSendHello(
@@ -813,7 +976,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
 
   // ─── §4.4 rows K5–K8: negotiation records ──────────────────────────────────
 
-  function receiveNegotiation(payload: Uint8Array): RelayE2eeInboundDisposition {
+  function receiveNegotiation(
+    payload: Uint8Array,
+  ): RelayE2eeInboundDisposition | Promise<RelayE2eeInboundDisposition> {
     // §4.3 step 4 and §3.3: the per-type bound before any body parse, and the
     // §3.4 direction registry. An unknown, misdirected, or over-bound record is
     // row K8 / §11.2 P3.
@@ -821,7 +986,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
     if (decoded.kind === "error") return fatalPre("P3");
     if (decoded.value.recordType === E2EE_NEGOTIATION_TYPE_SERVER_ACCEPT) {
       // Row K6's first clause / §11.2 P16: an accept with no hello sent.
-      if (!helloSent || handshake === undefined) return fatalPre("P16");
+      if (!helloSent || (handshake === undefined && nativeHandshakeHandle === undefined)) {
+        return fatalPre("P16");
+      }
       return receiveServerAccept(payload);
     }
     if (decoded.value.recordType === E2EE_NEGOTIATION_TYPE_HANDSHAKE_REJECT) {
@@ -844,9 +1011,9 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
    * confirmation, and a transcript rebuilt from the bytes that arrived would
    * hash the attacker's version at both ends.
    */
-  function receiveServerAccept(payload: Uint8Array): RelayE2eeInboundDisposition {
-    const client = handshake!;
-    const result = client.receiveServerAccept(payload, now());
+  function acceptEstablishedResult(
+    result: E2eeClientEstablishedResult,
+  ): RelayE2eeInboundDisposition {
     if (result.kind === "fatal") return fatalPre(result.row); // Row K6.
     if (attempt.pairingOnly || releaseGatedWithoutVerifiedPin()) {
       // §13.2: "the pairing attempt always ends without application
@@ -879,6 +1046,29 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       // Present on the web arm alone (§13.5); absent by construction on IK.
       webEphemeralPublicKey: result.webEphemeralPublicKey,
     });
+  }
+
+  function receiveServerAccept(
+    payload: Uint8Array,
+  ): RelayE2eeInboundDisposition | Promise<RelayE2eeInboundDisposition> {
+    const handle = nativeHandshakeHandle;
+    if (handle !== undefined) {
+      const adapter = attempt.nativeHandshake;
+      if (adapter === undefined) return fatalPre("local");
+      nativeHandshakeHandle = undefined;
+      return adapter.finish(handle, payload, now()).then(
+        (result) => {
+          if (mode !== "negotiating") {
+            if (result.kind === "established") eraseE2eeSessionSecrets(result.secrets);
+            return REJECTED;
+          }
+          return acceptEstablishedResult(result);
+        },
+        () => (mode === "negotiating" ? fatalPre("local") : REJECTED),
+      );
+    }
+    const client = handshake!;
+    return acceptEstablishedResult(client.receiveServerAccept(payload, now()));
   }
 
   // ─── §4.4: the state dispatch ──────────────────────────────────────────────
@@ -980,6 +1170,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       clearTimers();
       handshake?.destroy();
       handshake = undefined;
+      destroyNativeHandshake();
       host.close();
       return "opened";
     },
@@ -988,6 +1179,7 @@ export function makeRelayE2eeInitiator(sources: RelayE2eeInitiatorSources): Rela
       clearTimers();
       handshake?.destroy();
       handshake = undefined;
+      destroyNativeHandshake();
       established?.dispose(options);
     },
     mode: () => mode,

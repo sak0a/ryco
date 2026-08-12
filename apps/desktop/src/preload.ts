@@ -46,6 +46,10 @@ const VALIDATE_HUB_ORIGIN_CHANNEL = "desktop:validate-hub-origin";
 const GET_HOSTED_IDENTITY_STATUS_CHANNEL = "desktop:get-hosted-identity-status";
 const CONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:connect-hosted-identity";
 const DISCONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:disconnect-hosted-identity";
+const PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL = "desktop:prepare-native-e2ee-attempt";
+const START_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:start-native-e2ee-handshake";
+const FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:finish-native-e2ee-handshake";
+const DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:destroy-native-e2ee-handshake";
 const GET_ADVERTISED_ENDPOINTS_CHANNEL = "desktop:get-advertised-endpoints";
 const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
@@ -129,6 +133,14 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getHostedIdentityState: () => ipcRenderer.invoke(GET_HOSTED_IDENTITY_STATUS_CHANNEL),
   connectHostedIdentity: () => ipcRenderer.invoke(CONNECT_HOSTED_IDENTITY_CHANNEL),
   disconnectHostedIdentity: () => ipcRenderer.invoke(DISCONNECT_HOSTED_IDENTITY_CHANNEL),
+  prepareNativeE2eeAttempt: (input) =>
+    ipcRenderer.invoke(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL, input),
+  startNativeE2eeHandshake: (attemptHandle, input) =>
+    ipcRenderer.invoke(START_NATIVE_E2EE_HANDSHAKE_CHANNEL, attemptHandle, input),
+  finishNativeE2eeHandshake: (handle, payload) =>
+    ipcRenderer.invoke(FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL, handle, payload),
+  destroyNativeE2eeHandshake: (handle) =>
+    ipcRenderer.invoke(DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL, handle),
   setHubLaunchConfig: (input: {
     readonly enabled?: boolean;
     readonly origin?: string | null;

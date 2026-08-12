@@ -1,5 +1,8 @@
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
 
+import type { NodeE2eeCapabilityVerification } from "@ryco/shared/relayE2eeCapabilityVerify";
+import { e2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
+import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 import type { DesktopProtectedRecordStore } from "./protectedRecordStore.ts";
 import { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
 import { describe, expect, it } from "vite-plus/test";
@@ -90,5 +93,65 @@ describe("Desktop E2EE trust store", () => {
       trust.promoteLocal({ ...promotion, nodeIdentityPublicKey: otherNodeIdentityPublicKey }),
     ).rejects.toMatchObject({ code: "trust_conflict" });
     expect(memory.records.get("e2ee-trust")).toBe(before);
+  });
+
+  it("advances only the authenticated statement policy for the exact durable pin", async () => {
+    const memory = memoryStore();
+    const trust = new DesktopE2eeTrustStore(memory.store);
+    const pin = await trust.promoteLocal(promotion);
+    const verification = {
+      kind: "verified",
+      anchor: "pin-unchanged",
+      selectedSuite: E2EE_SUITE_25519_CHACHAPOLY_SHA256,
+      statement: {
+        transcript: Uint8Array.of(1),
+        signature: Uint8Array.of(2),
+        hubOrigin: promotion.hubOrigin,
+        nodeId: promotion.nodeId,
+        identityKeyId: `nkey_${"F".repeat(22)}`,
+        identityPublicKey: promotion.nodeIdentityPublicKey,
+        identityFingerprint: e2eeKeyFingerprint("node-identity", promotion.nodeIdentityPublicKey),
+        e2eeVersionMin: 1,
+        e2eeVersionMax: 1,
+        suiteRegistry: [E2EE_SUITE_25519_CHACHAPOLY_SHA256],
+        prekeyCertificate: {
+          prekeyId: `epk_${"G".repeat(22)}`,
+          agreementPublicKey: new Uint8Array(32),
+          agreementFingerprint: new Uint8Array(32),
+          crossSignature: new Uint8Array(64),
+          createdAt: promotion.approvedAt,
+          expiresAt: promotion.approvedAt + 60_000,
+        },
+        continuityChain: [],
+        requireE2EE: true,
+        requireApprovedClientE2EE: true,
+        admittedPatterns: ["IK"],
+        policyGeneration: 9,
+        issuedAt: promotion.approvedAt,
+        expiresAt: promotion.approvedAt + 60_000,
+        continuityId: promotion.nodeContinuityId,
+      },
+    } satisfies Extract<NodeE2eeCapabilityVerification, { readonly kind: "verified" }>;
+
+    await expect(
+      trust.recordAuthenticatedStatement({
+        hubOrigin: promotion.hubOrigin,
+        accountId: promotion.accountId,
+        nodeId: promotion.nodeId,
+        localNodeHandle: pin.localNodeHandle,
+        verification,
+      }),
+    ).resolves.toMatchObject({ acceptedPolicyGeneration: 9 });
+    await expect(trust.hasVerifiedOrigin(promotion.hubOrigin)).resolves.toBe(true);
+
+    await expect(
+      trust.recordAuthenticatedStatement({
+        hubOrigin: promotion.hubOrigin,
+        accountId: promotion.accountId,
+        nodeId: promotion.nodeId,
+        localNodeHandle: "H".repeat(22),
+        verification,
+      }),
+    ).rejects.toMatchObject({ code: "trust_conflict" });
   });
 });

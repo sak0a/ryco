@@ -139,6 +139,8 @@ import {
   DesktopHostedIdentityCoordinator,
   type DesktopHostedIdentityStatus,
 } from "./desktopHostedIdentity.ts";
+import { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
+import { DesktopNativeE2eeHandshakeService } from "./desktopNativeE2eeHandshake.ts";
 
 const desktopStartupTiming = createStartupTiming();
 desktopStartupTiming.mark("desktop.launch");
@@ -178,6 +180,10 @@ const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
 const GET_HOSTED_IDENTITY_STATUS_CHANNEL = "desktop:get-hosted-identity-status";
 const CONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:connect-hosted-identity";
 const DISCONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:disconnect-hosted-identity";
+const PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL = "desktop:prepare-native-e2ee-attempt";
+const START_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:start-native-e2ee-handshake";
+const FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:finish-native-e2ee-handshake";
+const DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:destroy-native-e2ee-handshake";
 const TURN_COMPLETE_NOTIFICATION_ACTIVATED_CHANNEL = "desktop:turn-complete-notification-activated";
 const BASE_DIR = readEnv("RYCO_HOME")?.trim() || Path.join(OS.homedir(), ".ryco");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
@@ -307,6 +313,14 @@ const desktopAuthorizationBroker = new DesktopAuthorizationCallbackBroker();
 let desktopHostedIdentityCoordinator: DesktopHostedIdentityCoordinator | null = null;
 let desktopHostedIdentityStatus: DesktopHostedIdentityStatus = { status: "signed-out" };
 let desktopHostedIdentityControlGeneration = "";
+let desktopNativeIdentityContext: {
+  readonly origin: string;
+  readonly installationId: string;
+  readonly records: ReturnType<typeof createDesktopProtectedRecordStore>;
+  readonly security: DesktopNativeSecurityHelper;
+  readonly trust: DesktopE2eeTrustStore;
+} | null = null;
+let desktopNativeE2eeHandshakeService: DesktopNativeE2eeHandshakeService | null = null;
 // Retain live turn-complete notifications: Electron GCs Notification objects once
 // the creating scope returns, which would drop their `click`/`close` handlers.
 const activeTurnCompleteNotifications = new Set<Notification>();
@@ -610,8 +624,10 @@ function desktopHostedDeviceLabel(): string {
   return hostname.length > 0 ? hostname : APP_DISPLAY_NAME;
 }
 
-async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedIdentityCoordinator> {
-  if (desktopHostedIdentityCoordinator !== null) return desktopHostedIdentityCoordinator;
+async function ensureDesktopNativeIdentityContext(): Promise<
+  NonNullable<typeof desktopNativeIdentityContext>
+> {
+  if (desktopNativeIdentityContext !== null) return desktopNativeIdentityContext;
   if (
     process.platform !== "darwin" ||
     desktopSettings.hubConnectorEnabled !== true ||
@@ -648,7 +664,21 @@ async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedId
       protection,
     }),
   });
-  const credentials = createDesktopHostedSessionCredentials(records);
+  const context = {
+    origin: desktopSettings.hubOrigin,
+    installationId,
+    records,
+    security,
+    trust: new DesktopE2eeTrustStore(records),
+  };
+  desktopNativeIdentityContext = context;
+  return context;
+}
+
+async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedIdentityCoordinator> {
+  if (desktopHostedIdentityCoordinator !== null) return desktopHostedIdentityCoordinator;
+  const context = await ensureDesktopNativeIdentityContext();
+  const credentials = createDesktopHostedSessionCredentials(context.records);
   const nativeAuthorization = createDesktopNativeAuthorization({
     variant: desktopAuthorizationVariant(),
     deviceLabel: desktopHostedDeviceLabel,
@@ -656,18 +686,19 @@ async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedId
     openExternal: async (url) => await shell.openExternal(url, { activate: true }),
   });
   const api = await createDesktopHostedHubApi({
-    origin: desktopSettings.hubOrigin,
+    origin: context.origin,
     credentials,
-    security,
+    security: context.security,
     nativeAuthorization,
   });
   const coordinator = new DesktopHostedIdentityCoordinator({
-    origin: desktopSettings.hubOrigin,
-    installationId,
+    origin: context.origin,
+    installationId: context.installationId,
     api,
     credentials,
-    security,
-    records,
+    security: context.security,
+    records: context.records,
+    trust: context.trust,
     control: createDesktopHubControlClient({
       baseUrl: () => backendHttpUrl,
       controlToken: () => backendControlToken,
@@ -675,6 +706,20 @@ async function ensureDesktopHostedIdentityCoordinator(): Promise<DesktopHostedId
   });
   desktopHostedIdentityCoordinator = coordinator;
   return coordinator;
+}
+
+async function ensureDesktopNativeE2eeHandshakeService(): Promise<DesktopNativeE2eeHandshakeService> {
+  if (desktopNativeE2eeHandshakeService !== null) return desktopNativeE2eeHandshakeService;
+  const context = await ensureDesktopNativeIdentityContext();
+  const service = new DesktopNativeE2eeHandshakeService({
+    origin: context.origin,
+    security: context.security,
+    records: context.records,
+    trust: context.trust,
+    identityStatus: () => desktopHostedIdentityStatus,
+  });
+  desktopNativeE2eeHandshakeService = service;
+  return service;
 }
 
 async function runDesktopHostedIdentity(
@@ -702,6 +747,7 @@ function resumeDesktopHostedIdentityForBackend(): void {
   ) {
     return;
   }
+  desktopNativeE2eeHandshakeService?.dispose();
   desktopHostedIdentityControlGeneration = backendControlToken;
   void runDesktopHostedIdentity(false);
 }
@@ -2492,9 +2538,96 @@ function registerIpcHandlers(): void {
   });
   ipcMain.removeHandler(DISCONNECT_HOSTED_IDENTITY_CHANNEL);
   ipcMain.handle(DISCONNECT_HOSTED_IDENTITY_CHANNEL, async () => {
+    desktopNativeE2eeHandshakeService?.dispose();
     await desktopHostedIdentityCoordinator?.disconnect().catch(() => undefined);
     desktopHostedIdentityStatus = { status: "signed-out" };
     return hostedIdentityView();
+  });
+
+  ipcMain.removeHandler(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL);
+  ipcMain.handle(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL, async (_event, rawInput: unknown) => {
+    if (typeof rawInput !== "object" || rawInput === null || Array.isArray(rawInput)) {
+      throw new Error("Desktop native E2EE is unavailable.");
+    }
+    const input = rawInput as { readonly accountId?: unknown; readonly nodeId?: unknown };
+    if (
+      typeof input.accountId !== "string" ||
+      input.accountId.length === 0 ||
+      input.accountId.length > 2_048 ||
+      typeof input.nodeId !== "string" ||
+      input.nodeId.length === 0 ||
+      input.nodeId.length > 2_048
+    ) {
+      throw new Error("Desktop native E2EE is unavailable.");
+    }
+    try {
+      return await (
+        await ensureDesktopNativeE2eeHandshakeService()
+      ).prepare({
+        accountId: input.accountId,
+        nodeId: input.nodeId,
+      });
+    } catch {
+      return { kind: "strict-unavailable" } as const;
+    }
+  });
+
+  ipcMain.removeHandler(START_NATIVE_E2EE_HANDSHAKE_CHANNEL);
+  ipcMain.handle(
+    START_NATIVE_E2EE_HANDSHAKE_CHANNEL,
+    async (_event, attemptHandle: unknown, rawInput: unknown) => {
+      if (
+        typeof attemptHandle !== "string" ||
+        typeof rawInput !== "object" ||
+        rawInput === null ||
+        Array.isArray(rawInput) ||
+        !(rawInput as { readonly statement?: unknown }).statement ||
+        !(
+          (rawInput as { readonly statement: unknown }).statement instanceof Uint8Array ||
+          Buffer.isBuffer((rawInput as { readonly statement: unknown }).statement)
+        ) ||
+        (rawInput as { readonly statement: Uint8Array }).statement.byteLength > 64 * 1024
+      ) {
+        throw new Error("Desktop native E2EE is unavailable.");
+      }
+      try {
+        return await (
+          await ensureDesktopNativeE2eeHandshakeService()
+        ).start(
+          attemptHandle,
+          rawInput as Parameters<DesktopNativeE2eeHandshakeService["start"]>[1],
+        );
+      } catch {
+        throw new Error("Desktop native E2EE is unavailable.");
+      }
+    },
+  );
+
+  ipcMain.removeHandler(FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL);
+  ipcMain.handle(
+    FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL,
+    async (_event, handle: unknown, payload: unknown) => {
+      if (
+        typeof handle !== "string" ||
+        !(payload instanceof Uint8Array || Buffer.isBuffer(payload)) ||
+        payload.byteLength > 64 * 1024
+      ) {
+        throw new Error("Desktop native E2EE is unavailable.");
+      }
+      try {
+        return (await ensureDesktopNativeE2eeHandshakeService()).finish(
+          handle,
+          Uint8Array.from(payload),
+        );
+      } catch {
+        throw new Error("Desktop native E2EE is unavailable.");
+      }
+    },
+  );
+
+  ipcMain.removeHandler(DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL);
+  ipcMain.handle(DESTROY_NATIVE_E2EE_HANDSHAKE_CHANNEL, async (_event, handle: unknown) => {
+    if (typeof handle === "string") desktopNativeE2eeHandshakeService?.destroy(handle);
   });
 
   ipcMain.removeHandler(VALIDATE_HUB_ORIGIN_CHANNEL);
@@ -3170,6 +3303,7 @@ app.on("before-quit", () => {
   cancelBackendReadinessWait();
   stopBackend();
   desktopAuthorizationBroker.cancel();
+  desktopNativeE2eeHandshakeService?.dispose();
   void desktopSshEnvironmentBridge.dispose().catch(() => undefined);
   restoreStdIoCapture?.();
 });

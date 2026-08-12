@@ -289,6 +289,88 @@ export interface DesktopHostedIdentityState {
   readonly status: "signed-out" | "ready" | "unavailable";
 }
 
+export type DesktopNativeE2eePreparation =
+  | { readonly kind: "web-eligible" }
+  | { readonly kind: "strict-unavailable" }
+  | {
+      readonly kind: "native";
+      readonly attemptHandle: string;
+      readonly credentials: {
+        readonly tier: "native";
+        readonly accountId: string;
+        readonly identityPublicKey: Uint8Array;
+        readonly agreementPublicKey: Uint8Array;
+        readonly prekeyTranscript: Uint8Array;
+        readonly prekeySignature: Uint8Array;
+      };
+      readonly verifiedPin: {
+        readonly identityFingerprint: Uint8Array;
+        readonly continuityId: string;
+      };
+      readonly acceptedPolicyGeneration: number;
+    };
+
+export interface DesktopNativeE2eeHandshakeStartInput {
+  readonly statement: Uint8Array;
+  readonly channel: {
+    readonly hubOrigin: string;
+    readonly channelId: string;
+    readonly relayProtocolMajor: number;
+    readonly relayProtocolMinor: number;
+    readonly channelOpenCapability: string;
+    readonly channelOpenEffectiveRole: string;
+  };
+  readonly selectedSuite: number;
+  readonly offeredSuites: readonly number[];
+  readonly intendedCapability: string;
+  readonly intendedRole: string;
+  readonly now: number;
+}
+
+export type DesktopNativeE2eeHandshakeStartResult =
+  | {
+      readonly kind: "hello";
+      readonly handle: string;
+      readonly result: {
+        readonly kind: "hello";
+        readonly record: Uint8Array;
+        readonly contextBlock: Uint8Array;
+        readonly contextCommitment: Uint8Array;
+        readonly prologue: Uint8Array;
+        readonly deadlineAt: number;
+      };
+    }
+  | {
+      readonly kind: "fatal";
+      readonly result: {
+        readonly kind: "fatal";
+        readonly row: string;
+        readonly reason: string;
+      };
+    };
+
+export type DesktopNativeE2eeHandshakeFinishResult =
+  | {
+      readonly kind: "established";
+      readonly sessionBindingHash: Uint8Array;
+      readonly secrets: {
+        readonly epochSecretC2N: Uint8Array;
+        readonly epochSecretN2C: Uint8Array;
+        readonly exporterSecret: Uint8Array;
+        readonly serverConfirmationKey: Uint8Array;
+      };
+      readonly suite: number;
+      readonly contextBlock: Uint8Array;
+      readonly serverAcceptTbs: Uint8Array;
+      readonly confirmationTranscript: Uint8Array;
+      readonly webEphemeralPublicKey?: Uint8Array;
+    }
+  | {
+      readonly kind: "fatal";
+      readonly row: string;
+      readonly reason: string;
+    };
+
 export type DesktopHubOriginRejection =
   | "empty"
   | "too_long"
@@ -347,6 +429,19 @@ export interface DesktopBridge {
   getHostedIdentityState?: () => Promise<DesktopHostedIdentityState>;
   connectHostedIdentity?: () => Promise<DesktopHostedIdentityState>;
   disconnectHostedIdentity?: () => Promise<DesktopHostedIdentityState>;
+  prepareNativeE2eeAttempt?: (input: {
+    readonly accountId: string;
+    readonly nodeId: string;
+  }) => Promise<DesktopNativeE2eePreparation>;
+  startNativeE2eeHandshake?: (
+    attemptHandle: string,
+    input: DesktopNativeE2eeHandshakeStartInput,
+  ) => Promise<DesktopNativeE2eeHandshakeStartResult>;
+  finishNativeE2eeHandshake?: (
+    handle: string,
+    payload: Uint8Array,
+  ) => Promise<DesktopNativeE2eeHandshakeFinishResult>;
+  destroyNativeE2eeHandshake?: (handle: string) => Promise<void>;
   /**
    * Persist hub launch configuration and relaunch to apply it.
    *
