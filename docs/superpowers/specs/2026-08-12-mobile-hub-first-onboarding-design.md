@@ -1,6 +1,6 @@
 # Ryco Mobile Hub-First Onboarding Design
 
-- **Status:** Owner-approved design, 2026-08-12; written-spec review pending
+- **Status:** Owner-approved, 2026-08-12
 - **Scope:** `apps/mobile`, plus the public web native-authorization route in `apps/web`
 - **Target:** one focused public pull request against `main`
 - **Protocol:** existing native handoff v1, unchanged
@@ -119,7 +119,7 @@ browser session. An embedded WebView is never used.
 - Shows only bounded account and Hub display metadata already projected by the runtime.
 - Refreshes and displays the existing authorized Hub node directory.
 - Supports loading, empty, offline, and retry presentation.
-- Finishes to Inbox when an Inbox entry is available, otherwise to Nodes.
+- Offers explicit “Go to Inbox” and “View Nodes” exits; either completes onboarding.
 - Does not choose a preferred node, cache nodes for offline authority, or claim automatic
   reconnection policy.
 
