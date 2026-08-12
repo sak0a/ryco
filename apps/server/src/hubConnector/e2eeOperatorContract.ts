@@ -120,6 +120,15 @@ export const E2eeAuthorizationChangeView = Schema.Struct({
 });
 export type E2eeAuthorizationChangeView = typeof E2eeAuthorizationChangeView.Type;
 
+/** Public, short-lived node attestation rendered by the local owner surface. */
+export const E2eeCrossDeviceApprovalView = Schema.Struct({
+  payload: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(2_048)),
+  approvedAt: EpochMillis,
+  issuedAt: EpochMillis,
+  expiresAt: EpochMillis,
+});
+export type E2eeCrossDeviceApprovalView = typeof E2eeCrossDeviceApprovalView.Type;
+
 /**
  * §13.5's node-side half of the comparison, for the sessions established now.
  *

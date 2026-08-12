@@ -40,6 +40,10 @@ import {
   type NodeClientAuthorizationClient,
 } from "../hubIdentity/NodeClientAuthorizationClient.ts";
 import { makeNodeClientAuthorizationStore } from "../hubIdentity/NodeClientAuthorizationStore.ts";
+import {
+  makeNodeCrossDeviceApprovalService,
+  type NodeCrossDeviceApprovalService,
+} from "../hubIdentity/NodeCrossDeviceApprovalService.ts";
 import { makeNodeLocalIntroductionLedger } from "../hubIdentity/NodeLocalIntroductionLedger.ts";
 import {
   makeNodeLocalIntroductionService,
@@ -366,6 +370,8 @@ export interface HubIdentityRuntimeShape {
    * says it means.
    */
   readonly e2eeAuthorizationAdmin: NodeE2eeAuthorizationAdmin;
+  /** Owner-scanned, node-signed approval QR for an exact approved client. */
+  readonly crossDeviceApproval: NodeCrossDeviceApprovalService;
   /** Desktop-main-only Local Trusted Introduction over its child control channel. */
   readonly localIntroduction: NodeLocalIntroductionService;
   /** §5.7's generation the next advertisement carries, for the policy display. */
@@ -1072,28 +1078,37 @@ export async function makeHubIdentityRuntime(options: {
     return descriptor.publicKey;
   };
 
+  const activeApprovalDescriptor = async () => {
+    const state = await stateStore.readOrCreate();
+    const active = state.activeNode;
+    if (active === null) throw new HubIdentityRuntimeError("identity_unavailable");
+    const continuity = await evaluateContinuity(active.hubOrigin);
+    if (continuity.status !== "advertisable") {
+      throw new HubIdentityRuntimeError("identity_unavailable");
+    }
+    const selected = await rotation.authenticationKey(active.hubOrigin);
+    return {
+      hubOrigin: active.hubOrigin,
+      environmentId: state.environmentId,
+      nodeId: active.nodeId,
+      nodeIdentityPublicKey: await identityPublicKey(selected.secretName),
+      nodeContinuityId: continuity.continuityId,
+      nodePolicyGeneration: policyClient.generation(),
+      signApproval: (approvalTbs: Uint8Array) =>
+        signingIdentity.sign(selected.secretName, approvalTbs),
+    };
+  };
+
   const localIntroduction = makeNodeLocalIntroductionService({
-    active: async () => {
-      const state = await stateStore.readOrCreate();
-      const active = state.activeNode;
-      if (active === null) throw new HubIdentityRuntimeError("identity_unavailable");
-      const continuity = await evaluateContinuity(active.hubOrigin);
-      if (continuity.status !== "advertisable") {
-        throw new HubIdentityRuntimeError("identity_unavailable");
-      }
-      const selected = await rotation.authenticationKey(active.hubOrigin);
-      return {
-        hubOrigin: active.hubOrigin,
-        environmentId: state.environmentId,
-        nodeId: active.nodeId,
-        nodeIdentityPublicKey: await identityPublicKey(selected.secretName),
-        nodeContinuityId: continuity.continuityId,
-        nodePolicyGeneration: policyClient.generation(),
-        signApproval: (approvalTbs) => signingIdentity.sign(selected.secretName, approvalTbs),
-      };
-    },
+    active: activeApprovalDescriptor,
     authorization: authorizationClient,
     ledger: localIntroductionLedger,
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
+
+  const crossDeviceApproval = makeNodeCrossDeviceApprovalService({
+    active: activeApprovalDescriptor,
+    authorization: authorizationClient,
     ...(options.now === undefined ? {} : { now: options.now }),
   });
 
@@ -1434,6 +1449,7 @@ export async function makeHubIdentityRuntime(options: {
     registerE2eeChannel: () => policyClient.registerChannel(),
     e2eeClientAuthorization: authorizationClient,
     e2eeAuthorizationAdmin: authorizationClient,
+    crossDeviceApproval,
     localIntroduction,
     e2eeGeneration: () => policyClient.generation(),
     applyE2eePolicy: (proposal) => policyClient.applyChange(proposal),

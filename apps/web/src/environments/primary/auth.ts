@@ -60,6 +60,7 @@ export const leaveHub = auth.leaveHub;
 // hosted Hub mode, so none of these can leave a hosted browser.
 export const fetchNodeE2eeClients = auth.fetchNodeE2eeClients;
 export const applyNodeE2eeAuthorization = auth.applyNodeE2eeAuthorization;
+export const createNodeE2eeClientApprovalQr = auth.createNodeE2eeClientApprovalQr;
 export const setNodeE2eePairingWindow = auth.setNodeE2eePairingWindow;
 export const clearNodeE2eeRefusals = auth.clearNodeE2eeRefusals;
 export const fetchNodeE2eeSessions = auth.fetchNodeE2eeSessions;

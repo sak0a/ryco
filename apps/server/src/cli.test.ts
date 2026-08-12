@@ -808,6 +808,70 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
     }),
   );
 
+  it.effect("renders the approved phone attestation as a terminal QR and JSON", () =>
+    Effect.gen(function* () {
+      const baseDir = mkdtempSync(join(tmpdir(), "ryco-cli-e2ee-approval-qr-test-"));
+      const fingerprint = `SHA256:${"B".repeat(42)}A`;
+      const seen: unknown[] = [];
+      yield* withLiveHubCliServer(
+        baseDir,
+        () =>
+          Effect.gen(function* () {
+            const args = [
+              "e2ee",
+              "client",
+              "approval-qr",
+              fingerprint,
+              "--hub-origin",
+              "https://hub.example.test",
+              "--account-id",
+              "acct_stub",
+              "--base-dir",
+              baseDir,
+            ];
+            const human = yield* captureStdout(runCli(args));
+            assert.include(human.output, "Scan this code in Ryco");
+            assert.isTrue(
+              human.output.includes("█") ||
+                human.output.includes("▀") ||
+                human.output.includes("▄"),
+            );
+            assert.include(human.output, "fresh ticket, channel, and IK handshake");
+            assert.notInclude(human.output, "ryco-e2ee-approval-v1:test");
+
+            const json = yield* captureStdout(runCli([...args, "--json"]));
+            assert.deepInclude(JSON.parse(json.output), {
+              payload: "ryco-e2ee-approval-v1:test",
+              expiresAt: 303_000,
+            });
+            assert.deepEqual(seen, [
+              {
+                hubOrigin: "https://hub.example.test",
+                accountId: "acct_stub",
+                fingerprint,
+              },
+              {
+                hubOrigin: "https://hub.example.test",
+                accountId: "acct_stub",
+                fingerprint,
+              },
+            ]);
+          }),
+        {
+          createClientApprovalQr: async (key) => {
+            seen.push(key);
+            return {
+              payload: "ryco-e2ee-approval-v1:test",
+              approvedAt: 1_000,
+              issuedAt: 3_000,
+              expiresAt: 303_000,
+            };
+          },
+        },
+      );
+    }),
+  );
+
   it.effect("shows the admission policy and warns before a narrowing change", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "ryco-cli-e2ee-policy-test-"));

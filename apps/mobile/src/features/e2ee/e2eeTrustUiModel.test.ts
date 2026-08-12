@@ -1,8 +1,15 @@
+/// <reference types="node" />
+import { createPrivateKey, sign as signBytes } from "node:crypto";
+
 import { HOSTED_E2EE_CHANNEL_STATUSES } from "@ryco/client-runtime/authorization";
 import {
   E2EE_SAFETY_NUMBER_DIGITS,
   E2EE_SAFETY_NUMBER_MIN_DISPLAYED_BITS,
 } from "@ryco/shared/relayE2eeConstants";
+import {
+  encodeCrossDeviceApprovalQr,
+  encodeCrossDeviceApprovalTbs,
+} from "@ryco/shared/relayE2eeCrossDeviceApproval";
 import { e2eeKeyFingerprint, formatE2eeKeyFingerprint } from "@ryco/shared/relayE2eeKeys";
 import { deriveE2eeSafetyNumber } from "@ryco/shared/relayE2eeVerificationDisplay";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -29,6 +36,7 @@ import {
   CHANNEL_LABELS,
   CHANNEL_MESSAGES,
   createE2eeVerificationDraft,
+  confirmE2eeApprovalQr,
   deriveE2eeSecurityView,
   deriveE2eeVerificationView,
   e2eeSafetyNumberGroups,
@@ -47,6 +55,7 @@ import {
   E2EE_UNEXPECTED_NODE_MESSAGES,
   E2EE_UNEXPECTED_NODE_TITLES,
   E2EE_VERIFICATION_UNAVAILABLE,
+  requestE2eeApproval,
   type E2eeTrustAction,
   type E2eeVerificationDraft,
 } from "./e2eeTrustUiModel";
@@ -73,6 +82,46 @@ const CLIENT_PUBLIC_KEY = bytes(
   "047a593180860c4037c83c12749845c8ee1424dd297fadcb895e358255d2c7d2" +
     "b2a8ca25580f2626fe579062ff1b99ff91c24a0da06fb32b5be20148c9249f5650",
 );
+const NODE_PRIVATE_KEY = createPrivateKey({
+  key: Buffer.concat([
+    Buffer.from("302e020100300506032b657004220420", "hex"),
+    Buffer.from(Uint8Array.from({ length: 32 }, (_, index) => index)),
+  ]),
+  format: "der",
+  type: "pkcs8",
+});
+
+function approvalQr(now = 2_000): string {
+  const state = session({
+    selection: {
+      ...session().selection!,
+      nodeId: `node_${"N".repeat(22)}`,
+    },
+    presented: {
+      ...session().presented!,
+      continuityId: `nct_${"C".repeat(22)}`,
+    },
+  });
+  const tbs = encodeCrossDeviceApprovalTbs({
+    hubOrigin: HUB,
+    accountId: ACCOUNT,
+    nodeId: state.selection!.nodeId,
+    nodeIdentityPublicKey: NODE_PUBLIC_KEY,
+    clientIdentityFingerprint: e2eeKeyFingerprint("client-identity", CLIENT_PUBLIC_KEY),
+    maxRole: "owner",
+    capabilitySet: ["ryco.rpc"],
+    nodeContinuityId: state.presented!.continuityId,
+    nodePolicyGeneration: state.presented!.policyGeneration,
+    approvedAt: now - 1_000,
+    approvalId: new Uint8Array(32).fill(0x5a),
+    issuedAt: now - 500,
+    expiresAt: now + 299_500,
+  });
+  return encodeCrossDeviceApprovalQr({
+    tbs,
+    signature: Uint8Array.from(signBytes(null, tbs, NODE_PRIVATE_KEY)),
+  });
+}
 
 function display(nodeKey: Uint8Array): MobileE2eeIdentityDisplay {
   return {
@@ -758,6 +807,78 @@ describe("§13.2 step 5 actually promotes the pin", () => {
     expect(test.draft().errorMessage).toBe(E2EE_VERIFICATION_UNAVAILABLE);
     expect(test.draft().busy).toBe(false);
     expect(test.completed).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+});
+
+describe("one-scan cross-device approval", () => {
+  const qrSession = () =>
+    session({
+      selection: {
+        ...session().selection!,
+        nodeId: `node_${"N".repeat(22)}`,
+      },
+      presented: {
+        ...session().presented!,
+        continuityId: `nct_${"C".repeat(22)}`,
+      },
+    });
+
+  it("requests a pairing-only reconnect by creating only an unverified local record", async () => {
+    const beginPairing = vi.spyOn(mobileE2eeTrustStore, "beginPairing").mockResolvedValue({
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      localNodeHandle: "handle-qr",
+    });
+    const promote = vi.spyOn(mobileE2eeTrustStore, "promote");
+    await expect(requestE2eeApproval(qrSession())).resolves.toBeNull();
+    expect(beginPairing).toHaveBeenCalledWith({
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      nodeId: `node_${"N".repeat(22)}`,
+      environmentId: "env_1",
+    });
+    expect(promote).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("promotes only a node-signed QR bound to this exact phone and current statement", async () => {
+    const beginPairing = vi.spyOn(mobileE2eeTrustStore, "beginPairing").mockResolvedValue({
+      hubOrigin: HUB,
+      accountId: ACCOUNT,
+      localNodeHandle: "handle-qr",
+    });
+    const promote = vi.spyOn(mobileE2eeTrustStore, "promote").mockResolvedValue();
+    await expect(
+      confirmE2eeApprovalQr({ session: qrSession(), payload: approvalQr(), decidedAt: 2_000 }),
+    ).resolves.toBeNull();
+    expect(beginPairing).toHaveBeenCalledTimes(1);
+    expect(promote).toHaveBeenCalledTimes(1);
+    expect(promote.mock.calls[0]?.[0]).toMatchObject({
+      verifiedFingerprint: PRESENTED.fingerprint,
+      approvedAt: 1_000,
+      decidedAt: 2_000,
+      acceptedPolicyGeneration: 4,
+      continuityId: `nct_${"C".repeat(22)}`,
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("rejects a copied code for another phone or stale statement before any trust write", async () => {
+    const beginPairing = vi.spyOn(mobileE2eeTrustStore, "beginPairing");
+    const promote = vi.spyOn(mobileE2eeTrustStore, "promote");
+    const mismatched = qrSession();
+    const failure = await confirmE2eeApprovalQr({
+      session: {
+        ...mismatched,
+        presented: { ...mismatched.presented!, policyGeneration: 5 },
+      },
+      payload: approvalQr(),
+      decidedAt: 2_000,
+    });
+    expect(failure).toContain("does not match this phone, node, account");
+    expect(beginPairing).not.toHaveBeenCalled();
+    expect(promote).not.toHaveBeenCalled();
     vi.restoreAllMocks();
   });
 });

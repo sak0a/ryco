@@ -52,6 +52,10 @@
       "types": "./src/relayE2eeLocalIntroduction.ts",
       "import": "./src/relayE2eeLocalIntroduction.ts"
     },
+    "./relayE2eeCrossDeviceApproval": {
+      "types": "./src/relayE2eeCrossDeviceApproval.ts",
+      "import": "./src/relayE2eeCrossDeviceApproval.ts"
+    },
     "./relayE2eeVerificationDisplay": {
       "types": "./src/relayE2eeVerificationDisplay.ts",
       "import": "./src/relayE2eeVerificationDisplay.ts"

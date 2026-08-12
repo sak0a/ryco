@@ -374,6 +374,14 @@ export function makeNodeE2eeOperator(options: {
     // stale copy of a record the owner just deleted would be the one answer an
     // operator could misread as "it is still there".
     purgeClient: async (key) => changeView(await admin().purge(authorizationKey(key))),
+    createClientApprovalQr: async (key) => {
+      const parsed = authorizationKey(key);
+      return identity.crossDeviceApproval.create({
+        hubOrigin: parsed.hubOrigin,
+        accountId: parsed.accountId,
+        clientIdentityFingerprint: parsed.clientIdentityFingerprint,
+      });
+    },
     openPairingWindow: async (fingerprint) => {
       let parsed: Uint8Array;
       try {

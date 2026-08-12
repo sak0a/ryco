@@ -2,6 +2,7 @@ import { E2EE_SUITE_25519_CHACHAPOLY_SHA256 } from "@ryco/shared/relayE2eeWire";
 
 import type { HubConnectorE2eeOperator } from "../HubConnectorLive.ts";
 import type { NodeE2eeAuthorizationAdmin } from "../HubIdentityRuntime.ts";
+import type { NodeCrossDeviceApprovalService } from "../../hubIdentity/NodeCrossDeviceApprovalService.ts";
 import type { NodeLocalIntroductionService } from "../../hubIdentity/NodeLocalIntroductionService.ts";
 import type { NodeNativeClaimService } from "../../hubIdentity/NodeNativeClaimService.ts";
 import type {
@@ -24,6 +25,15 @@ export const stubLocalIntroductionService = (
     throw new Error("unused");
   };
   return { descriptor: unused, complete: unused, ...overrides };
+};
+
+export const stubCrossDeviceApprovalService = (
+  overrides: Partial<NodeCrossDeviceApprovalService> = {},
+): NodeCrossDeviceApprovalService => {
+  const unused = async (): Promise<never> => {
+    throw new Error("unused");
+  };
+  return { create: unused, ...overrides };
 };
 
 export const stubNativeNodeClaimService = (
@@ -100,6 +110,12 @@ export const stubE2eeOperator = (
     abortedHandshakes: 0,
   }),
   purgeClient: async () => ({ closedChannels: 0, abortedHandshakes: 0 }),
+  createClientApprovalQr: async () => ({
+    payload: "ryco-e2ee-approval-v1:stub",
+    approvedAt: 2_000,
+    issuedAt: 3_000,
+    expiresAt: 303_000,
+  }),
   openPairingWindow: async () => stubClientListing(),
   closePairingWindow: async () => stubClientListing(),
   clearRefusedPairingAttempts: async () => stubClientListing({ refusedPairingAttempts: 0 }),

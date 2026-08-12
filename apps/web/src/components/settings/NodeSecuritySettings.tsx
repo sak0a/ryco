@@ -1,4 +1,4 @@
-import { CopyIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
+import { CopyIcon, QrCodeIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
@@ -6,6 +6,7 @@ import type {
   NodeE2eeClientListing,
   NodeE2eeClientRecord,
   NodeE2eeContinuity,
+  NodeE2eeCrossDeviceApproval,
   NodeE2eeFallback,
   NodeE2eePolicy,
   NodeE2eePolicyChange,
@@ -27,6 +28,7 @@ import {
   applyNodeE2eeContinuity,
   applyNodeE2eePolicy,
   clearNodeE2eeRefusals,
+  createNodeE2eeClientApprovalQr,
   fetchHubEnrollment,
   fetchNodeE2eeClients,
   fetchNodeE2eeContinuity,
@@ -57,7 +59,18 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "../ui/dialog";
 import { Input } from "../ui/input";
+import { QRCodeSvg } from "../ui/qr-code";
 import { Switch } from "../ui/switch";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import {
@@ -412,6 +425,10 @@ export function NodeSecuritySettings() {
     readonly destructive: boolean;
   } | null>(null);
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null);
+  const [approvalQr, setApprovalQr] = useState<{
+    readonly approval: NodeE2eeCrossDeviceApproval;
+    readonly label: string;
+  } | null>(null);
   const [windowFingerprint, setWindowFingerprint] = useState("");
   const mountedRef = useRef(true);
   const failuresRef = useRef(0);
@@ -637,11 +654,51 @@ export function NodeSecuritySettings() {
           accountId: request.accountId,
           hubOrigin: request.hubOrigin,
         }),
-        run: () => run(() => applyNodeE2eeAuthorization(request), `Client approved as ${role}.`),
+        run: () =>
+          run(async () => {
+            await applyNodeE2eeAuthorization(request);
+            try {
+              const approval = await createNodeE2eeClientApprovalQr({
+                hubOrigin: request.hubOrigin,
+                accountId: request.accountId,
+                fingerprint: request.fingerprint,
+              });
+              if (mountedRef.current) {
+                setApprovalQr({ approval, label: request.fingerprint });
+              }
+              return `Client approved as ${role}. Scan the code on the new device.`;
+            } catch {
+              // Approval is already durable. Report that truthfully and leave
+              // the approved row's retry action available rather than turning
+              // a QR rendering failure into a false "approval failed" result.
+              return `Client approved as ${role}. The QR code was not created; use Show phone QR to retry.`;
+            }
+          }, `Client approved as ${role}.`),
       });
     },
     [run],
   );
+
+  const showApprovalQr = useCallback(async (record: NodeE2eeClientRecord) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const approval = await createNodeE2eeClientApprovalQr({
+        hubOrigin: record.hubOrigin,
+        accountId: record.accountId,
+        fingerprint: record.fingerprint,
+      });
+      if (mountedRef.current) {
+        setApprovalQr({ approval, label: record.displayLabel ?? record.fingerprint });
+      }
+    } catch (cause) {
+      if (mountedRef.current) {
+        setError(cause instanceof Error ? cause.message : "Unable to create the phone QR code.");
+      }
+    } finally {
+      if (mountedRef.current) setBusy(false);
+    }
+  }, []);
 
   const fingerprintView = nodeEnrollmentFingerprintView(snapshot.enrollmentFingerprint);
   const fallback = useMemo(() => nodeFallbackReport(snapshot.fallback), [snapshot.fallback]);
@@ -879,6 +936,7 @@ export function NodeSecuritySettings() {
                 busy={busy}
                 onAuthorize={authorize}
                 onApprove={approve}
+                onShowApprovalQr={showApprovalQr}
               />
             ))}
             {snapshot.clients !== null && snapshot.clients.records.length === 0 ? (
@@ -1087,6 +1145,43 @@ export function NodeSecuritySettings() {
           </AlertDialogFooter>
         </AlertDialogPopup>
       </AlertDialog>
+
+      <Dialog open={approvalQr !== null} onOpenChange={(open) => !open && setApprovalQr(null)}>
+        <DialogPopup className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Verify this phone</DialogTitle>
+            <DialogDescription>
+              On the new phone, open node verification and scan this code. It is bound to that
+              phone&apos;s key and expires after five minutes.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4">
+            {approvalQr ? (
+              <div className="flex flex-col items-center gap-3">
+                <div className="rounded-2xl bg-white p-3">
+                  <QRCodeSvg
+                    value={approvalQr.approval.payload}
+                    size={240}
+                    level="M"
+                    marginSize={2}
+                    title="Node approval — scan with Ryco on the new phone"
+                  />
+                </div>
+                <p className="max-w-full break-all text-center font-mono text-[11px] text-muted-foreground">
+                  {approvalQr.label}
+                </p>
+              </div>
+            ) : null}
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              The code contains no secret and grants no access by itself. Ryco will reconnect and
+              prove both device keys after the scan.
+            </p>
+          </DialogPanel>
+          <DialogFooter variant="bare">
+            <DialogClose render={<Button variant="outline" />}>Done</DialogClose>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
     </SettingsPageContainer>
   );
 }
@@ -1229,6 +1324,7 @@ function ClientRecordRow({
   busy,
   onAuthorize,
   onApprove,
+  onShowApprovalQr,
 }: {
   readonly record: NodeE2eeClientRecord;
   readonly busy: boolean;
@@ -1238,6 +1334,7 @@ function ClientRecordRow({
     message: string,
   ) => void;
   readonly onApprove: (request: NodeE2eeAuthorizationRequest, role: NodeE2eeApprovableRole) => void;
+  readonly onShowApprovalQr: (record: NodeE2eeClientRecord) => void;
 }) {
   const key = {
     hubOrigin: record.hubOrigin,
@@ -1309,6 +1406,17 @@ function ClientRecordRow({
               }
             >
               Reduce to viewer
+            </Button>
+          ) : null}
+          {record.status === "approved" ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              onClick={() => onShowApprovalQr(record)}
+            >
+              <QrCodeIcon className="size-3.5" />
+              Show phone QR
             </Button>
           ) : null}
           {record.status === "revoked" ? null : (
