@@ -9,6 +9,7 @@ import {
   mobileAuthorizationCallbackUri,
   type MobileNativeAuthorizationDependencies,
 } from "./nativeAuthorization";
+import { createNativeAuthorizationPhaseStore } from "../features/onboarding/nativeAuthorizationState";
 
 function dependencies(
   overrides: Partial<MobileNativeAuthorizationDependencies> = {},
@@ -81,11 +82,80 @@ describe("mobile native authorization adapter", () => {
     );
   });
 
+  it("reports opening, waiting, and idle without publishing browser data", async () => {
+    const phase = createNativeAuthorizationPhaseStore();
+    const snapshots: string[] = [];
+    phase.subscribe(() => snapshots.push(phase.getSnapshot().phase));
+    let releaseBrowser: ((value: { type: "success"; url: string }) => void) | undefined;
+    const service = createMobileNativeAuthorization(
+      dependencies({
+        phase,
+        loadBrowser: async () =>
+          ({
+            openAuthSessionAsync: () =>
+              new Promise((resolve) => {
+                releaseBrowser = resolve;
+              }),
+            dismissAuthSession: () => {},
+          }) as never,
+      }),
+    );
+
+    const pending = service.openSystemBrowser(
+      "https://hub.ryco.dev/native/authorize/id",
+      "ryco-dev://hosted/complete",
+    );
+    await Promise.resolve();
+    expect(snapshots).toEqual(["opening", "waiting"]);
+
+    releaseBrowser?.({
+      type: "success",
+      url: "ryco-dev://hosted/complete?code=x&state=y&handoff_id=z",
+    });
+    await expect(pending).resolves.toMatchObject({ type: "success" });
+    expect(snapshots).toEqual(["opening", "waiting", "idle"]);
+    expect(JSON.stringify(phase.getSnapshot())).not.toContain("handoff_id");
+  });
+
+  it("reports cancelled for browser dismissal and idle for a locked browser", async () => {
+    const dismissed = createNativeAuthorizationPhaseStore();
+    const dismissedService = createMobileNativeAuthorization(
+      dependencies({
+        phase: dismissed,
+        loadBrowser: async () =>
+          ({ openAuthSessionAsync: async () => ({ type: "dismiss" }) }) as never,
+      }),
+    );
+    await expect(
+      dismissedService.openSystemBrowser(
+        "https://hub.ryco.dev/native/authorize/id",
+        "ryco-dev://hosted/complete",
+      ),
+    ).resolves.toEqual({ type: "dismiss" });
+    expect(dismissed.getSnapshot().phase).toBe("cancelled");
+
+    const locked = createNativeAuthorizationPhaseStore();
+    const lockedService = createMobileNativeAuthorization(
+      dependencies({
+        phase: locked,
+        loadBrowser: async () =>
+          ({ openAuthSessionAsync: async () => ({ type: "locked" }) }) as never,
+      }),
+    );
+    await lockedService.openSystemBrowser(
+      "https://hub.ryco.dev/native/authorize/id",
+      "ryco-dev://hosted/complete",
+    );
+    expect(locked.getSnapshot().phase).toBe("idle");
+  });
+
   it("dismisses the browser and resolves as cancelled when the attempt is aborted", async () => {
     const dismissAuthSession = vi.fn();
+    const phase = createNativeAuthorizationPhaseStore();
     const pending = new Promise<never>(() => {});
     const service = createMobileNativeAuthorization(
       dependencies({
+        phase,
         loadBrowser: async () =>
           ({
             openAuthSessionAsync: () => pending,
@@ -104,5 +174,6 @@ describe("mobile native authorization adapter", () => {
 
     await expect(result).resolves.toEqual({ type: "cancel" });
     expect(dismissAuthSession).toHaveBeenCalledTimes(1);
+    expect(phase.getSnapshot().phase).toBe("cancelled");
   });
 });
