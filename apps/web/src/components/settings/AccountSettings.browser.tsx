@@ -53,6 +53,7 @@ import {
   hostedHubStore,
   hostedRecoveryCodeDisplayStore,
 } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { AccountSettingsPanel } from "./AccountSettings";
 import {
   STEP_UP_INFERRED_ATTEMPT_LIMIT,
@@ -315,6 +316,7 @@ describe("AccountSettingsPanel", () => {
     // Drops any display lease a previous test left behind, which is the only
     // thing the runtime keeps outside its two stores.
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     hostedHubStore.setState(
       {
         ...hostedHubStore.getInitialState(),

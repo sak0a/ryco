@@ -93,10 +93,46 @@ export function parseHostedNodeHref(browserHref: string): ParsedHostedNodeHref {
   };
 }
 
-/** Prefix a logical href with the routed node segment (no-op without one). */
+/**
+ * First path segments owned by the Hub website rather than by a node's logical
+ * route tree.
+ *
+ * Declared here rather than imported from `hubRoutes.ts` to keep this module
+ * free of a cycle — `hubRoutes` reads this module's published route. The two
+ * are kept in agreement by a test asserting this set equals
+ * `HUB_ROUTE_TOP_SEGMENTS`.
+ */
+const HUB_ROUTE_TOP_SEGMENT_SET: ReadonlySet<string> = new Set([
+  "sign-in",
+  "sign-up",
+  "public-signup",
+  "password-reset",
+  "invitation",
+  "setup",
+  "email-verification",
+  "nodes",
+  "account",
+]);
+
+function isHubRoutePathname(pathname: string): boolean {
+  if (!pathname.startsWith("/")) return false;
+  const segment = pathname.slice(1).split("/", 1)[0] ?? "";
+  return HUB_ROUTE_TOP_SEGMENT_SET.has(segment);
+}
+
+/**
+ * Prefix a logical href with the routed node segment (no-op without one).
+ *
+ * Hub pathnames are exempt. This function is the history's `createHref`, so it
+ * rewrites **every** href the app renders while a node is selected; without the
+ * exemption a link to `/account` would be emitted as `/node/<id>/account`,
+ * which parses back out as the node's logical `/account` and never reaches the
+ * Hub page at all.
+ */
 export function buildHostedNodeHref(logicalHref: string, nodeId: string | null): string {
   if (nodeId === null || !isValidHostedNodeRouteSegment(nodeId)) return logicalHref;
   const { pathname, suffix } = splitHref(logicalHref);
+  if (isHubRoutePathname(pathname)) return logicalHref;
   const scopedPathname =
     pathname === "" || pathname === "/"
       ? `${HOSTED_NODE_ROUTE_PREFIX}/${nodeId}`

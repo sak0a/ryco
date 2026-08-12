@@ -28,6 +28,7 @@ vi.mock("../../env", async (importOriginal) => ({
 }));
 
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import type { HostedHubNode } from "../../hostedHub/types";
 import { HostedHubRoot, HostedNodeMenu } from "./HostedHubRoot";
@@ -90,6 +91,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   // The §13 projection is module scope, so a channel left standing by another
   // case would render this one's disclosure at the wrong claim.
   resetWebE2eeSession();
@@ -105,6 +107,7 @@ afterEach(async () => {
   await page.viewport(1_280, 720);
   mounted = null;
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   resetWebE2eeSession();
   vi.restoreAllMocks();
   document.body.innerHTML = "";
@@ -231,6 +234,7 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
 
       // Node selection: rows and controls are named, presence reads as text
       // (never color alone), and stale directory data announces as a status.
@@ -922,5 +926,68 @@ describe("HostedHubRoot accessibility and responsive flows", () => {
 
     await expect.element(page.getByText("Incompatible", { exact: true })).toBeVisible();
     await expect.element(replacementButton).toBeEnabled();
+  });
+});
+
+/**
+ * The Hub's pages have addresses.
+ *
+ * Every one of these screens used to be a `useState` discriminator at `/`, so a
+ * refresh restored nothing, Back left the Hub instead of stepping out of the
+ * ceremony, and no page could be linked or bookmarked.
+ */
+describe("hosted Hub routes", () => {
+  it("gives each signed-out ceremony its own address and restores it on reload", async () => {
+    for (const [control, pathname, heading] of [
+      ["Redeem invitation", "/invitation", "Redeem your invitation"],
+      ["Password, recovery code, or reset", "/sign-in/password", "Sign in with a password"],
+    ] as const) {
+      mounted = await render(<HostedHubRoot />);
+      await page.getByRole("button", { name: control }).click();
+      await expect.element(page.getByRole("heading", { name: heading })).toBeVisible();
+      expect(window.location.pathname, control).toBe(pathname);
+
+      // A reload is a fresh mount against the same URL.
+      await mounted.unmount();
+      mounted = await render(<HostedHubRoot />);
+      await expect.element(page.getByRole("heading", { name: heading })).toBeVisible();
+
+      await mounted.unmount();
+      mounted = null;
+      hostedHubController.resetForTests();
+      resetHubRoutesForTests();
+    }
+  });
+
+  it("steps back through a ceremony instead of leaving the Hub", async () => {
+    mounted = await render(<HostedHubRoot />);
+    await page.getByRole("button", { name: "Redeem invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { name: "Redeem your invitation" }))
+      .toBeVisible();
+
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { name: "Connect to your Ryco nodes" }))
+      .toBeVisible();
+    // Back lands on the Hub home the ceremony was entered from — `/` and
+    // `/sign-in` both render the landing page — rather than leaving the site.
+    expect(window.location.pathname).not.toBe("/invitation");
+  });
+
+  it("names each page in the document title", async () => {
+    mounted = await render(<HostedHubRoot />);
+    // The Hub home is titled with the bare wordmark; a page adds its own name.
+    await vi.waitFor(() => {
+      expect(document.title).toContain("Ryco Hub");
+    });
+    await page.getByRole("button", { name: "Redeem invitation" }).click();
+    await vi.waitFor(() => {
+      expect(document.title).toContain("Redeem your invitation");
+    });
+    // Not the desktop client's name or release channel: the Hub is its own
+    // product. `branding.ts` would have produced "Ryco (Beta)".
+    expect(document.title).toContain("Ryco Hub");
+    expect(document.title).not.toContain("(Beta)");
   });
 });

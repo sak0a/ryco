@@ -43,6 +43,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 }));
 
 import { hostedHubController, useHostedHubStore } from "../hostedHub/state";
+import { resetHubRoutesForTests } from "../hostedHub/hubRoutes";
 import type { HostedHubNode } from "../hostedHub/types";
 import { syncDocumentPresentationTier } from "../lib/presentationTier";
 import {
@@ -147,7 +148,10 @@ const ENTRY_SURFACES: readonly EntrySurface[] = [
       await page.getByRole("button", { name: "Redeem invitation" }).click();
       await expect.element(page.getByLabelText("Invitation code")).toBeVisible();
     },
-    marker: () => waitForVisibleByText("Connect to your Ryco nodes"),
+    // Each ceremony is its own Hub page with its own heading now. It used to be
+    // a form appended below the sign-in page's copy, which is why this marker
+    // was the sign-in headline.
+    marker: () => waitForVisibleByText("Redeem your invitation"),
     primaryAction: () => findButtonByText("Create account and passkey"),
   },
   {
@@ -239,6 +243,7 @@ async function sweepEntrySurfaces(options: {
   expect(surfaces.length).toBeGreaterThan(0);
   for (const surface of surfaces) {
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     surface.seed();
     mounted = await render(<HostedHubRoot />);
     await surface.prepare?.();
@@ -293,6 +298,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     localStorage.clear();
     sessionStorage.clear();
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     navigate.mockClear();
   });
 
@@ -300,6 +306,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     vi.restoreAllMocks();
     document.body.innerHTML = "";
     await resetPointerEmulation();
@@ -350,6 +357,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
       // Desktop-density guard: the phone-only 44px floor must not leak into
       // the desktop tier (size="lg" resolves below 44px there).
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
       useHostedHubStore.setState({ bootstrapAvailable: true });
       mounted = await render(<HostedHubRoot />);
       const signIn = await vi.waitFor(() => {
@@ -418,6 +426,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
       await mounted.unmount();
       mounted = null;
       hostedHubController.resetForTests();
+      resetHubRoutesForTests();
 
       useHostedHubStore.setState({
         accountStatus: "authenticated",
@@ -505,6 +514,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     await mounted.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
 
     // 844×390 coarse landscape: the pill grows to the coarse 44px floor and
     // the sheet stays contained; with reduced motion emulated, the popup's
@@ -1107,9 +1117,9 @@ const PROVING_TESTS: readonly ProvingCell[] = [
     test: "keeps the polite ceremony announcement and Hub recovery mounted in registration mode",
   },
   {
-    cell: "step8 entry — desktop unchanged",
+    cell: "step8 entry — desktop tier keeps flow layout and compact density",
     file: "HES",
-    test: "leaves the desktop entry card, its top-right sign-out, and its static actions unchanged",
+    test: "puts the desktop directory in the Hub shell with its account controls in the Hub bar",
   },
   {
     cell: "step8 pairing — reachable + 44px",

@@ -14,6 +14,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 }));
 
 import { hostedHubController, useHostedHubStore } from "../hostedHub/state";
+import { resetHubRoutesForTests } from "../hostedHub/hubRoutes";
 import { getPresentationTier, syncDocumentPresentationTier } from "../lib/presentationTier";
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from "../rightPanelLayout";
 import { useTierOverrideStore } from "../tierOverrideStore";
@@ -64,12 +65,14 @@ describe("presentation tier", () => {
     useTierOverrideStore.setState({ override: null });
     localStorage.clear();
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     await page.viewport(DESKTOP_VIEWPORT.width, DESKTOP_VIEWPORT.height);
   });
 
   afterEach(async () => {
     useTierOverrideStore.setState({ override: null });
     hostedHubController.resetForTests();
+    resetHubRoutesForTests();
     document.body.innerHTML = "";
     await page.viewport(DESKTOP_VIEWPORT.width, DESKTOP_VIEWPORT.height);
   });

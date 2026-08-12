@@ -6,6 +6,7 @@ import { render } from "vitest-browser-react";
 
 import { hostedHubApi } from "../../hostedHub/api";
 import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { HostedNativeAuthorizationRoute } from "./HostedNativeAuthorizationRoute";
 
 const account = {
@@ -32,6 +33,7 @@ let mounted: Awaited<ReturnType<typeof render>> | null = null;
 
 beforeEach(() => {
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   useHostedHubStore.setState({
     accountStatus: "authenticated",
     account,
@@ -43,6 +45,7 @@ afterEach(async () => {
   await mounted?.unmount();
   mounted = null;
   hostedHubController.resetForTests();
+  resetHubRoutesForTests();
   vi.restoreAllMocks();
   document.body.innerHTML = "";
 });
