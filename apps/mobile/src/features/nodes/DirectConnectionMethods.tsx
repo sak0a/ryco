@@ -23,7 +23,7 @@ export function DirectConnectionMethods(props: {
             accessibilityLabel={`${method.title}. ${method.detail}`}
             disabled={props.disabled}
             onPress={() => props.onChange(method.id)}
-            className={`min-h-16 flex-row items-center gap-3 rounded-full border px-5 py-3 active:bg-subtle disabled:opacity-40 ${
+            className={`min-h-16 flex-row items-center gap-3 rounded-2xl border px-4 py-3 active:bg-subtle disabled:opacity-40 ${
               selected ? "border-accent bg-accent-bg" : "border-border bg-card"
             }`}
           >

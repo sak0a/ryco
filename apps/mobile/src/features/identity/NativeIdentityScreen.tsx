@@ -15,6 +15,7 @@ import {
   View,
 } from "react-native";
 
+import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import {
@@ -247,7 +248,6 @@ function Action(props: {
   readonly onPress: () => void;
   readonly disabled?: boolean;
   readonly quiet?: boolean;
-  readonly compact?: boolean;
 }) {
   return (
     <Pressable
@@ -256,20 +256,51 @@ function Action(props: {
       disabled={props.disabled}
       onPress={props.onPress}
       className={cn(
-        "items-center justify-center rounded-full px-5 active:scale-[0.985] disabled:opacity-40",
-        props.compact ? "min-h-11" : "min-h-13.5",
+        "min-h-13.5 items-center justify-center rounded-full px-5 active:scale-[0.985] disabled:opacity-40",
         props.quiet ? "border border-border bg-card" : "bg-primary",
       )}
     >
       <Text
         className={cn(
-          "font-ryco-bold",
-          props.compact ? "text-sm" : "text-base",
+          "text-base font-ryco-bold",
           props.quiet ? "text-foreground" : "text-primary-foreground",
         )}
       >
         {props.label}
       </Text>
+    </Pressable>
+  );
+}
+
+function EntryOption(props: {
+  readonly label: string;
+  readonly detail?: string;
+  readonly first?: boolean;
+  readonly onPress: () => void;
+}) {
+  const chevronColor = useThemeColor("--color-icon-subtle");
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.detail ? `${props.label}. ${props.detail}` : props.label}
+      onPress={props.onPress}
+      className={cn(
+        "min-h-12 flex-row items-center gap-3 px-4 py-3 active:bg-subtle",
+        props.first ? "" : "border-t border-border-subtle",
+      )}
+    >
+      <Text className="min-w-0 flex-1 text-sm font-ryco-medium text-foreground">{props.label}</Text>
+      {props.detail ? (
+        <Text numberOfLines={1} className="max-w-[44%] text-right text-xs text-foreground-muted">
+          {props.detail}
+        </Text>
+      ) : null}
+      <SymbolView
+        name={{ ios: "chevron.right", android: "chevron_right" }}
+        size={15}
+        tintColor={chevronColor}
+        type="monochrome"
+      />
     </Pressable>
   );
 }
@@ -771,7 +802,7 @@ export function NativeIdentityScreen() {
             contentFit="contain"
             tintColor={logoColor as string}
             accessibilityLabel="Ryco"
-            style={{ width: 112, height: 112, alignSelf: "center", marginBottom: 34 }}
+            style={{ width: 164, height: 164, alignSelf: "center", marginBottom: 32 }}
           />
           <Text className="text-center text-[30px] font-ryco-bold tracking-[-0.8px] text-foreground">
             {title}
@@ -851,29 +882,30 @@ export function NativeIdentityScreen() {
                     })
                   }
                 />
-                {nativePolicy?.login.methods.includes("recovery_code") ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => setScreen({ name: "recovery" })}
-                    className="min-h-11 items-center justify-center rounded-full px-4 active:bg-subtle"
-                  >
-                    <Text className="text-sm font-ryco-bold text-foreground-muted">
-                      Use a recovery code
-                    </Text>
-                  </Pressable>
-                ) : null}
-                <Action
-                  label={`Using ${profile?.label ?? "Ryco Hub"} · Different Hub`}
-                  quiet
-                  compact
-                  onPress={() => setEditorVisible(true)}
-                />
-                <Action
-                  label="Pair a device directly"
-                  quiet
-                  compact
-                  onPress={() => navigation.navigate("ConnectionsNew" as never)}
-                />
+                <View className="mt-1 gap-2">
+                  <Text className="px-1 text-xs font-ryco-medium text-foreground-muted">
+                    Other options
+                  </Text>
+                  <View className="overflow-hidden rounded-2xl border border-border bg-card">
+                    {nativePolicy?.login.methods.includes("recovery_code") ? (
+                      <EntryOption
+                        first
+                        label="Use a recovery code"
+                        onPress={() => setScreen({ name: "recovery" })}
+                      />
+                    ) : null}
+                    <EntryOption
+                      first={!nativePolicy?.login.methods.includes("recovery_code")}
+                      label="Different Hub"
+                      detail={profile?.label ?? "Ryco Hub"}
+                      onPress={() => setEditorVisible(true)}
+                    />
+                    <EntryOption
+                      label="Pair a device"
+                      onPress={() => navigation.navigate("ConnectionsNew" as never)}
+                    />
+                  </View>
+                </View>
               </>
             ) : screen.name === "mailbox" || screen.name === "reset-mailbox" ? (
               <>
