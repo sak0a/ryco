@@ -47,6 +47,8 @@ import { cancelVerifiedEmailAttempt } from "./nativeIdentityCancellation";
 import {
   mailboxCodePrompt,
   PRIVATE_MAILBOX_PRESENTATION,
+  PRIVATE_RESET_MAILBOX_PRESENTATION,
+  passwordResetMailboxPresentation,
 } from "./nativeIdentityPresentation";
 import {
   createNativeIdentityTransactionStore,
@@ -1011,13 +1013,16 @@ export function NativeIdentityScreen() {
                         attemptId: response.attemptId,
                         attemptSecret: response.attemptSecret,
                         expiresAt: response.expiresAt,
-                        presentation: PRIVATE_MAILBOX_PRESENTATION,
+                        presentation: PRIVATE_RESET_MAILBOX_PRESENTATION,
                       });
                       setAntiBotToken(null);
                       setScreen({
                         name: "reset-mailbox",
                         ...response,
-                        presentation: normalizedIdentifier,
+                        presentation: passwordResetMailboxPresentation(
+                          normalizedIdentifier,
+                          isEmail(normalizedIdentifier),
+                        ),
                       });
                     })
                   }
