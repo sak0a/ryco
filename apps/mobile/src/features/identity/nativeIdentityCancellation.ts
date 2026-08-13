@@ -14,3 +14,23 @@ export function verifiedEmailCancellation(
     attemptSecret: response.activationSecret,
   };
 }
+
+/**
+ * Cleanup is useful but never authoritative for the verified-email outcome.
+ * The Hub expires an attempt independently, so a failed cancellation must not
+ * replace precise signup/login guidance with a generic request error.
+ */
+export async function cancelVerifiedEmailAttempt(
+  api: {
+    readonly cancelNativeIdentityAttempt: (
+      request: HostedIdentity.NativeIdentityAttemptCancelRequest,
+    ) => Promise<unknown>;
+  },
+  response: HostedIdentity.NativeIdentityEmailVerifyResponse,
+): Promise<void> {
+  try {
+    await api.cancelNativeIdentityAttempt(verifiedEmailCancellation(response));
+  } catch {
+    // The bounded server attempt expires even when eager cleanup is unavailable.
+  }
+}

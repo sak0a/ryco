@@ -43,7 +43,11 @@ import {
   createNativeIdentityCompletionJournal,
   type NativeIdentityCompletionJournal,
 } from "./completionJournal";
-import { verifiedEmailCancellation } from "./nativeIdentityCancellation";
+import { cancelVerifiedEmailAttempt } from "./nativeIdentityCancellation";
+import {
+  mailboxCodePrompt,
+  PRIVATE_MAILBOX_PRESENTATION,
+} from "./nativeIdentityPresentation";
 import {
   createNativeIdentityTransactionStore,
   type NativeIdentityTransactionRecord,
@@ -95,6 +99,7 @@ type Screen =
       readonly attemptId: HostedIdentity.NativeIdentityResetAttemptId;
       readonly attemptSecret: HostedIdentity.NativeIdentityPasswordResetResponse["attemptSecret"];
       readonly expiresAt: number;
+      readonly presentation: string;
     }
   | {
       readonly name: "reset-password";
@@ -216,6 +221,7 @@ function screenFromRecord(record: NativeIdentityTransactionRecord): Screen {
         attemptSecret:
           record.attemptSecret as HostedIdentity.NativeIdentityPasswordResetResponse["attemptSecret"],
         expiresAt: record.expiresAt,
+        presentation: record.presentation,
       };
     }
     if (record.step === "new-password" && record.resetSecret) {
@@ -481,7 +487,7 @@ export function NativeIdentityScreen() {
           attemptId: response.attemptId,
           attemptSecret: response.attemptSecret,
           expiresAt: response.expiresAt,
-          presentation: "your email",
+          presentation: value,
         };
         await persistTransaction({
           version: 1,
@@ -491,7 +497,7 @@ export function NativeIdentityScreen() {
           attemptId: response.attemptId,
           attemptSecret: response.attemptSecret,
           expiresAt: response.expiresAt,
-          presentation: "your email",
+          presentation: PRIVATE_MAILBOX_PRESENTATION,
         });
         setAntiBotToken(null);
         setScreen(next);
@@ -552,9 +558,7 @@ export function NativeIdentityScreen() {
       };
       if (response.status === "existing_account") {
         if (!nativePolicy?.login.methods.includes("password")) {
-          await getHostedHubApi().cancelNativeIdentityAttempt({
-            ...verifiedEmailCancellation(response),
-          });
+          await cancelVerifiedEmailAttempt(getHostedHubApi(), response);
           await transactionStore.clear();
           setScreen({ name: "entry" });
           setError("This Hub does not currently offer password login.");
@@ -571,9 +575,7 @@ export function NativeIdentityScreen() {
         setScreen({ name: "password", identifier: "", purpose: "login", ...activation });
       } else {
         if (nativePolicy?.signup.status !== "enabled") {
-          await getHostedHubApi().cancelNativeIdentityAttempt({
-            ...verifiedEmailCancellation(response),
-          });
+          await cancelVerifiedEmailAttempt(getHostedHubApi(), response);
           await transactionStore.clear();
           setScreen({ name: "entry" });
           setError(
@@ -764,7 +766,7 @@ export function NativeIdentityScreen() {
               : screen.name === "reset-request"
                 ? "Verify the account before choosing a new password."
               : screen.name === "mailbox" || screen.name === "reset-mailbox"
-                ? "Enter the six-digit code we sent."
+                ? mailboxCodePrompt(screen.presentation)
                 : "Native account access on Ryco Hub"}
           </Text>
 
@@ -1009,10 +1011,14 @@ export function NativeIdentityScreen() {
                         attemptId: response.attemptId,
                         attemptSecret: response.attemptSecret,
                         expiresAt: response.expiresAt,
-                        presentation: "your email",
+                        presentation: PRIVATE_MAILBOX_PRESENTATION,
                       });
                       setAntiBotToken(null);
-                      setScreen({ name: "reset-mailbox", ...response });
+                      setScreen({
+                        name: "reset-mailbox",
+                        ...response,
+                        presentation: normalizedIdentifier,
+                      });
                     })
                   }
                 />
