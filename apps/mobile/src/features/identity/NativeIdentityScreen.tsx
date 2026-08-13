@@ -14,7 +14,6 @@ import {
   ScrollView,
   View,
 } from "react-native";
-import { WebView } from "react-native-webview";
 
 import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
@@ -48,6 +47,7 @@ import {
   createNativeIdentityTransactionStore,
   type NativeIdentityTransactionRecord,
 } from "./nativeIdentityTransaction";
+import { TurnstileChallenge } from "./TurnstileChallenge";
 
 type Activation = {
   readonly attemptId: HostedIdentity.NativeIdentityAttemptId;
@@ -108,6 +108,8 @@ const completionJournal = createNativeIdentityCompletionJournal({
   sessionCredentials: mobileSessionCredentials,
 });
 const transactionStore = createNativeIdentityTransactionStore(mobileSecretKV);
+const SESSION_SETUP_WAIT_MS = 8_000;
+const CAPABILITY_CHECK_WAIT_MS = 10_000;
 
 function boundedError(error: unknown): string {
   if (
@@ -131,6 +133,20 @@ function isUsername(value: string): boolean {
 
 async function idempotencyKey(): Promise<string> {
   return encodeBase64Url(await mobileNativeAuthorization.randomBytes(32));
+}
+
+async function waitForSessionSetup(): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      ensureMobileHostedSession(),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, SESSION_SETUP_WAIT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function screenFromRecord(record: NativeIdentityTransactionRecord): Screen {
@@ -208,32 +224,6 @@ function screenFromRecord(record: NativeIdentityTransactionRecord): Screen {
   return { name: "entry" };
 }
 
-function TurnstileChallenge(props: {
-  readonly origin: string;
-  readonly siteKey: string;
-  readonly onToken: (token: string | null) => void;
-}) {
-  const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script></head><body style="margin:0;background:transparent"><div class="cf-turnstile" data-sitekey=${JSON.stringify(props.siteKey)} data-action="native_identity" data-callback="ok" data-error-callback="bad" data-expired-callback="bad"></div><script>function ok(t){window.ReactNativeWebView.postMessage(JSON.stringify({token:t}))}function bad(){window.ReactNativeWebView.postMessage(JSON.stringify({token:null}))}</script></body></html>`;
-  return (
-    <View className="h-20 overflow-hidden rounded-xl">
-      <WebView
-        source={{ html, baseUrl: props.origin }}
-        originWhitelist={[props.origin, "https://challenges.cloudflare.com"]}
-        sharedCookiesEnabled={false}
-        thirdPartyCookiesEnabled={false}
-        onMessage={(event) => {
-          try {
-            const value = JSON.parse(event.nativeEvent.data) as { token?: unknown };
-            props.onToken(typeof value.token === "string" ? value.token : null);
-          } catch {
-            props.onToken(null);
-          }
-        }}
-      />
-    </View>
-  );
-}
-
 function Action(props: {
   readonly label: string;
   readonly onPress: () => void;
@@ -295,16 +285,26 @@ export function NativeIdentityScreen() {
 
   const origin = profile?.origin ?? buildConfig?.hubOrigin ?? null;
   const nativePolicy = capability?.nativeIdentity;
+  const normalizedIdentifier = identifier.trim().toLocaleLowerCase();
+  const needsEntryAntiBot =
+    isEmail(normalizedIdentifier) && nativePolicy?.email.antiBot.provider === "turnstile";
 
   const refreshCapability = async () => {
     setBusy(true);
     setError(null);
     try {
-      await ensureMobileHostedSession();
+      // Session restoration may still be waiting on an unreachable endpoint.
+      // Native identity only needs the already-configured authenticated client,
+      // so never let that independent restore keep the blocker inert forever.
+      await waitForSessionSetup();
       if (origin === null) throw new Error("missing origin");
       const http = getMobileHostedHttpClient();
       if (http === null) throw new Error("missing client");
-      const result = await createHubCapabilityClient(http).check(origin);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CAPABILITY_CHECK_WAIT_MS);
+      const result = await createHubCapabilityClient(http)
+        .check(origin, controller.signal)
+        .finally(() => clearTimeout(timer));
       if (result.status !== "compatible" || result.capability.nativeIdentity === undefined) {
         setCapability(null);
         setError("This Hub is not ready for native account access.");
@@ -721,7 +721,7 @@ export function NativeIdentityScreen() {
       className="flex-1 bg-screen"
     >
       <ScrollView
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
         contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: 24 }}
       >
         <View className="mx-auto w-full max-w-[420px]">
@@ -764,7 +764,7 @@ export function NativeIdentityScreen() {
                   returnKeyType="go"
                   onSubmitEditing={start}
                 />
-                {nativePolicy?.email.antiBot.provider === "turnstile" && origin ? (
+                {needsEntryAntiBot && nativePolicy && origin ? (
                   <TurnstileChallenge
                     origin={origin}
                     siteKey={nativePolicy.email.antiBot.siteKey}
@@ -773,9 +773,21 @@ export function NativeIdentityScreen() {
                 ) : null}
                 <Action
                   label="Continue"
-                  disabled={busy || capability === null || identifier.trim().length === 0}
+                  disabled={
+                    busy ||
+                    capability === null ||
+                    normalizedIdentifier.length === 0 ||
+                    (needsEntryAntiBot && antiBotToken === null)
+                  }
                   onPress={start}
                 />
+                {!busy && capability === null ? (
+                  <Action
+                    label="Retry Hub connection"
+                    quiet
+                    onPress={() => void refreshCapability()}
+                  />
+                ) : null}
                 <View className="my-1 flex-row items-center gap-3">
                   <View className="h-px flex-1 bg-border" />
                   <Text className="text-xs text-foreground-muted">or</Text>
