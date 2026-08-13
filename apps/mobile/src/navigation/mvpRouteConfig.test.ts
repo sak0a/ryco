@@ -16,13 +16,13 @@ describe("MVP route config", () => {
   it("registers exactly the MVP root route set plus the NotFound catch-all", () => {
     expect(Object.keys(MVP_ROOT_ROUTES).toSorted()).toEqual(
       [
+        "Access",
         "AddProject",
         "Connections",
         "ConnectionsNew",
         "Home",
         "NewTask",
         "NotFound",
-        "Onboarding",
         "Project",
         "SettingsSheet",
         "Thread",
@@ -64,7 +64,7 @@ describe("MVP route config", () => {
     expect(MVP_ROOT_ROUTES.Connections.linking).toBe("connections");
     expect(MVP_ROOT_ROUTES.ConnectionsNew.linking).toBe("connections/new");
     expect(MVP_ROOT_ROUTES.SettingsSheet.linking).toBe("settings");
-    expect(MVP_ROOT_ROUTES.Onboarding.linking).toBe("onboarding");
+    expect(MVP_ROOT_ROUTES.Access.linking).toBe("account/access");
     // NotFound is the sanctioned deep-link catch-all.
     expect(MVP_ROOT_ROUTES.NotFound.linking).toBe("*");
   });
@@ -94,13 +94,13 @@ describe("MVP route config", () => {
       "ConnectionsNew",
       "AddProject",
       "ThreadReviewComment",
-      "Onboarding",
       "SettingsSheet",
     ] as const) {
       expect(overlays.has(overlay)).toBe(true);
     }
     // The workspace routes themselves are never overlays.
     for (const workspace of [
+      "Access",
       "Home",
       "NewTask",
       "Project",

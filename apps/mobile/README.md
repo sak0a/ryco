@@ -2,12 +2,12 @@
 
 The Ryco iOS-first native app (Expo / React Native), consuming
 `@ryco/client-runtime`. It ships the scaffold, platform adapters, direct-node
-bearer pairing loop, and hosted Hub system-browser authorization handoff.
+bearer pairing loop, and full-screen native Hub identity gate.
 
-The shared contracts/runtime also define an additive native identity v2 transport for a future
-full-screen mobile access gate. It remains disabled unless a compatible Hub explicitly advertises
-the v2 capability. This app still uses the existing system-browser handoff; the protocol dependency
-alone does not change startup UI or adopt returned native session material.
+The workspace mounts only after a Hub session is revalidated or a saved direct-node credential can
+be read. Native identity v2 remains unavailable unless the selected Hub explicitly advertises the
+complete capability. Email-first signup, passkey/password login, second factor, reset, recovery,
+and recovery-code custody stay inside the native gate; browser cookies are never adopted.
 
 ## Prerequisites
 
@@ -35,8 +35,8 @@ headless CI container.
 
 ## Launch the dev client + connect to a local/staging node (owner, on a Mac)
 
-Simulator QA uses the development client. Hosted sign-in itself uses the system
-browser and the app's custom callback scheme.
+Simulator QA uses the development client. Hosted identity uses native DPoP-mint
+routes; the custom scheme remains for verified-email and reset links.
 
 1. **Install deps** (repo root): `bun install --frozen-lockfile`.
 2. **Prebuild the native iOS project** (first run, or after native-dep/plugin

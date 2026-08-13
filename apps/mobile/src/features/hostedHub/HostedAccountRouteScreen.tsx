@@ -42,8 +42,8 @@ import { useHostedModeAvailable } from "./useHostedMode";
  *
  * Every credential action below is a native, DPoP-bound controller call.
  * Nothing on this screen opens a browser: `/api/account/*` authorizes an
- * `Authorization: DPoP` request without a same-origin check. Only signed-out
- * users leave this screen through the reviewed system-browser handoff.
+ * `Authorization: DPoP` request without a same-origin check. Signed-out users
+ * enter the same full-screen native identity blocker used at startup.
  */
 export function HostedAccountRouteScreen() {
   const navigation = useNavigation();
@@ -91,7 +91,7 @@ export function HostedAccountRouteScreen() {
     state,
     hostedModeAvailable,
     e2eeStatus,
-    onSignIn: () => navigation.navigate("Onboarding"),
+    onSignIn: () => navigation.navigate("Access"),
     actionStatus: accountState.actionStatus,
   });
 

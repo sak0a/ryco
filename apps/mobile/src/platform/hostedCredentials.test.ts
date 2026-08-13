@@ -127,6 +127,26 @@ describe("bearer session credentials", () => {
     expect(kv.store.get(HOSTED_SESSION_TOKEN_KEY)).toBe("t");
   });
 
+  it("commits a minted token only after durable read-back", async () => {
+    const kv = fakeSecretKV();
+    const credentials = createMobileSessionCredentials(kv.service);
+
+    await expect(credentials.commitBearerToken("native-token")).resolves.toBe(true);
+    expect(credentials.readBearerToken?.()).toBe("native-token");
+    expect(kv.store.get(HOSTED_SESSION_TOKEN_KEY)).toBe("native-token");
+  });
+
+  it("does not publish a token when the secure store refuses the write", async () => {
+    const credentials = createMobileSessionCredentials({
+      get: async () => null,
+      set: async () => false,
+      remove: async () => {},
+    });
+
+    await expect(credentials.commitBearerToken("native-token")).resolves.toBe(false);
+    expect(credentials.readBearerToken?.()).toBeNull();
+  });
+
   it("clears both the cache and the secret store on sign-out", async () => {
     const kv = fakeSecretKV(new Map([[HOSTED_SESSION_TOKEN_KEY, "t"]]));
     const credentials = createMobileSessionCredentials(kv.service);

@@ -44,6 +44,31 @@ describe("Hub capability decoder", () => {
     });
   });
 
+  it("projects the exact optional native identity policy without weakening v1", () => {
+    const nativeIdentity = {
+      version: 2,
+      email: { verification: "required", antiBot: { provider: "bypass" } },
+      signup: { status: "enabled", primaryCredentials: ["passkey", "password"] },
+      login: {
+        methods: ["passkey", "password", "recovery_code"],
+        passwordSecondFactor: {
+          totp: "when_enrolled",
+          fallback: "verified_email_code",
+        },
+      },
+      recovery: { recoveryCode: true, passwordReset: true },
+    } as const;
+    expect(decodeHubCapability(document({ nativeIdentity }), ORIGIN)).toEqual({
+      ok: true,
+      capability: {
+        protocolVersion: 1,
+        nativeHandoff: { mode: "system-browser", version: 1 },
+        relyingParty: { id: "hub.ryco.dev", displayName: "Studio Hub" },
+        nativeIdentity,
+      },
+    });
+  });
+
   it("rejects a relying party outside the Hub domain", () => {
     expect(
       decodeHubCapability(

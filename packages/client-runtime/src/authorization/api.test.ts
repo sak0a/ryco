@@ -1577,6 +1577,46 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
     expect("csrfToken" in result).toBe(false);
   });
 
+  it("offers an explicit native passkey login that never opens the browser handoff", async () => {
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    const openSystemBrowser = vi.fn<NativeAuthorizationService["openSystemBrowser"]>();
+    const authenticate = vi.fn(async () => ({ id: "assertion-canary" }) as never);
+    const requests: string[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      requests.push(String(input));
+      return requests.length === 1
+        ? response({ options: { challenge: encodeBase64Url(new Uint8Array([1, 2, 3])) } })
+        : response({ ...accountAndSession, token: "native-token-canary" });
+    });
+    const api = new HostedHubApi({
+      endpoint: fakeEndpoint,
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      dpopSigner: service,
+      passkeyCeremony: { authenticate, register: vi.fn() },
+      nativeAuthorization: {
+        callbackUri: () => "ryco://hosted/complete",
+        deviceLabel: () => "Ryco mobile",
+        randomBytes: async (length) => new Uint8Array(length),
+        sha256: async () => new Uint8Array(32),
+        openSystemBrowser,
+      },
+    });
+
+    await expect(api.signInWithNativePasskey()).resolves.toEqual({
+      session: expect.objectContaining(accountAndSession),
+      token: "native-token-canary",
+    });
+    expect(requests).toEqual([
+      "https://hub.example.test/api/auth/native/passkey/options",
+      "https://hub.example.test/api/auth/native/passkey/verify",
+    ]);
+    expect(openSystemBrowser).not.toHaveBeenCalled();
+    expect(credentials.current()).toBeNull();
+    expect(api.hasSessionMaterial).toBe(false);
+  });
+
   it("attaches Authorization DPoP + an ath proof on authenticated requests, no CSRF", async () => {
     const { calls, service } = recordingDpopSigner();
     const credentials = inMemoryBearerCredentials();

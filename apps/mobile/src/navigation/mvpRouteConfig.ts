@@ -31,6 +31,13 @@ const PROJECT = "projects/:environmentId/:projectId";
 // Flat root routes (Thread lives here, NOT in a nested navigator — required for
 // the iOS-26 shared-header morph). Order is the source order for the tree.
 export const MVP_ROOT_ROUTES = {
+  Access: {
+    linking: "account/access",
+    overlay: false,
+    headerPreset: "none",
+    ios: { presentation: "card" },
+    android: { presentation: "card" },
+  },
   Home: {
     linking: "",
     overlay: false,
@@ -142,17 +149,6 @@ export const MVP_ROOT_ROUTES = {
     ios: { presentation: "formSheet", sheetAllowedDetents: [0.95], sheetGrabberVisible: true },
     android: { presentation: "card" },
   },
-  Onboarding: {
-    linking: "onboarding",
-    overlay: true,
-    headerPreset: "sheet-solid",
-    ios: { presentation: "formSheet", sheetAllowedDetents: [0.6, 0.95], sheetGrabberVisible: true },
-    android: {
-      presentation: "formSheet",
-      sheetAllowedDetents: [0.6, 0.95],
-      sheetGrabberVisible: true,
-    },
-  },
   NotFound: {
     // Deep-link catch-all — the one sanctioned route not in the spec's table.
     linking: "*",
@@ -190,9 +186,8 @@ export const MVP_SETTINGS_SHEET_ROUTES = {
   Settings: { linking: "", ...SETTINGS_PUSH },
   SettingsHub: { linking: "hub", ...SETTINGS_PUSH },
   SettingsWorkspace: { linking: "workspace", ...SETTINGS_PUSH },
-  // Hosted Hub account. Nested rather than a root route so the hosted plane
-  // adds no root-route churn: sign-in lives inside the existing `Onboarding`
-  // sheet, and this is the only route the hosted surfaces add anywhere.
+  // Hosted Hub account. Account management stays nested; voluntary sign-in
+  // opens the full-screen root Access route rather than a dismissible sheet.
   SettingsAccount: { linking: "account", ...SETTINGS_PUSH },
   /**
    * The `docs/relay-e2ee-protocol.md` §13.1.1 security surface: the persistent

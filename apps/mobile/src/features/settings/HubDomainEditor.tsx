@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
@@ -49,7 +50,9 @@ export function HubDomainEditor(props: {
   readonly onDismiss: () => void;
   readonly onSave: (profile: HubProfile) => void;
   readonly onUseBuildDefault: (() => void) | null;
+  readonly requireNativeIdentity?: boolean;
 }) {
+  const insets = useSafeAreaInsets();
   const placeholderColor = useThemeColor("--color-placeholder");
   const textColor = useThemeColor("--color-foreground");
   const primaryForegroundColor = useThemeColor("--color-primary-foreground");
@@ -94,6 +97,11 @@ export function HubDomainEditor(props: {
       setChecking(false);
       return;
     }
+    if (props.requireNativeIdentity && result.capability.nativeIdentity === undefined) {
+      setError("This Hub does not advertise native account access.");
+      setChecking(false);
+      return;
+    }
     const profile = createHubProfile({
       origin: normalized.origin,
       label: label || result.capability.relyingParty.displayName,
@@ -114,7 +122,7 @@ export function HubDomainEditor(props: {
     <Modal
       visible={props.visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      presentationStyle={props.requireNativeIdentity ? "fullScreen" : "pageSheet"}
       onRequestClose={props.onDismiss}
     >
       <KeyboardAvoidingView
@@ -123,7 +131,12 @@ export function HubDomainEditor(props: {
       >
         <ScrollView
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ padding: 20, paddingBottom: 40, gap: 18 }}
+          contentContainerStyle={{
+            paddingHorizontal: 20,
+            paddingTop: props.requireNativeIdentity ? insets.top + 8 : 20,
+            paddingBottom: props.requireNativeIdentity ? Math.max(40, insets.bottom + 20) : 40,
+            gap: 18,
+          }}
         >
           <View className="flex-row items-center">
             <Pressable
@@ -186,7 +199,9 @@ export function HubDomainEditor(props: {
             <View className="rounded-2xl border border-success-border bg-success-bg p-4">
               <Text className="text-sm font-ryco-bold text-success">Compatible Hub</Text>
               <Text className="mt-1 font-sans text-xs leading-relaxed text-foreground-muted">
-                System-browser handoff v
+                {props.requireNativeIdentity
+                  ? "Native account access v2 and handoff v"
+                  : "System-browser handoff v"}
                 {checkedProfile.compatibility.status === "compatible"
                   ? checkedProfile.compatibility.handoffVersion
                   : 1}{" "}

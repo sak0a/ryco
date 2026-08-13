@@ -817,6 +817,40 @@ export class HostedHubApi {
     );
   }
 
+  /**
+   * Identifierless passkey login for a native identity surface. Unlike
+   * `signIn()`, this never opens the compatibility system-browser handoff.
+   */
+  async signInWithNativePasskey(signal?: AbortSignal): Promise<{
+    readonly session: HostedHubSessionResponse;
+    readonly token: string;
+  }> {
+    this.#requireBearerTransport();
+    const base = "/api/auth/native/passkey";
+    const options = await this.#request(`${base}/options`, {
+      method: "POST",
+      body: {},
+      dpop: "mint",
+      ...(signal ? { signal } : {}),
+    });
+    const response = await this.#passkeyCeremony.authenticate(
+      validatePasskeyAuthenticationOptions(options.options),
+      signal,
+    );
+    const verified = await this.#request(`${base}/verify`, {
+      method: "POST",
+      body: { response },
+      dpop: "mint",
+      ...(signal ? { signal } : {}),
+    });
+    const result = this.#nativeSessionResponse(verified);
+    // The full-screen native identity surface owns the durable commit. Do not
+    // publish the token through the synchronous session holder first: doing so
+    // would let a failed secure-store write unlock this launch (or a delayed
+    // best-effort mirror unlock the next one) before durability is proven.
+    return { session: result.response, token: result.token };
+  }
+
   async startPublicSignup(
     request: HostedIdentity.PublicSignupStartRequest,
     signal?: AbortSignal,
