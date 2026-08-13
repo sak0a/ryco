@@ -265,6 +265,27 @@ describe("hosted account state", () => {
   });
 
   it.each([
+    ["Hub rejection", new HostedHubApiError("invalid_response", 502)],
+    ["network loss", new HostedHubApiError("unavailable", 0)],
+  ])("still clears this device when remote sign-out ends in %s", async (_label, failure) => {
+    hostedHubStore.setState({
+      accountStatus: "authenticated",
+      account: sessionResponse.account,
+      session: sessionResponse.session,
+    });
+    vi.spyOn(hostedHubApi, "signOut").mockRejectedValue(failure);
+
+    await hostedHubController.signOut();
+
+    expect(hostedHubApi.clearSessionMaterial).toHaveBeenCalledTimes(1);
+    expect(hostedHubStore.getState()).toMatchObject({
+      accountStatus: "signed-out",
+      account: null,
+      session: null,
+    });
+  });
+
+  it.each([
     ["denial", new HostedHubApiError("authentication_failed", 401)],
     ["malformed response", new HostedHubApiError("invalid_response", 502)],
     ["network loss", new HostedHubApiError("unavailable", 0)],
