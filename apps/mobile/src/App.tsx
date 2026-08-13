@@ -3,7 +3,7 @@ import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { useEffect } from "react";
 import { StatusBar } from "react-native";
-import { createStaticNavigation, DarkTheme, DefaultTheme } from "@react-navigation/native";
+import { DarkTheme, DefaultTheme } from "@react-navigation/native";
 
 import { applyResolvedAppColorScheme, resolveAppColorScheme } from "./lib/appScheme";
 
@@ -17,9 +17,8 @@ import { appBlurTargetRef } from "./lib/appBlurTarget";
 import { useThemeColor } from "./lib/useThemeColor";
 import { ConnectionRegistryProvider } from "./providers/ConnectionRegistryProvider";
 import { AppProviders } from "./providers/AppProviders";
-import { ServerStateBootstrap } from "./state/serverStateSync";
 import { useHostedAppLifecycle } from "./hostedHub/useHostedAppLifecycle";
-import { RootStack } from "./Stack";
+import { AppAccessGate } from "./features/access/AppAccessGate";
 
 import "../global.css";
 
@@ -42,8 +41,6 @@ const appLinking = {
   // falls through to the NotFound wildcard on every dev launch.
   filter: (url: string) => !url.includes("expo-development-client"),
 };
-
-const Navigation = createStaticNavigation(RootStack);
 
 function SplashScreenCoordinator() {
   const { isReady } = useAppearancePreferences();
@@ -82,7 +79,6 @@ export default function App() {
       <ConnectionRegistryProvider>
         <AppearancePreferencesProvider>
           <SplashScreenCoordinator />
-          <ServerStateBootstrap />
           <HostedAppLifecycle />
           <StatusBar
             barStyle={colorScheme === "dark" ? "light-content" : "dark-content"}
@@ -93,7 +89,7 @@ export default function App() {
               overrideUserInterfaceStyle). Blur target hosts Android dropdown
               backdrops (see appBlurTarget.ts). */}
           <BlurTargetView ref={appBlurTargetRef} style={{ flex: 1 }}>
-            <Navigation
+            <AppAccessGate
               linking={appLinking}
               theme={colorScheme === "dark" ? DarkTheme : DefaultTheme}
             />

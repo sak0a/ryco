@@ -331,9 +331,8 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
     available,
     e2eeStatus,
     actions: hostedHubController,
-    // Sign-in lives on the Onboarding sheet (the hosted sign-in surface); this
-    // section never runs a ceremony itself.
-    onSignIn: () => navigation.navigate("Onboarding"),
+    // Sign-in uses the same full-screen native identity surface as the root gate.
+    onSignIn: () => navigation.navigate("Access"),
     query: props.query,
   });
 

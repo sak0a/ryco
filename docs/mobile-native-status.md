@@ -1,6 +1,6 @@
 # Native mobile delivery status
 
-**Current as of 2026-08-13 at public `main` `8f910252e`.** This is the concise delivery
+**Current as of 2026-08-13 on mobile blocker branch `codex/mobile-native-identity-blocker`.** This is the concise delivery
 ledger for the native app. Older design specifications and implementation plans remain useful as
 historical records, but this file is authoritative when their status language disagrees.
 
@@ -18,21 +18,24 @@ historical records, but this file is authoritative when their status language di
 - iOS-first simulator/development-client workflows. Android code exists in several platform seams,
   but Android product QA is not complete.
 
-## Native identity v2 protocol dependency
+## Native identity v2 mobile blocker
 
-The additive native identity v2 contracts and client-runtime transport are staged as a public
-dependency for a later full-screen mobile access gate. A Hub must explicitly advertise a compatible
-`nativeIdentity` v2 capability before a client may use those endpoints; an absent capability keeps
-the protocol dark and preserves the existing native-handoff v1 document.
+The additive native identity v2 contracts, transport, and full-screen mobile access gate are
+implemented on the blocker branch. A Hub must explicitly advertise a compatible `nativeIdentity`
+v2 capability before the client enables account actions; an absent capability keeps the protocol
+dark and leaves direct pairing available.
 
 Browser identity v1 remains a cookie/CSRF transport. Native identity v2 uses DPoP-mint requests and
 returns native session material without adopting or persisting it. The future mobile transaction
-owner must complete its recovery-code journal and durable credential transition before it unlocks
-the workspace. Browser cookies are never converted into native credentials by this path.
+owner stages that material in SecretKV, withholds recovery-code sessions until acknowledgement, and
+publishes a normal bearer credential only after a durable write/read-back. Browser cookies are never
+converted into native credentials by this path.
 
-This protocol/runtime slice does not change startup navigation, onboarding UI, or the current
-system-browser handoff. The compatible Hub implementation must land and be qualified before the
-separate mobile blocker change is built or enabled.
+The workspace navigator now mounts only after a revalidated native Hub session or a saved direct
+node with readable credential material. The gate uses the Ryco `R`, native email-first signup,
+passkey/password login, TOTP or email factor, reset, recovery-code login, strict custom-Hub checks,
+and a crash-safe recovery-code journal. The old onboarding sheet is removed. Simulator, real-device,
+Hub canary, review, and merge gates remain open; this branch is not a release claim.
 
 ## Open delivery slices
 

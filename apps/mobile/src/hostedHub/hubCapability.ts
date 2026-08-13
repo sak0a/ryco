@@ -33,6 +33,7 @@ export interface HubCapability {
     readonly id: string;
     readonly displayName: string;
   };
+  readonly nativeIdentity?: typeof NativeHandoffCapability.Type.nativeIdentity;
 }
 
 export type HubCapabilityCheck =
@@ -113,6 +114,9 @@ export function decodeHubCapability(value: unknown, origin: string): CapabilityD
         id: capability.relyingParty.id.toLocaleLowerCase(),
         displayName: capability.relyingParty.displayName,
       },
+      ...(capability.nativeIdentity === undefined
+        ? {}
+        : { nativeIdentity: capability.nativeIdentity }),
     },
   };
 }

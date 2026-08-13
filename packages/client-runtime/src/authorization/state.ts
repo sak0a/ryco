@@ -1280,11 +1280,15 @@ class HostedHubController {
     patchState({ accountStatus: "signing-out", errorMessage: null });
     try {
       await getHostedHubApi().signOut(operation.signal);
-    } catch (error) {
-      if (!isSessionFailure(error) && !operation.signal.aborted) {
-        patchState({ accountStatus: "authenticated", errorMessage: errorMessage(error) });
-        return;
-      }
+    } catch {
+      if (operation.signal.aborted) return;
+      // Remote revocation is best effort, but leaving this device must never be.
+      // A Hub outage, CSRF-policy mismatch, or malformed response used to put
+      // the controller back into `authenticated` and made the Sign out row a
+      // dead end. Drop the local authority explicitly on every settled remote
+      // failure; a DPoP-bound server session that could not be revoked is still
+      // unusable once this device has discarded its bearer material.
+      getHostedHubApi().clearSessionMaterial();
     } finally {
       if (this.#operation === operation) this.#operation = null;
     }

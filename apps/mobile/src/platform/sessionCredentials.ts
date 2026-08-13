@@ -27,6 +27,8 @@ export interface MobileSessionCredentials extends SessionCredentialsService {
   readonly hydrate: () => Promise<void>;
   /** Clear memory and durable storage, waiting until the removal has landed. */
   readonly clearBearerToken: () => Promise<void>;
+  /** Durably write and read back a newly minted token before publishing it. */
+  readonly commitBearerToken: (token: string) => Promise<boolean>;
 }
 
 export function createMobileSessionCredentials(
@@ -78,6 +80,22 @@ export function createMobileSessionCredentials(
     clearBearerToken: async () => {
       bearerToken = null;
       await persistBearerToken(null, true);
+    },
+    commitBearerToken: async (token) => {
+      const operation = persistence.then(async () => {
+        try {
+          const written = await secretKV.set(HOSTED_SESSION_TOKEN_KEY, token);
+          if (!written) return false;
+          const verified = await secretKV.get(HOSTED_SESSION_TOKEN_KEY);
+          if (verified !== token) return false;
+          bearerToken = token;
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      persistence = operation.then(() => undefined);
+      return operation;
     },
     hydrate: () => {
       hydration ??= (async () => {

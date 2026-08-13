@@ -24,8 +24,8 @@ import { ThreadFileRouteScreen } from "./features/files/ThreadFileRouteScreen";
 import { ThreadFilesRouteScreen } from "./features/files/ThreadFilesRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
 import { HostedAccountRouteScreen } from "./features/hostedHub/HostedAccountRouteScreen";
+import { NativeIdentityScreen } from "./features/identity/NativeIdentityScreen";
 import { NewTaskRouteScreen } from "./features/newTask/NewTaskRouteScreen";
-import { OnboardingRouteScreen } from "./features/onboarding/OnboardingRouteScreen";
 import { AddProjectRouteScreen } from "./features/projects/AddProjectRouteScreen";
 import { ProjectRouteScreen } from "./features/projects/ProjectRouteScreen";
 import { ReviewCommentComposerSheet } from "./features/review/ReviewCommentComposerSheet";
@@ -311,6 +311,11 @@ function NotFoundScreen() {
 // presentation/detents cannot drift from what the route-config test asserts.
 // Per-route cosmetic extras (titles, transparent content) stay inline.
 export const ROOT_STACK_SCREENS = {
+  Access: createNativeStackScreen({
+    screen: NativeIdentityScreen,
+    linking: MVP_ROOT_ROUTES.Access.linking,
+    options: routeOptions("Access", { gestureEnabled: true }),
+  }),
   Home: createNativeStackScreen({
     screen: HomeRouteScreen,
     linking: MVP_ROOT_ROUTES.Home.linking,
@@ -376,11 +381,6 @@ export const ROOT_STACK_SCREENS = {
     screen: SettingsSheetStack,
     linking: MVP_ROOT_ROUTES.SettingsSheet.linking,
     options: routeOptions("SettingsSheet", { gestureEnabled: true, headerShown: false }),
-  }),
-  Onboarding: createNativeStackScreen({
-    screen: OnboardingRouteScreen,
-    linking: MVP_ROOT_ROUTES.Onboarding.linking,
-    options: routeOptions("Onboarding", { title: "Connect", gestureEnabled: true }),
   }),
   NotFound: createNativeStackScreen({
     screen: NotFoundScreen,

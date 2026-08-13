@@ -2,10 +2,10 @@
 
 **Design:** `docs/superpowers/specs/2026-08-12-mobile-hub-first-onboarding-design.md`
 
-**Status:** public protocol/runtime implemented and locally qualified; awaiting public PR CI, review,
-and merge before the Hub phase
+**Status:** protocol/runtime merged; private Hub implementation is in draft PR with green CI;
+mobile blocker implementation is locally green and awaiting Simulator, canary, and device gates
 
-**Public working branch:** `codex/mobile-hub-onboarding`
+**Public working branch:** `codex/mobile-native-identity-blocker`
 
 **Hub counterpart:** maintained separately in the Hub repository so private implementation and
 operational details never enter this public plan

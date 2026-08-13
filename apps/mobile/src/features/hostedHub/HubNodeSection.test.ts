@@ -328,7 +328,7 @@ describe("Hub node section when hosted mode is unavailable or signed out", () =>
     // Only the EmptyState's browser-handoff capsule is tappable.
     expect(tappable).toHaveLength(1);
     (tappable[0]?.props.onPress as () => void)();
-    expect(navigationMock.navigate).toHaveBeenCalledWith("Onboarding");
+    expect(navigationMock.navigate).toHaveBeenCalledWith("Access");
     expect(hostedMock.controller.selectNode).not.toHaveBeenCalled();
   });
 });
