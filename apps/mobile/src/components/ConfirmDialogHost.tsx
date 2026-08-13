@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Modal, Pressable, View } from "react-native";
+import { Alert, Modal, Platform, Pressable, View } from "react-native";
 
 import { useThemeColor } from "../lib/useThemeColor";
 import { cn } from "../lib/cn";
@@ -24,6 +24,21 @@ let presentRequest: ((request: ConfirmDialogRequest) => void) | null = null;
  * once. Requires ConfirmDialogHost to be mounted at the app root.
  */
 export function showConfirmDialog(request: ConfirmDialogRequest): void {
+  if (Platform.OS === "ios") {
+    Alert.alert(request.title, request.message, [
+      {
+        text: request.cancelText ?? "Cancel",
+        style: "cancel",
+        ...(request.onCancel ? { onPress: request.onCancel } : {}),
+      },
+      {
+        text: request.confirmText,
+        style: request.destructive ? "destructive" : "default",
+        onPress: request.onConfirm,
+      },
+    ]);
+    return;
+  }
   presentRequest?.(request);
 }
 
