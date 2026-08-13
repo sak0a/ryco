@@ -115,7 +115,7 @@ export function ConnectionsNewRouteScreen() {
           accessibilityRole="button"
           accessibilityLabel="Scan pairing QR code"
           onPress={() => void openScanner()}
-          className="min-h-16 flex-row items-center rounded-2xl border border-border bg-card px-4 py-3 active:bg-card-alt"
+          className="min-h-16 flex-row items-center rounded-full border border-border bg-card px-5 py-3 active:bg-card-alt"
         >
           <View className="min-w-0 flex-1">
             <Text className="text-base font-ryco-bold text-foreground">Scan QR code</Text>

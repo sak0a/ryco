@@ -4,7 +4,7 @@ import type * as HostedIdentity from "@ryco/contracts/hosted-identity";
 import { Image } from "expo-image";
 import * as Linking from "expo-linking";
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -17,7 +17,11 @@ import {
 
 import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
-import { createHubCapabilityClient, type HubCapability } from "../../hostedHub/hubCapability";
+import {
+  checkHubCapabilityWithTimeout,
+  createHubCapabilityClient,
+  type HubCapability,
+} from "../../hostedHub/hubCapability";
 import {
   clearMobileHubProfile,
   createHubProfile,
@@ -54,10 +58,7 @@ import {
   createNativeIdentityTransactionStore,
   type NativeIdentityTransactionRecord,
 } from "./nativeIdentityTransaction";
-import {
-  NATIVE_IDENTITY_TURNSTILE_ACTIONS,
-  TurnstileChallenge,
-} from "./TurnstileChallenge";
+import { NATIVE_IDENTITY_TURNSTILE_ACTIONS, TurnstileChallenge } from "./TurnstileChallenge";
 
 type Activation = {
   readonly attemptId: HostedIdentity.NativeIdentityAttemptId;
@@ -126,7 +127,6 @@ const completionJournal = createNativeIdentityCompletionJournal({
 });
 const transactionStore = createNativeIdentityTransactionStore(mobileSecretKV);
 const SESSION_SETUP_WAIT_MS = 8_000;
-const CAPABILITY_CHECK_WAIT_MS = 10_000;
 
 function boundedError(error: unknown): string {
   if (
@@ -247,6 +247,7 @@ function Action(props: {
   readonly onPress: () => void;
   readonly disabled?: boolean;
   readonly quiet?: boolean;
+  readonly compact?: boolean;
 }) {
   return (
     <Pressable
@@ -255,13 +256,15 @@ function Action(props: {
       disabled={props.disabled}
       onPress={props.onPress}
       className={cn(
-        "min-h-13.5 items-center justify-center rounded-2xl px-5 active:scale-[0.985] disabled:opacity-40",
+        "items-center justify-center rounded-full px-5 active:scale-[0.985] disabled:opacity-40",
+        props.compact ? "min-h-11" : "min-h-13.5",
         props.quiet ? "border border-border bg-card" : "bg-primary",
       )}
     >
       <Text
         className={cn(
-          "text-base font-ryco-bold",
+          "font-ryco-bold",
+          props.compact ? "text-sm" : "text-base",
           props.quiet ? "text-foreground" : "text-primary-foreground",
         )}
       >
@@ -287,6 +290,8 @@ export function NativeIdentityScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editorVisible, setEditorVisible] = useState(false);
+  const [profileRefreshRevision, setProfileRefreshRevision] = useState(0);
+  const capabilityGeneration = useRef(0);
   const [profile, setProfile] = useState<HubProfile | null>(() => {
     const saved = readCachedMobileHubProfile();
     return saved === undefined
@@ -307,10 +312,10 @@ export function NativeIdentityScreen() {
   const needsEntryAntiBot =
     isEmail(normalizedIdentifier) && nativePolicy?.email.antiBot.provider === "turnstile";
   const needsResetAntiBot =
-    screen.name === "reset-request" &&
-    nativePolicy?.email.antiBot.provider === "turnstile";
+    screen.name === "reset-request" && nativePolicy?.email.antiBot.provider === "turnstile";
 
-  const refreshCapability = async () => {
+  const refreshCapability = async (requestedOrigin: string | null = origin) => {
+    const issued = ++capabilityGeneration.current;
     setBusy(true);
     setError(null);
     try {
@@ -318,25 +323,31 @@ export function NativeIdentityScreen() {
       // Native identity only needs the already-configured authenticated client,
       // so never let that independent restore keep the blocker inert forever.
       await waitForSessionSetup();
-      if (origin === null) throw new Error("missing origin");
+      if (issued !== capabilityGeneration.current) return;
+      if (requestedOrigin === null) throw new Error("missing origin");
       const http = getMobileHostedHttpClient();
       if (http === null) throw new Error("missing client");
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), CAPABILITY_CHECK_WAIT_MS);
-      const result = await createHubCapabilityClient(http)
-        .check(origin, controller.signal)
-        .finally(() => clearTimeout(timer));
+      const result = await checkHubCapabilityWithTimeout(
+        createHubCapabilityClient(http),
+        requestedOrigin,
+      );
+      if (issued !== capabilityGeneration.current) return;
       if (result.status !== "compatible" || result.capability.nativeIdentity === undefined) {
         setCapability(null);
-        setError("This Hub is not ready for native account access.");
+        setError(
+          result.status === "incompatible" && result.reason === "unreachable"
+            ? "Ryco could not reach native account access on this Hub. Try again."
+            : "This Hub is not ready for native account access.",
+        );
       } else {
         setCapability(result.capability);
       }
     } catch {
+      if (issued !== capabilityGeneration.current) return;
       setCapability(null);
-      setError("Ryco could not reach native account access on this Hub.");
+      setError("Ryco could not reach native account access on this Hub. Try again.");
     } finally {
-      setBusy(false);
+      if (issued === capabilityGeneration.current) setBusy(false);
     }
   };
 
@@ -366,16 +377,15 @@ export function NativeIdentityScreen() {
         );
         return;
       }
-      if (active) await refreshCapability();
+      if (active) await refreshCapability(origin);
     })();
     return () => {
       active = false;
+      capabilityGeneration.current += 1;
       setSecret("");
       setSecondarySecret("");
     };
-    // The selected origin is deliberately replaced only through the editor.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [origin]);
+  }, [origin, profileRefreshRevision]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
@@ -673,6 +683,7 @@ export function NativeIdentityScreen() {
     });
 
   const replaceProfile = async (next: HubProfile) => {
+    capabilityGeneration.current += 1;
     setEditorVisible(false);
     setBusy(true);
     setError(null);
@@ -683,6 +694,7 @@ export function NativeIdentityScreen() {
       await saveMobileHubProfile(mobileKV, next);
       invalidateMobileHostedRuntime();
       setProfile(next);
+      setProfileRefreshRevision((revision) => revision + 1);
       setCapability(null);
       setScreen({ name: "entry" });
     } catch {
@@ -693,6 +705,7 @@ export function NativeIdentityScreen() {
 
   const useBuildDefault = async () => {
     if (!buildConfig) return;
+    capabilityGeneration.current += 1;
     setEditorVisible(false);
     setBusy(true);
     setError(null);
@@ -709,6 +722,7 @@ export function NativeIdentityScreen() {
           allowInsecure: development,
         }),
       );
+      setProfileRefreshRevision((revision) => revision + 1);
       setCapability(null);
       setScreen({ name: "entry" });
     } catch {
@@ -724,23 +738,23 @@ export function NativeIdentityScreen() {
       ? "Log in or sign up"
       : screen.name === "reset-request"
         ? "Reset your password"
-      : screen.name === "mailbox" || screen.name === "reset-mailbox"
-        ? "Check your email"
-        : screen.name === "username"
-          ? "Choose a username"
-          : screen.name === "credential"
-            ? "Secure your account"
-            : screen.name === "factor"
-              ? screen.factor === "totp"
-                ? "Enter your authenticator code"
-                : "Enter your email code"
-              : screen.name === "recovery"
-                ? "Use a recovery code"
-                : screen.name === "reset-password"
-                  ? "Set a new password"
-                  : screen.name === "recovery-codes"
-                    ? "Save your recovery codes"
-                    : "Enter your password";
+        : screen.name === "mailbox" || screen.name === "reset-mailbox"
+          ? "Check your email"
+          : screen.name === "username"
+            ? "Choose a username"
+            : screen.name === "credential"
+              ? "Secure your account"
+              : screen.name === "factor"
+                ? screen.factor === "totp"
+                  ? "Enter your authenticator code"
+                  : "Enter your email code"
+                : screen.name === "recovery"
+                  ? "Use a recovery code"
+                  : screen.name === "reset-password"
+                    ? "Set a new password"
+                    : screen.name === "recovery-codes"
+                      ? "Save your recovery codes"
+                      : "Enter your password";
 
   return (
     <KeyboardAvoidingView
@@ -757,7 +771,7 @@ export function NativeIdentityScreen() {
             contentFit="contain"
             tintColor={logoColor as string}
             accessibilityLabel="Ryco"
-            style={{ width: 58, height: 58, alignSelf: "center", marginBottom: 30 }}
+            style={{ width: 112, height: 112, alignSelf: "center", marginBottom: 34 }}
           />
           <Text className="text-center text-[30px] font-ryco-bold tracking-[-0.8px] text-foreground">
             {title}
@@ -767,9 +781,9 @@ export function NativeIdentityScreen() {
               ? "Store these somewhere safe. Each code works once."
               : screen.name === "reset-request"
                 ? "Verify the account before choosing a new password."
-              : screen.name === "mailbox" || screen.name === "reset-mailbox"
-                ? mailboxCodePrompt(screen.presentation)
-                : "Native account access on Ryco Hub"}
+                : screen.name === "mailbox" || screen.name === "reset-mailbox"
+                  ? mailboxCodePrompt(screen.presentation)
+                  : "Native account access on Ryco Hub"}
           </Text>
 
           {error ? (
@@ -841,32 +855,25 @@ export function NativeIdentityScreen() {
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => setScreen({ name: "recovery" })}
-                    className="min-h-11 items-center justify-center active:opacity-60"
+                    className="min-h-11 items-center justify-center rounded-full px-4 active:bg-subtle"
                   >
                     <Text className="text-sm font-ryco-bold text-foreground-muted">
                       Use a recovery code
                     </Text>
                   </Pressable>
                 ) : null}
-                <Pressable
-                  accessibilityRole="button"
+                <Action
+                  label={`Using ${profile?.label ?? "Ryco Hub"} · Different Hub`}
+                  quiet
+                  compact
                   onPress={() => setEditorVisible(true)}
-                  className="min-h-11 items-center justify-center active:opacity-60"
-                >
-                  <Text className="text-sm text-foreground-muted">
-                    Using {profile?.label ?? "Ryco Hub"} ·{" "}
-                    <Text className="font-ryco-bold">Use a custom Hub</Text>
-                  </Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
+                />
+                <Action
+                  label="Pair a device directly"
+                  quiet
+                  compact
                   onPress={() => navigation.navigate("ConnectionsNew" as never)}
-                  className="min-h-11 items-center justify-center active:opacity-60"
-                >
-                  <Text className="text-sm font-ryco-medium text-foreground-muted">
-                    Pair a device directly
-                  </Text>
-                </Pressable>
+                />
               </>
             ) : screen.name === "mailbox" || screen.name === "reset-mailbox" ? (
               <>
@@ -1001,9 +1008,7 @@ export function NativeIdentityScreen() {
                       if (screen.name !== "reset-request") return;
                       const response = await getHostedHubApi().requestNativeIdentityPasswordReset({
                         identifier: normalizedIdentifier as HostedIdentity.HubLoginIdentifier,
-                        ...(antiBotAssertion()
-                          ? { antiBotAssertion: antiBotAssertion()! }
-                          : {}),
+                        ...(antiBotAssertion() ? { antiBotAssertion: antiBotAssertion()! } : {}),
                       });
                       await persistTransaction({
                         version: 1,
@@ -1070,7 +1075,7 @@ export function NativeIdentityScreen() {
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => setScreen({ name: "recovery" })}
-                    className="min-h-11 items-center justify-center"
+                    className="min-h-11 items-center justify-center rounded-full px-4 active:bg-subtle"
                   >
                     <Text className="text-sm font-ryco-bold text-foreground-muted">
                       Use a recovery code
@@ -1081,13 +1086,11 @@ export function NativeIdentityScreen() {
                   <Pressable
                     accessibilityRole="button"
                     onPress={() => {
-                      setIdentifier(
-                        (screen.identifier || identifier).trim().toLocaleLowerCase(),
-                      );
+                      setIdentifier((screen.identifier || identifier).trim().toLocaleLowerCase());
                       setAntiBotToken(null);
                       setScreen({ name: "reset-request", previous: screen });
                     }}
-                    className="min-h-11 items-center justify-center"
+                    className="min-h-11 items-center justify-center rounded-full px-4 active:bg-subtle"
                   >
                     <Text className="text-sm font-ryco-bold text-foreground-muted">
                       Forgot password?

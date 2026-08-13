@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -6,14 +6,17 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
-import { createHubCapabilityClient, hubCapabilityFailureText } from "../../hostedHub/hubCapability";
+import {
+  checkHubCapabilityWithTimeout,
+  createHubCapabilityClient,
+  hubCapabilityFailureText,
+} from "../../hostedHub/hubCapability";
 import {
   createHubProfile,
   HUB_PROFILE_LABEL_MAX_LENGTH,
@@ -53,20 +56,20 @@ export function HubDomainEditor(props: {
   readonly requireNativeIdentity?: boolean;
 }) {
   const insets = useSafeAreaInsets();
-  const placeholderColor = useThemeColor("--color-placeholder");
-  const textColor = useThemeColor("--color-foreground");
   const primaryForegroundColor = useThemeColor("--color-primary-foreground");
   const [origin, setOrigin] = useState("");
   const [label, setLabel] = useState("");
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checkedProfile, setCheckedProfile] = useState<HubProfile | null>(null);
+  const checkGeneration = useRef(0);
   const capabilityClient = useMemo(
     () => createHubCapabilityClient(createMobileHttpClient(() => null)),
     [],
   );
 
   useEffect(() => {
+    checkGeneration.current += 1;
     if (!props.visible) return;
     setOrigin(props.currentProfile?.origin ?? props.buildOrigin ?? "");
     setLabel(props.currentProfile?.label ?? "");
@@ -76,12 +79,15 @@ export function HubDomainEditor(props: {
   }, [props.buildOrigin, props.currentProfile, props.visible]);
 
   const updateOrigin = (value: string) => {
+    checkGeneration.current += 1;
+    setChecking(false);
     setOrigin(value);
     setCheckedProfile(null);
     setError(null);
   };
 
   const check = async () => {
+    const issued = ++checkGeneration.current;
     setChecking(true);
     setError(null);
     setCheckedProfile(null);
@@ -91,31 +97,43 @@ export function HubDomainEditor(props: {
       setChecking(false);
       return;
     }
-    const result = await capabilityClient.check(normalized.origin);
-    if (result.status === "incompatible") {
-      setError(hubCapabilityFailureText(result.reason));
-      setChecking(false);
-      return;
+    try {
+      const result = await checkHubCapabilityWithTimeout(capabilityClient, normalized.origin);
+      if (issued !== checkGeneration.current) return;
+      if (result.status === "incompatible") {
+        setError(hubCapabilityFailureText(result.reason));
+        return;
+      }
+      if (props.requireNativeIdentity && result.capability.nativeIdentity === undefined) {
+        setError("This Hub does not advertise native account access.");
+        return;
+      }
+      const profile = createHubProfile({
+        origin: normalized.origin,
+        label: label || result.capability.relyingParty.displayName,
+        allowInsecure: props.allowInsecure,
+        compatibility: {
+          status: "compatible",
+          checkedAt: result.checkedAt,
+          protocolVersion: result.capability.protocolVersion,
+          handoffVersion: result.capability.nativeHandoff.version,
+          relyingPartyId: result.capability.relyingParty.id,
+        },
+      });
+      setCheckedProfile(profile);
+    } catch {
+      if (issued === checkGeneration.current) {
+        setError("Ryco could not check this Hub. Try again.");
+      }
+    } finally {
+      if (issued === checkGeneration.current) setChecking(false);
     }
-    if (props.requireNativeIdentity && result.capability.nativeIdentity === undefined) {
-      setError("This Hub does not advertise native account access.");
-      setChecking(false);
-      return;
-    }
-    const profile = createHubProfile({
-      origin: normalized.origin,
-      label: label || result.capability.relyingParty.displayName,
-      allowInsecure: props.allowInsecure,
-      compatibility: {
-        status: "compatible",
-        checkedAt: result.checkedAt,
-        protocolVersion: result.capability.protocolVersion,
-        handoffVersion: result.capability.nativeHandoff.version,
-        relyingPartyId: result.capability.relyingParty.id,
-      },
-    });
-    setCheckedProfile(profile);
+  };
+
+  const dismiss = () => {
+    checkGeneration.current += 1;
     setChecking(false);
+    props.onDismiss();
   };
 
   return (
@@ -123,7 +141,7 @@ export function HubDomainEditor(props: {
       visible={props.visible}
       animationType="slide"
       presentationStyle={props.requireNativeIdentity ? "fullScreen" : "pageSheet"}
-      onRequestClose={props.onDismiss}
+      onRequestClose={dismiss}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -142,7 +160,7 @@ export function HubDomainEditor(props: {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Cancel Hub domain"
-              onPress={props.onDismiss}
+              onPress={dismiss}
               className="h-11 min-w-16 items-center justify-center rounded-full active:bg-subtle"
             >
               <Text className="text-base font-ryco-medium text-foreground">Cancel</Text>
@@ -160,17 +178,15 @@ export function HubDomainEditor(props: {
 
           <View className="gap-2">
             <Text className="px-1 text-sm font-ryco-medium text-foreground-muted">Domain</Text>
-            <TextInput
+            <AppTextInput
               accessibilityLabel="Hub domain"
               value={origin}
               onChangeText={updateOrigin}
               placeholder="https://hub.your-domain.com"
-              placeholderTextColor={placeholderColor as string}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
-              className="min-h-14 rounded-2xl border border-border bg-card px-4 py-3 font-mono text-sm"
-              style={{ color: textColor as string }}
+              className="min-h-14 px-4"
             />
           </View>
 
@@ -178,19 +194,20 @@ export function HubDomainEditor(props: {
             <Text className="px-1 text-sm font-ryco-medium text-foreground-muted">
               Name (optional)
             </Text>
-            <TextInput
+            <AppTextInput
               accessibilityLabel="Hub name"
               value={label}
               onChangeText={(value) => {
+                checkGeneration.current += 1;
+                setChecking(false);
                 setLabel(value);
                 setCheckedProfile(null);
+                setError(null);
               }}
               maxLength={HUB_PROFILE_LABEL_MAX_LENGTH}
               placeholder="Studio Hub"
-              placeholderTextColor={placeholderColor as string}
               autoCapitalize="words"
-              className="min-h-14 rounded-2xl border border-border bg-card px-4 py-3 font-sans text-base"
-              style={{ color: textColor as string }}
+              className="min-h-14 px-4"
             />
           </View>
 
@@ -231,7 +248,10 @@ export function HubDomainEditor(props: {
             accessibilityLabel="Save Hub profile"
             disabled={!checkedProfile || checking}
             onPress={() => {
-              if (checkedProfile) props.onSave(checkedProfile);
+              if (checkedProfile) {
+                checkGeneration.current += 1;
+                props.onSave(checkedProfile);
+              }
             }}
             className="h-12 items-center justify-center rounded-full border border-border bg-card px-5 active:bg-card-alt disabled:opacity-40"
           >
@@ -242,7 +262,11 @@ export function HubDomainEditor(props: {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Use build default Hub"
-              onPress={props.onUseBuildDefault}
+              onPress={() => {
+                checkGeneration.current += 1;
+                setChecking(false);
+                props.onUseBuildDefault?.();
+              }}
               className="h-11 items-center justify-center rounded-full active:bg-subtle"
             >
               <Text className="text-sm font-ryco-bold text-foreground-muted">
