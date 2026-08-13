@@ -12,6 +12,7 @@ import { Schema } from "effect";
 export const HUB_CAPABILITY_PATH = NATIVE_HANDOFF_CAPABILITY_PATH;
 export const SUPPORTED_HUB_PROTOCOL_VERSION = NATIVE_HANDOFF_PROTOCOL_VERSION;
 export const SUPPORTED_HUB_HANDOFF_VERSION = NATIVE_HANDOFF_VERSION;
+export const HUB_CAPABILITY_CHECK_TIMEOUT_MS = 10_000;
 
 const MAX_CAPABILITY_BODY_LENGTH = NATIVE_HANDOFF_MAX_CAPABILITY_BYTES;
 
@@ -47,6 +48,10 @@ export type HubCapabilityCheck =
       readonly checkedAt: number;
       readonly reason: HubCapabilityFailureReason;
     };
+
+export interface HubCapabilityClient {
+  readonly check: (origin: string, signal?: AbortSignal) => Promise<HubCapabilityCheck>;
+}
 
 type CapabilityDecodeResult =
   | { readonly ok: true; readonly capability: HubCapability }
@@ -124,9 +129,7 @@ export function decodeHubCapability(value: unknown, origin: string): CapabilityD
 export function createHubCapabilityClient(
   httpClient: HttpClientService,
   now: () => number = Date.now,
-): {
-  readonly check: (origin: string, signal?: AbortSignal) => Promise<HubCapabilityCheck>;
-} {
+): HubCapabilityClient {
   return {
     check: async (origin, signal) => {
       const checkedAt = now();
@@ -173,6 +176,39 @@ export function createHubCapabilityClient(
       return { status: "compatible", checkedAt, capability: decoded.capability };
     },
   };
+}
+
+/**
+ * Bound an owner-triggered compatibility probe even when a platform fetch
+ * implementation ignores AbortSignal. Aborting still releases conforming
+ * transports, while the race guarantees that every UI leaves its checking
+ * state and can offer a retry.
+ */
+export async function checkHubCapabilityWithTimeout(
+  client: HubCapabilityClient,
+  origin: string,
+  options: {
+    readonly timeoutMs?: number;
+    readonly now?: () => number;
+  } = {},
+): Promise<HubCapabilityCheck> {
+  const timeoutMs = options.timeoutMs ?? HUB_CAPABILITY_CHECK_TIMEOUT_MS;
+  const now = options.now ?? Date.now;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      client.check(origin, controller.signal),
+      new Promise<HubCapabilityCheck>((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          resolve({ status: "incompatible", checkedAt: now(), reason: "unreachable" });
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export function hubCapabilityFailureText(reason: HubCapabilityFailureReason): string {

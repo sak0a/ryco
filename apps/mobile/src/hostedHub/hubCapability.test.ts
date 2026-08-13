@@ -2,6 +2,7 @@ import type { HttpClientService } from "@ryco/client-runtime/platform";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  checkHubCapabilityWithTimeout,
   createHubCapabilityClient,
   decodeHubCapability,
   HUB_CAPABILITY_PATH,
@@ -105,6 +106,34 @@ describe("Hub capability client", () => {
       credentials: "omit",
       cache: "no-store",
     });
+  });
+
+  it("bounds a transport that never settles and aborts the underlying request", async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const pending = checkHubCapabilityWithTimeout(
+        {
+          check: async (_origin, nextSignal) => {
+            signal = nextSignal;
+            return await new Promise<never>(() => {});
+          },
+        },
+        ORIGIN,
+        { timeoutMs: 10_000, now: () => 5678 },
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await expect(pending).resolves.toEqual({
+        status: "incompatible",
+        checkedAt: 5678,
+        reason: "unreachable",
+      });
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reports protocol and handoff incompatibility with stable reasons", async () => {

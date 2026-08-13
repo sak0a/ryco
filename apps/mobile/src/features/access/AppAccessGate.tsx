@@ -43,7 +43,7 @@ function LaunchSurface() {
         contentFit="contain"
         tintColor={foreground as string}
         accessibilityLabel="Ryco is loading"
-        style={{ width: 58, height: 58 }}
+        style={{ width: 128, height: 128 }}
       />
     </View>
   );
