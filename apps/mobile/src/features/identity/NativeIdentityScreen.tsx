@@ -47,7 +47,10 @@ import {
   createNativeIdentityTransactionStore,
   type NativeIdentityTransactionRecord,
 } from "./nativeIdentityTransaction";
-import { TurnstileChallenge } from "./TurnstileChallenge";
+import {
+  NATIVE_IDENTITY_TURNSTILE_ACTIONS,
+  TurnstileChallenge,
+} from "./TurnstileChallenge";
 
 type Activation = {
   readonly attemptId: HostedIdentity.NativeIdentityAttemptId;
@@ -55,6 +58,12 @@ type Activation = {
   readonly activationSecret: HostedIdentity.NativeIdentityEmailVerifyResponse["activationSecret"];
   readonly expiresAt: number;
 };
+
+type PasswordScreen = {
+  readonly name: "password";
+  readonly identifier: string;
+  readonly purpose: "login" | "signup";
+} & Partial<Activation>;
 
 type Screen =
   | { readonly name: "entry" }
@@ -65,11 +74,7 @@ type Screen =
       readonly expiresAt: number;
       readonly presentation: string;
     }
-  | ({
-      readonly name: "password";
-      readonly identifier: string;
-      readonly purpose: "login" | "signup";
-    } & Partial<Activation>)
+  | PasswordScreen
   | ({ readonly name: "username" } & Activation)
   | ({ readonly name: "credential" } & Activation)
   | {
@@ -80,6 +85,10 @@ type Screen =
       readonly expiresAt: number;
     }
   | { readonly name: "recovery" }
+  | {
+      readonly name: "reset-request";
+      readonly previous: PasswordScreen;
+    }
   | {
       readonly name: "reset-mailbox";
       readonly attemptId: HostedIdentity.NativeIdentityResetAttemptId;
@@ -288,6 +297,9 @@ export function NativeIdentityScreen() {
   const normalizedIdentifier = identifier.trim().toLocaleLowerCase();
   const needsEntryAntiBot =
     isEmail(normalizedIdentifier) && nativePolicy?.email.antiBot.provider === "turnstile";
+  const needsResetAntiBot =
+    screen.name === "reset-request" &&
+    nativePolicy?.email.antiBot.provider === "turnstile";
 
   const refreshCapability = async () => {
     setBusy(true);
@@ -625,15 +637,21 @@ export function NativeIdentityScreen() {
 
   const restart = () =>
     void run(async () => {
+      const cancellableScreen = screen.name === "reset-request" ? screen.previous : screen;
       const attempt =
-        screen.name === "mailbox" ||
-        screen.name === "factor" ||
-        screen.name === "reset-mailbox" ||
-        screen.name === "reset-password" ||
-        screen.name === "username" ||
-        screen.name === "credential" ||
-        (screen.name === "password" && screen.attemptId && screen.attemptSecret)
-          ? { attemptId: screen.attemptId, attemptSecret: screen.attemptSecret }
+        cancellableScreen.name === "mailbox" ||
+        cancellableScreen.name === "factor" ||
+        cancellableScreen.name === "reset-mailbox" ||
+        cancellableScreen.name === "reset-password" ||
+        cancellableScreen.name === "username" ||
+        cancellableScreen.name === "credential" ||
+        (cancellableScreen.name === "password" &&
+          cancellableScreen.attemptId &&
+          cancellableScreen.attemptSecret)
+          ? {
+              attemptId: cancellableScreen.attemptId,
+              attemptSecret: cancellableScreen.attemptSecret,
+            }
           : null;
       if (attempt) {
         try {
@@ -697,6 +715,8 @@ export function NativeIdentityScreen() {
   const title =
     screen.name === "entry"
       ? "Log in or sign up"
+      : screen.name === "reset-request"
+        ? "Reset your password"
       : screen.name === "mailbox" || screen.name === "reset-mailbox"
         ? "Check your email"
         : screen.name === "username"
@@ -738,6 +758,8 @@ export function NativeIdentityScreen() {
           <Text className="mx-auto mt-2 max-w-[330px] text-center text-sm leading-relaxed text-foreground-muted">
             {screen.name === "recovery-codes"
               ? "Store these somewhere safe. Each code works once."
+              : screen.name === "reset-request"
+                ? "Verify the account before choosing a new password."
               : screen.name === "mailbox" || screen.name === "reset-mailbox"
                 ? "Enter the six-digit code we sent."
                 : "Native account access on Ryco Hub"}
@@ -768,6 +790,7 @@ export function NativeIdentityScreen() {
                   <TurnstileChallenge
                     origin={origin}
                     siteKey={nativePolicy.email.antiBot.siteKey}
+                    action={NATIVE_IDENTITY_TURNSTILE_ACTIONS.emailStart}
                     onToken={setAntiBotToken}
                   />
                 ) : null}
@@ -940,6 +963,65 @@ export function NativeIdentityScreen() {
                   />
                 ) : null}
               </>
+            ) : screen.name === "reset-request" ? (
+              <>
+                <AppTextInput
+                  accessibilityLabel="Email or username"
+                  placeholder="Email or username"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  keyboardType="email-address"
+                  value={identifier}
+                  onChangeText={setIdentifier}
+                />
+                {needsResetAntiBot && nativePolicy && origin ? (
+                  <TurnstileChallenge
+                    origin={origin}
+                    siteKey={nativePolicy.email.antiBot.siteKey}
+                    action={NATIVE_IDENTITY_TURNSTILE_ACTIONS.passwordReset}
+                    onToken={setAntiBotToken}
+                  />
+                ) : null}
+                <Action
+                  label="Send reset code"
+                  disabled={
+                    busy ||
+                    (!isEmail(normalizedIdentifier) && !isUsername(normalizedIdentifier)) ||
+                    (needsResetAntiBot && antiBotToken === null)
+                  }
+                  onPress={() =>
+                    void run(async () => {
+                      if (screen.name !== "reset-request") return;
+                      const response = await getHostedHubApi().requestNativeIdentityPasswordReset({
+                        identifier: normalizedIdentifier as HostedIdentity.HubLoginIdentifier,
+                        ...(antiBotAssertion()
+                          ? { antiBotAssertion: antiBotAssertion()! }
+                          : {}),
+                      });
+                      await persistTransaction({
+                        version: 1,
+                        kind: "password-reset",
+                        step: "mailbox",
+                        origin: origin!,
+                        attemptId: response.attemptId,
+                        attemptSecret: response.attemptSecret,
+                        expiresAt: response.expiresAt,
+                        presentation: "your email",
+                      });
+                      setAntiBotToken(null);
+                      setScreen({ name: "reset-mailbox", ...response });
+                    })
+                  }
+                />
+                <Action
+                  label="Back"
+                  quiet
+                  onPress={() => {
+                    setAntiBotToken(null);
+                    setScreen(screen.previous);
+                  }}
+                />
+              </>
             ) : screen.name === "password" ? (
               <>
                 <AppTextInput
@@ -984,30 +1066,13 @@ export function NativeIdentityScreen() {
                 {nativePolicy?.recovery.passwordReset ? (
                   <Pressable
                     accessibilityRole="button"
-                    onPress={() =>
-                      void run(async () => {
-                        const value = (screen.identifier || identifier).trim().toLocaleLowerCase();
-                        const response = await getHostedHubApi().requestNativeIdentityPasswordReset(
-                          {
-                            identifier: value as HostedIdentity.HubLoginIdentifier,
-                            ...(antiBotAssertion()
-                              ? { antiBotAssertion: antiBotAssertion()! }
-                              : {}),
-                          },
-                        );
-                        await persistTransaction({
-                          version: 1,
-                          kind: "password-reset",
-                          step: "mailbox",
-                          origin: origin!,
-                          attemptId: response.attemptId,
-                          attemptSecret: response.attemptSecret,
-                          expiresAt: response.expiresAt,
-                          presentation: "your email",
-                        });
-                        setScreen({ name: "reset-mailbox", ...response });
-                      })
-                    }
+                    onPress={() => {
+                      setIdentifier(
+                        (screen.identifier || identifier).trim().toLocaleLowerCase(),
+                      );
+                      setAntiBotToken(null);
+                      setScreen({ name: "reset-request", previous: screen });
+                    }}
                     className="min-h-11 items-center justify-center"
                   >
                     <Text className="text-sm font-ryco-bold text-foreground-muted">

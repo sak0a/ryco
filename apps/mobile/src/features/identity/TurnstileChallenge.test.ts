@@ -5,12 +5,26 @@ vi.mock("react-native-webview", () => ({ WebView: "WebView" }));
 
 import {
   createTurnstileHtml,
+  NATIVE_IDENTITY_TURNSTILE_ACTIONS,
   parseTurnstileMessage,
   TurnstileChallenge,
   turnstileOriginWhitelist,
 } from "./TurnstileChallenge";
 
 describe("TurnstileChallenge", () => {
+  it("binds each native ceremony to the Hub's exact verifier action", () => {
+    expect(NATIVE_IDENTITY_TURNSTILE_ACTIONS).toEqual({
+      emailStart: "public_signup",
+      passwordReset: "password_reset",
+    });
+    expect(
+      createTurnstileHtml(
+        "public-site-key",
+        NATIVE_IDENTITY_TURNSTILE_ACTIONS.passwordReset,
+      ),
+    ).toContain('data-action="password_reset"');
+  });
+
   it("allows the Hub, Cloudflare, and WebView bootstrap documents", () => {
     expect(turnstileOriginWhitelist("https://hub.example.com")).toEqual([
       "https://hub.example.com",
@@ -21,9 +35,10 @@ describe("TurnstileChallenge", () => {
   });
 
   it("renders a bounded flexible mobile challenge with retry callbacks", () => {
-    const html = createTurnstileHtml("public-site-key");
+    const html = createTurnstileHtml("public-site-key", "public_signup");
 
     expect(html).toContain('data-sitekey="public-site-key"');
+    expect(html).toContain('data-action="public_signup"');
     expect(html).toContain('data-size="flexible"');
     expect(html).toContain('data-retry="auto"');
     expect(html).toContain('data-error-callback="clear"');
@@ -42,6 +57,7 @@ describe("TurnstileChallenge", () => {
     const element = TurnstileChallenge({
       origin: "https://hub.example.com",
       siteKey: "public-site-key",
+      action: "password_reset",
       onToken: vi.fn(),
     }) as unknown as {
       readonly props: {

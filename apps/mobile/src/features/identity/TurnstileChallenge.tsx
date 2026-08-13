@@ -3,7 +3,14 @@ import { WebView } from "react-native-webview";
 
 const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 
-export function createTurnstileHtml(siteKey: string): string {
+export type TurnstileAction = "password_login" | "password_reset" | "public_signup";
+
+export const NATIVE_IDENTITY_TURNSTILE_ACTIONS = Object.freeze({
+  emailStart: "public_signup",
+  passwordReset: "password_reset",
+} as const satisfies Record<string, TurnstileAction>);
+
+export function createTurnstileHtml(siteKey: string, action: TurnstileAction): string {
   return `<!doctype html>
 <html>
   <head>
@@ -19,7 +26,7 @@ export function createTurnstileHtml(siteKey: string): string {
       id="challenge"
       class="cf-turnstile"
       data-sitekey=${JSON.stringify(siteKey)}
-      data-action="native_identity"
+      data-action=${JSON.stringify(action)}
       data-theme="dark"
       data-size="flexible"
       data-retry="auto"
@@ -55,6 +62,7 @@ export function parseTurnstileMessage(data: string): string | null {
 export function TurnstileChallenge(props: {
   readonly origin: string;
   readonly siteKey: string;
+  readonly action: TurnstileAction;
   readonly onToken: (token: string | null) => void;
 }) {
   const clearToken = () => props.onToken(null);
@@ -66,7 +74,7 @@ export function TurnstileChallenge(props: {
       style={{ height: 80, width: "100%", flex: 0 }}
     >
       <WebView
-        source={{ html: createTurnstileHtml(props.siteKey), baseUrl: props.origin }}
+        source={{ html: createTurnstileHtml(props.siteKey, props.action), baseUrl: props.origin }}
         originWhitelist={[...turnstileOriginWhitelist(props.origin)]}
         javaScriptEnabled
         domStorageEnabled
