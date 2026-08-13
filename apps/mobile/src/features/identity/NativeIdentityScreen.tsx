@@ -43,6 +43,7 @@ import {
   createNativeIdentityCompletionJournal,
   type NativeIdentityCompletionJournal,
 } from "./completionJournal";
+import { verifiedEmailCancellation } from "./nativeIdentityCancellation";
 import {
   createNativeIdentityTransactionStore,
   type NativeIdentityTransactionRecord,
@@ -552,12 +553,12 @@ export function NativeIdentityScreen() {
       if (response.status === "existing_account") {
         if (!nativePolicy?.login.methods.includes("password")) {
           await getHostedHubApi().cancelNativeIdentityAttempt({
-            attemptId: response.attemptId,
-            attemptSecret: screen.attemptSecret,
+            ...verifiedEmailCancellation(response),
           });
           await transactionStore.clear();
           setScreen({ name: "entry" });
-          throw new Error("password login unavailable");
+          setError("This Hub does not currently offer password login.");
+          return;
         }
         await persistTransaction({
           version: 1,
@@ -571,12 +572,14 @@ export function NativeIdentityScreen() {
       } else {
         if (nativePolicy?.signup.status !== "enabled") {
           await getHostedHubApi().cancelNativeIdentityAttempt({
-            attemptId: response.attemptId,
-            attemptSecret: screen.attemptSecret,
+            ...verifiedEmailCancellation(response),
           });
           await transactionStore.clear();
           setScreen({ name: "entry" });
-          throw new Error("signup unavailable");
+          setError(
+            "That email is not linked to an existing account. New account signup is currently closed.",
+          );
+          return;
         }
         await persistTransaction({
           version: 1,

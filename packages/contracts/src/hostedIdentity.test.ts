@@ -410,6 +410,12 @@ describe("native identity v2 contracts", () => {
         attemptSecret: opaque,
       }),
     ).toBeTruthy();
+    expect(
+      strictDecode(NativeIdentityAttemptCancelRequest, {
+        attemptId,
+        attemptSecret: opaqueB,
+      }),
+    ).toBeTruthy();
     expect(strictDecode(NativeIdentityAttemptCancelResponse, { status: "cancelled" })).toBeTruthy();
     expect(() =>
       strictDecode(NativeIdentityAttemptCancelRequest, {
