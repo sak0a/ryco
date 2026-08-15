@@ -160,9 +160,14 @@ and 390 x 844 phone viewports.
 There were no page errors. The route kept two expected lazy Suspense boundaries. A five-second idle
 render capture observed no React commits and the network capture observed no fetch/XHR polling.
 
-The complete serialized Chromium behavior suite passed 81 files and 723 tests, with one additional
+The complete serialized Chromium behavior suite passed 81 files and 731 tests, with one additional
 test marked as an expected failure. The suite covers desktop and phone lifecycle, reconnect,
 streaming, long-thread, workspace, source-control, modal, responsive-layout, and PWA behavior.
+
+A follow-up external harness now launches the production server and Chromium from outside the app,
+measures browser/network/WebSocket and process-tree behavior, and can compare two Git revisions in
+isolated worktrees. Its one-iteration smoke run validates the mechanism but is not used as statistical
+evidence for the performance claims above. See `docs/performance-testing.md`.
 
 ## Validation status
 
