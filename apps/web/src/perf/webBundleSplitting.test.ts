@@ -30,17 +30,22 @@ describe("web bundle splitting boundaries", () => {
   it("keeps heavy route bodies out of the eager route registration graph", async () => {
     const statisticsRoute = await readSource("../routes/statistics.tsx");
     const diagnosticsRoute = await readSource("../routes/_settings.diagnostics.tsx");
-    const pairRoute = await readSource("../routes/pair.tsx");
     const nativeAuthorizationRoute = await readSource("../routes/native.authorize.$handoffId.tsx");
 
     expect(statisticsRoute).toContain('import("../components/statistics/StatisticsPage")');
     expect(statisticsRoute).not.toContain("import { StatisticsPage }");
     expect(diagnosticsRoute).toContain('import("../components/settings/DiagnosticsSettings")');
     expect(diagnosticsRoute).not.toContain("import { DiagnosticsSettings }");
-    expect(pairRoute).toContain('import("../components/auth/PairingRouteSurface")');
     expect(nativeAuthorizationRoute).toContain(
       'import("../components/hostedHub/HostedNativeAuthorizationRoute")',
     );
+  });
+
+  it("keeps the first-navigation pairing surface eager", async () => {
+    const pairRoute = await readSource("../routes/pair.tsx");
+
+    expect(pairRoute).toContain('from "../components/auth/PairingRouteSurface"');
+    expect(pairRoute).not.toContain('import("../components/auth/PairingRouteSurface")');
   });
 
   it("loads xterm css from the terminal drawer chunk instead of the app entry", async () => {
