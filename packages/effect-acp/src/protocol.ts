@@ -75,6 +75,11 @@ const decodeElicitationComplete = Schema.decodeUnknownEffect(
 );
 const parserFactory = RpcSerialization.ndJsonRpc();
 
+const normalizeProtocolError = (error: unknown, detail: string): AcpError.AcpError =>
+  Schema.is(AcpError.AcpError)(error)
+    ? error
+    : new AcpError.AcpTransportError({ detail, cause: error });
+
 export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(function* (
   options: AcpPatchedProtocolOptions,
 ): Effect.fn.Return<AcpPatchedProtocol, never, Scope.Scope> {
@@ -107,7 +112,11 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     );
   };
 
-  const offerBounded = <A, E>(queue: Queue.Queue<A, E>, value: A, queueName: string) =>
+  const offerBounded = <A, E>(
+    queue: Queue.Queue<A, E>,
+    value: A,
+    queueName: string,
+  ): Effect.Effect<void, AcpError.AcpError> =>
     Queue.offer(queue, value).pipe(
       Effect.timeoutOrElse({
         duration: PROTOCOL_ENQUEUE_DEADLINE_MS,
@@ -120,6 +129,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
           ),
       }),
       Effect.asVoid,
+      Effect.mapError((error) => normalizeProtocolError(error, `ACP ${queueName} queue failed`)),
     );
 
   const offerOutgoing = Effect.fn("offerOutgoing")(function* (
@@ -448,12 +458,10 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
     ),
     Effect.matchEffect({
       onFailure: (error) => {
-        const normalized: AcpError.AcpError = Schema.is(AcpError.AcpError)(error)
-          ? error
-          : new AcpError.AcpTransportError({
-              detail: error instanceof Error ? error.message : String(error),
-              cause: error,
-            });
+        const normalized = normalizeProtocolError(
+          error,
+          error instanceof Error ? error.message : String(error),
+        );
         return handleTermination(() => Effect.succeed(normalized));
       },
       onSuccess: () =>

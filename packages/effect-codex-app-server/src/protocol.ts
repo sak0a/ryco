@@ -99,7 +99,7 @@ const encodeWireMessage = (
       }),
   });
 
-const normalizeIncomingError = (error: unknown, detail: string): CodexError.CodexAppServerError =>
+const normalizeProtocolError = (error: unknown, detail: string): CodexError.CodexAppServerError =>
   Schema.is(CodexError.CodexAppServerError)(error)
     ? error
     : new CodexError.CodexAppServerTransportError({
@@ -150,7 +150,11 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       );
     };
 
-    const offerBounded = <A, E>(queue: Queue.Queue<A, E>, value: A, queueName: string) =>
+    const offerBounded = <A, E>(
+      queue: Queue.Queue<A, E>,
+      value: A,
+      queueName: string,
+    ): Effect.Effect<void, CodexError.CodexAppServerError> =>
       Queue.offer(queue, value).pipe(
         Effect.timeoutOrElse({
           duration: PROTOCOL_ENQUEUE_DEADLINE_MS,
@@ -163,6 +167,9 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             ),
         }),
         Effect.asVoid,
+        Effect.mapError((error) =>
+          normalizeProtocolError(error, `Codex App Server ${queueName} queue failed`),
+        ),
       );
 
     const failAllPending = (error: CodexError.CodexAppServerError) =>
@@ -372,7 +379,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       Effect.matchEffect({
         onFailure: (error) =>
           handleTermination(() =>
-            Effect.succeed(normalizeIncomingError(error, "Codex App Server input stream failed")),
+            Effect.succeed(normalizeProtocolError(error, "Codex App Server input stream failed")),
           ),
         onSuccess: () =>
           Ref.get(remainder).pipe(
