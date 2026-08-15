@@ -7,6 +7,14 @@ import { runMeasuredCommand } from "./command.ts";
 import type { BenchmarkResult, PerfScenarioConfig } from "./model.ts";
 import { runCheckoutBenchmark } from "./runner.ts";
 
+export const REF_BUILD_ARGS = [
+  "run",
+  "build",
+  "--force",
+  "--filter=ryco-cli",
+  "--filter=@ryco/web",
+] as const;
+
 function git(repoRoot: string, args: readonly string[]): string {
   return execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" }).trim();
 }
@@ -45,7 +53,9 @@ async function measureRef(input: {
     }
     const build = await runMeasuredCommand({
       command: bunBinary,
-      args: ["run", "build", "--filter=ryco-cli", "--filter=@ryco/web"],
+      // Detached worktrees can still see Turbo's shared worktree cache. Force
+      // execution so one revision cannot receive a warm-cache advantage.
+      args: REF_BUILD_ARGS,
       cwd: worktree,
       env: { RYCO_WEB_SOURCEMAP: "0" },
       timeoutMs: 15 * 60_000,

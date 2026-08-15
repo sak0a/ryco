@@ -50,8 +50,10 @@ bun run perf:compare -- \
 ```
 
 The harness refuses a dirty `HEAD`. It creates detached temporary worktrees, runs
-`bun install --frozen-lockfile`, builds the production server and web targets, measures both
-revisions sequentially, and cleans up only the worktrees and homes it created.
+`bun install --frozen-lockfile`, forces equivalent production server and web builds without Turbo
+cache reads, measures both revisions sequentially, and cleans up only the worktrees and homes it
+created. The forced build matters because Turbo otherwise shares cache entries across Git
+worktrees, which can make whichever revision is already cached appear dramatically faster.
 
 Artifacts include:
 
