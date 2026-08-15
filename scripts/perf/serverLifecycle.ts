@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, mkdirSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -11,6 +11,11 @@ export interface LaunchedServer {
   readonly pairingUrl: string;
   readonly serverReadyMs: number;
   readonly output: () => string;
+  readonly stop: () => Promise<void>;
+}
+
+export interface StopProcessOptions {
+  readonly ownsProcessGroup?: boolean;
 }
 
 export function parsePairingUrl(output: string): string | null {
@@ -69,6 +74,7 @@ export async function launchProductionServer(input: {
     throw new Error(`Missing production server build: ${serverBin}`);
   }
   const startedAt = performance.now();
+  const ownsProcessGroup = process.platform !== "win32";
   const child = spawn(
     process.env.RYCO_PERF_NODE_BINARY || "node",
     [
@@ -94,6 +100,7 @@ export async function launchProductionServer(input: {
         VITE_RYCO_PERF_PROFILE: "0",
       },
       stdio: ["ignore", "pipe", "pipe"],
+      detached: ownsProcessGroup,
     },
   );
   input.onSpawn?.(child);
@@ -130,7 +137,7 @@ export async function launchProductionServer(input: {
       );
     });
   }).catch(async (error: unknown) => {
-    await stopProcess(child);
+    await stopProcess(child, { ownsProcessGroup });
     throw error;
   });
 
@@ -139,6 +146,7 @@ export async function launchProductionServer(input: {
     pairingUrl,
     serverReadyMs: performance.now() - startedAt,
     output: () => output,
+    stop: () => stopProcess(child, { ownsProcessGroup }),
   };
 }
 
@@ -157,12 +165,68 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
   });
 }
 
-export async function stopProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGINT");
-  if (await waitForExit(child, 3_000)) return;
-  child.kill("SIGTERM");
-  if (await waitForExit(child, 2_000)) return;
-  child.kill("SIGKILL");
-  await waitForExit(child, 1_000);
+function signalOwnedProcess(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+  ownsProcessGroup: boolean,
+): void {
+  if (!ownsProcessGroup || process.platform === "win32" || !child.pid) {
+    if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+    return;
+  }
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
+async function processGroupExists(
+  child: ChildProcess,
+  ownsProcessGroup: boolean,
+): Promise<boolean> {
+  if (!ownsProcessGroup || process.platform === "win32" || !child.pid) {
+    return child.exitCode === null && child.signalCode === null;
+  }
+  const processGroupId = child.pid;
+  return await new Promise((resolve, reject) => {
+    execFile("ps", ["-axo", "pgid="], { encoding: "utf8" }, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(
+        stdout
+          .split(/\s+/u)
+          .some((rawProcessGroupId) => Number(rawProcessGroupId) === processGroupId),
+      );
+    });
+  });
+}
+
+async function waitForOwnedExit(
+  child: ChildProcess,
+  timeoutMs: number,
+  ownsProcessGroup: boolean,
+): Promise<boolean> {
+  if (!ownsProcessGroup || process.platform === "win32") return await waitForExit(child, timeoutMs);
+  const deadline = performance.now() + timeoutMs;
+  while (await processGroupExists(child, true)) {
+    if (performance.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return true;
+}
+
+export async function stopProcess(
+  child: ChildProcess,
+  options: StopProcessOptions = {},
+): Promise<void> {
+  const ownsProcessGroup = options.ownsProcessGroup === true;
+  signalOwnedProcess(child, "SIGINT", ownsProcessGroup);
+  if (await waitForOwnedExit(child, 3_000, ownsProcessGroup)) return;
+  signalOwnedProcess(child, "SIGTERM", ownsProcessGroup);
+  if (await waitForOwnedExit(child, 2_000, ownsProcessGroup)) return;
+  signalOwnedProcess(child, "SIGKILL", ownsProcessGroup);
+  await waitForOwnedExit(child, 1_000, ownsProcessGroup);
 }

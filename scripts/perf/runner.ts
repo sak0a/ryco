@@ -22,7 +22,6 @@ import {
   launchProductionServer,
   prepareIterationHome,
   reserveLoopbackPort,
-  stopProcess,
 } from "./serverLifecycle.ts";
 
 const UNSAMPLED_PROCESS_TREE: ProcessTreeSummary = {
@@ -157,7 +156,7 @@ export async function runCheckoutBenchmark(input: {
         if (samplerRef.current && processTree === UNSAMPLED_PROCESS_TREE) {
           processTree = await samplerRef.current.stop();
         }
-        if (launchedServer) await stopProcess(launchedServer.child);
+        if (launchedServer) await launchedServer.stop();
       }
     }
   } finally {
