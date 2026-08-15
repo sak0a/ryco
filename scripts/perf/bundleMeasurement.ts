@@ -4,6 +4,16 @@ import zlib from "node:zlib";
 
 import type { BundleMeasurement } from "./model.ts";
 
+// Node's Brotli default is quality 11, which is intended for maximum offline
+// compression and can take minutes for a production asset tree. Quality 5 is
+// representative of dynamic/static web delivery while keeping this diagnostic
+// fast enough to run for every compared revision.
+const BROTLI_OPTIONS = {
+  params: {
+    [zlib.constants.BROTLI_PARAM_QUALITY]: 5,
+  },
+} as const;
+
 function filesBelow(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
@@ -22,7 +32,7 @@ export function measureWebBundle(distDir: string): BundleMeasurement {
     const bytes = readFileSync(file);
     rawBytes += bytes.byteLength;
     gzipBytes += zlib.gzipSync(bytes).byteLength;
-    brotliBytes += zlib.brotliCompressSync(bytes).byteLength;
+    brotliBytes += zlib.brotliCompressSync(bytes, BROTLI_OPTIONS).byteLength;
   }
   return { files: files.length, rawBytes, gzipBytes, brotliBytes };
 }
