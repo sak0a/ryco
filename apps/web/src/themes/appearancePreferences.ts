@@ -688,6 +688,7 @@ function buildMotionCssVariables(reducedMotion: boolean): string {
     ["--app-motion-duration-sheet", `${200 * scale}ms`],
     ["--app-motion-duration-stack", `${260 * scale}ms`],
     ["--app-motion-duration-chip", `${120 * scale}ms`],
+    ["--app-motion-activity-play-state", reducedMotion ? "paused" : "running"],
     // Desktop overlay entrances (popovers, menus, dialogs, toasts). A fourth
     // step rather than reusing `sheet` so overlay pacing can diverge from
     // sheet pacing without a rename sweep. Zeroed under reduced motion like

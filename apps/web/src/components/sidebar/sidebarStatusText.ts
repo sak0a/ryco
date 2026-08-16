@@ -5,20 +5,18 @@ import { type SidebarStatusBucket, type ThreadStatusPill } from "../Sidebar.logi
 const SIDEBAR_STATUS_TEXT_CLASSNAMES: Record<SidebarStatusBucket, string> = {
   done: "sidebar-status-text sidebar-status-text--done",
   idle: "",
-  in_progress: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",
+  in_progress: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--flow",
   review: "sidebar-status-text sidebar-status-text--review",
 };
 
 const THREAD_STATUS_TEXT_CLASSNAMES: Record<ThreadStatusPill["label"], string> = {
   "Awaiting Input": "sidebar-status-text sidebar-status-text--awaiting-input",
   Completed: "sidebar-status-text sidebar-status-text--done",
-  Connecting: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",
-  // Steady label, no duty-cycled shimmer: monitoring is calm background
-  // presence, not active progress.
-  Monitoring: "sidebar-status-text sidebar-status-text--in-progress",
+  Connecting: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--flow",
+  Monitoring: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--flow",
   "Pending Approval": "sidebar-status-text sidebar-status-text--pending-approval",
   "Plan Ready": "sidebar-status-text sidebar-status-text--plan-ready",
-  Working: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--shimmer",
+  Working: "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--flow",
 };
 
 export function resolveSidebarStatusTextClassName(
@@ -54,5 +52,6 @@ export function resolveSidebarStatusTextStyle(
       ? {}
       : { "--sidebar-status-text-duration": `${options.durationSeconds}s` }),
     "--sidebar-status-text-spread": `${spreadPx}px`,
+    "--sidebar-status-text-period": `${spreadPx * 2}px`,
   } as CSSProperties;
 }

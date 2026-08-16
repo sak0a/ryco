@@ -616,7 +616,7 @@ export function resolveThreadStatusPill(input: {
       label: "Monitoring",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
-      pulse: false,
+      pulse: true,
     };
   }
 

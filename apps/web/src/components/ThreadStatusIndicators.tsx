@@ -84,17 +84,22 @@ export function ThreadStatusLabel({
    */
   alwaysShowLabel?: boolean;
 }) {
+  const dotSizeClass = compact ? "size-[9px]" : "size-1.5";
+  const statusDot = status.pulse ? (
+    <span className={`status-activity-signal ${dotSizeClass}`}>
+      <span className={`size-full rounded-full ${status.dotClass}`} />
+    </span>
+  ) : (
+    <span className={`${dotSizeClass} rounded-full ${status.dotClass}`} />
+  );
+
   if (compact) {
     return (
       <span
         title={status.label}
         className={`inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
       >
-        <span
-          className={`size-[9px] rounded-full ${status.dotClass} ${
-            status.pulse ? "animate-status-pulse" : ""
-          }`}
-        />
+        {statusDot}
         <span className="sr-only">{status.label}</span>
       </span>
     );
@@ -105,11 +110,7 @@ export function ThreadStatusLabel({
       title={status.label}
       className={`inline-flex items-center gap-1 text-[10px] ${status.colorClass}`}
     >
-      <span
-        className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
-          status.pulse ? "animate-status-pulse" : ""
-        }`}
-      />
+      {statusDot}
       <span className={alwaysShowLabel ? undefined : "hidden md:inline"}>{status.label}</span>
     </span>
   );

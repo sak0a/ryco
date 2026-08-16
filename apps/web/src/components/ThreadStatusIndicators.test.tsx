@@ -14,11 +14,13 @@ function status(label: ThreadStatusPill["label"], pulse: boolean): ThreadStatusP
 }
 
 describe("ThreadStatusLabel status animation", () => {
-  it("keeps the low-duty-cycle pulse on active working and connecting indicators", () => {
-    for (const label of ["Working", "Connecting"] as const) {
+  it("keeps a stable core and continuous halo on active indicators", () => {
+    for (const label of ["Working", "Connecting", "Monitoring"] as const) {
       const markup = renderToStaticMarkup(<ThreadStatusLabel status={status(label, true)} />);
 
-      expect(markup).toContain("animate-status-pulse");
+      expect(markup).toContain("status-activity-signal");
+      expect(markup).toContain("bg-current");
+      expect(markup).not.toContain("animate-status-pulse");
       expect(markup).not.toContain("animate-pulse");
     }
   });
@@ -32,6 +34,7 @@ describe("ThreadStatusLabel status animation", () => {
     ] as const) {
       const markup = renderToStaticMarkup(<ThreadStatusLabel status={status(label, false)} />);
 
+      expect(markup).not.toContain("status-activity-signal");
       expect(markup).not.toContain("animate-status-");
       expect(markup).not.toContain("animate-pulse");
       expect(markup).not.toContain("animate-ping");

@@ -409,17 +409,20 @@ describe("material and motion tokens", () => {
     expect(style.read()).toContain("--app-motion-duration-sheet: 200ms;");
     expect(style.read()).toContain("--app-motion-duration-stack: 260ms;");
     expect(style.read()).toContain("--app-motion-duration-chip: 120ms;");
+    expect(style.read()).toContain("--app-motion-activity-play-state: running;");
 
     setAppearancePreference("motion", "reduce");
     applyAppearancePreferencesToDocument();
     expect(style.read()).toContain("--app-motion-duration-sheet: 0ms;");
     expect(style.read()).toContain("--app-motion-duration-stack: 0ms;");
     expect(style.read()).toContain("--app-motion-duration-chip: 0ms;");
+    expect(style.read()).toContain("--app-motion-activity-play-state: paused;");
 
     resetAppearancePreference("motion");
     installMatchMedia(["(prefers-reduced-motion: reduce)"]);
     applyAppearancePreferencesToDocument();
     expect(style.read()).toContain("--app-motion-duration-sheet: 0ms;");
+    expect(style.read()).toContain("--app-motion-activity-play-state: paused;");
   });
 });
 
