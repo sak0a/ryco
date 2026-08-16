@@ -10,10 +10,10 @@ import {
   type ModelSelection,
 } from "@ryco/contracts";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
-import { CopilotClient, type CopilotClientOptions, type SessionConfig } from "@github/copilot-sdk";
+import { CopilotClient, type SessionConfig } from "@github/copilot-sdk";
 import { Effect, Schema } from "effect";
 
-import { resolveCopilotCliPath } from "../provider/Layers/CopilotAdapter.ts";
+import { makeCopilotClientOptions } from "../provider/Layers/CopilotAdapter.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import type { TextGenerationShape } from "./TextGeneration.ts";
 import { buildThreadTitlePrompt } from "./TextGenerationPrompts.ts";
@@ -34,19 +34,6 @@ function gitTextGenerationSelection(): ModelSelection {
       DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[CODEX_DRIVER_KIND] ??
       DEFAULT_GIT_TEXT_GENERATION_MODEL,
     ...(options ? { options } : {}),
-  };
-}
-
-function makeClientOptions(
-  settings: Pick<CopilotSettings, "binaryPath">,
-  cwd: string | undefined,
-  environment: NodeJS.ProcessEnv,
-): CopilotClientOptions {
-  return {
-    cliPath: resolveCopilotCliPath(settings, environment),
-    ...(cwd ? { cwd } : {}),
-    env: environment,
-    logLevel: "error",
   };
 }
 
@@ -72,7 +59,9 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
         message: input.message,
         attachments: input.attachments,
       });
-      const client = new CopilotClient(makeClientOptions(copilotSettings, input.cwd, environment));
+      const client = new CopilotClient(
+        makeCopilotClientOptions(copilotSettings, environment, input.cwd),
+      );
       const reasoningEffort = getModelSelectionStringOptionValue(
         input.modelSelection,
         "reasoningEffort",

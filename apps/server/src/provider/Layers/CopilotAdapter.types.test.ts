@@ -4,8 +4,12 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vite-plus/test";
 
-import { DEFAULT_BINARY_PATH, resolveCopilotCliPath } from "./CopilotAdapter.types.ts";
-import { normalizeUsage } from "./CopilotAdapter.types.ts";
+import {
+  DEFAULT_BINARY_PATH,
+  makeCopilotClientOptions,
+  normalizeUsage,
+  resolveCopilotCliPath,
+} from "./CopilotAdapter.types.ts";
 
 describe("resolveCopilotCliPath", () => {
   it("resolves the default copilot command from PATH", () => {
@@ -29,6 +33,24 @@ describe("resolveCopilotCliPath", () => {
     expect(resolveCopilotCliPath({ binaryPath: DEFAULT_BINARY_PATH }, { PATH: "" })).toBe(
       DEFAULT_BINARY_PATH,
     );
+  });
+});
+
+describe("makeCopilotClientOptions", () => {
+  it("maps Ryco's binary, environment, and cwd settings to the Copilot v1 transport", () => {
+    const environment = { PATH: "/usr/bin", COPILOT_TOKEN: "token" };
+
+    expect(
+      makeCopilotClientOptions({ binaryPath: "/opt/copilot/bin/copilot" }, environment, "/repo"),
+    ).toEqual({
+      connection: {
+        kind: "stdio",
+        path: "/opt/copilot/bin/copilot",
+      },
+      workingDirectory: "/repo",
+      env: environment,
+      logLevel: "error",
+    });
   });
 });
 

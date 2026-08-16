@@ -49,7 +49,7 @@ import {
   makeStopSession,
 } from "./CopilotAdapter.session.ts";
 
-export { resolveCopilotCliPath } from "./CopilotAdapter.types.ts";
+export { makeCopilotClientOptions, resolveCopilotCliPath } from "./CopilotAdapter.types.ts";
 export type { CopilotAdapterLiveOptions } from "./CopilotAdapter.types.ts";
 
 const FULL_ACCESS_AUTO_APPROVE_AFTER_MS = 600;

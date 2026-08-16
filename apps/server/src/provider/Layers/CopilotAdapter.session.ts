@@ -40,7 +40,7 @@ import {
   type PendingUserInputRequest,
   buildThreadSnapshot,
   isSessionNotFoundError,
-  resolveCopilotCliPath,
+  makeCopilotClientOptions,
   selectionTargetsCopilotInstance,
   toMessage,
 } from "./CopilotAdapter.types.ts";
@@ -185,13 +185,11 @@ export const makeStartSession =
         } satisfies ProviderSession;
       }
 
-      const resolvedCliPath = resolveCopilotCliPath(deps.copilotSettings, deps.environment);
-      const clientOptions: CopilotClientOptions = {
-        cliPath: resolvedCliPath,
-        ...(input.cwd ? { cwd: input.cwd } : {}),
-        ...(deps.environment ? { env: deps.environment } : {}),
-        logLevel: "error",
-      };
+      const clientOptions: CopilotClientOptions = makeCopilotClientOptions(
+        deps.copilotSettings,
+        deps.environment,
+        input.cwd,
+      );
       const client =
         deps.options?.clientFactory?.(clientOptions) ?? new CopilotClient(clientOptions);
       const pendingApprovals = new Map<string, PendingApprovalRequest>();
