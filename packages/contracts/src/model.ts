@@ -132,16 +132,27 @@ const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
-export const DEFAULT_MODEL = "gpt-5.4";
-export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.4-mini";
+export const DEFAULT_MODEL = "gpt-5.6-terra";
+export const DEFAULT_GIT_TEXT_GENERATION_MODEL = "gpt-5.6-luna";
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
-  [CLAUDE_DRIVER_KIND]: "claude-sonnet-5",
+  [CLAUDE_DRIVER_KIND]: "claude-opus-5",
   [COPILOT_DRIVER_KIND]: "gpt-5",
   [CURSOR_DRIVER_KIND]: "auto",
   [GROK_DRIVER_KIND]: "grok-build",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
+};
+
+/** Provider options paired with auxiliary text-generation defaults. */
+export const DEFAULT_GIT_TEXT_GENERATION_OPTIONS: ReadonlyArray<ProviderOptionSelection> = [
+  { id: "reasoningEffort", value: "low" },
+];
+
+export const DEFAULT_GIT_TEXT_GENERATION_OPTIONS_BY_PROVIDER: Partial<
+  Record<ProviderDriverKind, ReadonlyArray<ProviderOptionSelection>>
+> = {
+  [CODEX_DRIVER_KIND]: DEFAULT_GIT_TEXT_GENERATION_OPTIONS,
 };
 
 /** Per-provider text generation model defaults. */

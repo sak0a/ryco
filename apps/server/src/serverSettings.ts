@@ -13,6 +13,7 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  DEFAULT_GIT_TEXT_GENERATION_OPTIONS_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   isProviderDriverKind,
   type ModelSelection,
@@ -189,6 +190,7 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
   if (!fallback) {
     return settings;
   }
+  const defaultOptions = DEFAULT_GIT_TEXT_GENERATION_OPTIONS_BY_PROVIDER[fallback];
 
   return {
     ...settings,
@@ -197,6 +199,7 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
       model:
         DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
         DEFAULT_GIT_TEXT_GENERATION_MODEL,
+      ...(defaultOptions ? { options: defaultOptions } : {}),
     } satisfies ModelSelection,
   };
 }
@@ -323,7 +326,12 @@ const makeServerSettings = Effect.gen(function* () {
             continue;
           }
           const secret = yield* secretStore
-            .get(providerEnvironmentSecretName({ instanceId, name: variable.name }))
+            .get(
+              providerEnvironmentSecretName({
+                instanceId,
+                name: variable.name,
+              }),
+            )
             .pipe(
               Effect.mapError((cause) =>
                 toSettingsError(
@@ -362,7 +370,10 @@ const makeServerSettings = Effect.gen(function* () {
         if (!instance.environment) continue;
         const environment: ProviderInstanceEnvironmentVariable[] = [];
         for (const variable of instance.environment) {
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
+          const secretName = providerEnvironmentSecretName({
+            instanceId,
+            name: variable.name,
+          });
           if (!variable.sensitive) {
             yield* secretStore
               .remove(secretName)
@@ -411,7 +422,10 @@ const makeServerSettings = Effect.gen(function* () {
       for (const [instanceId, instance] of Object.entries(current.providerInstances)) {
         for (const variable of instance.environment ?? []) {
           if (!variable.sensitive) continue;
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
+          const secretName = providerEnvironmentSecretName({
+            instanceId,
+            name: variable.name,
+          });
           if (nextSecretKeys.has(secretName)) continue;
           yield* secretStore
             .remove(secretName)

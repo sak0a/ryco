@@ -1,4 +1,5 @@
 import {
+  DEFAULT_MODEL,
   ProviderInstanceId,
   type ClientOrchestrationCommand,
   type CommandId,
@@ -132,7 +133,7 @@ export function buildProjectCreateCommand(input: {
     createWorkspaceRootIfMissing: true,
     defaultModelSelection: {
       instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5.4",
+      model: DEFAULT_MODEL,
     },
     createdAt: input.createdAt,
   };

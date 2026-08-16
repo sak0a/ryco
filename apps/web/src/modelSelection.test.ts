@@ -55,6 +55,25 @@ function settingsWithProviderInstances(): UnifiedSettings {
 }
 
 describe("instance-scoped model selection", () => {
+  it("prefers the declared provider default over catalog ordering", () => {
+    const providers = [
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: "claudeAgent",
+        models: ["claude-fable-5", "claude-opus-5", "claude-sonnet-5"],
+      }),
+    ];
+
+    expect(
+      resolveAppModelSelectionForInstance(
+        ProviderInstanceId.make("claudeAgent"),
+        settingsWithProviderInstances(),
+        providers,
+        null,
+      ),
+    ).toBe("claude-opus-5");
+  });
+
   it("keeps custom models on the provider instance that declared them", () => {
     const providers = [
       provider({
@@ -84,7 +103,10 @@ describe("instance-scoped model selection", () => {
 
   it("resolves a custom slug against the selected custom instance", () => {
     const providers = [
-      provider({ provider: ProviderDriverKind.make("claudeAgent"), instanceId: "claudeAgent" }),
+      provider({
+        provider: ProviderDriverKind.make("claudeAgent"),
+        instanceId: "claudeAgent",
+      }),
       provider({
         provider: ProviderDriverKind.make("claudeAgent"),
         instanceId: "claude_openrouter",

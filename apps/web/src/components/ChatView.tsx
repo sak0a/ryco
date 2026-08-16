@@ -2293,6 +2293,14 @@ export default function ChatView(props: ChatViewProps) {
     legendListRef.current?.scrollToEnd?.({ animated });
   }, []);
 
+  const scrollToEndAfterOptimistic = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        void legendListRef.current?.scrollToEnd?.({ animated: false });
+      });
+    });
+  }, []);
+
   const stopTimelineLiveFollow = useCallback(() => {
     setTimelineLiveFollowEnabled(false);
   }, []);
@@ -2848,6 +2856,7 @@ export default function ChatView(props: ChatViewProps) {
           setShowScrollToBottom(false);
           await legendListRef.current?.scrollToEnd?.({ animated: false });
         },
+        scrollToEndAfterOptimistic,
       },
       draft: {
         // Clearing has to target the thread the turn actually went to, or the
@@ -3167,6 +3176,7 @@ export default function ChatView(props: ChatViewProps) {
           streaming: false,
         },
       ]);
+      scrollToEndAfterOptimistic();
 
       try {
         await persistThreadSettingsForNextTurn({
@@ -3246,6 +3256,7 @@ export default function ChatView(props: ChatViewProps) {
       readComposer,
       resetLocalDispatch,
       runtimeMode,
+      scrollToEndAfterOptimistic,
       setComposerDraftInteractionMode,
       setComposerDraftTokenMode,
       setThreadError,

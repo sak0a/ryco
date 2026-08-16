@@ -62,10 +62,16 @@ describe("project actions", () => {
       workspaceRoot: "/srv/code/ryco",
       projectMetadataDir: ".ryco",
       createWorkspaceRootIfMissing: true,
-      defaultModelSelection: { instanceId: "codex", model: "gpt-5.4" },
+      defaultModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
       createdAt: now,
     });
-    expect(buildProjectRenameCommand({ commandId, projectId, title: "  Mobile app  " })).toEqual({
+    expect(
+      buildProjectRenameCommand({
+        commandId,
+        projectId,
+        title: "  Mobile app  ",
+      }),
+    ).toEqual({
       type: "project.meta.update",
       commandId,
       projectId,
@@ -123,7 +129,11 @@ describe("project actions", () => {
 
   it("dispatches once only when the node is mutation-ready", async () => {
     const dispatch = vi.fn(async (_command: ClientOrchestrationCommand) => undefined);
-    const command = buildProjectRenameCommand({ commandId, projectId, title: "Ryco" });
+    const command = buildProjectRenameCommand({
+      commandId,
+      projectId,
+      title: "Ryco",
+    });
 
     await dispatchWorkspaceCommand({ readiness: "ready", command, dispatch });
     expect(dispatch).toHaveBeenCalledTimes(1);
@@ -171,7 +181,11 @@ describe("project actions", () => {
   });
 
   it("maps failures to bounded user-facing messages", async () => {
-    const command = buildProjectRenameCommand({ commandId, projectId, title: "Ryco" });
+    const command = buildProjectRenameCommand({
+      commandId,
+      projectId,
+      title: "Ryco",
+    });
     const failing = dispatchWorkspaceCommand({
       readiness: "ready",
       command,
