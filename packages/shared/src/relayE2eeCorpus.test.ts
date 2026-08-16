@@ -1,6 +1,6 @@
-import { ed25519 } from "@noble/curves/ed25519";
-import { p256 } from "@noble/curves/nist";
-import { sha256 } from "@noble/hashes/sha2";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { decode } from "cborg";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
@@ -1751,13 +1751,27 @@ describe("§16.3 F17 key-material validation (§7.1, §8.1, §14.3)", () => {
     expect(control.expected.verificationVerdict).toBe(true);
     expect(nonCanonical.expected.verificationVerdict).toBe(verifyCase(nonCanonical));
     expect(nonCanonical.expected.verificationVerdict).toBe(false);
-    // §14.3 pins `zip215: false`. The case additionally RECORDS what the pinned
-    // primitive does under the relaxation rather than assuming it, so a future
-    // primitive that started admitting this encoding under ZIP215 is visible
-    // here instead of silently widening what "strict" costs.
+    // §14.3 pins `zip215: false`. The version-1 fixture also records the old
+    // primitive's ZIP215 result. Noble v1 canonicalized R and A before hashing
+    // the challenge; v2 correctly hashes the exact encodings and therefore
+    // accepts this constructed relaxed-mode signature.
+    const signature = fixtureBytes(nonCanonical.inputs.signature);
+    expect(
+      ed25519.verify(
+        signature,
+        fixtureBytes(nonCanonical.inputs.message),
+        fixtureBytes(nonCanonical.inputs.publicKey),
+        { zip215: true },
+      ),
+    ).toBe(true);
+    const legacyZip215Signature = Uint8Array.from(signature);
+    legacyZip215Signature.set(
+      ed25519.Point.fromBytes(fixtureBytes(nonCanonical.inputs.rEncoding), true).toBytes(),
+      0,
+    );
     expect(nonCanonical.expected.pinnedPrimitiveUnderZip215Relaxation).toBe(
       ed25519.verify(
-        fixtureBytes(nonCanonical.inputs.signature),
+        legacyZip215Signature,
         fixtureBytes(nonCanonical.inputs.message),
         fixtureBytes(nonCanonical.inputs.publicKey),
         { zip215: true },
@@ -2830,11 +2844,15 @@ describe("§16.3 F16 authorization context and Branch A enforcement (§8.3, §13
         agreementPublicKey: fixtureBytes(material.clientAgreementPublicKey),
         agreementSecretKey: fixtureBytes(material.testOnlyClientAgreementSecretKey),
         prekeyTranscript,
-        prekeySignature: p256
-          .sign(sha256(prekeyTranscript), fixtureBytes(material.testOnlyClientIdentitySecretKey), {
+        prekeySignature: p256.sign(
+          sha256(prekeyTranscript),
+          fixtureBytes(material.testOnlyClientIdentitySecretKey),
+          {
             prehash: false,
-          })
-          .toBytes("compact"),
+            lowS: false,
+            format: "compact",
+          },
+        ),
       },
       intendedCapability: channel.channelOpenCapability as string,
       intendedRole: channel.channelOpenEffectiveRole as string,

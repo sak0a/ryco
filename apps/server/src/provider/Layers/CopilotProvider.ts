@@ -13,7 +13,7 @@ import {
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
 import { ProviderAdapterProcessError } from "../Errors.ts";
-import { resolveCopilotCliPath } from "./CopilotAdapter.ts";
+import { makeCopilotClientOptions } from "./CopilotAdapter.ts";
 
 const PROVIDER = ProviderDriverKind.make("copilot");
 const COPILOT_PRESENTATION = {
@@ -127,12 +127,7 @@ function makeClient(
   settings: Pick<CopilotSettings, "binaryPath">,
   environment: NodeJS.ProcessEnv | undefined,
 ) {
-  return new CopilotClient({
-    cliPath: resolveCopilotCliPath(settings, environment),
-    ...(environment ? { env: environment } : {}),
-    logLevel: "error",
-    autoStart: true,
-  });
+  return new CopilotClient(makeCopilotClientOptions(settings, environment));
 }
 
 const withClient = <A>(

@@ -1,6 +1,6 @@
-import { p256 } from "@noble/curves/nist";
-import { sha256 } from "@noble/hashes/sha2";
-import { utf8ToBytes } from "@noble/hashes/utils";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -143,7 +143,11 @@ const CLIENT_IDENTITY_FINGERPRINT = e2eeKeyFingerprint("client-identity", CLIENT
 const CLIENT_AGREEMENT_FINGERPRINT = e2eeKeyFingerprint("agreement", CLIENT_AGREEMENT_PUBLIC);
 
 const signClientPrekey = (transcript: Uint8Array, secret: Uint8Array = CLIENT_IDENTITY_SECRET) =>
-  p256.sign(sha256(transcript), secret, { prehash: false }).toBytes("compact");
+  p256.sign(sha256(transcript), secret, {
+    prehash: false,
+    lowS: false,
+    format: "compact",
+  });
 
 const clientPrekeyTranscript = (
   overrides: Partial<Parameters<typeof encodeClientE2eePrekeyTranscript>[0]> = {},

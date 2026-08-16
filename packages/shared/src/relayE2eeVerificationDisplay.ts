@@ -1,6 +1,6 @@
-import { expand, extract } from "@noble/hashes/hkdf";
-import { sha256 } from "@noble/hashes/sha2";
-import { utf8ToBytes } from "@noble/hashes/utils";
+import { expand, extract } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { encode, rfc8949EncodeOptions } from "cborg";
 
 import {

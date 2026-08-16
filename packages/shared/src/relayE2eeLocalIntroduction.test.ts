@@ -1,6 +1,6 @@
-import { ed25519, x25519 } from "@noble/curves/ed25519";
-import { p256 } from "@noble/curves/nist";
-import { sha256 } from "@noble/hashes/sha2";
+import { ed25519, x25519 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -54,7 +54,11 @@ const requestInput = (
 });
 
 const signRequest = (requestTbs: Uint8Array): Uint8Array =>
-  p256.sign(sha256(requestTbs), CLIENT_SECRET, { prehash: false }).toBytes("compact");
+  p256.sign(sha256(requestTbs), CLIENT_SECRET, {
+    prehash: false,
+    lowS: false,
+    format: "compact",
+  });
 
 const signApproval = (approvalTbs: Uint8Array): Uint8Array =>
   ed25519.sign(approvalTbs, NODE_SECRET);

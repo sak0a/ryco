@@ -287,10 +287,10 @@ describe("relay E2EE runtime globals wiring", () => {
 
   it("installs onto the real globals as the module evaluates", async () => {
     // The wiring that matters on Hermes is the module-scope call, not the
-    // function it calls: `@noble/hashes` captures `globalThis.crypto` and `cborg`
-    // constructs its `TextEncoder` while THEY evaluate, so both globals must
-    // already be there. Node has both, so the only way to observe the install is
-    // to take them away and evaluate the module again.
+    // function it calls: `@noble/hashes` needs `globalThis.crypto` before its
+    // first draw and `cborg` constructs its `TextEncoder` while it evaluates.
+    // Node has both, so the only way to observe the install is to take them away
+    // and evaluate the module again.
     const globals = globalThis as { crypto?: unknown; TextEncoder?: unknown };
     const descriptors = (["crypto", "TextEncoder"] as const).map(
       (name) => [name, Object.getOwnPropertyDescriptor(globals, name)] as const,

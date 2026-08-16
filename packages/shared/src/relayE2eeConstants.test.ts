@@ -313,24 +313,24 @@ const SPEC_CONSTANTS: ReadonlyArray<SpecConstantRow> = [
     E2EE_CROCKFORD_ALPHABET,
     "0123456789ABCDEFGHJKMNPQRSTVWXYZ",
   ],
-  ["Encoding", "E2EE_CBOR_CODEC", E2EE_CBOR_CODEC, "cborg@5.1.7"],
+  ["Encoding", "E2EE_CBOR_CODEC", E2EE_CBOR_CODEC, "cborg@6.1.1"],
   [
     "Dependencies",
     "E2EE_NOBLE_CURVES_AUDIT_BASELINE",
     E2EE_NOBLE_CURVES_AUDIT_BASELINE,
-    "@noble/curves@1.6.0",
+    "@noble/curves@2.2.0",
   ],
   [
     "Dependencies",
     "E2EE_NOBLE_CIPHERS_AUDIT_BASELINE",
     E2EE_NOBLE_CIPHERS_AUDIT_BASELINE,
-    "@noble/ciphers@1.0.0",
+    "@noble/ciphers@2.2.0",
   ],
   [
     "Dependencies",
     "E2EE_NOBLE_HASHES_AUDIT_BASELINE",
     E2EE_NOBLE_HASHES_AUDIT_BASELINE,
-    "@noble/hashes@1.0.0",
+    "@noble/hashes@2.2.0",
   ],
   ["Handshake", "NOISE_SPEC_REVISION", NOISE_SPEC_REVISION, 34],
   [
@@ -713,8 +713,8 @@ describe("dependency pins (§3.2 Encoding and Dependencies, §14.2, §14.4)", ()
       const installed = installedVersion(name);
       expect(installed).toBe(pinned);
       expect(installed).toMatch(EXACT_VERSION);
-      // Within the independently audited MAJOR lineage: the 1.x line carries
-      // the Cure53 audit, the 2.x line only a maintainer self-audit.
+      // Stay within the reviewed major lineage so a future major requires an
+      // explicit protocol-security review rather than only a catalog edit.
       expect(installed.split(".")[0]).toBe(baselineVersion.split(".")[0]);
       // And never older than the audited baseline itself.
       expect(compareVersions(installed, baselineVersion)).toBeGreaterThanOrEqual(0);

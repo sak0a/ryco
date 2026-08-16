@@ -1,5 +1,5 @@
 import { RelayCapability, RelayChannelId, RelayEffectiveRole } from "@ryco/contracts/relay";
-import { sha256 } from "@noble/hashes/sha2";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { Tokenizer, Type, decode, encode, rfc8949EncodeOptions } from "cborg";
 import { Exit, Schema } from "effect";
 

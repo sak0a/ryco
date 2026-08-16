@@ -1,4 +1,4 @@
-import { x25519 } from "@noble/curves/ed25519";
+import { x25519 } from "@noble/curves/ed25519.js";
 import * as fc from "fast-check";
 import { describe, expect, it } from "vite-plus/test";
 

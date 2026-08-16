@@ -1,0 +1,41 @@
+diff --git a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift
+--- a/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift
++++ b/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift
+@@ -254,8 +254,15 @@ open class JavaScriptRuntime: Equatable, Identifiable, @unchecked Sendable {
+       (@convention(c) (UnsafeMutableRawPointer, UnsafePointer<CChar>, UnsafeMutableRawPointer) -> Void)? = setter
+     // Pass a null setter to C++ when the Swift setter is nil so that JS assignment
+     // raises a `jsi::JSError` directly, without crossing the Swift boundary.
++    if set == nil {
++      let callbacks = expo.HostObjectCallbacks(
++        context, getter, nil, propertyNamesGetter, deallocate)
++      let hostObject = expo.HostObject.makeObject(pointee, consume callbacks)
++
++      return JavaScriptObject(self, hostObject)
++    }
+     let callbacks = expo.HostObjectCallbacks(
+-      context, getter, set == nil ? nil : setterPointer, propertyNamesGetter, deallocate)
++      context, getter, setterPointer, propertyNamesGetter, deallocate)
+     let hostObject = expo.HostObject.makeObject(pointee, consume callbacks)
+ 
+     return JavaScriptObject(self, hostObject)
+diff --git a/apple/scripts/build-xcframework.sh b/apple/scripts/build-xcframework.sh
+--- a/apple/scripts/build-xcframework.sh
++++ b/apple/scripts/build-xcframework.sh
+@@ -209,6 +209,9 @@ build_slice() {
+     env_args+=(DEVELOPER_DIR="$DEVELOPER_DIR")
+   fi
+ 
++  # CocoaPods signs the framework when it embeds the final app. Keep this nested
++  # intermediate unsigned so synced-workspace metadata cannot invalidate it.
++
+   (cd "$PACKAGE_DIR" && env -i "${env_args[@]}" \
+     xcodebuild \
+     build \
+@@ -228,6 +231,7 @@ build_slice() {
+     OBJROOT="${DERIVED_DATA_PATH}/Build/Intermediates.noindex" \
+     BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+     SKIP_INSTALL=NO \
++    CODE_SIGNING_ALLOWED=NO \
+     DEBUG_INFORMATION_FORMAT=dwarf-with-dsym \
+     COMPILER_INDEX_STORE_ENABLE=NO \
+     SWIFT_COMPILATION_MODE=wholemodule \

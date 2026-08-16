@@ -1,8 +1,8 @@
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { x25519 } from "@noble/curves/ed25519";
-import { expand } from "@noble/hashes/hkdf";
-import { sha256 } from "@noble/hashes/sha2";
-import { utf8ToBytes } from "@noble/hashes/utils";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { expand } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vite-plus/test";

@@ -1,6 +1,6 @@
-import { ed25519 } from "@noble/curves/ed25519";
-import { p256 } from "@noble/curves/nist";
-import { sha256 } from "@noble/hashes/sha2";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import {
   RELAY_INITIAL_LIMITS,
   RelayLimits,
@@ -141,9 +141,15 @@ const CLIENT_PREKEY_TRANSCRIPT = encodeClientE2eePrekeyTranscript({
   createdAt: CREATED_AT,
   expiresAt: KEY_EXPIRES_AT,
 });
-const CLIENT_PREKEY_SIGNATURE = p256
-  .sign(sha256(CLIENT_PREKEY_TRANSCRIPT), CLIENT_IDENTITY_SECRET, { prehash: false })
-  .toBytes("compact");
+const CLIENT_PREKEY_SIGNATURE = p256.sign(
+  sha256(CLIENT_PREKEY_TRANSCRIPT),
+  CLIENT_IDENTITY_SECRET,
+  {
+    prehash: false,
+    lowS: false,
+    format: "compact",
+  },
+);
 
 const NODE_PREKEY_CROSS_SIGNATURE = ed25519.sign(
   encodeNodeE2eePrekeyTranscript({

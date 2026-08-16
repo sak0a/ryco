@@ -450,13 +450,13 @@ export const E2EE_CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
  * protocol-relevant change, because canonical bytes participate in signatures
  * and hashes.
  */
-export const E2EE_CBOR_CODEC = "cborg@5.1.7";
-/** Independently audited baseline for X25519/Ed25519/P-256 (Cure53, September 2024; §14). */
-export const E2EE_NOBLE_CURVES_AUDIT_BASELINE = "@noble/curves@1.6.0";
-/** Independently audited baseline for ChaCha20-Poly1305 (Cure53, September 2024; §14). */
-export const E2EE_NOBLE_CIPHERS_AUDIT_BASELINE = "@noble/ciphers@1.0.0";
-/** Independently audited baseline for SHA-256/HMAC/HKDF (Cure53, January 2022; §14). */
-export const E2EE_NOBLE_HASHES_AUDIT_BASELINE = "@noble/hashes@1.0.0";
+export const E2EE_CBOR_CODEC = "cborg@6.1.1";
+/** Maintainer security-audit baseline for X25519/Ed25519/P-256 (April 2026; §14). */
+export const E2EE_NOBLE_CURVES_AUDIT_BASELINE = "@noble/curves@2.2.0";
+/** Maintainer security-audit baseline for ChaCha20-Poly1305 (April 2026; §14). */
+export const E2EE_NOBLE_CIPHERS_AUDIT_BASELINE = "@noble/ciphers@2.2.0";
+/** Maintainer security-audit baseline for SHA-256/HMAC/HKDF (April 2026; §14). */
+export const E2EE_NOBLE_HASHES_AUDIT_BASELINE = "@noble/hashes@2.2.0";
 
 // ─── Handshake (§3.2 area: Handshake) ────────────────────────────────────────
 

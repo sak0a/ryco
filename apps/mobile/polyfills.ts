@@ -68,10 +68,9 @@ installArrayCompatibilityPolyfills(Array.prototype);
 // they live in the entry polyfill module rather than beside the code that needs
 // them:
 //
-// - `@noble/hashes/esm/crypto.js` captures `globalThis.crypto` into a module
-//   `const` while it evaluates, and `randomBytes` throws when that capture is
-//   `undefined`. A `crypto.getRandomValues` installed after the first noble
-//   import is already too late.
+// - `@noble/hashes` v2 reads `globalThis.crypto` for every `randomBytes` draw.
+//   The adapter must exist before the first draw, and defining it here keeps
+//   every E2EE consumer behind the same entry-point ordering guarantee.
 // - `cborg/lib/byte-utils.js` constructs a `TextEncoder` at module scope, so the
 //   §3.6 canonical codec fails to load at all when the global is absent.
 //
@@ -103,7 +102,7 @@ type ExpoCryptoModule = { readonly getRandomValues: RandomFill };
  * `expo-modules-core` in ahead of `react-native/Libraries/Core/InitializeCore`
  * — the order expo's own winter runtime warns must come first — and would throw
  * during startup on any build whose native module is not yet registered. The
- * installed function exists before the first noble import either way; only the
+ * installed function exists before the first noble draw either way; only that
  * first draw touches the native module.
  *
  * `getRandomValues` and not `getRandomBytes`: `getRandomBytes` substitutes

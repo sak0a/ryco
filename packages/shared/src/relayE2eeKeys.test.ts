@@ -1,4 +1,4 @@
-import { ed25519, x25519 } from "@noble/curves/ed25519";
+import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { describe, expect, it } from "vite-plus/test";
 
 import { fingerprintNodePublicKey, formatNodePublicKeyFingerprint } from "./nodeIdentity.ts";

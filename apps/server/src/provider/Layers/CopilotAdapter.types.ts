@@ -24,6 +24,7 @@ import type {
   PermissionRequestResult,
   SessionEvent,
 } from "@github/copilot-sdk";
+import { RuntimeConnection } from "@github/copilot-sdk";
 
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import type {
@@ -104,6 +105,21 @@ export function resolveCopilotCliPath(
   const binaryPath =
     settings.binaryPath === DEFAULT_BINARY_PATH ? DEFAULT_BINARY_PATH : settings.binaryPath;
   return resolveCommandPath(binaryPath, { env: environment ?? process.env }) ?? binaryPath;
+}
+
+export function makeCopilotClientOptions(
+  settings: { readonly binaryPath: string },
+  environment: NodeJS.ProcessEnv | undefined,
+  workingDirectory?: string,
+): CopilotClientOptions {
+  return {
+    connection: RuntimeConnection.forStdio({
+      path: resolveCopilotCliPath(settings, environment),
+    }),
+    ...(workingDirectory ? { workingDirectory } : {}),
+    ...(environment ? { env: environment } : {}),
+    logLevel: "error",
+  };
 }
 
 export function toMessage(cause: unknown, fallback: string): string {

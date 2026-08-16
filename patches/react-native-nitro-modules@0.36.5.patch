@@ -1,8 +1,8 @@
 diff --git a/package.json b/package.json
-index 4e4366fb9d05a6c250acfc62e79487475d8ac05b..200e4680d77cbb4f14d22eb986efde1275a0d3e8 100644
+index fc3f32a99df7d2f2c644ef1529de8bf651eee18b..733d094f32a6bcd36308f8b5c912d1b5e8644526 100644
 --- a/package.json
 +++ b/package.json
-@@ -88,6 +88,11 @@
+@@ -89,6 +89,11 @@
      "jsSrcsDir": "./src",
      "android": {
        "javaPackageName": "com.margelo.nitro"
