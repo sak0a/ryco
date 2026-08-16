@@ -1756,6 +1756,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
       });
 
       expect(result.commit.status).toBe("skipped_not_requested");
+      expect(result.commit.commitSha).toMatch(/^[a-f0-9]{40}$/);
       expect(result.push.status).toBe("pushed");
       expect(result.pr.status).toBe("skipped_not_requested");
       expect(
