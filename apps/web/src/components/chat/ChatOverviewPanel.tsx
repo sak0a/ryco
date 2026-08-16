@@ -6,7 +6,6 @@ import type {
   SourceControlWorkflowRunListResult,
   ThreadId,
 } from "@ryco/contracts";
-import { useQueryClient } from "~/rpc/queryClient";
 import {
   useCallback,
   useEffect,
@@ -17,8 +16,8 @@ import {
   type ReactNode,
 } from "react";
 import { useGitStatus } from "~/lib/gitStatusState";
-import { sourceControlContextQueryKeys } from "~/lib/sourceControlContextRpc";
-import { invalidateOverviewSourceControl } from "~/rpc/overviewAtoms";
+import { useSettings } from "~/hooks/useSettings";
+import { invalidateSourceControl } from "~/rpc/useSourceControl";
 import {
   useOverviewChangeRequestList,
   useOverviewPullRequestDetail,
@@ -194,32 +193,22 @@ export interface ChatOverviewPanelProps {
 }
 
 export function usePostPushWorkflowWatch() {
-  const queryClient = useQueryClient();
   const [postPushWorkflowWatch, setPostPushWorkflowWatch] =
     useState<PostPushWorkflowDiscoveryWatch | null>(null);
 
-  const handlePostPush = useCallback(
-    (event: GitActionPostPushEvent) => {
-      setPostPushWorkflowWatch(
-        createPostPushWorkflowDiscoveryWatch({
-          environmentId: event.environmentId,
-          threadKey: event.threadKey,
-          cwd: event.cwd,
-          pullRequestNumber: event.pullRequestNumber,
-          commitSha: event.commitSha,
-          nowMs: Date.now(),
-        }),
-      );
-      void queryClient.invalidateQueries({
-        queryKey: sourceControlContextQueryKeys.changeRequests(event.environmentId, event.cwd),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: sourceControlContextQueryKeys.workflows(event.environmentId, event.cwd),
-      });
-      invalidateOverviewSourceControl(event.cwd);
-    },
-    [queryClient],
-  );
+  const handlePostPush = useCallback((event: GitActionPostPushEvent) => {
+    setPostPushWorkflowWatch(
+      createPostPushWorkflowDiscoveryWatch({
+        environmentId: event.environmentId,
+        threadKey: event.threadKey,
+        cwd: event.cwd,
+        pullRequestNumber: event.pullRequestNumber,
+        commitSha: event.commitSha,
+        nowMs: Date.now(),
+      }),
+    );
+    invalidateSourceControl({ environmentId: event.environmentId, cwd: event.cwd });
+  }, []);
 
   useEffect(() => {
     if (!postPushWorkflowWatch) return;
@@ -366,6 +355,7 @@ export function ChatOverviewPanel(
     onPostPushDiscoveryComplete,
   } = props;
 
+  const sourceControlRefreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
   const gitStatusQuery = useGitStatus({ environmentId, cwd: gitCwd });
   const overviewBranchName =
     activeWorktreeBranch ?? activeThreadBranch ?? gitStatusQuery.data?.refName ?? null;
@@ -455,6 +445,7 @@ export function ChatOverviewPanel(
           })
         : null;
       return resolveWorkflowRunsRefetchInterval({
+        mode: sourceControlRefreshMode,
         activeWatch: activePostPushWorkflowWatch,
         nowMs: Date.now(),
         discoveredPostPushRun: hasDiscoveredPostPushWorkflowRun({
@@ -464,7 +455,7 @@ export function ChatOverviewPanel(
         statusRefreshable: status ? shouldRefreshPrCheckStatus(status) : false,
       });
     },
-    [activePostPushWorkflowWatch],
+    [activePostPushWorkflowWatch, sourceControlRefreshMode],
   );
 
   const overviewWorkflowRuns = useOverviewWorkflowRuns({
@@ -787,8 +778,8 @@ export function ChatOverviewPanel(
   }, [gitStatusQuery.data, changedFiles]);
 
   const handleRefreshPullRequest = useCallback(() => {
-    invalidateOverviewSourceControl(gitCwd);
-  }, [gitCwd]);
+    invalidateSourceControl({ environmentId, cwd: gitCwd });
+  }, [environmentId, gitCwd]);
 
   const isRefreshingPullRequest =
     overviewPullRequestDetail.isFetching ||

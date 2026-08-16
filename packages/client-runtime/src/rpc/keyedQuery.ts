@@ -2,12 +2,34 @@ import type { EnvironmentId } from "@ryco/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry.ts";
+import type { AppLifecycleService } from "../platform/index.ts";
 
 export const KEY_SEP = "\u0000";
 export const NOOP: () => void = () => undefined;
 
 export function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+export interface KeyedQueryLifecycleRefreshContext<TData> {
+  readonly data: TData | null;
+  readonly hasData: boolean;
+  readonly lastFetchedAt: number;
+  readonly staleTime: number;
+}
+
+export interface KeyedQueryWatchOptions<TData> {
+  readonly resolveIntervalMs?: (data: TData | null) => number | false;
+  readonly shouldRefreshOnLifecycle?: (
+    context: KeyedQueryLifecycleRefreshContext<TData>,
+  ) => boolean;
+}
+
+interface KeyedQueryPollSubscriber {
+  readonly resolveIntervalMs?: (data: unknown) => number | false;
+  readonly shouldRefreshOnLifecycle?: (
+    context: KeyedQueryLifecycleRefreshContext<unknown>,
+  ) => boolean;
 }
 
 export interface KeyedQueryControllerBase {
@@ -24,6 +46,9 @@ export interface KeyedQueryControllerBase {
   hasData: boolean;
   inFlightPromise: Promise<void> | null;
   gcTimer: ReturnType<typeof setTimeout> | null;
+  pollTimer: ReturnType<typeof setTimeout> | null;
+  pollSubscribers: Map<number, KeyedQueryPollSubscriber>;
+  nextPollSubscriberId: number;
 }
 
 export interface KeyedQueryRegistryConfig<TState> {
@@ -35,6 +60,13 @@ export interface KeyedQueryRegistryConfig<TState> {
   readonly selectPollData?: (state: TState) => unknown;
   readonly gcTime?: number;
   readonly maxEntries?: number;
+  readonly lifecycle?: AppLifecycleService;
+  readonly pollJitterRatio?: number;
+  readonly random?: () => number;
+  readonly adjustPollDelay?: (
+    baseDelayMs: number,
+    controller: KeyedQueryControllerBase & Record<string, unknown>,
+  ) => number;
   readonly onRunStart?: (controller: KeyedQueryControllerBase & Record<string, unknown>) => void;
   readonly onRunEnd?: (
     controller: KeyedQueryControllerBase & Record<string, unknown>,
@@ -69,6 +101,7 @@ export interface KeyedQueryRegistry<TState> {
   }): ReadonlySet<string>;
   clearEnvironment(environmentId: EnvironmentId): void;
   resetForTests(): void;
+  dispose(): void;
 }
 
 interface KeyedQueryEnvironmentCleanup {
@@ -90,6 +123,9 @@ export function createKeyedQueryRegistry<TState>(
   const controllers = new Map<string, KeyedQueryControllerBase & Record<string, unknown>>();
   const controllerKeysByEnvironment = new Map<EnvironmentId, Set<string>>();
   const controllerKeysByFamily = new Map<string, Set<string>>();
+  const pollJitterRatio = Math.max(0, Math.min(0.5, config.pollJitterRatio ?? 0));
+  const random = config.random ?? Math.random;
+  let disposed = false;
 
   const queryStateAtom = Atom.family((compositeKey: string) => {
     knownStateKeys.add(compositeKey);
@@ -280,27 +316,85 @@ export function createKeyedQueryRegistry<TState>(
     controller: KeyedQueryControllerBase & Record<string, unknown>,
   ): void {
     clearControllerPollTimer(controller);
-    if (controller.subscriberCount <= 0) {
-      return;
-    }
-    const resolveIntervalMs = controller.resolveIntervalMs as
-      | ((data: unknown) => number | false)
-      | null
-      | undefined;
-    if (!resolveIntervalMs) {
+    if (
+      disposed ||
+      controller.subscriberCount <= 0 ||
+      (config.lifecycle && (!config.lifecycle.isForeground() || !config.lifecycle.isOnline()))
+    ) {
       return;
     }
     const state = getQueryState(controller.compositeKey);
-    const interval = resolveIntervalMs(
-      config.selectPollData ? config.selectPollData(state) : state,
-    );
-    if (interval === false || interval <= 0) {
+    const data = config.selectPollData ? config.selectPollData(state) : state;
+    let interval: number | null = null;
+    for (const subscriber of controller.pollSubscribers.values()) {
+      const candidate = subscriber.resolveIntervalMs?.(data);
+      if (candidate === undefined || candidate === false || candidate <= 0) continue;
+      interval = interval === null ? candidate : Math.min(interval, candidate);
+    }
+    if (interval === null) {
       return;
     }
+    const adjustedInterval = Math.max(
+      1,
+      config.adjustPollDelay?.(interval, controller) ?? interval,
+    );
+    const jitter = adjustedInterval * pollJitterRatio * (random() * 2 - 1);
+    const delay = Math.max(1, Math.round(adjustedInterval + jitter));
     controller.pollTimer = setTimeout(() => {
       controller.pollTimer = null;
+      if (config.lifecycle && (!config.lifecycle.isForeground() || !config.lifecycle.isOnline())) {
+        return;
+      }
       void runController(controller);
-    }, interval);
+    }, delay);
+  }
+
+  function pollData(controller: KeyedQueryControllerBase & Record<string, unknown>): unknown {
+    const state = getQueryState(controller.compositeKey);
+    return config.selectPollData ? config.selectPollData(state) : state;
+  }
+
+  function shouldRefreshControllerOnLifecycle(
+    controller: KeyedQueryControllerBase & Record<string, unknown>,
+  ): boolean {
+    const context: KeyedQueryLifecycleRefreshContext<unknown> = {
+      data: pollData(controller),
+      hasData: controller.hasData,
+      lastFetchedAt: controller.lastFetchedAt,
+      staleTime: controller.staleTime,
+    };
+    for (const subscriber of controller.pollSubscribers.values()) {
+      if (subscriber.shouldRefreshOnLifecycle?.(context)) return true;
+    }
+    return false;
+  }
+
+  function handleLifecycleEvent(
+    event: Parameters<AppLifecycleService["subscribe"]>[0] extends (event: infer TEvent) => void
+      ? TEvent
+      : never,
+  ): void {
+    if (event === "background" || event === "offline") {
+      for (const controller of controllers.values()) clearControllerPollTimer(controller);
+      return;
+    }
+    if (
+      disposed ||
+      !config.lifecycle?.isForeground() ||
+      !config.lifecycle.isOnline() ||
+      (event !== "foreground" && event !== "resume" && event !== "online")
+    ) {
+      return;
+    }
+    for (const controller of controllers.values()) {
+      if (controller.subscriberCount <= 0) continue;
+      clearControllerPollTimer(controller);
+      if (shouldRefreshControllerOnLifecycle(controller)) {
+        void runController(controller);
+      } else {
+        scheduleControllerPoll(controller);
+      }
+    }
   }
 
   function resetForTests(): void {
@@ -316,6 +410,16 @@ export function createKeyedQueryRegistry<TState>(
       appAtomRegistry.set(queryStateAtom(compositeKey), config.initialState);
     }
     knownStateKeys.clear();
+  }
+
+  const unsubscribeLifecycle = config.lifecycle?.subscribe(handleLifecycleEvent) ?? NOOP;
+
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    unsubscribeLifecycle();
+    resetForTests();
+    keyedQueryEnvironmentCleanups.delete(registry);
   }
 
   function clearEnvironment(environmentId: EnvironmentId): void {
@@ -364,6 +468,7 @@ export function createKeyedQueryRegistry<TState>(
     controllerKeys,
     clearEnvironment,
     resetForTests,
+    dispose,
   };
   keyedQueryEnvironmentCleanups.add(registry);
   return registry;
@@ -441,6 +546,9 @@ export function defineKeyedQueryByKey<
         hasData: false,
         inFlightPromise: null,
         gcTimer: null,
+        pollTimer: null,
+        pollSubscribers: new Map(),
+        nextPollSubscriberId: 0,
         ...definition.createControllerFields(input),
       };
       registry.registerController(controller);
@@ -496,8 +604,10 @@ export interface KeyedQueryByInput<TInput, TData, TState> {
   readonly snapshotFor: (input: TInput) => TState;
   readonly watch: (
     input: TInput,
-    resolveIntervalMs?: (data: TData | null) => number | false,
+    options?: ((data: TData | null) => number | false) | KeyedQueryWatchOptions<TData>,
   ) => () => void;
+  readonly refresh: (input: TInput) => void;
+  readonly refreshAsync: (input: TInput) => Promise<TState>;
   readonly updateData: (input: TInput, updater: (current: TData | null) => TData | null) => void;
 }
 
@@ -535,7 +645,7 @@ export function defineKeyedQueryByInput<
 
   function watch(
     input: TInput,
-    resolveIntervalMs?: (data: TData | null) => number | false,
+    options?: ((data: TData | null) => number | false) | KeyedQueryWatchOptions<TData>,
   ): () => void {
     const compositeKey = compositeKeyFor(input);
     if (compositeKey === null) {
@@ -559,14 +669,33 @@ export function defineKeyedQueryByInput<
         inFlightPromise: null,
         gcTimer: null,
         pollTimer: null,
-        resolveIntervalMs: null,
+        pollSubscribers: new Map(),
+        nextPollSubscriberId: 0,
         ...definition.createControllerFields(input),
       };
       registry.registerController(controller);
     }
 
     registry.touch(controller);
-    controller.resolveIntervalMs = resolveIntervalMs ?? null;
+    const subscriptionId = controller.nextPollSubscriberId++;
+    const normalizedOptions =
+      typeof options === "function" ? { resolveIntervalMs: options } : (options ?? {});
+    controller.pollSubscribers.set(subscriptionId, {
+      ...(normalizedOptions.resolveIntervalMs
+        ? {
+            resolveIntervalMs: normalizedOptions.resolveIntervalMs as (
+              data: unknown,
+            ) => number | false,
+          }
+        : {}),
+      ...(normalizedOptions.shouldRefreshOnLifecycle
+        ? {
+            shouldRefreshOnLifecycle: normalizedOptions.shouldRefreshOnLifecycle as (
+              context: KeyedQueryLifecycleRefreshContext<unknown>,
+            ) => boolean,
+          }
+        : {}),
+    });
     controller.subscriberCount += 1;
     if (shouldFetchOnWatch(controller)) {
       void registry.runController(controller);
@@ -580,11 +709,33 @@ export function defineKeyedQueryByInput<
         return;
       }
       current.subscriberCount = Math.max(0, current.subscriberCount - 1);
+      current.pollSubscribers.delete(subscriptionId);
       if (current.subscriberCount <= 0) {
         registry.clearPollTimer(current);
         registry.scheduleGc(current);
+      } else {
+        registry.schedulePoll(current);
       }
     };
+  }
+
+  function refresh(input: TInput): void {
+    const compositeKey = compositeKeyFor(input);
+    if (compositeKey === null) return;
+    const controller = registry.controllers.get(compositeKey);
+    if (!controller) return;
+    controller.lastFetchedAt = 0;
+    void registry.runController(controller);
+  }
+
+  async function refreshAsync(input: TInput): Promise<TState> {
+    const compositeKey = compositeKeyFor(input);
+    if (compositeKey === null) return registry.initialState;
+    const controller = registry.controllers.get(compositeKey);
+    if (!controller) return registry.getQueryState(compositeKey);
+    controller.lastFetchedAt = 0;
+    await registry.runController(controller);
+    return registry.getQueryState(compositeKey);
   }
 
   function updateData(input: TInput, updater: (current: TData | null) => TData | null): void {
@@ -611,5 +762,13 @@ export function defineKeyedQueryByInput<
     }
   }
 
-  return { targetKey: compositeKeyFor, atomFor, snapshotFor, watch, updateData };
+  return {
+    targetKey: compositeKeyFor,
+    atomFor,
+    snapshotFor,
+    watch,
+    refresh,
+    refreshAsync,
+    updateData,
+  };
 }

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId } from "@ryco/contracts";
+import type { AppLifecycleEvent, AppLifecycleService } from "../platform/index.ts";
 
 import { createKeyedQueryRegistry, defineKeyedQueryByInput } from "./keyedQuery.ts";
 
@@ -12,16 +13,46 @@ interface State {
 const initialState: State = { data: null, fetching: false, error: null };
 const environmentId = EnvironmentId.make("environment-keyed-query-test");
 
-function makeRegistry(input?: { readonly gcTime?: number; readonly maxEntries?: number }) {
+function makeRegistry(input?: {
+  readonly gcTime?: number;
+  readonly maxEntries?: number;
+  readonly lifecycle?: AppLifecycleService;
+}) {
   return createKeyedQueryRegistry<State>({
     labelPrefix: "keyed-query-test",
     initialState,
     gcTime: input?.gcTime ?? 20,
     maxEntries: input?.maxEntries ?? 16,
+    lifecycle: input?.lifecycle,
     buildFetchingState: (current) => ({ ...current, fetching: true, error: null }),
     buildSuccessState: (data) => ({ data: data as string, fetching: false, error: null }),
     buildErrorState: (current, error) => ({ ...current, fetching: false, error }),
   });
+}
+
+function createLifecycleHarness() {
+  let foreground = true;
+  let online = true;
+  const listeners = new Set<(event: AppLifecycleEvent) => void>();
+  const lifecycle: AppLifecycleService = {
+    isForeground: () => foreground,
+    isOnline: () => online,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+  return {
+    lifecycle,
+    emit(event: AppLifecycleEvent) {
+      if (event === "background") foreground = false;
+      if (event === "foreground" || event === "resume") foreground = true;
+      if (event === "offline") online = false;
+      if (event === "online") online = true;
+      for (const listener of listeners) listener(event);
+    },
+    listenerCount: () => listeners.size,
+  };
 }
 
 function makeBinding(
@@ -123,5 +154,92 @@ describe("keyed query retention", () => {
 
     releaseTwo();
     releaseThree();
+  });
+});
+
+describe("keyed query polling", () => {
+  it("shares one timer at the fastest subscriber cadence and reschedules after release", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn((key: string) => Promise.resolve(`value:${key}`));
+    const registry = makeRegistry({ gcTime: 60_000 });
+    const binding = makeBinding(registry, run);
+    const input = { key: "shared" };
+
+    const releaseSlow = binding.watch(input, () => 30_000);
+    const releaseFast = binding.watch(input, () => 10_000);
+    await registry.controllers.get(binding.targetKey(input) as string)?.inFlightPromise;
+    expect(run).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledTimes(2);
+
+    releaseFast();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(run).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledTimes(3);
+
+    releaseSlow();
+  });
+
+  it("pauses timers in the background and performs one eligible stale refresh on recovery", async () => {
+    vi.useFakeTimers();
+    const lifecycleHarness = createLifecycleHarness();
+    const run = vi.fn((key: string) => Promise.resolve(`value:${key}`));
+    const registry = makeRegistry({ gcTime: 60_000, lifecycle: lifecycleHarness.lifecycle });
+    const binding = makeBinding(registry, run);
+    const input = { key: "lifecycle" };
+
+    const release = binding.watch(input, {
+      resolveIntervalMs: () => 10_000,
+      shouldRefreshOnLifecycle: ({ hasData, lastFetchedAt, staleTime }) =>
+        !hasData || Date.now() - lastFetchedAt >= staleTime,
+    });
+    await registry.controllers.get(binding.targetKey(input) as string)?.inFlightPromise;
+    expect(run).toHaveBeenCalledTimes(1);
+
+    lifecycleHarness.emit("background");
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(run).toHaveBeenCalledTimes(1);
+
+    lifecycleHarness.emit("foreground");
+    await vi.runAllTicks();
+    expect(run).toHaveBeenCalledTimes(2);
+
+    lifecycleHarness.emit("offline");
+    await vi.advanceTimersByTimeAsync(70_000);
+    expect(run).toHaveBeenCalledTimes(2);
+    lifecycleHarness.emit("online");
+    await vi.runAllTicks();
+    expect(run).toHaveBeenCalledTimes(3);
+
+    release();
+    registry.dispose();
+    expect(lifecycleHarness.listenerCount()).toBe(0);
+  });
+
+  it("does not schedule or lifecycle-refresh a manual subscriber", async () => {
+    vi.useFakeTimers();
+    const lifecycleHarness = createLifecycleHarness();
+    const run = vi.fn((key: string) => Promise.resolve(`value:${key}`));
+    const registry = makeRegistry({ gcTime: 60_000, lifecycle: lifecycleHarness.lifecycle });
+    const binding = makeBinding(registry, run);
+    const input = { key: "manual" };
+
+    const release = binding.watch(input, {
+      resolveIntervalMs: () => false,
+      shouldRefreshOnLifecycle: () => false,
+    });
+    await registry.controllers.get(binding.targetKey(input) as string)?.inFlightPromise;
+    await vi.advanceTimersByTimeAsync(120_000);
+    lifecycleHarness.emit("background");
+    lifecycleHarness.emit("foreground");
+    await vi.runAllTicks();
+
+    expect(run).toHaveBeenCalledTimes(1);
+    release();
+    registry.dispose();
   });
 });

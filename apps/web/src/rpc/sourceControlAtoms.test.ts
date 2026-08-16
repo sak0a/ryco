@@ -10,6 +10,8 @@ const {
   listIssueAssignees,
   getIssue,
   getChangeRequestDetail,
+  listWorkflowRuns,
+  getWorkflowRunJobs,
 } = vi.hoisted(() => ({
   listIssues: vi.fn(),
   listChangeRequests: vi.fn(),
@@ -19,6 +21,8 @@ const {
   listIssueAssignees: vi.fn(),
   getIssue: vi.fn(),
   getChangeRequestDetail: vi.fn(),
+  listWorkflowRuns: vi.fn(),
+  getWorkflowRunJobs: vi.fn(),
 }));
 
 vi.mock("~/environments/runtime", () => ({
@@ -33,6 +37,8 @@ vi.mock("~/environments/runtime", () => ({
         listIssueAssignees,
         getIssue,
         getChangeRequestDetail,
+        listWorkflowRuns,
+        getWorkflowRunJobs,
       },
     },
   })),
@@ -46,6 +52,8 @@ import {
   issueListBinding,
   issueSearchBinding,
   resetSourceControlAtomsForTests,
+  workflowRunJobsBinding,
+  workflowRunsBinding,
 } from "./sourceControlAtoms";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
@@ -280,6 +288,44 @@ describe("sourceControlAtoms — invalidation", () => {
     await flush();
     expect(issueListBinding.snapshotFor(input).data).toBe(freshData);
     release();
+  });
+});
+
+describe("sourceControlAtoms — canonical workflow queries", () => {
+  it("includes branch scope and joins duplicate workflow-run observers", async () => {
+    const result = { provider: "github", runs: [], headSha: { _tag: "None" } };
+    listWorkflowRuns.mockResolvedValue(result);
+    const input = {
+      environmentId: ENVIRONMENT_ID,
+      cwd: CWD,
+      branch: "main",
+      limit: 20,
+    };
+
+    const releaseOverview = workflowRunsBinding.watch(input, () => false);
+    const releaseExplorer = workflowRunsBinding.watch(input, () => false);
+    await flush();
+
+    expect(listWorkflowRuns).toHaveBeenCalledTimes(1);
+    expect(listWorkflowRuns).toHaveBeenCalledWith({ cwd: CWD, branch: "main", limit: 20 });
+    expect(workflowRunsBinding.snapshotFor(input).data).toBe(result);
+    releaseOverview();
+    releaseExplorer();
+  });
+
+  it("joins duplicate per-run job observers", async () => {
+    const result = { provider: "github", runId: "run-1", jobs: [] };
+    getWorkflowRunJobs.mockResolvedValue(result);
+    const input = { environmentId: ENVIRONMENT_ID, cwd: CWD, runId: "run-1" };
+
+    const releaseOverview = workflowRunJobsBinding.watch(input, () => 30_000);
+    const releaseExplorer = workflowRunJobsBinding.watch(input, () => 60_000);
+    await flush();
+
+    expect(getWorkflowRunJobs).toHaveBeenCalledTimes(1);
+    expect(getWorkflowRunJobs).toHaveBeenCalledWith({ cwd: CWD, runId: "run-1" });
+    releaseOverview();
+    releaseExplorer();
   });
 });
 

@@ -11,6 +11,8 @@ import { searchSourceControlSummaries } from "../chat/composerSourceControlConte
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { cn } from "~/lib/utils";
+import { useSettings } from "~/hooks/useSettings";
+import { resolveSourceControlRefreshDelay } from "~/rpc/sourceControlRefreshPolicy";
 import { PullRequestList } from "./PullRequestList";
 import { getPrCheckStatusFromChangeRequest, shouldRefreshPrCheckStatus } from "./prCheckStatus";
 import {
@@ -34,15 +36,19 @@ interface PullRequestsTabProps {
 
 export function PullRequestsTab(props: PullRequestsTabProps) {
   const [debouncedQuery] = useDebouncedValue(props.query, { wait: 200 });
+  const sourceControlRefreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
 
   const resolveListIntervalMs = useCallback(
     (data: ReadonlyArray<ChangeRequest> | null): number | false => {
-      if (!data) return false;
-      return data.some((pr) => shouldRefreshPrCheckStatus(getPrCheckStatusFromChangeRequest(pr)))
-        ? 30_000
-        : false;
+      const hasActiveChecks =
+        data?.some((pr) => shouldRefreshPrCheckStatus(getPrCheckStatusFromChangeRequest(pr))) ??
+        false;
+      return resolveSourceControlRefreshDelay({
+        mode: sourceControlRefreshMode,
+        phase: hasActiveChecks ? "active" : "settled",
+      });
     },
-    [],
+    [sourceControlRefreshMode],
   );
 
   const listQuery = useSourceControlChangeRequestList(

@@ -181,4 +181,40 @@ describe("post-push workflow discovery", () => {
       }),
     ).toBe(false);
   });
+
+  it("uses reduced cadence and disables every timer in manual mode", () => {
+    const watch = createPostPushWorkflowDiscoveryWatch({
+      environmentId,
+      cwd: "/repo",
+      nowMs: 1_000,
+    });
+
+    expect(
+      resolveWorkflowRunsRefetchInterval({
+        mode: "reduced",
+        activeWatch: watch,
+        nowMs: 2_000,
+        discoveredPostPushRun: false,
+        statusRefreshable: false,
+      }),
+    ).toBe(30_000);
+    expect(
+      resolveWorkflowRunsRefetchInterval({
+        mode: "reduced",
+        activeWatch: watch,
+        nowMs: 2_000,
+        discoveredPostPushRun: true,
+        statusRefreshable: true,
+      }),
+    ).toBe(60_000);
+    expect(
+      resolveWorkflowRunsRefetchInterval({
+        mode: "manual",
+        activeWatch: watch,
+        nowMs: 2_000,
+        discoveredPostPushRun: false,
+        statusRefreshable: true,
+      }),
+    ).toBe(false);
+  });
 });

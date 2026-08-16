@@ -18,6 +18,8 @@ import {
   defineKeyedQueryByInput,
   KEY_SEP,
 } from "@ryco/client-runtime/rpc";
+import { webAppLifecycle } from "~/platform/appLifecycle";
+import { resolveSourceControlFailureDelay } from "./sourceControlRefreshPolicy";
 
 // ---------------------------------------------------------------------------
 // Atom-backed source-control context reads.
@@ -67,6 +69,8 @@ const sourceControlRegistry = createKeyedQueryRegistry<SourceControlQueryState<u
   initialState: INITIAL_QUERY_STATE,
   gcTime: DEFAULT_QUERY_GC_TIME_MS,
   maxEntries: 192,
+  lifecycle: webAppLifecycle,
+  pollJitterRatio: 0.08,
   buildFetchingState: (current) => ({
     data: current.data,
     isLoading: current.data === null,
@@ -89,9 +93,18 @@ const sourceControlRegistry = createKeyedQueryRegistry<SourceControlQueryState<u
   onRunStart: (controller) => {
     controller.fetching = true;
   },
-  onRunEnd: (controller) => {
+  onRunEnd: (controller, outcome) => {
     controller.fetching = false;
+    controller.consecutiveFailures =
+      outcome === "success" ? 0 : (controller.consecutiveFailures as number) + 1;
   },
+  adjustPollDelay: (baseDelayMs, controller) =>
+    (controller.consecutiveFailures as number) > 0
+      ? resolveSourceControlFailureDelay({
+          baseDelayMs,
+          consecutiveFailures: controller.consecutiveFailures as number,
+        })
+      : baseDelayMs,
 });
 
 const { controllers, runController } = sourceControlRegistry;
@@ -120,7 +133,11 @@ function defineQuery<TInput, TData>(
     sourceControlRegistry,
     {
       ...definition,
-      createControllerFields: (input) => ({ cwd: definition.resolveCwd(input), fetching: false }),
+      createControllerFields: (input) => ({
+        cwd: definition.resolveCwd(input),
+        fetching: false,
+        consecutiveFailures: 0,
+      }),
     },
     (controller) => {
       const isStale =
@@ -452,6 +469,7 @@ export interface SourceControlWorkflowRunsInput {
   readonly cwd: string | null;
   readonly pullRequestNumber?: number | null;
   readonly commitSha?: string | null;
+  readonly branch?: string | null;
   readonly limit?: number;
   readonly enabled?: boolean;
 }
@@ -465,7 +483,7 @@ export const workflowRunsBinding = defineQuery<
   isEnabled: (input) =>
     (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
   buildKey: (input) =>
-    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.pullRequestNumber ?? ""}${KEY_SEP}${input.commitSha ?? ""}${KEY_SEP}${input.limit ?? ""}`,
+    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.pullRequestNumber ?? ""}${KEY_SEP}${input.commitSha ?? ""}${KEY_SEP}${input.branch ?? ""}${KEY_SEP}${input.limit ?? ""}`,
   resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
   resolveCwd: (input) => input.cwd as string,
   run: (input) =>
@@ -477,6 +495,7 @@ export const workflowRunsBinding = defineQuery<
       ...(input.commitSha !== undefined && input.commitSha !== null
         ? { commitSha: input.commitSha }
         : {}),
+      ...(input.branch !== undefined && input.branch !== null ? { branch: input.branch } : {}),
       ...(input.limit !== undefined ? { limit: input.limit } : {}),
     }),
 });
