@@ -7,6 +7,8 @@ import {
 import { Atom } from "effect/unstable/reactivity";
 
 import { readEnvironmentApi } from "../environmentApi";
+import { createVisibilityAwarePoller, type VisibilityAwarePoller } from "../lib/visibilityPolling";
+import { webAppLifecycle } from "../platform/appLifecycle";
 import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 
 // ---------------------------------------------------------------------------
@@ -152,9 +154,10 @@ interface BranchesController {
   lastFetchedAt: number;
   fetchToken: number;
   hasLoadedOnce: boolean;
+  inFlightPromise: Promise<void> | null;
   invalidationUnsub: () => void;
   focusListener: (() => void) | null;
-  intervalId: ReturnType<typeof setInterval> | null;
+  poller: VisibilityAwarePoller | null;
 }
 
 const NOOP: () => void = () => undefined;
@@ -213,7 +216,20 @@ function nextCursorOf(pages: ReadonlyArray<VcsListRefsResult>): number | null {
   return lastPage ? lastPage.nextCursor : null;
 }
 
-async function loadInitialBranches(controller: BranchesController): Promise<void> {
+function runBranchesFetch(controller: BranchesController, run: () => Promise<void>): Promise<void> {
+  if (controller.inFlightPromise) {
+    return controller.inFlightPromise;
+  }
+  const promise = run().finally(() => {
+    if (controller.inFlightPromise === promise) {
+      controller.inFlightPromise = null;
+    }
+  });
+  controller.inFlightPromise = promise;
+  return promise;
+}
+
+async function loadInitialBranchesNow(controller: BranchesController): Promise<void> {
   const token = ++controller.fetchToken;
   const current = appAtomRegistry.get(branchesStateAtom(controller.key));
   setBranchesState(controller.key, {
@@ -250,7 +266,11 @@ async function loadInitialBranches(controller: BranchesController): Promise<void
   }
 }
 
-async function refetchBranches(controller: BranchesController): Promise<void> {
+function loadInitialBranches(controller: BranchesController): Promise<void> {
+  return runBranchesFetch(controller, () => loadInitialBranchesNow(controller));
+}
+
+async function refetchBranchesNow(controller: BranchesController): Promise<void> {
   const token = ++controller.fetchToken;
   const pageCount = Math.max(1, controller.loadedPageCount);
   const current = appAtomRegistry.get(branchesStateAtom(controller.key));
@@ -302,6 +322,14 @@ async function refetchBranches(controller: BranchesController): Promise<void> {
   }
 }
 
+function refetchBranches(controller: BranchesController): Promise<void> {
+  return runBranchesFetch(controller, () => refetchBranchesNow(controller));
+}
+
+function pollBranches(controller: BranchesController): Promise<void> {
+  return controller.hasLoadedOnce ? refetchBranches(controller) : loadInitialBranches(controller);
+}
+
 export function fetchNextBranchesPage(targetKey: string | null): void {
   if (targetKey === null) {
     return;
@@ -311,7 +339,7 @@ export function fetchNextBranchesPage(targetKey: string | null): void {
     return;
   }
   const state = appAtomRegistry.get(branchesStateAtom(targetKey));
-  if (state.isFetchingNextPage) {
+  if (state.isFetchingNextPage || controller.inFlightPromise) {
     return;
   }
   const cursor = nextCursorOf(state.pages);
@@ -321,8 +349,14 @@ export function fetchNextBranchesPage(targetKey: string | null): void {
 
   setBranchesState(targetKey, { ...state, isFetchingNextPage: true, error: null });
   const token = controller.fetchToken;
-  void fetchRefsPage(controller.environmentId, controller.cwd, controller.query, cursor)
-    .then((page) => {
+  void runBranchesFetch(controller, async () => {
+    try {
+      const page = await fetchRefsPage(
+        controller.environmentId,
+        controller.cwd,
+        controller.query,
+        cursor,
+      );
       if (token !== controller.fetchToken) {
         return;
       }
@@ -335,8 +369,7 @@ export function fetchNextBranchesPage(targetKey: string | null): void {
         isFetchingNextPage: false,
         error: null,
       });
-    })
-    .catch((error: unknown) => {
+    } catch (error) {
       if (token !== controller.fetchToken) {
         return;
       }
@@ -346,7 +379,8 @@ export function fetchNextBranchesPage(targetKey: string | null): void {
         isFetchingNextPage: false,
         error: error instanceof Error ? error : new Error("Failed to load refs."),
       });
-    });
+    }
+  });
 }
 
 export function refreshBranches(targetKey: string | null): void {
@@ -359,14 +393,14 @@ export function refreshBranches(targetKey: string | null): void {
     void prefetchBranchesByKey(targetKey);
     return;
   }
-  void refetchBranches(controller);
+  void (controller.poller?.refresh() ?? pollBranches(controller));
 }
 
 function maybeRefetchStaleBranches(controller: BranchesController): void {
   if (Date.now() - controller.lastFetchedAt < GIT_BRANCHES_STALE_TIME_MS) {
     return;
   }
-  void refetchBranches(controller);
+  void (controller.poller?.refresh() ?? pollBranches(controller));
 }
 
 export function watchBranches(target: BranchesTarget): () => void {
@@ -397,27 +431,33 @@ export function watchBranches(target: BranchesTarget): () => void {
     lastFetchedAt: 0,
     fetchToken: 0,
     hasLoadedOnce: false,
+    inFlightPromise: null,
     invalidationUnsub: NOOP,
     focusListener: null,
-    intervalId: null,
+    poller: null,
   };
   branchesControllers.set(key, controller);
 
   controller.invalidationUnsub = subscribeInvalidationScope(gitScopeKey(cwd), () => {
-    void refetchBranches(controller);
+    void (controller.poller?.refresh() ?? pollBranches(controller));
   });
 
   if (typeof window !== "undefined") {
     const focusListener = () => maybeRefetchStaleBranches(controller);
     controller.focusListener = focusListener;
     window.addEventListener("focus", focusListener);
-    window.addEventListener("online", focusListener);
-    controller.intervalId = setInterval(() => {
-      void refetchBranches(controller);
-    }, GIT_BRANCHES_REFETCH_INTERVAL_MS);
   }
 
-  void loadInitialBranches(controller);
+  if (typeof window !== "undefined" && typeof document !== "undefined") {
+    controller.poller = createVisibilityAwarePoller({
+      lifecycle: webAppLifecycle,
+      run: () => pollBranches(controller),
+      resolveDelayMs: () => GIT_BRANCHES_REFETCH_INTERVAL_MS,
+      jitterRatio: 0.05,
+    });
+  } else {
+    void loadInitialBranches(controller);
+  }
 
   return () => unwatchBranches(key);
 }
@@ -435,11 +475,8 @@ function unwatchBranches(key: string): void {
   controller.invalidationUnsub();
   if (controller.focusListener && typeof window !== "undefined") {
     window.removeEventListener("focus", controller.focusListener);
-    window.removeEventListener("online", controller.focusListener);
   }
-  if (controller.intervalId !== null) {
-    clearInterval(controller.intervalId);
-  }
+  controller.poller?.stop();
   controller.fetchToken += 1;
   branchesControllers.delete(key);
 }
@@ -699,11 +736,8 @@ export function clearGitAtomState(): void {
     controller.invalidationUnsub();
     if (controller.focusListener && typeof window !== "undefined") {
       window.removeEventListener("focus", controller.focusListener);
-      window.removeEventListener("online", controller.focusListener);
     }
-    if (controller.intervalId !== null) {
-      clearInterval(controller.intervalId);
-    }
+    controller.poller?.stop();
   }
   branchesControllers.clear();
   branchesPrefetchGeneration += 1;

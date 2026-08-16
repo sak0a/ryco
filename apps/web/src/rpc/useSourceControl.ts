@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { appAtomRegistry } from "@ryco/client-runtime/rpc";
 import type {
   ChangeRequest,
   EnvironmentId,
@@ -19,9 +20,10 @@ import type {
   SourceControlWorkflowRunJobsResult,
   SourceControlWorkflowRunListResult,
 } from "@ryco/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { requireEnvironmentConnection } from "~/environments/runtime";
+import { useSettings } from "~/hooks/useSettings";
 import {
   changeRequestDetailBinding,
   changeRequestDiffBinding,
@@ -52,6 +54,10 @@ import {
   type SourceControlWorkflowRunJobsInput,
   type SourceControlWorkflowRunsInput,
 } from "./sourceControlAtoms";
+import {
+  resolveSourceControlRefreshDelay,
+  shouldRefreshSourceControlOnLifecycle,
+} from "./sourceControlRefreshPolicy";
 
 export {
   fetchSourceControlChangeRequestDetail,
@@ -110,19 +116,30 @@ function useWatchedQuery<TInput, TData>(
   resolveIntervalMs?: (data: TData | null) => number | false,
 ): SourceControlQueryState<TData> {
   const targetKey = binding.targetKey(input);
+  const refreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
   const inputRef = useRef(input);
   inputRef.current = input;
   const resolveIntervalRef = useRef(resolveIntervalMs);
   resolveIntervalRef.current = resolveIntervalMs;
+  const refreshModeRef = useRef(refreshMode);
+  refreshModeRef.current = refreshMode;
 
   useEffect(() => {
-    return binding.watch(
-      inputRef.current,
-      resolveIntervalRef.current
-        ? (data) => resolveIntervalRef.current?.(data as TData | null) ?? false
-        : undefined,
-    );
-  }, [binding, targetKey]);
+    return binding.watch(inputRef.current, {
+      resolveIntervalMs: (data) =>
+        refreshModeRef.current === "manual"
+          ? false
+          : (resolveIntervalRef.current?.(data as TData | null) ?? false),
+      shouldRefreshOnLifecycle: ({ hasData, lastFetchedAt, staleTime }) =>
+        shouldRefreshSourceControlOnLifecycle({
+          mode: refreshModeRef.current,
+          hasData,
+          invalidated: false,
+          lastFetchedAtMs: lastFetchedAt,
+          staleTimeMs: staleTime,
+        }),
+    });
+  }, [binding, refreshMode, targetKey]);
 
   return useAtomValue(binding.atomFor(input));
 }
@@ -198,8 +215,124 @@ export function useSourceControlWorkflowRuns(
 
 export function useSourceControlWorkflowRunJobs(
   input: SourceControlWorkflowRunJobsInput,
+  resolveIntervalMs?: (data: SourceControlWorkflowRunJobsResult | null) => number | false,
 ): SourceControlQueryState<SourceControlWorkflowRunJobsResult> {
-  return useWatchedQuery(workflowRunJobsBinding, input);
+  return useWatchedQuery(workflowRunJobsBinding, input, resolveIntervalMs);
+}
+
+function sourceControlQueryStatesEqual<TData>(
+  left: SourceControlQueryState<TData>,
+  right: SourceControlQueryState<TData>,
+): boolean {
+  return (
+    left.data === right.data &&
+    left.isLoading === right.isLoading &&
+    left.isFetching === right.isFetching &&
+    left.error === right.error
+  );
+}
+
+export interface SourceControlWorkflowRunJobsBatchResult {
+  readonly jobsByRunId: Map<string, SourceControlWorkflowRunJobsResult["jobs"]>;
+  readonly isLoading: boolean;
+}
+
+export function useSourceControlWorkflowRunJobsBatch(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly runIds: ReadonlyArray<string>;
+  readonly activeRunId: string | null;
+  readonly enabled: boolean;
+}): SourceControlWorkflowRunJobsBatchResult {
+  const refreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
+  const queryInputs = useMemo(
+    () =>
+      input.runIds.map((runId): SourceControlWorkflowRunJobsInput => ({
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        runId,
+        enabled: input.enabled,
+      })),
+    [input.cwd, input.enabled, input.environmentId, input.runIds],
+  );
+  const targetKeys = useMemo(
+    () => queryInputs.map((queryInput) => workflowRunJobsBinding.targetKey(queryInput)),
+    [queryInputs],
+  );
+  const batchSignature = useMemo(() => targetKeys.join("\u0001"), [targetKeys]);
+  const queryInputsRef = useRef(queryInputs);
+  queryInputsRef.current = queryInputs;
+  const snapshotRef = useRef<
+    ReadonlyArray<SourceControlQueryState<SourceControlWorkflowRunJobsResult>>
+  >([]);
+
+  useEffect(() => {
+    const releases = queryInputsRef.current.map((queryInput) =>
+      workflowRunJobsBinding.watch(queryInput, {
+        resolveIntervalMs: () =>
+          resolveSourceControlRefreshDelay({
+            mode: refreshMode,
+            phase: queryInput.runId === input.activeRunId ? "active" : "settled",
+          }),
+        shouldRefreshOnLifecycle: ({ hasData, lastFetchedAt, staleTime }) =>
+          shouldRefreshSourceControlOnLifecycle({
+            mode: refreshMode,
+            hasData,
+            invalidated: false,
+            lastFetchedAtMs: lastFetchedAt,
+            staleTimeMs: staleTime,
+          }),
+      }),
+    );
+    return () => {
+      for (const release of releases) release();
+    };
+  }, [batchSignature, input.activeRunId, refreshMode]);
+
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      // The signature intentionally rotates this subscription when the batch
+      // membership changes, while the current inputs themselves live in a ref.
+      void batchSignature;
+      const releases = queryInputsRef.current.map((queryInput) =>
+        appAtomRegistry.subscribe(workflowRunJobsBinding.atomFor(queryInput), onStoreChange),
+      );
+      return () => {
+        for (const release of releases) release();
+      };
+    },
+    [batchSignature],
+  );
+
+  const getSnapshot = useCallback(() => {
+    const next = queryInputsRef.current.map((queryInput) =>
+      workflowRunJobsBinding.snapshotFor(queryInput),
+    );
+    const previous = snapshotRef.current;
+    if (
+      previous.length === next.length &&
+      previous.every((state, index) => sourceControlQueryStatesEqual(state, next[index]!))
+    ) {
+      return previous;
+    }
+    snapshotRef.current = next;
+    return next;
+  }, []);
+
+  const states = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  return useMemo(() => {
+    const jobsByRunId = new Map<string, SourceControlWorkflowRunJobsResult["jobs"]>();
+    let isLoading = false;
+    input.runIds.forEach((runId, index) => {
+      const state = states[index];
+      if (!state || state.isLoading || state.data === null) {
+        isLoading = input.enabled;
+        return;
+      }
+      jobsByRunId.set(runId, state.data.jobs);
+    });
+    return { jobsByRunId, isLoading };
+  }, [input.enabled, input.runIds, states]);
 }
 
 export function useSourceControlWorkflowJobLog(

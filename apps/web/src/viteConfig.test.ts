@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { createWebViteConfig, shouldEnableHostedPwaBuild } from "../vite.config";
+import {
+  createWebViteConfig,
+  REACT_COMPILER_EXCLUDE,
+  REACT_COMPILER_INCLUDE,
+  shouldEnableHostedPwaBuild,
+} from "../vite.config";
 
 type ViteConfigWithOptimizeDeps = {
   readonly optimizeDeps?: {
@@ -9,6 +14,9 @@ type ViteConfigWithOptimizeDeps = {
   readonly define?: Record<string, string>;
   readonly resolve?: {
     readonly dedupe?: readonly string[];
+  };
+  readonly test?: {
+    readonly maxWorkers?: number;
   };
 };
 
@@ -25,6 +33,13 @@ describe("web Vite config", () => {
     const config = createWebViteConfig() as ViteConfigWithOptimizeDeps;
 
     expect(config.optimizeDeps?.include).toContain("react-dom/client");
+    expect(config.optimizeDeps?.include).toContain("@tanstack/react-router");
+  });
+
+  it("caps unit-test workers to prevent module-graph memory amplification", () => {
+    const config = createWebViteConfig() as ViteConfigWithOptimizeDeps;
+    expect(config.test?.maxWorkers).toBeGreaterThan(0);
+    expect(config.test?.maxWorkers).toBeLessThanOrEqual(4);
   });
 
   it("deduplicates react and react-dom so workspace deps cannot embed a second runtime", () => {
@@ -35,6 +50,19 @@ describe("web Vite config", () => {
       expect(dedupe).toContain("react");
       expect(dedupe).toContain("react-dom");
     }
+  });
+
+  it("limits React compiler transforms to web React source", () => {
+    expect(REACT_COMPILER_INCLUDE.test("/repo/apps/web/src/components/ChatView.tsx")).toBe(true);
+    expect(REACT_COMPILER_INCLUDE.test("/repo/packages/client-runtime/src/state/store.ts")).toBe(
+      false,
+    );
+
+    const excluded = (path: string) => REACT_COMPILER_EXCLUDE.some((pattern) => pattern.test(path));
+    expect(excluded("/repo/apps/web/src/routeTree.gen.ts")).toBe(true);
+    expect(excluded("/repo/apps/web/src/workers/liquidGlass.worker.ts")).toBe(true);
+    expect(excluded("/repo/apps/web/src/components/ChatView.logic.ts")).toBe(true);
+    expect(excluded("/repo/apps/web/src/components/ChatView.tsx")).toBe(false);
   });
 
   it("enables PWA artifacts only for production hosted builds", () => {

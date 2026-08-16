@@ -85,11 +85,13 @@ export function SidebarProjectHeader(props: {
             title={projectStatus.label}
             className={`-ml-0.5 relative inline-flex size-3.5 shrink-0 items-center justify-center ${projectStatus.colorClass}`}
           >
-            <span
-              className={`size-[9px] rounded-full ${projectStatus.dotClass} ${
-                projectStatus.pulse ? "animate-status-pulse" : ""
-              }`}
-            />
+            {projectStatus.pulse ? (
+              <span className="status-activity-signal size-[9px]">
+                <span className={`size-full rounded-full ${projectStatus.dotClass}`} />
+              </span>
+            ) : (
+              <span className={`size-[9px] rounded-full ${projectStatus.dotClass}`} />
+            )}
           </span>
         ) : null}
         <ProjectFavicon

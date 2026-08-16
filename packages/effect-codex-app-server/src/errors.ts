@@ -58,6 +58,18 @@ export class CodexAppServerTransportError extends Schema.TaggedError<CodexAppSer
   }
 }
 
+export class CodexAppServerProtocolOverloadedError extends Schema.TaggedError<CodexAppServerProtocolOverloadedError>()(
+  "CodexAppServerProtocolOverloadedError",
+  {
+    queue: Schema.String,
+    capacity: Schema.Number,
+  },
+) {
+  override get message() {
+    return `Codex App Server protocol queue ${this.queue} exceeded its bounded capacity (${this.capacity})`;
+  }
+}
+
 export class CodexAppServerRequestError extends Schema.TaggedError<CodexAppServerRequestError>()(
   "CodexAppServerRequestError",
   {
@@ -139,6 +151,7 @@ export const CodexAppServerError = Schema.Union([
   CodexAppServerSpawnError,
   CodexAppServerProcessExitedError,
   CodexAppServerProtocolParseError,
+  CodexAppServerProtocolOverloadedError,
   CodexAppServerTransportError,
 ]);
 

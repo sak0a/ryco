@@ -6,6 +6,7 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
+  OrchestrationThreadHistoryError,
   OrchestrationGetTaskOutputError,
   OrchestrationGetTurnDiffError,
   OrchestrationGetWorkflowScriptError,
@@ -13,6 +14,8 @@ import {
   OrchestrationStopBackgroundTaskError,
   ORCHESTRATION_WS_METHODS,
   WS_METHODS,
+  type OrchestrationGetThreadHistoryPageInput,
+  type OrchestrationGetThreadWindowInput,
   type ThreadId,
 } from "@ryco/contracts";
 
@@ -81,7 +84,10 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
       : projectionSnapshotQuery.getThreadDetailById(threadId).pipe(
           Effect.map(
             Option.match({
-              onNone: () => ({ scriptPaths: new Set<string>(), outputPaths: new Set<string>() }),
+              onNone: () => ({
+                scriptPaths: new Set<string>(),
+                outputPaths: new Set<string>(),
+              }),
               onSome: (thread) => {
                 const scriptPaths = new Set<string>();
                 const outputPaths = new Set<string>();
@@ -115,7 +121,77 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
         }),
       ),
       Effect.catch(() =>
-        Effect.succeed({ scriptPaths: new Set<string>(), outputPaths: new Set<string>() }),
+        Effect.succeed({
+          scriptPaths: new Set<string>(),
+          outputPaths: new Set<string>(),
+        }),
+      ),
+    );
+  };
+
+  const loadThreadWindow = (input: OrchestrationGetThreadWindowInput) => {
+    const query = projectionSnapshotQuery.getThreadWindow;
+    if (query === undefined) {
+      return Effect.fail(
+        new OrchestrationGetSnapshotError({
+          message: "Bounded thread history is unavailable",
+          cause: "ProjectionSnapshotQuery.getThreadWindow is not implemented",
+        }),
+      );
+    }
+    return query({
+      threadId: input.threadId,
+      limits: {
+        messages: clamp(input.limits.messages, { minimum: 1, maximum: 200 }),
+        proposedPlans: clamp(input.limits.proposedPlans, {
+          minimum: 1,
+          maximum: 50,
+        }),
+        activities: clamp(input.limits.activities, {
+          minimum: 1,
+          maximum: 200,
+        }),
+        checkpoints: clamp(input.limits.checkpoints, {
+          minimum: 1,
+          maximum: 50,
+        }),
+      },
+    }).pipe(
+      Effect.mapError((cause) =>
+        Schema.is(OrchestrationThreadHistoryError)(cause)
+          ? cause
+          : new OrchestrationGetSnapshotError({
+              message: `Failed to load bounded history for thread ${input.threadId}`,
+              cause,
+            }),
+      ),
+    );
+  };
+
+  const loadThreadHistoryPage = (input: OrchestrationGetThreadHistoryPageInput) => {
+    const query = projectionSnapshotQuery.getThreadHistoryPage;
+    if (query === undefined) {
+      return Effect.fail(
+        new OrchestrationGetSnapshotError({
+          message: "Thread history pagination is unavailable",
+          cause: "ProjectionSnapshotQuery.getThreadHistoryPage is not implemented",
+        }),
+      );
+    }
+    return query({
+      ...input,
+      limit: clamp(input.limit, {
+        minimum: 1,
+        maximum: input.collection === "messages" || input.collection === "activities" ? 200 : 50,
+      }),
+    }).pipe(
+      Effect.mapError((cause) =>
+        Schema.is(OrchestrationThreadHistoryError)(cause)
+          ? cause
+          : new OrchestrationGetSnapshotError({
+              message: `Failed to load ${input.collection} history for thread ${input.threadId}`,
+              cause,
+            }),
       ),
     );
   };
@@ -271,32 +347,37 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
                 ),
               ),
             onSome: (service) =>
-              service.stopBackgroundTask({ threadId: input.threadId, taskId: input.taskId }).pipe(
-                Effect.tapError((cause) =>
-                  Effect.logWarning("stopBackgroundTask failed", {
-                    threadId: input.threadId,
-                    taskId: input.taskId,
-                    cause,
-                  }),
-                ),
-                // The raw provider cause stays in server logs; the wire error
-                // carries only the classified reason.
-                Effect.mapError(
-                  (cause) =>
-                    new OrchestrationStopBackgroundTaskError({
-                      reason:
-                        cause._tag === "ProviderUnsupportedError"
-                          ? "unsupported"
-                          : cause._tag === "ProviderSessionNotFoundError" ||
-                              cause._tag === "ProviderAdapterSessionNotFoundError" ||
-                              cause._tag === "ProviderAdapterSessionClosedError"
-                            ? "session-not-found"
-                            : "stop-failed",
+              service
+                .stopBackgroundTask({
+                  threadId: input.threadId,
+                  taskId: input.taskId,
+                })
+                .pipe(
+                  Effect.tapError((cause) =>
+                    Effect.logWarning("stopBackgroundTask failed", {
                       threadId: input.threadId,
                       taskId: input.taskId,
+                      cause,
                     }),
+                  ),
+                  // The raw provider cause stays in server logs; the wire error
+                  // carries only the classified reason.
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationStopBackgroundTaskError({
+                        reason:
+                          cause._tag === "ProviderUnsupportedError"
+                            ? "unsupported"
+                            : cause._tag === "ProviderSessionNotFoundError" ||
+                                cause._tag === "ProviderAdapterSessionNotFoundError" ||
+                                cause._tag === "ProviderAdapterSessionClosedError"
+                              ? "session-not-found"
+                              : "stop-failed",
+                        threadId: input.threadId,
+                        taskId: input.taskId,
+                      }),
+                  ),
                 ),
-              ),
           }).pipe(Effect.as({})),
         ),
         { "rpc.aggregate": "orchestration" },
@@ -349,6 +430,16 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
                 }),
             ),
           ),
+        { "rpc.aggregate": "orchestration" },
+      ),
+    [ORCHESTRATION_WS_METHODS.getThreadWindow]: (input) =>
+      observeRpcEffect(ORCHESTRATION_WS_METHODS.getThreadWindow, loadThreadWindow(input), {
+        "rpc.aggregate": "orchestration",
+      }),
+    [ORCHESTRATION_WS_METHODS.getThreadHistoryPage]: (input) =>
+      observeRpcEffect(
+        ORCHESTRATION_WS_METHODS.getThreadHistoryPage,
+        loadThreadHistoryPage(input),
         { "rpc.aggregate": "orchestration" },
       ),
     [ORCHESTRATION_WS_METHODS.replayEvents]: (input) =>
@@ -500,6 +591,39 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
             Stream.tap((item) =>
               Effect.sync(() =>
                 recordServerPerfPayload("server.ws.orchestration.subscribeThread", item),
+              ),
+            ),
+          ),
+        ),
+        { "rpc.aggregate": "orchestration" },
+      ),
+    [ORCHESTRATION_WS_METHODS.subscribeThreadWindow]: (input) =>
+      observeRpcStreamEffect(
+        ORCHESTRATION_WS_METHODS.subscribeThreadWindow,
+        Effect.succeed(
+          makeReplayableThreadStream(
+            Effect.gen(function* () {
+              const perfEnabled = isServerPerfProfileEnabled();
+              const startedAtMs = performance.now();
+              const snapshot = yield* loadThreadWindow(input);
+              const snapshotDurationMs = Math.max(0, performance.now() - startedAtMs);
+              yield* recordThreadSnapshotDurationMs(snapshotDurationMs);
+              if (perfEnabled) {
+                yield* Effect.sync(() =>
+                  recordServerPerfPayload(
+                    "server.ws.orchestration.subscribeThreadWindow.snapshot",
+                    snapshot,
+                    { durationMs: snapshotDurationMs },
+                  ),
+                );
+              }
+              return snapshot;
+            }),
+            input.threadId,
+          ).pipe(
+            Stream.tap((item) =>
+              Effect.sync(() =>
+                recordServerPerfPayload("server.ws.orchestration.subscribeThreadWindow", item),
               ),
             ),
           ),

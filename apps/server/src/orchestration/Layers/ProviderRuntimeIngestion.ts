@@ -21,6 +21,7 @@ import {
 } from "@ryco/contracts";
 import { Cache, Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
+import { losslessBackpressureQueuePolicy } from "@ryco/shared/QueuePolicy";
 import { readEnv } from "@ryco/shared/runtimeEnv";
 import { classifyTaskAgentKind } from "@ryco/shared/taskClassification";
 
@@ -2678,7 +2679,13 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  const worker = yield* makeDrainableWorker({
+    policy: losslessBackpressureQueuePolicy({
+      component: "ProviderRuntimeIngestion",
+      capacity: 2_048,
+    }),
+    process: processInputSafely,
+  });
   enqueueRuntimeInput = worker.enqueue;
 
   const start: ProviderRuntimeIngestionShape["start"] = () =>

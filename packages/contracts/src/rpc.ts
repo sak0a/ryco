@@ -97,6 +97,7 @@ import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadMessagesInput,
+  OrchestrationThreadHistoryError,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsError,
@@ -134,6 +135,7 @@ import {
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
+  TerminalSubscriptionResyncError,
   TerminalWriteInput,
 } from "./terminal.ts";
 import {
@@ -1236,6 +1238,24 @@ export const WsOrchestrationSearchThreadMessagesRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationGetThreadWindowRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadWindow,
+  {
+    payload: OrchestrationRpcSchemas.getThreadWindow.input,
+    success: OrchestrationRpcSchemas.getThreadWindow.output,
+    error: Schema.Union([OrchestrationThreadHistoryError, OrchestrationGetSnapshotError]),
+  },
+);
+
+export const WsOrchestrationGetThreadHistoryPageRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getThreadHistoryPage,
+  {
+    payload: OrchestrationRpcSchemas.getThreadHistoryPage.input,
+    success: OrchestrationRpcSchemas.getThreadHistoryPage.output,
+    error: Schema.Union([OrchestrationThreadHistoryError, OrchestrationGetSnapshotError]),
+  },
+);
+
 export const WsOrchestrationReplayEventsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.replayEvents, {
   payload: OrchestrationReplayEventsInput,
   success: OrchestrationRpcSchemas.replayEvents.output,
@@ -1264,6 +1284,16 @@ export const WsOrchestrationSubscribeThreadRpc = Rpc.make(
     payload: OrchestrationRpcSchemas.subscribeThread.input,
     success: OrchestrationRpcSchemas.subscribeThread.output,
     error: OrchestrationGetSnapshotError,
+    stream: true,
+  },
+);
+
+export const WsOrchestrationSubscribeThreadWindowRpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.subscribeThreadWindow,
+  {
+    payload: OrchestrationRpcSchemas.subscribeThreadWindow.input,
+    success: OrchestrationRpcSchemas.subscribeThreadWindow.output,
+    error: Schema.Union([OrchestrationThreadHistoryError, OrchestrationGetSnapshotError]),
     stream: true,
   },
 );
@@ -1307,7 +1337,7 @@ export const WsContextHandoffReadExportChunkRpc = Rpc.make(
 export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTerminalEvents, {
   payload: Schema.Struct({}),
   success: TerminalEvent,
-  error: AuthRpcError,
+  error: Schema.Union([AuthRpcError, TerminalSubscriptionResyncError]),
   stream: true,
 });
 
@@ -1444,10 +1474,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationSearchThreadMessagesRpc,
+  WsOrchestrationGetThreadWindowRpc,
+  WsOrchestrationGetThreadHistoryPageRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationReplayEventsPageRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsOrchestrationSubscribeThreadWindowRpc,
   WsContextHandoffGetInspectionSummaryRpc,
   WsContextHandoffListInspectionEntriesRpc,
   WsContextHandoffReadRawPayloadChunkRpc,

@@ -64,6 +64,10 @@ export interface CodexAppServerPatchedProtocol {
   ) => Effect.Effect<void, CodexError.CodexAppServerError>;
 }
 
+const PROTOCOL_QUEUE_CAPACITY = 256;
+const PROTOCOL_ENQUEUE_DEADLINE_MS = 2_000;
+const PROTOCOL_MAX_FRAME_BYTES = 8 * 1024 * 1024;
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -95,7 +99,7 @@ const encodeWireMessage = (
       }),
   });
 
-const normalizeIncomingError = (error: unknown, detail: string): CodexError.CodexAppServerError =>
+const normalizeProtocolError = (error: unknown, detail: string): CodexError.CodexAppServerError =>
   Schema.is(CodexError.CodexAppServerError)(error)
     ? error
     : new CodexError.CodexAppServerTransportError({
@@ -119,9 +123,13 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
   function* (
     options: CodexAppServerPatchedProtocolOptions,
   ): Effect.fn.Return<CodexAppServerPatchedProtocol, never, Scope.Scope> {
-    const outgoing = yield* Queue.unbounded<string, Cause.Done<void>>();
-    const incomingNotifications = yield* Queue.unbounded<CodexAppServerIncomingNotification>();
-    const incomingRequests = yield* Queue.unbounded<CodexAppServerIncomingRequest>();
+    const outgoing = yield* Queue.bounded<string, Cause.Done<void>>(PROTOCOL_QUEUE_CAPACITY);
+    const incomingNotifications = yield* options.onNotification
+      ? Queue.sliding<CodexAppServerIncomingNotification>(PROTOCOL_QUEUE_CAPACITY)
+      : Queue.bounded<CodexAppServerIncomingNotification>(PROTOCOL_QUEUE_CAPACITY);
+    const incomingRequests = yield* options.onRequest
+      ? Queue.sliding<CodexAppServerIncomingRequest>(PROTOCOL_QUEUE_CAPACITY)
+      : Queue.bounded<CodexAppServerIncomingRequest>(PROTOCOL_QUEUE_CAPACITY);
     const pending = yield* Ref.make(
       new Map<string, Deferred.Deferred<unknown, CodexError.CodexAppServerError>>(),
     );
@@ -141,6 +149,28 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
         Effect.logDebug("Codex App Server protocol event").pipe(Effect.annotateLogs({ event }))
       );
     };
+
+    const offerBounded = <A, E>(
+      queue: Queue.Queue<A, E>,
+      value: A,
+      queueName: string,
+    ): Effect.Effect<void, CodexError.CodexAppServerError> =>
+      Queue.offer(queue, value).pipe(
+        Effect.timeoutOrElse({
+          duration: PROTOCOL_ENQUEUE_DEADLINE_MS,
+          orElse: () =>
+            Effect.fail(
+              new CodexError.CodexAppServerProtocolOverloadedError({
+                queue: queueName,
+                capacity: PROTOCOL_QUEUE_CAPACITY,
+              }),
+            ),
+        }),
+        Effect.asVoid,
+        Effect.mapError((error) =>
+          normalizeProtocolError(error, `Codex App Server ${queueName} queue failed`),
+        ),
+      );
 
     const failAllPending = (error: CodexError.CodexAppServerError) =>
       Ref.get(pending).pipe(
@@ -178,12 +208,18 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
           payload: message,
         });
         const encoded = yield* encodeWireMessage(message);
+        if (new TextEncoder().encode(encoded).byteLength > PROTOCOL_MAX_FRAME_BYTES) {
+          return yield* new CodexError.CodexAppServerProtocolOverloadedError({
+            queue: "outgoing-frame-bytes",
+            capacity: PROTOCOL_MAX_FRAME_BYTES,
+          });
+        }
         yield* logProtocol({
           direction: "outgoing",
           stage: "raw",
           payload: encoded,
         });
-        yield* Queue.offer(outgoing, encoded).pipe(Effect.asVoid);
+        yield* offerBounded(outgoing, encoded, "outgoing");
       });
 
     const removePending = (requestId: string) =>
@@ -235,7 +271,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
     };
 
     const handleRequest = (request: CodexAppServerIncomingRequest) =>
-      Queue.offer(incomingRequests, request).pipe(
+      offerBounded(incomingRequests, request, "incoming-requests").pipe(
         Effect.andThen(
           options.onRequest
             ? options.onRequest(request).pipe(
@@ -247,13 +283,11 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
               )
             : Effect.void,
         ),
-        Effect.asVoid,
       );
 
     const handleNotification = (notification: CodexAppServerIncomingNotification) =>
-      Queue.offer(incomingNotifications, notification).pipe(
+      offerBounded(incomingNotifications, notification, "incoming-notifications").pipe(
         Effect.andThen(options.onNotification ? options.onNotification(notification) : Effect.void),
-        Effect.asVoid,
       );
 
     const routeMessage = (
@@ -322,13 +356,30 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
           const combined = current + chunk;
           const lines = combined.split("\n");
           const nextRemainder = lines.pop() ?? "";
-          return [lines.map((line) => line.replace(/\r$/, "")), nextRemainder] as const;
-        }).pipe(Effect.flatMap((lines) => Effect.forEach(lines, handleLine, { discard: true }))),
+          return [
+            {
+              lines: lines.map((line) => line.replace(/\r$/, "")),
+              remainderBytes: new TextEncoder().encode(nextRemainder).byteLength,
+            },
+            nextRemainder,
+          ] as const;
+        }).pipe(
+          Effect.flatMap(({ lines, remainderBytes }) =>
+            remainderBytes > PROTOCOL_MAX_FRAME_BYTES
+              ? Effect.fail(
+                  new CodexError.CodexAppServerProtocolOverloadedError({
+                    queue: "incoming-frame-bytes",
+                    capacity: PROTOCOL_MAX_FRAME_BYTES,
+                  }),
+                )
+              : Effect.forEach(lines, handleLine, { discard: true }),
+          ),
+        ),
       ),
       Effect.matchEffect({
         onFailure: (error) =>
           handleTermination(() =>
-            Effect.succeed(normalizeIncomingError(error, "Codex App Server input stream failed")),
+            Effect.succeed(normalizeProtocolError(error, "Codex App Server input stream failed")),
           ),
         onSuccess: () =>
           Ref.get(remainder).pipe(

@@ -28,6 +28,8 @@ import {
 } from "~/rpc/useSourceControl";
 import { errorMessage } from "~/lib/errorMessage";
 import { cn } from "~/lib/utils";
+import { useSettings } from "~/hooks/useSettings";
+import { resolveSourceControlRefreshDelay } from "~/rpc/sourceControlRefreshPolicy";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
@@ -57,8 +59,6 @@ import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
 import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
 import { WorkflowRunsSection } from "./WorkflowRunsSection";
-
-const CHANGE_REQUEST_DETAIL_OPEN_REFETCH_INTERVAL_MS = 30_000;
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -91,10 +91,14 @@ interface PullRequestDetailProps {
 
 export function PullRequestDetail(props: PullRequestDetailProps) {
   const reference = String(props.pullRequestNumber);
+  const sourceControlRefreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
   const resolveDetailIntervalMs = useCallback(
     (data: SourceControlChangeRequestDetail | null): number | false =>
-      data?.state === "open" ? CHANGE_REQUEST_DETAIL_OPEN_REFETCH_INTERVAL_MS : false,
-    [],
+      resolveSourceControlRefreshDelay({
+        mode: sourceControlRefreshMode,
+        phase: data?.state === "open" ? "active" : "settled",
+      }),
+    [sourceControlRefreshMode],
   );
   const detailQuery = useSourceControlChangeRequestDetail(
     {
@@ -536,6 +540,7 @@ function PullRequestTimelineCommitRow(props: {
   cwd: string | null;
   pullRequestUrl: string;
 }) {
+  const sourceControlRefreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
   const runsQuery = useSourceControlWorkflowRuns(
     {
       environmentId: props.environmentId,
@@ -545,12 +550,16 @@ function PullRequestTimelineCommitRow(props: {
       enabled: props.provider === "github",
     },
     (data) => {
-      if (!data) return false;
-      const status = getPrCheckStatusFromWorkflowRuns({
-        runs: data.runs,
-        headSha: props.commit.oid,
+      const status = data
+        ? getPrCheckStatusFromWorkflowRuns({
+            runs: data.runs,
+            headSha: props.commit.oid,
+          })
+        : null;
+      return resolveSourceControlRefreshDelay({
+        mode: sourceControlRefreshMode,
+        phase: status && shouldRefreshPrCheckStatus(status) ? "active" : "settled",
       });
-      return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
     },
   );
   const status = getPrCheckStatusForQuery({

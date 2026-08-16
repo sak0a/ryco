@@ -1,12 +1,18 @@
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon } from "lucide-react";
+import { lazy, Suspense } from "react";
 
-import { DiagnosticsSettings } from "../components/settings/DiagnosticsSettings";
 import { HostedConnectionControl } from "../components/hostedHub/HostedConnectionControls";
 import { Button } from "../components/ui/button";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { SidebarInset } from "../components/ui/sidebar";
 import { APP_DISPLAY_NAME } from "~/branding";
+
+const LazyDiagnosticsSettings = lazy(() =>
+  import("../components/settings/DiagnosticsSettings").then((module) => ({
+    default: module.DiagnosticsSettings,
+  })),
+);
 
 function DiagnosticsRouteView() {
   const router = useRouter();
@@ -40,7 +46,9 @@ function DiagnosticsRouteView() {
         </header>
 
         <ScrollArea className="min-h-0 flex-1">
-          <DiagnosticsSettings />
+          <Suspense fallback={null}>
+            <LazyDiagnosticsSettings />
+          </Suspense>
         </ScrollArea>
       </div>
     </SidebarInset>

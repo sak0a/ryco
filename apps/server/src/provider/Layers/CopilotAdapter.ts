@@ -68,7 +68,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         })
       : undefined);
   const sessions = new Map<ThreadId, ActiveCopilotSession>();
-  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(2_048);
   const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
     queue: "provider.adapter.runtimeEvents",
     component: "CopilotAdapter",

@@ -13,7 +13,6 @@ import { setModelPickerOpen } from "../modelPickerOpenState";
 import { clearKeyedQueriesForEnvironment } from "../rpc/keyedQuery";
 import { clearProjectAtomState } from "../rpc/projectAtoms";
 import { clearGitAtomState } from "../rpc/gitAtoms";
-import { clearOverviewAtomState } from "../rpc/overviewAtoms";
 import { clearCheckpointDiffState } from "../rpc/providerAtoms";
 import { defaultQueryClient } from "../rpc/queryClient";
 import { clearServerState } from "../rpc/serverState";
@@ -46,7 +45,6 @@ export function clearWebHostedNodeScopedState(environmentId: EnvironmentId): voi
   clearKeyedQueriesForEnvironment(environmentId);
   clearProjectAtomState();
   clearGitAtomState();
-  clearOverviewAtomState();
   clearCheckpointDiffState();
   useStore.getState().removeEnvironmentState(environmentId);
   useComposerDraftStore.setState({

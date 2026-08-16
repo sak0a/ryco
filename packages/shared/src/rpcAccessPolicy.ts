@@ -45,6 +45,8 @@ export const RPC_ACCESS_POLICY = {
   // File-content reads match projectsReadFile/filesystemBrowse: operator,
   // not viewer — scripts and task outputs can carry prompts and secrets.
   [ORCHESTRATION_WS_METHODS.getTaskOutput]: "operator",
+  [ORCHESTRATION_WS_METHODS.getThreadHistoryPage]: "viewer",
+  [ORCHESTRATION_WS_METHODS.getThreadWindow]: "viewer",
   [ORCHESTRATION_WS_METHODS.getWorkflowScript]: "operator",
   [ORCHESTRATION_WS_METHODS.stopBackgroundTask]: "operator",
   [ORCHESTRATION_WS_METHODS.replayEvents]: "viewer",
@@ -52,6 +54,7 @@ export const RPC_ACCESS_POLICY = {
   [ORCHESTRATION_WS_METHODS.searchThreadMessages]: "viewer",
   [ORCHESTRATION_WS_METHODS.subscribeShell]: "viewer",
   [ORCHESTRATION_WS_METHODS.subscribeThread]: "viewer",
+  [ORCHESTRATION_WS_METHODS.subscribeThreadWindow]: "viewer",
   [CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary]: "viewer",
   [CONTEXT_HANDOFF_WS_METHODS.listInspectionEntries]: "viewer",
   [CONTEXT_HANDOFF_WS_METHODS.readRawPayloadChunk]: "viewer",

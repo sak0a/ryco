@@ -48,6 +48,8 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMainte
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 import { ignoreProviderBackgroundCause } from "../ignoreProviderBackgroundCause.ts";
 
+const PROVIDER_REFRESH_CONCURRENCY = 4;
+
 const loadProviders = (
   providerSources: ReadonlyArray<ProviderSnapshotSource>,
 ): Effect.Effect<ReadonlyArray<ServerProvider>> =>
@@ -173,6 +175,7 @@ const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource
   instanceId: instance.instanceId,
   driverKind: instance.driverKind,
   getSnapshot: instance.snapshot.getSnapshot,
+  revalidate: instance.snapshot.revalidate,
   refresh: instance.snapshot.refresh,
   streamChanges: instance.snapshot.streamChanges,
 });
@@ -188,7 +191,7 @@ export const ProviderRegistryLive = Layer.effect(
     // Aggregator PubSub — consumers (WS gateway, etc.) subscribe here for
     // coalesced updates across every instance.
     const changesPubSub = yield* Effect.acquireRelease(
-      PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
+      PubSub.sliding<ReadonlyArray<ServerProvider>>(1),
       PubSub.shutdown,
     );
 
@@ -431,10 +434,30 @@ export const ProviderRegistryLive = Layer.effect(
       );
     });
 
+    const revalidateOneSource = Effect.fn("revalidateOneSource")(function* (
+      providerSource: ProviderSnapshotSource,
+    ) {
+      return yield* providerSource.revalidate.pipe(
+        Effect.flatMap((nextProvider) =>
+          correlateSnapshotWithSource(providerSource, nextProvider).pipe(
+            Effect.flatMap(syncProvider),
+          ),
+        ),
+      );
+    });
+
+    const revalidateStale = Effect.fn("revalidateStale")(function* () {
+      const sources = yield* getLiveSources;
+      return yield* Effect.forEach(sources, revalidateOneSource, {
+        concurrency: PROVIDER_REFRESH_CONCURRENCY,
+        discard: true,
+      }).pipe(Effect.andThen(Ref.get(providersRef)));
+    });
+
     const refreshAll = Effect.fn("refreshAll")(function* () {
       const sources = yield* getLiveSources;
       return yield* Effect.forEach(sources, (source) => refreshOneSource(source), {
-        concurrency: "unbounded",
+        concurrency: PROVIDER_REFRESH_CONCURRENCY,
         discard: true,
       }).pipe(Effect.andThen(Ref.get(providersRef)));
     });
@@ -566,7 +589,7 @@ export const ProviderRegistryLive = Layer.effect(
                   "provider registry initial instance refresh failed; preserving cached provider",
                 ),
               ),
-            { concurrency: "unbounded", discard: true },
+            { concurrency: PROVIDER_REFRESH_CONCURRENCY, discard: true },
           );
 
           if (refreshMode === "background") {
@@ -684,6 +707,7 @@ export const ProviderRegistryLive = Layer.effect(
 
     return {
       getProviders: Ref.get(providersRef),
+      revalidateStale: revalidateStale().pipe(Effect.catchCause(recoverRefreshFailure)),
       refresh: (provider?: ProviderDriverKind) =>
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshInstance: (instanceId: ProviderInstanceId) =>

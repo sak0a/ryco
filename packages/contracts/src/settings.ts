@@ -33,6 +33,10 @@ export const GitStatusPollIntervalMs = Schema.Literals([0, 10_000, 30_000, 60_00
 export type GitStatusPollIntervalMs = typeof GitStatusPollIntervalMs.Type;
 export const DEFAULT_GIT_STATUS_POLL_INTERVAL_MS: GitStatusPollIntervalMs = 0;
 
+export const SourceControlRefreshMode = Schema.Literals(["automatic", "reduced", "manual"]);
+export type SourceControlRefreshMode = typeof SourceControlRefreshMode.Type;
+export const DEFAULT_SOURCE_CONTROL_REFRESH_MODE: SourceControlRefreshMode = "automatic";
+
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -89,6 +93,9 @@ export const ClientSettingsSchema = Schema.Struct({
   preferredEditor: Schema.NullOr(EditorId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   gitStatusPollIntervalMs: GitStatusPollIntervalMs.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GIT_STATUS_POLL_INTERVAL_MS)),
+  ),
+  sourceControlRefreshMode: SourceControlRefreshMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SOURCE_CONTROL_REFRESH_MODE)),
   ),
   // Desktop-only: post a native notification when an agent turn completes while
   // the Ryco window is unfocused. No-op in the browser (no desktop bridge).
@@ -583,5 +590,6 @@ export const ClientSettingsPatch = Schema.Struct({
   timestampFormat: Schema.optionalKey(TimestampFormat),
   preferredEditor: Schema.optionalKey(Schema.NullOr(EditorId)),
   gitStatusPollIntervalMs: Schema.optionalKey(GitStatusPollIntervalMs),
+  sourceControlRefreshMode: Schema.optionalKey(SourceControlRefreshMode),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

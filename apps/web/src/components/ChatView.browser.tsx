@@ -701,6 +701,27 @@ function toShellSnapshot(snapshot: OrchestrationReadModel) {
   };
 }
 
+function toThreadWindowSnapshot(
+  snapshotSequence: number,
+  thread: OrchestrationReadModel["threads"][number],
+) {
+  const emptyPage = {
+    oldestCursor: null,
+    newestCursor: null,
+    hasMoreBefore: false,
+  };
+  return {
+    snapshotSequence,
+    thread,
+    history: {
+      messages: emptyPage,
+      proposedPlans: emptyPage,
+      activities: emptyPage,
+      checkpoints: emptyPage,
+    },
+  };
+}
+
 function updateThreadSessionInSnapshot(
   snapshot: OrchestrationReadModel,
   threadId: ThreadId,
@@ -2388,6 +2409,11 @@ function hasContainedHorizontalDiffOverflow(fileElement: HTMLElement): boolean {
 
 describe("ChatView timeline estimator parity (full app)", () => {
   beforeAll(async () => {
+    // This suite exercises the route after it has rendered, not the loading
+    // boundary itself. Warm the lazy route module once so a cold Vite
+    // transform cannot consume an interaction test's timeout while the route
+    // Suspense fallback is intentionally empty.
+    await import("./routeViews/ChatThreadRouteView");
     // Mirrors main.tsx: stamps data-tier on the root element so tier-gated
     // (`phone:`) styles and the tier hook stay live across viewport changes.
     syncDocumentPresentationTier();
@@ -2442,19 +2468,24 @@ describe("ChatView timeline estimator parity (full app)", () => {
             },
           ];
         }
-        if (request._tag === ORCHESTRATION_WS_METHODS.subscribeThread) {
+        if (
+          request._tag === ORCHESTRATION_WS_METHODS.subscribeThread ||
+          request._tag === ORCHESTRATION_WS_METHODS.subscribeThreadWindow
+        ) {
           const thread = fixture.snapshot.threads.find((entry) => entry.id === request.threadId);
-          return thread
-            ? [
-                {
-                  kind: "snapshot",
-                  snapshot: {
-                    snapshotSequence: fixture.snapshot.snapshotSequence,
-                    thread,
-                  },
-                },
-              ]
-            : [];
+          if (!thread) return [];
+          return [
+            {
+              kind: "snapshot",
+              snapshot:
+                request._tag === ORCHESTRATION_WS_METHODS.subscribeThreadWindow
+                  ? toThreadWindowSnapshot(fixture.snapshot.snapshotSequence, thread)
+                  : {
+                      snapshotSequence: fixture.snapshot.snapshotSequence,
+                      thread,
+                    },
+            },
+          ];
         }
         return [];
       },
@@ -8635,17 +8666,20 @@ describe("ChatView timeline estimator parity (full app)", () => {
         300,
         (scrollContainer!.scrollHeight - scrollContainer!.clientHeight) / 4,
       );
-      // Match a real user scroll. The live-follow latch intentionally ignores
-      // bare programmatic scrollTop writes so layout corrections cannot turn
-      // off streaming follow mode by accident.
-      scrollContainer!.dispatchEvent(
-        new WheelEvent("wheel", { deltaY: -240, bubbles: true, cancelable: true }),
-      );
-      await waitForLayout();
       await vi.waitFor(async () => {
         scrollContainer!.scrollTop = targetScrollTop;
+        // Match a real user scroll after the viewport is away from the end.
+        // The live-follow latch intentionally ignores bare programmatic
+        // scrollTop writes so layout corrections cannot turn off streaming
+        // follow mode by accident.
+        scrollContainer!.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -240, bubbles: true, cancelable: true }),
+        );
         await waitForLayout();
         expect(Math.abs(scrollContainer!.scrollTop - targetScrollTop)).toBeLessThan(50);
+      });
+      await vi.waitFor(() => {
+        expect(findScrollToBottomButton()).not.toBeNull();
       });
       // Confirm the position holds without further re-assertion.
       await waitForLayout();
@@ -9185,12 +9219,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
       if (!approvalThread) {
         throw new Error("Expected the approval thread in the snapshot.");
       }
-      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThread, {
+      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThreadWindow, {
         kind: "snapshot",
-        snapshot: {
-          snapshotSequence: approvalSnapshot.snapshotSequence + 1,
-          thread: approvalThread,
-        },
+        snapshot: toThreadWindowSnapshot(approvalSnapshot.snapshotSequence + 1, approvalThread),
       });
 
       await waitForElement(
@@ -9481,7 +9512,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         "Unable to find the composer form.",
       );
       const sendButton = await waitForSendButton();
-
       // Settle before the baseline is taken, not after.
       //
       // The composer's position depends on the virtualized timeline above it,
@@ -9508,7 +9538,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         previousTop = top;
       }
       expect(stableFrames, "composer geometry never stopped converging").toBeGreaterThanOrEqual(8);
-
       const baselineFormRect = composerForm.getBoundingClientRect();
       const baselineSendRect = sendButton.getBoundingClientRect();
 
@@ -10352,12 +10381,12 @@ describe("ChatView timeline estimator parity (full app)", () => {
         threads: nextThreads,
       };
       fixture.snapshot = next;
-      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThread, {
+      rpcHarness.emitStreamValue(ORCHESTRATION_WS_METHODS.subscribeThreadWindow, {
         kind: "snapshot",
-        snapshot: {
-          snapshotSequence: next.snapshotSequence,
-          thread: nextThreads.find((thread) => thread.id === THREAD_ID)!,
-        },
+        snapshot: toThreadWindowSnapshot(
+          next.snapshotSequence,
+          nextThreads.find((thread) => thread.id === THREAD_ID)!,
+        ),
       });
     };
     const threadTitleShown = (title: string) =>

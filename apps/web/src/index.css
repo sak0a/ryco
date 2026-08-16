@@ -235,48 +235,93 @@
   }
 }
 
-/* Status motion is intentionally front-loaded, then held still for most of
-   the cycle. This preserves a visible working/connecting cue without asking
-   the browser to repaint it continuously. */
+/* Active status motion stays continuous so working state never looks frozen.
+   Dedicated status dots keep a stable core and animate only a transform/opacity
+   halo; generic active icons use the quieter breathe animation. */
 .animate-status-pulse {
-  animation: status-pulse 6s ease-in-out infinite;
+  animation: status-pulse 1.8s ease-in-out infinite;
+  animation-play-state: var(--app-motion-activity-play-state, running);
 }
 
 .animate-status-ping {
-  animation: status-ping 6s cubic-bezier(0, 0, 0.2, 1) infinite;
+  animation: status-ping 1.8s cubic-bezier(0.2, 0.75, 0.25, 1) infinite;
+  animation-play-state: var(--app-motion-activity-play-state, running);
+}
+
+.status-activity-signal {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  isolation: isolate;
+}
+
+.status-activity-signal::after {
+  position: absolute;
+  z-index: -1;
+  inset: -3px;
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+  content: "";
+  animation: status-activity-halo 1.8s cubic-bezier(0.2, 0.75, 0.25, 1) infinite;
+  animation-play-state: var(--app-motion-activity-play-state, running);
+}
+
+:root[data-ryco-motion-paused]
+  :is(
+    .animate-status-pulse,
+    .animate-status-ping,
+    .chat-file-edit-text--active,
+    .sidebar-status-text--flow,
+    .thinking-status-shimmer
+  ) {
+  animation-play-state: paused;
+}
+
+:root[data-ryco-motion-paused] .status-activity-signal::after {
+  animation-play-state: paused;
 }
 
 @keyframes status-pulse {
   0%,
-  18%,
   100% {
-    opacity: 1;
+    opacity: 0.82;
+    transform: scale(0.97);
   }
-  6%,
-  12% {
-    opacity: 0.5;
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
   }
 }
 
 @keyframes status-ping {
   0% {
-    opacity: 0.75;
-    transform: scale(1);
+    opacity: 0.5;
+    transform: scale(0.9);
   }
-  24% {
-    opacity: 0;
-    transform: scale(2);
-  }
-  24.01%,
   100% {
     opacity: 0;
-    transform: scale(2);
+    transform: scale(1.9);
+  }
+}
+
+@keyframes status-activity-halo {
+  0%,
+  100% {
+    opacity: 0.18;
+    transform: scale(0.86);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.12);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-status-pulse,
-  .animate-status-ping {
+  .animate-status-ping,
+  .status-activity-signal::after {
     animation: none;
   }
 }
@@ -411,6 +456,7 @@
   --app-motion-duration-stack: 260ms;
   --app-motion-duration-chip: 120ms;
   --app-motion-duration-pop: 200ms;
+  --app-motion-activity-play-state: running;
   --background: var(--color-white);
   --app-chrome-background: var(--background);
   --foreground: var(--color-neutral-800);
@@ -531,6 +577,7 @@
     --app-motion-duration-stack: 0s;
     --app-motion-duration-chip: 0s;
     --app-motion-duration-pop: 0s;
+    --app-motion-activity-play-state: paused;
   }
 }
 
@@ -1239,14 +1286,15 @@ code {
     background-position: 100% center;
     background-clip: text;
     -webkit-background-clip: text;
-    animation: chat-file-edit-text-shimmer 1.65s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+    animation: chat-file-edit-text-shimmer 6s linear infinite;
   }
 
   @keyframes chat-file-edit-text-shimmer {
     0% {
       background-position: 100% center;
+      animation-timing-function: steps(8, end);
     }
-    30%,
+    20%,
     100% {
       background-position: -100% center;
     }
@@ -1282,30 +1330,29 @@ code {
   }
 
   .sidebar-status-text.sidebar-status-text {
-    --sidebar-status-text-duration: 2s;
+    --sidebar-status-text-duration: 2.35s;
     --sidebar-status-text-spread: 20px;
     color: transparent;
     -webkit-text-fill-color: transparent;
-    background-image:
-      linear-gradient(
-        90deg,
-        transparent calc(50% - var(--sidebar-status-text-spread)),
-        var(--sidebar-status-text-shimmer-color),
-        transparent calc(50% + var(--sidebar-status-text-spread))
-      ),
-      linear-gradient(var(--sidebar-status-text-base-color), var(--sidebar-status-text-base-color));
-    background-repeat: no-repeat, no-repeat;
-    background-size:
-      250% 100%,
-      auto;
-    background-position:
-      100% center,
-      center;
+    background-image: linear-gradient(
+      100deg,
+      var(--sidebar-status-text-base-color) 0%,
+      var(--sidebar-status-text-base-color) calc(50% - var(--sidebar-status-text-spread)),
+      var(--sidebar-status-text-shimmer-color) calc(50% - var(--sidebar-status-text-spread) / 2),
+      var(--sidebar-status-text-crest-color) 50%,
+      var(--sidebar-status-text-shimmer-color) calc(50% + var(--sidebar-status-text-spread) / 2),
+      var(--sidebar-status-text-base-color) calc(50% + var(--sidebar-status-text-spread)),
+      var(--sidebar-status-text-base-color) 100%
+    );
+    background-repeat: no-repeat;
+    background-size: 250% 100%;
+    background-position: 100% center;
     background-clip: text;
     -webkit-background-clip: text;
+    contain: paint;
   }
 
-  .sidebar-status-text.sidebar-status-text:not(.sidebar-status-text--shimmer) {
+  .sidebar-status-text.sidebar-status-text:not(.sidebar-status-text--flow) {
     background-image: linear-gradient(
       var(--sidebar-status-text-base-color),
       var(--sidebar-status-text-base-color)
@@ -1315,54 +1362,63 @@ code {
   }
 
   .sidebar-status-text--in-progress {
-    --sidebar-status-text-duration: 2s;
-    --sidebar-status-text-base-color: var(--muted-foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-500);
+    --sidebar-status-text-base-color: var(--color-sky-500);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-300);
+    --sidebar-status-text-crest-color: var(--color-zinc-200);
   }
 
   .sidebar-status-text--review {
     --sidebar-status-text-base-color: var(--color-amber-600);
     --sidebar-status-text-shimmer-color: var(--color-orange-300);
+    --sidebar-status-text-crest-color: var(--color-yellow-300);
   }
 
   .sidebar-status-text--pending-approval {
     --sidebar-status-text-base-color: var(--color-amber-600);
     --sidebar-status-text-shimmer-color: var(--color-yellow-300);
+    --sidebar-status-text-crest-color: var(--color-yellow-200);
   }
 
   .sidebar-status-text--awaiting-input {
     --sidebar-status-text-base-color: var(--color-indigo-600);
     --sidebar-status-text-shimmer-color: var(--color-indigo-300);
+    --sidebar-status-text-crest-color: var(--color-indigo-200);
   }
 
   .sidebar-status-text--plan-ready {
     --sidebar-status-text-base-color: var(--color-violet-600);
     --sidebar-status-text-shimmer-color: var(--color-fuchsia-300);
+    --sidebar-status-text-crest-color: var(--color-fuchsia-200);
   }
 
   .sidebar-status-text--done {
     --sidebar-status-text-base-color: var(--color-emerald-600);
     --sidebar-status-text-shimmer-color: var(--color-lime-400);
+    --sidebar-status-text-crest-color: var(--color-lime-300);
   }
 
   .dark .sidebar-status-text--in-progress {
-    --sidebar-status-text-base-color: var(--muted-foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-300);
+    --sidebar-status-text-base-color: var(--color-sky-300);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-400);
+    --sidebar-status-text-crest-color: var(--color-zinc-300);
   }
 
   [data-active="true"] .sidebar-status-text--in-progress {
-    --sidebar-status-text-base-color: var(--foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-500);
+    --sidebar-status-text-base-color: var(--color-sky-500);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-50);
+    --sidebar-status-text-crest-color: var(--color-white);
   }
 
   .dark [data-active="true"] .sidebar-status-text--in-progress {
-    --sidebar-status-text-base-color: var(--foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-300);
+    --sidebar-status-text-base-color: var(--color-sky-300);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-50);
+    --sidebar-status-text-crest-color: var(--color-white);
   }
 
   .dark .sidebar-status-text--review {
     --sidebar-status-text-base-color: var(--color-amber-300);
     --sidebar-status-text-shimmer-color: var(--color-yellow-50);
+    --sidebar-status-text-crest-color: var(--color-white);
   }
 
   .dark .sidebar-status-text--pending-approval {
@@ -1385,26 +1441,25 @@ code {
     --sidebar-status-text-shimmer-color: var(--color-lime-50);
   }
 
-  .sidebar-status-text--shimmer {
-    animation: sidebar-status-text-shimmer var(--sidebar-status-text-duration) linear infinite;
+  .sidebar-status-text--flow {
+    animation: sidebar-status-text-flow var(--sidebar-status-text-duration) linear infinite;
+    animation-play-state: var(--app-motion-activity-play-state, running);
   }
 
-  @keyframes sidebar-status-text-shimmer {
-    0% {
-      background-position:
-        120% center,
-        center;
+  @keyframes sidebar-status-text-flow {
+    from {
+      background-position: 100% center;
     }
-    25%,
-    100% {
-      background-position:
-        -20% center,
-        center;
+    to {
+      background-position: 0 center;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .sidebar-status-text--shimmer {
+    .sidebar-status-text--flow {
+      color: var(--sidebar-status-text-base-color);
+      -webkit-text-fill-color: var(--sidebar-status-text-base-color);
+      background-image: none;
       animation: none;
     }
   }
@@ -1829,8 +1884,8 @@ label:has(> select#reasoning-effort) select {
    Text shimmer utility — vendored verbatim from shadcn 4.12.0
    (dist/tailwind.css `@utility shimmer`). The full `shadcn` stylesheet is not
    imported because it would clash with this project's theme, so the
-   self-contained shimmer block lives here instead. Applied on the transcript's
-   live "Thinking" status line via the `shimmer` class. Provides `shimmer`,
+   self-contained shimmer block lives here instead. The transcript's live
+   "Thinking" status layers a scoped duty cycle over `shimmer`. Provides `shimmer`,
    `shimmer-duration-*`, `shimmer-spread-*`, `shimmer-angle-*`,
    `shimmer-color-*`, `shimmer-once`, `shimmer-reverse`, and `shimmer-none`.
    Docs: https://ui.shadcn.com/docs/utils/shimmer
@@ -1931,8 +1986,30 @@ label:has(> select#reasoning-effort) select {
   --shimmer-angle: calc(--value(integer) * 1deg);
 }
 
+/* The pending provider-output label gets the vendored shimmer's visual
+   treatment without repainting throughout a long wait. Move the highlight
+   briefly on mount and at each occasional restart, then hold it still. */
+.thinking-status-shimmer {
+  animation-name: thinking-status-shimmer;
+  animation-duration: 6s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes thinking-status-shimmer {
+  0% {
+    background-position: 100% 0;
+    animation-timing-function: steps(8, end);
+  }
+  20%,
+  100% {
+    background-position: 0 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .shimmer {
+  .shimmer,
+  .thinking-status-shimmer {
     animation: none;
     background-image: none;
     -webkit-text-fill-color: currentColor;

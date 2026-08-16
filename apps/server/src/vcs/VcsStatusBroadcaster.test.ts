@@ -266,7 +266,7 @@ describe("VcsStatusBroadcaster", () => {
     }).pipe(Effect.provide(Layer.mergeAll(testLayer, NodeServices.layer)));
   });
 
-  it.effect("streams a local snapshot first and remote updates later", () => {
+  it.effect("streams a local snapshot first and recoverable current snapshots later", () => {
     const state = {
       currentLocalStatus: baseLocalStatus,
       currentRemoteStatus: baseRemoteStatus,
@@ -279,28 +279,29 @@ describe("VcsStatusBroadcaster", () => {
     return Effect.gen(function* () {
       const broadcaster = yield* VcsStatusBroadcaster.VcsStatusBroadcaster;
       const snapshotDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
-      const remoteUpdatedDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
+      const currentSnapshotDeferred = yield* Deferred.make<VcsStatusStreamEvent>();
       yield* Stream.runForEach(broadcaster.streamStatus({ cwd: "/repo" }), (event) => {
-        if (event._tag === "snapshot") {
+        if (event._tag === "snapshot" && event.remote === null) {
           return Deferred.succeed(snapshotDeferred, event).pipe(Effect.ignore);
         }
-        if (event._tag === "remoteUpdated") {
-          return Deferred.succeed(remoteUpdatedDeferred, event).pipe(Effect.ignore);
+        if (event._tag === "snapshot" && event.remote !== null) {
+          return Deferred.succeed(currentSnapshotDeferred, event).pipe(Effect.ignore);
         }
         return Effect.void;
       }).pipe(Effect.forkScoped);
 
       const snapshot = yield* Deferred.await(snapshotDeferred);
       yield* broadcaster.refreshStatus("/repo");
-      const remoteUpdated = yield* Deferred.await(remoteUpdatedDeferred);
+      const currentSnapshot = yield* Deferred.await(currentSnapshotDeferred);
 
       assert.deepStrictEqual(snapshot, {
         _tag: "snapshot",
         local: baseLocalStatus,
         remote: null,
       } satisfies VcsStatusStreamEvent);
-      assert.deepStrictEqual(remoteUpdated, {
-        _tag: "remoteUpdated",
+      assert.deepStrictEqual(currentSnapshot, {
+        _tag: "snapshot",
+        local: baseLocalStatus,
         remote: baseRemoteStatus,
       } satisfies VcsStatusStreamEvent);
     }).pipe(Effect.provide(makeTestLayer(state)));

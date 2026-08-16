@@ -98,6 +98,11 @@ import type {
   ContextHandoffRawPayloadChunkInput,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetThreadHistoryPageInput,
+  OrchestrationGetThreadWindowInput,
+  OrchestrationThreadHistoryPage,
+  OrchestrationThreadWindowSnapshot,
+  OrchestrationThreadWindowStreamItem,
   OrchestrationSearchThreadMessagesInput,
   OrchestrationSearchThreadMessagesResult,
   OrchestrationGetTurnDiffInput,
@@ -672,6 +677,14 @@ export interface EnvironmentApi {
     searchThreadMessages: (
       input: OrchestrationSearchThreadMessagesInput,
     ) => Promise<OrchestrationSearchThreadMessagesResult>;
+    /** Optional so clients can feature-detect against older environments. */
+    getThreadWindow?: (
+      input: OrchestrationGetThreadWindowInput,
+    ) => Promise<OrchestrationThreadWindowSnapshot>;
+    /** Optional so clients can feature-detect against older environments. */
+    getThreadHistoryPage?: (
+      input: OrchestrationGetThreadHistoryPageInput,
+    ) => Promise<OrchestrationThreadHistoryPage>;
     replayEvents?: (
       input: OrchestrationReplayEventsInput,
     ) => Promise<OrchestrationReplayEventsResult>;
@@ -689,6 +702,15 @@ export interface EnvironmentApi {
       callback: (event: OrchestrationThreadStreamItem) => void,
       options?: {
         onResubscribe?: () => void;
+      },
+    ) => () => void;
+    /** Optional so clients can feature-detect against older environments. */
+    subscribeThreadWindow?: (
+      input: OrchestrationGetThreadWindowInput,
+      callback: (event: OrchestrationThreadWindowStreamItem) => void,
+      options?: {
+        onResubscribe?: () => void;
+        onError?: () => void;
       },
     ) => () => void;
   };

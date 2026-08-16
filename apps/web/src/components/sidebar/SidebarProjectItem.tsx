@@ -26,7 +26,6 @@ import { useThreadSelectionStore } from "../../threadSelectionStore";
 import { isContextMenuPointerDown } from "../Sidebar.logic";
 import { readLocalApi } from "../../localApi";
 import { SidebarWorktreeList, type SidebarThreadGitStatusTarget } from "./SidebarWorktreeList";
-import { ProjectSettingsDialog } from "./ProjectSettingsDialog";
 import {
   createSidebarProjectDraftThreadsSelector,
   mergeSidebarThreadsWithDrafts,
@@ -35,34 +34,24 @@ import { type SidebarTreeThread } from "./hooks/useSidebarTree";
 import { type SortableProjectHandleProps } from "./SidebarProjectList";
 import { SidebarThreadRow } from "./SidebarThreadRow";
 import { SidebarProjectThreadList } from "./SidebarProjectThreadList";
-import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import {
-  ProjectExplorerDialog,
-  type ProjectExplorerTabId,
-} from "../projectExplorer/ProjectExplorerDialog";
-import { NewWorktreeDialog, type NewWorktreeDialogTab } from "../worktrees/NewWorktreeDialog";
+import { useSettings } from "~/hooks/useSettings";
 import type { SidebarThreadSummary } from "../../types";
 import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
 import { SidebarProjectHeader } from "./SidebarProjectHeader";
-import { SidebarProjectRenameDialog } from "./SidebarProjectRenameDialog";
-import { SidebarProjectGroupingDialog } from "./SidebarProjectGroupingDialog";
 import { useHasIntersectedViewport } from "./hooks/useHasIntersectedViewport";
 import { useSidebarProjectJiraLinks } from "./hooks/useSidebarProjectJiraLinks";
 import { useSidebarProjectThreadPresentation } from "./hooks/useSidebarProjectThreadPresentation";
-import { useSidebarProjectSettingsDialog } from "./hooks/useSidebarProjectSettingsDialog";
 import { useThreadClipboardActions } from "./hooks/useThreadClipboardActions";
-import { useSidebarProjectRenameDialog } from "./hooks/useSidebarProjectRenameDialog";
-import { useSidebarProjectGroupingDialog } from "./hooks/useSidebarProjectGroupingDialog";
 import { useSidebarProjectActions } from "./hooks/useSidebarProjectActions";
 import { useSidebarThreadActions } from "./hooks/useSidebarThreadActions";
 import { useSidebarWorktreeActions } from "./hooks/useSidebarWorktreeActions";
 import { useSidebarProjectContextMenu } from "./hooks/useSidebarProjectContextMenu";
+import { useSidebarProjectDialogs } from "./SidebarProjectDialogOwner";
 
 interface SidebarProjectItemProps {
   project: SidebarProjectSnapshot;
   isThreadListExpanded: boolean;
   activeRouteThreadKey: string | null;
-  newThreadShortcutLabel: string | null;
   handleNewThread: ReturnType<typeof useNewThreadHandler>["handleNewThread"];
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
@@ -109,11 +98,6 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
   const defaultThreadEnvMode = useSettings<ThreadEnvMode>(
     (settings) => settings.defaultThreadEnvMode,
   );
-  const projectGroupingSettings = useSettings((settings) => ({
-    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
-    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
-  }));
-  const { updateSettings } = useUpdateSettings();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
@@ -213,13 +197,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     [projectThreads, threadLastVisitedAts],
   );
   const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
-  const [newWorktreeDialogOpen, setNewWorktreeDialogOpen] = useState(false);
-  const [newWorktreeInitialTab, setNewWorktreeInitialTab] =
-    useState<NewWorktreeDialogTab>("branches");
-  const [explorerDialog, setExplorerDialog] = useState<{
-    open: boolean;
-    initialTab: ProjectExplorerTabId;
-  }>({ open: false, initialTab: "overview" });
+  const projectDialogs = useSidebarProjectDialogs();
   const [setProjectHeaderVisibilityNode, projectHeaderHasIntersected] = useHasIntersectedViewport();
   const confirmArchiveButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const memberProjectByScopedKey = useMemo(
@@ -269,7 +247,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
 
   const jiraProjectOpenUrlByProjectKey = useSidebarProjectJiraLinks({
     project,
-    explorerOpen: explorerDialog.open,
+    explorerOpen: false,
     projectVisible: projectHeaderHasIntersected,
   });
 
@@ -294,12 +272,6 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     isThreadListExpanded,
   });
 
-  const settingsDialog = useSidebarProjectSettingsDialog();
-  const renameDialog = useSidebarProjectRenameDialog();
-  const groupingDialog = useSidebarProjectGroupingDialog({
-    projectGroupingSettings,
-    updateSettings,
-  });
   const { openProjectRemoteLink, openProjectJiraLink, handleRemoveProject } =
     useSidebarProjectActions({
       memberThreadCountByPhysicalKey,
@@ -366,19 +338,19 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
   });
 
   const openProjectOverview = useCallback(() => {
-    setExplorerDialog({ open: true, initialTab: "overview" });
-  }, []);
+    projectDialogs.openExplorer(project, "overview");
+  }, [project, projectDialogs]);
 
   const { handleProjectButtonContextMenu } = useSidebarProjectContextMenu({
     project,
     jiraProjectOpenUrlByProjectKey,
     suppressProjectClickForContextMenuRef,
     onOpenOverview: openProjectOverview,
-    openProjectSettingsDialog: settingsDialog.openProjectSettingsDialog,
+    openProjectSettingsDialog: projectDialogs.openSettings,
     openProjectRemoteLink,
     openProjectJiraLink,
-    openProjectRenameDialog: renameDialog.openProjectRenameDialog,
-    openProjectGroupingDialog: groupingDialog.openProjectGroupingDialog,
+    openProjectRenameDialog: projectDialogs.openRename,
+    openProjectGroupingDialog: projectDialogs.openGrouping,
     copyPathToClipboard,
     handleRemoveProject,
   });
@@ -455,12 +427,14 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     [suppressProjectClickAfterDragRef, suppressProjectClickForContextMenuRef],
   );
 
-  const handleOpenNewWorktreeClick = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setNewWorktreeInitialTab("branches");
-    setNewWorktreeDialogOpen(true);
-  }, []);
+  const handleOpenNewWorktreeClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      projectDialogs.openNewWorktree(project, "branches");
+    },
+    [project, projectDialogs],
+  );
 
   // Routes through the ordinary new-thread path, which reuses this project's
   // existing draft when there is one and lands on `/draft/$draftId` — the
@@ -480,9 +454,9 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
       event.stopPropagation();
-      setExplorerDialog({ open: true, initialTab: "overview" });
+      projectDialogs.openExplorer(project, "overview");
     },
-    [],
+    [project, projectDialogs],
   );
 
   return (
@@ -505,7 +479,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
         onCopyPath={(member) => {
           copyPathToClipboard(member.cwd, { path: member.cwd });
         }}
-        onGrouping={groupingDialog.openProjectGroupingDialog}
+        onGrouping={projectDialogs.openGrouping}
         onNewFolderWithProject={onNewFolderWithProject}
         onOpenJiraProject={openProjectJiraLink}
         onOpenOverview={openProjectOverview}
@@ -513,8 +487,8 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
         onRemove={(member) => {
           void handleRemoveProject(member);
         }}
-        onRename={renameDialog.openProjectRenameDialog}
-        onSettings={settingsDialog.openProjectSettingsDialog}
+        onRename={projectDialogs.openRename}
+        onSettings={projectDialogs.openSettings}
       />
 
       {treeProject?.isGitRepo ? (
@@ -609,67 +583,6 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
           collapseThreadListForProject={collapseThreadListForProject}
         />
       )}
-
-      <NewWorktreeDialog
-        open={newWorktreeDialogOpen}
-        environmentId={project.environmentId}
-        projectId={project.id}
-        cwd={project.cwd}
-        initialTab={newWorktreeInitialTab}
-        onCreated={(result) => {
-          navigateToThread(scopeThreadRef(project.environmentId, result.sessionId));
-        }}
-        onOpenChange={setNewWorktreeDialogOpen}
-      />
-
-      <ProjectExplorerDialog
-        open={explorerDialog.open}
-        projectName={project.displayName}
-        memberProjects={project.memberProjects}
-        initialTab={explorerDialog.initialTab}
-        onOpenChange={(open) => setExplorerDialog((prev) => ({ ...prev, open }))}
-      />
-
-      <ProjectSettingsDialog
-        open={settingsDialog.projectSettingsOpen}
-        target={settingsDialog.projectSettingsTarget}
-        title={settingsDialog.projectSettingsTitle}
-        customAvatarContentHash={settingsDialog.projectSettingsCustomAvatarContentHash}
-        projectAvatarUploadUnavailableReason={settingsDialog.projectAvatarUploadUnavailableReason}
-        preferredRemoteName={settingsDialog.projectSettingsPreferredRemoteName}
-        workspaceRoot={settingsDialog.projectSettingsWorkspaceRoot}
-        customSystemPrompt={settingsDialog.projectSettingsCustomSystemPrompt}
-        defaultModelSelection={settingsDialog.projectSettingsDefaultModelSelection}
-        saving={settingsDialog.projectSettingsSaving}
-        onClose={settingsDialog.closeProjectSettingsDialog}
-        onSave={() => void settingsDialog.submitProjectSettings()}
-        onTitleChange={settingsDialog.setProjectSettingsTitle}
-        onWorkspaceRootChange={settingsDialog.setProjectSettingsWorkspaceRoot}
-        onCustomSystemPromptChange={settingsDialog.setProjectSettingsCustomSystemPrompt}
-        onDefaultModelSelectionChange={settingsDialog.setProjectSettingsDefaultModelSelection}
-        onPreferredRemoteChange={settingsDialog.setProjectSettingsPreferredRemoteName}
-        onPickWorkspaceRoot={() => void settingsDialog.pickProjectSettingsWorkspaceRoot()}
-        onOpenRemote={settingsDialog.openProjectRemoteByName}
-        onUploadAvatar={settingsDialog.uploadProjectAvatar}
-        onRemoveAvatar={settingsDialog.removeProjectAvatar}
-      />
-
-      <SidebarProjectRenameDialog
-        target={renameDialog.projectRenameTarget}
-        title={renameDialog.projectRenameTitle}
-        onTitleChange={renameDialog.setProjectRenameTitle}
-        onClose={renameDialog.closeProjectRenameDialog}
-        onSubmit={() => void renameDialog.submitProjectRename()}
-      />
-
-      <SidebarProjectGroupingDialog
-        target={groupingDialog.projectGroupingTarget}
-        selection={groupingDialog.projectGroupingSelection}
-        globalGroupingMode={projectGroupingSettings.sidebarProjectGroupingMode}
-        onSelectionChange={groupingDialog.setProjectGroupingSelection}
-        onClose={groupingDialog.closeProjectGroupingDialog}
-        onSave={groupingDialog.saveProjectGroupingPreference}
-      />
     </>
   );
 });

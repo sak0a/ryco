@@ -206,6 +206,10 @@ interface MessagesTimelineProps {
   onIsAtEndChange: (isAtEnd: boolean) => void;
   onManualNavigation?: () => void;
   onUserReachedEnd?: () => void;
+  canLoadOlder?: boolean;
+  isLoadingOlder?: boolean;
+  loadOlderError?: string | null;
+  onLoadOlder?: () => void;
   onInspectContextHandoff?: (
     marker: ContextHandoffTimelineEntry,
     trigger: HTMLButtonElement,
@@ -253,6 +257,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onIsAtEndChange,
   onManualNavigation,
   onUserReachedEnd,
+  canLoadOlder = false,
+  isLoadingOlder = false,
+  loadOlderError = null,
+  onLoadOlder,
   onInspectContextHandoff,
 }: MessagesTimelineProps) {
   usePerfMark("MessagesTimeline");
@@ -336,6 +344,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const handleScroll = useCallback(() => {
     const isAtEnd = evaluateIsAtEnd();
+    const scrollNode = listRef.current?.getScrollableNode?.();
+    if (
+      scrollNode instanceof HTMLElement &&
+      scrollNode.scrollTop <= 320 &&
+      canLoadOlder &&
+      !isLoadingOlder
+    ) {
+      onLoadOlder?.();
+    }
     if (isAtEnd === true && manualScrollIntentRef.current) {
       manualScrollIntentRef.current = false;
       if (manualScrollIntentTimerRef.current !== null) {
@@ -367,7 +384,36 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [evaluateIsAtEnd, listRef, minimapItems, minimapStripMap, onUserReachedEnd]);
+  }, [
+    canLoadOlder,
+    evaluateIsAtEnd,
+    isLoadingOlder,
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onLoadOlder,
+    onUserReachedEnd,
+  ]);
+
+  const listHeader = useMemo(
+    () => (
+      <>
+        {TIMELINE_LIST_HEADER}
+        {canLoadOlder || isLoadingOlder || loadOlderError ? (
+          <div className="mx-auto flex min-h-9 w-full max-w-3xl items-center justify-center px-3 pb-2 text-xs text-muted-foreground">
+            {isLoadingOlder ? (
+              <span role="status">Loading earlier history…</span>
+            ) : (
+              <Button size="sm" variant="ghost" onClick={onLoadOlder}>
+                {loadOlderError ? "Retry earlier history" : "Load earlier history"}
+              </Button>
+            )}
+          </div>
+        ) : null}
+      </>
+    ),
+    [canLoadOlder, isLoadingOlder, loadOlderError, onLoadOlder],
+  );
 
   useEffect(() => {
     let removeListeners: (() => void) | null = null;
@@ -390,8 +436,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         };
         const handleWheel = (event: WheelEvent) => {
           if (!contentOverflows()) return;
-          markManualScrollIntent();
-          if (event.deltaY < 0) onManualNavigation?.();
+          if (event.deltaY < 0) {
+            // Upward navigation can only move away from the end. Do not arm
+            // the "user reached end" latch: a responsive remeasurement that
+            // temporarily reports the bottom must not turn live follow back
+            // on after the user deliberately left it.
+            onManualNavigation?.();
+            return;
+          }
+          if (event.deltaY > 0) markManualScrollIntent();
         };
         const handleTouchMove = () => {
           markManualScrollIntent();
@@ -421,8 +474,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         };
 
         scrollNode.addEventListener("wheel", handleWheel, { passive: true });
-        scrollNode.addEventListener("touchmove", handleTouchMove, { passive: true });
-        scrollNode.addEventListener("pointerdown", handlePointerDown, { passive: true });
+        scrollNode.addEventListener("touchmove", handleTouchMove, {
+          passive: true,
+        });
+        scrollNode.addEventListener("pointerdown", handlePointerDown, {
+          passive: true,
+        });
         scrollNode.addEventListener("keydown", handleKeyDown);
         removeListeners = () => {
           scrollNode.removeEventListener("wheel", handleWheel);
@@ -691,7 +748,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             // shifts when overflow appears — which is what `scrollbar-gutter:
             // stable` used to reserve space for.
             className="h-full overflow-x-hidden overscroll-y-contain px-3 [scrollbar-width:none] sm:px-5 [&::-webkit-scrollbar]:hidden"
-            ListHeaderComponent={TIMELINE_LIST_HEADER}
+            ListHeaderComponent={listHeader}
             ListFooterComponent={TIMELINE_LIST_FOOTER}
           />
           <TimelineMinimap
@@ -1286,7 +1343,7 @@ function PendingWorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 
         </>
       ) : null}
       <div className="pt-1.5 text-[13px] text-muted-foreground/70">
-        <span className="shimmer">Thinking</span>
+        <span className="shimmer thinking-status-shimmer">Thinking</span>
       </div>
     </div>
   );

@@ -2,9 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   DEFAULT_INACTIVE_PANEL_CONTAIN_INTRINSIC_SIZE,
+  DOCUMENT_MOTION_PAUSED_ATTRIBUTE,
   PREFERS_REDUCED_MOTION_QUERY,
   resolveInactivePanelContentVisibilityStyle,
   shouldEnableAutoAnimate,
+  syncDocumentMotionVisibility,
 } from "./motion";
 
 describe("UI motion energy helpers", () => {
@@ -39,5 +41,39 @@ describe("UI motion energy helpers", () => {
       contentVisibility: "hidden",
       containIntrinsicSize: "28rem 100vh",
     });
+  });
+
+  it("pauses decorative document motion while hidden", () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    const listener: { current: (() => void) | null } = { current: null };
+    const attributes = new Set<string>();
+    const release = syncDocumentMotionVisibility({
+      get visibilityState() {
+        return visibilityState;
+      },
+      documentElement: {
+        toggleAttribute: (name, force) => {
+          if (force) attributes.add(name);
+          else attributes.delete(name);
+          return force ?? false;
+        },
+      },
+      addEventListener: (_type, nextListener) => {
+        listener.current = nextListener;
+      },
+      removeEventListener: (_type, nextListener) => {
+        if (listener.current === nextListener) listener.current = null;
+      },
+    });
+
+    expect(attributes.has(DOCUMENT_MOTION_PAUSED_ATTRIBUTE)).toBe(false);
+    visibilityState = "hidden";
+    listener.current?.();
+    expect(attributes.has(DOCUMENT_MOTION_PAUSED_ATTRIBUTE)).toBe(true);
+    visibilityState = "visible";
+    listener.current?.();
+    expect(attributes.has(DOCUMENT_MOTION_PAUSED_ATTRIBUTE)).toBe(false);
+    release();
+    expect(listener.current).toBeNull();
   });
 });

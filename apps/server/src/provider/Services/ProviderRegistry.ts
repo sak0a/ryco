@@ -27,6 +27,13 @@ export interface ProviderRegistryShape {
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
 
   /**
+   * Revalidate provider snapshots whose managed freshness window has elapsed.
+   * Fresh snapshots remain cache-only and concurrent stale callers coalesce per
+   * provider instance.
+   */
+  readonly revalidateStale: Effect.Effect<ReadonlyArray<ServerProvider>>;
+
+  /**
    * Refresh all providers, or the default instance of the specified
    * kind when supplied.
    *

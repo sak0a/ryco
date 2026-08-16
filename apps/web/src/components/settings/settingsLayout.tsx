@@ -1,16 +1,26 @@
 import { Undo2Icon } from "lucide-react";
 import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useState } from "react";
 
+import { createVisibilityAwarePoller } from "../../lib/visibilityPolling";
+import { webAppLifecycle } from "../../platform/appLifecycle";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
-/** Re-render every `intervalMs`; return a stable timestamp snapshot for render-time relative labels. */
+/** Re-render while visible; refresh once after returning from the background. */
 export function useRelativeTimeTick(intervalMs = 1_000) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), intervalMs);
-    return () => clearInterval(id);
+    const poller = createVisibilityAwarePoller({
+      lifecycle: webAppLifecycle,
+      run: () => {
+        setNowMs(Date.now());
+        return Promise.resolve();
+      },
+      resolveDelayMs: () => intervalMs,
+      runImmediately: false,
+    });
+    return poller.stop;
   }, [intervalMs]);
   return nowMs;
 }

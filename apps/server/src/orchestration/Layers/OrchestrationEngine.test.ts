@@ -202,6 +202,7 @@ describe("OrchestrationEngine", () => {
         Layer.succeed(OrchestrationProjectionPipeline, {
           bootstrap: Effect.void,
           projectEvent: () => Effect.void,
+          projectEventInTransaction: () => Effect.succeed(Effect.void),
         } satisfies OrchestrationProjectionPipelineShape),
       ),
       Layer.provide(Layer.succeed(OrchestrationEventStore, eventStore)),
@@ -910,7 +911,8 @@ describe("OrchestrationEngine", () => {
     let shouldFailRequestedProjection = true;
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
-      projectEvent: (event) => {
+      projectEvent: () => Effect.void,
+      projectEventInTransaction: (event) => {
         if (
           shouldFailRequestedProjection &&
           event.commandId === CommandId.make("cmd-turn-start-atomic") &&
@@ -924,7 +926,7 @@ describe("OrchestrationEngine", () => {
             }),
           );
         }
-        return Effect.void;
+        return Effect.succeed(Effect.void);
       },
     };
 
@@ -1069,7 +1071,8 @@ describe("OrchestrationEngine", () => {
     let shouldFailProjection = true;
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
-      projectEvent: (event) => {
+      projectEvent: () => Effect.void,
+      projectEventInTransaction: (event) => {
         if (
           shouldFailProjection &&
           event.commandId === CommandId.make("cmd-thread-archive-sync-fail")
@@ -1082,7 +1085,7 @@ describe("OrchestrationEngine", () => {
             }),
           );
         }
-        return Effect.void;
+        return Effect.succeed(Effect.void);
       },
     };
 

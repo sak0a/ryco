@@ -1,78 +1,63 @@
-import { useAtomValue } from "@effect/atom-react";
 import type {
   ChangeRequest,
   EnvironmentId,
   SourceControlChangeRequestDetail,
   SourceControlWorkflowRunListResult,
 } from "@ryco/contracts";
-import { useEffect, useMemo } from "react";
+import { useCallback } from "react";
 
+import { useSettings } from "~/hooks/useSettings";
 import {
-  getOverviewChangeRequestDetailKey,
-  getOverviewChangeRequestListKey,
-  getOverviewQueryAtom,
-  getOverviewWorkflowRunJobsAtom,
-  getOverviewWorkflowRunJobsKey,
-  getOverviewWorkflowRunsKey,
-  type OverviewQueryState,
-  type OverviewWorkflowRunJobsResult,
-  selectOverviewWorkflowRunJobs,
-  watchOverviewChangeRequestDetail,
-  watchOverviewChangeRequestList,
-  watchOverviewWorkflowRunJobs,
-  watchOverviewWorkflowRuns,
-} from "./overviewAtoms";
+  useSourceControlChangeRequestDetail,
+  useSourceControlChangeRequestList,
+  useSourceControlWorkflowRunJobsBatch,
+  useSourceControlWorkflowRuns,
+  type SourceControlQueryState,
+  type SourceControlWorkflowRunJobsBatchResult,
+} from "./useSourceControl";
+import { resolveSourceControlRefreshDelay } from "./sourceControlRefreshPolicy";
+
+export type OverviewQueryState<TData> = SourceControlQueryState<TData>;
+export type OverviewWorkflowRunJobsResult = SourceControlWorkflowRunJobsBatchResult;
+
+export const OVERVIEW_CHANGE_REQUEST_LIST_LIMIT = 50;
+export const OVERVIEW_WORKFLOW_RUNS_LIMIT = 20;
 
 /**
- * Atom-backed replacement for the React Query open change-request list used by
- * the overview panel to locate the pull request for the current branch.
+ * Overview adapters deliberately reuse the canonical source-control bindings.
+ * Opening Overview and Project Explorer for the same key therefore joins one
+ * in-flight request, one cache entry, and one lifecycle-aware poll timer.
  */
 export function useOverviewChangeRequestList(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
   enabled: boolean;
 }): OverviewQueryState<ReadonlyArray<ChangeRequest>> {
-  const { environmentId, cwd, enabled } = input;
-  const key = getOverviewChangeRequestListKey({ environmentId, cwd, enabled });
-
-  useEffect(
-    () => watchOverviewChangeRequestList({ environmentId, cwd, enabled }),
-    [environmentId, cwd, enabled],
-  );
-
-  return useAtomValue(getOverviewQueryAtom(key)) as OverviewQueryState<
-    ReadonlyArray<ChangeRequest>
-  >;
+  return useSourceControlChangeRequestList({
+    ...input,
+    state: "open",
+    limit: OVERVIEW_CHANGE_REQUEST_LIST_LIMIT,
+  });
 }
 
-/**
- * Atom-backed replacement for the React Query pull request detail query. Polls
- * every 30s while the pull request is open, matching the previous behavior.
- */
 export function useOverviewPullRequestDetail(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
   reference: string | null;
   enabled: boolean;
 }): OverviewQueryState<SourceControlChangeRequestDetail> {
-  const { environmentId, cwd, reference, enabled } = input;
-  const key = getOverviewChangeRequestDetailKey({ environmentId, cwd, reference, enabled });
-
-  useEffect(
-    () => watchOverviewChangeRequestDetail({ environmentId, cwd, reference, enabled }),
-    [environmentId, cwd, reference, enabled],
+  const refreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
+  const resolveIntervalMs = useCallback(
+    (data: SourceControlChangeRequestDetail | null) =>
+      resolveSourceControlRefreshDelay({
+        mode: refreshMode,
+        phase: data?.state === "open" ? "active" : "settled",
+      }),
+    [refreshMode],
   );
-
-  return useAtomValue(
-    getOverviewQueryAtom(key),
-  ) as OverviewQueryState<SourceControlChangeRequestDetail>;
+  return useSourceControlChangeRequestDetail(input, resolveIntervalMs);
 }
 
-/**
- * Atom-backed replacement for the React Query workflow runs query. The polling
- * interval is computed by the caller (post-push discovery / active-run policy)
- * and re-evaluated after every fetch, matching the previous `refetchInterval`.
- */
 export function useOverviewWorkflowRuns(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
@@ -82,35 +67,20 @@ export function useOverviewWorkflowRuns(input: {
   enabled: boolean;
   resolveIntervalMs: (data: SourceControlWorkflowRunListResult | null) => number | false;
 }): OverviewQueryState<SourceControlWorkflowRunListResult> {
-  const { environmentId, cwd, pullRequestNumber, branch, commitSha, enabled, resolveIntervalMs } =
-    input;
-  const key = getOverviewWorkflowRunsKey({
-    environmentId,
-    cwd,
-    pullRequestNumber,
-    branch,
-    commitSha,
-    enabled,
-  });
-
-  useEffect(
-    () =>
-      watchOverviewWorkflowRuns(
-        { environmentId, cwd, pullRequestNumber, branch, commitSha, enabled },
-        resolveIntervalMs,
-      ),
-    [environmentId, cwd, pullRequestNumber, branch, commitSha, enabled, resolveIntervalMs],
+  return useSourceControlWorkflowRuns(
+    {
+      environmentId: input.environmentId,
+      cwd: input.cwd,
+      pullRequestNumber: input.pullRequestNumber,
+      branch: input.pullRequestNumber === null ? input.branch : null,
+      commitSha: input.commitSha,
+      limit: OVERVIEW_WORKFLOW_RUNS_LIMIT,
+      enabled: input.enabled && (input.pullRequestNumber !== null || input.branch !== null),
+    },
+    input.resolveIntervalMs,
   );
-
-  return useAtomValue(
-    getOverviewQueryAtom(key),
-  ) as OverviewQueryState<SourceControlWorkflowRunListResult>;
 }
 
-/**
- * Atom-backed replacement for the React Query `useQueries` workflow run jobs
- * fetch. Caches jobs per run id and polls the active run every 30s.
- */
 export function useOverviewWorkflowRunJobs(input: {
   environmentId: EnvironmentId | null;
   cwd: string | null;
@@ -118,18 +88,5 @@ export function useOverviewWorkflowRunJobs(input: {
   activeRunId: string | null;
   enabled: boolean;
 }): OverviewWorkflowRunJobsResult {
-  const { environmentId, cwd, runIds, activeRunId, enabled } = input;
-  const key = getOverviewWorkflowRunJobsKey({ environmentId, cwd, runIds, activeRunId, enabled });
-
-  useEffect(
-    () => watchOverviewWorkflowRunJobs({ environmentId, cwd, runIds, activeRunId, enabled }),
-    [environmentId, cwd, runIds, activeRunId, enabled],
-  );
-
-  const map = useAtomValue(getOverviewWorkflowRunJobsAtom(key));
-
-  return useMemo<OverviewWorkflowRunJobsResult>(
-    () => selectOverviewWorkflowRunJobs(map, runIds, enabled),
-    [map, runIds, enabled],
-  );
+  return useSourceControlWorkflowRunJobsBatch(input);
 }

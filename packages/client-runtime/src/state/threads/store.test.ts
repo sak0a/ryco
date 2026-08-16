@@ -7,6 +7,7 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  OrchestrationThreadHistoryCursor,
   ThreadId,
   TurnId,
   WorktreeId,
@@ -27,6 +28,7 @@ import {
   selectThreadExistsByRef,
   setSidebarWorktreeTitle,
   setThreadBranch,
+  syncServerThreadHistoryPage,
   selectThreadsAcrossEnvironments,
   SHELL_COALESCE_THRESHOLD_EVENTS_PER_MS,
   type AppState,
@@ -373,6 +375,66 @@ describe("worktree sidebar state", () => {
 });
 
 describe("thread selection memoization", () => {
+  it("merges history pages idempotently in stable message order", () => {
+    const thread = makeThread({
+      messages: [
+        {
+          id: MessageId.make("message-2"),
+          role: "assistant",
+          text: "newest",
+          createdAt: "2026-02-13T00:02:00.000Z",
+          streaming: false,
+        },
+      ],
+    });
+    const page = {
+      collection: "messages" as const,
+      snapshotSequence: 2,
+      items: [
+        {
+          id: MessageId.make("message-1"),
+          role: "user" as const,
+          text: "older",
+          turnId: null,
+          streaming: false,
+          createdAt: "2026-02-13T00:01:00.000Z",
+          updatedAt: "2026-02-13T00:01:00.000Z",
+        },
+      ],
+      page: {
+        oldestCursor: OrchestrationThreadHistoryCursor.make("v1.oldest"),
+        newestCursor: OrchestrationThreadHistoryCursor.make("v1.newest"),
+        hasMoreBefore: true,
+      },
+    };
+
+    const once = syncServerThreadHistoryPage(
+      makeState(thread),
+      page,
+      thread.id,
+      localEnvironmentId,
+    );
+    const twice = syncServerThreadHistoryPage(once, page, thread.id, localEnvironmentId);
+
+    expect(
+      selectThreadByRef(twice, scopeThreadRef(localEnvironmentId, thread.id))?.messages,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: MessageId.make("message-1") }),
+        expect.objectContaining({ id: MessageId.make("message-2") }),
+      ]),
+    );
+    expect(
+      selectThreadByRef(twice, scopeThreadRef(localEnvironmentId, thread.id))?.messages.map(
+        (message) => message.id,
+      ),
+    ).toEqual([MessageId.make("message-1"), MessageId.make("message-2")]);
+    expect(
+      twice.environmentStateById[localEnvironmentId]?.threadHistoryByThreadId?.[thread.id]?.messages
+        .hasMoreBefore,
+    ).toBe(true);
+  });
+
   it("returns stable thread references for repeated reads of the same state", () => {
     const thread = makeThread({
       messages: [
@@ -1003,7 +1065,12 @@ describe("incremental orchestration updates", () => {
         status: "ready",
         files: [
           { path: "src/noop.ts", kind: "modified", additions: 0, deletions: 0 },
-          { path: "script.sh", kind: "mode-changed", additions: 0, deletions: 0 },
+          {
+            path: "script.sh",
+            kind: "mode-changed",
+            additions: 0,
+            deletions: 0,
+          },
           { path: "src/app.ts", kind: "modified", additions: 1, deletions: 0 },
         ],
         assistantMessageId: MessageId.make("assistant-1"),

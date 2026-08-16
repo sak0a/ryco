@@ -260,8 +260,15 @@ export interface WsRpcClient {
     readonly searchThreadMessages: RpcUnaryMethod<
       typeof ORCHESTRATION_WS_METHODS.searchThreadMessages
     >;
+    readonly getThreadWindow?: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.getThreadWindow>;
+    readonly getThreadHistoryPage?: RpcUnaryMethod<
+      typeof ORCHESTRATION_WS_METHODS.getThreadHistoryPage
+    >;
     readonly subscribeShell: RpcStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeShell>;
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
+    readonly subscribeThreadWindow?: RpcInputStreamMethod<
+      typeof ORCHESTRATION_WS_METHODS.subscribeThreadWindow
+    >;
   };
   readonly contextHandoff: {
     readonly getInspectionSummary: RpcUnaryMethod<
@@ -568,6 +575,10 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.getFullThreadDiff](input)),
       searchThreadMessages: (input) =>
         transport.request((client) => client[ORCHESTRATION_WS_METHODS.searchThreadMessages](input)),
+      getThreadWindow: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadWindow](input)),
+      getThreadHistoryPage: (input) =>
+        transport.request((client) => client[ORCHESTRATION_WS_METHODS.getThreadHistoryPage](input)),
       subscribeShell: (listener, options) =>
         transport.subscribe(
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeShell]({}),
@@ -579,6 +590,12 @@ export function createWsRpcClient(transport: WsTransport): WsRpcClient {
           (client) => client[ORCHESTRATION_WS_METHODS.subscribeThread](input),
           listener,
           { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThread },
+        ),
+      subscribeThreadWindow: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[ORCHESTRATION_WS_METHODS.subscribeThreadWindow](input),
+          listener,
+          { ...options, tag: ORCHESTRATION_WS_METHODS.subscribeThreadWindow },
         ),
     },
     contextHandoff: {

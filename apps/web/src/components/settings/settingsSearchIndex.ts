@@ -44,9 +44,15 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
   },
   {
     section: "general",
-    title: "Git status polling",
-    description: "Refresh remote branch and pull request status.",
-    keywords: "refresh remote",
+    title: "Remote Git status",
+    description: "Refresh remote branch and pull request metadata.",
+    keywords: "git polling refresh remote",
+  },
+  {
+    section: "general",
+    title: "PR & workflow updates",
+    description: "Choose automatic, reduced, or manual pull request and workflow refreshes.",
+    keywords: "github actions checks ci polling refresh",
   },
   {
     section: "general",

@@ -12,6 +12,7 @@ import {
 } from "@ryco/contracts";
 import { Cause, Effect, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@ryco/shared/DrainableWorker";
+import { losslessBackpressureQueuePolicy } from "@ryco/shared/QueuePolicy";
 
 import { parseTurnDiffFilesFromUnifiedDiff } from "../../checkpointing/Diffs.ts";
 import {
@@ -883,7 +884,13 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processInputSafely);
+  const worker = yield* makeDrainableWorker({
+    policy: losslessBackpressureQueuePolicy({
+      component: "CheckpointReactor",
+      capacity: 1_024,
+    }),
+    process: processInputSafely,
+  });
 
   const start: CheckpointReactorShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(

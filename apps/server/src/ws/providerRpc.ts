@@ -458,9 +458,10 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
             })),
           );
 
-          yield* providerRegistry
-            .refresh()
-            .pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
+          yield* providerRegistry.revalidateStale.pipe(
+            Effect.ignoreCause({ log: true }),
+            Effect.forkScoped,
+          );
 
           const liveUpdates = Stream.merge(
             keybindingsUpdates,

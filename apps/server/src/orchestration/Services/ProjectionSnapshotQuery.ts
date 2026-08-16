@@ -15,7 +15,12 @@ import type {
   OrchestrationThread,
   OrchestrationSearchThreadMessagesInput,
   OrchestrationThreadMessageSearchResult,
+  OrchestrationGetThreadHistoryPageInput,
+  OrchestrationGetThreadWindowInput,
+  OrchestrationThreadHistoryError,
+  OrchestrationThreadHistoryPage,
   OrchestrationThreadShell,
+  OrchestrationThreadWindowSnapshot,
   OrchestrationWorktreeShell,
   ProjectId,
   ThreadId,
@@ -138,6 +143,22 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadDetailById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+
+  /** Read the newest bounded history window for one active thread. */
+  readonly getThreadWindow?: (
+    input: OrchestrationGetThreadWindowInput,
+  ) => Effect.Effect<
+    OrchestrationThreadWindowSnapshot,
+    ProjectionRepositoryError | OrchestrationThreadHistoryError
+  >;
+
+  /** Read an older page or a page around a stable history anchor. */
+  readonly getThreadHistoryPage?: (
+    input: OrchestrationGetThreadHistoryPageInput,
+  ) => Effect.Effect<
+    OrchestrationThreadHistoryPage,
+    ProjectionRepositoryError | OrchestrationThreadHistoryError
+  >;
 
   /**
    * Read only the file-path references carried by a thread's task activities

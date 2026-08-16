@@ -41,6 +41,7 @@ import {
   Option,
   Path,
   PubSub,
+  Ref,
   Stream,
 } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -691,6 +692,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(ProviderRegistry)({
           getProviders: Effect.succeed([]),
+          revalidateStale: Effect.succeed([]),
           refresh: () => Effect.succeed([]),
           refreshInstance: () => Effect.succeed([]),
           getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
@@ -2549,6 +2551,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         keybindings: [],
         issues: [],
       } as const;
+      const revalidateCalls = yield* Ref.make(0);
 
       yield* buildAppUnderTest({
         config: {
@@ -2565,6 +2568,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
           providerRegistry: {
             getProviders: Effect.succeed(providers),
+            revalidateStale: Ref.update(revalidateCalls, (count) => count + 1).pipe(
+              Effect.as(providers),
+            ),
+            refresh: () => Effect.die("config subscriptions must not force provider refreshes"),
           },
         },
       });
@@ -2598,6 +2605,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         type: "keybindingsUpdated",
         payload: { keybindings: [], issues: [] },
       });
+      for (let attempt = 0; attempt < 50 && (yield* Ref.get(revalidateCalls)) === 0; attempt += 1) {
+        yield* Effect.yieldNow;
+      }
+      assert.equal(yield* Ref.get(revalidateCalls), 1);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

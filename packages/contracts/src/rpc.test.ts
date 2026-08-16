@@ -30,6 +30,13 @@ describe("WS_METHODS Atlassian and work item names", () => {
     expect(ORCHESTRATION_WS_METHODS.searchThreadMessages).toBe(
       "orchestration.searchThreadMessages",
     );
+    expect(ORCHESTRATION_WS_METHODS.getThreadWindow).toBe("orchestration.getThreadWindow");
+    expect(ORCHESTRATION_WS_METHODS.getThreadHistoryPage).toBe(
+      "orchestration.getThreadHistoryPage",
+    );
+    expect(ORCHESTRATION_WS_METHODS.subscribeThreadWindow).toBe(
+      "orchestration.subscribeThreadWindow",
+    );
     expect(CONTEXT_HANDOFF_WS_METHODS.getInspectionSummary).toBe(
       "contextHandoff.getInspectionSummary",
     );

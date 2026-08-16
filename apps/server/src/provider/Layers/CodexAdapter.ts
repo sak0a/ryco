@@ -1661,7 +1661,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       : undefined);
   const managedNativeEventLogger =
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
-  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+  const runtimeEventQueue = yield* Queue.bounded<ProviderRuntimeEvent>(2_048);
   const runtimeEventQueueMetrics = yield* makeServerQueueMetrics({
     queue: "provider.adapter.runtimeEvents",
     component: "CodexAdapter",

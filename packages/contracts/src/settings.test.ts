@@ -2,10 +2,37 @@ import { describe, expect, it } from "vite-plus/test";
 import { Schema } from "effect";
 
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  ClientSettingsPatch,
+  ClientSettingsSchema,
+  DEFAULT_CLIENT_SETTINGS,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
+const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+describe("ClientSettings.sourceControlRefreshMode", () => {
+  it("defaults legacy settings to automatic refresh", () => {
+    expect(DEFAULT_CLIENT_SETTINGS.sourceControlRefreshMode).toBe("automatic");
+    expect(decodeClientSettings({}).sourceControlRefreshMode).toBe("automatic");
+  });
+
+  it("decodes every supported mode and patches it independently", () => {
+    for (const sourceControlRefreshMode of ["automatic", "reduced", "manual"] as const) {
+      expect(decodeClientSettings({ sourceControlRefreshMode }).sourceControlRefreshMode).toBe(
+        sourceControlRefreshMode,
+      );
+      expect(decodeClientSettingsPatch({ sourceControlRefreshMode }).sourceControlRefreshMode).toBe(
+        sourceControlRefreshMode,
+      );
+    }
+  });
+});
 
 describe("ServerSettings.enableLegacyTokenStreaming", () => {
   it("defaults to buffered output and deliberately ignores the retired key", () => {

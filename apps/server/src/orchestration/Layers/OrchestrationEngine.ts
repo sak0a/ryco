@@ -117,12 +117,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   let commandReadModel = createEmptyReadModel(new Date().toISOString());
 
-  const commandQueue = yield* Queue.unbounded<CommandEnvelope>();
+  const commandQueue = yield* Queue.bounded<CommandEnvelope>(1_024);
   const commandQueueMetrics = yield* makeServerQueueMetrics({
     queue: "orchestration.command",
     component: "OrchestrationEngine",
   });
-  const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>();
+  const eventPubSub = yield* PubSub.bounded<OrchestrationEvent>(4_096);
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -192,12 +192,15 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           .withTransaction(
             Effect.gen(function* () {
               const committedEvents: OrchestrationEvent[] = [];
+              const postCommitEffects: Array<Effect.Effect<void>> = [];
               let nextCommandReadModel = commandReadModel;
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
                 nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent);
-                yield* projectionPipeline.projectEvent(savedEvent);
+                postCommitEffects.push(
+                  yield* projectionPipeline.projectEventInTransaction(savedEvent),
+                );
                 committedEvents.push(savedEvent);
               }
 
@@ -223,6 +226,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 committedEvents,
                 lastSequence: lastSavedEvent.sequence,
                 nextCommandReadModel,
+                postCommitEffects,
               } as const;
             }),
           )
@@ -235,6 +239,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         commandReadModel = committedCommand.nextCommandReadModel;
+        yield* Effect.forEach(committedCommand.postCommitEffects, (effect) => effect, {
+          concurrency: 1,
+          discard: true,
+        });
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {
@@ -345,7 +353,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
+      const admissionStartedAtMs = Date.now();
       yield* Queue.offer(commandQueue, { command, result, startedAtMs: Date.now() });
+      yield* commandQueueMetrics.recordBlocked(Date.now() - admissionStartedAtMs);
       yield* commandQueueMetrics.recordEnqueued();
       return yield* Deferred.await(result);
     });

@@ -1,4 +1,4 @@
-import { Effect, Metric, Ref } from "effect";
+import { Duration, Effect, Metric, Ref } from "effect";
 
 import {
   metricAttributes,
@@ -6,11 +6,19 @@ import {
   runtimeQueueDepth,
   runtimeQueueEnqueuesTotal,
   runtimeQueueHighWater,
+  runtimeQueueBlockedDuration,
+  runtimeQueueCoalescedTotal,
+  runtimeQueueOverflowsTotal,
+  runtimeQueueRecoveriesTotal,
 } from "./Metrics.ts";
 
 export interface ServerQueueMetrics {
   readonly recordEnqueued: (amount?: number) => Effect.Effect<void, never, never>;
   readonly recordDequeued: (amount?: number) => Effect.Effect<void, never, never>;
+  readonly recordBlocked: (durationMs: number) => Effect.Effect<void, never, never>;
+  readonly recordCoalesced: (amount?: number) => Effect.Effect<void, never, never>;
+  readonly recordOverflow: (amount?: number) => Effect.Effect<void, never, never>;
+  readonly recordRecovery: (amount?: number) => Effect.Effect<void, never, never>;
   readonly reset: Effect.Effect<void, never, never>;
 }
 
@@ -79,6 +87,26 @@ export const makeServerQueueMetrics = (
           const highWater = yield* Ref.get(highWaterRef);
           yield* recordDepth(depth, highWater);
         }) as Effect.Effect<void, never, never>,
+      recordBlocked: (durationMs): Effect.Effect<void, never, never> =>
+        Metric.update(
+          Metric.withAttributes(runtimeQueueBlockedDuration, metricAttrs),
+          Duration.millis(Math.max(0, durationMs)),
+        ) as Effect.Effect<void, never, never>,
+      recordCoalesced: (amount): Effect.Effect<void, never, never> =>
+        Metric.update(
+          Metric.withAttributes(runtimeQueueCoalescedTotal, metricAttrs),
+          normalizeAmount(amount),
+        ) as Effect.Effect<void, never, never>,
+      recordOverflow: (amount): Effect.Effect<void, never, never> =>
+        Metric.update(
+          Metric.withAttributes(runtimeQueueOverflowsTotal, metricAttrs),
+          normalizeAmount(amount),
+        ) as Effect.Effect<void, never, never>,
+      recordRecovery: (amount): Effect.Effect<void, never, never> =>
+        Metric.update(
+          Metric.withAttributes(runtimeQueueRecoveriesTotal, metricAttrs),
+          normalizeAmount(amount),
+        ) as Effect.Effect<void, never, never>,
       reset: Effect.gen(function* () {
         yield* Ref.set(depthRef, 0);
         yield* Ref.set(highWaterRef, 0);

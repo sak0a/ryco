@@ -1051,6 +1051,38 @@ describe("GeneralSettingsPanel observability", () => {
     });
   });
 
+  it("shows separate remote Git and PR workflow refresh controls", async () => {
+    const setClientSettings = vi
+      .fn<LocalApi["persistence"]["setClientSettings"]>()
+      .mockResolvedValue(undefined);
+    installSettingsNativeApi({ setClientSettings });
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("Remote Git status", { exact: true })).toBeInTheDocument();
+    await expect
+      .element(page.getByText("PR & workflow updates", { exact: true }))
+      .toBeInTheDocument();
+
+    const refreshMode = page.getByLabelText("PR and workflow update mode");
+    await expect.element(refreshMode).toHaveTextContent("Automatic");
+    await refreshMode.click();
+    await page.getByRole("option", { name: "Reduced", exact: true }).click();
+
+    await vi.waitFor(() => {
+      expect(setClientSettings).toHaveBeenLastCalledWith({
+        ...DEFAULT_CLIENT_SETTINGS,
+        sourceControlRefreshMode: "reduced",
+      });
+    });
+    await expect.element(refreshMode).toHaveTextContent("Reduced");
+  });
+
   it("creates and shows a pairing link when network access is enabled", async () => {
     window.desktopBridge = createDesktopBridgeStub({
       serverExposureState: {

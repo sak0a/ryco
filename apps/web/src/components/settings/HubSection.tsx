@@ -8,6 +8,11 @@ import type {
   HubIdentitySummary,
 } from "@ryco/contracts";
 import relayArchitectureGuideUrl from "../../../../../docs/relay-architecture.html?url";
+import {
+  createVisibilityAwarePoller,
+  type VisibilityAwarePoller,
+} from "../../lib/visibilityPolling";
+import { webAppLifecycle } from "../../platform/appLifecycle";
 
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
@@ -89,6 +94,7 @@ export function HubSection({
   const [hostedIdentityPending, setHostedIdentityPending] = useState(false);
   const [hostedIdentityError, setHostedIdentityError] = useState<string | null>(null);
   const mountedRef = useRef(true);
+  const pollerRef = useRef<VisibilityAwarePoller | null>(null);
   const { copyToClipboard } = useCopyToClipboard();
   // Same derivation the pairing rows use: clipboard writes need a secure context.
   const canCopyToClipboard =
@@ -122,10 +128,20 @@ export function HubSection({
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), HUB_STATUS_POLL_MS);
-    return () => clearInterval(timer);
+    const poller = createVisibilityAwarePoller({
+      lifecycle: webAppLifecycle,
+      run: refresh,
+      resolveDelayMs: () => HUB_STATUS_POLL_MS,
+      jitterRatio: 0.1,
+    });
+    pollerRef.current = poller;
+    return () => {
+      if (pollerRef.current === poller) pollerRef.current = null;
+      poller.stop();
+    };
   }, [refresh]);
+
+  const refreshCurrent = useCallback(() => pollerRef.current?.refresh() ?? refresh(), [refresh]);
 
   useEffect(() => {
     if (!desktopBridge) return;
@@ -223,7 +239,7 @@ export function HubSection({
           default:
             return;
         }
-        await refresh();
+        await refreshCurrent();
       } catch (cause) {
         if (!mountedRef.current) return;
         setError(cause instanceof Error ? cause.message : "That didn't work.");
@@ -231,7 +247,7 @@ export function HubSection({
         if (mountedRef.current) setPendingAction(null);
       }
     },
-    [config, desktopBridge, refresh],
+    [config, desktopBridge, refreshCurrent],
   );
 
   const handleOriginBlur = useCallback(async () => {

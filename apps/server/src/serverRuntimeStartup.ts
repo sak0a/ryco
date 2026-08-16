@@ -155,7 +155,7 @@ export const makeCommandGate = (options: CommandGateOptions = {}) =>
       DEFAULT_STARTUP_COMMAND_GATE_READY_TIMEOUT_MS,
     );
     const commandReady = yield* Deferred.make<void, ServerRuntimeStartupError>();
-    const commandQueue = yield* Queue.unbounded<QueuedCommand>();
+    const commandQueue = yield* Queue.bounded<QueuedCommand>(maxPendingCommands);
     const commandReadinessState = yield* Ref.make<CommandReadinessState>("pending");
     const pendingCommandCount = yield* Ref.make(0);
     const pendingCommandHighWater = yield* Ref.make(0);

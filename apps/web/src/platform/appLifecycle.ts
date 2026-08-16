@@ -1,9 +1,12 @@
 import type { AppLifecycleService } from "@ryco/client-runtime/platform";
 
 export const webAppLifecycle: AppLifecycleService = {
-  isForeground: () => document.visibilityState !== "hidden",
-  isOnline: () => navigator.onLine !== false,
+  isForeground: () => typeof document === "undefined" || document.visibilityState !== "hidden",
+  isOnline: () => typeof navigator === "undefined" || navigator.onLine !== false,
   subscribe: (listener) => {
+    if (typeof document === "undefined" || typeof window === "undefined") {
+      return () => undefined;
+    }
     const onVisibility = () =>
       listener(document.visibilityState === "hidden" ? "background" : "foreground");
     const onOffline = () => listener("offline");

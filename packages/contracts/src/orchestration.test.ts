@@ -11,6 +11,8 @@ import {
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationGetFullThreadDiffInput,
+  OrchestrationGetThreadHistoryPageInput,
+  OrchestrationGetThreadWindowInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
   ProjectCreatedPayload,
@@ -54,6 +56,60 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeThreadWindowInput = Schema.decodeUnknownEffect(OrchestrationGetThreadWindowInput);
+const decodeThreadHistoryPageInput = Schema.decodeUnknownEffect(
+  OrchestrationGetThreadHistoryPageInput,
+);
+
+it.effect("accepts bounded thread history inputs with positive limits", () =>
+  Effect.gen(function* () {
+    const windowInput = yield* decodeThreadWindowInput({
+      threadId: "thread-1",
+      limits: {
+        messages: 100,
+        proposedPlans: 20,
+        activities: 100,
+        checkpoints: 20,
+      },
+    });
+    assert.strictEqual(windowInput.limits.messages, 100);
+
+    const pageInput = yield* decodeThreadHistoryPageInput({
+      threadId: "thread-1",
+      collection: "messages",
+      mode: { kind: "before", cursor: "v1.opaque" },
+      limit: 50,
+    });
+    assert.strictEqual(pageInput.mode.kind, "before");
+  }),
+);
+
+it.effect("rejects empty cursors and non-positive thread history limits", () =>
+  Effect.gen(function* () {
+    const windowExit = yield* Effect.exit(
+      decodeThreadWindowInput({
+        threadId: "thread-1",
+        limits: {
+          messages: 0,
+          proposedPlans: 1,
+          activities: 1,
+          checkpoints: 1,
+        },
+      }),
+    );
+    assert.strictEqual(windowExit._tag, "Failure");
+
+    const pageExit = yield* Effect.exit(
+      decodeThreadHistoryPageInput({
+        threadId: "thread-1",
+        collection: "messages",
+        mode: { kind: "before", cursor: "" },
+        limit: 1,
+      }),
+    );
+    assert.strictEqual(pageExit._tag, "Failure");
+  }),
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -815,7 +871,13 @@ it.effect("rejects malformed context handoff activity metadata", () =>
         targetMessageId: "msg-2",
         sourceSelection: { instanceId: "codex", model: "gpt-5.6" },
         targetSelection: { instanceId: "claudeAgent", model: "claude-fable-5" },
-        sources: [{ providerInstanceId: "codex", driverKind: "codex", modelSlug: "gpt-5.6" }],
+        sources: [
+          {
+            providerInstanceId: "codex",
+            driverKind: "codex",
+            modelSlug: "gpt-5.6",
+          },
+        ],
         target: {
           providerInstanceId: "claudeAgent",
           driverKind: "claudeAgent",

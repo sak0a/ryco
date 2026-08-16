@@ -79,6 +79,28 @@ const makeProjectionStateRepository = Effect.gen(function* () {
       `,
   });
 
+  const upsertMany: ProjectionStateRepositoryShape["upsertMany"] = (rows) => {
+    if (rows.length === 0) {
+      return Effect.void;
+    }
+    return sql`
+      INSERT INTO projection_state ${sql.insert(
+        rows.map((row) => ({
+          projector: row.projector,
+          last_applied_sequence: row.lastAppliedSequence,
+          updated_at: row.updatedAt,
+        })),
+      )}
+      ON CONFLICT (projector)
+      DO UPDATE SET
+        last_applied_sequence = excluded.last_applied_sequence,
+        updated_at = excluded.updated_at
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(toPersistenceSqlError("ProjectionStateRepository.upsertMany:query")),
+    );
+  };
+
   const upsert: ProjectionStateRepositoryShape["upsert"] = (row) =>
     upsertProjectionStateRow(row).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionStateRepository.upsert:query")),
@@ -104,6 +126,7 @@ const makeProjectionStateRepository = Effect.gen(function* () {
 
   return {
     upsert,
+    upsertMany,
     getByProjector,
     listAll,
     minLastAppliedSequence,

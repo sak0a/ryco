@@ -15,6 +15,7 @@ import {
 const LIST_ENTRIES_STALE_TIME_MS = 0;
 const READ_FILE_STALE_TIME_MS = 0;
 const FETCH_RETRY_COUNT = 1;
+const PROJECT_PREVIEW_GC_TIME_MS = 60_000;
 
 export interface ProjectPreviewQueryState<T> {
   readonly data: T | null;
@@ -33,6 +34,8 @@ const INITIAL_QUERY_STATE: ProjectPreviewQueryState<never> = Object.freeze({
 const projectPreviewRegistry = createKeyedQueryRegistry<ProjectPreviewQueryState<unknown>>({
   labelPrefix: "project-preview",
   initialState: INITIAL_QUERY_STATE,
+  gcTime: PROJECT_PREVIEW_GC_TIME_MS,
+  maxEntries: 48,
   buildFetchingState: (current) => ({
     data: current.data,
     isLoading: current.data === null,

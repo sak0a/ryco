@@ -408,11 +408,13 @@ export const projectSearchEntriesQuery = defineQuery<
 export function invalidateProjectFilesState(): void {
   for (const controller of projectFilesRegistry.controllers.values()) {
     controller.lastFetchedAt = 0;
+    // Fence any response already in flight before asking an observed query
+    // for fresh node-owned state. The registry otherwise joins duplicate
+    // callers, which would let the invalidation wait on the stale request.
+    projectFilesRegistry.cancel(controller);
     if (controller.subscriberCount > 0) {
       void projectFilesRegistry.runController(controller);
-      continue;
     }
-    controller.fetchToken += 1;
   }
 }
 

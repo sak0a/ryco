@@ -29,6 +29,8 @@ import {
   useSourceControlWorkflowRuns,
 } from "~/rpc/useSourceControl";
 import { cn } from "~/lib/utils";
+import { useSettings } from "~/hooks/useSettings";
+import { resolveSourceControlRefreshDelay } from "~/rpc/sourceControlRefreshPolicy";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
@@ -214,6 +216,7 @@ function isWorkflowRunGroupDefaultExpanded(group: WorkflowRunGroup): boolean {
 export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [expandedGroupOverrides, setExpandedGroupOverrides] = useState<Record<string, boolean>>({});
+  const sourceControlRefreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
   const shouldGroupRuns = props.groupRunsBySource === true && props.pullRequestNumber == null;
   const changeRequestsQuery = useSourceControlChangeRequestList({
     environmentId: props.environmentId,
@@ -232,12 +235,16 @@ export function WorkflowRunsSection(props: WorkflowRunsSectionProps) {
       limit: 20,
     },
     (data) => {
-      if (!data) return false;
-      const status = getPrCheckStatusFromWorkflowRuns({
-        runs: data.runs,
-        headSha: sourceControlOptionValue(data.headSha),
+      const status = data
+        ? getPrCheckStatusFromWorkflowRuns({
+            runs: data.runs,
+            headSha: sourceControlOptionValue(data.headSha),
+          })
+        : null;
+      return resolveSourceControlRefreshDelay({
+        mode: sourceControlRefreshMode,
+        phase: status && shouldRefreshPrCheckStatus(status) ? "active" : "settled",
       });
-      return shouldRefreshPrCheckStatus(status) ? 30_000 : false;
     },
   );
 
@@ -679,12 +686,22 @@ function WorkflowRunJobsPanel(props: {
   cwd: string | null;
   run: SourceControlWorkflowRun;
 }) {
-  const jobsQuery = useSourceControlWorkflowRunJobs({
-    environmentId: props.environmentId,
-    cwd: props.cwd,
-    runId: props.run.runId,
-    enabled: true,
-  });
+  const sourceControlRefreshMode = useSettings((settings) => settings.sourceControlRefreshMode);
+  const jobsQuery = useSourceControlWorkflowRunJobs(
+    {
+      environmentId: props.environmentId,
+      cwd: props.cwd,
+      runId: props.run.runId,
+      enabled: true,
+    },
+    () =>
+      resolveSourceControlRefreshDelay({
+        mode: sourceControlRefreshMode,
+        phase: shouldRefreshPrCheckStatus(getCheckStatusFromWorkflowRun(props.run))
+          ? "active"
+          : "settled",
+      }),
+  );
 
   const jobs = jobsQuery.data?.jobs ?? [];
   const failedJobs = jobs.filter(

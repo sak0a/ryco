@@ -59,7 +59,9 @@ function formatErrorMessage(error: unknown): string {
 
 function isRetryableSubscriptionError(message: string): boolean {
   return (
-    isTransportConnectionErrorMessage(message) || THREAD_NOT_FOUND_ERROR_RE.test(message.trim())
+    isTransportConnectionErrorMessage(message) ||
+    THREAD_NOT_FOUND_ERROR_RE.test(message.trim()) ||
+    message.includes("reconnect to resynchronize")
   );
 }
 

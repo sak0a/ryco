@@ -292,6 +292,7 @@ export function invalidateWorkItems(input?: {
     }
     controller.hasData = false;
     controller.lastFetchedAt = 0;
+    workItemsRegistry.cancel(controller);
     if (controller.subscriberCount > 0) {
       void runController(controller);
     }

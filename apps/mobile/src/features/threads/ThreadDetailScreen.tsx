@@ -24,7 +24,10 @@ import { EmptyState } from "../../components/EmptyState";
 import { ErrorBanner } from "../../components/ErrorBanner";
 import { SymbolView } from "../../components/AppSymbol";
 import { ensureEnvironmentApi } from "../../connection/environmentApi";
-import { retainThreadDetailSubscription } from "../../connection/threadDetail";
+import {
+  loadOlderThreadMessages,
+  retainThreadDetailSubscription,
+} from "../../connection/threadDetail";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { newCommandId, newMessageId } from "../../lib/ids";
 import { useThemeColor } from "../../lib/useThemeColor";
@@ -174,6 +177,22 @@ export function ThreadDetailScreen(props: {
   const thread = useStore((state) =>
     selectThreadByRef(state, scopeThreadRef(environmentId, threadId)),
   );
+  const messageHistory = useStore(
+    (state) =>
+      state.environmentStateById[environmentId]?.threadHistoryByThreadId?.[threadId]?.messages,
+  );
+  const messageHistoryLoad = useStore(
+    (state) =>
+      state.environmentStateById[environmentId]?.threadHistoryLoadByThreadId?.[threadId]?.messages,
+  );
+  const loadOlderMessages = useCallback(() => {
+    if (!messageHistory?.hasMoreBefore || messageHistoryLoad?.status === "loading") return;
+    void loadOlderThreadMessages({
+      environmentId,
+      threadId,
+      page: messageHistory,
+    }).catch(() => undefined);
+  }, [environmentId, messageHistory, messageHistoryLoad?.status, threadId]);
   const project = useStore((state) =>
     thread
       ? (selectProjectByRef(state, scopeProjectRef(environmentId, thread.projectId)) ?? null)
@@ -417,16 +436,8 @@ export function ThreadDetailScreen(props: {
     }
   };
 
-  // The running fold shows a live timer, so it needs a clock that advances. One
-  // interval for the whole screen, and only while something is actually running.
   const runningTurnId =
     thread?.latestTurn?.state === "running" ? (thread.latestTurn.turnId ?? null) : null;
-  const [nowIso, setNowIso] = useState(() => new Date().toISOString());
-  useEffect(() => {
-    if (runningTurnId === null) return;
-    const timer = setInterval(() => setNowIso(new Date().toISOString()), 1000);
-    return () => clearInterval(timer);
-  }, [runningTurnId]);
 
   const timelineRows = useMemo(
     () =>
@@ -434,9 +445,12 @@ export function ThreadDetailScreen(props: {
         entries: built?.timeline ?? [],
         runningTurnId,
         expandedFoldIds,
-        now: nowIso,
+        // Running folds deliberately use a stable "Working…" label. Sampling
+        // the clock only when the timeline changes avoids rebuilding the whole
+        // virtualized list every second for a duration that is not displayed.
+        now: new Date().toISOString(),
       }),
-    [built?.timeline, expandedFoldIds, nowIso, runningTurnId],
+    [built?.timeline, expandedFoldIds, runningTurnId],
   );
 
   const renderItem = ({ item }: LegendListRenderItemProps<ThreadTimelineRow>) =>
@@ -476,12 +490,35 @@ export function ThreadDetailScreen(props: {
         keyExtractor={(row) => row.id}
         alignItemsAtEnd
         initialScrollAtEnd
-        maintainScrollAtEnd={{ animated: true, on: { dataChange: true, itemLayout: true } }}
+        maintainScrollAtEnd={{
+          animated: true,
+          on: { dataChange: true, itemLayout: true },
+        }}
         maintainVisibleContentPosition
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="never"
         contentContainerStyle={{ paddingVertical: 10 }}
+        onStartReached={loadOlderMessages}
+        onStartReachedThreshold={0.35}
+        ListHeaderComponent={
+          messageHistory?.hasMoreBefore || messageHistoryLoad?.status === "loading" ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={messageHistoryLoad?.status === "loading"}
+              onPress={loadOlderMessages}
+              className="items-center px-4 py-3"
+            >
+              <Text className="text-xs text-muted-foreground">
+                {messageHistoryLoad?.status === "loading"
+                  ? "Loading earlier history…"
+                  : messageHistoryLoad?.status === "error"
+                    ? "Retry earlier history"
+                    : "Load earlier history"}
+              </Text>
+            </Pressable>
+          ) : null
+        }
         ListEmptyComponent={
           <View className="px-4 py-16">
             <EmptyState

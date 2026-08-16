@@ -1,4 +1,6 @@
 import { getEffectiveSurfaceTransparency } from "../themes/appearancePreferences";
+import { acquireLiquidGlassMap, type LiquidGlassMapLease } from "./liquidGlassMapCache";
+import { readWebPerfNow, recordWebPerf } from "../perf/perfInstrumentation";
 
 /**
  * Shared machinery for the experimental liquid-glass material: an SVG
@@ -57,142 +59,6 @@ const DISPLACEMENT_SCALE_BY_STEP: Record<string, number> = {
 
 export function getLiquidGlassDisplacementScale(): number {
   return DISPLACEMENT_SCALE_BY_STEP[getEffectiveSurfaceTransparency()] ?? 0;
-}
-
-/**
- * Displacement magnitude by normalized distance-from-edge, ray-traced once
- * through a convex-circle bezel (height `y = √(1-(1-t)²)`, refractive index
- * 1.5). A vertical ray hits the tilted surface at incidence
- * `θ1 = atan(slope)`, bends by `δ = θ1 - asin(sin(θ1)/n)`, and lands
- * `y·tan(δ)` off its entry point — zero at the sharp edge (no glass depth),
- * peaking around a fifth of the way in and carrying visible bend across the
- * whole band. (The squircle profile Apple favors plateaus within the first
- * few percent of the band, which reads as almost no refraction at our band
- * widths — the circle is the profile that actually looks like liquid glass.)
- * Normalized so the profile peak maps to the full channel range.
- */
-const REFRACTION_SAMPLES = 128;
-const GLASS_REFRACTIVE_INDEX = 1.5;
-
-let refractionProfile: Float32Array | null = null;
-
-function getRefractionProfile(): Float32Array {
-  if (refractionProfile) return refractionProfile;
-  const lut = new Float32Array(REFRACTION_SAMPLES);
-  let peak = 0;
-  for (let i = 0; i < REFRACTION_SAMPLES; i++) {
-    const t = i / (REFRACTION_SAMPLES - 1);
-    const u = 1 - t;
-    const height = Math.sqrt(Math.max(1 - u * u, 1e-9));
-    const slope = u / height;
-    const theta1 = Math.atan(slope);
-    const theta2 = Math.asin(Math.sin(theta1) / GLASS_REFRACTIVE_INDEX);
-    lut[i] = height * Math.tan(theta1 - theta2);
-    peak = Math.max(peak, lut[i] as number);
-  }
-  for (let i = 0; i < REFRACTION_SAMPLES; i++) lut[i] = (lut[i] as number) / peak;
-  refractionProfile = lut;
-  return lut;
-}
-
-/**
- * Maps are smooth gradients, so large surfaces don't need pixel-exact maps —
- * cap the generated bitmap and let feImage stretch it back over the element.
- * Keeps a 1180×790 dialog's map generation ~4× cheaper with no visible loss.
- */
-const MAX_MAP_PIXELS = 262144;
-
-/** Physically-profiled rounded-rect displacement map: X in R, Y in B. */
-export function renderDisplacementMap(
-  width: number,
-  height: number,
-  radius: number,
-  edgeBandPx: number,
-): string | null {
-  const scale = Math.min(1, Math.sqrt(MAX_MAP_PIXELS / Math.max(1, width * height)));
-  const w = Math.max(2, Math.round(width * scale));
-  const h = Math.max(2, Math.round(height * scale));
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const context = canvas.getContext("2d");
-  if (!context) return null;
-  const image = context.createImageData(w, h);
-  const lut = getRefractionProfile();
-  const halfW = w / 2 - 1;
-  const halfH = h / 2 - 1;
-  const r = Math.min(radius * scale, halfW, halfH);
-  const band = Math.max(2, edgeBandPx * scale);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const px = x - w / 2;
-      const py = y - h / 2;
-      const qx = Math.abs(px) - halfW + r;
-      const qy = Math.abs(py) - halfH + r;
-      const distance =
-        Math.min(Math.max(qx, qy), 0) + Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) - r;
-      const index = (y * w + x) * 4;
-      // Normalized depth into the bezel: 0 at the edge, 1 at the plateau.
-      const t = -distance / band;
-      if (t <= 0 || t >= 1) {
-        image.data[index] = 128;
-        image.data[index + 1] = 128;
-        image.data[index + 2] = 128;
-        image.data[index + 3] = 255;
-        continue;
-      }
-      const magnitude = lut[Math.round(t * (REFRACTION_SAMPLES - 1))] as number;
-      // Outward edge normal from the SDF gradient: radial in the corner
-      // circle, cardinal along the straight edges.
-      let nx: number;
-      let ny: number;
-      if (qx > 0 && qy > 0) {
-        const length = Math.hypot(qx, qy) || 1;
-        nx = (qx / length) * Math.sign(px);
-        ny = (qy / length) * Math.sign(py);
-      } else if (qx > qy) {
-        nx = Math.sign(px);
-        ny = 0;
-      } else {
-        nx = 0;
-        ny = Math.sign(py);
-      }
-      image.data[index] = 128 + nx * magnitude * 127;
-      image.data[index + 1] = 128;
-      image.data[index + 2] = 128 + ny * magnitude * 127;
-      image.data[index + 3] = 255;
-    }
-  }
-  context.putImageData(image, 0, 0);
-  return canvas.toDataURL();
-}
-
-/**
- * Maps are pure functions of (size, radius, band) and popups reopen at the
- * same sizes constantly — cache the data URLs so reopening a menu costs
- * nothing beyond a Map lookup.
- */
-const MAP_CACHE_LIMIT = 24;
-const displacementMapCache = new Map<string, string>();
-
-function renderDisplacementMapCached(
-  width: number,
-  height: number,
-  radius: number,
-  edgeBandPx: number,
-): string | null {
-  const key = `${Math.round(width)}x${Math.round(height)}r${radius}b${edgeBandPx}`;
-  const cached = displacementMapCache.get(key);
-  if (cached) return cached;
-  const url = renderDisplacementMap(width, height, radius, edgeBandPx);
-  if (url) {
-    if (displacementMapCache.size >= MAP_CACHE_LIMIT) {
-      const oldest = displacementMapCache.keys().next().value;
-      if (oldest !== undefined) displacementMapCache.delete(oldest);
-    }
-    displacementMapCache.set(key, url);
-  }
-  return url;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -419,6 +285,9 @@ export function attachLiquidGlassRefraction(element: HTMLElement, radius: number
   // surfaces (dialogs) get the single-pass graph, small ones the full
   // aberration graph.
   let handles: LiquidFilterHandles | null = null;
+  let mapLease: LiquidGlassMapLease | null = null;
+  let generation = 0;
+  let detached = false;
   const detachLayers = attachLiquidLayers(element);
 
   // Chromium drops the whole backdrop-filter when a url() reference filter
@@ -451,20 +320,32 @@ export function attachLiquidGlassRefraction(element: HTMLElement, radius: number
     // Bezel width scales with the surface so the lens ring stays readable:
     // ~a quarter of the smaller dimension, within sane bounds.
     const band = Math.round(Math.min(52, Math.max(28, Math.min(width, height) * 0.24)));
-    const url = renderDisplacementMapCached(width, height, radius, band);
-    if (!url) return;
-    if (!handles) {
-      handles = buildLiquidGlassFilter(id, {
-        aberration: width * height <= ABERRATION_AREA_LIMIT,
+    const requestGeneration = ++generation;
+    void acquireLiquidGlassMap({ width, height, radius, edgeBandPx: band }).then((lease) => {
+      if (!lease) return;
+      if (detached || requestGeneration !== generation) {
+        lease.release();
+        return;
+      }
+      const applyStartedAt = readWebPerfNow();
+      if (!handles) {
+        handles = buildLiquidGlassFilter(id, {
+          aberration: width * height <= ABERRATION_AREA_LIMIT,
+        });
+        handles.setScale(-scale);
+        ensureLiquidGlassDefsHost().appendChild(handles.filter);
+      }
+      handles.setMap(lease.url, width, height);
+      element.style.backdropFilter = `url(#${id}) ${existing}`;
+      // Safari ignores the whole declaration if url() is present, so the
+      // -webkit- fallback keeps the plain frost.
+      element.style.setProperty("-webkit-backdrop-filter", existing);
+      mapLease?.release();
+      mapLease = lease;
+      recordWebPerf("web.liquid-glass.apply", {
+        durationMs: Math.max(0, readWebPerfNow() - applyStartedAt),
       });
-      handles.setScale(-scale);
-      ensureLiquidGlassDefsHost().appendChild(handles.filter);
-    }
-    handles.setMap(url, width, height);
-    element.style.backdropFilter = `url(#${id}) ${existing}`;
-    // Safari ignores the whole declaration if url() is present, so the
-    // -webkit- fallback keeps the plain frost.
-    element.style.setProperty("-webkit-backdrop-filter", existing);
+    });
   };
   // Apply immediately: during the entrance animation the element is grouped
   // and cannot sample the page regardless, so the chain being in place means
@@ -476,9 +357,12 @@ export function attachLiquidGlassRefraction(element: HTMLElement, radius: number
   });
   observer.observe(element);
   return () => {
+    detached = true;
+    generation += 1;
     observer.disconnect();
     if (frame) window.cancelAnimationFrame(frame);
     handles?.filter.remove();
+    mapLease?.release();
     detachLayers();
     element.style.removeProperty("backdrop-filter");
     element.style.removeProperty("-webkit-backdrop-filter");

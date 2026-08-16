@@ -1765,6 +1765,27 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
               )
           : { status: "skipped_not_requested" as const };
 
+        // A push-only action skips the commit step, but post-push workflow
+        // discovery still needs the exact pushed revision. Resolve HEAD after
+        // a successful push so the client can match the workflow run and leave
+        // the faster discovery cadence as soon as that run appears.
+        const reportedCommit =
+          push.status === "pushed" && !("commitSha" in commit)
+            ? yield* gitCore
+                .execute({
+                  operation: "runStackedAction.revParsePushedHead",
+                  cwd: input.cwd,
+                  args: ["rev-parse", "HEAD"],
+                })
+                .pipe(
+                  Effect.map((result) => result.stdout.trim()),
+                  Effect.map((commitSha) =>
+                    commitSha.length > 0 ? { ...commit, commitSha } : commit,
+                  ),
+                  Effect.catch(() => Effect.succeed(commit)),
+                )
+            : commit;
+
         const pr = wantsPr
           ? yield* progress
               .emit({
@@ -1789,7 +1810,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         const toast = yield* buildCompletionToast(input.cwd, {
           action: input.action,
           branch: branchStep,
-          commit,
+          commit: reportedCommit,
           push,
           pr,
         });
@@ -1797,7 +1818,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         const result = {
           action: input.action,
           branch: branchStep,
-          commit,
+          commit: reportedCommit,
           push,
           pr,
           toast,

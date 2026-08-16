@@ -18,6 +18,8 @@ import {
   defineKeyedQueryByInput,
   KEY_SEP,
 } from "@ryco/client-runtime/rpc";
+import { webAppLifecycle } from "~/platform/appLifecycle";
+import { resolveSourceControlFailureDelay } from "./sourceControlRefreshPolicy";
 
 // ---------------------------------------------------------------------------
 // Atom-backed source-control context reads.
@@ -41,6 +43,12 @@ const CHANGE_REQUEST_DIFF_STALE_TIME_MS = 300_000;
 const WORKFLOW_RUNS_STALE_TIME_MS = 60_000;
 const WORKFLOW_RUN_JOBS_STALE_TIME_MS = 60_000;
 const WORKFLOW_JOB_LOG_STALE_TIME_MS = 300_000;
+const DEFAULT_QUERY_GC_TIME_MS = 5 * 60_000;
+const SEARCH_QUERY_GC_TIME_MS = 60_000;
+const LARGE_QUERY_GC_TIME_MS = 90_000;
+const DETAIL_CACHE_GC_TIME_MS = 2 * 60_000;
+const DETAIL_CACHE_MAX_ENTRIES = 48;
+const DETAIL_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 
 export interface SourceControlQueryState<T> {
   readonly data: T | null;
@@ -59,6 +67,10 @@ const INITIAL_QUERY_STATE: SourceControlQueryState<never> = Object.freeze({
 const sourceControlRegistry = createKeyedQueryRegistry<SourceControlQueryState<unknown>>({
   labelPrefix: "source-control",
   initialState: INITIAL_QUERY_STATE,
+  gcTime: DEFAULT_QUERY_GC_TIME_MS,
+  maxEntries: 192,
+  lifecycle: webAppLifecycle,
+  pollJitterRatio: 0.08,
   buildFetchingState: (current) => ({
     data: current.data,
     isLoading: current.data === null,
@@ -81,12 +93,21 @@ const sourceControlRegistry = createKeyedQueryRegistry<SourceControlQueryState<u
   onRunStart: (controller) => {
     controller.fetching = true;
   },
-  onRunEnd: (controller) => {
+  onRunEnd: (controller, outcome) => {
     controller.fetching = false;
+    controller.consecutiveFailures =
+      outcome === "success" ? 0 : (controller.consecutiveFailures as number) + 1;
   },
+  adjustPollDelay: (baseDelayMs, controller) =>
+    (controller.consecutiveFailures as number) > 0
+      ? resolveSourceControlFailureDelay({
+          baseDelayMs,
+          consecutiveFailures: controller.consecutiveFailures as number,
+        })
+      : baseDelayMs,
 });
 
-const { controllers, runController, clearPollTimer } = sourceControlRegistry;
+const { controllers, runController } = sourceControlRegistry;
 
 export type QueryBinding<TInput, TData> = import("@ryco/client-runtime/rpc").KeyedQueryByInput<
   TInput,
@@ -97,6 +118,7 @@ export type QueryBinding<TInput, TData> = import("@ryco/client-runtime/rpc").Key
 interface SourceControlQueryDefinition<TInput, TData> {
   readonly label: string;
   readonly staleTime: number;
+  readonly gcTime?: number;
   readonly isEnabled: (input: TInput) => boolean;
   readonly buildKey: (input: TInput) => string;
   readonly resolveEnvironmentId: (input: TInput) => EnvironmentId;
@@ -111,7 +133,11 @@ function defineQuery<TInput, TData>(
     sourceControlRegistry,
     {
       ...definition,
-      createControllerFields: (input) => ({ cwd: definition.resolveCwd(input), fetching: false }),
+      createControllerFields: (input) => ({
+        cwd: definition.resolveCwd(input),
+        fetching: false,
+        consecutiveFailures: 0,
+      }),
     },
     (controller) => {
       const isStale =
@@ -207,6 +233,7 @@ export const issueSearchBinding = defineQuery<
 >({
   label: "issues:search",
   staleTime: SEARCH_STALE_TIME_MS,
+  gcTime: SEARCH_QUERY_GC_TIME_MS,
   isEnabled: (input) =>
     (input.enabled ?? true) &&
     input.environmentId !== null &&
@@ -242,6 +269,7 @@ export const changeRequestSearchBinding = defineQuery<
 >({
   label: "changeRequests:search",
   staleTime: SEARCH_STALE_TIME_MS,
+  gcTime: SEARCH_QUERY_GC_TIME_MS,
   isEnabled: (input) =>
     (input.enabled ?? true) &&
     input.environmentId !== null &&
@@ -277,6 +305,7 @@ export const repositorySearchBinding = defineQuery<
 >({
   label: "repositories:search",
   staleTime: SEARCH_STALE_TIME_MS,
+  gcTime: SEARCH_QUERY_GC_TIME_MS,
   isEnabled: (input) =>
     (input.enabled ?? true) && input.environmentId !== null && input.provider !== null,
   buildKey: (input) =>
@@ -415,6 +444,7 @@ export interface SourceControlChangeRequestDiffInput {
 export const changeRequestDiffBinding = defineQuery<SourceControlChangeRequestDiffInput, string>({
   label: "changeRequests:diff",
   staleTime: CHANGE_REQUEST_DIFF_STALE_TIME_MS,
+  gcTime: LARGE_QUERY_GC_TIME_MS,
   isEnabled: (input) =>
     (input.enabled ?? true) &&
     input.environmentId !== null &&
@@ -439,6 +469,7 @@ export interface SourceControlWorkflowRunsInput {
   readonly cwd: string | null;
   readonly pullRequestNumber?: number | null;
   readonly commitSha?: string | null;
+  readonly branch?: string | null;
   readonly limit?: number;
   readonly enabled?: boolean;
 }
@@ -452,7 +483,7 @@ export const workflowRunsBinding = defineQuery<
   isEnabled: (input) =>
     (input.enabled ?? true) && input.environmentId !== null && input.cwd !== null,
   buildKey: (input) =>
-    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.pullRequestNumber ?? ""}${KEY_SEP}${input.commitSha ?? ""}${KEY_SEP}${input.limit ?? ""}`,
+    `${input.environmentId}${KEY_SEP}${input.cwd}${KEY_SEP}${input.pullRequestNumber ?? ""}${KEY_SEP}${input.commitSha ?? ""}${KEY_SEP}${input.branch ?? ""}${KEY_SEP}${input.limit ?? ""}`,
   resolveEnvironmentId: (input) => input.environmentId as EnvironmentId,
   resolveCwd: (input) => input.cwd as string,
   run: (input) =>
@@ -464,6 +495,7 @@ export const workflowRunsBinding = defineQuery<
       ...(input.commitSha !== undefined && input.commitSha !== null
         ? { commitSha: input.commitSha }
         : {}),
+      ...(input.branch !== undefined && input.branch !== null ? { branch: input.branch } : {}),
       ...(input.limit !== undefined ? { limit: input.limit } : {}),
     }),
 });
@@ -510,6 +542,7 @@ export const workflowJobLogBinding = defineQuery<
 >({
   label: "workflows:jobLog",
   staleTime: WORKFLOW_JOB_LOG_STALE_TIME_MS,
+  gcTime: LARGE_QUERY_GC_TIME_MS,
   isEnabled: (input) =>
     (input.enabled ?? false) &&
     input.environmentId !== null &&
@@ -542,9 +575,55 @@ interface DetailCacheSlot {
   readonly cwd: string;
   promise?: Promise<unknown>;
   entry?: DetailCacheEntry<unknown>;
+  bytes: number;
+  lastAccessedAt: number;
+  gcTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const detailCache = new Map<string, DetailCacheSlot>();
+let detailCacheBytes = 0;
+
+function estimatePayloadBytes(value: unknown): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  } catch {
+    return 0;
+  }
+}
+
+function deleteDetailCacheEntry(cacheKey: string): void {
+  const slot = detailCache.get(cacheKey);
+  if (!slot) return;
+  if (slot.gcTimer !== null) clearTimeout(slot.gcTimer);
+  detailCache.delete(cacheKey);
+  detailCacheBytes = Math.max(0, detailCacheBytes - slot.bytes);
+}
+
+function scheduleDetailCacheGc(cacheKey: string, slot: DetailCacheSlot): void {
+  if (slot.gcTimer !== null) clearTimeout(slot.gcTimer);
+  slot.gcTimer = setTimeout(() => {
+    const current = detailCache.get(cacheKey);
+    if (current === slot && !current.promise) deleteDetailCacheEntry(cacheKey);
+  }, DETAIL_CACHE_GC_TIME_MS);
+}
+
+function evictDetailCacheToBudget(): void {
+  if (detailCache.size <= DETAIL_CACHE_MAX_ENTRIES && detailCacheBytes <= DETAIL_CACHE_MAX_BYTES) {
+    return;
+  }
+  const candidates = [...detailCache.entries()]
+    .filter(([, slot]) => !slot.promise)
+    .toSorted(([, left], [, right]) => left.lastAccessedAt - right.lastAccessedAt);
+  for (const [cacheKey] of candidates) {
+    deleteDetailCacheEntry(cacheKey);
+    if (
+      detailCache.size <= DETAIL_CACHE_MAX_ENTRIES &&
+      detailCacheBytes <= DETAIL_CACHE_MAX_BYTES
+    ) {
+      break;
+    }
+  }
+}
 
 async function fetchDetailWithCache<T>(params: {
   readonly cacheKey: string;
@@ -555,6 +634,8 @@ async function fetchDetailWithCache<T>(params: {
 }): Promise<T> {
   const existing = detailCache.get(params.cacheKey);
   if (existing?.entry && Date.now() - existing.entry.fetchedAt < params.staleTime) {
+    existing.lastAccessedAt = Date.now();
+    scheduleDetailCacheGc(params.cacheKey, existing);
     return existing.entry.value as T;
   }
   if (existing?.promise) {
@@ -564,17 +645,29 @@ async function fetchDetailWithCache<T>(params: {
   const promise = params
     .run()
     .then((value) => {
-      detailCache.set(params.cacheKey, {
+      const bytes = estimatePayloadBytes(value);
+      const previous = detailCache.get(params.cacheKey);
+      if (previous?.gcTimer !== null && previous?.gcTimer !== undefined) {
+        clearTimeout(previous.gcTimer);
+      }
+      detailCacheBytes = Math.max(0, detailCacheBytes - (previous?.bytes ?? 0)) + bytes;
+      const slot: DetailCacheSlot = {
         environmentId: params.environmentId,
         cwd: params.cwd,
         entry: { value, fetchedAt: Date.now() },
-      });
+        bytes,
+        lastAccessedAt: Date.now(),
+        gcTimer: null,
+      };
+      detailCache.set(params.cacheKey, slot);
+      scheduleDetailCacheGc(params.cacheKey, slot);
+      evictDetailCacheToBudget();
       return value;
     })
     .catch((error: unknown) => {
       const slot = detailCache.get(params.cacheKey);
       if (slot && slot.promise === promise) {
-        detailCache.delete(params.cacheKey);
+        deleteDetailCacheEntry(params.cacheKey);
       }
       throw error;
     });
@@ -583,6 +676,9 @@ async function fetchDetailWithCache<T>(params: {
     environmentId: params.environmentId,
     cwd: params.cwd,
     promise,
+    bytes: existing?.bytes ?? 0,
+    lastAccessedAt: Date.now(),
+    gcTimer: existing?.gcTimer ?? null,
   });
   return promise;
 }
@@ -658,22 +754,21 @@ export function invalidateSourceControl(input?: {
   const environmentId = input?.environmentId ?? null;
   const cwd = input?.cwd ?? null;
 
-  for (const controller of controllers.values()) {
-    if (environmentId !== null && controller.environmentId !== environmentId) {
-      continue;
-    }
+  const candidateKeys =
+    environmentId === null
+      ? controllers.keys()
+      : sourceControlRegistry.controllerKeys({ environmentId }).values();
+  for (const compositeKey of candidateKeys) {
+    const controller = controllers.get(compositeKey);
+    if (!controller) continue;
     if (cwd !== null && (controller.cwd as string) !== cwd) {
       continue;
     }
     controller.hasData = false;
-    clearPollTimer(controller);
+    sourceControlRegistry.cancel(controller);
+    controller.fetching = false;
     if (controller.subscriberCount > 0) {
       void runController(controller);
-    } else {
-      // No active observers: cancel any in-flight fetch so the next watch
-      // refetches fresh data.
-      controller.fetchToken += 1;
-      controller.fetching = false;
     }
   }
 
@@ -684,7 +779,7 @@ export function invalidateSourceControl(input?: {
     if (cwd !== null && slot.cwd !== cwd) {
       continue;
     }
-    detailCache.delete(cacheKey);
+    deleteDetailCacheEntry(cacheKey);
   }
 }
 
@@ -694,5 +789,5 @@ export function invalidateSourceControl(input?: {
 
 export function resetSourceControlAtomsForTests(): void {
   sourceControlRegistry.resetForTests();
-  detailCache.clear();
+  for (const cacheKey of detailCache.keys()) deleteDetailCacheEntry(cacheKey);
 }

@@ -25,6 +25,7 @@ import { ProjectAvatarStore } from "../../project/Services/ProjectAvatarStore.ts
 import { RepositoryIdentityResolverLive } from "../../project/Layers/RepositoryIdentityResolver.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import {
+  ORCHESTRATION_EVENT_PROJECTORS,
   ORCHESTRATION_PROJECTOR_NAMES,
   OrchestrationProjectionPipelineLive,
 } from "./ProjectionPipeline.ts";
@@ -57,6 +58,19 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("ryco-projection-pipeline-test-");
+
+it("routes each event only to its explicit projection owners", () => {
+  assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.message-sent"], [
+    ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+    ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
+    ORCHESTRATION_PROJECTOR_NAMES.threads,
+  ]);
+  assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["worktree.created"], [
+    ORCHESTRATION_PROJECTOR_NAMES.worktrees,
+  ]);
+  assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.context-handoff-requested"], []);
+  assert.equal(Object.keys(ORCHESTRATION_EVENT_PROJECTORS).length, 35);
+});
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   it.effect("bootstraps all projection states and writes projection rows", () =>
@@ -177,6 +191,189 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       for (const row of stateRows) {
         assert.equal(row.lastAppliedSequence, 3);
       }
+    }),
+  );
+
+  it.effect("maintains user-input and latest-message summaries incrementally", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-incremental-summary");
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-incremental-summary-created"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-08-12T00:00:00.000Z",
+        commandId: CommandId.make("cmd-incremental-summary-created"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-incremental-summary-created"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-incremental-summary"),
+          title: "Incremental summary",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-08-12T00:00:00.000Z",
+          updatedAt: "2026-08-12T00:00:00.000Z",
+        },
+      });
+
+      let activityIndex = 0;
+      const appendActivity = (
+        suffix: string,
+        kind: string,
+        detail: string | undefined = undefined,
+      ) => {
+        activityIndex += 1;
+        const createdAt = new Date(
+          Date.parse("2026-08-12T00:00:00.000Z") + activityIndex * 60_000,
+        ).toISOString();
+        return appendAndProject({
+          type: "thread.activity-appended",
+          eventId: EventId.make(`evt-incremental-summary-${suffix}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          commandId: CommandId.make(`cmd-incremental-summary-${suffix}`),
+          causationEventId: null,
+          correlationId: CommandId.make(`cmd-incremental-summary-${suffix}`),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make(`activity-incremental-summary-${suffix}`),
+              tone: kind === "user-input.requested" ? "info" : "error",
+              kind,
+              summary: kind,
+              payload:
+                detail === undefined
+                  ? { requestId: "input-incremental-summary" }
+                  : { requestId: "input-incremental-summary", detail },
+              turnId: null,
+              createdAt,
+            },
+          },
+        });
+      };
+
+      yield* appendActivity("requested", "user-input.requested");
+      yield* appendActivity("requested-again", "user-input.requested");
+      yield* appendActivity(
+        "transient-failure",
+        "provider.user-input.respond.failed",
+        "Provider timed out",
+      );
+
+      const pendingRows = yield* sql<{ readonly pendingUserInputCount: number }>`
+        SELECT pending_user_input_count AS "pendingUserInputCount"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepEqual(pendingRows, [{ pendingUserInputCount: 1 }]);
+
+      yield* appendActivity(
+        "stale-failure",
+        "provider.user-input.respond.failed",
+        "Unknown pending user-input request",
+      );
+
+      for (const [suffix, createdAt] of [
+        ["newer", "2026-08-12T03:00:00.000Z"],
+        ["older", "2026-08-12T02:00:00.000Z"],
+      ] as const) {
+        yield* appendAndProject({
+          type: "thread.message-sent",
+          eventId: EventId.make(`evt-incremental-summary-message-${suffix}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          commandId: CommandId.make(`cmd-incremental-summary-message-${suffix}`),
+          causationEventId: null,
+          correlationId: CommandId.make(`cmd-incremental-summary-message-${suffix}`),
+          metadata: {},
+          payload: {
+            threadId,
+            messageId: MessageId.make(`message-incremental-summary-${suffix}`),
+            role: "user",
+            text: suffix,
+            turnId: null,
+            streaming: false,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+      }
+
+      for (const [suffix, implementedAt, updatedAt] of [
+        ["open", null, "2026-08-12T04:00:00.000Z"],
+        ["implemented", "2026-08-12T05:00:00.000Z", "2026-08-12T05:00:00.000Z"],
+      ] as const) {
+        yield* appendAndProject({
+          type: "thread.proposed-plan-upserted",
+          eventId: EventId.make(`evt-incremental-summary-plan-${suffix}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: updatedAt,
+          commandId: CommandId.make(`cmd-incremental-summary-plan-${suffix}`),
+          causationEventId: null,
+          correlationId: CommandId.make(`cmd-incremental-summary-plan-${suffix}`),
+          metadata: {},
+          payload: {
+            threadId,
+            proposedPlan: {
+              id: "plan-incremental-summary",
+              turnId: null,
+              planMarkdown: "# Incremental plan",
+              implementedAt,
+              implementationThreadId: null,
+              createdAt: "2026-08-12T04:00:00.000Z",
+              updatedAt,
+            },
+          },
+        });
+        if (suffix === "open") {
+          const actionableRows = yield* sql<{ readonly actionable: number }>`
+            SELECT has_actionable_proposed_plan AS actionable
+            FROM projection_threads
+            WHERE thread_id = ${threadId}
+          `;
+          assert.deepEqual(actionableRows, [{ actionable: 1 }]);
+        }
+      }
+
+      const summaryRows = yield* sql<{
+        readonly latestUserMessageAt: string | null;
+        readonly pendingUserInputCount: number;
+        readonly hasActionableProposedPlan: number;
+      }>`
+        SELECT
+          latest_user_message_at AS "latestUserMessageAt",
+          pending_user_input_count AS "pendingUserInputCount",
+          has_actionable_proposed_plan AS "hasActionableProposedPlan"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepEqual(summaryRows, [
+        {
+          latestUserMessageAt: "2026-08-12T03:00:00.000Z",
+          pendingUserInputCount: 0,
+          hasActionableProposedPlan: 0,
+        },
+      ]);
     }),
   );
 });

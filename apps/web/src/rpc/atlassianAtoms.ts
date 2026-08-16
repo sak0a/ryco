@@ -169,6 +169,7 @@ export function invalidateAtlassian(input?: {
     }
     controller.hasData = false;
     controller.lastFetchedAt = 0;
+    atlassianRegistry.cancel(controller);
     if (controller.subscriberCount > 0) {
       void runController(controller);
     }

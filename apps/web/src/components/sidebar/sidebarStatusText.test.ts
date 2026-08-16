@@ -11,22 +11,17 @@ function status(label: ThreadStatusPill["label"], pulse: boolean): ThreadStatusP
 }
 
 describe("sidebar status text animation", () => {
-  it("shimmers only while a status is actively changing", () => {
-    expect(resolveSidebarStatusTextClassName("in_progress")).toContain(
-      "sidebar-status-text--shimmer",
-    );
-    expect(resolveThreadStatusTextClassName(status("Working", true))).toContain(
-      "sidebar-status-text--shimmer",
-    );
-    expect(resolveThreadStatusTextClassName(status("Connecting", true))).toContain(
-      "sidebar-status-text--shimmer",
-    );
+  it("flows continuously while a status is actively changing", () => {
+    expect(resolveSidebarStatusTextClassName("in_progress")).toContain("sidebar-status-text--flow");
+    for (const label of ["Working", "Connecting", "Monitoring"] as const) {
+      expect(resolveThreadStatusTextClassName(status(label, true))).toContain(
+        "sidebar-status-text--flow",
+      );
+    }
   });
 
   it("keeps stable attention states static", () => {
-    expect(resolveSidebarStatusTextClassName("review")).not.toContain(
-      "sidebar-status-text--shimmer",
-    );
+    expect(resolveSidebarStatusTextClassName("review")).not.toContain("sidebar-status-text--flow");
 
     for (const label of [
       "Awaiting Input",
@@ -35,7 +30,7 @@ describe("sidebar status text animation", () => {
       "Completed",
     ] as const) {
       expect(resolveThreadStatusTextClassName(status(label, false))).not.toContain(
-        "sidebar-status-text--shimmer",
+        "sidebar-status-text--flow",
       );
     }
   });

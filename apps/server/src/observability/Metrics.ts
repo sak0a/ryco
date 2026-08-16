@@ -43,6 +43,10 @@ export const metricNames = {
   runtimeQueueDequeuesTotal: "ryco_runtime_queue_dequeues_total",
   runtimeQueueDepth: "ryco_runtime_queue_depth",
   runtimeQueueHighWater: "ryco_runtime_queue_high_water",
+  runtimeQueueBlockedDuration: "ryco_runtime_queue_blocked_duration",
+  runtimeQueueCoalescedTotal: "ryco_runtime_queue_coalesced_total",
+  runtimeQueueOverflowsTotal: "ryco_runtime_queue_overflows_total",
+  runtimeQueueRecoveriesTotal: "ryco_runtime_queue_recoveries_total",
   startupCommandGateEnqueuesTotal: "ryco_startup_command_gate_enqueues_total",
   startupCommandGateQueueDepth: "ryco_startup_command_gate_queue_depth",
   startupCommandGateQueueHighWater: "ryco_startup_command_gate_queue_high_water",
@@ -171,6 +175,22 @@ export const runtimeQueueDepth = Metric.gauge(metricNames.runtimeQueueDepth, {
 
 export const runtimeQueueHighWater = Metric.gauge(metricNames.runtimeQueueHighWater, {
   description: "Highest observed tracked runtime queue depth.",
+});
+
+export const runtimeQueueBlockedDuration = Metric.timer(metricNames.runtimeQueueBlockedDuration, {
+  description: "Time producers spent waiting for bounded runtime queue admission.",
+});
+
+export const runtimeQueueCoalescedTotal = Metric.counter(metricNames.runtimeQueueCoalescedTotal, {
+  description: "Total replaceable runtime queue items merged into newer state.",
+});
+
+export const runtimeQueueOverflowsTotal = Metric.counter(metricNames.runtimeQueueOverflowsTotal, {
+  description: "Total bounded runtime queue overflows.",
+});
+
+export const runtimeQueueRecoveriesTotal = Metric.counter(metricNames.runtimeQueueRecoveriesTotal, {
+  description: "Total recoveries completed after bounded runtime queue pressure.",
 });
 
 export const startupCommandGateEnqueuesTotal = Metric.counter(

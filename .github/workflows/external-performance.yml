@@ -1,0 +1,71 @@
+name: External Performance Comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Git revision to use as the baseline
+        required: true
+        default: origin/main
+        type: string
+      iterations:
+        description: Number of samples per revision
+        required: true
+        default: "7"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: Compare ${{ inputs.baseline }} to HEAD
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 60
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup project
+        uses: ./.github/actions/setup-ryco
+        with:
+          cache-scope: external-performance
+
+      - name: Install pinned Chromium
+        run: bun run --cwd apps/web test:browser:install
+
+      - name: Compare revisions
+        env:
+          PERF_BASELINE: ${{ inputs.baseline }}
+          PERF_ITERATIONS: ${{ inputs.iterations }}
+        run: >-
+          bun run perf:compare
+          --base "$PERF_BASELINE"
+          --candidate HEAD
+          --iterations "$PERF_ITERATIONS"
+          --output .perf-results/ci
+
+      - name: Publish comparison summary
+        if: always()
+        run: |
+          if test -f .perf-results/ci/comparison.md; then
+            tee -a "$GITHUB_STEP_SUMMARY" < .perf-results/ci/comparison.md
+          else
+            echo "The performance comparison did not produce a Markdown report." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload raw performance results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: external-performance-${{ github.run_id }}
+          path: .perf-results/ci
+          if-no-files-found: warn
+          retention-days: 30

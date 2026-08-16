@@ -1,8 +1,15 @@
 import type { EnvironmentId, SourceControlWorkflowRun } from "@ryco/contracts";
+import type { SourceControlRefreshMode } from "@ryco/contracts/settings";
+import {
+  AUTOMATIC_ACTIVE_REFRESH_MS,
+  AUTOMATIC_DISCOVERY_REFRESH_MS,
+  POST_PUSH_DISCOVERY_WINDOW_MS,
+  resolveSourceControlRefreshDelay,
+} from "~/rpc/sourceControlRefreshPolicy";
 
-export const POST_PUSH_WORKFLOW_DISCOVERY_INTERVAL_MS = 10_000;
-export const POST_PUSH_WORKFLOW_DISCOVERY_WINDOW_MS = 90_000;
-export const ACTIVE_WORKFLOW_REFRESH_INTERVAL_MS = 30_000;
+export const POST_PUSH_WORKFLOW_DISCOVERY_INTERVAL_MS = AUTOMATIC_DISCOVERY_REFRESH_MS;
+export const POST_PUSH_WORKFLOW_DISCOVERY_WINDOW_MS = POST_PUSH_DISCOVERY_WINDOW_MS;
+export const ACTIVE_WORKFLOW_REFRESH_INTERVAL_MS = AUTOMATIC_ACTIVE_REFRESH_MS;
 
 export interface PostPushWorkflowDiscoveryWatch {
   readonly environmentId: EnvironmentId;
@@ -68,6 +75,7 @@ export function hasDiscoveredPostPushWorkflowRun(input: {
 }
 
 export function resolveWorkflowRunsRefetchInterval(input: {
+  readonly mode?: SourceControlRefreshMode;
   readonly activeWatch: PostPushWorkflowDiscoveryWatch | null;
   readonly nowMs: number;
   readonly discoveredPostPushRun: boolean;
@@ -78,8 +86,16 @@ export function resolveWorkflowRunsRefetchInterval(input: {
     input.nowMs < input.activeWatch.expiresAtMs &&
     !input.discoveredPostPushRun
   ) {
-    return POST_PUSH_WORKFLOW_DISCOVERY_INTERVAL_MS;
+    return resolveSourceControlRefreshDelay({
+      mode: input.mode ?? "automatic",
+      phase: "discovery",
+      nowMs: input.nowMs,
+      discoveryExpiresAtMs: input.activeWatch.expiresAtMs,
+    });
   }
 
-  return input.statusRefreshable ? ACTIVE_WORKFLOW_REFRESH_INTERVAL_MS : false;
+  return resolveSourceControlRefreshDelay({
+    mode: input.mode ?? "automatic",
+    phase: input.statusRefreshable ? "active" : "settled",
+  });
 }

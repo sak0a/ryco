@@ -106,7 +106,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const workflow = yield* GitWorkflowService.GitWorkflowService;
     const changesPubSub = yield* Effect.acquireRelease(
-      PubSub.unbounded<VcsStatusChange>(),
+      PubSub.sliding<VcsStatusChange>(64),
       (pubsub) => PubSub.shutdown(pubsub),
     );
     const broadcasterScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
@@ -127,23 +127,31 @@ export const layer = Layer.effect(
           fingerprint: fingerprintStatusPart(local),
           value: local,
         } satisfies CachedValue<VcsStatusLocalResult>;
-        const shouldPublish = yield* Ref.modify(cacheRef, (cache) => {
+        const publication = yield* Ref.modify(cacheRef, (cache) => {
           const previous = cache.get(cwd) ?? { local: null, remote: null };
-          const nextCache = new Map(cache);
-          nextCache.set(cwd, {
+          const next = {
             ...previous,
             local: nextLocal,
-          });
-          return [previous.local?.fingerprint !== nextLocal.fingerprint, nextCache] as const;
+          };
+          const nextCache = new Map(cache);
+          nextCache.set(cwd, next);
+          return [
+            {
+              changed: previous.local?.fingerprint !== nextLocal.fingerprint,
+              event: {
+                _tag: "snapshot" as const,
+                local,
+                remote: next.remote?.value ?? null,
+              },
+            },
+            nextCache,
+          ] as const;
         });
 
-        if (options?.publish && shouldPublish) {
+        if (options?.publish && publication.changed) {
           yield* PubSub.publish(changesPubSub, {
             cwd,
-            event: {
-              _tag: "localUpdated",
-              local,
-            },
+            event: publication.event,
           });
         }
 
@@ -161,23 +169,33 @@ export const layer = Layer.effect(
           fingerprint: fingerprintStatusPart(remote),
           value: remote,
         } satisfies CachedValue<VcsStatusRemoteResult | null>;
-        const shouldPublish = yield* Ref.modify(cacheRef, (cache) => {
+        const publication = yield* Ref.modify(cacheRef, (cache) => {
           const previous = cache.get(cwd) ?? { local: null, remote: null };
-          const nextCache = new Map(cache);
-          nextCache.set(cwd, {
+          const next = {
             ...previous,
             remote: nextRemote,
-          });
-          return [previous.remote?.fingerprint !== nextRemote.fingerprint, nextCache] as const;
+          };
+          const nextCache = new Map(cache);
+          nextCache.set(cwd, next);
+          return [
+            {
+              changed: previous.remote?.fingerprint !== nextRemote.fingerprint,
+              event: next.local
+                ? ({
+                    _tag: "snapshot" as const,
+                    local: next.local.value,
+                    remote,
+                  } satisfies VcsStatusStreamEvent)
+                : ({ _tag: "remoteUpdated" as const, remote } satisfies VcsStatusStreamEvent),
+            },
+            nextCache,
+          ] as const;
         });
 
-        if (options?.publish && shouldPublish) {
+        if (options?.publish && publication.changed) {
           yield* PubSub.publish(changesPubSub, {
             cwd,
-            event: {
-              _tag: "remoteUpdated",
-              remote,
-            },
+            event: publication.event,
           });
         }
 

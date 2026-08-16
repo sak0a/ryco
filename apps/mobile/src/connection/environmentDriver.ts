@@ -303,7 +303,10 @@ export function createMobileEnvironmentDriver(
     });
     const connection = createEnvironmentConnection({
       kind: "saved",
-      knownEnvironment: { ...knownEnvironment, environmentId: record.environmentId },
+      knownEnvironment: {
+        ...knownEnvironment,
+        environmentId: record.environmentId,
+      },
       client,
       pushSequenceMonitor: noopPushSequenceMonitor,
       applyShellEvent: (event, environmentId) =>
@@ -370,6 +373,19 @@ export function createMobileEnvironmentDriver(
       useStore
         .getState()
         .syncServerThreadDetail((snapshot as { readonly thread: never }).thread, environmentId),
+    syncThreadWindowSnapshot: (environmentId, snapshot) =>
+      useStore.getState().syncServerThreadWindow(snapshot, environmentId),
+    syncThreadHistoryPage: (environmentId, threadId, page) =>
+      useStore.getState().syncServerThreadHistoryPage(page, threadId, environmentId),
+    setThreadHistoryRequestState: (input) =>
+      useStore.getState().setServerThreadHistoryLoadState({
+        ...input,
+        loadState: {
+          status: input.status,
+          cursor: input.cursor,
+          error: input.error,
+        },
+      }),
     applyThreadDetailEvent: (environmentId, event) =>
       applyThreadDetailEvent(environmentId, event as OrchestrationEvent),
     stateSink,

@@ -6,6 +6,8 @@ import {
   useRef,
   useSyncExternalStore,
 } from "react";
+import { createVisibilityAwarePoller } from "../lib/visibilityPolling";
+import { webAppLifecycle } from "../platform/appLifecycle";
 
 /**
  * Minimal, self-contained replacement for the slice of `@tanstack/react-query`
@@ -52,6 +54,9 @@ interface QueryEntry {
   readonly observers: Set<QueryObserver>;
   promise: Promise<unknown> | null;
   fetchId: number;
+  gcTime: number;
+  lastAccessedAt: number;
+  gcTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface QueryObserver {
@@ -109,6 +114,7 @@ export interface FetchQueryOptions<TData = unknown> {
   readonly queryKey: QueryKey;
   readonly queryFn: () => Promise<TData>;
   readonly staleTime?: number;
+  readonly gcTime?: number;
   readonly retry?: number | boolean;
 }
 
@@ -118,6 +124,87 @@ interface InvalidateFilters {
 
 export class QueryClient {
   private readonly cache = new Map<string, QueryEntry>();
+  private readonly prefixIndex = new Map<string, Set<string>>();
+  private readonly maxEntries: number;
+  private readonly defaultGcTime: number;
+
+  constructor(options?: { readonly maxEntries?: number; readonly defaultGcTime?: number }) {
+    this.maxEntries = Math.max(1, Math.floor(options?.maxEntries ?? 512));
+    this.defaultGcTime = Math.max(0, options?.defaultGcTime ?? 5 * 60_000);
+  }
+
+  private prefixHash(key: QueryKey): string {
+    return stableStringify(key);
+  }
+
+  private indexEntry(entry: QueryEntry): void {
+    for (let length = 1; length <= entry.key.length; length += 1) {
+      const prefix = this.prefixHash(entry.key.slice(0, length));
+      const hashes = this.prefixIndex.get(prefix) ?? new Set<string>();
+      hashes.add(entry.hash);
+      this.prefixIndex.set(prefix, hashes);
+    }
+  }
+
+  private unindexEntry(entry: QueryEntry): void {
+    for (let length = 1; length <= entry.key.length; length += 1) {
+      const prefix = this.prefixHash(entry.key.slice(0, length));
+      const hashes = this.prefixIndex.get(prefix);
+      if (!hashes) continue;
+      hashes.delete(entry.hash);
+      if (hashes.size === 0) this.prefixIndex.delete(prefix);
+    }
+  }
+
+  private clearGcTimer(entry: QueryEntry): void {
+    if (entry.gcTimer !== null) {
+      clearTimeout(entry.gcTimer);
+      entry.gcTimer = null;
+    }
+  }
+
+  private isPinned(entry: QueryEntry): boolean {
+    return entry.listeners.size > 0 || entry.observers.size > 0 || entry.promise !== null;
+  }
+
+  private removeEntry(entry: QueryEntry): boolean {
+    if (this.cache.get(entry.hash) !== entry || this.isPinned(entry)) return false;
+    this.clearGcTimer(entry);
+    entry.fetchId += 1;
+    entry.state = INITIAL_QUERY_STATE;
+    this.cache.delete(entry.hash);
+    this.unindexEntry(entry);
+    return true;
+  }
+
+  private scheduleGc(entry: QueryEntry): void {
+    this.clearGcTimer(entry);
+    if (this.isPinned(entry) || entry.gcTime === Infinity) return;
+    if (entry.gcTime === 0) {
+      this.removeEntry(entry);
+      return;
+    }
+    entry.gcTimer = setTimeout(() => {
+      entry.gcTimer = null;
+      this.removeEntry(entry);
+    }, entry.gcTime);
+  }
+
+  private touch(entry: QueryEntry): void {
+    entry.lastAccessedAt = Date.now();
+    this.clearGcTimer(entry);
+  }
+
+  private evictToCapacity(): void {
+    if (this.cache.size <= this.maxEntries) return;
+    const candidates = [...this.cache.values()]
+      .filter((entry) => !this.isPinned(entry))
+      .toSorted((left, right) => left.lastAccessedAt - right.lastAccessedAt);
+    for (const entry of candidates) {
+      if (this.cache.size <= this.maxEntries) break;
+      this.removeEntry(entry);
+    }
+  }
 
   private ensureEntry(key: QueryKey): QueryEntry {
     const hash = hashQueryKey(key);
@@ -131,10 +218,26 @@ export class QueryClient {
         observers: new Set(),
         promise: null,
         fetchId: 0,
+        gcTime: this.defaultGcTime,
+        lastAccessedAt: Date.now(),
+        gcTimer: null,
       };
       this.cache.set(hash, entry);
+      this.indexEntry(entry);
+      this.evictToCapacity();
     }
+    this.touch(entry);
     return entry;
+  }
+
+  setGcTime(key: QueryKey, gcTime: number | undefined): void {
+    const entry = this.ensureEntry(key);
+    entry.gcTime = Math.max(0, gcTime ?? this.defaultGcTime);
+    if (!this.isPinned(entry)) this.scheduleGc(entry);
+  }
+
+  getCacheSize(): number {
+    return this.cache.size;
   }
 
   getEntry(key: QueryKey): QueryEntry {
@@ -159,16 +262,20 @@ export class QueryClient {
   subscribe(key: QueryKey, listener: () => void): () => void {
     const entry = this.ensureEntry(key);
     entry.listeners.add(listener);
+    this.clearGcTimer(entry);
     return () => {
       entry.listeners.delete(listener);
+      this.scheduleGc(entry);
     };
   }
 
   addObserver(key: QueryKey, observer: QueryObserver): () => void {
     const entry = this.ensureEntry(key);
     entry.observers.add(observer);
+    this.clearGcTimer(entry);
     return () => {
       entry.observers.delete(observer);
+      this.scheduleGc(entry);
     };
   }
 
@@ -206,6 +313,7 @@ export class QueryClient {
       dataUpdatedAt: Date.now(),
       errorUpdatedAt: entry.state.errorUpdatedAt,
     });
+    this.scheduleGc(entry);
     return next;
   }
 
@@ -224,8 +332,12 @@ export class QueryClient {
 
   invalidateQueries(filters: InvalidateFilters = {}): Promise<void> {
     const prefix = filters.queryKey;
-    for (const entry of this.cache.values()) {
-      if (prefix && !keyMatchesPrefix(entry.key, prefix)) continue;
+    const entries = prefix
+      ? [...(this.prefixIndex.get(this.prefixHash(prefix)) ?? [])]
+          .map((hash) => this.cache.get(hash))
+          .filter((entry): entry is QueryEntry => entry !== undefined)
+      : [...this.cache.values()];
+    for (const entry of entries) {
       // Mark stale so the next mount/fetch refetches even without observers.
       if (entry.state.status === "success") {
         this.setState(entry, { ...entry.state, dataUpdatedAt: 0 });
@@ -248,7 +360,7 @@ export class QueryClient {
     } = {},
   ): Promise<TData | undefined> {
     const entry = this.ensureEntry(key);
-    if (!options.force && entry.promise) {
+    if (entry.promise) {
       return entry.promise as Promise<TData | undefined>;
     }
 
@@ -300,6 +412,8 @@ export class QueryClient {
     const promise = run().finally(() => {
       if (entry.promise === promise) {
         entry.promise = null;
+        this.scheduleGc(entry);
+        this.evictToCapacity();
       }
     });
     entry.promise = promise as Promise<unknown>;
@@ -307,6 +421,7 @@ export class QueryClient {
   }
 
   async fetchQuery<TData>(options: FetchQueryOptions<TData>): Promise<TData> {
+    this.setGcTime(options.queryKey, options.gcTime);
     const staleTime = options.staleTime ?? 0;
     if (!this.isStale(options.queryKey, staleTime)) {
       return this.getQueryData<TData>(options.queryKey) as TData;
@@ -327,7 +442,13 @@ export class QueryClient {
   }
 
   clear(): void {
+    for (const entry of this.cache.values()) {
+      this.clearGcTimer(entry);
+      entry.fetchId += 1;
+      entry.state = INITIAL_QUERY_STATE;
+    }
     this.cache.clear();
+    this.prefixIndex.clear();
   }
 }
 
@@ -458,6 +579,7 @@ export function useQuery<TQueryFnData = unknown, TData = TQueryFnData>(
   const client = useQueryClient();
   const { queryKey } = options;
   const hash = hashQueryKey(queryKey);
+  client.setGcTime(queryKey, options.gcTime);
 
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -514,10 +636,15 @@ export function useQuery<TQueryFnData = unknown, TData = TQueryFnData>(
         ? interval({ state: { data: client.getQueryData<TData>(current.queryKey) } })
         : interval;
     if (ms === false || ms === undefined || ms <= 0) return;
-    const timer = setTimeout(() => {
-      void client.fetch(current.queryKey, current.queryFn, { retry: current.retry, force: true });
-    }, ms);
-    return () => clearTimeout(timer);
+    const poller = createVisibilityAwarePoller({
+      lifecycle: webAppLifecycle,
+      run: () =>
+        client.fetch(current.queryKey, current.queryFn, { retry: current.retry, force: true }),
+      resolveDelayMs: () => ms,
+      runImmediately: false,
+      jitterRatio: 0.05,
+    });
+    return poller.stop;
   }, [client, hash, enabled, state]);
 
   const selected = useSelectMemo(
@@ -541,6 +668,7 @@ export function useQueries<TQueryFnData = unknown, TData = TQueryFnData>(config:
   queriesRef.current = queries;
 
   const hashes = queries.map((query) => hashQueryKey(query.queryKey));
+  for (const query of queries) client.setGcTime(query.queryKey, query.gcTime);
   const combinedHash = hashes.join("|");
 
   const [, forceRender] = useReducer((tick: number) => tick + 1, 0);
@@ -583,7 +711,7 @@ export function useQueries<TQueryFnData = unknown, TData = TQueryFnData>(config:
   const stateSignature = states.map((state) => state.dataUpdatedAt).join("|");
 
   useEffect(() => {
-    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const stops: Array<() => void> = [];
     for (const query of queriesRef.current) {
       if (!(query.enabled ?? true)) continue;
       const interval = query.refetchInterval;
@@ -593,14 +721,17 @@ export function useQueries<TQueryFnData = unknown, TData = TQueryFnData>(config:
           ? interval({ state: { data: client.getQueryData<TData>(query.queryKey) } })
           : interval;
       if (ms === false || ms === undefined || ms <= 0) continue;
-      timers.push(
-        setTimeout(() => {
-          void client.fetch(query.queryKey, query.queryFn, { retry: query.retry, force: true });
-        }, ms),
-      );
+      const poller = createVisibilityAwarePoller({
+        lifecycle: webAppLifecycle,
+        run: () => client.fetch(query.queryKey, query.queryFn, { retry: query.retry, force: true }),
+        resolveDelayMs: () => ms,
+        runImmediately: false,
+        jitterRatio: 0.05,
+      });
+      stops.push(poller.stop);
     }
     return () => {
-      for (const timer of timers) clearTimeout(timer);
+      for (const stop of stops) stop();
     };
   }, [client, combinedHash, stateSignature]);
 

@@ -355,7 +355,14 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
               checkpointTurnCount: 1,
               checkpointRef: asCheckpointRef("checkpoint-1"),
               status: "ready",
-              files: [{ path: "README.md", kind: "modified", additions: 2, deletions: 1 }],
+              files: [
+                {
+                  path: "README.md",
+                  kind: "modified",
+                  additions: 2,
+                  deletions: 1,
+                },
+              ],
               assistantMessageId: asMessageId("message-1"),
               completedAt: "2026-02-24T00:00:08.000Z",
             },
@@ -646,6 +653,17 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         ],
       );
       assert.include(allResults[0]?.snippet ?? "", "authentication fix");
+      assert.isDefined(allResults[0]?.historyCursor);
+
+      const threadResults = yield* snapshotQuery.searchThreadMessages({
+        query: "authentication",
+        threadId: ThreadId.make("thread-search-b"),
+        limit: 10,
+      });
+      assert.deepEqual(
+        threadResults.map((result) => result.messageId),
+        [asMessageId("message-search-b")],
+      );
 
       const projectResults = yield* snapshotQuery.searchThreadMessages({
         query: "authentication",
@@ -1600,11 +1618,50 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       );
 
       const startedAt = Date.now();
+      const threadWindow = yield* snapshotQuery.getThreadWindow!({
+        threadId: ThreadId.make("thread-paged"),
+        limits: {
+          messages: 100,
+          proposedPlans: 10,
+          activities: 50,
+          checkpoints: 10,
+        },
+      });
+      const oldestMessageCursor = threadWindow.history.messages.oldestCursor;
+      assert.isNotNull(oldestMessageCursor);
+      const olderPage = yield* snapshotQuery.getThreadHistoryPage!({
+        threadId: ThreadId.make("thread-paged"),
+        collection: "messages",
+        mode: { kind: "before", cursor: oldestMessageCursor! },
+        limit: 100,
+      });
+      const aroundPage = yield* snapshotQuery.getThreadHistoryPage!({
+        threadId: ThreadId.make("thread-paged"),
+        collection: "messages",
+        mode: { kind: "around", anchorId: asMessageId("message-0123") },
+        limit: 21,
+      });
       const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-paged"));
       const snapshot = yield* snapshotQuery.getSnapshot();
       const elapsedMs = Date.now() - startedAt;
 
       assert.isBelow(elapsedMs, 2_000);
+      assert.equal(threadWindow.thread.messages.length, 100);
+      assert.equal(threadWindow.thread.messages[0]?.id, asMessageId("message-0900"));
+      assert.equal(threadWindow.thread.messages[99]?.id, asMessageId("message-0999"));
+      assert.isTrue(threadWindow.history.messages.hasMoreBefore);
+      assert.equal(olderPage.collection, "messages");
+      if (olderPage.collection === "messages") {
+        assert.equal(olderPage.items.length, 100);
+        assert.equal(olderPage.items[0]?.id, asMessageId("message-0800"));
+        assert.equal(olderPage.items[99]?.id, asMessageId("message-0899"));
+        assert.isTrue(olderPage.page.hasMoreBefore);
+      }
+      assert.equal(aroundPage.collection, "messages");
+      if (aroundPage.collection === "messages") {
+        assert.equal(aroundPage.items.length, 21);
+        assert.equal(aroundPage.items[10]?.id, asMessageId("message-0123"));
+      }
 
       assert.equal(threadDetail._tag, "Some");
       if (threadDetail._tag === "Some") {
@@ -1624,6 +1681,20 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         snapshotThread?.messages[(snapshotThread?.messages.length ?? 0) - 1]?.id,
         asMessageId("message-0999"),
       );
+
+      yield* sql`DELETE FROM projection_thread_messages WHERE message_id = 'message-0900'`;
+      const staleBoundaryError = yield* Effect.flip(
+        snapshotQuery.getThreadHistoryPage!({
+          threadId: ThreadId.make("thread-paged"),
+          collection: "messages",
+          mode: { kind: "before", cursor: oldestMessageCursor! },
+          limit: 100,
+        }),
+      );
+      assert.equal(staleBoundaryError._tag, "OrchestrationThreadHistoryError");
+      if (staleBoundaryError._tag === "OrchestrationThreadHistoryError") {
+        assert.equal(staleBoundaryError.reason, "stale-cursor");
+      }
     }),
   );
 

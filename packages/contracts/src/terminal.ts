@@ -157,6 +157,18 @@ export const TerminalEvent = Schema.Union([
 ]);
 export type TerminalEvent = typeof TerminalEvent.Type;
 
+export class TerminalSubscriptionResyncError extends Schema.TaggedError<TerminalSubscriptionResyncError>()(
+  "TerminalSubscriptionResyncError",
+  {
+    reason: Schema.Literal("slowConsumer"),
+    capacity: Schema.Number,
+  },
+) {
+  override get message() {
+    return `Terminal event subscriber fell behind (${this.capacity} buffered events); reconnect to resynchronize`;
+  }
+}
+
 export class TerminalCwdError extends Schema.TaggedError<TerminalCwdError>()("TerminalCwdError", {
   cwd: Schema.String,
   reason: Schema.Literals(["notFound", "notDirectory", "outsideWorkspace", "statFailed"]),
