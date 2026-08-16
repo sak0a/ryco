@@ -498,6 +498,7 @@ export async function harness(
             return result;
           },
           rateLimiter: makeNodeE2eeHandshakeRateLimiter(),
+          now: () => NOW,
           scheduler,
           recordPeerLegacyFallback: () => {
             fallbacks += 1;

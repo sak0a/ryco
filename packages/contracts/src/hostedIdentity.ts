@@ -547,10 +547,7 @@ export const NativeIdentityAttemptCancelRequest = strict(
     // Pending attempts use the attempt secret. Once email verification has
     // promoted a signup attempt, this endpoint accepts the activation secret;
     // both remain opaque 256-bit values on the wire.
-    attemptSecret: Schema.Union([
-      NativeIdentityAttemptSecret,
-      NativeIdentityActivationSecret,
-    ]),
+    attemptSecret: Schema.Union([NativeIdentityAttemptSecret, NativeIdentityActivationSecret]),
   }),
 );
 export type NativeIdentityAttemptCancelRequest = typeof NativeIdentityAttemptCancelRequest.Type;

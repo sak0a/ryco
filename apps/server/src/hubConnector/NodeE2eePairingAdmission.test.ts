@@ -395,6 +395,7 @@ async function orderedSession(
     authorization,
     withPrekeySecret: async (_prekeyId, use) => use(NODE_AGREEMENT_SECRET),
     rateLimiter: makeNodeE2eeHandshakeRateLimiter(),
+    now: () => NOW,
     recordPeerLegacyFallback: () => undefined,
   });
   session.announce();

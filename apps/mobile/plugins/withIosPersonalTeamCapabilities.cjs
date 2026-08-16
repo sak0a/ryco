@@ -2,11 +2,7 @@ const fs = require("node:fs");
 const { createRequire } = require("node:module");
 const path = require("node:path");
 
-const {
-  IOSConfig,
-  withEntitlementsPlist,
-  withFinalizedMod,
-} = require("expo/config-plugins");
+const { IOSConfig, withEntitlementsPlist, withFinalizedMod } = require("expo/config-plugins");
 const expoRequire = createRequire(require.resolve("expo/config-plugins"));
 const plist = expoRequire("@expo/plist").default;
 

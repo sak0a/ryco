@@ -33,7 +33,11 @@ describe("showConfirmDialog", () => {
     const [title, message, actions] = mocks.alert.mock.calls[0] as [
       string,
       string,
-      ReadonlyArray<{ readonly text: string; readonly style: string; readonly onPress?: () => void }>,
+      ReadonlyArray<{
+        readonly text: string;
+        readonly style: string;
+        readonly onPress?: () => void;
+      }>,
     ];
     expect(title).toBe("Sign out of your Hub?");
     expect(message).toBe("This device's Hub session ends.");

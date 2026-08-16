@@ -21,9 +21,7 @@ describe("native identity mailbox presentation", () => {
   });
 
   it("keeps email password reset enumeration-safe while showing the selected address", () => {
-    expect(
-      mailboxCodePrompt(passwordResetMailboxPresentation("person@example.com", true)),
-    ).toBe(
+    expect(mailboxCodePrompt(passwordResetMailboxPresentation("person@example.com", true))).toBe(
       "Enter the six-digit code sent to person@example.com if an account exists for that email.",
     );
   });

@@ -14,13 +14,12 @@ const { stripUnsupportedPersonalTeamEntitlements } =
       entitlementsPath: string,
     ) => Record<string, unknown>;
   };
-const { stripUnsupportedPersonalTeamEntitlementsFile } = require(
-  "./withIosPersonalTeamCapabilities.cjs",
-) as {
-  readonly stripUnsupportedPersonalTeamEntitlementsFile: (
-    entitlementsPath: string,
-  ) => Record<string, unknown>;
-};
+const { stripUnsupportedPersonalTeamEntitlementsFile } =
+  require("./withIosPersonalTeamCapabilities.cjs") as {
+    readonly stripUnsupportedPersonalTeamEntitlementsFile: (
+      entitlementsPath: string,
+    ) => Record<string, unknown>;
+  };
 
 describe("withIosPersonalTeamCapabilities", () => {
   it("removes APNs without mutating or dropping supported entitlements", () => {

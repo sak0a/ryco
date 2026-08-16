@@ -18,10 +18,7 @@ describe("TurnstileChallenge", () => {
       passwordReset: "password_reset",
     });
     expect(
-      createTurnstileHtml(
-        "public-site-key",
-        NATIVE_IDENTITY_TURNSTILE_ACTIONS.passwordReset,
-      ),
+      createTurnstileHtml("public-site-key", NATIVE_IDENTITY_TURNSTILE_ACTIONS.passwordReset),
     ).toContain('data-action="password_reset"');
   });
 
