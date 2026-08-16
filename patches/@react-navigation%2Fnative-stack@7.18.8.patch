@@ -1,8 +1,8 @@
 diff --git a/lib/module/views/useHeaderConfigProps.js b/lib/module/views/useHeaderConfigProps.js
-index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b01175ec19220 100644
+index a56cb12fc83995973fad7d9e851d6fdbaf999a17..c3b83008dcd5a7bc7c3011bbf24363fdddb3f2ae 100644
 --- a/lib/module/views/useHeaderConfigProps.js
 +++ b/lib/module/views/useHeaderConfigProps.js
-@@ -19,6 +19,12 @@
+@@ -19,6 +19,12 @@ const processBarButtonItems = (items, colors, fonts) => {
        }
        return item;
      }
@@ -15,7 +15,7 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
      if (item.type === 'button' || item.type === 'menu') {
        if (item.type === 'menu' && item.menu == null) {
          throw new Error(`Menu item must have a 'menu' property defined: ${JSON.stringify(item)}`);
-@@ -79,7 +85,7 @@
+@@ -79,7 +85,7 @@ const processBarButtonItems = (items, colors, fonts) => {
        }
        return processedItem;
      }
@@ -24,11 +24,12 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
    }).filter(item => item != null);
  };
  const transformIcon = icon => {
-@@ -158,8 +164,12 @@
+@@ -158,9 +164,13 @@ export function useHeaderConfigProps({
    headerBack,
    route,
    title,
 +  unstable_headerCenterItems: headerCenterItems,
+   unstable_headerInsets: headerInsets,
    unstable_headerLeftItems: headerLeftItems,
 -  unstable_headerRightItems: headerRightItems
 +  unstable_headerRightItems: headerRightItems,
@@ -38,7 +39,7 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
  }) {
    const {
      direction
-@@ -255,6 +265,10 @@
+@@ -256,6 +266,10 @@ export function useHeaderConfigProps({
      tintColor,
      canGoBack
    });
@@ -49,7 +50,7 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
    let rightItems = headerRightItems?.({
      tintColor,
      canGoBack
-@@ -264,6 +278,10 @@
+@@ -265,6 +279,10 @@ export function useHeaderConfigProps({
      // So we need to reverse them here to match the order
      rightItems = [...rightItems].reverse();
    }
@@ -60,7 +61,7 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
    const children = /*#__PURE__*/_jsxs(_Fragment, {
      children: [Platform.OS === 'ios' ? /*#__PURE__*/_jsxs(_Fragment, {
        children: [leftItems ? leftItems.map((item, index) => {
-@@ -278,7 +296,15 @@
+@@ -279,7 +297,15 @@ export function useHeaderConfigProps({
          return null;
        }) : headerLeftElement != null ? /*#__PURE__*/_jsx(ScreenStackHeaderLeftView, {
          children: headerLeftElement
@@ -77,7 +78,7 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
          children: headerTitleElement
        }) : null]
      }) : /*#__PURE__*/_jsxs(_Fragment, {
-@@ -356,6 +382,7 @@
+@@ -357,6 +383,7 @@ export function useHeaderConfigProps({
      largeTitleFontWeight,
      largeTitleHideShadow: headerLargeTitleShadowVisible === false,
      title: titleText,
@@ -85,8 +86,8 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
      titleColor,
      titleFontFamily,
      titleFontSize,
-@@ -364,9 +391,12 @@
-     disableTopInsetApplication: !headerTopInsetEnabled,
+@@ -368,6 +395,9 @@ export function useHeaderConfigProps({
+     disableBottomInsetApplication: headerInsets?.bottom !== undefined ? !headerInsets.bottom : undefined,
      translucent: translucent === true,
      children,
 +    navigationItemStyle,
@@ -95,8 +96,3 @@ index 0b75c70b4e0d233ee3b5faaf9cfbc40d4f8ed494..eb174e3fde91a7783f132b3fb16b0117
      headerLeftBarButtonItems: processBarButtonItems(leftItems, colors, fonts),
      headerRightBarButtonItems: processBarButtonItems(rightItems, colors, fonts),
      experimental_userInterfaceStyle: dark ? 'dark' : 'light'
-   };
- }
--//# sourceMappingURL=useHeaderConfigProps.js.map
-\ No newline at end of file
-+//# sourceMappingURL=useHeaderConfigProps.js.map
