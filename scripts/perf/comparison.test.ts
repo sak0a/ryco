@@ -34,6 +34,7 @@ function benchmark(input: {
     label: input.label,
     revision: input.label,
     scenario: {
+      profile: "shell",
       iterations: 0,
       idleMs: 1,
       hiddenIdleMs: 1,
@@ -42,6 +43,11 @@ function benchmark(input: {
       readySelector: "#root",
       targetPath: null,
       fixtureHome: null,
+      sourceControlDiscoveryTimeoutMs: 1,
+      sourceControlActiveMs: 1,
+      sourceControlHiddenMs: 1,
+      sourceControlSettledMs: 1,
+      sourceControlStatusRows: 1,
     },
     metadata: {
       generatedAt: "2026-08-15T00:00:00.000Z",

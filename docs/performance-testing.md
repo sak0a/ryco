@@ -17,6 +17,49 @@ bun run perf:smoke
 
 The generated JSON is written below `.perf-results/`, which Git ignores.
 
+## Active source-control scenario
+
+Run the credential-free source-control workload after building the production server and web app:
+
+```sh
+bun run perf:source-control
+```
+
+This profile creates a temporary Git repository and bare local remote, registers the repository in
+a fresh Ryco home, then drives the production UI in Chromium. The repository keeps a synthetic
+GitHub-shaped fetch URL for provider detection while a repository-scoped SSH transport and push URL
+route Git entirely to the harness-owned bare repository. No network credential or private
+repository identifier is used or written to the report.
+
+The browser performs a real push to trigger post-push workflow discovery. Deterministic
+source-control RPC responses then let the harness verify and measure:
+
+- the 10-second discovery request stream;
+- Overview and Project Explorer sharing cached PR detail and workflow queries;
+- the 30-second active-check cadence;
+- zero timer-driven source-control requests while hidden;
+- zero timer-driven requests after checks settle;
+- renderer task time, heap, long tasks, and frame pacing with 12 continuously animated status
+  rows; and
+- production server/process-tree CPU and RSS throughout the scenario.
+
+The default one-iteration scenario takes about 90 seconds because it observes real production
+cadences rather than scaling timers. Tune its bounded windows only for diagnosis:
+
+```sh
+bun run perf:external -- \
+  --profile active-source-control \
+  --iterations 3 \
+  --source-control-active-ms 35000 \
+  --source-control-hidden-ms 5000 \
+  --source-control-settled-ms 32000 \
+  --source-control-status-rows 12
+```
+
+Use the same profile with `perf:compare` for a controlled main-versus-candidate measurement. Do
+not supply a real user home to this profile: its local fixture is intentionally disposable and
+isolated per iteration.
+
 ## Measure the current checkout
 
 ```sh
@@ -100,6 +143,8 @@ shell and the default readiness selector is `#root`.
 - HTTP request count and encoded bytes;
 - WebSocket frames and payload bytes;
 - foreground and hidden fetch/XHR polling;
+- active source-control discovery, duplicate-observer, hidden, and settled request counts;
+- active source-control cadence and continuous-status frame pacing;
 - browser task duration and renderer heap around idle windows;
 - offline-to-WebSocket-reconnect time;
 - launched server/provider process-tree CPU, RSS, and process count;

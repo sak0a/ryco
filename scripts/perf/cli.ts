@@ -20,6 +20,7 @@ const KNOWN_OPTIONS = new Set([
   "base",
   "candidate",
   "url",
+  "profile",
   "iterations",
   "idle-ms",
   "hidden-idle-ms",
@@ -28,6 +29,11 @@ const KNOWN_OPTIONS = new Set([
   "fixture-home",
   "target-path",
   "ready-selector",
+  "source-control-discovery-timeout-ms",
+  "source-control-active-ms",
+  "source-control-hidden-ms",
+  "source-control-settled-ms",
+  "source-control-status-rows",
   "output",
   "policy",
   "help",
@@ -51,6 +57,7 @@ Options:
   --base <ref>                 Baseline ref. Default: origin/main
   --candidate <ref>            Candidate ref. Default: HEAD
   --url <url>                  Measure an already-running application.
+  --profile <name>             shell or active-source-control. Default: shell.
   --iterations <count>         Measured iterations. Default: 5 (smoke: 1)
   --idle-ms <ms>               Foreground idle window.
   --hidden-idle-ms <ms>        Background idle window.
@@ -59,6 +66,16 @@ Options:
   --fixture-home <path>        Stopped, sanitized Ryco home copied per iteration.
   --target-path <path>         Route opened after pairing.
   --ready-selector <selector>  Visible readiness selector. Default: #root
+  --source-control-discovery-timeout-ms <ms>
+                               Deadline for the 10s post-push discovery sample.
+  --source-control-active-ms <ms>
+                               Visible active-check observation window.
+  --source-control-hidden-ms <ms>
+                               Hidden-document observation window.
+  --source-control-settled-ms <ms>
+                               Settled-check observation window.
+  --source-control-status-rows <count>
+                               Continuously animated status rows. Default: 12.
   --output <directory>         Result directory. Default: .perf-results/<timestamp>
   --policy <json-file>         Comparison policy override.
   --help                       Show this help.
@@ -106,10 +123,15 @@ function positiveInteger(
   return parsed;
 }
 
-function scenarioFromArgs(parsed: ParsedArgs): PerfScenarioConfig {
+export function scenarioFromArgs(parsed: ParsedArgs): PerfScenarioConfig {
   const defaults = defaultScenarioConfig(parsed.command === "smoke");
   const fixtureHome = parsed.values.get("fixture-home");
+  const profile = parsed.values.get("profile") ?? defaults.profile;
+  if (profile !== "shell" && profile !== "active-source-control") {
+    throw new Error("--profile must be 'shell' or 'active-source-control'.");
+  }
   return {
+    profile,
     iterations: positiveInteger(parsed.values, "iterations", defaults.iterations),
     idleMs: positiveInteger(parsed.values, "idle-ms", defaults.idleMs),
     hiddenIdleMs: positiveInteger(parsed.values, "hidden-idle-ms", defaults.hiddenIdleMs),
@@ -122,6 +144,31 @@ function scenarioFromArgs(parsed: ParsedArgs): PerfScenarioConfig {
     readySelector: parsed.values.get("ready-selector") ?? defaults.readySelector,
     targetPath: parsed.values.get("target-path") ?? defaults.targetPath,
     fixtureHome: fixtureHome ? path.resolve(fixtureHome) : defaults.fixtureHome,
+    sourceControlDiscoveryTimeoutMs: positiveInteger(
+      parsed.values,
+      "source-control-discovery-timeout-ms",
+      defaults.sourceControlDiscoveryTimeoutMs,
+    ),
+    sourceControlActiveMs: positiveInteger(
+      parsed.values,
+      "source-control-active-ms",
+      defaults.sourceControlActiveMs,
+    ),
+    sourceControlHiddenMs: positiveInteger(
+      parsed.values,
+      "source-control-hidden-ms",
+      defaults.sourceControlHiddenMs,
+    ),
+    sourceControlSettledMs: positiveInteger(
+      parsed.values,
+      "source-control-settled-ms",
+      defaults.sourceControlSettledMs,
+    ),
+    sourceControlStatusRows: positiveInteger(
+      parsed.values,
+      "source-control-status-rows",
+      defaults.sourceControlStatusRows,
+    ),
   };
 }
 

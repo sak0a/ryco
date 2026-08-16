@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 
-import { parseArgs } from "./cli.ts";
+import { parseArgs, scenarioFromArgs } from "./cli.ts";
 
 describe("external performance CLI", () => {
   it("parses comparison refs and scenario values", () => {
@@ -23,5 +23,29 @@ describe("external performance CLI", () => {
     assert.throws(() => parseArgs(["unknown"]), /Unknown command/u);
     assert.throws(() => parseArgs(["run", "--iterations"]), /requires a value/u);
     assert.throws(() => parseArgs(["run", "--mystery", "value"]), /Unknown option/u);
+  });
+
+  it("parses the active source-control profile and its bounded windows", () => {
+    const parsed = parseArgs([
+      "run",
+      "--profile",
+      "active-source-control",
+      "--source-control-active-ms",
+      "31000",
+      "--source-control-status-rows",
+      "8",
+    ]);
+    const scenario = scenarioFromArgs(parsed);
+
+    assert.equal(scenario.profile, "active-source-control");
+    assert.equal(scenario.sourceControlActiveMs, 31_000);
+    assert.equal(scenario.sourceControlStatusRows, 8);
+  });
+
+  it("rejects unknown profiles", () => {
+    assert.throws(
+      () => scenarioFromArgs(parseArgs(["run", "--profile", "mystery"])),
+      /--profile must be/u,
+    );
   });
 });

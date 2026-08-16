@@ -1,6 +1,9 @@
-export const EXTERNAL_PERF_SCHEMA_VERSION = 1 as const;
+export const EXTERNAL_PERF_SCHEMA_VERSION = 2 as const;
+
+export type PerfScenarioProfile = "shell" | "active-source-control";
 
 export interface PerfScenarioConfig {
+  readonly profile: PerfScenarioProfile;
   readonly iterations: number;
   readonly idleMs: number;
   readonly hiddenIdleMs: number;
@@ -9,6 +12,11 @@ export interface PerfScenarioConfig {
   readonly readySelector: string;
   readonly targetPath: string | null;
   readonly fixtureHome: string | null;
+  readonly sourceControlDiscoveryTimeoutMs: number;
+  readonly sourceControlActiveMs: number;
+  readonly sourceControlHiddenMs: number;
+  readonly sourceControlSettledMs: number;
+  readonly sourceControlStatusRows: number;
 }
 
 export interface PhaseNetworkMetrics {
@@ -41,6 +49,22 @@ export interface BrowserVitals {
   readonly maxLongTaskMs: number;
 }
 
+export interface SourceControlScenarioMetrics {
+  readonly supported: boolean;
+  readonly discoveryRequests: number;
+  readonly discoveryCadenceMs: number | null;
+  readonly duplicateObserverRequests: number;
+  readonly activeRequests: number;
+  readonly activeCadenceMs: number | null;
+  readonly hiddenRequests: number;
+  readonly settledRequests: number;
+  readonly statusMotionRows: number;
+  readonly statusMotionFrames: number;
+  readonly statusMotionP95FrameMs: number | null;
+  readonly statusMotionDroppedFrames: number;
+  readonly unavailableReason: string | null;
+}
+
 export interface PerfSample {
   readonly iteration: number;
   readonly serverReadyMs: number | null;
@@ -55,6 +79,7 @@ export interface PerfSample {
   readonly hiddenIdleNetwork: PhaseNetworkMetrics;
   readonly reconnectNetwork: PhaseNetworkMetrics;
   readonly processTree: ProcessTreeSummary;
+  readonly sourceControl: SourceControlScenarioMetrics;
   readonly errors: readonly string[];
 }
 
@@ -87,7 +112,16 @@ export type PerfMetricKey =
   | "heapAfterIdleBytes"
   | "peakTreeRssBytes"
   | "medianTreeCpuPercent"
-  | "peakTreeCpuPercent";
+  | "peakTreeCpuPercent"
+  | "sourceControlDiscoveryRequests"
+  | "sourceControlDiscoveryCadenceMs"
+  | "sourceControlDuplicateObserverRequests"
+  | "sourceControlActiveRequests"
+  | "sourceControlActiveCadenceMs"
+  | "sourceControlHiddenRequests"
+  | "sourceControlSettledRequests"
+  | "statusMotionP95FrameMs"
+  | "statusMotionDroppedFrames";
 
 export type ComparisonMetricKey =
   | PerfMetricKey
@@ -173,6 +207,22 @@ export const EMPTY_NETWORK_METRICS: PhaseNetworkMetrics = {
   webSocketBytes: 0,
 };
 
+export const UNSUPPORTED_SOURCE_CONTROL_METRICS: SourceControlScenarioMetrics = {
+  supported: false,
+  discoveryRequests: 0,
+  discoveryCadenceMs: null,
+  duplicateObserverRequests: 0,
+  activeRequests: 0,
+  activeCadenceMs: null,
+  hiddenRequests: 0,
+  settledRequests: 0,
+  statusMotionRows: 0,
+  statusMotionFrames: 0,
+  statusMotionP95FrameMs: null,
+  statusMotionDroppedFrames: 0,
+  unavailableReason: "The shell profile does not run the active source-control scenario.",
+};
+
 export const DEFAULT_COMPARISON_POLICY: ComparisonPolicy = {
   metrics: {
     serverReadyMs: { relativePercent: 15, absolute: 50 },
@@ -192,6 +242,10 @@ export const DEFAULT_COMPARISON_POLICY: ComparisonPolicy = {
     bundleRawBytes: { relativePercent: 5, absolute: 50 * 1024 },
     bundleGzipBytes: { relativePercent: 5, absolute: 20 * 1024 },
     bundleBrotliBytes: { relativePercent: 5, absolute: 20 * 1024 },
+    sourceControlDiscoveryCadenceMs: { relativePercent: 20, absolute: 2_000 },
+    sourceControlActiveCadenceMs: { relativePercent: 15, absolute: 3_000 },
+    statusMotionP95FrameMs: { relativePercent: 20, absolute: 4 },
+    statusMotionDroppedFrames: { relativePercent: 50, absolute: 3 },
   },
   idleRequestAllowance: 1,
   failOnSampleErrors: true,
@@ -219,6 +273,15 @@ export const PERF_METRIC_KEYS: readonly PerfMetricKey[] = [
   "peakTreeRssBytes",
   "medianTreeCpuPercent",
   "peakTreeCpuPercent",
+  "sourceControlDiscoveryRequests",
+  "sourceControlDiscoveryCadenceMs",
+  "sourceControlDuplicateObserverRequests",
+  "sourceControlActiveRequests",
+  "sourceControlActiveCadenceMs",
+  "sourceControlHiddenRequests",
+  "sourceControlSettledRequests",
+  "statusMotionP95FrameMs",
+  "statusMotionDroppedFrames",
 ];
 
 export function sampleMetric(sample: PerfSample, metric: PerfMetricKey): number | null {
@@ -258,5 +321,23 @@ export function sampleMetric(sample: PerfSample, metric: PerfMetricKey): number 
       return sample.processTree.medianCpuPercent;
     case "peakTreeCpuPercent":
       return sample.processTree.peakCpuPercent;
+    case "sourceControlDiscoveryRequests":
+      return sample.sourceControl.supported ? sample.sourceControl.discoveryRequests : null;
+    case "sourceControlDiscoveryCadenceMs":
+      return sample.sourceControl.discoveryCadenceMs;
+    case "sourceControlDuplicateObserverRequests":
+      return sample.sourceControl.supported ? sample.sourceControl.duplicateObserverRequests : null;
+    case "sourceControlActiveRequests":
+      return sample.sourceControl.supported ? sample.sourceControl.activeRequests : null;
+    case "sourceControlActiveCadenceMs":
+      return sample.sourceControl.activeCadenceMs;
+    case "sourceControlHiddenRequests":
+      return sample.sourceControl.supported ? sample.sourceControl.hiddenRequests : null;
+    case "sourceControlSettledRequests":
+      return sample.sourceControl.supported ? sample.sourceControl.settledRequests : null;
+    case "statusMotionP95FrameMs":
+      return sample.sourceControl.statusMotionP95FrameMs;
+    case "statusMotionDroppedFrames":
+      return sample.sourceControl.supported ? sample.sourceControl.statusMotionDroppedFrames : null;
   }
 }

@@ -11,6 +11,7 @@ import { runBrowserProbe, sanitizeDiagnostic } from "./browserProbe.ts";
 import { ProcessTreeSampler } from "./processSampler.ts";
 import {
   EXTERNAL_PERF_SCHEMA_VERSION,
+  UNSUPPORTED_SOURCE_CONTROL_METRICS,
   type BenchmarkResult,
   type BuildMeasurement,
   type BundleMeasurement,
@@ -23,6 +24,10 @@ import {
   prepareIterationHome,
   reserveLoopbackPort,
 } from "./serverLifecycle.ts";
+import {
+  prepareActiveSourceControlFixture,
+  type ActiveSourceControlFixture,
+} from "./sourceControlFixture.ts";
 
 const UNSAMPLED_PROCESS_TREE: ProcessTreeSummary = {
   supported: false,
@@ -53,6 +58,7 @@ function benchmarkMetadata() {
 
 export function defaultScenarioConfig(smoke = false): PerfScenarioConfig {
   return {
+    profile: "shell",
     iterations: smoke ? 1 : 5,
     idleMs: smoke ? 2_000 : 5_000,
     hiddenIdleMs: smoke ? 1_000 : 5_000,
@@ -61,6 +67,11 @@ export function defaultScenarioConfig(smoke = false): PerfScenarioConfig {
     readySelector: "#root",
     targetPath: null,
     fixtureHome: null,
+    sourceControlDiscoveryTimeoutMs: 18_000,
+    sourceControlActiveMs: 35_000,
+    sourceControlHiddenMs: 5_000,
+    sourceControlSettledMs: 32_000,
+    sourceControlStatusRows: 12,
   };
 }
 
@@ -95,6 +106,7 @@ export async function runCheckoutBenchmark(input: {
       let processTree = UNSAMPLED_PROCESS_TREE;
       let entryUrl = input.externalUrl ?? null;
       let launchedServer: Awaited<ReturnType<typeof launchProductionServer>> | null = null;
+      let sourceControlFixture: ActiveSourceControlFixture | null = null;
       const samplerRef: { current: ProcessTreeSampler | null } = { current: null };
       const iterationErrors: string[] = [];
 
@@ -105,6 +117,13 @@ export async function runCheckoutBenchmark(input: {
             destination: iterationHome,
             fixtureHome: input.scenario.fixtureHome,
           });
+          if (input.scenario.profile === "active-source-control") {
+            sourceControlFixture = prepareActiveSourceControlFixture({
+              repoRoot: input.repoRoot,
+              home: iterationHome,
+              fixtureRoot: path.join(temporaryRoot, `source-control-${iteration}`),
+            });
+          }
           const port = await reserveLoopbackPort();
           launchedServer = await launchProductionServer({
             repoRoot: input.repoRoot,
@@ -124,6 +143,7 @@ export async function runCheckoutBenchmark(input: {
           browser,
           entryUrl,
           scenario: input.scenario,
+          sourceControlFixture,
         });
         iterationErrors.push(...browserResult.errors);
         if (launchedServer && launchedServer.child.exitCode !== null) {
@@ -146,6 +166,7 @@ export async function runCheckoutBenchmark(input: {
           hiddenIdleNetwork: browserResult.hiddenIdleNetwork,
           reconnectNetwork: browserResult.reconnectNetwork,
           processTree,
+          sourceControl: browserResult.sourceControl ?? UNSUPPORTED_SOURCE_CONTROL_METRICS,
           errors: iterationErrors,
         });
       } catch (error) {
