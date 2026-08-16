@@ -218,6 +218,7 @@ const config: ExpoConfig = {
   },
   plugins: [
     "expo-asset",
+    "expo-image",
     [
       "expo-font",
       {
