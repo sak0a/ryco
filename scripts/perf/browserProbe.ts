@@ -561,7 +561,6 @@ async function startStatusMotionFrameSampler(page: Page, rows: number): Promise<
       label.className =
         "sidebar-status-text sidebar-status-text--in-progress sidebar-status-text--flow";
       label.style.setProperty("--sidebar-status-text-spread", "28px");
-      label.style.setProperty("--sidebar-status-text-period", "56px");
       label.textContent = `Working session ${index + 1}`;
       row.append(signal, label);
       host.append(row);

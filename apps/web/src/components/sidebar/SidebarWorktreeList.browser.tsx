@@ -229,7 +229,7 @@ describe("SidebarWorktreeList", () => {
     expect(inProgressTitle.classList.contains("sidebar-status-text--in-progress")).toBe(true);
     expect(inProgressTitle.classList.contains("sidebar-status-text--flow")).toBe(true);
     expect(inProgressTitle.style.getPropertyValue("--sidebar-status-text-spread")).toBe("24px");
-    expect(inProgressTitle.style.getPropertyValue("--sidebar-status-text-period")).toBe("48px");
+    expect(inProgressTitle.style.getPropertyValue("--sidebar-status-text-period")).toBe("");
     expect(inProgressTitle.getAttribute("aria-label")).toBe("In progress: working-feat");
   });
 });

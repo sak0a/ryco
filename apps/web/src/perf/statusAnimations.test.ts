@@ -63,9 +63,17 @@ describe("status animation CSS", () => {
     expect(vendoredUtility).not.toContain("thinking-status-shimmer");
   });
 
-  it("keeps a colored sidebar wave present throughout its continuous flow", () => {
+  it("moves one neutral crest across a continuously state-colored sidebar label", () => {
     const fileEdit = cssSection(".chat-file-edit-text--active", ".chat-final-diff-section");
     const sidebar = cssSection(".sidebar-status-text.sidebar-status-text", "@media (forced-colors");
+    const inactiveWorking = cssSection(
+      ".sidebar-status-text--in-progress",
+      ".sidebar-status-text--review",
+    );
+    const activeWorking = cssSection(
+      '[data-active="true"] .sidebar-status-text--in-progress',
+      '.dark [data-active="true"] .sidebar-status-text--in-progress',
+    );
     const hidden = cssSection(":root[data-ryco-motion-paused]", "@keyframes status-pulse");
 
     expect(fileEdit).toContain("animation: chat-file-edit-text-shimmer 6s linear infinite");
@@ -73,10 +81,17 @@ describe("status animation CSS", () => {
     expect(fileEdit).toMatch(/20%,\s*100%/s);
     expect(sidebar).toContain("--sidebar-status-text-duration: 2.35s");
     expect(sidebar).toContain("--sidebar-status-text-crest-color");
-    expect(sidebar).toContain("background-repeat: repeat-x");
-    expect(sidebar).toContain("background-size: var(--sidebar-status-text-period) 100%");
+    expect(inactiveWorking).toContain("--sidebar-status-text-base-color: var(--color-sky-500)");
+    expect(inactiveWorking).toContain("--sidebar-status-text-shimmer-color: var(--color-zinc-300)");
+    expect(activeWorking).toContain("--sidebar-status-text-base-color: var(--color-sky-500)");
+    expect(activeWorking).toContain("--sidebar-status-text-crest-color: var(--color-white)");
+    expect(sidebar).toContain("background-repeat: no-repeat");
+    expect(sidebar).toContain("background-size: 250% 100%");
     expect(sidebar).toContain("animation: sidebar-status-text-flow");
-    expect(sidebar).toMatch(/background-position: var\(--sidebar-status-text-period\) center;/s);
+    expect(sidebar).toMatch(/from\s*{\s*background-position: 100% center;/s);
+    expect(sidebar).toMatch(/to\s*{\s*background-position: 0 center;/s);
+    expect(sidebar).not.toContain("--sidebar-status-text-period");
+    expect(sidebar).not.toContain("repeat-x");
     expect(sidebar).not.toMatch(/sidebar-status-text-flow[^]*steps\(/s);
     expect(hidden).toContain(".chat-file-edit-text--active");
     expect(hidden).toContain(".sidebar-status-text--flow");

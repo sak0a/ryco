@@ -52,6 +52,5 @@ export function resolveSidebarStatusTextStyle(
       ? {}
       : { "--sidebar-status-text-duration": `${options.durationSeconds}s` }),
     "--sidebar-status-text-spread": `${spreadPx}px`,
-    "--sidebar-status-text-period": `${spreadPx * 2}px`,
   } as CSSProperties;
 }

@@ -1332,22 +1332,21 @@ code {
   .sidebar-status-text.sidebar-status-text {
     --sidebar-status-text-duration: 2.35s;
     --sidebar-status-text-spread: 20px;
-    --sidebar-status-text-period: 40px;
     color: transparent;
     -webkit-text-fill-color: transparent;
     background-image: linear-gradient(
       100deg,
       var(--sidebar-status-text-base-color) 0%,
-      var(--sidebar-status-text-base-color) 16%,
-      var(--sidebar-status-text-shimmer-color) 34%,
+      var(--sidebar-status-text-base-color) calc(50% - var(--sidebar-status-text-spread)),
+      var(--sidebar-status-text-shimmer-color) calc(50% - var(--sidebar-status-text-spread) / 2),
       var(--sidebar-status-text-crest-color) 50%,
-      var(--sidebar-status-text-shimmer-color) 66%,
-      var(--sidebar-status-text-base-color) 84%,
+      var(--sidebar-status-text-shimmer-color) calc(50% + var(--sidebar-status-text-spread) / 2),
+      var(--sidebar-status-text-base-color) calc(50% + var(--sidebar-status-text-spread)),
       var(--sidebar-status-text-base-color) 100%
     );
-    background-repeat: repeat-x;
-    background-size: var(--sidebar-status-text-period) 100%;
-    background-position: 0 center;
+    background-repeat: no-repeat;
+    background-size: 250% 100%;
+    background-position: 100% center;
     background-clip: text;
     -webkit-background-clip: text;
     contain: paint;
@@ -1363,9 +1362,9 @@ code {
   }
 
   .sidebar-status-text--in-progress {
-    --sidebar-status-text-base-color: var(--muted-foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-500);
-    --sidebar-status-text-crest-color: var(--color-cyan-400);
+    --sidebar-status-text-base-color: var(--color-sky-500);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-300);
+    --sidebar-status-text-crest-color: var(--color-zinc-200);
   }
 
   .sidebar-status-text--review {
@@ -1399,21 +1398,21 @@ code {
   }
 
   .dark .sidebar-status-text--in-progress {
-    --sidebar-status-text-base-color: var(--muted-foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-300);
-    --sidebar-status-text-crest-color: var(--color-cyan-200);
+    --sidebar-status-text-base-color: var(--color-sky-300);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-400);
+    --sidebar-status-text-crest-color: var(--color-zinc-300);
   }
 
   [data-active="true"] .sidebar-status-text--in-progress {
-    --sidebar-status-text-base-color: var(--foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-500);
-    --sidebar-status-text-crest-color: var(--color-cyan-400);
+    --sidebar-status-text-base-color: var(--color-sky-500);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-50);
+    --sidebar-status-text-crest-color: var(--color-white);
   }
 
   .dark [data-active="true"] .sidebar-status-text--in-progress {
-    --sidebar-status-text-base-color: var(--foreground);
-    --sidebar-status-text-shimmer-color: var(--color-sky-300);
-    --sidebar-status-text-crest-color: var(--color-cyan-100);
+    --sidebar-status-text-base-color: var(--color-sky-300);
+    --sidebar-status-text-shimmer-color: var(--color-zinc-50);
+    --sidebar-status-text-crest-color: var(--color-white);
   }
 
   .dark .sidebar-status-text--review {
@@ -1448,8 +1447,11 @@ code {
   }
 
   @keyframes sidebar-status-text-flow {
+    from {
+      background-position: 100% center;
+    }
     to {
-      background-position: var(--sidebar-status-text-period) center;
+      background-position: 0 center;
     }
   }
 
