@@ -675,6 +675,7 @@ describe("wsApi", () => {
       timestampFormat: "24-hour" as const,
       preferredEditor: null,
       gitStatusPollIntervalMs: 0 as const,
+      sourceControlRefreshMode: "automatic" as const,
       notifyOnTurnCompleteWhenUnfocused: true,
     };
     const getClientSettings = vi.fn().mockResolvedValue({
@@ -740,6 +741,7 @@ describe("wsApi", () => {
       timestampFormat: "24-hour" as const,
       preferredEditor: null,
       gitStatusPollIntervalMs: 0 as const,
+      sourceControlRefreshMode: "automatic" as const,
       notifyOnTurnCompleteWhenUnfocused: true,
     };
 

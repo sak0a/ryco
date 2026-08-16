@@ -8,7 +8,11 @@ import {
   type ScopedThreadRef,
 } from "@ryco/contracts";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
-import { DEFAULT_UNIFIED_SETTINGS, type GitStatusPollIntervalMs } from "@ryco/contracts/settings";
+import {
+  DEFAULT_UNIFIED_SETTINGS,
+  type GitStatusPollIntervalMs,
+  type SourceControlRefreshMode,
+} from "@ryco/contracts/settings";
 import { Equal } from "effect";
 import { APP_BASE_NAME, APP_VERSION } from "../../branding";
 import {
@@ -75,12 +79,28 @@ const GIT_STATUS_POLL_INTERVAL_OPTIONS = [
   0, 10_000, 30_000, 60_000, 300_000,
 ] as const satisfies readonly GitStatusPollIntervalMs[];
 
+const SOURCE_CONTROL_REFRESH_MODE_LABELS = {
+  automatic: "Automatic",
+  reduced: "Reduced",
+  manual: "Manual",
+} satisfies Record<SourceControlRefreshMode, string>;
+
+const SOURCE_CONTROL_REFRESH_MODE_OPTIONS = [
+  "automatic",
+  "reduced",
+  "manual",
+] as const satisfies readonly SourceControlRefreshMode[];
+
 function parseGitStatusPollInterval(value: string | null): GitStatusPollIntervalMs | null {
   if (value === null) return null;
   const parsed = Number.parseInt(value, 10);
   return GIT_STATUS_POLL_INTERVAL_OPTIONS.includes(parsed as GitStatusPollIntervalMs)
     ? (parsed as GitStatusPollIntervalMs)
     : null;
+}
+
+function parseSourceControlRefreshMode(value: string | null): SourceControlRefreshMode | null {
+  return SOURCE_CONTROL_REFRESH_MODE_OPTIONS.find((mode) => mode === value) ?? null;
 }
 
 function EditorOptionIcon({ editor }: { editor: EditorId }) {
@@ -348,6 +368,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
+      ...(settings.gitStatusPollIntervalMs !== DEFAULT_UNIFIED_SETTINGS.gitStatusPollIntervalMs
+        ? ["Remote Git status"]
+        : []),
+      ...(settings.sourceControlRefreshMode !== DEFAULT_UNIFIED_SETTINGS.sourceControlRefreshMode
+        ? ["PR & workflow updates"]
+        : []),
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open overview"]
         : []),
@@ -384,6 +410,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
+      settings.gitStatusPollIntervalMs,
+      settings.sourceControlRefreshMode,
       settings.timestampFormat,
       theme,
     ],
@@ -404,6 +432,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       diffWordWrap: DEFAULT_UNIFIED_SETTINGS.diffWordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
+      gitStatusPollIntervalMs: DEFAULT_UNIFIED_SETTINGS.gitStatusPollIntervalMs,
+      sourceControlRefreshMode: DEFAULT_UNIFIED_SETTINGS.sourceControlRefreshMode,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
       enableLegacyTokenStreaming: DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
@@ -741,8 +771,8 @@ export function GeneralSettingsPanel({
         />
 
         <SettingsRow
-          title="Git status polling"
-          description="Refresh remote branch and pull request status while a repository is open."
+          title="Remote Git status"
+          description="Refresh remote branch and pull request metadata while a repository is open."
           resetAction={
             settings.gitStatusPollIntervalMs !==
             DEFAULT_UNIFIED_SETTINGS.gitStatusPollIntervalMs ? (
@@ -775,6 +805,46 @@ export function GeneralSettingsPanel({
                 {GIT_STATUS_POLL_INTERVAL_OPTIONS.map((interval) => (
                   <SelectItem key={interval} hideIndicator value={String(interval)}>
                     {GIT_STATUS_POLL_INTERVAL_LABELS[interval]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="PR & workflow updates"
+          description="Control automatic pull request and workflow refreshes. Automatic is fast after pushes and stops when checks settle."
+          resetAction={
+            settings.sourceControlRefreshMode !==
+            DEFAULT_UNIFIED_SETTINGS.sourceControlRefreshMode ? (
+              <SettingResetButton
+                label="PR and workflow updates"
+                onClick={() =>
+                  updateSettings({
+                    sourceControlRefreshMode: DEFAULT_UNIFIED_SETTINGS.sourceControlRefreshMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sourceControlRefreshMode}
+              onValueChange={(value) => {
+                const mode = parseSourceControlRefreshMode(value);
+                if (mode !== null) updateSettings({ sourceControlRefreshMode: mode });
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="PR and workflow update mode">
+                <SelectValue>
+                  {SOURCE_CONTROL_REFRESH_MODE_LABELS[settings.sourceControlRefreshMode]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {SOURCE_CONTROL_REFRESH_MODE_OPTIONS.map((mode) => (
+                  <SelectItem key={mode} hideIndicator value={mode}>
+                    {SOURCE_CONTROL_REFRESH_MODE_LABELS[mode]}
                   </SelectItem>
                 ))}
               </SelectPopup>
