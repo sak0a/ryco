@@ -92,6 +92,7 @@
     "@effect/sql-sqlite-bun": "catalog:",
     "@effect/vitest": "catalog:",
     "effect": "catalog:",
+    "next": "16.3.1",
     "vite": "catalog:",
     "vitest": "catalog:"
   },
