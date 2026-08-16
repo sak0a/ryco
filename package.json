@@ -29,8 +29,8 @@
       "tsdown": "^0.22.14",
       "typescript": "7.0.2",
       "vitest": "4.1.10",
-      "vite": "npm:@voidzero-dev/vite-plus-core@0.2.8",
-      "vite-plus": "0.2.8"
+      "vite": "npm:@voidzero-dev/vite-plus-core@0.2.9",
+      "vite-plus": "0.2.9"
     }
   },
   "type": "module",
@@ -77,9 +77,9 @@
   "devDependencies": {
     "@effect/tsgo": "catalog:",
     "@types/node": "catalog:",
-    "oxfmt": "^0.62.0",
-    "oxlint": "^1.77.0",
-    "turbo": "^2.10.9",
+    "oxfmt": "^0.63.0",
+    "oxlint": "^1.78.0",
+    "turbo": "^2.10.10",
     "typescript": "catalog:",
     "vite-plus": "catalog:",
     "vitest": "catalog:"

@@ -95,7 +95,7 @@
     "shiki": "4.2.0",
     "tailwind-merge": "^3.6.0",
     "uniwind": "^1.10.1",
-    "zustand": "^5.0.14"
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

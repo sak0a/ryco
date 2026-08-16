@@ -226,7 +226,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       0,
       `Expected desktop electron-builder binary to resolve without install.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
     );
-    assert.equal(result.stdout.trim(), "26.8.1");
+    assert.equal(result.stdout.trim(), "26.15.3");
   });
 
   it("builds the web app before bundling it into the desktop server", () => {
