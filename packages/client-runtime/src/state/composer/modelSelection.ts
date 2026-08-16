@@ -1,6 +1,10 @@
 import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  DEFAULT_GIT_TEXT_GENERATION_OPTIONS,
+  DEFAULT_GIT_TEXT_GENERATION_OPTIONS_BY_PROVIDER,
+  DEFAULT_MODEL,
+  DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   type ModelSelection,
   ProviderDriverKind,
@@ -89,7 +93,10 @@ function toAppModelOption(model: ServerProvider["models"][number]): AppModelOpti
 function readInstanceModelPreferences(
   settings: UnifiedSettings,
   instanceId: ProviderInstanceId,
-): { readonly hiddenModels: ReadonlyArray<string>; readonly modelOrder: ReadonlyArray<string> } {
+): {
+  readonly hiddenModels: ReadonlyArray<string>;
+  readonly modelOrder: ReadonlyArray<string>;
+} {
   return (
     settings.providerModelPreferences?.[instanceId] ?? {
       hiddenModels: [],
@@ -243,8 +250,10 @@ export function resolveAppModelSelectionForInstance(
   );
   if (!entry) return null;
   const options = getAppModelOptionsForInstance(settings, entry);
+  const configuredDefault = DEFAULT_MODEL_BY_PROVIDER[entry.driverKind] ?? DEFAULT_MODEL;
   return (
     resolveSelectableModel(entry.driverKind, selectedModel, options) ??
+    resolveSelectableModel(entry.driverKind, configuredDefault, options) ??
     options[0]?.slug ??
     entry.models[0]?.slug ??
     null
@@ -276,6 +285,7 @@ export function resolveAppModelSelectionState(
   const selection = settings.textGenerationModelSelection ?? {
     instanceId: DEFAULT_TEXT_GENERATION_INSTANCE_ID,
     model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+    options: DEFAULT_GIT_TEXT_GENERATION_OPTIONS,
   };
   const entries = deriveProviderInstanceEntries(providers);
   const selectedEntry = entries.find(
@@ -286,11 +296,18 @@ export function resolveAppModelSelectionState(
   if (entry) {
     // When the instance changed due to fallback (e.g. selected instance was disabled),
     // don't carry over the old instance's model — use the fallback instance's default.
-    const selectedModel = selectedEntry ? selection.model : null;
+    const textGenerationDefault =
+      DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[entry.driverKind] ??
+      DEFAULT_GIT_TEXT_GENERATION_MODEL;
+    const options = getAppModelOptionsForInstance(settings, entry);
+    const retainedModel = selectedEntry
+      ? resolveSelectableModel(entry.driverKind, selection.model, options)
+      : null;
     const model =
-      resolveAppModelSelectionForInstance(entry.instanceId, settings, providers, selectedModel) ??
-      entry.models[0]?.slug ??
-      DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[entry.driverKind];
+      retainedModel ??
+      resolveSelectableModel(entry.driverKind, textGenerationDefault, options) ??
+      options[0]?.slug ??
+      entry.models[0]?.slug;
     if (!model) {
       return createModelSelection(entry.instanceId, "", []);
     }
@@ -300,7 +317,9 @@ export function resolveAppModelSelectionState(
       model,
       models: entry.models,
       prompt: "",
-      modelOptions: selectedEntry ? selection.options : undefined,
+      modelOptions: retainedModel
+        ? selection.options
+        : DEFAULT_GIT_TEXT_GENERATION_OPTIONS_BY_PROVIDER[entry.driverKind],
     });
 
     return createModelSelection(entry.instanceId, model, modelOptionsForDispatch);

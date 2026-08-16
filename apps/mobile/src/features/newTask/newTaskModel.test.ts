@@ -44,7 +44,10 @@ describe("New Task defaults", () => {
     expect(defaults.environment?.environmentId).toBe(readyEnvironment.environmentId);
     expect(defaults.project?.id).toBe(project.id);
     expect(defaults.worktree).toBeNull();
-    expect(defaults.modelSelection).toMatchObject({ instanceId: "codex", model: "gpt-5.4" });
+    expect(defaults.modelSelection).toMatchObject({
+      instanceId: "codex",
+      model: "gpt-5.6-terra",
+    });
   });
 
   it("preserves an active launched project and worktree", () => {

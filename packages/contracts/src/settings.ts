@@ -3,7 +3,11 @@ import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
 import { EditorId } from "./editor.ts";
-import { DEFAULT_GIT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
+import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+  DEFAULT_GIT_TEXT_GENERATION_OPTIONS,
+  ProviderOptionSelections,
+} from "./model.ts";
 import { AgentTokenMode, DEFAULT_AGENT_TOKEN_MODE, ModelSelection } from "./orchestration.ts";
 import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
 
@@ -301,7 +305,10 @@ export const CopilotSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Binary path",
         description: "Path to the GitHub Copilot CLI binary.",
-        providerSettingsForm: { placeholder: "copilot", clearWhenEmpty: "omit" },
+        providerSettingsForm: {
+          placeholder: "copilot",
+          clearWhenEmpty: "omit",
+        },
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
@@ -418,6 +425,7 @@ export const ServerSettings = Schema.Struct({
       Effect.succeed({
         instanceId: ProviderInstanceId.make("codex"),
         model: DEFAULT_GIT_TEXT_GENERATION_MODEL,
+        options: DEFAULT_GIT_TEXT_GENERATION_OPTIONS,
       }),
     ),
   ),

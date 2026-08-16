@@ -101,6 +101,7 @@ export interface SendTurnProjectContext {
 
 export interface SendTurnScrollDeps {
   scrollToEndBeforeOptimistic: () => Promise<void>;
+  scrollToEndAfterOptimistic: () => void;
 }
 
 export interface SendTurnComposerDraftDeps {
@@ -337,6 +338,7 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
       streaming: false,
     },
   ]);
+  scroll.scrollToEndAfterOptimistic();
 
   setThreadError(thread.threadId, null);
   draft.setComposerDraftTokenMode(

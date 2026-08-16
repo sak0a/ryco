@@ -264,12 +264,14 @@ describe("buildSendTurnBootstrap", () => {
 // ---------------------------------------------------------------------------
 
 describe("executeChatSendTurn", () => {
-  it("scrolls to the bottom before appending the optimistic message on send", async () => {
-    // Records the observable side-effect order so we can assert the timeline is
-    // pinned to the bottom *before* the user's message is inserted.
+  it("scrolls to the bottom before and after appending the optimistic message", async () => {
+    // The first scroll arms live-follow; the second reaches the newly rendered row.
     const order: string[] = [];
     const scrollToEndBeforeOptimistic = vi.fn(async () => {
       order.push("scroll");
+    });
+    const scrollToEndAfterOptimistic = vi.fn(() => {
+      order.push("scroll-after");
     });
     const setOptimisticUserMessages = vi.fn(() => {
       order.push("optimistic");
@@ -320,7 +322,7 @@ describe("executeChatSendTurn", () => {
         projectCwd: "/tmp/project",
         defaultModelSelection: null,
       },
-      scroll: { scrollToEndBeforeOptimistic },
+      scroll: { scrollToEndBeforeOptimistic, scrollToEndAfterOptimistic },
       draft: {
         composerDraftTarget: DraftId.make("draft-1"),
         environmentId: EnvironmentId.make("env-1"),
@@ -353,10 +355,10 @@ describe("executeChatSendTurn", () => {
     });
 
     expect(scrollToEndBeforeOptimistic).toHaveBeenCalledTimes(1);
+    expect(scrollToEndAfterOptimistic).toHaveBeenCalledTimes(1);
     expect(setOptimisticUserMessages).toHaveBeenCalledTimes(1);
     expect(dispatchCommand).toHaveBeenCalledTimes(1);
-    // Scroll pins to the bottom, then the optimistic message is inserted, then dispatched.
-    expect(order).toEqual(["scroll", "optimistic", "dispatch"]);
+    expect(order).toEqual(["scroll", "optimistic", "scroll-after", "dispatch"]);
     expect(dispatchCommand).toHaveBeenCalledWith(
       expect.objectContaining({ type: "thread.turn.start" }),
     );
@@ -418,7 +420,10 @@ describe("executeChatSendTurn", () => {
         projectCwd: "/tmp/project",
         defaultModelSelection: null,
       },
-      scroll: { scrollToEndBeforeOptimistic: vi.fn(async () => {}) },
+      scroll: {
+        scrollToEndBeforeOptimistic: vi.fn(async () => {}),
+        scrollToEndAfterOptimistic: vi.fn(() => {}),
+      },
       draft: {
         composerDraftTarget: DraftId.make("draft-handoff"),
         environmentId: EnvironmentId.make("env-1"),

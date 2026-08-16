@@ -1,5 +1,6 @@
 import type { Project, SidebarWorktreeSummary } from "@ryco/client-runtime/state/threads";
 import {
+  DEFAULT_MODEL,
   ProviderInstanceId,
   type EnvironmentId,
   type ModelSelection,
@@ -70,7 +71,7 @@ export function deriveNewTaskDefaults(input: {
     worktree: launchedWorktree ?? null,
     modelSelection: project?.defaultModelSelection ?? {
       instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5.4",
+      model: DEFAULT_MODEL,
     },
     runtimeMode: "full-access",
     interactionMode: "default",

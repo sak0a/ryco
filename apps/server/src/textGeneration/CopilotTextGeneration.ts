@@ -2,6 +2,7 @@ import {
   CodexSettings,
   DEFAULT_GIT_TEXT_GENERATION_MODEL,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  DEFAULT_GIT_TEXT_GENERATION_OPTIONS_BY_PROVIDER,
   ProviderDriverKind,
   ProviderInstanceId,
   TextGenerationError,
@@ -26,11 +27,13 @@ const ThreadTitleResponse = Schema.Struct({
 });
 
 function gitTextGenerationSelection(): ModelSelection {
+  const options = DEFAULT_GIT_TEXT_GENERATION_OPTIONS_BY_PROVIDER[CODEX_DRIVER_KIND];
   return {
     instanceId: ProviderInstanceId.make("codex"),
     model:
       DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[CODEX_DRIVER_KIND] ??
       DEFAULT_GIT_TEXT_GENERATION_MODEL,
+    ...(options ? { options } : {}),
   };
 }
 
@@ -77,7 +80,9 @@ export const makeCopilotTextGeneration = Effect.fn("makeCopilotTextGeneration")(
       const sessionConfig: SessionConfig = {
         model: input.modelSelection.model,
         ...(reasoningEffort
-          ? { reasoningEffort: reasoningEffort as "low" | "medium" | "high" | "xhigh" }
+          ? {
+              reasoningEffort: reasoningEffort as "low" | "medium" | "high" | "xhigh",
+            }
           : {}),
         workingDirectory: input.cwd,
         streaming: false,

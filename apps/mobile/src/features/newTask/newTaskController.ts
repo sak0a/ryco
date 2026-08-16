@@ -1,4 +1,5 @@
 import {
+  DEFAULT_MODEL,
   ProviderInstanceId,
   type AgentTokenMode,
   type ClientOrchestrationCommand,
@@ -95,7 +96,10 @@ export interface NewTaskControllerDeps {
   readonly createWorktree: (input: {
     readonly projectId: ProjectId;
     readonly branch: string;
-  }) => Promise<{ readonly worktreeId: WorktreeId; readonly threadId: ThreadId }>;
+  }) => Promise<{
+    readonly worktreeId: WorktreeId;
+    readonly threadId: ThreadId;
+  }>;
   readonly waitForProject: (projectId: ProjectId) => Promise<void>;
   readonly waitForWorktree: (worktreeId: WorktreeId) => Promise<void>;
   readonly waitForThread: (input: {
@@ -127,7 +131,7 @@ export function createNewTaskAttempt(input: {
     worktree: input.worktree,
     modelSelection: input.modelSelection ?? {
       instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5.4",
+      model: DEFAULT_MODEL,
     },
     runtimeMode: input.runtimeMode ?? "full-access",
     interactionMode: input.interactionMode ?? "default",
@@ -214,7 +218,10 @@ export async function runNewTaskAttempt(
       if (!worktreeId) {
         const branch = next.worktree.branch.trim();
         if (!branch) throw new Error("branch-required");
-        const created = await deps.createWorktree({ projectId: next.projectId, branch });
+        const created = await deps.createWorktree({
+          projectId: next.projectId,
+          branch,
+        });
         worktreeId = created.worktreeId;
         threadId = created.threadId;
         next = { ...next, worktreeId, threadId };
