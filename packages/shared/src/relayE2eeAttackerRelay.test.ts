@@ -1,6 +1,6 @@
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { p256 } from "@noble/curves/nist";
-import { sha256 } from "@noble/hashes/sha2";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { encode as cborEncode, rfc8949EncodeOptions } from "cborg";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -205,9 +205,15 @@ const CLIENT_PREKEY_TRANSCRIPT = encodeClientE2eePrekeyTranscript({
   createdAt: CREATED_AT,
   expiresAt: EXPIRES_AT,
 });
-const CLIENT_PREKEY_SIGNATURE = p256
-  .sign(sha256(CLIENT_PREKEY_TRANSCRIPT), CLIENT_IDENTITY_SECRET, { prehash: false })
-  .toBytes("compact");
+const CLIENT_PREKEY_SIGNATURE = p256.sign(
+  sha256(CLIENT_PREKEY_TRANSCRIPT),
+  CLIENT_IDENTITY_SECRET,
+  {
+    prehash: false,
+    lowS: false,
+    format: "compact",
+  },
+);
 
 const SUITE = E2EE_SUITE_25519_CHACHAPOLY_SHA256;
 const PLAINTEXT_CEILING = 1024;

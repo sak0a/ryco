@@ -1,7 +1,7 @@
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { expand } from "@noble/hashes/hkdf";
-import { sha256 } from "@noble/hashes/sha2";
-import { clean, concatBytes, utf8ToBytes } from "@noble/hashes/utils";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { expand } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { clean, concatBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { encode, rfc8949EncodeOptions } from "cborg";
 
 import {

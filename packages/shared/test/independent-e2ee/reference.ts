@@ -1,9 +1,9 @@
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { x25519 } from "@noble/curves/ed25519";
-import { p256 } from "@noble/curves/nist";
-import { expand, extract } from "@noble/hashes/hkdf";
-import { sha256 } from "@noble/hashes/sha2";
-import { concatBytes } from "@noble/hashes/utils";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { x25519 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
+import { expand, extract } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { concatBytes } from "@noble/hashes/utils.js";
 import { Tokenizer, Type, decode, encode, rfc8949EncodeOptions } from "cborg";
 
 const EMPTY = new Uint8Array(0);

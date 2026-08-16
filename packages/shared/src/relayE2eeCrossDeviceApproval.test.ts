@@ -1,5 +1,5 @@
-import { ed25519 } from "@noble/curves/ed25519";
-import { p256 } from "@noble/curves/nist";
+import { ed25519 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
 import { describe, expect, it } from "vitest";
 
 import {

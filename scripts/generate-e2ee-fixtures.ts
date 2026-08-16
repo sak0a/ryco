@@ -1,7 +1,7 @@
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { ed25519, x25519 } from "@noble/curves/ed25519";
-import { p256 } from "@noble/curves/nist";
-import { sha256 as nobleSha256, sha512 } from "@noble/hashes/sha2";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { ed25519, x25519 } from "@noble/curves/ed25519.js";
+import { p256 } from "@noble/curves/nist.js";
+import { sha256 as nobleSha256, sha512 } from "@noble/hashes/sha2.js";
 import {
   e2eeChannelSizeBudget,
   E2EE_AAD_BYTES,
@@ -459,7 +459,11 @@ const MAX_SIZE_TIMESTAMP = 4_294_967_296;
 const signNode = (message: Uint8Array, seed: Uint8Array = NODE_IDENTITY_SEED): Uint8Array =>
   ed25519.sign(message, seed);
 const signClient = (message: Uint8Array, secret: Uint8Array = CLIENT_IDENTITY_SECRET): Uint8Array =>
-  p256.sign(nobleSha256(message), secret, { prehash: false }).toBytes("compact");
+  p256.sign(nobleSha256(message), secret, {
+    prehash: false,
+    lowS: false,
+    format: "compact",
+  });
 
 const NODE_IDENTITY_FINGERPRINT = e2eeKeyFingerprint("node-identity", NODE_IDENTITY_PUBLIC);
 const NODE_AGREEMENT_FINGERPRINT = e2eeKeyFingerprint("agreement", NODE_AGREEMENT_PUBLIC);
@@ -3351,9 +3355,11 @@ function buildFamily17(): FixtureFamily {
 
   // ── §7.1: P-256 ECDSA signature encodings ────────────────────────────────
   const validClientSignature = signClient(CLIENT_PREKEY_TRANSCRIPT);
-  const derSignature = p256
-    .sign(nobleSha256(CLIENT_PREKEY_TRANSCRIPT), CLIENT_IDENTITY_SECRET, { prehash: false })
-    .toBytes("der");
+  const derSignature = p256.sign(nobleSha256(CLIENT_PREKEY_TRANSCRIPT), CLIENT_IDENTITY_SECRET, {
+    prehash: false,
+    lowS: false,
+    format: "der",
+  });
   const rawWith = (r: bigint, s: bigint): Uint8Array => {
     const out = new Uint8Array(64);
     out.set(bigIntToBytesBe(r, 32), 0);
@@ -3464,6 +3470,12 @@ function buildFamily17(): FixtureFamily {
     const nonCanonicalIdentityR = bigIntToBytesLe(ED25519_FIELD_PRIME + 1n, 32);
     const canonicalForge = forge(canonicalIdentityR);
     const nonCanonicalForge = forge(nonCanonicalIdentityR);
+    // The v1 corpus records Noble v1's relaxed-mode result. That version
+    // canonicalized R before hashing the verification challenge; Noble v2
+    // correctly hashes the original wire encoding. Recreate the old call here
+    // so upgrading the primitive does not silently rewrite a versioned corpus.
+    const legacyZip215Signature = Uint8Array.from(nonCanonicalForge);
+    legacyZip215Signature.set(ed25519.Point.fromBytes(nonCanonicalIdentityR, true).toBytes(), 0);
 
     cases.push(
       {
@@ -3504,7 +3516,7 @@ function buildFamily17(): FixtureFamily {
             signature: nonCanonicalForge,
           }),
           pinnedPrimitiveUnderZip215Relaxation: ed25519.verify(
-            nonCanonicalForge,
+            legacyZip215Signature,
             F17_ED_MESSAGE,
             F17_ED_PUBLIC,
             { zip215: true },

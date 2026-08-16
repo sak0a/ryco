@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { sha256 } from "@noble/hashes/sha2";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

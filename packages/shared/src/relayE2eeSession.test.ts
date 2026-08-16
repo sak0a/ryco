@@ -1,7 +1,7 @@
-import { chacha20poly1305 } from "@noble/ciphers/chacha";
-import { hmac } from "@noble/hashes/hmac";
-import { sha256 } from "@noble/hashes/sha2";
-import { concatBytes, utf8ToBytes } from "@noble/hashes/utils";
+import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { concatBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -160,10 +160,11 @@ const freshSecrets = (): ReturnType<typeof e2eeSessionSecretsFromNoiseKeys> =>
   });
 
 /**
- * An epoch secret that counts every read of `length`. HKDF-Expand reads exactly
- * that on its PRK, and nothing else on this path reads it — `requireSecret`
- * uses `byteLength` and erasure fills through the internal slot — so the
- * counter answers one question: has an epoch key been DERIVED from this secret?
+ * An epoch secret that counts every read of `length`. HKDF-Expand reads that on
+ * its PRK while `requireSecret` uses `byteLength` and erasure fills through the
+ * internal slot, so a positive count answers one question: has an epoch key
+ * been DERIVED from this secret? The primitive may validate or copy the PRK
+ * more than once without changing that answer.
  */
 class WatchedEpochSecret extends Uint8Array {
   hkdfReads = 0;
@@ -1324,8 +1325,8 @@ describe("relay E2EE erasure and exhaustion (§9.5, §9.6)", () => {
     // The secrets themselves are still erased by the construction funnel.
     expect(hex(epochSecretC2N)).toBe(zeros);
 
-    // Control: an accepted synthetic state derives exactly one key from the
-    // send direction's secret, so the assertion above is about the ordering.
+    // Control: an accepted synthetic state derives a key from the send
+    // direction's secret, so the assertion above is about the ordering.
     const liveSecret = watchedEpochSecret(bytes(EPOCH_SECRET_C2N));
     const control = new E2eeRecordSession({
       secrets: e2eeSessionSecretsFromNoiseKeys({
@@ -1339,7 +1340,7 @@ describe("relay E2EE erasure and exhaustion (§9.5, §9.6)", () => {
       plaintextCeiling: 64,
       testOnlySyntheticSendState: { epoch: E2EE_EPOCH_MAX },
     });
-    expect(liveSecret.hkdfReads).toBe(1);
+    expect(liveSecret.hkdfReads).toBeGreaterThan(0);
     control.erase();
     expect(hex(liveSecret)).toBe(zeros);
   });

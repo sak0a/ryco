@@ -1,4 +1,4 @@
-import { sha256 } from "@noble/hashes/sha2";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 import { E2EE_CLIENT_DISPLAY_LABEL_MAX_CHARS } from "./relayE2eeConstants.ts";
 import {
