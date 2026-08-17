@@ -1,10 +1,13 @@
 import {
+  AgentControlOperationId,
+  AgentControlProposalId,
   AgentControlRequestId,
   AgentControlRiskTag,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
   WorktreeId,
+  type AgentControlOperation,
   type AgentControlPrincipal,
   type AgentControlProposal,
 } from "@ryco/contracts";
@@ -12,6 +15,7 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Layer } from "effect";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { AgentControlOperationRepository } from "../../persistence/Services/AgentControlOperations.ts";
 import { AgentControlAuditRepositoryLive } from "../../persistence/Layers/AgentControlAudit.ts";
 import { AgentControlOperationRepositoryLive } from "../../persistence/Layers/AgentControlOperations.ts";
 import { AgentControlProposalRepositoryLive } from "../../persistence/Layers/AgentControlProposals.ts";
@@ -93,6 +97,57 @@ disabledLayer("AgentControlOperationStore (feature disabled)", (it) => {
         store.createForProposal({ proposal, now: "2026-08-17T00:06:00.000Z" }),
       );
       assert.strictEqual(error._tag, "AgentControlDisabledError");
+    }),
+  );
+
+  it.effect("refuses to advance work while disabled but still lets cleanup settle", () =>
+    Effect.gen(function* () {
+      const repository = yield* AgentControlOperationRepository;
+      const store = yield* AgentControlOperationStore;
+      const seed = (idValue: string, status: AgentControlOperation["status"]) =>
+        repository.insert({
+          operationId: AgentControlOperationId.make(idValue),
+          proposalId: AgentControlProposalId.make(`proposal-${idValue}`),
+          actionKind: "createThreads",
+          status,
+          attempt: 0,
+          state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+          result: null,
+          createdAt: "2026-08-17T00:00:00.000Z",
+          updatedAt: "2026-08-17T00:00:00.000Z",
+        });
+      yield* seed("op-disabled-pending", "pending");
+      yield* seed("op-disabled-running", "running");
+
+      // A pre-existing pending operation must not start running while the
+      // feature gate is off.
+      const startError = yield* Effect.flip(
+        store.transition({
+          operationId: AgentControlOperationId.make("op-disabled-pending"),
+          expectedStatus: "pending",
+          nextStatus: "running",
+          actor: "executor",
+          attempt: 1,
+          state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+          result: null,
+          updatedAt: "2026-08-17T00:01:00.000Z",
+        }),
+      );
+      assert.strictEqual(startError._tag, "AgentControlDisabledError");
+
+      // Winding down an interrupted run stays possible so restart cleanup
+      // can settle stragglers.
+      const compensating = yield* store.transition({
+        operationId: AgentControlOperationId.make("op-disabled-running"),
+        expectedStatus: "running",
+        nextStatus: "compensating",
+        actor: "executor",
+        attempt: 1,
+        state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+        result: null,
+        updatedAt: "2026-08-17T00:01:00.000Z",
+      });
+      assert.strictEqual(compensating.status, "compensating");
     }),
   );
 });

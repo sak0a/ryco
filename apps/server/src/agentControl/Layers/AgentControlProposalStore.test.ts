@@ -10,6 +10,7 @@ import {
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Option } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { AgentControlAuditRepository } from "../../persistence/Services/AgentControlAudit.ts";
@@ -353,6 +354,81 @@ enabledLayer("AgentControlProposalStore", (it) => {
       assert.strictEqual(error._tag, "AgentControlProposalExpiredError");
       const row = Option.getOrThrow(yield* store.getById(proposal.proposalId));
       assert.strictEqual(row.status, "expired");
+    }),
+  );
+
+  it.effect("reports terminal proposals as invalid transitions, not as expired", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const { proposal } = yield* store.submit(submitInput("request-terminal-expiry"));
+      yield* store.decide({
+        proposalId: proposal.proposalId,
+        decision: "rejected",
+        actor: "user",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+      });
+
+      // Long past expiresAt: the refusal must name the real state
+      // ("rejected"), not misreport the settled proposal as expired.
+      const begin = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: proposal.proposalId,
+          actor: "executor",
+          now: "2026-08-17T02:00:00.000Z",
+        }),
+      );
+      assert.strictEqual(begin._tag, "AgentControlInvalidTransitionError");
+
+      const decide = yield* Effect.flip(
+        store.decide({
+          proposalId: proposal.proposalId,
+          decision: "cancelled",
+          actor: "user",
+          decidedAt: "2026-08-17T02:00:00.000Z",
+        }),
+      );
+      assert.strictEqual(decide._tag, "AgentControlInvalidTransitionError");
+
+      const row = Option.getOrThrow(yield* store.getById(proposal.proposalId));
+      assert.strictEqual(row.status, "rejected");
+    }),
+  );
+
+  it.effect("rolls the state change back when the audit append fails", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const store = yield* AgentControlProposalStore;
+      const { proposal } = yield* store.submit(submitInput("request-atomic"));
+
+      yield* sql`
+        CREATE TRIGGER agent_control_audit_fail
+        BEFORE INSERT ON agent_control_audit
+        BEGIN
+          SELECT RAISE(ABORT, 'injected audit failure');
+        END
+      `;
+      const error = yield* Effect.flip(
+        store.decide({
+          proposalId: proposal.proposalId,
+          decision: "approved",
+          actor: "user",
+          decidedAt: "2026-08-17T00:05:00.000Z",
+        }),
+      );
+      assert.strictEqual(error._tag, "PersistenceSqlError");
+      yield* sql`DROP TRIGGER agent_control_audit_fail`;
+
+      // The status change rolled back with the audit failure, so the user
+      // can retry the decision and the audit trail stays gapless.
+      const row = Option.getOrThrow(yield* store.getById(proposal.proposalId));
+      assert.strictEqual(row.status, "pending-user-approval");
+      const approved = yield* store.decide({
+        proposalId: proposal.proposalId,
+        decision: "approved",
+        actor: "user",
+        decidedAt: "2026-08-17T00:06:00.000Z",
+      });
+      assert.strictEqual(approved.status, "approved");
     }),
   );
 

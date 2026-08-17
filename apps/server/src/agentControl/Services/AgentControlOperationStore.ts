@@ -4,9 +4,10 @@
  * and recovery listing.
  *
  * Operations exist only downstream of an executing proposal. Recovery
- * reads and terminal transitions stay available while the feature gate is
- * off so restart cleanup can always settle stragglers — but new operations
- * cannot be created while disabled.
+ * reads and winding-down transitions (compensating, terminal settles) stay
+ * available while the feature gate is off so restart cleanup can always
+ * settle stragglers — but operations cannot be created or moved into
+ * `running` while disabled.
  *
  * @module AgentControlOperationStore
  */

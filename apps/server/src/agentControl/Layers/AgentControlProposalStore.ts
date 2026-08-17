@@ -7,7 +7,9 @@ import {
   type IsoDateTime,
 } from "@ryco/contracts";
 import { Effect, Layer, Option } from "effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { toPersistenceSqlError } from "../../persistence/Errors.ts";
 import {
   AGENT_CONTROL_AUDIT_EVENT_KINDS,
   type AgentControlAuditEventKind,
@@ -67,9 +69,25 @@ const auditMetadataForProposal = (proposal: AgentControlProposal): AgentControlA
 });
 
 const makeAgentControlProposalStore = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
   const policy = yield* AgentControlPolicy;
   const proposals = yield* AgentControlProposalRepository;
   const audit = yield* AgentControlAuditRepository;
+
+  /**
+   * State changes and their audit rows must land atomically: without the
+   * transaction, an audit failure after a committed compare-and-set would
+   * leave a durable state change whose caller saw an error and whose audit
+   * row can never be repaired (the table is append-only).
+   */
+  const atomically = <A, E>(operation: string, effect: Effect.Effect<A, E>) =>
+    sql
+      .withTransaction(effect)
+      .pipe(
+        Effect.catchTag("SqlError", (cause) =>
+          Effect.fail(toPersistenceSqlError(operation)(cause)),
+        ),
+      );
 
   const appendAudit = (input: {
     readonly proposal: AgentControlProposal;
@@ -130,14 +148,35 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
         });
       }
 
-      const won = yield* proposals.compareAndSetStatus({
-        proposalId: input.current.proposalId,
-        expectedStatus: input.current.status,
-        nextStatus: input.nextStatus,
+      const updated: AgentControlProposal = {
+        ...input.current,
+        status: input.nextStatus,
         decidedAt: input.decidedAt,
         result: input.result,
         updatedAt: input.updatedAt,
-      });
+      };
+      const won = yield* atomically(
+        "AgentControlProposalStore.transitionTo:transaction",
+        Effect.gen(function* () {
+          const won = yield* proposals.compareAndSetStatus({
+            proposalId: input.current.proposalId,
+            expectedStatus: input.current.status,
+            nextStatus: input.nextStatus,
+            decidedAt: input.decidedAt,
+            result: input.result,
+            updatedAt: input.updatedAt,
+          });
+          if (won) {
+            yield* appendAudit({
+              proposal: updated,
+              principalScope: agentControlPrincipalScope(updated.principal),
+              eventKind: input.eventKind,
+              createdAt: input.updatedAt,
+            });
+          }
+          return won;
+        }),
+      );
       if (!won) {
         const actual = yield* getOrNotFound(input.current.proposalId);
         return yield* new AgentControlInvalidTransitionError({
@@ -148,31 +187,27 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
           detail: `lost transition race; proposal is now ${actual.status}`,
         });
       }
-
-      const updated: AgentControlProposal = {
-        ...input.current,
-        status: input.nextStatus,
-        decidedAt: input.decidedAt,
-        result: input.result,
-        updatedAt: input.updatedAt,
-      };
-      yield* appendAudit({
-        proposal: updated,
-        principalScope: agentControlPrincipalScope(updated.principal),
-        eventKind: input.eventKind,
-        createdAt: input.updatedAt,
-      });
       return updated;
     });
 
   /**
-   * Expiry enforcement shared by decision and execution paths: a
-   * non-terminal proposal past its expiry is expired in place (best effort;
-   * a lost race just means someone else settled it) and refuses the caller.
+   * Expiry enforcement shared by decision and execution paths. Only states
+   * that can legally expire (pending-user-approval, approved) are expired
+   * in place and refused; an already-expired proposal is refused as
+   * expired; every other state falls through so ordinary transition
+   * validation reports the real conflict (e.g. "completed", not "expired").
    */
   const failIfExpired = (proposal: AgentControlProposal, now: IsoDateTime) =>
     Effect.gen(function* () {
-      if (now < proposal.expiresAt) {
+      if (proposal.status === "expired") {
+        return yield* new AgentControlProposalExpiredError({
+          proposalId: proposal.proposalId,
+          expiresAt: proposal.expiresAt,
+        });
+      }
+      const canExpire =
+        proposalTransitionIssue({ from: proposal.status, to: "expired", actor: "system" }) === null;
+      if (!canExpire || now < proposal.expiresAt) {
         return;
       }
       const expiry = transitionTo({
@@ -223,14 +258,22 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
         result: null,
       };
 
-      const inserted = yield* proposals.insert({ proposal, principalScope });
+      const inserted = yield* atomically(
+        "AgentControlProposalStore.submit:transaction",
+        Effect.gen(function* () {
+          const inserted = yield* proposals.insert({ proposal, principalScope });
+          if (inserted) {
+            yield* appendAudit({
+              proposal,
+              principalScope,
+              eventKind: AGENT_CONTROL_AUDIT_EVENT_KINDS.proposalCreated,
+              createdAt: input.now,
+            });
+          }
+          return inserted;
+        }),
+      );
       if (inserted) {
-        yield* appendAudit({
-          proposal,
-          principalScope,
-          eventKind: AGENT_CONTROL_AUDIT_EVENT_KINDS.proposalCreated,
-          createdAt: input.now,
-        });
         return { proposal, replayed: false };
       }
 

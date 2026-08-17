@@ -76,6 +76,12 @@ const makeAgentControlOperationStore = Effect.gen(function* () {
 
   const transition: AgentControlOperationStoreShape["transition"] = (input) =>
     Effect.gen(function* () {
+      // Fail closed on transitions that advance work. Winding-down
+      // transitions (compensating, terminal settles) stay available so
+      // restart cleanup can settle stragglers while the gate is off.
+      if (input.nextStatus === "running") {
+        yield* policy.requireEnabled("AgentControlOperationStore.transition");
+      }
       const issue = operationTransitionIssue({
         from: input.expectedStatus,
         to: input.nextStatus,
