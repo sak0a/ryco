@@ -29,6 +29,7 @@ import { Effect, Schema } from "effect";
 import {
   IsoDateTime,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   RuntimeSessionId,
   ThreadId,
@@ -355,6 +356,138 @@ export const AgentControlProposal = Schema.Struct({
   result: Schema.NullOr(AgentControlResultEnvelope),
 });
 export type AgentControlProposal = typeof AgentControlProposal.Type;
+
+// ── Approval queue and RPC surface ────────────────────────────────────
+
+export const AGENT_CONTROL_WS_METHODS = {
+  listProposals: "agentControl.listProposals",
+  getProposal: "agentControl.getProposal",
+  acceptProposal: "agentControl.acceptProposal",
+  rejectProposal: "agentControl.rejectProposal",
+  subscribeProposals: "agentControl.subscribeProposals",
+} as const;
+
+/** Proposals shown in the live approval queue (everything non-terminal). */
+export const AGENT_CONTROL_ACTIVE_PROPOSAL_STATUSES: ReadonlyArray<AgentControlProposalStatus> = [
+  "pending-user-approval",
+  "approved",
+  "executing",
+];
+
+export const AGENT_CONTROL_QUEUE_ACTIVE_LIMIT_MAX = 100;
+export const AGENT_CONTROL_QUEUE_RECENT_LIMIT_MAX = 100;
+export const AGENT_CONTROL_QUEUE_ACTIVE_LIMIT_DEFAULT = 50;
+export const AGENT_CONTROL_QUEUE_RECENT_LIMIT_DEFAULT = 20;
+
+/**
+ * Stable, bounded lifecycle receipt for one proposal: identifiers, status,
+ * digest, risk tags, timing, and the terminal result envelope. This is the
+ * shape future MCP read/wait tools return to the originating agent — never
+ * the plan payload or prompt text.
+ */
+export const AgentControlProposalReceipt = Schema.Struct({
+  proposalId: AgentControlProposalId,
+  requestId: AgentControlRequestId,
+  actionKind: AgentControlActionKind,
+  planDigest: AgentControlPlanDigest,
+  riskTags: Schema.Array(AgentControlRiskTag),
+  status: AgentControlProposalStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  expiresAt: IsoDateTime,
+  decidedAt: Schema.NullOr(IsoDateTime),
+  result: Schema.NullOr(AgentControlResultEnvelope),
+});
+export type AgentControlProposalReceipt = typeof AgentControlProposalReceipt.Type;
+
+/**
+ * Queue snapshot: non-terminal proposals (oldest first) plus a bounded
+ * terminal history (newest first). `revision` is the server's per-process
+ * monotonic change counter at snapshot time — it orders proposal events
+ * within one subscription and is NOT durable across server restarts; every
+ * snapshot resets the client's dedupe baseline.
+ */
+export const AgentControlProposalQueue = Schema.Struct({
+  revision: NonNegativeInt,
+  active: Schema.Array(AgentControlProposal),
+  recent: Schema.Array(AgentControlProposal),
+});
+export type AgentControlProposalQueue = typeof AgentControlProposalQueue.Type;
+
+export const AgentControlListProposalsInput = Schema.Struct({
+  /** Capped server-side at `AGENT_CONTROL_QUEUE_ACTIVE_LIMIT_MAX`. */
+  activeLimit: Schema.optional(PositiveInt),
+  /** Capped server-side at `AGENT_CONTROL_QUEUE_RECENT_LIMIT_MAX`. */
+  recentLimit: Schema.optional(PositiveInt),
+});
+export type AgentControlListProposalsInput = typeof AgentControlListProposalsInput.Type;
+
+export const AgentControlGetProposalInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+});
+export type AgentControlGetProposalInput = typeof AgentControlGetProposalInput.Type;
+
+export const AgentControlGetProposalResult = Schema.Struct({
+  proposal: Schema.NullOr(AgentControlProposal),
+});
+export type AgentControlGetProposalResult = typeof AgentControlGetProposalResult.Type;
+
+export const AgentControlDecideProposalInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+});
+export type AgentControlDecideProposalInput = typeof AgentControlDecideProposalInput.Type;
+
+export const AgentControlProposalStreamSnapshotEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("snapshot"),
+  queue: AgentControlProposalQueue,
+});
+export type AgentControlProposalStreamSnapshotEvent =
+  typeof AgentControlProposalStreamSnapshotEvent.Type;
+
+/**
+ * One proposal creation or transition. The full proposal document is the
+ * payload — clients upsert by `proposalId`, keeping the highest-revision
+ * version, so replayed or duplicated events are harmless.
+ */
+export const AgentControlProposalStreamProposalEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("proposal"),
+  revision: NonNegativeInt,
+  proposal: AgentControlProposal,
+});
+export type AgentControlProposalStreamProposalEvent =
+  typeof AgentControlProposalStreamProposalEvent.Type;
+
+export const AgentControlProposalStreamEvent = Schema.Union([
+  AgentControlProposalStreamSnapshotEvent,
+  AgentControlProposalStreamProposalEvent,
+]);
+export type AgentControlProposalStreamEvent = typeof AgentControlProposalStreamEvent.Type;
+
+/**
+ * Bounded RPC failure for the approval surface. Carries only the decision
+ * outcome category and, on decision conflicts, the proposal's actual status
+ * — never plan payloads, prompt text, or other resource details.
+ */
+export const AgentControlRpcErrorCode = Schema.Literals([
+  "disabled",
+  "not-found",
+  "expired",
+  "conflict",
+  "storage",
+]);
+export type AgentControlRpcErrorCode = typeof AgentControlRpcErrorCode.Type;
+
+export class AgentControlRpcError extends Schema.TaggedError<AgentControlRpcError>()(
+  "AgentControlRpcError",
+  {
+    code: AgentControlRpcErrorCode,
+    message: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_ERROR_MESSAGE_MAX_CHARS)),
+    /** The proposal's actual status when a decision lost to another actor. */
+    status: Schema.optional(AgentControlProposalStatus),
+  },
+) {}
 
 // ── Operations ────────────────────────────────────────────────────────
 
