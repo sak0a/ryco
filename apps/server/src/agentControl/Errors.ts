@@ -105,3 +105,36 @@ export class AgentControlProposalExpiredError extends Schema.TaggedError<AgentCo
     return `Agent Control proposal ${this.proposalId} expired at ${this.expiresAt}`;
   }
 }
+
+/**
+ * An internal MCP request presented no usable credential. `unknown`
+ * deliberately covers revoked, expired, and never-issued tokens alike —
+ * a caller cannot distinguish "this credential existed once" from "this
+ * credential never existed". The raw credential never appears here.
+ */
+export class AgentControlMcpAuthError extends Schema.TaggedError<AgentControlMcpAuthError>()(
+  "AgentControlMcpAuthError",
+  {
+    reason: Schema.Literals(["missing", "malformed", "unknown"]),
+  },
+) {
+  override get message(): string {
+    return `Agent Control MCP credential rejected: ${this.reason}`;
+  }
+}
+
+/**
+ * Exact-turn write authority could not be bound or exercised. Raised by
+ * the session registry's lease API; consumed by the proposal-backed
+ * mutation slice.
+ */
+export class AgentControlTurnAuthorityError extends Schema.TaggedError<AgentControlTurnAuthorityError>()(
+  "AgentControlTurnAuthorityError",
+  {
+    reason: Schema.Literals(["session-unknown", "authority-retired", "turn-mismatch"]),
+  },
+) {
+  override get message(): string {
+    return `Agent Control turn authority refused: ${this.reason}`;
+  }
+}
