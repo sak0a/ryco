@@ -10,6 +10,7 @@ import type {
   ThreadId,
   ProjectId,
   TurnId,
+  TurnDispatchMode,
   MessageId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -55,6 +56,7 @@ export interface ChatMessage {
   text: string;
   attachments?: ChatAttachment[];
   turnId?: TurnId | null;
+  dispatchMode?: TurnDispatchMode;
   createdAt: string;
   completedAt?: string | undefined;
   streaming: boolean;

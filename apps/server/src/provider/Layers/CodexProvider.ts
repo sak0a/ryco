@@ -28,6 +28,7 @@ const CODEX_PRESENTATION = {
   displayName: "Codex",
   showInteractionModeToggle: true,
   supportsAskMode: true,
+  supportsTurnSteering: true,
 } as const;
 
 export interface CodexAppServerProviderSnapshot {

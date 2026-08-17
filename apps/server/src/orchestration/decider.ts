@@ -736,6 +736,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         : [userMessageEvent, turnStartRequestedEvent];
     }
 
+    case "thread.turn.steer": {
+      const targetThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const activeTurnId = targetThread.session?.activeTurnId ?? null;
+      if (targetThread.session?.status !== "running" || activeTurnId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has no active turn to steer.`,
+        });
+      }
+      if (activeTurnId !== command.expectedTurnId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' active turn '${activeTurnId}' does not match expected turn '${command.expectedTurnId}'.`,
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.requestedAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.turn-steer-requested",
+        payload: {
+          threadId: command.threadId,
+          expectedTurnId: command.expectedTurnId,
+          message: command.message,
+          createdAt: command.createdAt,
+          requestedAt: command.requestedAt,
+        },
+      };
+    }
+
     case "thread.turn.interrupt": {
       const targetThread = yield* requireThread({
         readModel,
@@ -1261,6 +1298,106 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           activity: command.activity,
         },
       };
+    }
+
+    case "thread.turn.steer.resolve": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const resolvedAt = command.resolution.resolvedAt;
+      if (command.resolution.status === "accepted") {
+        if (command.resolution.turnId !== command.expectedTurnId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Accepted steer turn '${command.resolution.turnId}' does not match expected turn '${command.expectedTurnId}'.`,
+          });
+        }
+        const messageEvent: PlannedOrchestrationEvent = {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: resolvedAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: command.message.messageId,
+            role: "user",
+            text: command.message.text,
+            attachments: command.message.attachments,
+            dispatchMode: "steer",
+            turnId: command.resolution.turnId,
+            streaming: false,
+            createdAt: command.createdAt,
+            updatedAt: resolvedAt,
+          },
+        };
+        const acceptedEvent: PlannedOrchestrationEvent = {
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: resolvedAt,
+            commandId: command.commandId,
+          }),
+          causationEventId: messageEvent.eventId,
+          type: "thread.turn-steer-accepted",
+          payload: {
+            threadId: command.threadId,
+            messageId: command.message.messageId,
+            expectedTurnId: command.expectedTurnId,
+            turnId: command.resolution.turnId,
+            resolvedAt,
+          },
+        };
+        return [messageEvent, acceptedEvent];
+      }
+
+      const rejectedEvent: PlannedOrchestrationEvent = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: resolvedAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.turn-steer-rejected",
+        payload: {
+          threadId: command.threadId,
+          messageId: command.message.messageId,
+          expectedTurnId: command.expectedTurnId,
+          error: command.resolution.error,
+          resolvedAt,
+        },
+      };
+      const activityEvent: PlannedOrchestrationEvent = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: resolvedAt,
+          commandId: command.commandId,
+        }),
+        causationEventId: rejectedEvent.eventId,
+        type: "thread.activity-appended",
+        payload: {
+          threadId: command.threadId,
+          activity: {
+            id: EventId.make(`turn-steer-rejected:${command.requestCommandId}`),
+            tone: "error",
+            kind: "provider.turn.steer.failed",
+            summary: "Steer failed",
+            payload: {
+              messageId: command.message.messageId,
+              expectedTurnId: command.expectedTurnId,
+              error: command.resolution.error,
+            },
+            turnId: command.expectedTurnId,
+            createdAt: resolvedAt,
+          },
+        },
+      };
+      return [rejectedEvent, activityEvent];
     }
 
     default: {

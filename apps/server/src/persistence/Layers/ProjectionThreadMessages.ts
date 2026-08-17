@@ -1,7 +1,7 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
-import { ChatAttachment } from "@ryco/contracts";
+import { ChatAttachment, TurnDispatchMode } from "@ryco/contracts";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -17,6 +17,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
     attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
+    dispatchMode: Schema.NullOr(TurnDispatchMode),
   }),
 );
 
@@ -33,6 +34,7 @@ function toProjectionThreadMessage(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     ...(row.attachments !== null ? { attachments: row.attachments } : {}),
+    ...(row.dispatchMode !== null ? { dispatchMode: row.dispatchMode } : {}),
   };
 }
 
@@ -52,6 +54,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           role,
           text,
           attachments_json,
+          dispatch_mode,
           is_streaming,
           created_at,
           updated_at
@@ -70,6 +73,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
               WHERE message_id = ${row.messageId}
             )
           ),
+          ${row.dispatchMode ?? null},
           ${row.isStreaming ? 1 : 0},
           ${row.createdAt},
           ${row.updatedAt}
@@ -83,6 +87,10 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           attachments_json = COALESCE(
             excluded.attachments_json,
             projection_thread_messages.attachments_json
+          ),
+          dispatch_mode = COALESCE(
+            excluded.dispatch_mode,
+            projection_thread_messages.dispatch_mode
           ),
           is_streaming = excluded.is_streaming,
           created_at = excluded.created_at,
@@ -103,6 +111,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          dispatch_mode AS "dispatchMode",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -124,6 +133,7 @@ const makeProjectionThreadMessageRepository = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          dispatch_mode AS "dispatchMode",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"

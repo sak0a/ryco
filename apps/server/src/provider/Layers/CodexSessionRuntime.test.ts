@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 import { Effect, Schema } from "effect";
 import { describe, it } from "vite-plus/test";
-import { ThreadId } from "@ryco/contracts";
+import { MessageId, ThreadId, TurnId } from "@ryco/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 
@@ -13,6 +13,7 @@ import {
 } from "../CodexDeveloperInstructions.ts";
 import {
   buildTurnStartParams,
+  buildTurnSteerParams,
   isRecoverableThreadResumeError,
   openCodexThread,
 } from "./CodexSessionRuntime.ts";
@@ -229,6 +230,30 @@ describe("buildTurnStartParams", () => {
           type: "text",
           text: "Review",
         },
+      ],
+    });
+  });
+});
+
+describe("buildTurnSteerParams", () => {
+  it("sends only input and the exact active-turn precondition", () => {
+    const params = Effect.runSync(
+      buildTurnSteerParams({
+        threadId: "provider-thread-1",
+        expectedTurnId: TurnId.make("turn-active"),
+        messageId: MessageId.make("message-steer"),
+        prompt: "Also preserve the retry state.",
+        attachments: [{ type: "image", url: "data:image/png;base64,abc" }],
+      }),
+    );
+
+    assert.deepStrictEqual(params, {
+      threadId: "provider-thread-1",
+      expectedTurnId: "turn-active",
+      clientUserMessageId: "message-steer",
+      input: [
+        { type: "text", text: "Also preserve the retry state." },
+        { type: "image", url: "data:image/png;base64,abc" },
       ],
     });
   });

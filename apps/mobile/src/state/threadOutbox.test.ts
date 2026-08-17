@@ -46,7 +46,7 @@ describe("threadOutbox store + drain", () => {
     expect(
       listThreadOutboxMessages()
         .map((m) => m.messageId)
-        .sort(),
+        .toSorted(),
     ).toEqual(["m1", "m2"]);
   });
 
@@ -59,6 +59,32 @@ describe("threadOutbox store + drain", () => {
 
     expect(sendQueuedMessage).toHaveBeenCalledTimes(2);
     expect(listThreadOutboxMessages()).toHaveLength(0);
+  });
+
+  it("removes an already projected message without sending it again", async () => {
+    enqueueThreadOutboxMessage(queued("m-steered", "2026-08-17T10:00:00.000Z"));
+    const sendQueuedMessage = vi.fn(async () => undefined);
+
+    await drainThreadOutbox({
+      readThreadDeliveryState: () => ({ ...liveConnected(), alreadyDelivered: true }),
+      sendQueuedMessage,
+    });
+
+    expect(sendQueuedMessage).not.toHaveBeenCalled();
+    expect(listThreadOutboxMessages()).toHaveLength(0);
+  });
+
+  it("waits for detailed message reconciliation before delivery", async () => {
+    enqueueThreadOutboxMessage(queued("m-unknown", "2026-08-17T10:00:00.000Z"));
+    const sendQueuedMessage = vi.fn(async () => undefined);
+
+    await drainThreadOutbox({
+      readThreadDeliveryState: () => ({ ...liveConnected(), deliveryReconciled: false }),
+      sendQueuedMessage,
+    });
+
+    expect(sendQueuedMessage).not.toHaveBeenCalled();
+    expect(listThreadOutboxMessages()).toHaveLength(1);
   });
 
   it("retains a message on a transient send failure (retry)", async () => {

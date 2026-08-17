@@ -48,6 +48,7 @@ type ProviderIntentEvent = Extract<
       | "thread.goal-updated"
       | "thread.goal-cleared"
       | "thread.turn-start-requested"
+      | "thread.turn-steer-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
       | "thread.user-input-response-requested"
@@ -950,6 +951,77 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const processTurnSteerRequested = Effect.fn("processTurnSteerRequested")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-steer-requested" }>,
+  ) {
+    const key = turnStartKeyForEvent(event);
+    if (yield* hasHandledTurnStartRecently(key)) return;
+    const requestCommandId =
+      event.commandId ?? CommandId.make(`event:${event.eventId}:turn-steer-request`);
+    const resolve = (
+      resolution:
+        | {
+            readonly status: "accepted";
+            readonly turnId: TurnId;
+            readonly resolvedAt: string;
+          }
+        | {
+            readonly status: "rejected";
+            readonly error: string;
+            readonly resolvedAt: string;
+          },
+    ) => {
+      const commandBase = {
+        type: "thread.turn.steer.resolve" as const,
+        commandId: serverCommandId("turn-steer-resolve"),
+        requestCommandId,
+        threadId: event.payload.threadId,
+        expectedTurnId: event.payload.expectedTurnId,
+        message: event.payload.message,
+        createdAt: event.payload.createdAt,
+        requestedAt: event.payload.requestedAt,
+      };
+      if (resolution.status === "accepted") {
+        return orchestrationEngine.dispatch({ ...commandBase, resolution });
+      }
+      return orchestrationEngine.dispatch({ ...commandBase, resolution });
+    };
+
+    yield* providerService
+      .steerTurn({
+        threadId: event.payload.threadId,
+        expectedTurnId: event.payload.expectedTurnId,
+        messageId: event.payload.message.messageId,
+        ...(toNonEmptyProviderInput(event.payload.message.text)
+          ? { input: toNonEmptyProviderInput(event.payload.message.text) }
+          : {}),
+        ...(event.payload.message.attachments.length > 0
+          ? { attachments: event.payload.message.attachments }
+          : {}),
+      })
+      .pipe(
+        Effect.flatMap((result) =>
+          resolve({
+            status: "accepted",
+            turnId: result.turnId,
+            resolvedAt: new Date().toISOString(),
+          }),
+        ),
+        Effect.catchCause((cause) => {
+          const rawDetail = formatFailureDetail(cause).trim();
+          const error = (
+            rawDetail.length > 0 ? rawDetail : "Provider rejected turn steering."
+          ).slice(0, 1_000);
+          return resolve({
+            status: "rejected",
+            error,
+            resolvedAt: new Date().toISOString(),
+          });
+        }),
+        Effect.forkScoped,
+      );
+  });
+
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
@@ -1117,6 +1189,9 @@ const make = Effect.gen(function* () {
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
+      case "thread.turn-steer-requested":
+        yield* processTurnSteerRequested(event);
+        return;
       case "thread.turn-interrupt-requested":
         yield* processTurnInterruptRequested(event);
         return;
@@ -1161,6 +1236,7 @@ const make = Effect.gen(function* () {
         event.type === "thread.goal-updated" ||
         event.type === "thread.goal-cleared" ||
         event.type === "thread.turn-start-requested" ||
+        event.type === "thread.turn-steer-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||
         event.type === "thread.user-input-response-requested" ||

@@ -18,6 +18,7 @@ import {
   ProviderRespondToUserInputInput,
   ProviderSendTurnInput,
   ProviderSessionStartInput,
+  ProviderSteerTurnInput,
   ProviderStopBackgroundTaskInput,
   ProviderStopSessionInput,
   RuntimeSessionId,
@@ -1168,6 +1169,76 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     return true;
   });
 
+  const steerTurn: ProviderServiceShape["steerTurn"] = Effect.fn("steerTurn")(function* (rawInput) {
+    const parsed = yield* decodeInputOrValidationError({
+      operation: "ProviderService.steerTurn",
+      schema: ProviderSteerTurnInput,
+      payload: rawInput,
+    });
+    const input = { ...parsed, attachments: parsed.attachments ?? [] };
+    if (!input.input && input.attachments.length === 0) {
+      return yield* toValidationError(
+        "ProviderService.steerTurn",
+        "Either input text or at least one attachment is required",
+      );
+    }
+    const routed = yield* resolveRoutableSession({
+      threadId: input.threadId,
+      operation: "ProviderService.steerTurn",
+      allowRecovery: false,
+    });
+    if (!routed.isActive || routed.session === undefined) {
+      return yield* new ProviderSessionNotFoundError({ threadId: input.threadId });
+    }
+    if (routed.session.activeTurnId !== input.expectedTurnId) {
+      return yield* toValidationError(
+        "ProviderService.steerTurn",
+        `Expected active turn '${input.expectedTurnId}', found '${routed.session.activeTurnId ?? "none"}'.`,
+      );
+    }
+    const steer = routed.adapter.steerTurn;
+    if (routed.adapter.capabilities.turnSteering !== "native" || steer === undefined) {
+      return yield* toValidationError(
+        "ProviderService.steerTurn",
+        `Provider '${routed.adapter.provider}' does not support active-turn steering.`,
+      );
+    }
+    yield* Effect.annotateCurrentSpan({
+      "provider.operation": "steer-turn",
+      "provider.kind": routed.adapter.provider,
+      "provider.thread_id": input.threadId,
+      "provider.turn_id": input.expectedTurnId,
+      "provider.attachment_count": input.attachments.length,
+    });
+    const result = yield* steer(input);
+    if (result.turnId !== input.expectedTurnId) {
+      return yield* toValidationError(
+        "ProviderService.steerTurn",
+        `Provider returned turn '${result.turnId}' for expected turn '${input.expectedTurnId}'.`,
+      );
+    }
+    yield* directory.upsert({
+      threadId: input.threadId,
+      provider: routed.adapter.provider,
+      providerInstanceId: routed.instanceId,
+      ...(routed.session.runtimeSessionId
+        ? { runtimeSessionId: routed.session.runtimeSessionId }
+        : {}),
+      status: "running",
+      runtimePayload: {
+        activeTurnId: input.expectedTurnId,
+        lastRuntimeEvent: "provider.steerTurn",
+        lastRuntimeEventAt: new Date().toISOString(),
+      },
+    });
+    yield* analytics.record("provider.turn.steered", {
+      provider: routed.adapter.provider,
+      attachmentCount: input.attachments.length,
+      hasInput: typeof input.input === "string" && input.input.trim().length > 0,
+    });
+    return result;
+  });
+
   const interruptTurn: ProviderServiceShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -1540,6 +1611,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     sendTurn,
     setThreadGoal,
     clearThreadGoal,
+    steerTurn,
     interruptTurn,
     stopBackgroundTask,
     respondToRequest,

@@ -7,11 +7,14 @@ import type {
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSession,
+  ProviderSteerTurnInput,
+  ProviderTurnSteerResult,
   ProviderTurnStartResult,
 } from "@ryco/contracts";
 import {
   ApprovalRequestId,
   EventId,
+  MessageId,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionStartInput,
@@ -148,8 +151,26 @@ function makeFakeCodexAdapter(
       return Effect.succeed({
         threadId: input.threadId,
         turnId: TurnId.make(`turn-${String(input.threadId)}`),
-      });
+      }).pipe(
+        Effect.tap((turn) =>
+          Effect.sync(() => {
+            const session = sessions.get(input.threadId);
+            if (session) {
+              sessions.set(input.threadId, {
+                ...session,
+                status: "running",
+                activeTurnId: turn.turnId,
+              });
+            }
+          }),
+        ),
+      );
     },
+  );
+
+  const steerTurn = vi.fn(
+    (input: ProviderSteerTurnInput): Effect.Effect<ProviderTurnSteerResult, ProviderAdapterError> =>
+      Effect.succeed({ threadId: input.threadId, turnId: input.expectedTurnId }),
   );
 
   const interruptTurn = vi.fn(
@@ -221,9 +242,11 @@ function makeFakeCodexAdapter(
     provider,
     capabilities: {
       sessionModelSwitch: "in-session",
+      turnSteering: provider === CODEX_DRIVER ? "native" : "unsupported",
     },
     startSession,
     sendTurn,
+    ...(provider === CODEX_DRIVER ? { steerTurn } : {}),
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -270,6 +293,7 @@ function makeFakeCodexAdapter(
     removeSession,
     startSession,
     sendTurn,
+    steerTurn,
     interruptTurn,
     respondToRequest,
     respondToUserInput,
@@ -928,12 +952,21 @@ routing.layer("ProviderServiceLive routing", (it) => {
       const sessions = yield* provider.listSessions();
       assert.equal(sessions.length, 1);
 
-      yield* provider.sendTurn({
+      const turn = yield* provider.sendTurn({
         threadId: session.threadId,
         input: "hello",
         attachments: [],
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+
+      yield* provider.steerTurn({
+        threadId: session.threadId,
+        expectedTurnId: turn.turnId,
+        messageId: MessageId.make("message-steer-1"),
+        input: "Use this additional constraint",
+        attachments: [],
+      });
+      assert.equal(routing.codex.steerTurn.mock.calls.length, 1);
 
       yield* provider.interruptTurn({ threadId: session.threadId });
       assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);

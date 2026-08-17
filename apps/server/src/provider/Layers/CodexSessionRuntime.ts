@@ -3,6 +3,7 @@ import {
   type AgentTokenMode,
   DEFAULT_MODEL,
   EventId,
+  MessageId,
   ProviderDriverKind,
   ProviderItemId,
   type ProviderInstanceId,
@@ -13,6 +14,7 @@ import {
   type ProviderRequestKind,
   type ProviderSession,
   type ProviderTurnStartResult,
+  type ProviderTurnSteerResult,
   type ProviderUserInputAnswers,
   RuntimeMode,
   ThreadId,
@@ -108,6 +110,16 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly customSystemPrompt?: string;
 }
 
+export interface CodexSessionRuntimeSteerTurnInput {
+  readonly expectedTurnId: TurnId;
+  readonly messageId: MessageId;
+  readonly input?: string;
+  readonly attachments?: ReadonlyArray<{
+    readonly type: "image";
+    readonly url: string;
+  }>;
+}
+
 export interface CodexThreadTurnSnapshot {
   readonly id: TurnId;
   readonly items: ReadonlyArray<CodexThreadItem>;
@@ -124,6 +136,9 @@ export interface CodexSessionRuntimeShape {
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly steerTurn: (
+    input: CodexSessionRuntimeSteerTurnInput,
+  ) => Effect.Effect<ProviderTurnSteerResult, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
@@ -428,6 +443,29 @@ export function buildTurnStartParams(input: {
     ...(collaborationMode ? { collaborationMode } : {}),
   }).pipe(
     Effect.mapError((error) => toProtocolParseError("Invalid turn/start request payload", error)),
+  );
+}
+
+export function buildTurnSteerParams(input: {
+  readonly threadId: string;
+  readonly expectedTurnId: TurnId;
+  readonly messageId: MessageId;
+  readonly prompt?: string;
+  readonly attachments?: ReadonlyArray<{ readonly type: "image"; readonly url: string }>;
+}): Effect.Effect<
+  EffectCodexSchema.V2TurnSteerParams,
+  CodexErrors.CodexAppServerProtocolParseError
+> {
+  const turnInput: Array<EffectCodexSchema.V2TurnSteerParams__UserInput> = [];
+  if (input.prompt) turnInput.push({ type: "text", text: input.prompt });
+  for (const attachment of input.attachments ?? []) turnInput.push(attachment);
+  return Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnSteerParams)({
+    threadId: input.threadId,
+    expectedTurnId: input.expectedTurnId,
+    clientUserMessageId: input.messageId,
+    input: turnInput,
+  }).pipe(
+    Effect.mapError((error) => toProtocolParseError("Invalid turn/steer request payload", error)),
   );
 }
 
@@ -1792,6 +1830,30 @@ export const makeCodexSessionRuntime = (
               ? { resumeCursor: { threadId: resumedProviderThreadId } }
               : {}),
           } satisfies ProviderTurnStartResult;
+        }),
+      steerTurn: (input) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          const params = yield* buildTurnSteerParams({
+            threadId: providerThreadId,
+            expectedTurnId: input.expectedTurnId,
+            messageId: input.messageId,
+            ...(input.input ? { prompt: input.input } : {}),
+            ...(input.attachments ? { attachments: input.attachments } : {}),
+          });
+          const rawResponse = yield* client.raw.request("turn/steer", params);
+          const response = yield* Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnSteerResponse)(
+            rawResponse,
+          ).pipe(
+            Effect.mapError((error) =>
+              toProtocolParseError("Invalid turn/steer response payload", error),
+            ),
+          );
+          const turnId = TurnId.make(response.turnId);
+          return {
+            threadId: options.threadId,
+            turnId,
+          } satisfies ProviderTurnSteerResult;
         }),
       interruptTurn: (turnId) =>
         Effect.gen(function* () {

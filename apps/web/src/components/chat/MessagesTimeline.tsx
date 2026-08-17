@@ -1200,6 +1200,7 @@ function TimelineRowContent({ row }: { row: TimelineRow }) {
                     )}
                   </div>
                   <p className="text-right text-[11px] text-muted-foreground/50">
+                    {row.message.dispatchMode === "steer" ? "Steered · " : ""}
                     {formatTimestamp(row.message.createdAt, ctx.timestampFormat)}
                   </p>
                 </div>

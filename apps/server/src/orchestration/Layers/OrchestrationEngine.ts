@@ -90,6 +90,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "thread.goal.sync":
     case "thread.goal.provider-clear":
     case "thread.turn.start":
+    case "thread.turn.steer":
+    case "thread.turn.steer.resolve":
     case "thread.turn.interrupt":
     case "thread.approval.respond":
     case "thread.user-input.respond":
