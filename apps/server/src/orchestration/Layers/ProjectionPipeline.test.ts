@@ -69,7 +69,10 @@ it("routes each event only to its explicit projection owners", () => {
     ORCHESTRATION_PROJECTOR_NAMES.worktrees,
   ]);
   assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.context-handoff-requested"], []);
-  assert.equal(Object.keys(ORCHESTRATION_EVENT_PROJECTORS).length, 35);
+  assert.deepEqual(ORCHESTRATION_EVENT_PROJECTORS["thread.goal-updated"], [
+    ORCHESTRATION_PROJECTOR_NAMES.threads,
+  ]);
+  assert.equal(Object.keys(ORCHESTRATION_EVENT_PROJECTORS).length, 37);
 });
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {

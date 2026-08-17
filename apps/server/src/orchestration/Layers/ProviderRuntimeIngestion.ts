@@ -1991,6 +1991,23 @@ const make = Effect.gen(function* () {
       const eventTurnId = toTurnId(event.turnId);
       const activeTurnId = thread.session?.activeTurnId ?? null;
 
+      if (event.type === "thread.goal.updated") {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.goal.sync",
+          commandId: providerCommandId(event, "thread-goal-sync"),
+          threadId: thread.id,
+          goal: event.payload.goal,
+          createdAt: now,
+        });
+      } else if (event.type === "thread.goal.cleared" && thread.goal != null) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.goal.provider-clear",
+          commandId: providerCommandId(event, "thread-goal-provider-clear"),
+          threadId: thread.id,
+          createdAt: now,
+        });
+      }
+
       // A recovered provider can become ready after the process that owned the
       // projected turn disappeared. In that case no turn.aborted notification
       // can ever arrive, so the provider's own idle session state is the

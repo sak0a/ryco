@@ -32,6 +32,8 @@ import {
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadTokenModeSetPayload,
+  ThreadGoalUpdatedPayload,
+  ThreadGoalClearedPayload,
   ThreadUnarchivedPayload,
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
@@ -327,6 +329,7 @@ export function projectEvent(
             manualStatusBucket: null,
             manualPosition: 0,
             latestTurn: null,
+            goal: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
@@ -546,6 +549,28 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             tokenMode: payload.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.goal-updated":
+      return decodeForEvent(ThreadGoalUpdatedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            goal: payload.goal,
+            updatedAt: payload.goal.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.goal-cleared":
+      return decodeForEvent(ThreadGoalClearedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            goal: null,
             updatedAt: payload.updatedAt,
           }),
         })),

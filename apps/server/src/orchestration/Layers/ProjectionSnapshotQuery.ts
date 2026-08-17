@@ -30,6 +30,7 @@ import {
   ModelSelection,
   ProjectId,
   ThreadId,
+  ThreadGoal,
   WorktreeId,
 } from "@ryco/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
@@ -87,6 +88,7 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    goal: Schema.NullOr(Schema.fromJsonString(ThreadGoal)),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -536,6 +538,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           manual_status_bucket AS "manualStatusBucket",
           manual_position AS "manualPosition",
           latest_turn_id AS "latestTurnId",
+          goal_json AS "goal",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -973,6 +976,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           manual_status_bucket AS "manualStatusBucket",
           manual_position AS "manualPosition",
           latest_turn_id AS "latestTurnId",
+          goal_json AS "goal",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -1507,6 +1511,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       latestTurn: Option.isSome(input.latestTurnRow)
         ? mapLatestTurn(input.latestTurnRow.value)
         : null,
+      goal: input.threadRow.goal,
       createdAt: input.threadRow.createdAt,
       updatedAt: input.threadRow.updatedAt,
       archivedAt: input.threadRow.archivedAt,
@@ -1796,6 +1801,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 manualStatusBucket: row.manualStatusBucket ?? null,
                 manualPosition: row.manualPosition ?? 0,
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                goal: row.goal,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
                 archivedAt: row.archivedAt,
@@ -2086,6 +2092,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   manualStatusBucket: row.manualStatusBucket ?? null,
                   manualPosition: row.manualPosition ?? 0,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                  goal: row.goal,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
                   archivedAt: row.archivedAt,
@@ -2242,6 +2249,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     manualStatusBucket: row.manualStatusBucket ?? null,
                     manualPosition: row.manualPosition ?? 0,
                     latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                    goal: row.goal,
                     createdAt: row.createdAt,
                     updatedAt: row.updatedAt,
                     archivedAt: row.archivedAt,
@@ -2500,6 +2508,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         manualStatusBucket: threadRow.value.manualStatusBucket ?? null,
         manualPosition: threadRow.value.manualPosition ?? 0,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
+        goal: threadRow.value.goal,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
         archivedAt: threadRow.value.archivedAt,

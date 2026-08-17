@@ -9,6 +9,7 @@ import {
   ContextHandoffId,
   DEFAULT_AGENT_TOKEN_MODE,
   EventId,
+  NonNegativeInt,
 } from "@ryco/contracts";
 import { modelSelectionRequiresContextHandoff } from "@ryco/shared/model";
 import { Effect } from "effect";
@@ -448,6 +449,113 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           tokenMode: command.tokenMode,
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.goal.set": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const previousGoal = thread.goal ?? null;
+      if (previousGoal === null && command.objective === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' does not have a goal to update.`,
+        });
+      }
+
+      const objective = command.objective ?? previousGoal!.objective;
+      const objectiveChanged = previousGoal === null || objective !== previousGoal.objective;
+      const elapsedSeconds =
+        previousGoal !== null && previousGoal.status === "active" && !objectiveChanged
+          ? Math.max(
+              0,
+              Math.floor(
+                (Date.parse(command.createdAt) - Date.parse(previousGoal.updatedAt)) / 1_000,
+              ),
+            )
+          : 0;
+      const goal = {
+        objective,
+        status: command.status ?? (objectiveChanged ? ("active" as const) : previousGoal!.status),
+        tokenBudget:
+          command.tokenBudget !== undefined
+            ? command.tokenBudget
+            : (previousGoal?.tokenBudget ?? null),
+        tokensUsed: objectiveChanged ? NonNegativeInt.make(0) : previousGoal!.tokensUsed,
+        timeUsedSeconds: objectiveChanged
+          ? NonNegativeInt.make(0)
+          : NonNegativeInt.make(previousGoal!.timeUsedSeconds + elapsedSeconds),
+        createdAt: objectiveChanged ? command.createdAt : previousGoal!.createdAt,
+        updatedAt: command.createdAt,
+      };
+
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-updated",
+        payload: {
+          threadId: command.threadId,
+          goal,
+          origin: "client",
+        },
+      };
+    }
+
+    case "thread.goal.sync": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-updated",
+        payload: {
+          threadId: command.threadId,
+          goal: command.goal,
+          origin: "provider",
+        },
+      };
+    }
+
+    case "thread.goal.clear":
+    case "thread.goal.provider-clear": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.goal == null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' does not have a goal to clear.`,
+        });
+      }
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.goal-cleared",
+        payload: {
+          threadId: command.threadId,
+          origin: command.type === "thread.goal.clear" ? "client" : "provider",
+          updatedAt: command.createdAt,
         },
       };
     }

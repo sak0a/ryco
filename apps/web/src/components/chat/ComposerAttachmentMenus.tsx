@@ -131,6 +131,13 @@ export function useComposerAttachmentMenus(
           description: "Switch response model for this thread",
         },
         {
+          id: "slash:goal",
+          type: "slash-command",
+          command: "goal",
+          label: "/goal",
+          description: "Set a persistent goal for this thread",
+        },
+        {
           id: "slash:plan",
           type: "slash-command",
           command: "plan",

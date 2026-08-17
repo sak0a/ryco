@@ -338,6 +338,7 @@ function mapThread(thread: OrchestrationThread, environmentId: EnvironmentId): T
     worktreeId: thread.worktreeId ?? null,
     manualStatusBucket: thread.manualStatusBucket ?? null,
     manualPosition: thread.manualPosition ?? 0,
+    goal: thread.goal ?? null,
     turnDiffSummaries: thread.checkpoints.map(mapTurnDiffSummary),
     activities: thread.activities.map((activity) => ({ ...activity })),
   };
@@ -371,6 +372,7 @@ function mapThreadShell(
     worktreeId: thread.worktreeId ?? null,
     manualStatusBucket: thread.manualStatusBucket ?? null,
     manualPosition: thread.manualPosition ?? 0,
+    goal: thread.goal ?? null,
   };
   const session = thread.session ? mapSession(thread.session) : null;
   const turnState: ThreadTurnState = {
@@ -428,6 +430,7 @@ function toThreadShell(thread: Thread): ThreadShell {
     worktreeId: thread.worktreeId,
     manualStatusBucket: thread.manualStatusBucket,
     manualPosition: thread.manualPosition,
+    goal: thread.goal ?? null,
   };
 }
 
@@ -447,6 +450,23 @@ function sourceProposedPlansEqual(
   if (left === right) return true;
   if (left === undefined || right === undefined) return false;
   return left.threadId === right.threadId && left.planId === right.planId;
+}
+
+function threadGoalsEqual(
+  left: ThreadShell["goal"] | undefined,
+  right: ThreadShell["goal"] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left == null || right == null) return false;
+  return (
+    left.objective === right.objective &&
+    left.status === right.status &&
+    left.tokenBudget === right.tokenBudget &&
+    left.tokensUsed === right.tokensUsed &&
+    left.timeUsedSeconds === right.timeUsedSeconds &&
+    left.createdAt === right.createdAt &&
+    left.updatedAt === right.updatedAt
+  );
 }
 
 function latestTurnsEqual(
@@ -532,7 +552,8 @@ function threadShellsEqual(left: ThreadShell | undefined, right: ThreadShell): b
     left.worktreePath === right.worktreePath &&
     left.worktreeId === right.worktreeId &&
     left.manualStatusBucket === right.manualStatusBucket &&
-    left.manualPosition === right.manualPosition
+    left.manualPosition === right.manualPosition &&
+    threadGoalsEqual(left.goal, right.goal)
   );
 }
 
@@ -2078,6 +2099,7 @@ function applyEnvironmentOrchestrationEvent(
           manualStatusBucket: null,
           manualPosition: 0,
           latestTurn: null,
+          goal: null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
           archivedAt: null,
@@ -2144,6 +2166,20 @@ function applyEnvironmentOrchestrationEvent(
       return updateThreadState(state, event.payload.threadId, (thread) => ({
         ...thread,
         tokenMode: event.payload.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
+        updatedAt: event.payload.updatedAt,
+      }));
+
+    case "thread.goal-updated":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        goal: event.payload.goal,
+        updatedAt: event.payload.goal.updatedAt,
+      }));
+
+    case "thread.goal-cleared":
+      return updateThreadState(state, event.payload.threadId, (thread) => ({
+        ...thread,
+        goal: null,
         updatedAt: event.payload.updatedAt,
       }));
 

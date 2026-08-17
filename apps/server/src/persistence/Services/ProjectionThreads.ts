@@ -16,6 +16,7 @@ import {
   RuntimeMode,
   StatusBucket,
   ThreadId,
+  ThreadGoal,
   TurnId,
   WorktreeId,
 } from "@ryco/contracts";
@@ -38,6 +39,7 @@ export const ProjectionThread = Schema.Struct({
   manualStatusBucket: Schema.optional(Schema.NullOr(StatusBucket)),
   manualPosition: Schema.optional(Schema.Number),
   latestTurnId: Schema.NullOr(TurnId),
+  goal: Schema.NullOr(ThreadGoal),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),

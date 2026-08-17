@@ -30,6 +30,8 @@ import {
   DEFAULT_AGENT_TOKEN_MODE,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  ThreadGoal as ThreadGoalSchema,
+  type ThreadGoal,
 } from "@ryco/contracts";
 import { Effect, Exit, Fiber, FileSystem, Option, Queue, Schema, Scope, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -138,6 +140,30 @@ function mapCodexRuntimeError(
     detail: formatCodexRuntimeErrorDetail(error),
     cause: error,
   });
+}
+
+function normalizeCodexThreadGoal(goal: {
+  readonly objective: string;
+  readonly status: ThreadGoal["status"];
+  readonly tokenBudget?: number | null;
+  readonly tokensUsed: number;
+  readonly timeUsedSeconds: number;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}): ThreadGoal | null {
+  try {
+    return Schema.decodeUnknownSync(ThreadGoalSchema)({
+      objective: goal.objective,
+      status: goal.status,
+      tokenBudget: goal.tokenBudget ?? null,
+      tokensUsed: goal.tokensUsed,
+      timeUsedSeconds: goal.timeUsedSeconds,
+      createdAt: new Date(goal.createdAt * 1_000).toISOString(),
+      updatedAt: new Date(goal.updatedAt * 1_000).toISOString(),
+    });
+  } catch {
+    return null;
+  }
 }
 
 type CodexLifecycleItem =
@@ -1039,6 +1065,34 @@ function mapToRuntimeEvents(
         payload: {
           usage: normalizedUsage,
         },
+      },
+    ];
+  }
+
+  if (event.method === "thread/goal/updated") {
+    const payload = readPayload(EffectCodexSchema.V2ThreadGoalUpdatedNotification, event.payload);
+    const goal = payload ? normalizeCodexThreadGoal(payload.goal) : null;
+    if (!goal) {
+      return [];
+    }
+    return [
+      {
+        type: "thread.goal.updated",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: { goal },
+      },
+    ];
+  }
+
+  if (event.method === "thread/goal/cleared") {
+    if (!readPayload(EffectCodexSchema.V2ThreadGoalClearedNotification, event.payload)) {
+      return [];
+    }
+    return [
+      {
+        type: "thread.goal.cleared",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {},
       },
     ];
   }
@@ -2075,6 +2129,34 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
   };
 
+  const setThreadGoal: NonNullable<CodexAdapterShape["setThreadGoal"]> = (threadId, goal) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) =>
+        session.runtime.setGoal({
+          objective: goal.objective,
+          status: goal.status,
+          tokenBudget: goal.tokenBudget,
+        }),
+      ),
+      Effect.asVoid,
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/goal/set", cause),
+      ),
+    );
+
+  const clearThreadGoal: NonNullable<CodexAdapterShape["clearThreadGoal"]> = (threadId) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) => session.runtime.clearGoal),
+      Effect.asVoid,
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/goal/clear", cause),
+      ),
+    );
+
   const respondToRequest: CodexAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.respondToRequest(requestId, decision)),
@@ -2150,6 +2232,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     interruptTurn,
     readThread,
     rollbackThread,
+    setThreadGoal,
+    clearThreadGoal,
     respondToRequest,
     respondToUserInput,
     stopSession,

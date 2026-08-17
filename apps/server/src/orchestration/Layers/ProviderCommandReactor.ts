@@ -37,6 +37,7 @@ import {
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { withProviderGoalPrompt } from "../../provider/goalMode.ts";
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -44,6 +45,8 @@ type ProviderIntentEvent = Extract<
     type:
       | "thread.runtime-mode-set"
       | "thread.token-mode-set"
+      | "thread.goal-updated"
+      | "thread.goal-cleared"
       | "thread.turn-start-requested"
       | "thread.turn-interrupt-requested"
       | "thread.approval-response-requested"
@@ -551,10 +554,36 @@ const make = Effect.gen(function* () {
       input.createdAt,
       input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
     );
+    const goal = thread.goal ?? null;
+    const goalHandledNatively =
+      goal === null
+        ? providerService.clearThreadGoal === undefined
+          ? false
+          : yield* providerService.clearThreadGoal(input.threadId).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("provider goal clear failed before turn", {
+                  threadId: input.threadId,
+                  cause: Cause.pretty(cause),
+                }).pipe(Effect.as(false)),
+              ),
+            )
+        : providerService.setThreadGoal === undefined
+          ? false
+          : yield* providerService.setThreadGoal(input.threadId, goal).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("provider goal synchronization failed; using prompt fallback", {
+                  threadId: input.threadId,
+                  cause: Cause.pretty(cause),
+                }).pipe(Effect.as(false)),
+              ),
+            );
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
-    const normalizedInput = toNonEmptyProviderInput(input.messageText);
+    const normalizedInput = withProviderGoalPrompt({
+      message: toNonEmptyProviderInput(input.messageText),
+      goal: goalHandledNatively ? null : goal,
+    });
     const normalizedAttachments = input.attachments ?? [];
     const project = yield* resolveProject(thread.projectId);
     const customSystemPrompt = project?.customSystemPrompt?.trim() || undefined;
@@ -885,6 +914,42 @@ const make = Effect.gen(function* () {
     yield* providerService.interruptTurn({ threadId: event.payload.threadId });
   });
 
+  const processGoalUpdated = Effect.fn("processGoalUpdated")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.goal-updated" }>,
+  ) {
+    if (event.payload.origin !== "client") return;
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread?.session || thread.session.status === "stopped") return;
+    if (providerService.setThreadGoal === undefined) return;
+    yield* providerService.setThreadGoal(thread.id, event.payload.goal).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider goal synchronization failed", {
+          threadId: thread.id,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
+  const processGoalCleared = Effect.fn("processGoalCleared")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.goal-cleared" }>,
+  ) {
+    if (event.payload.origin !== "client") return;
+    const thread = yield* resolveThread(event.payload.threadId);
+    if (!thread?.session || thread.session.status === "stopped") return;
+    if (providerService.clearThreadGoal === undefined) return;
+    yield* providerService.clearThreadGoal(thread.id).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider goal clear failed", {
+          threadId: thread.id,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+      Effect.asVoid,
+    );
+  });
+
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
@@ -1043,6 +1108,12 @@ const make = Effect.gen(function* () {
         );
         return;
       }
+      case "thread.goal-updated":
+        yield* processGoalUpdated(event);
+        return;
+      case "thread.goal-cleared":
+        yield* processGoalCleared(event);
+        return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
         return;
@@ -1087,6 +1158,8 @@ const make = Effect.gen(function* () {
       if (
         event.type === "thread.runtime-mode-set" ||
         event.type === "thread.token-mode-set" ||
+        event.type === "thread.goal-updated" ||
+        event.type === "thread.goal-cleared" ||
         event.type === "thread.turn-start-requested" ||
         event.type === "thread.turn-interrupt-requested" ||
         event.type === "thread.approval-response-requested" ||

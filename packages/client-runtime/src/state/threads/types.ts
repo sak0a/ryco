@@ -20,6 +20,7 @@ import type {
   StatusBucket,
   WorktreeId,
   WorktreeOrigin,
+  ThreadGoal,
 } from "@ryco/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -120,6 +121,7 @@ export interface Thread {
   archivedAt: string | null;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
+  goal?: ThreadGoal | null;
   pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
   branch: string | null;
   worktreePath: string | null;
@@ -149,6 +151,7 @@ export interface ThreadShell {
   worktreeId?: string | null | undefined;
   manualStatusBucket?: StatusBucket | null | undefined;
   manualPosition?: number | undefined;
+  goal?: ThreadGoal | null;
 }
 
 export interface ThreadTurnState {

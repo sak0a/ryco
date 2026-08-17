@@ -91,6 +91,15 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         manualStatusBucket: null,
         manualPosition: 0,
         latestTurnId: null,
+        goal: {
+          objective: "Verify projection persistence",
+          status: "active",
+          tokenBudget: null,
+          tokensUsed: 12,
+          timeUsedSeconds: 3,
+          createdAt: "2026-03-24T00:00:00.000Z",
+          updatedAt: "2026-03-24T00:00:03.000Z",
+        },
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
         archivedAt: null,
@@ -127,6 +136,15 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.deepStrictEqual(Option.getOrNull(persisted)?.modelSelection, {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-opus-4-6",
+      });
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.goal, {
+        objective: "Verify projection persistence",
+        status: "active",
+        tokenBudget: null,
+        tokensUsed: 12,
+        timeUsedSeconds: 3,
+        createdAt: "2026-03-24T00:00:00.000Z",
+        updatedAt: "2026-03-24T00:00:03.000Z",
       });
     }),
   );
