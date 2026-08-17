@@ -230,3 +230,93 @@ describe("AgentControlOperation", () => {
     expect(state.resources).toEqual({ threadIds: [], worktreeIds: [] });
   });
 });
+
+describe("Agent Control MCP contracts", () => {
+  it("catalogs exactly the seven read-only tools", async () => {
+    const { AGENT_CONTROL_MCP_TOOLS, AGENT_CONTROL_MCP_TOOL_NAMES } =
+      await import("./agentControl.ts");
+    expect([...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted()).toEqual(
+      [
+        "ryco_context",
+        "ryco_capabilities",
+        "ryco_list_projects",
+        "ryco_list_threads",
+        "ryco_read_thread",
+        "ryco_read_control_request",
+        "ryco_wait_for_control_request",
+      ].toSorted(),
+    );
+    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(7);
+    for (const name of AGENT_CONTROL_MCP_TOOL_NAMES) {
+      expect(name.startsWith("ryco_")).toBe(true);
+    }
+  });
+
+  it("decodes list/read/wait inputs and rejects out-of-bounds payloads", async () => {
+    const {
+      AgentControlMcpListThreadsInput,
+      AgentControlMcpReadThreadInput,
+      AgentControlMcpWaitForControlRequestInput,
+    } = await import("./agentControl.ts");
+    const decodeListThreads = Schema.decodeUnknownSync(AgentControlMcpListThreadsInput);
+    const decodeReadThread = Schema.decodeUnknownSync(AgentControlMcpReadThreadInput);
+    const decodeWait = Schema.decodeUnknownSync(AgentControlMcpWaitForControlRequestInput);
+
+    expect(
+      decodeListThreads({ projectId: "project-1", includeArchived: true, limit: 5 }).limit,
+    ).toBe(5);
+    expect(decodeReadThread({ threadId: "thread-1" }).threadId).toBe("thread-1");
+    expect(decodeWait({ proposalId: "proposal-1", waitFor: "terminal" }).waitFor).toBe("terminal");
+
+    expect(() => decodeReadThread({})).toThrow();
+    expect(() => decodeListThreads({ limit: 0 })).toThrow();
+    expect(() => decodeWait({ proposalId: "proposal-1", waitFor: "forever" })).toThrow();
+    expect(() => decodeReadThread({ threadId: "thread-1", cursor: "x".repeat(2_000) })).toThrow();
+  });
+
+  it("bounds the wait/read control-request result to the receipt shape", async () => {
+    const { AgentControlMcpControlRequestResult } = await import("./agentControl.ts");
+    const decoded = Schema.decodeUnknownSync(AgentControlMcpControlRequestResult)({
+      receipt: {
+        proposalId: "proposal-1",
+        requestId: "request-1",
+        actionKind: "sendMessage",
+        planDigest: "a".repeat(64),
+        riskTags: [],
+        status: "completed",
+        createdAt: "2026-08-18T00:00:00.000Z",
+        updatedAt: "2026-08-18T00:10:00.000Z",
+        expiresAt: "2026-08-18T01:00:00.000Z",
+        decidedAt: "2026-08-18T00:05:00.000Z",
+        result: { outcome: "completed", completedAt: "2026-08-18T00:10:00.000Z" },
+      },
+      timedOut: false,
+    });
+    expect(decoded.receipt.status).toBe("completed");
+    // The receipt never carries the plan payload or prompt text.
+    expect(decoded.receipt).not.toHaveProperty("plan");
+    expect(decoded.receipt).not.toHaveProperty("promptSummary");
+  });
+
+  it("decodes capability summaries keyed by provider instance id", async () => {
+    const { AgentControlMcpCapabilitiesResult } = await import("./agentControl.ts");
+    const decoded = Schema.decodeUnknownSync(AgentControlMcpCapabilitiesResult)({
+      enabled: true,
+      readOnly: true,
+      tools: ["ryco_context"],
+      grantedCapabilities: ["read"],
+      providerInstances: [
+        {
+          instanceId: "codex_personal",
+          driver: "codex",
+          displayName: "Personal",
+          enabled: true,
+          status: "ready",
+          availability: "available",
+          models: [{ slug: "gpt-5.6", name: "GPT-5.6" }],
+        },
+      ],
+    });
+    expect(decoded.providerInstances[0]?.instanceId).toBe("codex_personal");
+  });
+});

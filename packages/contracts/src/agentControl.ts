@@ -36,8 +36,9 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ModelSelection, RuntimeMode } from "./orchestration.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import { ModelSelection, OrchestrationSessionStatus, RuntimeMode } from "./orchestration.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
+import { ServerProviderAvailability, ServerProviderState } from "./server.ts";
 import { ThreadEnvMode } from "./settings.ts";
 import { WorktreeId } from "./worktree.ts";
 
@@ -544,3 +545,213 @@ export const AgentControlOperation = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type AgentControlOperation = typeof AgentControlOperation.Type;
+
+// ── Internal provider-session MCP surface ─────────────────────────────
+//
+// The server exposes a private, loopback-only MCP endpoint to supported
+// provider runtimes. This section defines the tool names and the bounded
+// input/result payloads those tools exchange. The credential material that
+// authenticates a provider session never appears in these contracts — it
+// is issued in-memory per provider runtime and revoked with it.
+
+/**
+ * The complete internal MCP tool catalog. Read-only by design in this
+ * slice: no mutation tool may be advertised until the proposal-backed
+ * thread actions ship, and even then every mutation is approval-gated.
+ */
+export const AGENT_CONTROL_MCP_TOOLS = {
+  context: "ryco_context",
+  capabilities: "ryco_capabilities",
+  listProjects: "ryco_list_projects",
+  listThreads: "ryco_list_threads",
+  readThread: "ryco_read_thread",
+  readControlRequest: "ryco_read_control_request",
+  waitForControlRequest: "ryco_wait_for_control_request",
+} as const;
+export type AgentControlMcpToolName =
+  (typeof AGENT_CONTROL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_MCP_TOOLS];
+
+export const AGENT_CONTROL_MCP_TOOL_NAMES: ReadonlyArray<AgentControlMcpToolName> =
+  Object.values(AGENT_CONTROL_MCP_TOOLS);
+
+// Server-side clamps for list/read tools. Inputs above a max are capped,
+// not rejected; absent limits use the defaults.
+export const AGENT_CONTROL_MCP_LIST_LIMIT_MAX = 50;
+export const AGENT_CONTROL_MCP_LIST_LIMIT_DEFAULT = 20;
+export const AGENT_CONTROL_MCP_MESSAGE_LIMIT_MAX = 50;
+export const AGENT_CONTROL_MCP_MESSAGE_LIMIT_DEFAULT = 20;
+/** Per-message transcript text cap; longer text is truncated and flagged. */
+export const AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS = 8_000;
+/** Wait bounds for `ryco_wait_for_control_request` (milliseconds). */
+export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_MAX = 50_000;
+export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_DEFAULT = 25_000;
+
+/**
+ * Opaque pagination cursor. List cursors are minted by the server and are
+ * only meaningful to the tool that issued them; thread-history cursors
+ * reuse the orchestration history cursor encoding. Bounded so a caller
+ * cannot smuggle unbounded payloads through the cursor field.
+ */
+export const AgentControlMcpCursor = TrimmedNonEmptyString.check(Schema.isMaxLength(1_024));
+export type AgentControlMcpCursor = typeof AgentControlMcpCursor.Type;
+
+// ── Tool inputs ───────────────────────────────────────────────────────
+
+export const AgentControlMcpListProjectsInput = Schema.Struct({
+  limit: Schema.optional(PositiveInt),
+  cursor: Schema.optional(AgentControlMcpCursor),
+});
+export type AgentControlMcpListProjectsInput = typeof AgentControlMcpListProjectsInput.Type;
+
+export const AgentControlMcpListThreadsInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  includeArchived: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(PositiveInt),
+  cursor: Schema.optional(AgentControlMcpCursor),
+});
+export type AgentControlMcpListThreadsInput = typeof AgentControlMcpListThreadsInput.Type;
+
+export const AgentControlMcpReadThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  messageLimit: Schema.optional(PositiveInt),
+  /** Page older history; minted by a previous `ryco_read_thread` call. */
+  cursor: Schema.optional(AgentControlMcpCursor),
+});
+export type AgentControlMcpReadThreadInput = typeof AgentControlMcpReadThreadInput.Type;
+
+export const AgentControlMcpReadControlRequestInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+});
+export type AgentControlMcpReadControlRequestInput =
+  typeof AgentControlMcpReadControlRequestInput.Type;
+
+export const AgentControlMcpWaitCondition = Schema.Literals(["decided", "terminal"]);
+export type AgentControlMcpWaitCondition = typeof AgentControlMcpWaitCondition.Type;
+
+export const AgentControlMcpWaitForControlRequestInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+  /** `decided` (default): any status past pending. `terminal`: a final outcome. */
+  waitFor: Schema.optional(AgentControlMcpWaitCondition),
+  /** Capped at `AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_MAX`. */
+  timeoutMs: Schema.optional(PositiveInt),
+});
+export type AgentControlMcpWaitForControlRequestInput =
+  typeof AgentControlMcpWaitForControlRequestInput.Type;
+
+// ── Tool results ──────────────────────────────────────────────────────
+
+export const AgentControlMcpContextResult = Schema.Struct({
+  threadId: ThreadId,
+  threadTitle: Schema.NullOr(TrimmedNonEmptyString),
+  projectId: Schema.NullOr(ProjectId),
+  projectTitle: Schema.NullOr(TrimmedNonEmptyString),
+  providerInstanceId: ProviderInstanceId,
+  runtimeSessionId: RuntimeSessionId,
+  capabilities: Schema.Array(AgentControlCapability),
+  /** Truthful advertisement: `false` until proposal-backed mutations ship. */
+  writeToolsAvailable: Schema.Boolean,
+});
+export type AgentControlMcpContextResult = typeof AgentControlMcpContextResult.Type;
+
+export const AGENT_CONTROL_MCP_MODELS_PER_INSTANCE_MAX = 50;
+
+export const AgentControlMcpModelSummary = Schema.Struct({
+  slug: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+});
+export type AgentControlMcpModelSummary = typeof AgentControlMcpModelSummary.Type;
+
+/**
+ * Bounded provider-instance availability for `ryco_capabilities`. Keyed by
+ * `ProviderInstanceId` — never a static provider name — and deliberately
+ * free of auth identity, rate limits, and maintenance internals.
+ */
+export const AgentControlMcpProviderInstanceSummary = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  driver: ProviderDriverKind,
+  displayName: Schema.NullOr(TrimmedNonEmptyString),
+  enabled: Schema.Boolean,
+  status: ServerProviderState,
+  availability: ServerProviderAvailability,
+  models: Schema.Array(AgentControlMcpModelSummary),
+});
+export type AgentControlMcpProviderInstanceSummary =
+  typeof AgentControlMcpProviderInstanceSummary.Type;
+
+export const AgentControlMcpCapabilitiesResult = Schema.Struct({
+  enabled: Schema.Boolean,
+  readOnly: Schema.Boolean,
+  tools: Schema.Array(TrimmedNonEmptyString),
+  grantedCapabilities: Schema.Array(AgentControlCapability),
+  providerInstances: Schema.Array(AgentControlMcpProviderInstanceSummary),
+});
+export type AgentControlMcpCapabilitiesResult = typeof AgentControlMcpCapabilitiesResult.Type;
+
+export const AgentControlMcpProjectSummary = Schema.Struct({
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type AgentControlMcpProjectSummary = typeof AgentControlMcpProjectSummary.Type;
+
+export const AgentControlMcpListProjectsResult = Schema.Struct({
+  projects: Schema.Array(AgentControlMcpProjectSummary),
+  nextCursor: Schema.NullOr(AgentControlMcpCursor),
+});
+export type AgentControlMcpListProjectsResult = typeof AgentControlMcpListProjectsResult.Type;
+
+export const AgentControlMcpThreadSummary = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  status: OrchestrationSessionStatus,
+  activeTurnId: Schema.NullOr(TurnId),
+  providerInstanceId: Schema.NullOr(ProviderInstanceId),
+  archived: Schema.Boolean,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type AgentControlMcpThreadSummary = typeof AgentControlMcpThreadSummary.Type;
+
+export const AgentControlMcpListThreadsResult = Schema.Struct({
+  threads: Schema.Array(AgentControlMcpThreadSummary),
+  nextCursor: Schema.NullOr(AgentControlMcpCursor),
+});
+export type AgentControlMcpListThreadsResult = typeof AgentControlMcpListThreadsResult.Type;
+
+/**
+ * Redacted transcript entry: role, bounded text, and turn attribution
+ * only. Attachments surface as metadata counts; activity payloads, raw
+ * provider events, and file paths never cross this boundary.
+ */
+export const AgentControlMcpMessage = Schema.Struct({
+  messageId: TrimmedNonEmptyString,
+  role: Schema.Literals(["user", "assistant", "system"]),
+  text: Schema.String,
+  truncated: Schema.Boolean,
+  turnId: Schema.NullOr(TurnId),
+  attachmentCount: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+export type AgentControlMcpMessage = typeof AgentControlMcpMessage.Type;
+
+export const AgentControlMcpReadThreadResult = Schema.Struct({
+  thread: AgentControlMcpThreadSummary,
+  messages: Schema.Array(AgentControlMcpMessage),
+  hasMoreBefore: Schema.Boolean,
+  /** Cursor for the next-older page; `null` when history is exhausted. */
+  nextCursor: Schema.NullOr(AgentControlMcpCursor),
+});
+export type AgentControlMcpReadThreadResult = typeof AgentControlMcpReadThreadResult.Type;
+
+/**
+ * Control-request read/wait payload: the bounded lifecycle receipt plus
+ * wait metadata. Never the plan payload or prompt text.
+ */
+export const AgentControlMcpControlRequestResult = Schema.Struct({
+  receipt: AgentControlProposalReceipt,
+  /** Only set by the wait tool: `true` when it returned on timeout. */
+  timedOut: Schema.optional(Schema.Boolean),
+});
+export type AgentControlMcpControlRequestResult = typeof AgentControlMcpControlRequestResult.Type;
