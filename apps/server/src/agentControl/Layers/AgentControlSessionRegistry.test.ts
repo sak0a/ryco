@@ -170,6 +170,30 @@ enabledLayer("AgentControlSessionRegistry", (it) => {
     }),
   );
 
+  it.effect("revokeLease by unique id never touches a successor with a reused epoch", () =>
+    Effect.gen(function* () {
+      const registry = yield* AgentControlSessionRegistry;
+      yield* registry.publishEndpoint(ENDPOINT);
+      // Recovery can legitimately reuse the exact same (thread, epoch)
+      // pair for a successor runtime. A stale teardown that revokes by the
+      // first lease's unique id must be a no-op against the successor.
+      const first = yield* issue({ runtimeSessionId: runtime1 });
+      const second = yield* issue({ runtimeSessionId: runtime1 });
+
+      yield* registry.revokeLease({ sessionId: first.sessionId, reason: "runtime-teardown" });
+
+      const survivor = yield* registry.authenticate(bearer(second));
+      assert.strictEqual(survivor.sessionId, second.sessionId);
+      assert.strictEqual(yield* registry.activeSessionCount, 1);
+
+      // Revoking the live lease by its own id works and is idempotent.
+      yield* registry.revokeLease({ sessionId: second.sessionId, reason: "runtime-teardown" });
+      yield* registry.revokeLease({ sessionId: second.sessionId, reason: "runtime-teardown" });
+      const gone = yield* Effect.flip(registry.authenticate(bearer(second)));
+      assert.strictEqual(gone.reason, "unknown");
+    }),
+  );
+
   it.effect("re-issuing for a thread supersedes the prior runtime's lease", () =>
     Effect.gen(function* () {
       const registry = yield* AgentControlSessionRegistry;

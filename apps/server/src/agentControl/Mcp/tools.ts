@@ -18,6 +18,7 @@ import {
   AGENT_CONTROL_MCP_MESSAGE_LIMIT_MAX,
   AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS,
   AGENT_CONTROL_MCP_MODELS_PER_INSTANCE_MAX,
+  AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS,
   AGENT_CONTROL_MCP_TOOLS,
   AGENT_CONTROL_MCP_TOOL_NAMES,
   AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_DEFAULT,
@@ -297,6 +298,30 @@ const toMcpMessage = (message: OrchestrationMessage): AgentControlMcpMessage => 
   };
 };
 
+/**
+ * Enforce the aggregate transcript budget over an ascending-order page.
+ * Newest messages keep their text; once the budget is exhausted walking
+ * backwards, older messages are truncated (possibly to empty) and
+ * flagged. The message set itself is untouched, so history cursors stay
+ * exact, and the bounded page can never blow the listener's response cap.
+ */
+const applyTranscriptTextBudget = (
+  messages: ReadonlyArray<AgentControlMcpMessage>,
+): ReadonlyArray<AgentControlMcpMessage> => {
+  let remaining = AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS;
+  const bounded = [...messages];
+  for (let index = bounded.length - 1; index >= 0; index -= 1) {
+    const message = bounded[index]!;
+    if (message.text.length <= remaining) {
+      remaining -= message.text.length;
+      continue;
+    }
+    bounded[index] = { ...message, text: message.text.slice(0, remaining), truncated: true };
+    remaining = 0;
+  }
+  return bounded;
+};
+
 const toInstanceSummary = (provider: ServerProvider): AgentControlMcpProviderInstanceSummary => ({
   instanceId: provider.instanceId,
   driver: provider.driver,
@@ -536,7 +561,7 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
 
       return Schema.encodeSync(AgentControlMcpReadThreadResult)({
         thread: toThreadSummary(shell.value),
-        messages: messages.map(toMcpMessage),
+        messages: applyTranscriptTextBudget(messages.map(toMcpMessage)),
         hasMoreBefore: pageInfo.hasMoreBefore,
         nextCursor: pageInfo.hasMoreBefore ? pageInfo.oldestCursor : null,
       });

@@ -582,6 +582,14 @@ export const AGENT_CONTROL_MCP_MESSAGE_LIMIT_MAX = 50;
 export const AGENT_CONTROL_MCP_MESSAGE_LIMIT_DEFAULT = 20;
 /** Per-message transcript text cap; longer text is truncated and flagged. */
 export const AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS = 8_000;
+/**
+ * Aggregate transcript text budget per `ryco_read_thread` page. Newest
+ * messages keep their text; older messages beyond the budget are
+ * truncated (down to empty) and flagged, so a max-limit page of max-length
+ * messages still fits the listener's bounded response size even after the
+ * MCP dual text/structured serialization.
+ */
+export const AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS = 80_000;
 /** Wait bounds for `ryco_wait_for_control_request` (milliseconds). */
 export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_MAX = 50_000;
 export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_DEFAULT = 25_000;

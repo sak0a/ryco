@@ -141,6 +141,12 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
       return Effect.succeed(session.record);
     });
 
+  const revokeLease: AgentControlSessionRegistryShape["revokeLease"] = (input) =>
+    Effect.sync(() => {
+      const session = sessionsById.get(input.sessionId);
+      if (session !== undefined) dropSession(session);
+    });
+
   const revokeLeases: AgentControlSessionRegistryShape["revokeLeases"] = (input) =>
     Effect.sync(() => {
       revokeMatching(
@@ -231,6 +237,7 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
   return {
     issueLease,
     authenticate,
+    revokeLease,
     revokeLeases,
     revokeAll,
     activeSessionCount,

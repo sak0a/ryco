@@ -128,7 +128,19 @@ export interface AgentControlSessionRegistryShape {
     authorizationHeader: string | undefined,
   ) => Effect.Effect<AgentControlSessionRecord, AgentControlMcpAuthError>;
 
-  /** Synchronously revoke leases and abort their in-flight requests. */
+  /**
+   * Synchronously revoke exactly one issued lease by its unique session
+   * id, aborting its in-flight requests. Idempotent and incapable of
+   * touching a successor lease: session ids are never reused, so a stale
+   * runtime's late teardown cannot revoke the credential of a recovered
+   * runtime that reused the same `(threadId, runtimeSessionId)` epoch.
+   */
+  readonly revokeLease: (input: {
+    readonly sessionId: string;
+    readonly reason: AgentControlLeaseRevocationReason;
+  }) => Effect.Effect<void>;
+
+  /** Synchronously revoke leases by runtime identity and abort their in-flight requests. */
   readonly revokeLeases: (input: RevokeAgentControlLeasesInput) => Effect.Effect<void>;
 
   /** Revoke every lease (server shutdown, feature disable, listener stop). */

@@ -50,12 +50,17 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
   });
 
   // Start/stop transitions are serialized so a rapid settings flip cannot
-  // interleave a start with a teardown.
+  // interleave a start with a teardown. `shuttingDown` latches inside the
+  // semaphore during the shutdown finalizer: scope finalizers run LIFO, so
+  // the settings watcher fiber (forked before the finalizer registration)
+  // is still alive when shutdown runs and a buffered settings event could
+  // otherwise restart the listener after the final teardown.
   const transitions = yield* Semaphore.make(1);
   let listenerScope: Scope.Closeable | null = null;
+  let shuttingDown = false;
 
   const startListener = Effect.gen(function* () {
-    if (listenerScope !== null) return;
+    if (shuttingDown || listenerScope !== null) return;
     const scope = yield* Scope.make("sequential");
     const started = yield* makeAgentControlMcpListener({ registry, tools }).pipe(
       Scope.provide(scope),
@@ -106,7 +111,14 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
   );
 
   yield* Effect.addFinalizer(() =>
-    transitions.withPermits(1)(stopListener("server-shutdown")).pipe(Effect.ignore),
+    transitions
+      .withPermits(1)(
+        Effect.gen(function* () {
+          shuttingDown = true;
+          yield* stopListener("server-shutdown");
+        }),
+      )
+      .pipe(Effect.ignore),
   );
 });
 

@@ -34,7 +34,6 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import type {
   AgentControlIssuedLease,
   IssueAgentControlLeaseInput,
-  RevokeAgentControlLeasesInput,
 } from "../../agentControl/Services/AgentControlSessionRegistry.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
@@ -137,14 +136,14 @@ const makeBridge = (input?: { readonly withLease?: boolean }) => {
           }),
     ),
   );
-  const revokeLeases = vi.fn((_input: RevokeAgentControlLeasesInput) => Effect.void);
+  const revokeLease = vi.fn((_input: { sessionId: string; reason: string }) => Effect.void);
   const bridge: CodexAgentControlBridge = {
     issueLease: (leaseInput) => issueLease(leaseInput),
     // Suspend so the spy counts revocation *executions*, not the eager
     // construction of the finalizer effect at registration time.
-    revokeLeases: (revokeInput) => Effect.suspend(() => revokeLeases(revokeInput)),
+    revokeLease: (revokeInput) => Effect.suspend(() => revokeLease(revokeInput)),
   };
-  return { bridge, issueLease, revokeLeases };
+  return { bridge, issueLease, revokeLease };
 };
 
 const makeRuntimeFactory = (options?: { readonly failConstruction?: boolean }) => {
@@ -251,7 +250,7 @@ it.effect("injects the MCP connection into runtime options, never the environmen
 
 it.effect("starts without Agent Control when no lease is issued", () =>
   Effect.gen(function* () {
-    const { bridge, revokeLeases } = makeBridge({ withLease: false });
+    const { bridge, revokeLease } = makeBridge({ withLease: false });
     const runtimeFactory = makeRuntimeFactory();
 
     yield* Effect.gen(function* () {
@@ -262,27 +261,31 @@ it.effect("starts without Agent Control when no lease is issued", () =>
       assert.isUndefined(options.agentControl);
       yield* adapter.stopSession(threadId);
       // Nothing to revoke: no lease existed.
-      assert.strictEqual(revokeLeases.mock.calls.length, 0);
+      assert.strictEqual(revokeLease.mock.calls.length, 0);
     }).pipe(Effect.provide(makeAdapterLayer({ bridge, runtimeFactory })));
   }),
 );
 
 it.effect("revokes the lease on stopSession (runtime teardown)", () =>
   Effect.gen(function* () {
-    const { bridge, revokeLeases } = makeBridge();
+    const { bridge, revokeLease } = makeBridge();
     const runtimeFactory = makeRuntimeFactory();
 
     yield* Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       yield* adapter.startSession(startInput);
-      assert.strictEqual(revokeLeases.mock.calls.length, 0);
+      assert.strictEqual(revokeLease.mock.calls.length, 0);
       yield* adapter.stopSession(threadId);
-      assert.strictEqual(revokeLeases.mock.calls.length, 1);
-      assert.deepStrictEqual(revokeLeases.mock.calls[0]?.[0], {
-        threadId,
-        runtimeSessionId,
-        reason: "runtime-teardown",
-      });
+      // Eager revocation inside stopSessionInternal plus the session-scope
+      // backstop finalizer both fire; both target the same unique lease id
+      // (idempotent against the real registry).
+      assert.isAtLeast(revokeLease.mock.calls.length, 1);
+      for (const call of revokeLease.mock.calls) {
+        assert.deepStrictEqual(call[0], {
+          sessionId: "session-ac",
+          reason: "runtime-teardown",
+        });
+      }
       assert.ok(runtimeFactory.lastRuntime?.closeImpl.mock.calls.length);
     }).pipe(Effect.provide(makeAdapterLayer({ bridge, runtimeFactory })));
   }),
@@ -290,17 +293,16 @@ it.effect("revokes the lease on stopSession (runtime teardown)", () =>
 
 it.effect("revokes the lease when runtime construction fails", () =>
   Effect.gen(function* () {
-    const { bridge, revokeLeases } = makeBridge();
+    const { bridge, revokeLease } = makeBridge();
     const runtimeFactory = makeRuntimeFactory({ failConstruction: true });
 
     yield* Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       const exit = yield* Effect.exit(adapter.startSession(startInput));
       assert.isTrue(exit._tag === "Failure");
-      assert.strictEqual(revokeLeases.mock.calls.length, 1);
-      assert.deepStrictEqual(revokeLeases.mock.calls[0]?.[0], {
-        threadId,
-        runtimeSessionId,
+      assert.strictEqual(revokeLease.mock.calls.length, 1);
+      assert.deepStrictEqual(revokeLease.mock.calls[0]?.[0], {
+        sessionId: "session-ac",
         reason: "runtime-teardown",
       });
     }).pipe(Effect.provide(makeAdapterLayer({ bridge, runtimeFactory })));
@@ -309,7 +311,7 @@ it.effect("revokes the lease when runtime construction fails", () =>
 
 it.live("revokes the lease when the codex process exits without a stop call", () =>
   Effect.gen(function* () {
-    const { bridge, revokeLeases } = makeBridge();
+    const { bridge, revokeLease } = makeBridge();
     const runtimeFactory = makeRuntimeFactory();
 
     yield* Effect.gen(function* () {
@@ -328,10 +330,10 @@ it.live("revokes the lease when the codex process exits without a stop call", ()
       } as unknown as ProviderEvent);
 
       // The event fiber consumes asynchronously; poll briefly.
-      for (let attempt = 0; attempt < 100 && revokeLeases.mock.calls.length === 0; attempt += 1) {
+      for (let attempt = 0; attempt < 100 && revokeLease.mock.calls.length === 0; attempt += 1) {
         yield* Effect.sleep("10 millis");
       }
-      assert.strictEqual(revokeLeases.mock.calls.length, 1);
+      assert.strictEqual(revokeLease.mock.calls.length, 1);
       yield* adapter.stopSession(threadId);
     }).pipe(Effect.provide(makeAdapterLayer({ bridge, runtimeFactory })));
   }),
@@ -339,7 +341,7 @@ it.live("revokes the lease when the codex process exits without a stop call", ()
 
 it.effect("adapter release (stopAll) revokes every active lease", () =>
   Effect.gen(function* () {
-    const { bridge, revokeLeases } = makeBridge();
+    const { bridge, revokeLease } = makeBridge();
     const runtimeFactory = makeRuntimeFactory();
     const scope = yield* Scope.make("sequential");
     const context = yield* Layer.build(makeAdapterLayer({ bridge, runtimeFactory })).pipe(
@@ -347,10 +349,13 @@ it.effect("adapter release (stopAll) revokes every active lease", () =>
     );
     const adapter = Context.get(context, CodexAdapter);
     yield* adapter.startSession(startInput);
-    assert.strictEqual(revokeLeases.mock.calls.length, 0);
+    assert.strictEqual(revokeLease.mock.calls.length, 0);
 
     yield* Scope.close(scope, Exit.void);
-    assert.strictEqual(revokeLeases.mock.calls.length, 1);
+    assert.isAtLeast(revokeLease.mock.calls.length, 1);
+    for (const call of revokeLease.mock.calls) {
+      assert.deepStrictEqual(call[0], { sessionId: "session-ac", reason: "runtime-teardown" });
+    }
   }),
 );
 

@@ -85,18 +85,24 @@ const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES =
  */
 export type CodexAgentControlBridge = Pick<
   AgentControlSessionRegistryShape,
-  "issueLease" | "revokeLeases"
+  "issueLease" | "revokeLease"
 >;
 
 /**
  * Truthful host-context note injected only when a lease was actually
  * issued. A runtime without a lease receives no mention of these tools.
+ * The revocation sentence keeps the note truthful for the runtime's whole
+ * lifetime: instructions are fixed at session start, but the lease can be
+ * revoked mid-session (feature disabled, listener stopped), after which
+ * every request is rejected as unauthorized.
  */
 export const CODEX_AGENT_CONTROL_INSTRUCTIONS =
   "Ryco Agent Control: read-only Ryco control tools (ryco_*) are available through the " +
   `'${CODEX_AGENT_CONTROL_SERVER_NAME}' MCP server on a private local connection. They can ` +
   "inspect Ryco projects, threads, transcripts, and Agent Control request status. " +
-  "No tool on that server can change Ryco state in this build.";
+  "No tool on that server can change Ryco state in this build. If the server is " +
+  "unreachable or rejects requests as unauthorized, Ryco has revoked this session's " +
+  "access — treat the tools as unavailable instead of retrying.";
 
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
@@ -119,6 +125,8 @@ interface CodexAdapterSessionContext {
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
+  /** Unique Agent Control lease id for this exact runtime, when issued. */
+  readonly agentControlSessionId?: string;
   stopped: boolean;
 }
 
@@ -1839,24 +1847,26 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { serviceTier: "fast" }
             : {}),
         };
+        const agentControlSessionId = Option.isSome(agentControlLease)
+          ? agentControlLease.value.sessionId
+          : undefined;
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>
           sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
         );
-        // The session scope is the teardown choke point: stop, wedged-turn
-        // recycle, start-failure cleanup, instance rebuild, and server
-        // shutdown all close it — one finalizer covers lease revocation on
-        // every path.
-        if (options?.agentControl && agentControlInjection !== undefined) {
+        // The session scope is a teardown backstop: start-failure cleanup,
+        // epoch mismatch, instance rebuild, and server shutdown all close
+        // it. `stopSessionInternal` additionally revokes eagerly before the
+        // (interruptible, potentially wedged) runtime close, so a timed-out
+        // stop cannot leave the credential alive. Revocation targets the
+        // unique lease id — never the (thread, epoch) pair, which a
+        // recovered successor runtime may legitimately reuse.
+        if (options?.agentControl && agentControlSessionId !== undefined) {
           yield* Scope.addFinalizer(
             sessionScope,
             options.agentControl
-              .revokeLeases({
-                threadId: input.threadId,
-                runtimeSessionId,
-                reason: "runtime-teardown",
-              })
+              .revokeLease({ sessionId: agentControlSessionId, reason: "runtime-teardown" })
               .pipe(Effect.ignore),
           );
         }
@@ -1886,18 +1896,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             );
             // A dead codex process cannot use its lease, but the read tools
             // must not outlive the runtime either — revoke on exit even
-            // before anything calls stopSession on the stale record.
+            // before anything calls stopSession on the stale record. By
+            // unique lease id: this fiber may outlive a replacement, and
+            // must never touch a successor's lease.
             if (
               options?.agentControl &&
-              agentControlInjection !== undefined &&
+              agentControlSessionId !== undefined &&
               runtimeEvents.some((runtimeEvent) => runtimeEvent.type === "session.exited")
             ) {
               yield* options.agentControl
-                .revokeLeases({
-                  threadId: input.threadId,
-                  runtimeSessionId,
-                  reason: "runtime-teardown",
-                })
+                .revokeLease({ sessionId: agentControlSessionId, reason: "runtime-teardown" })
                 .pipe(Effect.ignore);
             }
             if (runtimeEvents.length === 0) {
@@ -1954,6 +1962,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           scope: sessionScope,
           runtime,
           eventFiber,
+          ...(agentControlSessionId !== undefined ? { agentControlSessionId } : {}),
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -2172,8 +2181,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (session.stopped) {
       return;
     }
-    session.stopped = true;
-    sessions.delete(session.threadId);
+    // Revoke the Agent Control lease first, in one uninterruptible step
+    // with the map removal: `ProviderService.stopExactBinding` wraps this
+    // stop in a timeout, and an interruption striking during the
+    // (potentially wedged) `runtime.close` below must not leave a dead
+    // runtime holding a valid credential. The session-scope finalizer
+    // repeats the revocation idempotently on the paths that do reach it.
+    yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        session.stopped = true;
+        sessions.delete(session.threadId);
+        if (options?.agentControl && session.agentControlSessionId !== undefined) {
+          yield* options.agentControl
+            .revokeLease({ sessionId: session.agentControlSessionId, reason: "runtime-teardown" })
+            .pipe(Effect.ignore);
+        }
+      }),
+    );
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
     yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);

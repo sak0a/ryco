@@ -1,6 +1,7 @@
 import {
   AGENT_CONTROL_CAPABILITIES,
   AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS,
+  AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS,
   AGENT_CONTROL_MCP_TOOLS,
   AGENT_CONTROL_MCP_TOOL_NAMES,
   AGENT_CONTROL_ACTION_CAPABILITIES,
@@ -541,6 +542,54 @@ it.effect("ryco_read_thread pages older history through the cursor", () =>
     assert.strictEqual(payload.messages.length, 1);
     assert.isFalse(payload.hasMoreBefore);
     assert.isNull(payload.nextCursor);
+  }),
+);
+
+it.effect("ryco_read_thread bounds aggregate transcript text, newest first", () =>
+  Effect.gen(function* () {
+    // A full max-limit page of max-length messages must stay under the
+    // listener's response cap even with the dual text/structured MCP
+    // serialization; older messages give up their text first.
+    const manyMessages = Array.from({ length: 50 }, (_, index) => ({
+      id: `bulk-message-${index}`,
+      role: "assistant",
+      text: "z".repeat(AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS),
+      turnId: null,
+      streaming: false,
+      createdAt: T1,
+      updatedAt: T1,
+    }));
+    const bulkWindow = decodeWindow({
+      ...Schema.encodeSync(OrchestrationThreadWindowSnapshot)(windowSnapshot),
+      thread: {
+        ...Schema.encodeSync(OrchestrationThreadWindowSnapshot)(windowSnapshot).thread,
+        messages: manyMessages,
+      },
+    });
+    const deps = makeDeps({
+      projections: { ...projections, getThreadWindow: () => Effect.succeed(bulkWindow) },
+    });
+    const result = yield* call(deps, AGENT_CONTROL_MCP_TOOLS.readThread, {
+      threadId: "thread-caller",
+      messageLimit: 50,
+    });
+    assert.isUndefined(result.isError);
+    const payload = structured(result) as {
+      readonly messages: ReadonlyArray<{ readonly text: string; readonly truncated: boolean }>;
+    };
+    assert.strictEqual(payload.messages.length, 50);
+    const totalChars = payload.messages.reduce((sum, message) => sum + message.text.length, 0);
+    assert.isAtMost(totalChars, AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS);
+    // Newest messages keep full text; the oldest are emptied and flagged.
+    assert.strictEqual(
+      payload.messages.at(-1)?.text.length,
+      AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS,
+    );
+    assert.strictEqual(payload.messages[0]?.text.length, 0);
+    assert.isTrue(payload.messages[0]?.truncated);
+    // The serialized JSON-RPC result (text copy + structured copy) fits
+    // the listener's response bound with ample headroom.
+    assert.isAtMost(JSON.stringify(result).length * 2, 512 * 1024);
   }),
 );
 
