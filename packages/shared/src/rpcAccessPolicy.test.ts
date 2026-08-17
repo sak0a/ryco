@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { CONTEXT_HANDOFF_WS_METHODS, ORCHESTRATION_WS_METHODS, WS_METHODS } from "@ryco/contracts";
+import {
+  CONTEXT_HANDOFF_WS_METHODS,
+  DEVICE_WS_METHODS,
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
+} from "@ryco/contracts";
 import { hostedRoleAllows, RPC_ACCESS_POLICY, rpcAccessFor } from "./rpcAccessPolicy.ts";
 
 describe("shared RPC access policy", () => {
@@ -10,6 +15,7 @@ describe("shared RPC access policy", () => {
         ...Object.values(WS_METHODS),
         ...Object.values(ORCHESTRATION_WS_METHODS),
         ...Object.values(CONTEXT_HANDOFF_WS_METHODS),
+        ...Object.values(DEVICE_WS_METHODS),
       ]),
     );
     expect(rpcAccessFor(WS_METHODS.searchThreadMessages)).toBe("owner");

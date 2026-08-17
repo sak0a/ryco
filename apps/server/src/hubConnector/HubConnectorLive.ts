@@ -1,5 +1,5 @@
 import { Context, Effect, Exit, Layer, Scope } from "effect";
-import { WsRpcGroup } from "@ryco/contracts";
+import { WsHostedRpcGroup } from "@ryco/contracts";
 
 import { ServerConfig } from "../config.ts";
 import { ServerEnvironment } from "../environment/Services/ServerEnvironment.ts";
@@ -9,6 +9,7 @@ import {
   RpcOutputRefusedError,
 } from "../ws/RpcByteSession.ts";
 import { relayRpcPrincipal } from "../ws/RpcPrincipal.ts";
+import { makeDeviceWsRpcLayer } from "../ws/index.ts";
 import { makeServerWsRpcLayer } from "../ws.ts";
 import { HubConnector } from "./HubConnector.ts";
 import {
@@ -542,8 +543,11 @@ export const HubConnectorLive = Layer.effect(
         try {
           const session = await runPromise(
             makeRpcByteSession(
-              WsRpcGroup,
-              makeServerWsRpcLayer(relayRpcPrincipal(effectiveRole, channelId)),
+              WsHostedRpcGroup,
+              Layer.merge(
+                makeServerWsRpcLayer(relayRpcPrincipal(effectiveRole, channelId)),
+                makeDeviceWsRpcLayer(relayRpcPrincipal(effectiveRole, channelId)),
+              ),
               // A refused response is reported, not thrown: the registry already
               // closes the channel naming the cause, and a defect here would
               // instead kill the RPC server fiber and every request on it. On an

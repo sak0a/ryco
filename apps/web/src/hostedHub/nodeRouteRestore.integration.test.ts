@@ -35,7 +35,13 @@ function MockWsTransport(resolveUrl: () => Promise<string>, options: CapturedTra
   capturedTransports.push({ resolveUrl, options });
 }
 
-vi.mock("../rpc/wsTransport", () => ({ WsTransport: MockWsTransport }));
+function MockDeviceWsTransport() {}
+
+vi.mock("../rpc/wsTransport", () => ({
+  DeviceWsTransport: MockDeviceWsTransport,
+  HostedWsTransport: MockWsTransport,
+  WsTransport: MockWsTransport,
+}));
 
 vi.mock("../rpc/wsRpcClient", () => ({ createWsRpcClient }));
 

@@ -15,7 +15,11 @@ import type { ObservabilityService, SocketService } from "../platform/index.ts";
 import { clearAllTrackedRpcRequests } from "./requestLatencyState.ts";
 import {
   createWsRpcProtocolLayer,
+  makeHostedRpcProtocolClient,
+  makeDeviceRpcProtocolClient,
   makeWsRpcProtocolClient,
+  type DeviceRpcProtocolClient,
+  type HostedRpcProtocolClient,
   type WsProtocolLifecycleHandlers,
   type WsRpcProtocolClient,
   type WsRpcProtocolSocketUrlProvider,
@@ -38,8 +42,8 @@ const NOOP: () => void = () => undefined;
 export const THREAD_NOT_FOUND_ERROR_RE = /^Thread\s.+\swas not found$/u;
 export const SUBSCRIPTION_STREAM_DONE_SCHEMA_ERROR_FRAGMENT = "SchemaError(Expected array";
 
-interface TransportSession {
-  readonly clientPromise: Promise<WsRpcProtocolClient>;
+interface TransportSession<Client> {
+  readonly clientPromise: Promise<Client>;
   readonly clientScope: Scope.Closeable;
   readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;
 }
@@ -73,7 +77,7 @@ export function isSubscriptionStreamDoneError(message: string): boolean {
   );
 }
 
-export class WsTransport {
+class RpcTransport<Client> {
   private readonly url: WsRpcProtocolSocketUrlProvider;
   private readonly socket: SocketService;
   private readonly observability: ObservabilityService;
@@ -84,24 +88,27 @@ export class WsTransport {
   private reconnectChain: Promise<void> = Promise.resolve();
   private nextSessionId = 0;
   private activeSessionId = 0;
-  private session: TransportSession;
+  private session: TransportSession<Client>;
   private lastHeartbeatPongAt = 0;
+  private readonly makeClient: () => Effect.Effect<Client, never, RpcClient.Protocol | Scope.Scope>;
   private readonly streamRequestStartListeners = new Set<(info: StreamRequestStartInfo) => void>();
 
   constructor(
     url: WsRpcProtocolSocketUrlProvider,
     platform: { readonly observability: ObservabilityService; readonly socket: SocketService },
+    makeClient: () => Effect.Effect<Client, never, RpcClient.Protocol | Scope.Scope>,
     lifecycleHandlers?: WsProtocolLifecycleHandlers,
   ) {
     this.url = url;
     this.socket = platform.socket;
     this.observability = platform.observability;
+    this.makeClient = makeClient;
     this.lifecycleHandlers = lifecycleHandlers;
     this.session = this.createSession();
   }
 
   async request<TSuccess>(
-    execute: (client: WsRpcProtocolClient) => Effect.Effect<TSuccess, Error, never>,
+    execute: (client: Client) => Effect.Effect<TSuccess, Error, never>,
     _options?: RequestOptions,
   ): Promise<TSuccess> {
     if (this.disposed) {
@@ -114,7 +121,7 @@ export class WsTransport {
   }
 
   async requestStream<TValue>(
-    connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
+    connect: (client: Client) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,
   ): Promise<void> {
     if (this.disposed) {
@@ -137,7 +144,7 @@ export class WsTransport {
   }
 
   subscribe<TValue>(
-    connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
+    connect: (client: Client) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,
     options?: SubscribeOptions,
   ): () => void {
@@ -268,7 +275,7 @@ export class WsTransport {
     await this.closeSession(this.session);
   }
 
-  private closeSession(session: TransportSession) {
+  private closeSession(session: TransportSession<Client>) {
     this.intentionalCloseDepth += 1;
     return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
       this.intentionalCloseDepth -= 1;
@@ -276,7 +283,7 @@ export class WsTransport {
     });
   }
 
-  private createSession(): TransportSession {
+  private createSession(): TransportSession<Client> {
     const sessionId = this.nextSessionId + 1;
     this.nextSessionId = sessionId;
     this.activeSessionId = sessionId;
@@ -310,13 +317,13 @@ export class WsTransport {
     return {
       runtime,
       clientScope,
-      clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+      clientPromise: runtime.runPromise(Scope.provide(clientScope)(this.makeClient())),
     };
   }
 
   private runStreamOnSession<TValue>(
-    session: TransportSession,
-    connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
+    session: TransportSession<Client>,
+    connect: (client: Client) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,
     requestStart: {
       readonly tag?: string;
@@ -399,6 +406,46 @@ export class WsTransport {
       cancel,
       completed,
     };
+  }
+}
+
+/** The main application RPC transport. */
+export class WsTransport extends RpcTransport<WsRpcProtocolClient> {
+  constructor(
+    url: WsRpcProtocolSocketUrlProvider,
+    platform: { readonly observability: ObservabilityService; readonly socket: SocketService },
+    lifecycleHandlers?: WsProtocolLifecycleHandlers,
+  ) {
+    super(url, platform, () => makeWsRpcProtocolClient, lifecycleHandlers);
+  }
+}
+
+/**
+ * Low-priority simulator control transport. It reuses the same lifecycle and
+ * retry implementation while keeping its handler group and socket isolated.
+ */
+export class DeviceWsTransport extends RpcTransport<DeviceRpcProtocolClient> {
+  constructor(
+    url: WsRpcProtocolSocketUrlProvider,
+    platform: { readonly observability: ObservabilityService; readonly socket: SocketService },
+    lifecycleHandlers?: WsProtocolLifecycleHandlers,
+  ) {
+    super(url, platform, () => makeDeviceRpcProtocolClient, {
+      ...lifecycleHandlers,
+      preserveSocketPath: true,
+      recordConnectionState: false,
+    });
+  }
+}
+
+/** The hosted relay's authoritative socket carries application and device control RPC together. */
+export class HostedWsTransport extends RpcTransport<HostedRpcProtocolClient> {
+  constructor(
+    url: WsRpcProtocolSocketUrlProvider,
+    platform: { readonly observability: ObservabilityService; readonly socket: SocketService },
+    lifecycleHandlers?: WsProtocolLifecycleHandlers,
+  ) {
+    super(url, platform, () => makeHostedRpcProtocolClient, lifecycleHandlers);
   }
 }
 

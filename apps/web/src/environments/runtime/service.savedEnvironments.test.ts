@@ -70,6 +70,8 @@ vi.mock("../../rpc/wsRpcClient", () => ({
 }));
 
 vi.mock("../../rpc/wsTransport", () => ({
+  DeviceWsTransport: MockWsTransport,
+  HostedWsTransport: MockWsTransport,
   WsTransport: MockWsTransport,
 }));
 

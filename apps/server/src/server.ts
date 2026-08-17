@@ -15,7 +15,9 @@ import {
 } from "./http.ts";
 import { ProjectAvatarStoreLive } from "./project/Layers/ProjectAvatarStore.ts";
 import { fixPath } from "./os-jank.ts";
-import { websocketRpcRouteLayer } from "./ws.ts";
+import { deviceWebsocketRpcRouteLayer, websocketRpcRouteLayer } from "./ws.ts";
+import { DeviceServiceLive } from "./device/Layers/DeviceService.ts";
+import { deviceFrameRouteLayer } from "./device/deviceFrameRoute.ts";
 import { HubConnectorLive } from "./hubConnector/HubConnectorLive.ts";
 import { hubConnectorRoutesLayer } from "./hubConnector/http.ts";
 import { desktopLocalIntroductionRoutesLayer } from "./hubConnector/localIntroductionHttp.ts";
@@ -352,6 +354,9 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 
 const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
+  // One process-scoped manager is shared by control RPC, frame streaming,
+  // provider tools, idle cleanup, and crash-recovery ownership.
+  Layer.provideMerge(DeviceServiceLive),
 );
 
 const authRoutesLayer = Layer.mergeAll(
@@ -384,6 +389,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   legacyServerEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
+  deviceWebsocketRpcRouteLayer,
+  deviceFrameRouteLayer,
   hubConnectorRoutesLayer,
   desktopLocalIntroductionRoutesLayer,
   desktopNativeNodeClaimRoutesLayer,

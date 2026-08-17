@@ -33,6 +33,7 @@ const STATIC_COMMAND_META: Record<string, Omit<KeybindingCommandMeta, "category"
   "workspace.files": { title: "Open workspace files", sortWeight: 1 },
   "workspace.review": { title: "Open workspace review", sortWeight: 2 },
   "workspace.terminal": { title: "Open workspace terminal", sortWeight: 3 },
+  "workspace.simulator": { title: "Open iOS Simulator workspace", sortWeight: 4 },
   "diff.toggle": { title: "Toggle diff view", sortWeight: 1 },
   "commandPalette.toggle": { title: "Open command palette", sortWeight: 1 },
   "chat.new": { title: "New chat", sortWeight: 1 },

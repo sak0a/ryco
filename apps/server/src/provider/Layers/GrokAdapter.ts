@@ -34,6 +34,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -391,6 +392,17 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           yield* Effect.addFinalizer(() =>
             sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
           );
+          let ctx!: GrokSessionContext;
+          const deviceToolBinding = createProcessDeviceToolBinding({
+            threadId: input.threadId,
+            isTurnActive: () => ctx !== undefined && ctx.activeTurnId !== undefined && !ctx.stopped,
+          });
+          if (deviceToolBinding) {
+            yield* Scope.addFinalizer(
+              sessionScope,
+              Effect.sync(() => deviceToolBinding.dispose()),
+            );
+          }
 
           const resumeSessionId = grokResume?.sessionId;
           const acpNativeLoggers = makeAcpNativeLoggers({
@@ -406,6 +418,21 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "ryco", version: "0.0.0" },
+            ...(deviceToolBinding
+              ? {
+                  mcpServers: [
+                    {
+                      type: "http" as const,
+                      name: "ryco-device",
+                      url: deviceToolBinding.url,
+                      headers: Object.entries(deviceToolBinding.headers).map(([name, value]) => ({
+                        name,
+                        value,
+                      })),
+                    },
+                  ],
+                }
+              : {}),
             ...acpNativeLoggers,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),
@@ -576,7 +603,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             updatedAt: now,
           };
 
-          const ctx: GrokSessionContext = {
+          ctx = {
             threadId: input.threadId,
             acpSessionId: started.sessionId,
             session,

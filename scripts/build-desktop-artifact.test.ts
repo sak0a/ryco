@@ -575,6 +575,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           from: "apps/desktop/resources/ryco-desktop-security-helper",
           to: "ryco-desktop-security-helper",
         },
+        {
+          from: "apps/server/dist/device-helper",
+          to: "device-helper",
+        },
       ]);
       assert.deepStrictEqual(config.protocols, [
         { name: "Ryco Hosted Authorization", schemes: ["ryco"] },

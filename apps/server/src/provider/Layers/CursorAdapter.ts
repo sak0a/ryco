@@ -43,6 +43,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -593,6 +594,16 @@ export function makeCursorAdapter(
             sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
           );
           let ctx!: CursorSessionContext;
+          const deviceToolBinding = createProcessDeviceToolBinding({
+            threadId: input.threadId,
+            isTurnActive: () => ctx !== undefined && ctx.activeTurnId !== undefined && !ctx.stopped,
+          });
+          if (deviceToolBinding) {
+            yield* Scope.addFinalizer(
+              sessionScope,
+              Effect.sync(() => deviceToolBinding.dispose()),
+            );
+          }
 
           const resumeSessionId =
             input.resumePolicy === "fresh"
@@ -623,6 +634,21 @@ export function makeCursorAdapter(
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "ryco", version: "0.0.0" },
+            ...(deviceToolBinding
+              ? {
+                  mcpServers: [
+                    {
+                      type: "http" as const,
+                      name: "ryco-device",
+                      url: deviceToolBinding.url,
+                      headers: Object.entries(deviceToolBinding.headers).map(([name, value]) => ({
+                        name,
+                        value,
+                      })),
+                    },
+                  ],
+                }
+              : {}),
             ...acpNativeLoggers,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),

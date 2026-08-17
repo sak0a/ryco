@@ -4,6 +4,7 @@ import type { WsRpcClient } from "../rpc/index.ts";
 
 export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
   return {
+    ...(rpcClient.device ? { device: rpcClient.device } : {}),
     terminal: {
       open: (input) => rpcClient.terminal.open(input as never),
       write: (input) => rpcClient.terminal.write(input as never),

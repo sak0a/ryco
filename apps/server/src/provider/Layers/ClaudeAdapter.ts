@@ -80,6 +80,10 @@ import {
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
+import {
+  createProcessDeviceToolBinding,
+  type DeviceToolBinding,
+} from "../../providerTools/deviceToolGateway.ts";
 import { buildTokenReductionInstructions, checkRtkAvailability } from "../../tokenReduction.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { formatProjectCustomSystemPrompt } from "../ProjectCustomSystemPrompt.ts";
@@ -197,6 +201,7 @@ interface ClaudeSessionContext {
   session: ProviderSession;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
+  readonly deviceToolBinding: DeviceToolBinding | null;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
@@ -3464,6 +3469,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped) return;
 
     context.stopped = true;
+    context.deviceToolBinding?.dispose();
 
     for (const [requestId, pending] of context.pendingApprovals) {
       yield* Deferred.succeed(pending.decision, "cancel");
@@ -3613,6 +3619,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const inFlightTools = new Map<number, ToolInFlight>();
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined);
+      let deviceToolContext: ClaudeSessionContext | undefined;
+      const deviceToolBinding = createProcessDeviceToolBinding({
+        threadId,
+        isTurnActive: () =>
+          deviceToolContext?.turnState !== undefined && !deviceToolContext.stopped,
+      });
 
       /**
        * Handle AskUserQuestion tool calls by emitting a `user-input.requested`
@@ -3967,6 +3979,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
+        ...(deviceToolBinding
+          ? {
+              mcpServers: {
+                ryco_device: {
+                  type: "http",
+                  url: deviceToolBinding.url,
+                  headers: { ...deviceToolBinding.headers },
+                  alwaysLoad: true,
+                },
+              },
+            }
+          : {}),
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
@@ -4010,7 +4034,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             detail: toMessage(cause, "Failed to start Claude runtime session."),
             cause,
           }),
-      });
+      }).pipe(Effect.tapError(() => Effect.sync(() => deviceToolBinding?.dispose())));
 
       const session: ProviderSession = {
         threadId,
@@ -4037,6 +4061,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         session,
         promptQueue,
         query: queryRuntime,
+        deviceToolBinding,
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
@@ -4063,6 +4088,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         completedSubagentIds: new Set(),
         stopped: false,
       };
+      deviceToolContext = context;
       yield* Ref.set(contextRef, context);
       sessions.set(threadId, context);
 

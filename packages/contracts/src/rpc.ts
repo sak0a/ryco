@@ -25,6 +25,21 @@ import {
 } from "./atlassian.ts";
 import { ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
+  DEVICE_WS_METHODS,
+  DeviceAppRequest,
+  DeviceAppResponse,
+  DeviceEvent,
+  DeviceInputRequest,
+  DeviceInputResponse,
+  DeviceLifecycleRequest,
+  DeviceLifecycleResponse,
+  DeviceReadRequest,
+  DeviceReadResponse,
+  DeviceRecordingRequest,
+  DeviceRecordingResponse,
+  DeviceRpcError,
+} from "./device.ts";
+import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
   FilesystemBrowseError,
@@ -1017,6 +1032,43 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   error: Schema.Union([FilesystemBrowseError, AuthRpcError]),
 });
 
+export const WsDeviceReadRpc = Rpc.make(DEVICE_WS_METHODS.read, {
+  payload: DeviceReadRequest,
+  success: DeviceReadResponse,
+  error: Schema.Union([DeviceRpcError, AuthRpcError]),
+});
+
+export const WsDeviceLifecycleRpc = Rpc.make(DEVICE_WS_METHODS.lifecycle, {
+  payload: DeviceLifecycleRequest,
+  success: DeviceLifecycleResponse,
+  error: Schema.Union([DeviceRpcError, AuthRpcError]),
+});
+
+export const WsDeviceInputRpc = Rpc.make(DEVICE_WS_METHODS.input, {
+  payload: DeviceInputRequest,
+  success: DeviceInputResponse,
+  error: Schema.Union([DeviceRpcError, AuthRpcError]),
+});
+
+export const WsDeviceAppRpc = Rpc.make(DEVICE_WS_METHODS.app, {
+  payload: DeviceAppRequest,
+  success: DeviceAppResponse,
+  error: Schema.Union([DeviceRpcError, AuthRpcError]),
+});
+
+export const WsDeviceRecordingRpc = Rpc.make(DEVICE_WS_METHODS.recording, {
+  payload: DeviceRecordingRequest,
+  success: DeviceRecordingResponse,
+  error: Schema.Union([DeviceRpcError, AuthRpcError]),
+});
+
+export const WsSubscribeDeviceEventsRpc = Rpc.make(DEVICE_WS_METHODS.subscribeEvents, {
+  payload: Schema.Struct({}),
+  success: DeviceEvent,
+  error: Schema.Union([DeviceRpcError, AuthRpcError]),
+  stream: true,
+});
+
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   payload: VcsStatusInput,
   success: VcsStatusStreamEvent,
@@ -1361,6 +1413,20 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
   stream: true,
 });
 
+/**
+ * Simulator RPCs stay in a bounded subgroup so handler-service inference does
+ * not have to expand the entire application group for every device method.
+ * The public WsRpcGroup below merges this subgroup and remains the one wire API.
+ */
+export const WsDeviceRpcGroup = RpcGroup.make(
+  WsDeviceReadRpc,
+  WsDeviceLifecycleRpc,
+  WsDeviceInputRpc,
+  WsDeviceAppRpc,
+  WsDeviceRecordingRpc,
+  WsSubscribeDeviceEventsRpc,
+);
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerGetAdvertisedEndpointsRpc,
@@ -1486,3 +1552,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsContextHandoffReadRawPayloadChunkRpc,
   WsContextHandoffReadExportChunkRpc,
 );
+
+/**
+ * Hosted relay channels carry both groups through one lifecycle-owned encrypted
+ * channel. Direct clients keep the device group on its own low-priority socket
+ * so video-adjacent work cannot contend with chat RPC.
+ */
+export const WsHostedRpcGroup = WsRpcGroup.merge(WsDeviceRpcGroup);

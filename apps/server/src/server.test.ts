@@ -115,6 +115,7 @@ import {
   type RepositoryIdentityResolverShape,
 } from "./project/Services/RepositoryIdentityResolver.ts";
 import { ProjectAvatarStore } from "./project/Services/ProjectAvatarStore.ts";
+import { makeDeviceServiceLayer } from "./device/Layers/DeviceService.ts";
 import {
   ServerEnvironment,
   type ServerEnvironmentShape,
@@ -951,6 +952,7 @@ const buildAppUnderTest = (options?: {
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(LocalDiagnosticsMetricsLive),
       Layer.provideMerge(AdvertisedEndpointRegistryLive),
+      Layer.provide(makeDeviceServiceLayer({ platform: "linux" })),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),

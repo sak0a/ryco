@@ -3,7 +3,7 @@ import { type TurnId } from "@ryco/contracts";
 import { stripDiffSearchParams } from "./diffRouteSearch";
 import { stripPreviewSearchParams } from "./previewRouteSearch";
 
-export type WorkspacePanelTab = "review" | "files" | "terminal" | "agent" | "agents";
+export type WorkspacePanelTab = "review" | "files" | "terminal" | "simulator" | "agent" | "agents";
 
 export interface WorkspaceRouteSearch {
   workspaceOpen?: "1" | undefined;
@@ -24,6 +24,7 @@ function normalizeWorkspaceTab(value: unknown): WorkspacePanelTab | undefined {
     value === "review" ||
     value === "files" ||
     value === "terminal" ||
+    value === "simulator" ||
     value === "agent" ||
     value === "agents"
   ) {
@@ -217,6 +218,47 @@ export function buildOpenTerminalSearch<T extends Record<string, unknown>>(
     ...stripWorkspacePanelSearchParams(params),
     workspaceOpen: "1",
     workspaceTab: "terminal",
+    workspaceAgentKey: undefined,
+    diff: undefined,
+    diffTurnId: undefined,
+    diffFilePath: undefined,
+    preview: undefined,
+  } as Omit<
+    T,
+    | "diff"
+    | "diffTurnId"
+    | "diffFilePath"
+    | "preview"
+    | "workspaceOpen"
+    | "workspaceTab"
+    | "workspaceAgentKey"
+  > &
+    WorkspaceRouteSearch & {
+      diff?: undefined;
+      preview?: undefined;
+    };
+}
+
+export function buildOpenSimulatorSearch<T extends Record<string, unknown>>(
+  params: T,
+): Omit<
+  T,
+  | "diff"
+  | "diffTurnId"
+  | "diffFilePath"
+  | "preview"
+  | "workspaceOpen"
+  | "workspaceTab"
+  | "workspaceAgentKey"
+> &
+  WorkspaceRouteSearch & {
+    diff?: undefined;
+    preview?: undefined;
+  } {
+  return {
+    ...stripWorkspacePanelSearchParams(params),
+    workspaceOpen: "1",
+    workspaceTab: "simulator",
     workspaceAgentKey: undefined,
     diff: undefined,
     diffTurnId: undefined,

@@ -23,6 +23,7 @@ import { Effect } from "effect";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -196,7 +197,11 @@ export const makeStartSession =
       const pendingUserInputs = new Map<string, PendingUserInputRequest>();
       let activeTurn: TurnId | undefined;
       const stoppedRef = { stopped: false };
-      const sessionConfig = deps.buildSessionConfig(
+      const deviceToolBinding = createProcessDeviceToolBinding({
+        threadId: input.threadId,
+        isTurnActive: () => activeTurn !== undefined && !stoppedRef.stopped,
+      });
+      const baseSessionConfig = deps.buildSessionConfig(
         {
           threadId: input.threadId,
           runtimeMode: input.runtimeMode,
@@ -209,6 +214,21 @@ export const makeStartSession =
         () => activeTurn,
         stoppedRef,
       );
+      const sessionConfig: SessionConfig = {
+        ...baseSessionConfig,
+        ...(deviceToolBinding
+          ? {
+              mcpServers: {
+                ...baseSessionConfig.mcpServers,
+                ryco_device: {
+                  type: "http",
+                  url: deviceToolBinding.url,
+                  headers: { ...deviceToolBinding.headers },
+                },
+              },
+            }
+          : {}),
+      };
 
       const effectiveResumeCursor = input.resumePolicy === "fresh" ? undefined : input.resumeCursor;
       const session = yield* Effect.tryPromise({
@@ -225,7 +245,7 @@ export const makeStartSession =
             detail: toMessage(cause, "Failed to start GitHub Copilot session."),
             cause,
           }),
-      });
+      }).pipe(Effect.tapError(() => Effect.sync(() => deviceToolBinding?.dispose())));
 
       const createdAt = new Date().toISOString();
       const tokenMode = input.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
@@ -241,6 +261,7 @@ export const makeStartSession =
         pendingApprovals,
         pendingUserInputs,
         pendingTurnStarts: new Set(),
+        deviceToolBinding,
         turns: [],
         renewSession: () => client.createSession(sessionConfig),
         attachSession: (nextSession) => {
@@ -478,6 +499,7 @@ export const stopSessionRecord = (
   Effect.tryPromise({
     try: async () => {
       record.stopped = true;
+      record.deviceToolBinding?.dispose();
       record.unsubscribe();
       for (const pending of record.pendingApprovals.values()) {
         pending.resolve({ kind: "reject" });

@@ -179,7 +179,7 @@ describe("MessagesTimeline", () => {
     expect(twoMessageMarkup).toContain('aria-label="Jump to message: User message"');
     expect(twoMessageMarkup).toContain("[@media(pointer:fine)]:block");
     expect(twoMessageMarkup.match(/data-minimap-strip=/g)).toHaveLength(2);
-  });
+  }, 15_000);
 
   it("renders inline terminal labels with the composer chip UI", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");

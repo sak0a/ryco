@@ -14,6 +14,7 @@ import {
   MessageSquareTextIcon,
   Minimize2Icon,
   PlusIcon,
+  SmartphoneIcon,
   TerminalIcon,
   XIcon,
   type LucideIcon,
@@ -35,6 +36,7 @@ import {
   buildOpenAgentsSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
+  buildOpenSimulatorSearch,
   buildOpenTerminalSearch,
   buildOpenWorkspaceSearch,
   stripWorkspacePanelSearchParams,
@@ -75,6 +77,7 @@ import type { DiffPanelMode } from "./DiffPanelShell";
 import DiffPanel from "./DiffPanel";
 import PreviewPanel from "./PreviewPanel";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+import SimulatorPanel from "./device/SimulatorPanel";
 
 function statusBucket(status: ThreadSubagentStatus): "idle" | "in_progress" | "review" | "done" {
   if (status === "running") return "in_progress";
@@ -121,6 +124,9 @@ function TabIcon(props: { tab: WorkspaceTab; active: boolean }) {
   }
   if (props.tab.key === "terminal") {
     return <TerminalIcon className={className} />;
+  }
+  if (props.tab.key === "simulator") {
+    return <SmartphoneIcon className={className} />;
   }
   if (props.tab.key === "agents") {
     return <BotIcon className={className} />;
@@ -600,6 +606,7 @@ function WorkspaceLauncher(props: {
   onSelectTab: (tab: WorkspaceTab) => void;
   /** The frozen phone tier has no Agents workspace (AGENTS.md). */
   showAgents: boolean;
+  showSimulator: boolean;
   isPhoneSurface: boolean;
   liveAgentCount: number;
 }) {
@@ -607,6 +614,11 @@ function WorkspaceLauncher(props: {
   const filesTab: WorkspaceTab = { key: "files", label: "Files", mode: "files" };
   const reviewTab: WorkspaceTab = { key: "review", label: "Review", mode: "review" };
   const terminalTab: WorkspaceTab = { key: "terminal", label: "Terminal", mode: "terminal" };
+  const simulatorTab: WorkspaceTab = {
+    key: "simulator",
+    label: "Simulator",
+    mode: "simulator",
+  };
   const agentsTab: WorkspaceTab = { key: "agents", label: "Agents", mode: "agents" };
   const filesShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "workspace.files"),
@@ -618,6 +630,10 @@ function WorkspaceLauncher(props: {
   );
   const terminalShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "workspace.terminal"),
+    [keybindings],
+  );
+  const simulatorShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "workspace.simulator"),
     [keybindings],
   );
   const agentTabs = props.tabs.filter((tab) => tab.mode === "agent");
@@ -663,6 +679,16 @@ function WorkspaceLauncher(props: {
         compact={compact}
         onClick={() => props.onSelectTab(terminalTab)}
       />
+      {props.showSimulator ? (
+        <LauncherCard
+          label="Simulator"
+          description="Run and control an iOS app"
+          icon={SmartphoneIcon}
+          shortcutLabel={simulatorShortcutLabel}
+          compact={compact}
+          onClick={() => props.onSelectTab(simulatorTab)}
+        />
+      ) : null}
       {props.showAgents ? (
         <LauncherCard
           label="Agents"
@@ -726,7 +752,7 @@ function WorkspaceLauncher(props: {
         >
           <div className="@container/workspace-launcher flex min-h-0 flex-1 items-center justify-center">
             <div
-              className="grid aspect-square grid-cols-2 grid-rows-3 gap-2 @sm/workspace-launcher:gap-3"
+              className="grid aspect-square grid-cols-3 grid-rows-3 gap-2 @sm/workspace-launcher:gap-3"
               data-slot="workspace-launcher-grid"
               style={{ inlineSize: "min(100cqw, 100cqh, 32rem)" }}
             >
@@ -774,8 +800,20 @@ export default function ThreadWorkspacePanel(props: {
     select: (value) => parseRightPanelRouteSearch(value),
   });
   const routeThreadRef = resolveThreadRouteRef(params);
+  const workspaceDraftId = params.draftId ? DraftId.make(params.draftId) : null;
+  const workspaceDraftSession = useComposerDraftStore((store) =>
+    workspaceDraftId ? store.getDraftSession(workspaceDraftId) : null,
+  );
+  const workspaceThreadRef = useMemo(
+    () =>
+      routeThreadRef ??
+      (workspaceDraftSession
+        ? scopeThreadRef(workspaceDraftSession.environmentId, workspaceDraftSession.threadId)
+        : null),
+    [routeThreadRef, workspaceDraftSession],
+  );
   const activeThread = useStore(
-    useMemo(() => createThreadSelectorByRef(routeThreadRef), [routeThreadRef]),
+    useMemo(() => createThreadSelectorByRef(workspaceThreadRef), [workspaceThreadRef]),
   );
   const agentSessionLive =
     derivePhase(activeThread?.session ?? null) !== "disconnected" &&
@@ -810,6 +848,7 @@ export default function ThreadWorkspacePanel(props: {
       activeMode === "files" ||
       activeMode === "review" ||
       activeMode === "terminal" ||
+      activeMode === "simulator" ||
       activeMode === "agents"
     ) {
       return props.openedPanelModes.includes(activeMode)
@@ -825,8 +864,10 @@ export default function ThreadWorkspacePanel(props: {
       openedAgentKeys: props.openedAgentKeys,
       openedPanelModes,
     });
-    // No Agents workspace tab on the frozen phone tier.
-    return isPhoneSurface ? built.filter((tab) => tab.mode !== "agents") : built;
+    // The web phone tier is frozen; native mobile owns future phone surfaces.
+    return isPhoneSurface
+      ? built.filter((tab) => tab.mode !== "agents" && tab.mode !== "simulator")
+      : built;
   }, [agentKey, isPhoneSurface, openedPanelModes, props.openedAgentKeys, subagents]);
   // A phone agents deep link falls back to the launcher with the agents tab
   // filtered out — no tab is active then, so aria-labelledby never points
@@ -874,6 +915,10 @@ export default function ThreadWorkspacePanel(props: {
       }
       if (tab.mode === "terminal") {
         navigateSearch((previous) => buildOpenTerminalSearch(previous));
+        return;
+      }
+      if (tab.mode === "simulator") {
+        navigateSearch((previous) => buildOpenSimulatorSearch(previous));
         return;
       }
       if (tab.mode === "agents") {
@@ -1131,13 +1176,18 @@ export default function ThreadWorkspacePanel(props: {
           <PreviewPanel mode={props.mode} />
         ) : activeMode === "terminal" ? (
           <WorkspaceTerminalPanel />
+        ) : activeMode === "simulator" && !isPhoneSurface ? (
+          <SimulatorPanel
+            environmentId={workspaceThreadRef?.environmentId ?? null}
+            threadId={workspaceThreadRef?.threadId ?? null}
+          />
         ) : activeMode === "agents" && !isPhoneSurface ? (
           // The Agents workspace stays off the frozen phone tier; a phone
           // route that lands here falls back to the launcher.
           <AgentsPanel
             model={agentPanelModel}
-            environmentId={routeThreadRef?.environmentId ?? null}
-            threadId={routeThreadRef ? (routeThreadRef.threadId as ThreadId) : null}
+            environmentId={workspaceThreadRef?.environmentId ?? null}
+            threadId={workspaceThreadRef ? (workspaceThreadRef.threadId as ThreadId) : null}
             onOpenAgent={openRuntimeAgent}
           />
         ) : activeMode === "agent" ? (
@@ -1148,6 +1198,12 @@ export default function ThreadWorkspacePanel(props: {
             activeThread={activeThread}
             onSelectTab={selectTab}
             showAgents={!isPhoneSurface}
+            showSimulator={
+              !isPhoneSurface &&
+              Boolean(
+                workspaceThreadRef && readEnvironmentApi(workspaceThreadRef.environmentId)?.device,
+              )
+            }
             isPhoneSurface={isPhoneSurface}
             liveAgentCount={agentPanelModel.liveCount}
           />
