@@ -9,6 +9,8 @@ import {
   ThreadRuntimeModeSetPayload as ContractsThreadRuntimeModeSetPayloadSchema,
   ThreadInteractionModeSetPayload as ContractsThreadInteractionModeSetPayloadSchema,
   ThreadTokenModeSetPayload as ContractsThreadTokenModeSetPayloadSchema,
+  ThreadGoalUpdatedPayload as ContractsThreadGoalUpdatedPayloadSchema,
+  ThreadGoalClearedPayload as ContractsThreadGoalClearedPayloadSchema,
   ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
   ThreadUnarchivedPayload as ContractsThreadUnarchivedPayloadSchema,
   ThreadMessageSentPayload as ContractsThreadMessageSentPayloadSchema,
@@ -45,6 +47,8 @@ export const ThreadMetaUpdatedPayload = ContractsThreadMetaUpdatedPayloadSchema;
 export const ThreadRuntimeModeSetPayload = ContractsThreadRuntimeModeSetPayloadSchema;
 export const ThreadInteractionModeSetPayload = ContractsThreadInteractionModeSetPayloadSchema;
 export const ThreadTokenModeSetPayload = ContractsThreadTokenModeSetPayloadSchema;
+export const ThreadGoalUpdatedPayload = ContractsThreadGoalUpdatedPayloadSchema;
+export const ThreadGoalClearedPayload = ContractsThreadGoalClearedPayloadSchema;
 export const ThreadDeletedPayload = ContractsThreadDeletedPayloadSchema;
 export const ThreadUnarchivedPayload = ContractsThreadUnarchivedPayloadSchema;
 

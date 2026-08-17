@@ -1139,6 +1139,36 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const setThreadGoal: NonNullable<ProviderServiceShape["setThreadGoal"]> = Effect.fn(
+    "setThreadGoal",
+  )(function* (threadId, goal) {
+    const routed = yield* resolveRoutableSession({
+      threadId,
+      operation: "ProviderService.setThreadGoal",
+      allowRecovery: false,
+    });
+    if (!routed.isActive || routed.adapter.setThreadGoal === undefined) {
+      return false;
+    }
+    yield* routed.adapter.setThreadGoal(threadId, goal);
+    return true;
+  });
+
+  const clearThreadGoal: NonNullable<ProviderServiceShape["clearThreadGoal"]> = Effect.fn(
+    "clearThreadGoal",
+  )(function* (threadId) {
+    const routed = yield* resolveRoutableSession({
+      threadId,
+      operation: "ProviderService.clearThreadGoal",
+      allowRecovery: false,
+    });
+    if (!routed.isActive || routed.adapter.clearThreadGoal === undefined) {
+      return false;
+    }
+    yield* routed.adapter.clearThreadGoal(threadId);
+    return true;
+  });
+
   const steerTurn: ProviderServiceShape["steerTurn"] = Effect.fn("steerTurn")(function* (rawInput) {
     const parsed = yield* decodeInputOrValidationError({
       operation: "ProviderService.steerTurn",
@@ -1579,6 +1609,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     stopSessionBinding,
     listStaleSessionBindings,
     sendTurn,
+    setThreadGoal,
+    clearThreadGoal,
     steerTurn,
     interruptTurn,
     stopBackgroundTask,

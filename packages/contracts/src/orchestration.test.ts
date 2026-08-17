@@ -27,6 +27,7 @@ import {
   ThreadTurnStartRequestedPayload,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { THREAD_GOAL_OBJECTIVE_MAX_CHARS } from "./threadGoal.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -59,6 +60,31 @@ const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpda
 const decodeThreadWindowInput = Schema.decodeUnknownEffect(OrchestrationGetThreadWindowInput);
 const decodeThreadHistoryPageInput = Schema.decodeUnknownEffect(
   OrchestrationGetThreadHistoryPageInput,
+);
+
+it.effect("validates thread goal commands", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeOrchestrationCommand({
+      type: "thread.goal.set",
+      commandId: "goal-command",
+      threadId: "goal-thread",
+      objective: "Ship persistent goals",
+      status: "active",
+      createdAt: "2026-08-17T10:00:00.000Z",
+    });
+    assert.strictEqual(parsed.type, "thread.goal.set");
+
+    const invalid = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.goal.set",
+        commandId: "goal-command-too-long",
+        threadId: "goal-thread",
+        objective: "x".repeat(THREAD_GOAL_OBJECTIVE_MAX_CHARS + 1),
+        createdAt: "2026-08-17T10:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(invalid._tag, "Failure");
+  }),
 );
 
 it.effect("accepts bounded thread history inputs with positive limits", () =>

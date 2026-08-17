@@ -3,7 +3,7 @@ import { serializeComposerMentionPath } from "./mentionSyntax.ts";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./terminalContext.ts";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "skill" | "source-control";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSlashCommand = "model" | "goal" | "plan" | "default";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -329,7 +329,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+): Exclude<ComposerSlashCommand, "model" | "goal"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
@@ -337,6 +337,11 @@ export function parseStandaloneComposerSlashCommand(
   const command = match[1]?.toLowerCase();
   if (command === "plan") return "plan";
   return "default";
+}
+
+export function parseThreadGoalSlashCommand(text: string): string | null {
+  const match = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  return match ? (match[1]?.trim() ?? "") : null;
 }
 
 export function replaceTextRange(

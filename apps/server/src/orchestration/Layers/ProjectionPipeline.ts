@@ -100,6 +100,8 @@ export const ORCHESTRATION_EVENT_PROJECTORS = {
   "thread.runtime-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.interaction-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.token-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
+  "thread.goal-updated": [ORCHESTRATION_PROJECTOR_NAMES.threads],
+  "thread.goal-cleared": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.context-handoff-requested": [],
   "thread.turn-steer-requested": [],
   "thread.turn-steer-accepted": [],
@@ -736,6 +738,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             manualStatusBucket: null,
             manualPosition: 0,
             latestTurnId: null,
+            goal: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
@@ -839,6 +842,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             tokenMode: event.payload.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE,
+            updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.goal-updated": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            goal: event.payload.goal,
+            updatedAt: event.payload.goal.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.goal-cleared": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            goal: null,
             updatedAt: event.payload.updatedAt,
           });
           return;

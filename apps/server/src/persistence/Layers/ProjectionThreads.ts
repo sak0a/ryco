@@ -14,11 +14,12 @@ import {
   SetProjectionThreadManualPositionInput,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { DEFAULT_AGENT_TOKEN_MODE, ModelSelection } from "@ryco/contracts";
+import { DEFAULT_AGENT_TOKEN_MODE, ModelSelection, ThreadGoal } from "@ryco/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    goal: Schema.NullOr(Schema.fromJsonString(ThreadGoal)),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -44,6 +45,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           manual_status_bucket,
           manual_position,
           latest_turn_id,
+          goal_json,
           created_at,
           updated_at,
           archived_at,
@@ -67,6 +69,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.manualStatusBucket ?? null},
           ${row.manualPosition ?? 0},
           ${row.latestTurnId},
+          ${row.goal === null ? null : JSON.stringify(row.goal)},
           ${row.createdAt},
           ${row.updatedAt},
           ${row.archivedAt},
@@ -90,6 +93,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           manual_status_bucket = excluded.manual_status_bucket,
           manual_position = excluded.manual_position,
           latest_turn_id = excluded.latest_turn_id,
+          goal_json = excluded.goal_json,
           created_at = excluded.created_at,
           updated_at = excluded.updated_at,
           archived_at = excluded.archived_at,
@@ -120,6 +124,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           manual_status_bucket AS "manualStatusBucket",
           manual_position AS "manualPosition",
           latest_turn_id AS "latestTurnId",
+          goal_json AS "goal",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",
@@ -152,6 +157,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           manual_status_bucket AS "manualStatusBucket",
           manual_position AS "manualPosition",
           latest_turn_id AS "latestTurnId",
+          goal_json AS "goal",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
           archived_at AS "archivedAt",

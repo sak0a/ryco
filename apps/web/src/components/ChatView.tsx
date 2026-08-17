@@ -16,6 +16,8 @@ import {
   ProviderDriverKind,
   RuntimeMode,
   AgentTokenMode,
+  type ThreadGoalStatus,
+  THREAD_GOAL_OBJECTIVE_MAX_CHARS,
   ORCHESTRATION_WS_METHODS,
   WS_METHODS,
 } from "@ryco/contracts";
@@ -49,7 +51,10 @@ import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { isRightPanelOpen, parseRightPanelRouteSearch } from "../rightPanelRouteSearch";
 import { deriveThreadAgentPanelModel, deriveThreadSubagents } from "../threadWorkspaceViewModel";
-import { parseStandaloneComposerSlashCommand } from "../composer-logic";
+import {
+  parseStandaloneComposerSlashCommand,
+  parseThreadGoalSlashCommand,
+} from "../composer-logic";
 import {
   derivePhase,
   createTimelineEntryIndex,
@@ -2303,6 +2308,83 @@ export default function ChatView(props: ChatViewProps) {
     [environmentId, serverThread],
   );
 
+  const dispatchThreadGoalUpdate = useCallback(
+    async (update: { readonly objective?: string; readonly status?: ThreadGoalStatus }) => {
+      if (!serverThread || !dispatchCapability.allowed) return false;
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return false;
+      try {
+        await api.orchestration.dispatchCommand({
+          type: "thread.goal.set",
+          commandId: newCommandId(),
+          threadId: serverThread.id,
+          ...update,
+          createdAt: new Date().toISOString(),
+        });
+        return true;
+      } catch (error) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not update goal",
+            description: error instanceof Error ? error.message : "The goal update failed.",
+          }),
+        );
+        return false;
+      }
+    },
+    [dispatchCapability.allowed, environmentId, serverThread],
+  );
+
+  const handleEditGoal = useCallback(() => {
+    const objective = serverThread?.goal?.objective;
+    if (!objective) return;
+    const nextPrompt = `/goal ${objective}`;
+    promptRef.current = nextPrompt;
+    setComposerDraftPrompt(composerDraftTarget, nextPrompt);
+    readComposer()?.resetCursorState({
+      prompt: nextPrompt,
+      cursor: nextPrompt.length,
+      detectTrigger: false,
+    });
+    scheduleComposerFocus();
+  }, [
+    composerDraftTarget,
+    readComposer,
+    scheduleComposerFocus,
+    serverThread?.goal?.objective,
+    setComposerDraftPrompt,
+  ]);
+
+  const handleGoalStatusChange = useCallback(
+    (status: ThreadGoalStatus) => {
+      void dispatchThreadGoalUpdate({ status });
+    },
+    [dispatchThreadGoalUpdate],
+  );
+
+  const handleClearGoal = useCallback(() => {
+    if (!serverThread || !dispatchCapability.allowed) return;
+    const api = readEnvironmentApi(environmentId);
+    if (!api) return;
+    void api.orchestration
+      .dispatchCommand({
+        type: "thread.goal.clear",
+        commandId: newCommandId(),
+        threadId: serverThread.id,
+        createdAt: new Date().toISOString(),
+      })
+      .catch((error: unknown) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not clear goal",
+            description: error instanceof Error ? error.message : "The goal could not be cleared.",
+          }),
+        );
+      });
+  }, [dispatchCapability.allowed, environmentId, serverThread]);
+
   // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
   const scrollToEnd = useCallback((animated = false) => {
     setTimelineLiveFollowEnabled(true);
@@ -3129,6 +3211,44 @@ export default function ChatView(props: ChatViewProps) {
       imageCount: composerImages.length,
       terminalContexts: composerTerminalContexts,
     });
+    const goalObjective =
+      composerImages.length === 0 && sendableComposerTerminalContexts.length === 0
+        ? parseThreadGoalSlashCommand(trimmed)
+        : null;
+    if (goalObjective !== null) {
+      if (!serverThread) {
+        toastManager.add({
+          type: "warning",
+          title: "Start the thread first",
+          description: "A goal can be attached after the thread has been created.",
+        });
+        return;
+      }
+      if (goalObjective.length === 0) {
+        toastManager.add({
+          type: "warning",
+          title: "Describe the goal",
+          description: "Use /goal followed by the outcome you want this thread to pursue.",
+        });
+        return;
+      }
+      if (goalObjective.length > THREAD_GOAL_OBJECTIVE_MAX_CHARS) {
+        toastManager.add({
+          type: "warning",
+          title: "Goal is too long",
+          description: `Keep the objective under ${THREAD_GOAL_OBJECTIVE_MAX_CHARS.toLocaleString()} characters.`,
+        });
+        return;
+      }
+      const updated = await dispatchThreadGoalUpdate({ objective: goalObjective });
+      if (updated) {
+        promptRef.current = "";
+        clearComposerDraftContent(composerDraftTarget);
+        setComposerDraftTokenMode(composerDraftTarget, tokenMode);
+        readComposer()?.resetCursorState();
+      }
+      return;
+    }
     if (showPlanFollowUpPrompt && activeProposedPlan) {
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
@@ -4186,6 +4306,7 @@ export default function ChatView(props: ChatViewProps) {
                   activeThreadStarted={activeThreadStarted}
                   isServerThread={isServerThread}
                   isLocalDraftThread={isLocalDraftThread}
+                  activeThreadGoal={serverThread?.goal ?? null}
                   phase={phase}
                   isConnecting={isConnecting}
                   isSendBusy={isSendBusy || !dispatchCapability.allowed}
@@ -4247,6 +4368,9 @@ export default function ChatView(props: ChatViewProps) {
                   scheduleComposerFocus={scheduleComposerFocus}
                   setThreadError={setThreadError}
                   onExpandImage={onExpandTimelineImage}
+                  onEditGoal={handleEditGoal}
+                  onGoalStatusChange={handleGoalStatusChange}
+                  onClearGoal={handleClearGoal}
                 />
               </div>
             </div>

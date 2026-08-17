@@ -17,6 +17,7 @@ import type {
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderRuntimeEvent,
+  ThreadGoal,
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
@@ -100,6 +101,13 @@ export interface ProviderServiceShape {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+
+  /** Synchronize a goal with a live provider session. Returns false when unsupported or inactive. */
+  readonly setThreadGoal?: (
+    threadId: ThreadId,
+    goal: ThreadGoal,
+  ) => Effect.Effect<boolean, ProviderServiceError>;
+  readonly clearThreadGoal?: (threadId: ThreadId) => Effect.Effect<boolean, ProviderServiceError>;
 
   /** Steer the exact active provider turn without creating a new turn. */
   readonly steerTurn: (

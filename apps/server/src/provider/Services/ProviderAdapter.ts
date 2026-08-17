@@ -21,6 +21,7 @@ import type {
   ProviderTurnSteerResult,
   ProviderTurnStartResult,
   TurnId,
+  ThreadGoal,
 } from "@ryco/contracts";
 import type { Effect } from "effect";
 import type { Stream } from "effect";
@@ -130,6 +131,10 @@ export interface ProviderAdapterShape<TError> {
     threadId: ThreadId,
     numTurns: number,
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
+
+  /** Native thread-goal integration. Providers without it use prompt injection. */
+  readonly setThreadGoal?: (threadId: ThreadId, goal: ThreadGoal) => Effect.Effect<void, TError>;
+  readonly clearThreadGoal?: (threadId: ThreadId) => Effect.Effect<void, TError>;
 
   /**
    * Stop all sessions owned by this adapter.

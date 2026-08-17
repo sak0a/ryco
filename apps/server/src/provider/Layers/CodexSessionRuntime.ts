@@ -144,6 +144,17 @@ export interface CodexSessionRuntimeShape {
   readonly rollbackThread: (
     numTurns: number,
   ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  readonly setGoal: (
+    input: Omit<EffectCodexSchema.V2ThreadGoalSetParams, "threadId">,
+  ) => Effect.Effect<EffectCodexSchema.V2ThreadGoalSetResponse, CodexSessionRuntimeError>;
+  readonly getGoal: Effect.Effect<
+    EffectCodexSchema.V2ThreadGoalGetResponse,
+    CodexSessionRuntimeError
+  >;
+  readonly clearGoal: Effect.Effect<
+    EffectCodexSchema.V2ThreadGoalClearResponse,
+    CodexSessionRuntimeError
+  >;
   readonly respondToRequest: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -549,6 +560,8 @@ function readNotificationThreadId(notification: CodexServerNotification): string
     case "thread/closed":
     case "thread/name/updated":
     case "thread/tokenUsage/updated":
+    case "thread/goal/updated":
+    case "thread/goal/cleared":
     case "turn/started":
     case "hook/started":
     case "turn/completed":
@@ -679,6 +692,8 @@ function shouldSuppressChildConversationNotification(
     method === "thread/compacted" ||
     method === "thread/name/updated" ||
     method === "thread/tokenUsage/updated" ||
+    method === "thread/goal/updated" ||
+    method === "thread/goal/cleared" ||
     method === "turn/started" ||
     method === "turn/completed" ||
     method === "turn/plan/updated" ||
@@ -1894,6 +1909,22 @@ export const makeCodexSessionRuntime = (
           });
           return parseThreadSnapshot(response);
         }),
+      setGoal: (input) =>
+        Effect.gen(function* () {
+          const providerThreadId = yield* readProviderThreadId;
+          return yield* client.request("thread/goal/set", {
+            threadId: providerThreadId,
+            ...input,
+          });
+        }),
+      getGoal: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        return yield* client.request("thread/goal/get", { threadId: providerThreadId });
+      }),
+      clearGoal: Effect.gen(function* () {
+        const providerThreadId = yield* readProviderThreadId;
+        return yield* client.request("thread/goal/clear", { threadId: providerThreadId });
+      }),
       respondToRequest: (requestId, decision) =>
         Effect.gen(function* () {
           const pending = (yield* Ref.get(pendingApprovalsRef)).get(requestId);

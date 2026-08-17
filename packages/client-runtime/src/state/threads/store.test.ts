@@ -615,6 +615,40 @@ describe("incremental orchestration updates", () => {
     expect(localEnvironmentStateOf(next).bootstrapComplete).toBe(false);
   });
 
+  it("applies goal updates and clears to the thread shell", () => {
+    const state = makeState(makeThread());
+    const goal = {
+      objective: "Finish the goal UI",
+      status: "active" as const,
+      tokenBudget: null,
+      tokensUsed: 40,
+      timeUsedSeconds: 5,
+      createdAt: "2026-02-27T00:00:00.000Z",
+      updatedAt: "2026-02-27T00:00:05.000Z",
+    };
+    const updated = applyOrchestrationEvent(
+      state,
+      makeEvent("thread.goal-updated", {
+        threadId: ThreadId.make("thread-1"),
+        goal,
+        origin: "provider",
+      }),
+      localEnvironmentId,
+    );
+    expect(threadsOf(updated)[0]?.goal).toEqual(goal);
+
+    const cleared = applyOrchestrationEvent(
+      updated,
+      makeEvent("thread.goal-cleared", {
+        threadId: ThreadId.make("thread-1"),
+        origin: "client",
+        updatedAt: "2026-02-27T00:00:06.000Z",
+      }),
+      localEnvironmentId,
+    );
+    expect(threadsOf(cleared)[0]?.goal).toBeNull();
+  });
+
   it("preserves state identity for no-op project and thread deletes", () => {
     const thread = makeThread();
     const state = makeState(thread);

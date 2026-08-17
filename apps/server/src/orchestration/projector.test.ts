@@ -90,6 +90,7 @@ describe("orchestration projector", () => {
         manualStatusBucket: null,
         manualPosition: 0,
         latestTurn: null,
+        goal: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,

@@ -29,6 +29,7 @@ import { it, vi } from "@effect/vitest";
 import { Context, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stream } from "effect";
 import { TestClock } from "effect/testing";
 import * as CodexErrors from "effect-codex-app-server/errors";
+import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { ServerConfig } from "../../config.ts";
 import { attachmentRelativePath } from "../../attachmentStore.ts";
@@ -149,6 +150,26 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   rollbackThread(numTurns: number) {
     return Effect.promise(() => this.rollbackThreadImpl(numTurns));
   }
+
+  setGoal(input: Omit<EffectCodexSchema.V2ThreadGoalSetParams, "threadId">) {
+    const timestamp = Math.floor(Date.now() / 1_000);
+    return Effect.succeed({
+      goal: {
+        threadId: "provider-thread-1",
+        objective: input.objective ?? "Test goal",
+        status: input.status ?? "active",
+        tokenBudget: input.tokenBudget ?? null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    });
+  }
+
+  getGoal = Effect.succeed({ goal: null });
+
+  clearGoal = Effect.succeed({ cleared: true });
 
   respondToRequest(requestId: ApprovalRequestId, decision: ProviderApprovalDecision) {
     return Effect.promise(() => this.respondToRequestImpl(requestId, decision));
@@ -1314,6 +1335,48 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastOutputTokens: 6,
         lastReasoningOutputTokens: 0,
         compactsAutomatically: true,
+      });
+    }),
+  );
+
+  it.effect("maps Codex goal updates to the canonical thread goal", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-codex-thread-goal-updated"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "thread/goal/updated",
+        payload: {
+          threadId: "provider-thread-1",
+          goal: {
+            threadId: "provider-thread-1",
+            objective: "Finish the integration",
+            status: "active",
+            tokenBudget: 40_000,
+            tokensUsed: 1_200,
+            timeUsedSeconds: 75,
+            createdAt: 1_787_011_200,
+            updatedAt: 1_787_011_275,
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "thread.goal.updated") return;
+      assert.deepEqual(firstEvent.value.payload.goal, {
+        objective: "Finish the integration",
+        status: "active",
+        tokenBudget: 40_000,
+        tokensUsed: 1_200,
+        timeUsedSeconds: 75,
+        createdAt: "2026-08-18T00:00:00.000Z",
+        updatedAt: "2026-08-18T00:01:15.000Z",
       });
     }),
   );

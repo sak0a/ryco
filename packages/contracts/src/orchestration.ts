@@ -22,6 +22,12 @@ import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ComposerSourceControlContext } from "./sourceControl.ts";
 import { WorkItemProviderKind, WorkItemState } from "./workItems.ts";
 import {
+  ThreadGoal,
+  ThreadGoalEventOrigin,
+  ThreadGoalObjective,
+  ThreadGoalStatus,
+} from "./threadGoal.ts";
+import {
   IssueState,
   PullRequestState,
   StatusBucket,
@@ -683,6 +689,9 @@ export const OrchestrationThread = Schema.Struct({
   manualStatusBucket: Schema.optional(Schema.NullOr(StatusBucket)),
   manualPosition: Schema.optional(Schema.Number),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  goal: Schema.optional(Schema.NullOr(ThreadGoal)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -747,6 +756,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   manualStatusBucket: Schema.optional(Schema.NullOr(StatusBucket)),
   manualPosition: Schema.optional(Schema.Number),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  goal: Schema.optional(Schema.NullOr(ThreadGoal)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1060,6 +1072,23 @@ const ThreadTokenModeSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadGoalSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  objective: Schema.optional(ThreadGoalObjective),
+  status: Schema.optional(ThreadGoalStatus),
+  tokenBudget: Schema.optional(Schema.NullOr(PositiveInt)),
+  createdAt: IsoDateTime,
+});
+
+const ThreadGoalClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -1313,6 +1342,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTokenModeSetCommand,
+  ThreadGoalSetCommand,
+  ThreadGoalClearCommand,
   ThreadTurnStartCommand,
   ThreadTurnSteerCommand,
   ThreadTurnInterruptCommand,
@@ -1347,6 +1378,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTokenModeSetCommand,
+  ThreadGoalSetCommand,
+  ThreadGoalClearCommand,
   ClientThreadTurnStartCommand,
   ClientThreadTurnSteerCommand,
   ThreadTurnInterruptCommand,
@@ -1475,6 +1508,21 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadGoalSyncCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.sync"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  goal: ThreadGoal,
+  createdAt: IsoDateTime,
+});
+
+const ThreadGoalProviderClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.goal.provider-clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1484,6 +1532,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadTurnSteerResolveCommand,
   ThreadRevertCompleteCommand,
+  ThreadGoalSyncCommand,
+  ThreadGoalProviderClearCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1506,6 +1556,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
   "thread.token-mode-set",
+  "thread.goal-updated",
+  "thread.goal-cleared",
   "thread.context-handoff-requested",
   "thread.message-sent",
   "thread.turn-steer-requested",
@@ -1636,6 +1688,18 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
 export const ThreadTokenModeSetPayload = Schema.Struct({
   threadId: ThreadId,
   tokenMode: Schema.optionalKey(AgentTokenMode),
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadGoalUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  goal: ThreadGoal,
+  origin: ThreadGoalEventOrigin,
+});
+
+export const ThreadGoalClearedPayload = Schema.Struct({
+  threadId: ThreadId,
+  origin: ThreadGoalEventOrigin,
   updatedAt: IsoDateTime,
 });
 
@@ -1938,6 +2002,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.token-mode-set"),
     payload: ThreadTokenModeSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-updated"),
+    payload: ThreadGoalUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.goal-cleared"),
+    payload: ThreadGoalClearedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

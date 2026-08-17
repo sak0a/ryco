@@ -9,6 +9,7 @@ import {
   isLocalFilePathInsideDirectory,
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
+  parseThreadGoalSlashCommand,
   replaceTextRange,
   shouldUseNativeComposerFileReference,
 } from "./composer-logic";
@@ -488,5 +489,22 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("parseThreadGoalSlashCommand", () => {
+  it("returns the trimmed objective", () => {
+    expect(parseThreadGoalSlashCommand(" /goal  Ship a reliable reconnect flow  ")).toBe(
+      "Ship a reliable reconnect flow",
+    );
+  });
+
+  it("returns an empty objective for a bare command", () => {
+    expect(parseThreadGoalSlashCommand("/goal")).toBe("");
+  });
+
+  it("does not capture ordinary messages", () => {
+    expect(parseThreadGoalSlashCommand("Please use /goal later")).toBeNull();
+    expect(parseThreadGoalSlashCommand("/goals are useful")).toBeNull();
   });
 });

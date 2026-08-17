@@ -12,6 +12,7 @@ import type {
   ServerProvider,
   ThreadId,
   TurnId,
+  ThreadGoalStatus,
 } from "@ryco/contracts";
 import {
   ORCHESTRATION_WS_METHODS,
@@ -123,6 +124,7 @@ import { ComposerLiquidGlass } from "./ComposerLiquidGlass";
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashPicker } from "./ComposerStashPicker";
 import { PendingContextHandoffChip } from "./PendingContextHandoffChip";
+import { ComposerGoalHeader } from "./ComposerGoalHeader";
 import { derivePendingContextHandoff } from "./pendingContextHandoff";
 
 const COMPOSER_FLOATING_LAYER_SELECTOR = [
@@ -267,6 +269,7 @@ export interface ChatComposerProps {
   activeThreadStarted: boolean;
   isServerThread: boolean;
   isLocalDraftThread: boolean;
+  activeThreadGoal: Thread["goal"];
 
   // Session phase
   phase: SessionPhase;
@@ -371,6 +374,9 @@ export interface ChatComposerProps {
   scheduleComposerFocus: () => void;
   setThreadError: (threadId: ThreadId | null, error: string | null) => void;
   onExpandImage: (preview: ExpandedImagePreview) => void;
+  onEditGoal: () => void;
+  onGoalStatusChange: (status: ThreadGoalStatus) => void;
+  onClearGoal: () => void;
 }
 
 // --------------------------------------------------------------------------
@@ -391,6 +397,7 @@ export const ChatComposer = memo(
       activeThreadStarted,
       isServerThread: _isServerThread,
       isLocalDraftThread: _isLocalDraftThread,
+      activeThreadGoal,
       phase,
       isConnecting,
       isSendBusy,
@@ -446,6 +453,9 @@ export const ChatComposer = memo(
       scheduleComposerFocus,
       setThreadError,
       onExpandImage,
+      onEditGoal,
+      onGoalStatusChange,
+      onClearGoal,
     } = props;
 
     // ------------------------------------------------------------------
@@ -858,10 +868,17 @@ export const ChatComposer = memo(
 
     const isComposerApprovalState = activePendingApproval !== null;
     const activePendingUserInput = pendingUserInputs[0] ?? null;
+    const showGoalHeader =
+      !isMobileViewport &&
+      activeThreadGoal != null &&
+      !isComposerApprovalState &&
+      pendingUserInputs.length === 0 &&
+      !(showPlanFollowUpPrompt && activeProposedPlan !== null);
     const hasComposerHeader =
       isComposerApprovalState ||
       pendingUserInputs.length > 0 ||
-      (showPlanFollowUpPrompt && activeProposedPlan !== null);
+      (showPlanFollowUpPrompt && activeProposedPlan !== null) ||
+      showGoalHeader;
     // Presentation flag only: the collapsed editor is the same always-mounted
     // editor, so this decides whether the compact send affordance renders
     // beside it — nothing is swapped in or out.
@@ -1426,6 +1443,22 @@ export const ChatComposer = memo(
               setComposerHighlightedItemId(null);
               setIsComposerModelPickerOpen(true);
             }
+            return;
+          }
+          if (item.command === "goal") {
+            const replacement = "/goal ";
+            const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+              snapshot.value,
+              trigger.rangeEnd,
+              replacement,
+            );
+            const applied = applyPromptReplacement(
+              trigger.rangeStart,
+              replacementRangeEnd,
+              replacement,
+              { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+            );
+            if (applied) setComposerHighlightedItemId(null);
             return;
           }
           void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
@@ -2350,6 +2383,13 @@ export const ChatComposer = memo(
                     planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
                   />
                 </div>
+              ) : showGoalHeader && activeThreadGoal ? (
+                <ComposerGoalHeader
+                  goal={activeThreadGoal}
+                  onEdit={onEditGoal}
+                  onStatusChange={onGoalStatusChange}
+                  onClear={onClearGoal}
+                />
               ) : null)}
 
             {isComposerCollapsedMobile && activePendingApproval ? (
