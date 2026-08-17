@@ -402,6 +402,18 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+/**
+ * Agent Control feature gate. Server-authoritative and disabled by default:
+ * while disabled, the server injects no agent-facing control tools, rejects
+ * external integration setup, and every Agent Control entry point fails
+ * closed. The struct exists (rather than a bare boolean) so later slices can
+ * add non-secret operational limits without a settings migration.
+ */
+export const AgentControlSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+});
+export type AgentControlSettings = typeof AgentControlSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Legacy token-by-token assistant output. This is deliberately a fresh key
   // (formerly `enableAssistantStreaming`): decoding drops the old key so all
@@ -453,6 +465,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  agentControl: AgentControlSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -542,6 +555,11 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(Schema.String),
       otlpMetricsUrl: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  agentControl: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   providers: Schema.optionalKey(

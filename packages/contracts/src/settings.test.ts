@@ -159,6 +159,23 @@ describe("ServerSettingsPatch.providerInstances", () => {
   });
 });
 
+describe("ServerSettings.agentControl", () => {
+  it("defaults Agent Control to disabled, including for legacy configs without the key", () => {
+    expect(DEFAULT_SERVER_SETTINGS.agentControl.enabled).toBe(false);
+    expect(decodeServerSettings({}).agentControl.enabled).toBe(false);
+    expect(decodeServerSettings({ agentControl: {} }).agentControl.enabled).toBe(false);
+  });
+
+  it("round-trips an explicit opt-in and patches it independently", () => {
+    expect(decodeServerSettings({ agentControl: { enabled: true } }).agentControl.enabled).toBe(
+      true,
+    );
+    const patch = decodeServerSettingsPatch({ agentControl: { enabled: true } });
+    expect(patch.agentControl?.enabled).toBe(true);
+    expect(decodeServerSettingsPatch({}).agentControl).toBeUndefined();
+  });
+});
+
 describe("ServerSettingsPatch.providers.grok", () => {
   it("decodes Grok binary and model overrides", () => {
     const patch = decodeServerSettingsPatch({
