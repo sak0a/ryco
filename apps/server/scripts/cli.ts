@@ -165,6 +165,16 @@ const buildCmd = Command.make(
         }),
       );
 
+      const deviceHelperSource = path.join(serverDir, "native/device-helper");
+      const deviceHelperTarget = path.join(serverDir, "dist/device-helper");
+      if (!(yield* fs.exists(path.join(deviceHelperSource, "build.sh")))) {
+        return yield* new CliError({
+          message: `Missing iOS Simulator helper sources: ${deviceHelperSource}`,
+        });
+      }
+      yield* fs.copy(deviceHelperSource, deviceHelperTarget);
+      yield* Effect.log("[cli] Bundled iOS Simulator helper sources into dist/device-helper");
+
       const webDist = path.join(repoRoot, "apps/web/dist");
       const clientTarget = path.join(serverDir, "dist/client");
 

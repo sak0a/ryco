@@ -56,6 +56,7 @@ const STATIC_KEYBINDING_COMMANDS = [
   "workspace.files",
   "workspace.review",
   "workspace.terminal",
+  "workspace.simulator",
   "diff.toggle",
   "commandPalette.toggle",
   "chat.new",

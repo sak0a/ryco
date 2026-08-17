@@ -18,6 +18,7 @@ import { Effect, Stream } from "effect";
 import { type WsRpcProtocolClient } from "./protocol.ts";
 import { resetWsReconnectBackoff } from "./wsConnectionState.ts";
 import { WsTransport } from "./wsTransport.ts";
+import type { DeviceRpcClient } from "./deviceRpcClient.ts";
 
 type RpcTag = keyof WsRpcProtocolClient & string;
 type RpcMethod<TTag extends RpcTag> = WsRpcProtocolClient[TTag];
@@ -60,6 +61,7 @@ export interface WsRpcClient {
   readonly dispose: () => Promise<void>;
   readonly reconnect: () => Promise<void>;
   readonly isHeartbeatFresh: () => boolean;
+  readonly device?: DeviceRpcClient;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
@@ -284,14 +286,17 @@ export interface WsRpcClient {
   };
 }
 
-export function createWsRpcClient(transport: WsTransport): WsRpcClient {
+export function createWsRpcClient(transport: WsTransport, device?: DeviceRpcClient): WsRpcClient {
   return {
-    dispose: () => transport.dispose(),
+    dispose: async () => {
+      await Promise.all([transport.dispose(), device?.dispose()]);
+    },
     reconnect: async () => {
       resetWsReconnectBackoff();
-      await transport.reconnect();
+      await Promise.all([transport.reconnect(), device?.reconnect()]);
     },
     isHeartbeatFresh: () => transport.isHeartbeatFresh(),
+    ...(device ? { device } : {}),
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),

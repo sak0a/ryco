@@ -135,6 +135,38 @@ import { EditorId } from "./editor.ts";
 import type { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import type { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 import type {
+  DeviceAttachInput,
+  DeviceBootInput,
+  DeviceBootResult,
+  DeviceDescribeUiInput,
+  DeviceDescribeUiResult,
+  DeviceDetachInput,
+  DeviceEvent,
+  DeviceInstallAppInput,
+  DeviceInstallAppResult,
+  DeviceKeyEventInput,
+  DeviceLaunchAppInput,
+  DeviceLaunchAppResult,
+  DeviceListInput,
+  DeviceListResult,
+  DeviceOpenUrlInput,
+  DevicePressButtonInput,
+  DeviceScreenshotInput,
+  DeviceScreenshotResult,
+  DeviceScrollToElementInput,
+  DeviceScrollToElementResult,
+  DeviceShutdownInput,
+  DeviceStartRecordingInput,
+  DeviceStartRecordingResult,
+  DeviceStopRecordingInput,
+  DeviceStopRecordingResult,
+  DeviceSwipeInput,
+  DeviceTapInput,
+  DeviceThreadInput,
+  DeviceTypeTextInput,
+  ThreadDeviceState,
+} from "./device.ts";
+import type {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
   SourceControlDiscoveryResult,
@@ -580,6 +612,28 @@ export interface LocalApi {
  * `environmentId` rather than reaching through the local desktop bridge.
  */
 export interface EnvironmentApi {
+  device?: {
+    list: (input?: DeviceListInput) => Promise<DeviceListResult>;
+    getThreadState: (input: DeviceThreadInput) => Promise<ThreadDeviceState>;
+    screenshot: (input: DeviceScreenshotInput) => Promise<DeviceScreenshotResult>;
+    describeUi: (input: DeviceDescribeUiInput) => Promise<DeviceDescribeUiResult>;
+    boot: (input: DeviceBootInput) => Promise<DeviceBootResult>;
+    shutdown: (input: DeviceShutdownInput) => Promise<void>;
+    attach: (input: DeviceAttachInput) => Promise<ThreadDeviceState>;
+    detach: (input: DeviceDetachInput) => Promise<ThreadDeviceState>;
+    tap: (input: DeviceTapInput) => Promise<void>;
+    swipe: (input: DeviceSwipeInput) => Promise<void>;
+    typeText: (input: DeviceTypeTextInput) => Promise<void>;
+    keyEvent: (input: DeviceKeyEventInput) => Promise<void>;
+    pressButton: (input: DevicePressButtonInput) => Promise<void>;
+    scrollToElement: (input: DeviceScrollToElementInput) => Promise<DeviceScrollToElementResult>;
+    installApp: (input: DeviceInstallAppInput) => Promise<DeviceInstallAppResult>;
+    launchApp: (input: DeviceLaunchAppInput) => Promise<DeviceLaunchAppResult>;
+    openUrl: (input: DeviceOpenUrlInput) => Promise<void>;
+    startRecording: (input: DeviceStartRecordingInput) => Promise<DeviceStartRecordingResult>;
+    stopRecording: (input: DeviceStopRecordingInput) => Promise<DeviceStopRecordingResult>;
+    onEvent: (callback: (event: DeviceEvent) => void) => () => void;
+  };
   terminal: {
     open: (input: typeof TerminalOpenInput.Encoded) => Promise<TerminalSessionSnapshot>;
     write: (input: typeof TerminalWriteInput.Encoded) => Promise<void>;

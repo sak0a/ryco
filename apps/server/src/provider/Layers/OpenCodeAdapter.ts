@@ -31,6 +31,7 @@ import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlC
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
+import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
   ProviderAdapterProcessError,
@@ -1503,8 +1504,21 @@ export function makeOpenCodeAdapter(
           });
         }
 
+        let deviceToolContext: OpenCodeSessionContext | undefined;
+        const deviceToolBinding = createProcessDeviceToolBinding({
+          threadId: input.threadId,
+          isTurnActive: () =>
+            deviceToolContext?.activeTurnId !== undefined &&
+            deviceToolContext.session.status !== "closed",
+        });
         const started = yield* Effect.gen(function* () {
           const sessionScope = yield* Scope.make();
+          if (deviceToolBinding) {
+            yield* Scope.addFinalizer(
+              sessionScope,
+              Effect.sync(() => deviceToolBinding.dispose()),
+            );
+          }
           const startedExit = yield* Effect.exit(
             Effect.gen(function* () {
               // The runtime binds the server's lifetime to the Scope.Scope
@@ -1520,6 +1534,21 @@ export function makeOpenCodeAdapter(
                 directory,
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               });
+              if (deviceToolBinding) {
+                yield* runOpenCodeSdk("mcp.add", () =>
+                  client.mcp.add({
+                    directory,
+                    name: `ryco_device_${runtimeSessionId}`,
+                    config: {
+                      type: "remote",
+                      url: deviceToolBinding.url,
+                      headers: { ...deviceToolBinding.headers },
+                      oauth: false,
+                      enabled: true,
+                    },
+                  }),
+                );
+              }
               const openCodeSession = yield* runOpenCodeSdk("session.create", () =>
                 client.session.create({
                   title: `Ryco ${input.threadId}`,
@@ -1603,6 +1632,7 @@ export function makeOpenCodeAdapter(
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
         };
+        deviceToolContext = context;
         sessions.set(input.threadId, context);
 
         yield* emitForContext(context, {

@@ -508,6 +508,9 @@ function backendChildEnv(): NodeJS.ProcessEnv {
   // shell exports it, the server's Config.url parser throws and the backend
   // exits before HTTP listen, causing the desktop to spin in a restart loop.
   deleteEnv(env, "VITE_DEV_SERVER_URL");
+  if (app.isPackaged && process.platform === "darwin") {
+    env.RYCO_DEVICE_HELPER_SOURCE_DIR = Path.join(process.resourcesPath, "device-helper");
+  }
   return env;
 }
 

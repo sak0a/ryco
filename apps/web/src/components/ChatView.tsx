@@ -17,6 +17,7 @@ import {
   RuntimeMode,
   AgentTokenMode,
   ORCHESTRATION_WS_METHODS,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   WS_METHODS,
 } from "@ryco/contracts";
 import {
@@ -128,6 +129,10 @@ import {
   type DraftId,
 } from "../composerDraftStore";
 import { type TerminalContextDraft, type TerminalContextSelection } from "../lib/terminalContext";
+import {
+  maybeResolveDevicePromptAttachment,
+  type DevicePromptAttachmentResolution,
+} from "../lib/devicePromptContext";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { PersistentThreadTerminalDrawer } from "./chat/ChatTerminalShell";
@@ -344,6 +349,7 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       onPreviewPanelOpen?: () => void;
       onTerminalPanelOpen?: () => void;
+      onSimulatorPanelOpen?: () => void;
       onAgentPanelOpen?: () => void;
       workspacePanelOpen?: boolean;
       onToggleWorkspacePanel?: () => void;
@@ -357,6 +363,7 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       onPreviewPanelOpen?: () => void;
       onTerminalPanelOpen?: () => void;
+      onSimulatorPanelOpen?: () => void;
       onAgentPanelOpen?: () => void;
       workspacePanelOpen?: boolean;
       onToggleWorkspacePanel?: () => void;
@@ -416,6 +423,7 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     onPreviewPanelOpen,
     onTerminalPanelOpen,
+    onSimulatorPanelOpen,
     onAgentPanelOpen,
     onToggleWorkspacePanel: externalToggleWorkspacePanel,
     reserveTitleBarControlInset = true,
@@ -1929,6 +1937,7 @@ export default function ChatView(props: ChatViewProps) {
     onToggleDiff,
     onOpenFilesPanel,
     onOpenTerminalPanel,
+    onOpenSimulatorPanel,
     onToggleWorkspacePanel,
     onOpenTurnDiff,
     onCloseDiff,
@@ -1948,6 +1957,7 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     onPreviewPanelOpen,
     onTerminalPanelOpen,
+    onSimulatorPanelOpen,
     onAgentPanelOpen,
   });
   const envLocked = Boolean(
@@ -2673,6 +2683,7 @@ export default function ChatView(props: ChatViewProps) {
     onOpenFilesPanel,
     onOpenReviewPanel,
     onOpenTerminalPanel,
+    onOpenSimulatorPanel,
     runProjectScript,
   });
 
@@ -2737,6 +2748,43 @@ export default function ChatView(props: ChatViewProps) {
     if (!canSendModelSelection(composerSnapshot.selectedModelSelection)) {
       notifySelectionBecameIneligible();
       return false;
+    }
+    const devicePromptAttachment: DevicePromptAttachmentResolution =
+      await maybeResolveDevicePromptAttachment({
+        api,
+        threadId: activeThread.id,
+        prompt: composerSnapshot.prompt,
+      }).catch(() => ({ requested: false, image: null }));
+    if (devicePromptAttachment.image) {
+      if (composerSnapshot.images.length < PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+        composerSnapshot = {
+          ...composerSnapshot,
+          images: [...composerSnapshot.images, devicePromptAttachment.image],
+        };
+      } else {
+        URL.revokeObjectURL(devicePromptAttachment.image.previewUrl);
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "The simulator screenshot was skipped",
+            description: `This message already has ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} attachments.`,
+          }),
+        );
+      }
+    } else if (devicePromptAttachment.requested) {
+      const description =
+        devicePromptAttachment.reason === "no-attached-device"
+          ? "Open the Simulator workspace and choose a device first."
+          : devicePromptAttachment.reason === "device-not-booted"
+            ? "The selected simulator is still starting."
+            : "The current simulator screen could not be attached.";
+      toastManager.add(
+        stackedThreadToast({
+          type: "warning",
+          title: "Couldn’t attach the simulator screen",
+          description,
+        }),
+      );
     }
     // Queued messages keep the settings snapshot from enqueue time; when the
     // Build-mode lock is on, every dispatched turn must still run in Build

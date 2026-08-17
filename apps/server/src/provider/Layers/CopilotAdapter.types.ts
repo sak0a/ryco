@@ -27,6 +27,7 @@ import type {
 import { RuntimeConnection } from "@github/copilot-sdk";
 
 import type { EventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import type { DeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import type {
   ProviderThreadSnapshot,
   ProviderThreadTurnSnapshot,
@@ -76,6 +77,7 @@ export interface ActiveCopilotSession {
   readonly pendingApprovals: Map<string, PendingApprovalRequest>;
   readonly pendingUserInputs: Map<string, PendingUserInputRequest>;
   readonly pendingTurnStarts: Set<PendingTurnStartRequest>;
+  readonly deviceToolBinding: DeviceToolBinding | null;
   readonly turns: Array<MutableTurnSnapshot>;
   readonly renewSession: () => Promise<CopilotSession>;
   readonly attachSession: (session: CopilotSession) => void;

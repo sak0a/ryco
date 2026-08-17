@@ -9,6 +9,7 @@ import type {
 
 import type { KnownEnvironment } from "../knownEnvironment.ts";
 import type { WsRpcClient } from "../rpc/index.ts";
+import { bindDeviceConnection } from "../state/device/runtime.ts";
 
 export interface PushSequenceMonitor {
   readonly recordEvent: (environmentId: EnvironmentId, sequence: number) => void;
@@ -147,12 +148,16 @@ export function createEnvironmentConnection(
   const unsubTerminalEvent = input.client.terminal.onEvent((event) =>
     input.applyTerminalEvent(event, environmentId),
   );
+  const deviceBinding = input.client.device
+    ? bindDeviceConnection(environmentId, input.client.device)
+    : null;
   const cleanup = () => {
     disposed = true;
     unsubShell();
     unsubTerminalEvent();
     unsubLifecycle();
     unsubConfig();
+    deviceBinding?.dispose();
   };
 
   return {
@@ -163,8 +168,10 @@ export function createEnvironmentConnection(
     ensureBootstrapped: () => bootstrapGate.wait(),
     reconnect: async () => {
       bootstrapGate.reset();
+      deviceBinding?.reconnecting();
       try {
         await input.client.reconnect();
+        await deviceBinding?.refreshInventory();
         await input.refreshMetadata?.();
         await bootstrapGate.wait();
       } catch (error) {

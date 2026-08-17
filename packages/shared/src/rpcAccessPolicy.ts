@@ -1,5 +1,6 @@
 import {
   CONTEXT_HANDOFF_WS_METHODS,
+  DEVICE_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
   WS_METHODS,
   type RelayEffectiveRole,
@@ -8,11 +9,18 @@ import {
 export type RpcMethod =
   | (typeof WS_METHODS)[keyof typeof WS_METHODS]
   | (typeof ORCHESTRATION_WS_METHODS)[keyof typeof ORCHESTRATION_WS_METHODS]
-  | (typeof CONTEXT_HANDOFF_WS_METHODS)[keyof typeof CONTEXT_HANDOFF_WS_METHODS];
+  | (typeof CONTEXT_HANDOFF_WS_METHODS)[keyof typeof CONTEXT_HANDOFF_WS_METHODS]
+  | (typeof DEVICE_WS_METHODS)[keyof typeof DEVICE_WS_METHODS];
 
 export type RpcAccess = RelayEffectiveRole | "authenticated" | "direct_owner";
 
 export const RPC_ACCESS_POLICY = {
+  [DEVICE_WS_METHODS.read]: "viewer",
+  [DEVICE_WS_METHODS.subscribeEvents]: "viewer",
+  [DEVICE_WS_METHODS.lifecycle]: "owner",
+  [DEVICE_WS_METHODS.input]: "owner",
+  [DEVICE_WS_METHODS.app]: "owner",
+  [DEVICE_WS_METHODS.recording]: "owner",
   [WS_METHODS.atlassianDisconnect]: "owner",
   [WS_METHODS.atlassianGetProjectLink]: "owner",
   [WS_METHODS.atlassianListConnections]: "owner",

@@ -10,6 +10,7 @@ import {
   buildOpenAgentsSearch,
   buildOpenFilesSearch,
   buildOpenReviewSearch,
+  buildOpenSimulatorSearch,
   buildOpenTerminalSearch,
   buildOpenWorkspaceSearch,
   stripWorkspacePanelSearchParams,
@@ -29,6 +30,7 @@ export interface UseChatWorkspacePanelsInput {
   onDiffPanelOpen: (() => void) | undefined;
   onPreviewPanelOpen: (() => void) | undefined;
   onTerminalPanelOpen: (() => void) | undefined;
+  onSimulatorPanelOpen: (() => void) | undefined;
   onAgentPanelOpen: (() => void) | undefined;
 }
 
@@ -37,6 +39,7 @@ export interface UseChatWorkspacePanelsResult {
   onToggleDiff: () => void;
   onOpenFilesPanel: () => void;
   onOpenTerminalPanel: () => void;
+  onOpenSimulatorPanel: () => void;
   onToggleWorkspacePanel: () => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onCloseDiff: () => void;
@@ -77,6 +80,7 @@ export function useChatWorkspacePanels(
     onDiffPanelOpen,
     onPreviewPanelOpen,
     onTerminalPanelOpen,
+    onSimulatorPanelOpen,
     onAgentPanelOpen,
   } = input;
   const isPhoneTier = usePresentationTier() === "phone";
@@ -161,6 +165,27 @@ export function useChatWorkspacePanels(
         environmentId,
         threadId,
       },
+      replace: true,
+      search: nextSearch,
+    });
+  });
+  const onOpenSimulatorPanel = useEvent(() => {
+    if (isPhoneTier) return;
+    onSimulatorPanelOpen?.();
+    const nextSearch = (previous: Record<string, unknown>) => buildOpenSimulatorSearch(previous);
+    if (routeKind === "draft" && draftId) {
+      void navigate({
+        to: "/draft/$draftId",
+        params: { draftId },
+        replace: true,
+        search: nextSearch,
+      });
+      return;
+    }
+    if (!isServerThread) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: { environmentId, threadId },
       replace: true,
       search: nextSearch,
     });
@@ -296,6 +321,7 @@ export function useChatWorkspacePanels(
     onToggleDiff,
     onOpenFilesPanel,
     onOpenTerminalPanel,
+    onOpenSimulatorPanel,
     onToggleWorkspacePanel,
     onOpenTurnDiff,
     onCloseDiff,

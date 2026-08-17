@@ -1,4 +1,4 @@
-import { WsRpcGroup } from "@ryco/contracts";
+import { WsDeviceRpcGroup, WsHostedRpcGroup, WsRpcGroup } from "@ryco/contracts";
 import { Data, Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
@@ -64,6 +64,8 @@ export interface WsProtocolLifecycleHandlers {
   readonly preserveSocketPath?: boolean;
   readonly shouldReconnect?: () => boolean;
   readonly authorizeRequest?: (info: { readonly tag: string; readonly stream: boolean }) => boolean;
+  /** Secondary feature channels must not replace the app's primary status. */
+  readonly recordConnectionState?: boolean;
 }
 
 export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
@@ -71,6 +73,16 @@ type RpcClientFactory = typeof makeWsRpcProtocolClient;
 export type WsRpcProtocolClient =
   RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
 export type WsRpcProtocolSocketUrlProvider = string | (() => Promise<string>);
+
+export const makeDeviceRpcProtocolClient = RpcClient.make(WsDeviceRpcGroup);
+type DeviceRpcClientFactory = typeof makeDeviceRpcProtocolClient;
+export type DeviceRpcProtocolClient =
+  DeviceRpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
+
+export const makeHostedRpcProtocolClient = RpcClient.make(WsHostedRpcGroup);
+type HostedRpcClientFactory = typeof makeHostedRpcProtocolClient;
+export type HostedRpcProtocolClient =
+  HostedRpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
 
 const WS_URL_PROVIDER_ERROR_MESSAGE = "Unable to prepare the Ryco server WebSocket connection.";
 export const WS_CONNECTION_ERROR_MESSAGE = "Unable to connect to the Ryco server WebSocket.";
@@ -104,21 +116,29 @@ function defaultLifecycleHandlers(
   return {
     isActive: () => true,
     onAttempt: (socketUrl) => {
-      recordWsConnectionAttempt(socketUrl, resolveConnectionMetadata(handlers));
+      if (handlers?.recordConnectionState !== false) {
+        recordWsConnectionAttempt(socketUrl, resolveConnectionMetadata(handlers));
+      }
     },
     onOpen: () => {
-      recordWsConnectionOpened(resolveConnectionMetadata(handlers));
+      if (handlers?.recordConnectionState !== false) {
+        recordWsConnectionOpened(resolveConnectionMetadata(handlers));
+      }
     },
     onError: (message) => {
-      clearAllTrackedRpcRequests();
-      recordWsConnectionErrored(message, resolveConnectionMetadata(handlers));
+      if (handlers?.recordConnectionState !== false) {
+        clearAllTrackedRpcRequests();
+        recordWsConnectionErrored(message, resolveConnectionMetadata(handlers));
+      }
     },
     onClose: (details, context) => {
-      clearAllTrackedRpcRequests();
+      if (handlers?.recordConnectionState !== false) clearAllTrackedRpcRequests();
       if (context.intentional) {
         return;
       }
-      recordWsConnectionClosed(details, resolveConnectionMetadata(handlers));
+      if (handlers?.recordConnectionState !== false) {
+        recordWsConnectionClosed(details, resolveConnectionMetadata(handlers));
+      }
     },
   };
 }

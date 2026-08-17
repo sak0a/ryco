@@ -122,6 +122,8 @@ vi.mock("../../rpc/wsRpcClient", () => ({
 }));
 
 vi.mock("../../rpc/wsTransport", () => ({
+  DeviceWsTransport: vi.fn(),
+  HostedWsTransport: vi.fn(),
   WsTransport: vi.fn(),
 }));
 
@@ -243,7 +245,7 @@ describe("addSavedEnvironment", () => {
     expect(mockUpsert).not.toHaveBeenCalled();
 
     await resetEnvironmentServiceForTests();
-  });
+  }, 15_000);
 
   it("restores unrelated saved environments when credential persistence rollback runs", async () => {
     mockSavedRecords = [

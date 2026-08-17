@@ -21,6 +21,7 @@ import {
 } from "@ryco/client-runtime/knownEnvironment";
 import {
   createEnvironmentConnectionSupervisor,
+  createDeviceFrameSource,
   SavedEnvironmentConnectionCancelledError,
 } from "@ryco/client-runtime/connection";
 export {
@@ -62,8 +63,9 @@ import { createEnvironmentConnection, type EnvironmentConnection } from "./conne
 import { useStore, selectSidebarThreadSummaryByRef, selectThreadByRef } from "~/store";
 import { useTerminalStateStore } from "~/terminalStateStore";
 import type { WsProtocolCloseContext } from "@ryco/client-runtime/rpc";
+import { createDeviceRpcClient } from "@ryco/client-runtime/rpc";
 import { getServerConfig } from "../../rpc/serverState";
-import { WsTransport } from "../../rpc/wsTransport";
+import { DeviceWsTransport, HostedWsTransport, WsTransport } from "../../rpc/wsTransport";
 import { createWsRpcClient, type WsRpcClient } from "../../rpc/wsRpcClient";
 import { appendVersionMismatchHint, resolveServerConfigVersionMismatch } from "../../versionSkew";
 import { markStartupPhase, measureStartupPhase } from "~/perf/startupInstrumentation";
@@ -76,6 +78,7 @@ import {
 } from "~/hostedHub/state";
 import { getHostedRelayAttemptFactory } from "~/hostedHub/transport";
 import { createWebEnvironmentStateSink } from "./environmentStateSink";
+import { webSocket } from "../../platform";
 
 function isSavedEnvironmentConnectionCancelledError(
   error: unknown,
@@ -755,36 +758,74 @@ function createPrimaryEnvironmentClient(
   if (isHostedHubMode()) {
     const attemptFactory = getHostedRelayAttemptFactory();
     const hostedHandlers = attemptFactory.lifecycleHandlers();
+    const transport = new HostedWsTransport(() => attemptFactory.nextUrl(), {
+      ...hostedHandlers,
+      getConnectionLabel: () => connectionLabel,
+      onOpen: () => {
+        hostedHandlers.onOpen?.();
+        markStartupPhase("primary-ws-open");
+      },
+    });
     return createWsRpcClient(
-      new WsTransport(() => attemptFactory.nextUrl(), {
-        ...hostedHandlers,
-        getConnectionLabel: () => connectionLabel,
-        onOpen: () => {
-          hostedHandlers.onOpen?.();
-          markStartupPhase("primary-ws-open");
-        },
-      }),
+      transport,
+      createDeviceRpcClient(transport, { manageTransport: false }),
     );
   }
 
+  const authenticatedSocketUrl = async (pathname: "/ws" | "/ws/device" | "/ws/device-frames") => {
+    const issued = await issuePrimaryWebSocketToken();
+    const url = new URL(wsBaseUrl, window.location.origin);
+    url.pathname = pathname;
+    url.searchParams.set("wsToken", issued.token);
+    return url.toString();
+  };
   return createWsRpcClient(
-    new WsTransport(
-      async () => {
-        const issued = await issuePrimaryWebSocketToken();
-        const url = new URL(wsBaseUrl, window.location.origin);
-        url.searchParams.set("wsToken", issued.token);
-        return url.toString();
+    new WsTransport(() => authenticatedSocketUrl("/ws"), {
+      getConnectionLabel: () => connectionLabel,
+      getVersionMismatchHint: () =>
+        resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
+      onOpen: () => {
+        markStartupPhase("primary-ws-open");
       },
-      {
+    }),
+    createDeviceRpcClient(
+      new DeviceWsTransport(() => authenticatedSocketUrl("/ws/device"), {
         getConnectionLabel: () => connectionLabel,
-        getVersionMismatchHint: () =>
-          resolveServerConfigVersionMismatch(getServerConfig())?.hint ?? null,
-        onOpen: () => {
-          markStartupPhase("primary-ws-open");
-        },
+      }),
+      {
+        openFrameSource: (udid, handlers) =>
+          createDeviceFrameSource({
+            udid,
+            handlers,
+            socket: webSocket,
+            resolveUrl: () => authenticatedSocketUrl("/ws/device-frames"),
+          }),
       },
     ),
   );
+}
+
+async function resolveSavedEnvironmentSocketUrl(
+  environmentId: EnvironmentId,
+  bearerToken: string,
+  pathname: "/ws" | "/ws/device" | "/ws/device-frames",
+): Promise<string> {
+  const record = getSavedEnvironmentRecord(environmentId);
+  if (!record) throw new Error(`Saved environment ${environmentId} not found.`);
+  const rawUrl = record.desktopSsh
+    ? await resolveDesktopSshWebSocketConnectionUrl(
+        record.wsBaseUrl,
+        record.httpBaseUrl,
+        bearerToken,
+      )
+    : await resolveRemoteWebSocketConnectionUrl({
+        wsBaseUrl: record.wsBaseUrl,
+        httpBaseUrl: record.httpBaseUrl,
+        bearerToken,
+      });
+  const url = new URL(rawUrl, window.location.origin);
+  url.pathname = pathname;
+  return url.toString();
 }
 
 function createSavedEnvironmentClient(
@@ -794,63 +835,62 @@ function createSavedEnvironmentClient(
   useSavedEnvironmentRuntimeStore.getState().ensure(environmentId);
 
   return createWsRpcClient(
-    new WsTransport(
-      async () => {
-        const record = getSavedEnvironmentRecord(environmentId);
-        if (!record) {
-          throw new Error(`Saved environment ${environmentId} not found.`);
-        }
-        return record.desktopSsh
-          ? await resolveDesktopSshWebSocketConnectionUrl(
-              record.wsBaseUrl,
-              record.httpBaseUrl,
-              bearerToken,
-            )
-          : await resolveRemoteWebSocketConnectionUrl({
-              wsBaseUrl: record.wsBaseUrl,
-              httpBaseUrl: record.httpBaseUrl,
-              bearerToken,
-            });
+    new WsTransport(() => resolveSavedEnvironmentSocketUrl(environmentId, bearerToken, "/ws"), {
+      getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
+      getVersionMismatchHint: () =>
+        resolveServerConfigVersionMismatch(
+          useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+        )?.hint ?? null,
+      onAttempt: () => {
+        setRuntimeConnecting(environmentId);
       },
-      {
-        getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
-        getVersionMismatchHint: () =>
-          resolveServerConfigVersionMismatch(
-            useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
-          )?.hint ?? null,
-        onAttempt: () => {
-          setRuntimeConnecting(environmentId);
-        },
-        onOpen: () => {
-          setRuntimeConnected(environmentId);
-        },
-        onError: (message: string) => {
-          const mismatch = resolveServerConfigVersionMismatch(
-            useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
-          );
-          useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
-            connectionState: "error",
-            lastError: appendVersionMismatchHint(message, mismatch),
-            lastErrorAt: isoNow(),
-          });
-        },
-        onClose: (
-          details: { readonly code: number; readonly reason: string },
-          context: WsProtocolCloseContext,
-        ) => {
-          if (context.intentional) {
-            return;
-          }
-          setRuntimeDisconnected(
-            environmentId,
-            appendVersionMismatchHint(
-              details.reason,
-              resolveServerConfigVersionMismatch(
-                useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
-              ),
+      onOpen: () => {
+        setRuntimeConnected(environmentId);
+      },
+      onError: (message: string) => {
+        const mismatch = resolveServerConfigVersionMismatch(
+          useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
+        );
+        useSavedEnvironmentRuntimeStore.getState().patch(environmentId, {
+          connectionState: "error",
+          lastError: appendVersionMismatchHint(message, mismatch),
+          lastErrorAt: isoNow(),
+        });
+      },
+      onClose: (
+        details: { readonly code: number; readonly reason: string },
+        context: WsProtocolCloseContext,
+      ) => {
+        if (context.intentional) {
+          return;
+        }
+        setRuntimeDisconnected(
+          environmentId,
+          appendVersionMismatchHint(
+            details.reason,
+            resolveServerConfigVersionMismatch(
+              useSavedEnvironmentRuntimeStore.getState().byId[environmentId]?.serverConfig,
             ),
-          );
+          ),
+        );
+      },
+    }),
+    createDeviceRpcClient(
+      new DeviceWsTransport(
+        () => resolveSavedEnvironmentSocketUrl(environmentId, bearerToken, "/ws/device"),
+        {
+          getConnectionLabel: () => getSavedEnvironmentRecord(environmentId)?.label ?? null,
         },
+      ),
+      {
+        openFrameSource: (udid, handlers) =>
+          createDeviceFrameSource({
+            udid,
+            handlers,
+            socket: webSocket,
+            resolveUrl: () =>
+              resolveSavedEnvironmentSocketUrl(environmentId, bearerToken, "/ws/device-frames"),
+          }),
       },
     ),
   );

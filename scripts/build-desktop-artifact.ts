@@ -957,6 +957,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         from: "apps/desktop/resources/ryco-desktop-security-helper",
         to: "ryco-desktop-security-helper",
       },
+      {
+        from: "apps/server/dist/device-helper",
+        to: "device-helper",
+      },
     ];
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],

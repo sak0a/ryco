@@ -35,6 +35,10 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import { appendProjectCustomSystemPrompt } from "../ProjectCustomSystemPrompt.ts";
+import {
+  createProcessDeviceToolBinding,
+  type DeviceToolBinding,
+} from "../../providerTools/deviceToolGateway.ts";
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -290,6 +294,7 @@ function buildThreadStartParams(input: {
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
+  readonly deviceToolBinding?: DeviceToolBinding | null;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   return {
@@ -297,6 +302,18 @@ function buildThreadStartParams(input: {
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     approvalsReviewer: config.approvalsReviewer,
+    ...(input.deviceToolBinding
+      ? {
+          config: {
+            mcp_servers: {
+              ryco_device: {
+                url: input.deviceToolBinding.url,
+                http_headers: { ...input.deviceToolBinding.headers },
+              },
+            },
+          },
+        }
+      : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
@@ -469,6 +486,7 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly deviceToolBinding?: DeviceToolBinding | null;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -476,6 +494,9 @@ export const openCodexThread = (input: {
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
+    ...(input.deviceToolBinding !== undefined
+      ? { deviceToolBinding: input.deviceToolBinding }
+      : {}),
   });
 
   if (resumeThreadId === undefined) {
@@ -858,6 +879,17 @@ export const makeCodexSessionRuntime = (
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const runtimeScope = yield* Scope.Scope;
+    let deviceTurnActive = false;
+    const deviceToolBinding = createProcessDeviceToolBinding({
+      threadId: options.threadId,
+      isTurnActive: () => deviceTurnActive,
+    });
+    if (deviceToolBinding) {
+      yield* Scope.addFinalizer(
+        runtimeScope,
+        Effect.sync(() => deviceToolBinding.dispose()),
+      );
+    }
     const events = yield* Queue.bounded<ProviderEvent>(2_048);
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
@@ -1381,6 +1413,7 @@ export const makeCodexSessionRuntime = (
           if (providerThreadId && payload.threadId !== providerThreadId) {
             return Effect.void;
           }
+          deviceTurnActive = true;
           return updateSession(sessionRef, {
             status: "running",
             activeTurnId: TurnId.make(payload.turn.id),
@@ -1395,6 +1428,7 @@ export const makeCodexSessionRuntime = (
           if (providerThreadId && payload.threadId !== providerThreadId) {
             return Effect.void;
           }
+          deviceTurnActive = false;
           const lastError =
             payload.turn.status === "failed" && "error" in payload.turn && payload.turn.error
               ? payload.turn.error.message
@@ -1686,6 +1720,7 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        deviceToolBinding,
       });
 
       const providerThreadId = opened.thread.id;
@@ -1717,6 +1752,7 @@ export const makeCodexSessionRuntime = (
       if (alreadyClosed) {
         return;
       }
+      deviceTurnActive = false;
       yield* settlePendingApprovals("cancel");
       yield* settlePendingUserInputs({});
       yield* updateSession(sessionRef, {
@@ -1761,6 +1797,7 @@ export const makeCodexSessionRuntime = (
             ),
           );
           const turnId = TurnId.make(response.turn.id);
+          deviceTurnActive = true;
           yield* updateSession(sessionRef, (session) => ({
             status: "running",
             // A follow-up can be accepted while another turn is active. The

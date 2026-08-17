@@ -22,6 +22,7 @@ export interface UseChatGlobalShortcutsInput {
   onOpenFilesPanel: () => void;
   onOpenReviewPanel: () => void;
   onOpenTerminalPanel: () => void;
+  onOpenSimulatorPanel: () => void;
   runProjectScript: (script: ProjectScript) => void | Promise<void>;
 }
 
@@ -47,6 +48,7 @@ export function useChatGlobalShortcuts(input: UseChatGlobalShortcutsInput): void
     onOpenFilesPanel,
     onOpenReviewPanel,
     onOpenTerminalPanel,
+    onOpenSimulatorPanel,
     runProjectScript,
   } = input;
 
@@ -136,6 +138,13 @@ export function useChatGlobalShortcuts(input: UseChatGlobalShortcutsInput): void
         return;
       }
 
+      if (command === "workspace.simulator") {
+        event.preventDefault();
+        event.stopPropagation();
+        onOpenSimulatorPanel();
+        return;
+      }
+
       if (command === "modelPicker.toggle") {
         event.preventDefault();
         event.stopPropagation();
@@ -168,6 +177,7 @@ export function useChatGlobalShortcuts(input: UseChatGlobalShortcutsInput): void
     onOpenFilesPanel,
     onOpenReviewPanel,
     onOpenTerminalPanel,
+    onOpenSimulatorPanel,
     readComposer,
     toggleTerminalVisibility,
   ]);
