@@ -447,8 +447,9 @@ export type AgentControlProposalStreamSnapshotEvent =
 
 /**
  * One proposal creation or transition. The full proposal document is the
- * payload — clients upsert by `proposalId`, keeping the highest-revision
- * version, so replayed or duplicated events are harmless.
+ * payload — clients upsert by `proposalId` and never let a proposal move
+ * backward through the one-way status progression, so replayed, duplicated,
+ * or reordered deliveries are harmless.
  */
 export const AgentControlProposalStreamProposalEvent = Schema.Struct({
   version: Schema.Literal(1),

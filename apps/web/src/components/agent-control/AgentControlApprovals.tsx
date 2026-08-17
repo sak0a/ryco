@@ -13,9 +13,12 @@ import {
   useAgentControlStore,
 } from "@ryco/client-runtime/state/agentControl";
 
-import { readEnvironmentApi } from "../../environmentApi";
+import { readEnvironmentApi, readEnvironmentApiForConnection } from "../../environmentApi";
+import {
+  subscribeEnvironmentConnections,
+  readEnvironmentConnection,
+} from "../../environments/runtime";
 import { useHostedRpcCapability } from "../../hostedHub/capabilities";
-import { useSettings } from "../../hooks/useSettings";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { AgentControlProposalCard } from "./AgentControlProposalCard";
@@ -28,16 +31,21 @@ export interface AgentControlApprovalsProps {
 /**
  * The Agent Control approval surface for one environment: every live
  * proposal as a decidable card — proposals raised from the active thread
- * first — plus a collapsed history of recent terminal decisions. Renders
- * nothing while the Agent Control server setting is disabled; all policy
- * stays server-side, this surface only renders state and sends explicit
- * decisions.
+ * first — plus a collapsed history of recent terminal decisions.
+ *
+ * The Agent Control setting is enforced by the TARGET environment's server
+ * (which may not be the primary node whose settings the web client
+ * mirrors): the subscription is simply attempted whenever a connection
+ * exists, and a server with the feature disabled refuses it — so nothing
+ * renders and no policy is decided client-side. The sync re-binds whenever
+ * the environment's connection is (re)registered, following the
+ * gitStatusState pattern, so late-connecting saved environments and
+ * reconnects keep the queue live.
  */
 export function AgentControlApprovals({
   environmentId,
   activeThreadId,
 }: AgentControlApprovalsProps) {
-  const enabled = useSettings((settings) => settings.agentControl.enabled);
   const decisionCapability = useHostedRpcCapability(AGENT_CONTROL_WS_METHODS.acceptProposal);
   const [submittingIds, setSubmittingIds] = useState<ReadonlyArray<string>>([]);
   const [decisionErrorsById, setDecisionErrorsById] = useState<Readonly<Record<string, string>>>(
@@ -46,19 +54,37 @@ export function AgentControlApprovals({
   const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
-    if (!enabled) return undefined;
-    const source = readEnvironmentApi(environmentId)?.agentControl;
-    if (!source) return undefined;
-    const store = useAgentControlStore.getState();
-    return startAgentControlProposalSync({
-      environmentId,
-      source,
-      sink: {
-        applyStreamEvent: store.applyStreamEvent,
-        clearEnvironment: store.clearEnvironment,
-      },
-    });
-  }, [enabled, environmentId]);
+    let currentClient: unknown = null;
+    let stopSync: (() => void) | null = null;
+
+    const syncSubscription = () => {
+      const client = readEnvironmentConnection(environmentId)?.client ?? null;
+      if (client === currentClient) return;
+      stopSync?.();
+      stopSync = null;
+      currentClient = client;
+      const source = client
+        ? readEnvironmentApiForConnection(environmentId, client)?.agentControl
+        : undefined;
+      if (!source) return;
+      const store = useAgentControlStore.getState();
+      stopSync = startAgentControlProposalSync({
+        environmentId,
+        source,
+        sink: {
+          applyStreamEvent: store.applyStreamEvent,
+          clearEnvironment: store.clearEnvironment,
+        },
+      });
+    };
+
+    const unsubscribeRegistry = subscribeEnvironmentConnections(syncSubscription);
+    syncSubscription();
+    return () => {
+      unsubscribeRegistry();
+      stopSync?.();
+    };
+  }, [environmentId]);
 
   const queueState = useAgentControlStore(
     (state) => state.queueByEnvironmentId[environmentId] ?? null,
@@ -113,7 +139,7 @@ export function AgentControlApprovals({
     [environmentId],
   );
 
-  if (!enabled || (orderedActive.length === 0 && recent.length === 0)) {
+  if (orderedActive.length === 0 && recent.length === 0) {
     return null;
   }
 

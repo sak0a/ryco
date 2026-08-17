@@ -27,9 +27,15 @@ export interface AgentControlSyncSink {
  *
  * The transport resubscribes automatically after reconnects, and the server
  * opens every subscription with a fresh snapshot event, which resets the
- * store's dedupe baseline — so replayed or duplicated events are absorbed
- * without polling. Callers start this only while the Agent Control setting
- * is enabled; stopping clears the environment's queue state.
+ * store's baseline — so replayed or duplicated events are absorbed without
+ * polling.
+ *
+ * Several syncs for one environment may coexist (e.g. two mounted screens),
+ * so stopping deliberately leaves the shared queue state in place for any
+ * surviving or future subscriber — the next snapshot replaces it wholesale.
+ * Only an authoritative refusal from the server (feature disabled, not
+ * authorized) clears the environment's state: nothing may keep rendering
+ * proposals the server no longer stands behind.
  */
 export function startAgentControlProposalSync(input: {
   readonly environmentId: EnvironmentId;
@@ -49,6 +55,7 @@ export function startAgentControlProposalSync(input: {
     {
       onError: () => {
         if (stopped) return;
+        sink.clearEnvironment(environmentId);
         input.onError?.();
       },
     },
@@ -58,6 +65,5 @@ export function startAgentControlProposalSync(input: {
     if (stopped) return;
     stopped = true;
     unsubscribe();
-    sink.clearEnvironment(environmentId);
   };
 }

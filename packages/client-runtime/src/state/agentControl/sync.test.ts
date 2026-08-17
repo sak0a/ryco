@@ -15,16 +15,22 @@ function makeHarness() {
   const applied: Array<{ environmentId: string; event: AgentControlProposalStreamEvent }> = [];
   const cleared: string[] = [];
   let listener: ((event: AgentControlProposalStreamEvent) => void) | null = null;
+  let errorListener: (() => void) | null = null;
   let unsubscribed = 0;
 
   return {
     applied,
     cleared,
     emit: (event: AgentControlProposalStreamEvent) => listener?.(event),
+    fail: () => errorListener?.(),
     unsubscribedCount: () => unsubscribed,
     source: {
-      subscribeProposals: (callback: (event: AgentControlProposalStreamEvent) => void) => {
+      subscribeProposals: (
+        callback: (event: AgentControlProposalStreamEvent) => void,
+        options?: { onError?: () => void },
+      ) => {
         listener = callback;
+        errorListener = options?.onError ?? null;
         return () => {
           unsubscribed += 1;
           listener = null;
@@ -57,7 +63,7 @@ describe("startAgentControlProposalSync", () => {
     expect(harness.applied[0]?.event.type).toBe("snapshot");
   });
 
-  it("stops delivering, unsubscribes, and clears state exactly once", () => {
+  it("stops delivering and unsubscribes without wiping shared state", () => {
     const harness = makeHarness();
     const stop = startAgentControlProposalSync({
       environmentId,
@@ -71,6 +77,25 @@ describe("startAgentControlProposalSync", () => {
 
     expect(harness.applied).toHaveLength(0);
     expect(harness.unsubscribedCount()).toBe(1);
+    // Another sync for the same environment may still be rendering this
+    // queue; only an authoritative server refusal clears it.
+    expect(harness.cleared).toEqual([]);
+  });
+
+  it("clears the environment when the server refuses the subscription", () => {
+    const harness = makeHarness();
+    let errored = 0;
+    startAgentControlProposalSync({
+      environmentId,
+      source: harness.source,
+      sink: harness.sink,
+      onError: () => {
+        errored += 1;
+      },
+    });
+
+    harness.fail();
     expect(harness.cleared).toEqual([environmentId]);
+    expect(errored).toBe(1);
   });
 });

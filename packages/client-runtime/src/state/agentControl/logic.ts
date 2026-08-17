@@ -1,15 +1,20 @@
 /**
  * Pure Agent Control proposal-queue state: hydration from queue snapshots,
- * revision-deduplicated change-event application, and selectors.
+ * per-proposal deduplicated change-event application, and selectors.
  *
  * The server is the only policy authority — this module never decides
  * anything; it renders what the server published. Every change event
  * carries the full proposal document, so applying state is an upsert
- * keyed by `proposalId`, deduplicated by the event `revision`:
+ * keyed by `proposalId`:
  *
- *   - A snapshot replaces the environment's state wholesale and resets the
- *     dedupe baseline (server revisions are per-process, not durable).
- *   - A proposal event at or below the baseline is a replay and is dropped.
+ *   - A snapshot replaces the environment's state wholesale (server
+ *     revisions are per-process, not durable, so each snapshot is a fresh
+ *     baseline).
+ *   - Per proposal, a document may never move backward through the legal
+ *     status progression (pending → approved → executing → terminal, each
+ *     status entered at most once). Ordering by status rather than by
+ *     event revision makes replayed, duplicated, or reordered deliveries
+ *     all harmless — a stale document simply loses the upsert.
  *   - Terminal proposals stay as bounded history; the oldest are pruned.
  */
 import {
@@ -24,7 +29,7 @@ import {
 export interface AgentControlQueueState {
   /** Whether a snapshot has been applied since (re)subscribing. */
   readonly hydrated: boolean;
-  /** Dedupe baseline: the highest applied event revision. */
+  /** Highest observed change revision; informational, not used to drop. */
   readonly revision: number;
   readonly proposalsById: Readonly<Record<string, AgentControlProposal>>;
 }
@@ -45,6 +50,22 @@ const TERMINAL_STATUSES: ReadonlySet<AgentControlProposalStatus> = new Set(
 export function isTerminalAgentControlStatus(status: AgentControlProposalStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
+
+/**
+ * Position in the one-way status progression from the server's legal
+ * transition table. All terminal statuses share a rank: a proposal enters
+ * exactly one of them, so equal-rank documents are identical.
+ */
+const STATUS_PROGRESSION_RANK: Record<AgentControlProposalStatus, number> = {
+  "pending-user-approval": 0,
+  approved: 1,
+  executing: 2,
+  rejected: 3,
+  expired: 3,
+  completed: 3,
+  failed: 3,
+  cancelled: 3,
+};
 
 function pruneTerminalHistory(
   proposalsById: Readonly<Record<string, AgentControlProposal>>,
@@ -81,20 +102,33 @@ export function applyAgentControlStreamEvent(
     };
   }
 
-  // Change events before the first snapshot have no baseline to order
-  // against; the snapshot that follows will cover them.
+  // Change events before the first snapshot have no state to update; the
+  // snapshot that follows will cover them.
   if (!state.hydrated) {
     return state;
   }
-  if (event.revision <= state.revision) {
-    return state;
+  const next = event.proposal;
+  const current = state.proposalsById[next.proposalId];
+  if (current !== undefined) {
+    const currentRank = STATUS_PROGRESSION_RANK[current.status];
+    const nextRank = STATUS_PROGRESSION_RANK[next.status];
+    // Stale document from a reordered delivery: the progression never
+    // moves backward, so the lower-ranked document loses.
+    if (nextRank < currentRank) {
+      return state;
+    }
+    // Same rank means the same document (each status is entered at most
+    // once) — a replay; keep the state identity stable.
+    if (nextRank === currentRank) {
+      return state;
+    }
   }
   return {
     hydrated: true,
-    revision: event.revision,
+    revision: Math.max(state.revision, event.revision),
     proposalsById: pruneTerminalHistory({
       ...state.proposalsById,
-      [event.proposal.proposalId]: event.proposal,
+      [next.proposalId]: next,
     }),
   };
 }

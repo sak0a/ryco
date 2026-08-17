@@ -104,23 +104,62 @@ describe("applyAgentControlStreamEvent", () => {
     expect(state).toBe(EMPTY_AGENT_CONTROL_QUEUE_STATE);
   });
 
-  it("drops replayed events at or below the snapshot baseline", () => {
-    const pending = makeProposal("p1");
+  it("treats replays and backward status documents as no-ops", () => {
+    const approved = makeProposal("p1", {
+      status: "approved",
+      decidedAt: "2026-08-17T00:05:00.000Z",
+    });
     const hydrated = applyAgentControlStreamEvent(
       EMPTY_AGENT_CONTROL_QUEUE_STATE,
-      snapshotEvent({ revision: 10, active: [pending] }),
+      snapshotEvent({ revision: 10, active: [approved] }),
     );
 
-    // A replay of the event already covered by the snapshot changes nothing,
-    // even when its payload claims an older status.
-    const stale = applyAgentControlStreamEvent(
+    // A replay of the same document keeps the state identity stable.
+    const replayed = applyAgentControlStreamEvent(hydrated, proposalEvent(9, approved));
+    expect(replayed).toBe(hydrated);
+
+    // A reordered stale document (earlier status) loses the upsert.
+    const backward = applyAgentControlStreamEvent(
       hydrated,
-      proposalEvent(10, makeProposal("p1", { status: "pending-user-approval" })),
+      proposalEvent(11, makeProposal("p1", { status: "pending-user-approval" })),
     );
-    expect(stale).toBe(hydrated);
+    expect(backward).toBe(hydrated);
+  });
 
-    const older = applyAgentControlStreamEvent(hydrated, proposalEvent(4, makeProposal("p2")));
-    expect(older).toBe(hydrated);
+  it("applies an event for another proposal even when delivered out of order", () => {
+    const hydrated = applyAgentControlStreamEvent(
+      EMPTY_AGENT_CONTROL_QUEUE_STATE,
+      snapshotEvent({ revision: 10, active: [makeProposal("p1")] }),
+    );
+    // Concurrent publishers can invert revision order across proposals;
+    // dedupe is per proposal, so the "older revision" event still lands.
+    const withLater = applyAgentControlStreamEvent(
+      hydrated,
+      proposalEvent(12, makeProposal("p3", { status: "approved" })),
+    );
+    const withEarlier = applyAgentControlStreamEvent(
+      withLater,
+      proposalEvent(11, makeProposal("p2")),
+    );
+    expect(Object.keys(withEarlier.proposalsById).toSorted()).toEqual(["p1", "p2", "p3"]);
+  });
+
+  it("never lets a terminal document be overwritten by a stale non-terminal one", () => {
+    const hydrated = applyAgentControlStreamEvent(
+      EMPTY_AGENT_CONTROL_QUEUE_STATE,
+      snapshotEvent({ revision: 0 }),
+    );
+    const expired = applyAgentControlStreamEvent(
+      hydrated,
+      proposalEvent(1, makeProposal("p1", { status: "expired" })),
+    );
+    // A commit-before-publish inversion can deliver the earlier "approved"
+    // document with a HIGHER revision after the terminal one; terminal wins.
+    const afterStale = applyAgentControlStreamEvent(
+      expired,
+      proposalEvent(2, makeProposal("p1", { status: "approved" })),
+    );
+    expect(afterStale.proposalsById.p1?.status).toBe("expired");
   });
 
   it("resets the dedupe baseline on a resubscribe snapshot", () => {
