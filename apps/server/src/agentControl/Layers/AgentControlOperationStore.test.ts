@@ -24,6 +24,7 @@ import { AgentControlOperationStore } from "../Services/AgentControlOperationSto
 import { AgentControlProposalStore } from "../Services/AgentControlProposalStore.ts";
 import { AgentControlOperationStoreLive } from "./AgentControlOperationStore.ts";
 import { AgentControlPolicyLive } from "./AgentControlPolicy.ts";
+import { AgentControlProposalEventsLive } from "./AgentControlProposalEvents.ts";
 import { AgentControlProposalStoreLive } from "./AgentControlProposalStore.ts";
 
 const principal: AgentControlPrincipal = {
@@ -34,6 +35,7 @@ const principal: AgentControlPrincipal = {
 
 const makeLayer = (enabled: boolean) =>
   Layer.mergeAll(AgentControlOperationStoreLive, AgentControlProposalStoreLive).pipe(
+    Layer.provideMerge(AgentControlProposalEventsLive),
     Layer.provideMerge(AgentControlPolicyLive),
     Layer.provideMerge(AgentControlProposalRepositoryLive),
     Layer.provideMerge(AgentControlOperationRepositoryLive),

@@ -1,0 +1,305 @@
+import {
+  AGENT_CONTROL_WS_METHODS,
+  AgentControlProposalId,
+  AgentControlRequestId,
+  ProviderInstanceId,
+  ThreadId,
+  type AgentControlProposal,
+  type AgentControlProposalQueue,
+  type AgentControlProposalReceipt,
+  type AgentControlRpcError,
+  type AuthRpcError,
+} from "@ryco/contracts";
+import { expect, it } from "@effect/vitest";
+import { Effect, Option, Stream } from "effect";
+import { hostedRoleAllows } from "@ryco/shared/rpcAccessPolicy";
+
+import {
+  AgentControlDisabledError,
+  AgentControlInvalidTransitionError,
+  AgentControlProposalExpiredError,
+  AgentControlProposalNotFoundError,
+} from "../agentControl/Errors.ts";
+import {
+  toAgentControlProposalReceipt,
+  type AgentControlProposalServiceShape,
+} from "../agentControl/Services/AgentControlProposalService.ts";
+import { PersistenceSqlError } from "../persistence/Errors.ts";
+import { authorizeRpcPrincipal, type WsRpcAccess } from "../auth/wsAuthorization.ts";
+import { makeAgentControlHandlers, toAgentControlRpcError } from "./agentControlRpc.ts";
+import type { WsRpcContext } from "./context.ts";
+import { relayRpcPrincipal, type RpcPrincipal } from "./RpcPrincipal.ts";
+
+const proposalId = AgentControlProposalId.make("proposal-1");
+
+const proposal: AgentControlProposal = {
+  proposalId,
+  requestId: AgentControlRequestId.make("request-1"),
+  principal: {
+    kind: "provider-session",
+    threadId: ThreadId.make("thread-1"),
+    providerInstanceId: ProviderInstanceId.make("codex"),
+  },
+  planVersion: 1,
+  plan: {
+    kind: "sendMessage",
+    threadId: ThreadId.make("thread-2"),
+    text: "Continue with the migration.",
+    delivery: "queue",
+  },
+  planDigest: "a".repeat(64),
+  riskTags: [],
+  promptSummary: "Send a message to thread-2",
+  status: "pending-user-approval",
+  createdAt: "2026-08-17T00:00:00.000Z",
+  updatedAt: "2026-08-17T00:00:00.000Z",
+  expiresAt: "2026-08-17T01:00:00.000Z",
+  decidedAt: null,
+  result: null,
+};
+
+const emptyQueue: AgentControlProposalQueue = {
+  revision: 7,
+  active: [proposal],
+  recent: [],
+};
+
+const unimplemented = (name: string) => () => Effect.die(`${name} not implemented in this test`);
+
+const makeService = (
+  overrides: Partial<AgentControlProposalServiceShape> = {},
+): AgentControlProposalServiceShape => ({
+  submit: unimplemented("submit"),
+  getQueue: () => Effect.succeed(emptyQueue),
+  getProposal: () => Effect.succeed(Option.some(proposal)),
+  accept: () => Effect.succeed(toAgentControlProposalReceipt(proposal)),
+  reject: () => Effect.succeed(toAgentControlProposalReceipt(proposal)),
+  expireOverdue: () => Effect.succeed([]),
+  subscribeQueue: () =>
+    Stream.make({ version: 1 as const, type: "snapshot" as const, queue: emptyQueue }),
+  ...overrides,
+});
+
+// Relay principals model hosted sessions, so the same harness exercises
+// hosted role enforcement directly.
+const makeContext = (
+  principal: RpcPrincipal,
+  service: AgentControlProposalServiceShape | null = makeService(),
+) => {
+  const withAccess = <A, E, R>(
+    access: WsRpcAccess,
+    method: string,
+    effect: Effect.Effect<A, E, R>,
+  ) => authorizeRpcPrincipal(principal, access, method).pipe(Effect.flatMap(() => effect));
+  const ownerEffect = <A, E, R>(method: string, effect: Effect.Effect<A, E, R>) =>
+    withAccess("owner", method, effect);
+
+  return {
+    ownerEffect,
+    ownerStreamEffect: ownerEffect,
+    agentControlProposals: service === null ? Option.none() : Option.some(service),
+  } as unknown as WsRpcContext;
+};
+
+const directOwnerPrincipal: RpcPrincipal = {
+  transport: "direct",
+  role: "owner",
+  scopeId: "session-owner",
+  canManageLocalAccess: true,
+};
+
+type AgentControlHandlers = ReturnType<typeof makeAgentControlHandlers>;
+
+type AgentControlHandlerError = AgentControlRpcError | AuthRpcError;
+
+function getTestHandler<Input, Output = never>(
+  handlers: AgentControlHandlers,
+  method: keyof AgentControlHandlers,
+): (input: Input) => Effect.Effect<Output, AgentControlHandlerError, never> {
+  const handler = handlers[method];
+  if (!handler) {
+    throw new Error(`Missing RPC handler for ${String(method)}`);
+  }
+  return handler as unknown as (
+    input: Input,
+  ) => Effect.Effect<Output, AgentControlHandlerError, never>;
+}
+
+/** Stream RPC handlers return the stream itself, not an effect of one. */
+function getTestStreamHandler<Input, Output = never>(
+  handlers: AgentControlHandlers,
+  method: keyof AgentControlHandlers,
+): (input: Input) => Stream.Stream<Output, AgentControlHandlerError, never> {
+  const handler = handlers[method];
+  if (!handler) {
+    throw new Error(`Missing RPC handler for ${String(method)}`);
+  }
+  return handler as unknown as (
+    input: Input,
+  ) => Stream.Stream<Output, AgentControlHandlerError, never>;
+}
+
+it.effect("refuses non-owner principals — including hosted roles — on every method", () =>
+  Effect.gen(function* () {
+    for (const role of ["viewer", "operator"] as const) {
+      const handlers = makeAgentControlHandlers(
+        makeContext(relayRpcPrincipal(role, `relay-${role}`)),
+      );
+      const listError = yield* Effect.flip(
+        getTestHandler(handlers, AGENT_CONTROL_WS_METHODS.listProposals)({}),
+      );
+      expect((listError as { _tag: string })._tag).toBe("AuthRpcError");
+      const getError = yield* Effect.flip(
+        getTestHandler(handlers, AGENT_CONTROL_WS_METHODS.getProposal)({ proposalId }),
+      );
+      expect((getError as { _tag: string })._tag).toBe("AuthRpcError");
+      const acceptError = yield* Effect.flip(
+        getTestHandler(handlers, AGENT_CONTROL_WS_METHODS.acceptProposal)({ proposalId }),
+      );
+      expect((acceptError as { _tag: string })._tag).toBe("AuthRpcError");
+      const rejectError = yield* Effect.flip(
+        getTestHandler(handlers, AGENT_CONTROL_WS_METHODS.rejectProposal)({ proposalId }),
+      );
+      expect((rejectError as { _tag: string })._tag).toBe("AuthRpcError");
+      const subscribeError = yield* Effect.flip(
+        Stream.runCollect(
+          getTestStreamHandler(handlers, AGENT_CONTROL_WS_METHODS.subscribeProposals)({}),
+        ),
+      );
+      expect((subscribeError as { _tag: string })._tag).toBe("AuthRpcError");
+    }
+  }),
+);
+
+it.effect("lets owner sessions list, read, and decide", () =>
+  Effect.gen(function* () {
+    const acceptedWith: Array<{ proposalId: string; decidedAt: string }> = [];
+    const service = makeService({
+      accept: (input) =>
+        Effect.sync(() => {
+          acceptedWith.push({ proposalId: input.proposalId, decidedAt: input.decidedAt });
+          return toAgentControlProposalReceipt({ ...proposal, status: "approved" });
+        }),
+    });
+    const handlers = makeAgentControlHandlers(makeContext(directOwnerPrincipal, service));
+
+    const queue = yield* getTestHandler<object, AgentControlProposalQueue>(
+      handlers,
+      AGENT_CONTROL_WS_METHODS.listProposals,
+    )({ activeLimit: 5 });
+    expect(queue.revision).toBe(7);
+    expect(queue.active).toHaveLength(1);
+
+    const read = yield* getTestHandler<object, { proposal: AgentControlProposal | null }>(
+      handlers,
+      AGENT_CONTROL_WS_METHODS.getProposal,
+    )({ proposalId });
+    expect(read.proposal?.proposalId).toBe(proposalId);
+
+    const receipt = yield* getTestHandler<object, AgentControlProposalReceipt>(
+      handlers,
+      AGENT_CONTROL_WS_METHODS.acceptProposal,
+    )({ proposalId });
+    expect(receipt.status).toBe("approved");
+    expect(acceptedWith).toHaveLength(1);
+    expect(acceptedWith[0]?.proposalId).toBe(proposalId);
+    // The server stamps the decision time; clients never supply it.
+    expect(Number.isNaN(Date.parse(acceptedWith[0]?.decidedAt ?? ""))).toBe(false);
+  }),
+);
+
+it.effect("streams the queue snapshot to owner sessions", () =>
+  Effect.gen(function* () {
+    const handlers = makeAgentControlHandlers(makeContext(directOwnerPrincipal));
+    const stream = getTestStreamHandler<object, { type: string }>(
+      handlers,
+      AGENT_CONTROL_WS_METHODS.subscribeProposals,
+    )({});
+    const events = Array.from(yield* Stream.runCollect(stream));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.type).toBe("snapshot");
+
+    // A hosted owner (relay principal) is equally authorized.
+    const hostedHandlers = makeAgentControlHandlers(
+      makeContext(relayRpcPrincipal("owner", "relay-owner")),
+    );
+    const hostedQueue = yield* getTestHandler<object, AgentControlProposalQueue>(
+      hostedHandlers,
+      AGENT_CONTROL_WS_METHODS.listProposals,
+    )({});
+    expect(hostedQueue.revision).toBe(7);
+  }),
+);
+
+it.effect("reports an unavailable service as a bounded storage error", () =>
+  Effect.gen(function* () {
+    const handlers = makeAgentControlHandlers(makeContext(directOwnerPrincipal, null));
+    const error = yield* Effect.flip(
+      getTestHandler(handlers, AGENT_CONTROL_WS_METHODS.listProposals)({}),
+    );
+    expect(error).toMatchObject({ _tag: "AgentControlRpcError", code: "storage" });
+  }),
+);
+
+it.effect("maps lifecycle failures onto bounded RPC error codes", () =>
+  Effect.gen(function* () {
+    const disabled = toAgentControlRpcError(
+      new AgentControlDisabledError({ operation: "AgentControlProposalService.getQueue" }),
+    );
+    expect(disabled.code).toBe("disabled");
+
+    const notFound = toAgentControlRpcError(new AgentControlProposalNotFoundError({ proposalId }));
+    expect(notFound.code).toBe("not-found");
+
+    const expired = toAgentControlRpcError(
+      new AgentControlProposalExpiredError({
+        proposalId,
+        expiresAt: "2026-08-17T01:00:00.000Z",
+      }),
+    );
+    expect(expired.code).toBe("expired");
+    expect(expired.status).toBe("expired");
+
+    const conflict = toAgentControlRpcError(
+      new AgentControlInvalidTransitionError({
+        entity: "proposal",
+        from: "rejected",
+        to: "approved",
+        actor: "user",
+        detail: "no legal transition from rejected to approved",
+      }),
+    );
+    expect(conflict.code).toBe("conflict");
+    expect(conflict.status).toBe("rejected");
+
+    const storage = toAgentControlRpcError(
+      new PersistenceSqlError({ operation: "op", detail: "database is locked" }),
+    );
+    expect(storage.code).toBe("storage");
+    // Storage details must not cross the RPC boundary.
+    expect(storage.message).not.toContain("database is locked");
+
+    // A decision that failed through a handler surfaces the mapped error.
+    const service = makeService({
+      reject: () => Effect.fail(new AgentControlProposalNotFoundError({ proposalId })),
+    });
+    const handlers = makeAgentControlHandlers(makeContext(directOwnerPrincipal, service));
+    const error = yield* Effect.flip(
+      getTestHandler(handlers, AGENT_CONTROL_WS_METHODS.rejectProposal)({ proposalId }),
+    );
+    expect(error).toMatchObject({ _tag: "AgentControlRpcError", code: "not-found" });
+  }),
+);
+
+it.effect("enforces hosted owner authorization for every Agent Control method", () =>
+  Effect.sync(() => {
+    for (const method of Object.values(AGENT_CONTROL_WS_METHODS)) {
+      expect(hostedRoleAllows("owner", method)).toBe(true);
+      expect(hostedRoleAllows("operator", method)).toBe(false);
+      expect(hostedRoleAllows("viewer", method)).toBe(false);
+      expect(hostedRoleAllows(null, method)).toBe(false);
+      // A stale hosted role snapshot cannot authorize decisions.
+      expect(hostedRoleAllows("owner", method, false)).toBe(false);
+    }
+  }),
+);

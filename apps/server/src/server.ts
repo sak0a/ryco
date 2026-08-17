@@ -102,6 +102,8 @@ import { AgentControlOperationRepositoryLive } from "./persistence/Layers/AgentC
 import { AgentControlProposalRepositoryLive } from "./persistence/Layers/AgentControlProposals.ts";
 import { AgentControlOperationStoreLive } from "./agentControl/Layers/AgentControlOperationStore.ts";
 import { AgentControlPolicyLive } from "./agentControl/Layers/AgentControlPolicy.ts";
+import { AgentControlProposalEventsLive } from "./agentControl/Layers/AgentControlProposalEvents.ts";
+import { AgentControlProposalServiceLive } from "./agentControl/Layers/AgentControlProposalService.ts";
 import { AgentControlProposalStoreLive } from "./agentControl/Layers/AgentControlProposalStore.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
@@ -200,15 +202,18 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
-// Agent Control foundation: policy plus proposal/operation facades over
-// their dedicated repositories. The feature defaults to disabled and every
-// entry point fails closed, so composing these services has no runtime side
-// effects — they exist for tests and the future approval/executor slices.
-// No MCP endpoint, provider injection, or RPC surface consumes them yet.
+// Agent Control: policy, proposal/operation facades over their dedicated
+// repositories, the proposal change feed, and the owner-facing approval
+// lifecycle service (consumed by the `agentControl.*` WS RPCs). The feature
+// defaults to disabled and every entry point fails closed; only the expiry
+// sweep runs unconditionally so stale proposals converge to `expired` even
+// while the feature is off. No MCP endpoint or provider injection exists yet.
 const AgentControlLayerLive = Layer.mergeAll(
-  AgentControlProposalStoreLive,
+  AgentControlProposalServiceLive,
   AgentControlOperationStoreLive,
 ).pipe(
+  Layer.provideMerge(AgentControlProposalStoreLive),
+  Layer.provideMerge(AgentControlProposalEventsLive),
   Layer.provideMerge(AgentControlPolicyLive),
   Layer.provideMerge(AgentControlProposalRepositoryLive),
   Layer.provideMerge(AgentControlOperationRepositoryLive),

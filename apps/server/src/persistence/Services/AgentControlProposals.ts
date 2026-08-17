@@ -60,6 +60,23 @@ export const ListPendingAgentControlProposalsInput = Schema.Struct({
 export type ListPendingAgentControlProposalsInput =
   typeof ListPendingAgentControlProposalsInput.Type;
 
+export const ListActiveAgentControlProposalsInput = Schema.Struct({
+  limit: PositiveInt,
+});
+export type ListActiveAgentControlProposalsInput = typeof ListActiveAgentControlProposalsInput.Type;
+
+export const ListRecentAgentControlProposalsInput = Schema.Struct({
+  limit: PositiveInt,
+});
+export type ListRecentAgentControlProposalsInput = typeof ListRecentAgentControlProposalsInput.Type;
+
+export const ListOverdueAgentControlProposalsInput = Schema.Struct({
+  now: IsoDateTime,
+  limit: PositiveInt,
+});
+export type ListOverdueAgentControlProposalsInput =
+  typeof ListOverdueAgentControlProposalsInput.Type;
+
 export const CompareAndSetAgentControlProposalStatusInput = Schema.Struct({
   proposalId: AgentControlProposalId,
   expectedStatus: AgentControlProposalStatus,
@@ -97,6 +114,28 @@ export interface AgentControlProposalRepositoryShape {
   /** Pending approval queue, oldest first. */
   readonly listPending: (
     input: ListPendingAgentControlProposalsInput,
+  ) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalRepositoryError>;
+
+  /**
+   * Non-terminal proposals (pending-user-approval, approved, executing),
+   * oldest first — the live approval queue.
+   */
+  readonly listActive: (
+    input: ListActiveAgentControlProposalsInput,
+  ) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalRepositoryError>;
+
+  /** Terminal proposals, most recently updated first — the decision history. */
+  readonly listRecent: (
+    input: ListRecentAgentControlProposalsInput,
+  ) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalRepositoryError>;
+
+  /**
+   * Expirable proposals (pending-user-approval, approved) whose `expires_at`
+   * is at or before `now`, oldest expiry first — the server-side expiry
+   * sweep's work list.
+   */
+  readonly listOverdue: (
+    input: ListOverdueAgentControlProposalsInput,
   ) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalRepositoryError>;
 
   /**

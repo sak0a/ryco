@@ -23,7 +23,10 @@ import {
   CompareAndSetAgentControlProposalStatusInput,
   FindAgentControlProposalByRequestInput,
   GetAgentControlProposalInput,
+  ListActiveAgentControlProposalsInput,
+  ListOverdueAgentControlProposalsInput,
   ListPendingAgentControlProposalsInput,
+  ListRecentAgentControlProposalsInput,
 } from "../Services/AgentControlProposals.ts";
 
 const AgentControlProposalDbRow = AgentControlProposal.mapFields(
@@ -181,6 +184,85 @@ const makeAgentControlProposalRepository = Effect.gen(function* () {
     `,
   });
 
+  const listActiveRows = SqlSchema.findAll({
+    Request: ListActiveAgentControlProposalsInput,
+    Result: AgentControlProposalDbRow,
+    execute: ({ limit }) => sql`
+      SELECT
+        proposal_id AS "proposalId",
+        request_id AS "requestId",
+        principal_json AS "principal",
+        plan_version AS "planVersion",
+        plan_json AS "plan",
+        plan_digest AS "planDigest",
+        risk_tags_json AS "riskTags",
+        prompt_summary AS "promptSummary",
+        status,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        expires_at AS "expiresAt",
+        decided_at AS "decidedAt",
+        result_json AS "result"
+      FROM agent_control_proposals
+      WHERE status IN ('pending-user-approval', 'approved', 'executing')
+      ORDER BY created_at ASC, proposal_id ASC
+      LIMIT ${limit}
+    `,
+  });
+
+  const listRecentRows = SqlSchema.findAll({
+    Request: ListRecentAgentControlProposalsInput,
+    Result: AgentControlProposalDbRow,
+    execute: ({ limit }) => sql`
+      SELECT
+        proposal_id AS "proposalId",
+        request_id AS "requestId",
+        principal_json AS "principal",
+        plan_version AS "planVersion",
+        plan_json AS "plan",
+        plan_digest AS "planDigest",
+        risk_tags_json AS "riskTags",
+        prompt_summary AS "promptSummary",
+        status,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        expires_at AS "expiresAt",
+        decided_at AS "decidedAt",
+        result_json AS "result"
+      FROM agent_control_proposals
+      WHERE status IN ('rejected', 'expired', 'completed', 'failed', 'cancelled')
+      ORDER BY updated_at DESC, proposal_id DESC
+      LIMIT ${limit}
+    `,
+  });
+
+  const listOverdueRows = SqlSchema.findAll({
+    Request: ListOverdueAgentControlProposalsInput,
+    Result: AgentControlProposalDbRow,
+    execute: ({ now, limit }) => sql`
+      SELECT
+        proposal_id AS "proposalId",
+        request_id AS "requestId",
+        principal_json AS "principal",
+        plan_version AS "planVersion",
+        plan_json AS "plan",
+        plan_digest AS "planDigest",
+        risk_tags_json AS "riskTags",
+        prompt_summary AS "promptSummary",
+        status,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt",
+        expires_at AS "expiresAt",
+        decided_at AS "decidedAt",
+        result_json AS "result"
+      FROM agent_control_proposals
+      WHERE status IN ('pending-user-approval', 'approved')
+        AND expires_at <= ${now}
+      ORDER BY expires_at ASC, proposal_id ASC
+      LIMIT ${limit}
+    `,
+  });
+
   const compareAndSetRow = SqlSchema.findAll({
     Request: CompareAndSetAgentControlProposalDbInput,
     Result: ProposalIdResult,
@@ -241,6 +323,36 @@ const makeAgentControlProposalRepository = Effect.gen(function* () {
       ),
     );
 
+  const listActive: AgentControlProposalRepositoryShape["listActive"] = (input) =>
+    listActiveRows(input).pipe(
+      Effect.mapError(
+        toSqlOrDecodeError(
+          "AgentControlProposalRepository.listActive:query",
+          "AgentControlProposalRepository.listActive:decodeRows",
+        ),
+      ),
+    );
+
+  const listRecent: AgentControlProposalRepositoryShape["listRecent"] = (input) =>
+    listRecentRows(input).pipe(
+      Effect.mapError(
+        toSqlOrDecodeError(
+          "AgentControlProposalRepository.listRecent:query",
+          "AgentControlProposalRepository.listRecent:decodeRows",
+        ),
+      ),
+    );
+
+  const listOverdue: AgentControlProposalRepositoryShape["listOverdue"] = (input) =>
+    listOverdueRows(input).pipe(
+      Effect.mapError(
+        toSqlOrDecodeError(
+          "AgentControlProposalRepository.listOverdue:query",
+          "AgentControlProposalRepository.listOverdue:decodeRows",
+        ),
+      ),
+    );
+
   const compareAndSetStatus: AgentControlProposalRepositoryShape["compareAndSetStatus"] = (input) =>
     compareAndSetRow(input).pipe(
       Effect.map((rows) => rows.length === 1),
@@ -257,6 +369,9 @@ const makeAgentControlProposalRepository = Effect.gen(function* () {
     getById,
     findByRequest,
     listPending,
+    listActive,
+    listRecent,
+    listOverdue,
     compareAndSetStatus,
   } satisfies AgentControlProposalRepositoryShape;
 });

@@ -12,6 +12,9 @@
  *     `executing`, and expired or cancelled proposals can never execute.
  *   - Every state change appends an audit row containing identifiers and
  *     an audit-safe summary only.
+ *   - Every committed insert or transition publishes exactly one change
+ *     event to `AgentControlProposalEvents` after the transaction commits,
+ *     so approval surfaces observe all lifecycle changes without polling.
  *
  * @module AgentControlProposalStore
  */
@@ -81,6 +84,12 @@ export interface SettleAgentControlExecutionInput {
   readonly now: IsoDateTime;
 }
 
+export interface ExpireOverdueAgentControlProposalsInput {
+  readonly now: IsoDateTime;
+  /** Upper bound on proposals expired in one sweep pass. */
+  readonly limit: number;
+}
+
 export type AgentControlProposalStoreError =
   | AgentControlDisabledError
   | AgentControlDuplicateRequestError
@@ -106,6 +115,31 @@ export interface AgentControlProposalStoreShape {
   readonly listPending: (input: {
     readonly limit: number;
   }) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalRepositoryError>;
+
+  /** Non-terminal proposals, oldest first — the live approval queue. */
+  readonly listActive: (input: {
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalRepositoryError>;
+
+  /** Terminal proposals, most recently updated first — decision history. */
+  readonly listRecent: (input: {
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalRepositoryError>;
+
+  /**
+   * Server-side expiry enforcement: transition every overdue expirable
+   * proposal (pending-user-approval or approved past `expiresAt`) to
+   * `expired` and return the proposals actually expired by this call.
+   * Losing a transition race to a concurrent decision is not an error —
+   * the winner's state stands and the proposal is simply skipped.
+   *
+   * Deliberately not gated on the feature flag: a proposal created while
+   * Agent Control was enabled must still expire after the feature is
+   * disabled, so the queue is already converged when it is re-enabled.
+   */
+  readonly expireOverdue: (
+    input: ExpireOverdueAgentControlProposalsInput,
+  ) => Effect.Effect<ReadonlyArray<AgentControlProposal>, AgentControlProposalStoreError>;
 
   /** Approve, reject, or cancel a proposal. Approval past expiry expires it instead. */
   readonly decide: (

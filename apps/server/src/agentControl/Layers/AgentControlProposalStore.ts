@@ -30,6 +30,7 @@ import {
 import { agentControlPrincipalScope } from "../principal.ts";
 import { computeAgentControlPlanDigest } from "../planDigest.ts";
 import { AgentControlPolicy } from "../Services/AgentControlPolicy.ts";
+import { AgentControlProposalEvents } from "../Services/AgentControlProposalEvents.ts";
 import {
   AgentControlProposalStore,
   type AgentControlProposalStoreShape,
@@ -73,6 +74,7 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
   const policy = yield* AgentControlPolicy;
   const proposals = yield* AgentControlProposalRepository;
   const audit = yield* AgentControlAuditRepository;
+  const events = yield* AgentControlProposalEvents;
 
   /**
    * State changes and their audit rows must land atomically: without the
@@ -187,8 +189,37 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
           detail: `lost transition race; proposal is now ${actual.status}`,
         });
       }
+      // Publish only after the transaction committed: a rolled-back state
+      // change must never reach subscribers.
+      yield* events.publish(updated);
       return updated;
     });
+
+  /**
+   * Expire one overdue proposal. `null` when a concurrent decision won the
+   * race — the winner's state stands and there is nothing to expire.
+   */
+  const expireProposal = (proposal: AgentControlProposal, now: IsoDateTime) =>
+    transitionTo({
+      current: proposal,
+      nextStatus: "expired",
+      actor: "system",
+      decidedAt: proposal.decidedAt,
+      result: agentControlFailureResult({
+        error: {
+          code: AGENT_CONTROL_ERROR_CODES.expired,
+          message: `Proposal expired at ${proposal.expiresAt}`,
+          retryable: true,
+        },
+        failedAt: now,
+      }),
+      eventKind: AGENT_CONTROL_AUDIT_EVENT_KINDS.proposalExpired,
+      updatedAt: now,
+    }).pipe(
+      Effect.catchTag("AgentControlInvalidTransitionError", () =>
+        Effect.succeed<AgentControlProposal | null>(null),
+      ),
+    );
 
   /**
    * Expiry enforcement shared by decision and execution paths. Only states
@@ -210,25 +241,7 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
       if (!canExpire || now < proposal.expiresAt) {
         return;
       }
-      const expiry = transitionTo({
-        current: proposal,
-        nextStatus: "expired",
-        actor: "system",
-        decidedAt: proposal.decidedAt,
-        result: agentControlFailureResult({
-          error: {
-            code: AGENT_CONTROL_ERROR_CODES.expired,
-            message: `Proposal expired at ${proposal.expiresAt}`,
-            retryable: true,
-          },
-          failedAt: now,
-        }),
-        eventKind: AGENT_CONTROL_AUDIT_EVENT_KINDS.proposalExpired,
-        updatedAt: now,
-      });
-      yield* expiry.pipe(
-        Effect.catchTag("AgentControlInvalidTransitionError", () => Effect.succeed(proposal)),
-      );
+      yield* expireProposal(proposal, now);
       return yield* new AgentControlProposalExpiredError({
         proposalId: proposal.proposalId,
         expiresAt: proposal.expiresAt,
@@ -274,6 +287,9 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
         }),
       );
       if (inserted) {
+        // After commit, mirroring transitionTo. An identical-request replay
+        // below deliberately does not publish: no state changed.
+        yield* events.publish(proposal);
         return { proposal, replayed: false };
       }
 
@@ -316,6 +332,25 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
 
   const listPending: AgentControlProposalStoreShape["listPending"] = (input) =>
     proposals.listPending({ limit: input.limit });
+
+  const listActive: AgentControlProposalStoreShape["listActive"] = (input) =>
+    proposals.listActive({ limit: input.limit });
+
+  const listRecent: AgentControlProposalStoreShape["listRecent"] = (input) =>
+    proposals.listRecent({ limit: input.limit });
+
+  const expireOverdue: AgentControlProposalStoreShape["expireOverdue"] = (input) =>
+    Effect.gen(function* () {
+      const overdue = yield* proposals.listOverdue({ now: input.now, limit: input.limit });
+      const expired: AgentControlProposal[] = [];
+      for (const proposal of overdue) {
+        const result = yield* expireProposal(proposal, input.now);
+        if (result !== null) {
+          expired.push(result);
+        }
+      }
+      return expired;
+    });
 
   const decide: AgentControlProposalStoreShape["decide"] = (input) =>
     Effect.gen(function* () {
@@ -383,6 +418,9 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
     submit,
     getById,
     listPending,
+    listActive,
+    listRecent,
+    expireOverdue,
     decide,
     beginExecution,
     settleExecution,

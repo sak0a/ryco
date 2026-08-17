@@ -5,6 +5,7 @@ import { RpcSerialization } from "effect/unstable/rpc";
 import type { AuthenticatedSession } from "../auth/Services/ServerAuth.ts";
 import { makeWsRpcContext } from "./context.ts";
 import { directRpcPrincipal, type RpcPrincipal } from "./RpcPrincipal.ts";
+import { makeAgentControlHandlers } from "./agentControlRpc.ts";
 import { makeOrchestrationHandlers } from "./orchestrationRpc.ts";
 import { makeGitHandlers } from "./gitRpc.ts";
 import { makeTerminalHandlers } from "./terminalRpc.ts";
@@ -21,6 +22,7 @@ const makeWsRpcHandlers = (principal: RpcPrincipal) =>
   Effect.gen(function* () {
     const ctx = yield* makeWsRpcContext(principal);
     return WsRpcGroup.of({
+      ...makeAgentControlHandlers(ctx),
       ...makeOrchestrationHandlers(ctx),
       ...makeContextHandoffHandlers(ctx),
       ...makeProviderHandlers(ctx),

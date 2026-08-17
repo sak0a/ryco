@@ -22,6 +22,7 @@ import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { computeAgentControlPlanDigest } from "../planDigest.ts";
 import { AgentControlProposalStore } from "../Services/AgentControlProposalStore.ts";
 import { AgentControlPolicyLive } from "./AgentControlPolicy.ts";
+import { AgentControlProposalEventsLive } from "./AgentControlProposalEvents.ts";
 import { AgentControlProposalStoreLive } from "./AgentControlProposalStore.ts";
 
 const SECRET_PROMPT = "SECRET-PROMPT-TOKEN: rotate the API keys in vault";
@@ -58,6 +59,7 @@ const submitInput = (requestIdValue: string, prompt: string = SECRET_PROMPT) => 
 
 const makeLayer = (enabled: boolean) =>
   AgentControlProposalStoreLive.pipe(
+    Layer.provideMerge(AgentControlProposalEventsLive),
     Layer.provideMerge(AgentControlPolicyLive),
     Layer.provideMerge(AgentControlProposalRepositoryLive),
     Layer.provideMerge(AgentControlOperationRepositoryLive),
