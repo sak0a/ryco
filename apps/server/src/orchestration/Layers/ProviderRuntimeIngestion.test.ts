@@ -101,6 +101,7 @@ function createProviderServiceHarness() {
     stopSessionBinding: () => Effect.succeed("not-found"),
     listStaleSessionBindings: () => Effect.succeed([]),
     sendTurn: () => unsupported(),
+    steerTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
     stopBackgroundTask: () => unsupported(),
     respondToRequest: () => unsupported(),

@@ -13,6 +13,7 @@ import {
   ThreadId,
   TurnId,
   IsoDateTime,
+  TurnDispatchMode,
 } from "@ryco/contracts";
 import { Schema, Context } from "effect";
 import type { Option } from "effect";
@@ -27,6 +28,7 @@ export const ProjectionThreadMessage = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  dispatchMode: Schema.optional(TurnDispatchMode),
   isStreaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

@@ -2,6 +2,7 @@ import { isTransportConnectionErrorMessage } from "@ryco/client-runtime/errors";
 import { scopeThreadRef, scopedThreadKey } from "@ryco/client-runtime/scoped";
 import type {
   CommandId,
+  AgentTokenMode,
   EnvironmentId,
   MessageId,
   ModelSelection,
@@ -34,6 +35,7 @@ export interface QueuedThreadMessage {
   readonly modelSelection?: ModelSelection;
   readonly runtimeMode?: RuntimeMode;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly tokenMode?: AgentTokenMode;
   readonly createdAt: string;
 }
 
@@ -101,7 +103,12 @@ export function resolveThreadOutboxDeliveryAction(input: {
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
   readonly threadBusy: boolean;
+  readonly alreadyDelivered?: boolean;
+  /** False until detailed messages are loaded and stable-id delivery can be checked. */
+  readonly deliveryReconciled?: boolean;
 }): ThreadOutboxDeliveryAction {
+  if (input.alreadyDelivered === true) return "remove";
+  if (input.deliveryReconciled === false) return "wait";
   if (!input.threadExists) {
     return input.shellStatus === "live" ? "remove" : "wait";
   }

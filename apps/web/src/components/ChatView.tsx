@@ -2,7 +2,7 @@ import {
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
-  type MessageId,
+  MessageId,
   type ModelSelection,
   type OrchestrationThreadMessageSearchResult,
   type ProjectId,
@@ -25,12 +25,17 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@ryco/client-runtime/scoped";
+import {
+  buildQueuedMessageSteerCommand,
+  resolveQueuedMessageSteerEligibility,
+} from "@ryco/client-runtime/state/message-queue";
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@ryco/shared/model";
 import { projectScriptCwd } from "@ryco/shared/projectScripts";
 import { truncate } from "@ryco/shared/String";
 import { Debouncer, useDebouncedValue } from "@tanstack/react-pacer";
 import { useQueryClient } from "~/rpc/queryClient";
 import { DateTime } from "effect";
+import { formatSourceControlContextsForAgent } from "@ryco/shared/sourceControlContextFormatter";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
@@ -189,6 +194,8 @@ import { useChatProjectScripts } from "./chat/useChatProjectScripts";
 import { useChatAttachmentPreviewHandoff } from "./chat/useChatAttachmentPreviewHandoff";
 import { useChatSessionActions } from "../hooks/useChatSessionActions";
 import {
+  buildOutgoingMessageText,
+  buildOutgoingTurnAttachments,
   executeChatSendTurn,
   type SendTurnComposerSnapshot,
   type SendTurnSettings,
@@ -251,6 +258,7 @@ const PROVIDER_STATUS_KEY_SEPARATOR = "\0";
 
 // Stable identity so the message-queue selector doesn't churn on empty threads.
 const EMPTY_QUEUED_MESSAGES: readonly QueuedMessage[] = Object.freeze([]);
+const EMPTY_STEERING_MESSAGE_IDS: readonly string[] = Object.freeze([]);
 
 function providerStatusesContentKey(providers: ReadonlyArray<ServerProvider>): string {
   const parts: string[] = [`${providers.length}`];
@@ -264,6 +272,7 @@ function providerStatusesContentKey(providers: ReadonlyArray<ServerProvider>): s
       provider.continuation?.groupKey ?? "",
       provider.showInteractionModeToggle ? "1" : "0",
       provider.supportsAskMode ? "1" : "0",
+      provider.supportsTurnSteering ? "1" : "0",
       provider.enabled ? "1" : "0",
       provider.status,
       provider.installed ? "1" : "0",
@@ -775,10 +784,17 @@ export default function ChatView(props: ChatViewProps) {
   const removeMessageFromQueue = useMessageQueueStore((store) => store.remove);
   const moveMessageInQueue = useMessageQueueStore((store) => store.move);
   const dequeueMessage = useMessageQueueStore((store) => store.dequeue);
+  const beginQueuedMessageSteer = useMessageQueueStore((store) => store.beginSteer);
+  const endQueuedMessageSteer = useMessageQueueStore((store) => store.endSteer);
   const queuedMessages = useMessageQueueStore((store) =>
     activeThreadKey
       ? (store.queuesByThreadKey[activeThreadKey] ?? EMPTY_QUEUED_MESSAGES)
       : EMPTY_QUEUED_MESSAGES,
+  );
+  const steeringQueuedMessageIds = useMessageQueueStore((store) =>
+    activeThreadKey
+      ? (store.steeringIdsByThreadKey[activeThreadKey] ?? EMPTY_STEERING_MESSAGE_IDS)
+      : EMPTY_STEERING_MESSAGE_IDS,
   );
   const handleRemoveQueuedMessage = useCallback(
     (id: string) => {
@@ -2722,6 +2738,139 @@ export default function ChatView(props: ChatViewProps) {
     );
   }, [providerSelectionPolicy.reason]);
 
+  const getQueuedSteerEligibility = useCallback(
+    (message: QueuedMessage) => {
+      const providerInstanceId = activeThread?.session?.providerInstanceId;
+      const provider = providerInstanceId
+        ? composerProviderStatuses.find((entry) => entry.instanceId === providerInstanceId)
+        : undefined;
+      const activeTokenMode = activeThread?.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
+      const activeInteractionMode = activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+      return resolveQueuedMessageSteerEligibility({
+        mutationReady: dispatchCapability.allowed && !activeEnvironmentUnavailable,
+        turnRunning: phase === "running",
+        activeTurnId: activeThread?.session?.activeTurnId,
+        supportsTurnSteering: provider?.supportsTurnSteering === true,
+        queuedModelSelection: message.composer.selectedModelSelection,
+        activeModelSelection: activeThread?.modelSelection,
+        queuedRuntimeMode: message.settings.runtimeMode,
+        activeRuntimeMode: activeThread?.runtimeMode,
+        queuedInteractionMode: message.settings.interactionMode,
+        activeInteractionMode,
+        queuedTokenMode: message.settings.tokenMode,
+        activeTokenMode,
+      });
+    },
+    [
+      activeEnvironmentUnavailable,
+      activeThread,
+      composerProviderStatuses,
+      dispatchCapability.allowed,
+      phase,
+    ],
+  );
+
+  const getQueuedSteerUnavailableReason = useCallback(
+    (message: QueuedMessage): string | null => {
+      const eligibility = getQueuedSteerEligibility(message);
+      return eligibility.allowed ? null : eligibility.reason;
+    },
+    [getQueuedSteerEligibility],
+  );
+
+  const handleSteerQueuedMessage = useCallback(
+    async (message: QueuedMessage) => {
+      if (!activeThreadKey || !activeThread) return;
+      const eligibility = getQueuedSteerEligibility(message);
+      if (!eligibility.allowed) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Cannot steer this message",
+            description: eligibility.reason,
+          }),
+        );
+        return;
+      }
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
+
+      beginQueuedMessageSteer(activeThreadKey, message.id);
+      try {
+        const baseText = buildOutgoingMessageText({
+          composer: message.composer,
+          formatOutgoingPrompt,
+        });
+        const sourceControlContext = formatSourceControlContextsForAgent(
+          message.composer.sourceControlContexts,
+        );
+        const text = sourceControlContext ? `${sourceControlContext}\n\n${baseText}` : baseText;
+        const attachments = await buildOutgoingTurnAttachments(message.composer.images);
+        const requestedAt = new Date().toISOString();
+        await api.orchestration.dispatchCommand(
+          buildQueuedMessageSteerCommand({
+            commandId: newCommandId(),
+            threadId: activeThread.id,
+            expectedTurnId: eligibility.expectedTurnId,
+            messageId: MessageId.make(message.id),
+            text,
+            attachments,
+            createdAt: message.createdAt ?? requestedAt,
+            requestedAt,
+          }),
+        );
+      } catch (error) {
+        endQueuedMessageSteer(activeThreadKey, message.id);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not steer message",
+            description: error instanceof Error ? error.message : "The steer request failed.",
+          }),
+        );
+      }
+    },
+    [
+      activeThread,
+      activeThreadKey,
+      beginQueuedMessageSteer,
+      endQueuedMessageSteer,
+      environmentId,
+      getQueuedSteerEligibility,
+    ],
+  );
+
+  useEffect(() => {
+    if (!activeThreadKey || steeringQueuedMessageIds.length === 0) return;
+    const projectedIds = new Set(activeThread?.messages.map((message) => String(message.id)) ?? []);
+    for (const messageId of steeringQueuedMessageIds) {
+      if (projectedIds.has(messageId)) {
+        handleRemoveQueuedMessage(messageId);
+      }
+    }
+  }, [
+    activeThread?.messages,
+    activeThreadKey,
+    handleRemoveQueuedMessage,
+    steeringQueuedMessageIds,
+  ]);
+
+  useEffect(() => {
+    if (!activeThreadKey || steeringQueuedMessageIds.length === 0) return;
+    const rejectedIds = new Set(
+      threadActivities.flatMap((activity) => {
+        if (activity.kind !== "provider.turn.steer.failed" || !activity.payload) return [];
+        const messageId = (activity.payload as { messageId?: unknown }).messageId;
+        return typeof messageId === "string" ? [messageId] : [];
+      }),
+    );
+    for (const messageId of steeringQueuedMessageIds) {
+      if (rejectedIds.has(messageId)) {
+        endQueuedMessageSteer(activeThreadKey, messageId);
+      }
+    }
+  }, [activeThreadKey, endQueuedMessageSteer, steeringQueuedMessageIds, threadActivities]);
+
   // Build the executeChatSendTurn input from a composer snapshot and dispatch it.
   // Shared by direct sends and queue flushes, so a queued message replays exactly
   // like a live send.
@@ -2730,6 +2879,7 @@ export default function ChatView(props: ChatViewProps) {
   const dispatchComposerSnapshot = async (
     composerSnapshot: SendTurnComposerSnapshot,
     settingsSnapshot: SendTurnSettings,
+    messageId?: MessageId,
   ): Promise<boolean> => {
     if (!dispatchCapability.allowed) return false;
     const api = readEnvironmentApi(environmentId);
@@ -2815,6 +2965,7 @@ export default function ChatView(props: ChatViewProps) {
     }
 
     await executeChatSendTurn({
+      ...(messageId !== undefined ? { messageId } : {}),
       composer: composerSnapshot,
       thread: {
         threadId: threadIdForSend,
@@ -3047,8 +3198,10 @@ export default function ChatView(props: ChatViewProps) {
     // A turn is already running: queue this message instead of sending it. Queued
     // messages auto-dispatch, in order, once the thread reaches quiescence.
     if (phase === "running" && activeThreadKey) {
+      const queuedMessageId = newMessageId();
       enqueueMessage(activeThreadKey, {
-        id: crypto.randomUUID(),
+        id: queuedMessageId,
+        createdAt: new Date().toISOString(),
         composer: {
           ...composerSnapshot,
           // Clearing the composer revokes the live blob preview URLs, so clone the
@@ -3087,11 +3240,14 @@ export default function ChatView(props: ChatViewProps) {
     if (sendInFlightRef.current) return;
     // Only remove the item once the send path has actually started; a guard
     // early-return (missing env/thread/base branch) leaves it queued.
-    void dispatchComposerSnapshotRef.current(next.composer, next.settings).then((started) => {
-      if (started) {
-        dequeueMessage(threadKey);
-      }
-    });
+    if (steeringQueuedMessageIds.includes(next.id)) return;
+    void dispatchComposerSnapshotRef
+      .current(next.composer, next.settings, MessageId.make(next.id))
+      .then((started) => {
+        if (started) {
+          dequeueMessage(threadKey);
+        }
+      });
   }, [
     activeThreadKey,
     queuedMessages,
@@ -3101,6 +3257,7 @@ export default function ChatView(props: ChatViewProps) {
     activePendingApproval,
     dispatchCapability.allowed,
     dequeueMessage,
+    steeringQueuedMessageIds,
   ]);
 
   const onSubmitPlanFollowUp = useCallback(
@@ -4010,6 +4167,10 @@ export default function ChatView(props: ChatViewProps) {
                 messages={queuedMessages}
                 onRemove={handleRemoveQueuedMessage}
                 onMove={handleMoveQueuedMessage}
+                showSteerAction={presentationTier !== "phone"}
+                steeringIds={steeringQueuedMessageIds}
+                getSteerUnavailableReason={getQueuedSteerUnavailableReason}
+                onSteer={(message) => void handleSteerQueuedMessage(message)}
               />
               <div className="relative z-10">
                 <ChatComposer

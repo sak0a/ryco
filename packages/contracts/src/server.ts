@@ -203,6 +203,7 @@ export const ServerProvider = Schema.Struct({
   // read-only turn. Absent means unsupported; the UI renders the ask
   // option disabled with an explanation.
   supportsAskMode: Schema.optional(Schema.Boolean),
+  supportsTurnSteering: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
   version: Schema.NullOr(TrimmedNonEmptyString),

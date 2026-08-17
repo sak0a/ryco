@@ -101,6 +101,9 @@ export const ORCHESTRATION_EVENT_PROJECTORS = {
   "thread.interaction-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.token-mode-set": [ORCHESTRATION_PROJECTOR_NAMES.threads],
   "thread.context-handoff-requested": [],
+  "thread.turn-steer-requested": [],
+  "thread.turn-steer-accepted": [],
+  "thread.turn-steer-rejected": [],
   "thread.message-sent": [
     ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
     ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
@@ -1215,6 +1218,11 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             role: event.payload.role,
             text: nextText,
             ...(nextAttachments !== undefined ? { attachments: [...nextAttachments] } : {}),
+            ...(event.payload.dispatchMode !== undefined
+              ? { dispatchMode: event.payload.dispatchMode }
+              : previousMessage?.dispatchMode !== undefined
+                ? { dispatchMode: previousMessage.dispatchMode }
+                : {}),
             isStreaming: event.payload.streaming,
             createdAt: previousMessage?.createdAt ?? event.payload.createdAt,
             updatedAt: event.payload.updatedAt,

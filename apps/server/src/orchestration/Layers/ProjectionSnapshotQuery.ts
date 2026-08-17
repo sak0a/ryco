@@ -30,6 +30,7 @@ import {
   ModelSelection,
   ProjectId,
   ThreadId,
+  TurnDispatchMode,
   WorktreeId,
 } from "@ryco/contracts";
 import { Effect, Layer, Option, Schema, Struct } from "effect";
@@ -81,6 +82,7 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   Struct.assign({
     isStreaming: Schema.Number,
     attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
+    dispatchMode: Schema.NullOr(TurnDispatchMode),
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
@@ -354,9 +356,11 @@ function mapMessageRow(
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
-  return row.attachments === null
-    ? message
-    : Object.assign(message, { attachments: row.attachments });
+  return Object.assign(
+    message,
+    row.attachments === null ? {} : { attachments: row.attachments },
+    row.dispatchMode === null ? {} : { dispatchMode: row.dispatchMode },
+  );
 }
 
 function mapActivityRow(
@@ -630,6 +634,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          dispatch_mode AS "dispatchMode",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -654,6 +659,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           messages.role,
           messages.text,
           messages.attachments_json AS "attachments",
+          messages.dispatch_mode AS "dispatchMode",
           messages.is_streaming AS "isStreaming",
           messages.created_at AS "createdAt",
           messages.updated_at AS "updatedAt"
@@ -1000,6 +1006,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           role,
           text,
           attachments_json AS "attachments",
+          dispatch_mode AS "dispatchMode",
           is_streaming AS "isStreaming",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
@@ -1174,6 +1181,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         role,
         text,
         attachments_json AS "attachments",
+        dispatch_mode AS "dispatchMode",
         is_streaming AS "isStreaming",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
@@ -1195,6 +1203,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         role,
         text,
         attachments_json AS "attachments",
+        dispatch_mode AS "dispatchMode",
         is_streaming AS "isStreaming",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
@@ -1220,6 +1229,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         role,
         text,
         attachments_json AS "attachments",
+        dispatch_mode AS "dispatchMode",
         is_streaming AS "isStreaming",
         created_at AS "createdAt",
         updated_at AS "updatedAt"
@@ -1241,6 +1251,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         role,
         text,
         attachments_json AS "attachments",
+        dispatch_mode AS "dispatchMode",
         is_streaming AS "isStreaming",
         created_at AS "createdAt",
         updated_at AS "updatedAt"

@@ -12,6 +12,7 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   type CodexSettings,
+  type ChatAttachment,
   ProviderDriverKind,
   type ProviderEvent,
   ProviderInstanceId,
@@ -27,6 +28,7 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
+  ProviderSteerTurnInput,
   DEFAULT_AGENT_TOKEN_MODE,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -94,7 +96,7 @@ interface CodexAdapterSessionContext {
 }
 
 interface ResolvedCodexAttachment {
-  readonly attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number];
+  readonly attachment: ChatAttachment;
   readonly path: string;
   readonly sizeBytes: number;
 }
@@ -1829,7 +1831,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
   const resolveAttachmentForPreflight = Effect.fn("resolveAttachmentForPreflight")(function* (
-    attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
+    attachment: ChatAttachment,
+    method: "turn/start" | "turn/steer",
   ) {
     const attachmentPath = resolveAttachmentPath({
       attachmentsDir: serverConfig.attachmentsDir,
@@ -1838,7 +1841,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (!attachmentPath) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Invalid attachment id '${attachment.id}'.`,
       });
     }
@@ -1848,7 +1851,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         (cause) =>
           new ProviderAdapterRequestError({
             provider: PROVIDER,
-            method: "turn/start",
+            method,
             detail: `Failed to stat attachment file: ${cause.message}.`,
             cause,
           }),
@@ -1857,7 +1860,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (fileInfo.type !== "File") {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Attachment '${attachment.name}' is not a regular file.`,
       });
     }
@@ -1866,14 +1869,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (sizeBytes <= 0) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Attachment '${attachment.name}' is empty.`,
       });
     }
     if (sizeBytes > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Attachment '${attachment.name}' is ${sizeBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_IMAGE_BYTES} bytes.`,
       });
     }
@@ -1886,25 +1889,28 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   });
 
   const preflightAttachments = Effect.fn("preflightAttachments")(function* (
-    input: ProviderSendTurnInput,
+    input: Pick<ProviderSendTurnInput | ProviderSteerTurnInput, "threadId" | "attachments">,
+    method: "turn/start" | "turn/steer",
   ) {
     const attachments = input.attachments ?? [];
     if (attachments.length > PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Turn has ${attachments.length} attachments; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS}.`,
       });
     }
 
-    const resolved = yield* Effect.forEach(attachments, resolveAttachmentForPreflight, {
-      concurrency: 1,
-    });
+    const resolved = yield* Effect.forEach(
+      attachments,
+      (attachment) => resolveAttachmentForPreflight(attachment, method),
+      { concurrency: 1 },
+    );
     const totalBytes = resolved.reduce((total, entry) => total + entry.sizeBytes, 0);
     if (totalBytes > PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Turn attachments total ${totalBytes} bytes; limit is ${PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES} bytes.`,
       });
     }
@@ -1931,13 +1937,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
   const toCodexAttachment = Effect.fn("toCodexAttachment")(function* (
     resolved: ResolvedCodexAttachment,
+    method: "turn/start" | "turn/steer",
   ) {
     const bytes = yield* fileSystem.readFile(resolved.path).pipe(
       Effect.mapError(
         (cause) =>
           new ProviderAdapterRequestError({
             provider: PROVIDER,
-            method: "turn/start",
+            method,
             detail: `Failed to read attachment file: ${cause.message}.`,
             cause,
           }),
@@ -1951,10 +1958,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   });
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    const resolvedAttachments = yield* preflightAttachments(input);
-    const codexAttachments = yield* Effect.forEach(resolvedAttachments, toCodexAttachment, {
-      concurrency: 1,
-    });
+    const resolvedAttachments = yield* preflightAttachments(input, "turn/start");
+    const codexAttachments = yield* Effect.forEach(
+      resolvedAttachments,
+      (attachment) => toCodexAttachment(attachment, "turn/start"),
+      { concurrency: 1 },
+    );
 
     const session = yield* requireSession(input.threadId);
     const reasoningEffort =
@@ -1987,6 +1996,28 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       })
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
   });
+
+  const steerTurn: NonNullable<CodexAdapterShape["steerTurn"]> = Effect.fn("steerTurn")(
+    function* (input) {
+      const resolvedAttachments = yield* preflightAttachments(input, "turn/steer");
+      const codexAttachments = yield* Effect.forEach(
+        resolvedAttachments,
+        (attachment) => toCodexAttachment(attachment, "turn/steer"),
+        { concurrency: 1 },
+      );
+      const session = yield* requireSession(input.threadId);
+      return yield* session.runtime
+        .steerTurn({
+          expectedTurnId: input.expectedTurnId,
+          messageId: input.messageId,
+          ...(input.input !== undefined ? { input: input.input } : {}),
+          ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
+        })
+        .pipe(
+          Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/steer", cause)),
+        );
+    },
+  );
 
   const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
     const session = sessions.get(threadId);
@@ -2144,9 +2175,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      turnSteering: "native",
     },
     startSession,
     sendTurn,
+    steerTurn,
     interruptTurn,
     readThread,
     rollbackThread,

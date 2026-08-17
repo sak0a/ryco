@@ -295,6 +295,7 @@ describe("ProviderCommandReactor", () => {
       stopSessionBinding: () => Effect.succeed("not-found"),
       listStaleSessionBindings: () => Effect.succeed([]),
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
+      steerTurn: () => unsupported(),
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
       stopBackgroundTask: () => Effect.die(new Error("Unsupported provider call in test")) as never,
       respondToRequest: respondToRequest as ProviderServiceShape["respondToRequest"],

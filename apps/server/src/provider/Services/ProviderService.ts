@@ -20,11 +20,13 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
+  ProviderSteerTurnInput,
   RuntimeSessionId,
   ProviderStopBackgroundTaskInput,
   ProviderStopSessionInput,
   ThreadId,
   ProviderTurnStartResult,
+  ProviderTurnSteerResult,
 } from "@ryco/contracts";
 import { Context } from "effect";
 import type { Effect, Option, Stream } from "effect";
@@ -98,6 +100,11 @@ export interface ProviderServiceShape {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+
+  /** Steer the exact active provider turn without creating a new turn. */
+  readonly steerTurn: (
+    input: ProviderSteerTurnInput,
+  ) => Effect.Effect<ProviderTurnSteerResult, ProviderServiceError>;
 
   /**
    * Interrupt a running provider turn.

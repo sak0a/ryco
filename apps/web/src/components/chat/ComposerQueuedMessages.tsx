@@ -1,5 +1,11 @@
 import { memo } from "react";
-import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
+import {
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CornerDownLeftIcon,
+  LoaderCircleIcon,
+  XIcon,
+} from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { summarizeQueuedMessage, type QueuedMessage } from "~/messageQueue.logic";
@@ -8,6 +14,10 @@ interface ComposerQueuedMessagesProps {
   messages: readonly QueuedMessage[];
   onRemove: (id: string) => void;
   onMove: (id: string, direction: "up" | "down") => void;
+  showSteerAction: boolean;
+  steeringIds: readonly string[];
+  getSteerUnavailableReason: (message: QueuedMessage) => string | null;
+  onSteer: (message: QueuedMessage) => void;
 }
 
 const iconButtonClass = cn(
@@ -24,6 +34,10 @@ export const ComposerQueuedMessages = memo(function ComposerQueuedMessages({
   messages,
   onRemove,
   onMove,
+  showSteerAction,
+  steeringIds,
+  getSteerUnavailableReason,
+  onSteer,
 }: ComposerQueuedMessagesProps) {
   if (messages.length === 0) {
     return null;
@@ -39,6 +53,8 @@ export const ComposerQueuedMessages = memo(function ComposerQueuedMessages({
           const summary = summarizeQueuedMessage(message);
           // Include position + summary so screen readers can tell rows apart.
           const rowLabel = `queued message ${index + 1} of ${messages.length}: ${summary}`;
+          const steerUnavailableReason = getSteerUnavailableReason(message);
+          const isSteering = steeringIds.includes(message.id);
           return (
             <li
               key={message.id}
@@ -47,6 +63,23 @@ export const ComposerQueuedMessages = memo(function ComposerQueuedMessages({
               <span className="min-w-0 flex-1 truncate text-xs text-foreground" title={summary}>
                 {summary}
               </span>
+              {showSteerAction ? (
+                <button
+                  type="button"
+                  className={cn(iconButtonClass, "w-auto gap-1 px-1.5 text-[11px]")}
+                  disabled={steerUnavailableReason !== null || isSteering}
+                  onClick={() => onSteer(message)}
+                  aria-label={`Steer ${rowLabel} into the active turn`}
+                  title={steerUnavailableReason ?? "Send this message into the active turn"}
+                >
+                  {isSteering ? (
+                    <LoaderCircleIcon className="size-3 animate-spin" />
+                  ) : (
+                    <CornerDownLeftIcon className="size-3" />
+                  )}
+                  Steer
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={iconButtonClass}

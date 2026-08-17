@@ -38,6 +38,7 @@ export interface ServerProviderPresentation {
   readonly badgeLabel?: string;
   readonly showInteractionModeToggle?: boolean;
   readonly supportsAskMode?: boolean;
+  readonly supportsTurnSteering?: boolean;
 }
 
 export type ServerProviderDraft = Omit<ServerProvider, "instanceId" | "driver">;
@@ -202,6 +203,9 @@ export function buildServerProvider(input: {
       : {}),
     ...(typeof input.presentation.supportsAskMode === "boolean"
       ? { supportsAskMode: input.presentation.supportsAskMode }
+      : {}),
+    ...(typeof input.presentation.supportsTurnSteering === "boolean"
+      ? { supportsTurnSteering: input.presentation.supportsTurnSteering }
       : {}),
     enabled: input.enabled,
     installed: input.probe.installed,
