@@ -22,9 +22,11 @@
  * @module provider/Drivers/CodexDriver
  */
 import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@ryco/contracts";
-import { Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
+
+import { AgentControlSessionRegistry } from "../../agentControl/Services/AgentControlSessionRegistry.ts";
 
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
@@ -136,6 +138,19 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         env: processEnv,
       });
 
+      // Agent Control is optional at driver level: resolved from ambient
+      // context so test compositions without the registry keep working.
+      // Absent registry ⇒ no lease bridge ⇒ sessions start without Agent
+      // Control (and never claim its tools). The lease itself is further
+      // gated on the server setting and listener health inside the
+      // registry, so wiring the bridge is never sufficient on its own.
+      const agentControl = yield* Effect.serviceOption(AgentControlSessionRegistry);
+      if (Option.isNone(agentControl)) {
+        yield* Effect.logDebug("Codex driver built without Agent Control session registry", {
+          instanceId,
+        });
+      }
+
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
       // per-operation closures they return. No `mapError` wrapper is needed
@@ -145,6 +160,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const adapter = yield* makeCodexAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        ...(Option.isSome(agentControl) ? { agentControl: agentControl.value } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);

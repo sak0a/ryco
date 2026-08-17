@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { Effect, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 import { describe, it } from "vite-plus/test";
 import { MessageId, ThreadId, TurnId } from "@ryco/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -12,6 +12,7 @@ import {
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../CodexDeveloperInstructions.ts";
 import {
+  CODEX_AGENT_CONTROL_SERVER_NAME,
   buildTurnStartParams,
   buildTurnSteerParams,
   isRecoverableThreadResumeError,
@@ -307,6 +308,64 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it("composes device and Agent Control MCP bindings in one thread config", async () => {
+    const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+    const client = {
+      request: <M extends "thread/start" | "thread/resume">(
+        method: M,
+        payload: CodexRpc.ClientRequestParamsByMethod[M],
+      ) => {
+        calls.push({ method, payload });
+        return Effect.succeed(
+          makeThreadOpenResponse("fresh-thread") as CodexRpc.ClientRequestResponsesByMethod[M],
+        );
+      },
+    };
+
+    await Effect.runPromise(
+      openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: undefined,
+        serviceTier: undefined,
+        resumeThreadId: undefined,
+        deviceToolBinding: {
+          url: "http://127.0.0.1:3100/device",
+          headers: { Authorization: "Bearer device-token" },
+          dispose: () => undefined,
+        },
+        agentControl: {
+          serverName: CODEX_AGENT_CONTROL_SERVER_NAME,
+          endpointUrl: "http://127.0.0.1:3200/mcp",
+          authorization: Redacted.make("agent-control-token"),
+          instructions: "Use Agent Control proposals.",
+        },
+      }),
+    );
+
+    assert.deepStrictEqual(calls[0]?.payload, {
+      cwd: "/tmp/project",
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+      approvalsReviewer: "user",
+      config: {
+        mcp_servers: {
+          ryco_device: {
+            url: "http://127.0.0.1:3100/device",
+            http_headers: { Authorization: "Bearer device-token" },
+          },
+          ryco: {
+            url: "http://127.0.0.1:3200/mcp",
+            http_headers: { Authorization: "Bearer agent-control-token" },
+            startup_timeout_sec: 10,
+          },
+        },
+      },
+    });
+  });
+
   it("passes fast service tier through thread/start", async () => {
     const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
     const client = {
