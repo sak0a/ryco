@@ -100,6 +100,13 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
     () => getOrderedThreadKeys(props.treeProject, props.visibleThreadKeys),
     [props.treeProject, props.visibleThreadKeys],
   );
+  const visibleDraftSessions = useMemo(
+    () =>
+      props.treeProject.draftSessions.filter((thread) =>
+        shouldRenderThread(thread, props.visibleThreadKeys),
+      ),
+    [props.treeProject.draftSessions, props.visibleThreadKeys],
+  );
   const visibleWorktrees = useMemo(
     () =>
       props.treeProject.worktrees.filter((worktree) => {
@@ -132,7 +139,11 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
     }
   }, []);
 
-  if (visibleWorktrees.length === 0 && props.treeProject.archivedWorktrees.length === 0) {
+  if (
+    visibleDraftSessions.length === 0 &&
+    visibleWorktrees.length === 0 &&
+    props.treeProject.archivedWorktrees.length === 0
+  ) {
     return null;
   }
 
@@ -142,6 +153,11 @@ export const SidebarWorktreeList = memo(function SidebarWorktreeList(
         ref={props.attachThreadListAutoAnimateRef}
         className="mx-1 my-0 w-full translate-x-0 gap-0.5 overflow-hidden px-1.5 py-0"
       >
+        {visibleDraftSessions.map((thread) => (
+          <Fragment key={scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))}>
+            {props.renderThread(thread, orderedProjectThreadKeys, undefined)}
+          </Fragment>
+        ))}
         {visibleWorktrees.map((worktree) => (
           <SidebarWorktreeSection
             key={worktree.worktree.worktreeId}
@@ -770,11 +786,15 @@ function getOrderedThreadKeys(
   treeProject: SidebarTreeProject,
   visibleThreadKeys: ReadonlySet<string> | null,
 ): string[] {
-  return treeProject.worktrees.flatMap((worktree) =>
+  const draftKeys = treeProject.draftSessions
+    .filter((thread) => shouldRenderThread(thread, visibleThreadKeys))
+    .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)));
+  const worktreeKeys = treeProject.worktrees.flatMap((worktree) =>
     worktree.sessions
       .filter((thread) => shouldRenderThread(thread, visibleThreadKeys))
       .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
   );
+  return [...draftKeys, ...worktreeKeys];
 }
 
 function getVisibleThreadsForWorktree(

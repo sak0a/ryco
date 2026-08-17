@@ -538,7 +538,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
                 cancelRename={cancelRename}
                 attemptArchiveThread={attemptArchiveThread}
                 openPrLink={openPrLink}
-                isTreeChild
+                isTreeChild={thread.draftId === undefined}
               />
             );
           }}

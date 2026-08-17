@@ -4,6 +4,7 @@ import { render } from "vitest-browser-react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { DEFAULT_INTERACTION_MODE } from "../../types";
+import { DraftId } from "../../composerDraftStore";
 import type {
   SidebarTreeProject,
   SidebarTreeThread,
@@ -43,6 +44,50 @@ describe("SidebarWorktreeList", () => {
     await page.getByRole("button", { name: "Expand main", exact: true }).click();
 
     await expect.element(page.getByText("Release checklist")).toBeInTheDocument();
+  });
+
+  it("renders draft sessions before worktrees as project-level rows", async () => {
+    const draft = {
+      ...makeThread(),
+      id: ThreadId.make("thread-draft"),
+      branch: "release/next",
+      draftId: DraftId.make("draft-new-thread"),
+      title: "New thread",
+      worktreeId: null,
+    };
+    const orderedKeys: string[][] = [];
+    await render(
+      <SidebarWorktreeList
+        attachThreadListAutoAnimateRef={() => undefined}
+        projectExpanded
+        resolveThreadGitStatusTarget={() => null}
+        renderThread={(thread, keys) => {
+          orderedKeys.push([...keys]);
+          return <div data-testid={`rendered-${thread.id}`}>{thread.title}</div>;
+        }}
+        treeProject={{ ...makeTreeProject(), draftSessions: [draft] }}
+        visibleThreadKeys={null}
+        onArchiveWorktree={vi.fn()}
+        onCopyWorktreePath={vi.fn()}
+        onDeleteWorktree={vi.fn()}
+        onNewSession={vi.fn()}
+        onOpenInEditor={vi.fn()}
+        onOpenWorktree={vi.fn()}
+        onRenameWorktree={vi.fn()}
+        onRestoreWorktree={vi.fn()}
+      />,
+    );
+
+    const draftRow = page.getByTestId("rendered-thread-draft").element();
+    const mainRow = page.getByText("main", { exact: true }).element();
+    expect(draftRow.compareDocumentPosition(mainRow) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
+      0,
+    );
+    expect(orderedKeys[0]).toEqual([
+      "environment-local:thread-draft",
+      "environment-local:thread-1",
+    ]);
+    expect(document.body.textContent).not.toContain("release/next");
   });
 
   it("expands a worktree when clicking its title without opening it", async () => {
@@ -239,6 +284,7 @@ function makeTreeProject(): SidebarTreeProject {
   return {
     archivedSessions: [],
     archivedWorktrees: [],
+    draftSessions: [],
     flatSessions: [],
     isGitRepo: true,
     project: {
@@ -288,6 +334,7 @@ function makeManySessionsTreeProject(count: number): SidebarTreeProject {
   return {
     archivedSessions: [],
     archivedWorktrees: [],
+    draftSessions: [],
     flatSessions: [],
     isGitRepo: true,
     project: makeProject(),
@@ -391,6 +438,7 @@ function makeVariantsTreeProject(): SidebarTreeProject {
   return {
     archivedSessions: [],
     archivedWorktrees: [],
+    draftSessions: [],
     flatSessions: [],
     isGitRepo: true,
     project: makeProject(),
@@ -422,6 +470,7 @@ function makeLinkedIssueAndPrTreeProject(): SidebarTreeProject {
   return {
     archivedSessions: [],
     archivedWorktrees: [],
+    draftSessions: [],
     flatSessions: [],
     isGitRepo: true,
     project: makeProject(),
@@ -453,6 +502,7 @@ function makeStatusDotTreeProject(): SidebarTreeProject {
   return {
     archivedSessions: [],
     archivedWorktrees: [],
+    draftSessions: [],
     flatSessions: [],
     isGitRepo: true,
     project: makeProject(),
