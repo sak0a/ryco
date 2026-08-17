@@ -1,0 +1,165 @@
+import { describe, expect, it } from "vite-plus/test";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  AgentControlProposalId,
+  AgentControlRequestId,
+  AgentControlRiskTag,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type AgentControlProposal,
+} from "@ryco/contracts";
+
+import { AgentControlProposalCard } from "./AgentControlProposalCard";
+import { buildAgentControlProposalCardModel } from "@ryco/client-runtime/state/agentControl";
+
+const SECRET_PROMPT = "SECRET-PROMPT-TOKEN: rotate the API keys in vault";
+
+function makeProposal(overrides: Partial<AgentControlProposal> = {}): AgentControlProposal {
+  return {
+    proposalId: AgentControlProposalId.make("proposal-1"),
+    requestId: AgentControlRequestId.make("request-1"),
+    principal: {
+      kind: "provider-session",
+      threadId: ThreadId.make("thread-caller-1234"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    },
+    planVersion: 1,
+    plan: {
+      kind: "createThreads",
+      entries: [
+        {
+          projectId: ProjectId.make("project-1"),
+          title: "Fix the flaky test",
+          prompt: SECRET_PROMPT,
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6" },
+          runtimeMode: "full-access",
+          envMode: "worktree",
+        },
+      ],
+    },
+    planDigest: "a".repeat(64),
+    riskTags: [AgentControlRiskTag.make("creates-threads")],
+    promptSummary: "Create 1 thread in project-1",
+    status: "pending-user-approval",
+    createdAt: "2026-08-17T00:00:00.000Z",
+    updatedAt: "2026-08-17T00:00:00.000Z",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    decidedAt: null,
+    result: null,
+    ...overrides,
+  };
+}
+
+function renderCard(input: {
+  proposal?: AgentControlProposal;
+  isSubmitting?: boolean;
+  decisionError?: string | null;
+  disabledReason?: string | null;
+}): string {
+  return renderToStaticMarkup(
+    <AgentControlProposalCard
+      model={buildAgentControlProposalCardModel(input.proposal ?? makeProposal())}
+      isSubmitting={input.isSubmitting ?? false}
+      decisionError={input.decisionError ?? null}
+      disabledReason={input.disabledReason ?? null}
+      onAccept={() => {}}
+      onReject={() => {}}
+    />,
+  );
+}
+
+describe("AgentControlProposalCard", () => {
+  it("shows a pending proposal with origin, action, risk, expiry, and decisions", () => {
+    const markup = renderCard({});
+    expect(markup).toContain("Agent Control");
+    expect(markup).toContain("Awaiting approval");
+    expect(markup).toContain("Create 1 thread");
+    expect(markup).toContain("Agent in thread thread-c…");
+    expect(markup).toContain("full-access · worktree");
+    expect(markup).toContain("creates threads");
+    expect(markup).toContain("Create 1 thread in project-1");
+    expect(markup).toContain("Expires in");
+    expect(markup).toContain(">Approve<");
+    expect(markup).toContain(">Reject<");
+  });
+
+  it("never renders the full prompt without deliberate expansion", () => {
+    const markup = renderCard({});
+    expect(markup).not.toContain(SECRET_PROMPT);
+    expect(markup).toContain("Show plan details");
+  });
+
+  it("disables decisions while a decision is submitting", () => {
+    const markup = renderCard({ isSubmitting: true });
+    const disabledButtons = markup.match(/ disabled=""/g) ?? [];
+    // Reject and Approve are both disabled; the detail toggle stays usable.
+    expect(disabledButtons.length).toBe(2);
+  });
+
+  it("disables decisions and explains why when the capability is missing", () => {
+    const markup = renderCard({ disabledReason: "Owner role required." });
+    expect(markup).toContain("Owner role required.");
+    expect((markup.match(/ disabled=""/g) ?? []).length).toBe(2);
+  });
+
+  it("shows an approved proposal without decision actions", () => {
+    const markup = renderCard({
+      proposal: makeProposal({
+        status: "approved",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+      }),
+    });
+    expect(markup).toContain("Approved · awaiting executor");
+    expect(markup).not.toContain(">Approve<");
+    expect(markup).not.toContain(">Reject<");
+  });
+
+  it("shows a rejected proposal with its terminal result", () => {
+    const markup = renderCard({
+      proposal: makeProposal({
+        status: "rejected",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+        result: {
+          outcome: "failed",
+          error: { code: "rejected" as never, message: "Proposal was rejected", retryable: false },
+          failedAt: "2026-08-17T00:05:00.000Z",
+        },
+      }),
+    });
+    expect(markup).toContain("Rejected");
+    expect(markup).toContain("rejected: Proposal was rejected");
+    expect(markup).not.toContain(">Approve<");
+  });
+
+  it("shows an expired proposal with its terminal result", () => {
+    const markup = renderCard({
+      proposal: makeProposal({
+        status: "expired",
+        expiresAt: "2026-08-17T01:00:00.000Z",
+        result: {
+          outcome: "failed",
+          error: {
+            code: "expired" as never,
+            message: "Proposal expired at 2026-08-17T01:00:00.000Z",
+            retryable: true,
+          },
+          failedAt: "2026-08-17T01:00:00.000Z",
+        },
+      }),
+    });
+    expect(markup).toContain("Expired");
+    expect(markup).toContain("expired: Proposal expired");
+    expect(markup).not.toContain("Expires in");
+  });
+
+  it("surfaces a failed decision as an alert on the pending card", () => {
+    const markup = renderCard({
+      decisionError: "Decision no longer applies to the proposal's current state.",
+    });
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Decision no longer applies");
+    // The card stays decidable so the user can retry after the queue syncs.
+    expect(markup).toContain(">Approve<");
+  });
+});

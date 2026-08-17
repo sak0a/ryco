@@ -5,6 +5,7 @@ import {
   type VcsStatusResult,
   type VcsStatusStreamEvent,
   type LocalApi,
+  AGENT_CONTROL_WS_METHODS,
   CONTEXT_HANDOFF_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
   type OpinionatedPluginCheckInput,
@@ -283,6 +284,15 @@ export interface WsRpcClient {
       typeof CONTEXT_HANDOFF_WS_METHODS.readRawPayloadChunk
     >;
     readonly readExportChunk: RpcUnaryMethod<typeof CONTEXT_HANDOFF_WS_METHODS.readExportChunk>;
+  };
+  readonly agentControl: {
+    readonly listProposals: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.listProposals>;
+    readonly getProposal: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.getProposal>;
+    readonly acceptProposal: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.acceptProposal>;
+    readonly rejectProposal: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.rejectProposal>;
+    readonly subscribeProposals: RpcStreamMethod<
+      typeof AGENT_CONTROL_WS_METHODS.subscribeProposals
+    >;
   };
 }
 
@@ -618,6 +628,22 @@ export function createWsRpcClient(transport: WsTransport, device?: DeviceRpcClie
         ),
       readExportChunk: (input) =>
         transport.request((client) => client[CONTEXT_HANDOFF_WS_METHODS.readExportChunk](input)),
+    },
+    agentControl: {
+      listProposals: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.listProposals](input)),
+      getProposal: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.getProposal](input)),
+      acceptProposal: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.acceptProposal](input)),
+      rejectProposal: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.rejectProposal](input)),
+      subscribeProposals: (listener, options) =>
+        transport.subscribe(
+          (client) => client[AGENT_CONTROL_WS_METHODS.subscribeProposals]({}),
+          listener,
+          { ...options, tag: AGENT_CONTROL_WS_METHODS.subscribeProposals },
+        ),
     },
   };
 }

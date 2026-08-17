@@ -185,6 +185,7 @@ import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+import { AgentControlApprovals } from "./agent-control/AgentControlApprovals";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import {
   ChatOverviewPanel,
@@ -4330,6 +4331,14 @@ export default function ChatView(props: ChatViewProps) {
                 </div>
               ) : null}
               <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
+              {/* Agent Control approvals stay off the frozen phone tier;
+                  apps/mobile owns the native surface. */}
+              {presentationTier !== "phone" ? (
+                <AgentControlApprovals
+                  environmentId={environmentId}
+                  activeThreadId={activeThreadId}
+                />
+              ) : null}
               {showNewThreadComposerSpacer ? <div aria-hidden className="mb-2 h-5" /> : null}
               <ComposerQueuedMessages
                 messages={queuedMessages}
