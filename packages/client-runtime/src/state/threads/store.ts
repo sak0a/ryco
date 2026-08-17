@@ -216,6 +216,7 @@ function mapMessage(environmentId: EnvironmentId, message: OrchestrationMessage)
     role: message.role,
     text: message.text,
     turnId: message.turnId,
+    ...(message.dispatchMode !== undefined ? { dispatchMode: message.dispatchMode } : {}),
     createdAt: message.createdAt,
     streaming: message.streaming,
     ...(message.streaming ? {} : { completedAt: message.updatedAt }),
@@ -1385,6 +1386,9 @@ function applyThreadMessageSentEvent(
     role: event.payload.role,
     text: event.payload.text,
     ...(event.payload.attachments !== undefined ? { attachments: event.payload.attachments } : {}),
+    ...(event.payload.dispatchMode !== undefined
+      ? { dispatchMode: event.payload.dispatchMode }
+      : {}),
     turnId: event.payload.turnId,
     streaming: event.payload.streaming,
     createdAt: event.payload.createdAt,

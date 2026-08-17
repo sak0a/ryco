@@ -71,6 +71,7 @@ export async function sendThreadTurn(
       modelSelection: context.modelSelection,
       runtimeMode: context.runtimeMode,
       interactionMode: context.interactionMode,
+      tokenMode: context.tokenMode,
       createdAt: deps.now(),
     });
     return true;

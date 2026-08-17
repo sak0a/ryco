@@ -543,11 +543,15 @@ export type OrchestrationProject = typeof OrchestrationProject.Type;
 export const OrchestrationMessageRole = Schema.Literals(["user", "assistant", "system"]);
 export type OrchestrationMessageRole = typeof OrchestrationMessageRole.Type;
 
+export const TurnDispatchMode = Schema.Literals(["queue", "steer"]);
+export type TurnDispatchMode = typeof TurnDispatchMode.Type;
+
 export const OrchestrationMessage = Schema.Struct({
   id: MessageId,
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  dispatchMode: Schema.optional(TurnDispatchMode),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
@@ -1126,6 +1130,37 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadTurnSteerCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.steer"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedTurnId: TurnId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+  }),
+  createdAt: IsoDateTime,
+  requestedAt: IsoDateTime,
+});
+export type ThreadTurnSteerCommand = typeof ThreadTurnSteerCommand.Type;
+
+const ClientThreadTurnSteerCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.steer"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedTurnId: TurnId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(UploadChatAttachment),
+  }),
+  createdAt: IsoDateTime,
+  requestedAt: IsoDateTime,
+});
+
 const ThreadTurnInterruptCommand = Schema.Struct({
   type: Schema.Literal("thread.turn.interrupt"),
   commandId: CommandId,
@@ -1279,6 +1314,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadTokenModeSetCommand,
   ThreadTurnStartCommand,
+  ThreadTurnSteerCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
@@ -1312,6 +1348,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadInteractionModeSetCommand,
   ThreadTokenModeSetCommand,
   ClientThreadTurnStartCommand,
+  ClientThreadTurnSteerCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
@@ -1387,6 +1424,49 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadTurnSteerResolveCommand = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("thread.turn.steer.resolve"),
+    commandId: CommandId,
+    requestCommandId: CommandId,
+    threadId: ThreadId,
+    expectedTurnId: TurnId,
+    message: Schema.Struct({
+      messageId: MessageId,
+      role: Schema.Literal("user"),
+      text: Schema.String,
+      attachments: Schema.Array(ChatAttachment),
+    }),
+    createdAt: IsoDateTime,
+    requestedAt: IsoDateTime,
+    resolution: Schema.Struct({
+      status: Schema.Literal("accepted"),
+      turnId: TurnId,
+      resolvedAt: IsoDateTime,
+    }),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("thread.turn.steer.resolve"),
+    commandId: CommandId,
+    requestCommandId: CommandId,
+    threadId: ThreadId,
+    expectedTurnId: TurnId,
+    message: Schema.Struct({
+      messageId: MessageId,
+      role: Schema.Literal("user"),
+      text: Schema.String,
+      attachments: Schema.Array(ChatAttachment),
+    }),
+    createdAt: IsoDateTime,
+    requestedAt: IsoDateTime,
+    resolution: Schema.Struct({
+      status: Schema.Literal("rejected"),
+      error: TrimmedNonEmptyString.check(Schema.isMaxLength(1_000)),
+      resolvedAt: IsoDateTime,
+    }),
+  }),
+]);
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -1402,6 +1482,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadTurnSteerResolveCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -1427,6 +1508,9 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.token-mode-set",
   "thread.context-handoff-requested",
   "thread.message-sent",
+  "thread.turn-steer-requested",
+  "thread.turn-steer-accepted",
+  "thread.turn-steer-rejected",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
@@ -1561,11 +1645,44 @@ export const ThreadMessageSentPayload = Schema.Struct({
   role: OrchestrationMessageRole,
   text: Schema.String,
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  dispatchMode: Schema.optional(TurnDispatchMode),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
+
+export const ThreadTurnSteerRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  expectedTurnId: TurnId,
+  message: Schema.Struct({
+    messageId: MessageId,
+    role: Schema.Literal("user"),
+    text: Schema.String,
+    attachments: Schema.Array(ChatAttachment),
+  }),
+  createdAt: IsoDateTime,
+  requestedAt: IsoDateTime,
+});
+export type ThreadTurnSteerRequestedPayload = typeof ThreadTurnSteerRequestedPayload.Type;
+
+export const ThreadTurnSteerAcceptedPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  expectedTurnId: TurnId,
+  turnId: TurnId,
+  resolvedAt: IsoDateTime,
+});
+export type ThreadTurnSteerAcceptedPayload = typeof ThreadTurnSteerAcceptedPayload.Type;
+
+export const ThreadTurnSteerRejectedPayload = Schema.Struct({
+  threadId: ThreadId,
+  messageId: MessageId,
+  expectedTurnId: TurnId,
+  error: TrimmedNonEmptyString.check(Schema.isMaxLength(1_000)),
+  resolvedAt: IsoDateTime,
+});
+export type ThreadTurnSteerRejectedPayload = typeof ThreadTurnSteerRejectedPayload.Type;
 
 export const ThreadContextHandoffRequestedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -1831,6 +1948,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.message-sent"),
     payload: ThreadMessageSentPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-steer-requested"),
+    payload: ThreadTurnSteerRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-steer-accepted"),
+    payload: ThreadTurnSteerAcceptedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-steer-rejected"),
+    payload: ThreadTurnSteerRejectedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

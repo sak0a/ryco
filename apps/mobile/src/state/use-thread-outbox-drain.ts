@@ -4,14 +4,13 @@ import { getWsConnectionStatus, getWsConnectionUiState } from "@ryco/client-runt
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   IMAGE_ONLY_BOOTSTRAP_PROMPT,
-  buildSendTurnDispatchAttachment,
   commitSendTurnDispatch,
 } from "@ryco/client-runtime/state/composer";
 
 import { ensureEnvironmentApi } from "../connection/environmentApi";
 import { newCommandId } from "../lib/ids";
-import { mobileAttachmentCodec } from "../platform/attachmentCodec";
 import { drainThreadOutbox, hydrateThreadOutbox } from "./threadOutbox";
+import { buildQueuedThreadMessageAttachments } from "./queuedThreadMessageAttachments";
 import type { EnvironmentShellStatus, QueuedThreadMessage } from "./threadOutboxModel";
 import {
   selectBootstrapCompleteForActiveEnvironment,
@@ -29,21 +28,7 @@ async function sendQueuedThreadMessage(message: QueuedThreadMessage): Promise<vo
     throw new Error("Queued message is missing composer settings.");
   }
   const api = ensureEnvironmentApi(message.environmentId);
-  const turnAttachments = await Promise.all(
-    message.attachments.map(async (attachment) =>
-      buildSendTurnDispatchAttachment({
-        attachment: await mobileAttachmentCodec.encode({
-          id: attachment.id,
-          mime: attachment.mimeType,
-          size: attachment.sizeBytes,
-          // Use the persisted data URL. Image-picker preview file URIs are
-          // cache-local and may disappear before an offline turn drains.
-          uri: attachment.dataUrl,
-        }),
-        name: attachment.name,
-      }),
-    ),
-  );
+  const turnAttachments = await buildQueuedThreadMessageAttachments(message);
   await commitSendTurnDispatch({
     api,
     threadId: message.threadId,
@@ -57,7 +42,7 @@ async function sendQueuedThreadMessage(message: QueuedThreadMessage): Promise<vo
     hasSelectedModel: true,
     runtimeMode: message.runtimeMode,
     interactionMode: message.interactionMode,
-    tokenMode: "balanced",
+    tokenMode: message.tokenMode ?? "balanced",
     bootstrap: undefined,
     sourceControlContexts: [],
     createdAt: message.createdAt,
@@ -72,6 +57,8 @@ function readThreadDeliveryState(message: QueuedThreadMessage): {
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
   readonly threadBusy: boolean;
+  readonly alreadyDelivered: boolean;
+  readonly deliveryReconciled: boolean;
 } {
   const state = useStore.getState();
   const ref = scopeThreadRef(message.environmentId, message.threadId);
@@ -83,6 +70,8 @@ function readThreadDeliveryState(message: QueuedThreadMessage): {
     shellStatus: selectBootstrapCompleteForActiveEnvironment(state) ? "live" : "loading",
     environmentConnected: connected,
     threadBusy: summary?.latestTurn?.state === "running" || thread?.latestTurn?.state === "running",
+    alreadyDelivered: thread?.messages.some((entry) => entry.id === message.messageId) ?? false,
+    deliveryReconciled: thread !== undefined,
   };
 }
 

@@ -4,16 +4,20 @@ import { moveQueuedMessage, removeQueuedMessage, type QueuedMessage } from "./lo
 
 export interface MessageQueueState<Composer = unknown, Settings = unknown> {
   readonly queuesByThreadKey: Record<string, QueuedMessage<Composer, Settings>[]>;
+  readonly steeringIdsByThreadKey: Record<string, string[]>;
   readonly enqueue: (threadKey: string, message: QueuedMessage<Composer, Settings>) => void;
   readonly remove: (threadKey: string, id: string) => void;
   readonly move: (threadKey: string, id: string, direction: "up" | "down") => void;
   readonly dequeue: (threadKey: string) => void;
   readonly clear: (threadKey: string) => void;
+  readonly beginSteer: (threadKey: string, id: string) => void;
+  readonly endSteer: (threadKey: string, id: string) => void;
 }
 
 export function createMessageQueueStore<Composer = unknown, Settings = unknown>() {
   return create<MessageQueueState<Composer, Settings>>((set) => ({
     queuesByThreadKey: {},
+    steeringIdsByThreadKey: {},
     enqueue: (threadKey, message) =>
       set((state) => ({
         queuesByThreadKey: {
@@ -25,10 +29,15 @@ export function createMessageQueueStore<Composer = unknown, Settings = unknown>(
       set((state) => {
         const current = state.queuesByThreadKey[threadKey];
         if (!current) return state;
+        const steeringIds = state.steeringIdsByThreadKey[threadKey] ?? [];
         return {
           queuesByThreadKey: {
             ...state.queuesByThreadKey,
             [threadKey]: removeQueuedMessage(current, id),
+          },
+          steeringIdsByThreadKey: {
+            ...state.steeringIdsByThreadKey,
+            [threadKey]: steeringIds.filter((entry) => entry !== id),
           },
         };
       }),
@@ -53,8 +62,32 @@ export function createMessageQueueStore<Composer = unknown, Settings = unknown>(
       set((state) => {
         if (!(threadKey in state.queuesByThreadKey)) return state;
         const queuesByThreadKey = { ...state.queuesByThreadKey };
+        const steeringIdsByThreadKey = { ...state.steeringIdsByThreadKey };
         delete queuesByThreadKey[threadKey];
-        return { queuesByThreadKey };
+        delete steeringIdsByThreadKey[threadKey];
+        return { queuesByThreadKey, steeringIdsByThreadKey };
+      }),
+    beginSteer: (threadKey, id) =>
+      set((state) => {
+        const current = state.steeringIdsByThreadKey[threadKey] ?? [];
+        if (current.includes(id)) return state;
+        return {
+          steeringIdsByThreadKey: {
+            ...state.steeringIdsByThreadKey,
+            [threadKey]: [...current, id],
+          },
+        };
+      }),
+    endSteer: (threadKey, id) =>
+      set((state) => {
+        const current = state.steeringIdsByThreadKey[threadKey];
+        if (!current?.includes(id)) return state;
+        return {
+          steeringIdsByThreadKey: {
+            ...state.steeringIdsByThreadKey,
+            [threadKey]: current.filter((entry) => entry !== id),
+          },
+        };
       }),
   }));
 }

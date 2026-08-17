@@ -20,6 +20,16 @@ const OUTBOX_STORAGE_KEY = "ryco.threadOutbox.v1";
 let messages: QueuedThreadMessage[] = [];
 let hydrated = false;
 let hydrationStarted = false;
+const listeners = new Set<() => void>();
+
+function notifyListeners(): void {
+  for (const listener of listeners) listener();
+}
+
+export function subscribeThreadOutbox(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
 
 export function isThreadOutboxHydrated(): boolean {
   return hydrated;
@@ -38,6 +48,7 @@ function mirrorToQueueStore(): void {
           modelSelection: message.modelSelection,
           runtimeMode: message.runtimeMode,
           interactionMode: message.interactionMode,
+          tokenMode: message.tokenMode,
         },
       });
     }
@@ -63,12 +74,14 @@ export async function hydrateThreadOutbox(): Promise<void> {
   }
   hydrated = true;
   mirrorToQueueStore();
+  notifyListeners();
 }
 
 export function enqueueThreadOutboxMessage(message: QueuedThreadMessage): void {
   messages = [...messages.filter((m) => m.messageId !== message.messageId), message];
   mirrorToQueueStore();
   persist();
+  notifyListeners();
 }
 
 export function removeThreadOutboxMessage(messageId: string): void {
@@ -77,6 +90,7 @@ export function removeThreadOutboxMessage(messageId: string): void {
   messages = next;
   mirrorToQueueStore();
   persist();
+  notifyListeners();
 }
 
 export function listThreadOutboxMessages(): ReadonlyArray<QueuedThreadMessage> {
@@ -88,6 +102,7 @@ export function resetThreadOutboxForTests(): void {
   messages = [];
   hydrated = false;
   hydrationStarted = false;
+  notifyListeners();
 }
 
 // The per-message context the drain needs from live state, and the send seam.
@@ -98,6 +113,8 @@ export interface ThreadOutboxDrainDeps {
     readonly shellStatus: EnvironmentShellStatus;
     readonly environmentConnected: boolean;
     readonly threadBusy: boolean;
+    readonly alreadyDelivered?: boolean;
+    readonly deliveryReconciled?: boolean;
   };
   /** Dispatch the queued turn through the runtime send path (commitSendTurnDispatch). */
   readonly sendQueuedMessage: (message: QueuedThreadMessage) => Promise<void>;

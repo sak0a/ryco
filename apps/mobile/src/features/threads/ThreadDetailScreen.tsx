@@ -2,22 +2,30 @@ import { useAtomValue } from "@effect/atom-react";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
-import {
-  getWsConnectionStatus,
-  getWsConnectionUiState,
-  serverConfigAtom,
-} from "@ryco/client-runtime/rpc";
+import { getWsConnectionUiState, serverConfigAtom } from "@ryco/client-runtime/rpc";
 import {
   getProviderInteractionModeToggle,
   getProviderSupportsAskMode,
 } from "@ryco/client-runtime/state/composer";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import type { TimelineEntry } from "@ryco/client-runtime/state/session";
-import { EnvironmentId, ThreadId } from "@ryco/contracts";
+import {
+  buildQueuedMessageSteerCommand,
+  resolveQueuedMessageSteerEligibility,
+} from "@ryco/client-runtime/state/message-queue";
+import { EnvironmentId, MessageId, ThreadId } from "@ryco/contracts";
+import { IMAGE_ONLY_BOOTSTRAP_PROMPT } from "@ryco/client-runtime/state/composer";
 
 import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
@@ -32,7 +40,15 @@ import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { newCommandId, newMessageId } from "../../lib/ids";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHomeWorkspaceData } from "../../state/homeData";
-import { enqueueThreadOutboxMessage } from "../../state/threadOutbox";
+import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
+import {
+  enqueueThreadOutboxMessage,
+  listThreadOutboxMessages,
+  removeThreadOutboxMessage,
+  subscribeThreadOutbox,
+} from "../../state/threadOutbox";
+import { buildQueuedThreadMessageAttachments } from "../../state/queuedThreadMessageAttachments";
+import type { QueuedThreadMessage } from "../../state/threadOutboxModel";
 import { useThreadTimeline } from "../../state/threadTimeline";
 import { selectProjectByRef, selectThreadByRef, useStore } from "../../state/threadsRuntime";
 import { useHomeEnvironments } from "../home/useHomeEnvironments";
@@ -61,6 +77,7 @@ import { buildSessionPolicyModel, resolveSessionPolicySelection } from "./sessio
 import { SessionPolicySheet } from "./SessionPolicySheet";
 import { ThreadActionsSheet } from "./ThreadActionsSheet";
 import { ThreadComposer } from "./ThreadComposer";
+import { ThreadQueuedMessages } from "./ThreadQueuedMessages";
 import { ThreadContextBar } from "./ThreadContextBar";
 import {
   buildThreadHeaderModel,
@@ -163,8 +180,12 @@ export function ThreadDetailScreen(props: {
   const [policyBusy, setPolicyBusy] = useState(false);
   const [modelVisible, setModelVisible] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [steeringMessageIds, setSteeringMessageIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [expandedFoldIds, setExpandedFoldIds] = useState<ReadonlySet<string>>(() => new Set());
   const serverConfig = useAtomValue(serverConfigAtom);
+  const connectionUiState = getWsConnectionUiState(useWsConnectionStatus());
 
   // Retain the supervisor's thread-detail subscription while mounted, and make
   // this node authoritative for the active task.
@@ -176,6 +197,18 @@ export function ThreadDetailScreen(props: {
   const built = useThreadTimeline(environmentId, threadId);
   const thread = useStore((state) =>
     selectThreadByRef(state, scopeThreadRef(environmentId, threadId)),
+  );
+  const outboxMessages = useSyncExternalStore(
+    subscribeThreadOutbox,
+    listThreadOutboxMessages,
+    listThreadOutboxMessages,
+  );
+  const queuedMessages = useMemo(
+    () =>
+      outboxMessages.filter(
+        (message) => message.environmentId === environmentId && message.threadId === threadId,
+      ),
+    [environmentId, outboxMessages, threadId],
   );
   const messageHistory = useStore(
     (state) =>
@@ -271,6 +304,105 @@ export function ThreadDetailScreen(props: {
     [modelQuery, project?.defaultModelSelection, serverConfig, thread],
   );
 
+  const getSteerEligibility = useCallback(
+    (message: QueuedThreadMessage) => {
+      const activeSelection = thread?.modelSelection ?? project?.defaultModelSelection;
+      const providerInstanceId = thread?.session?.providerInstanceId ?? activeSelection?.instanceId;
+      const provider = providers.find((entry) => entry.instanceId === providerInstanceId);
+      return resolveQueuedMessageSteerEligibility({
+        mutationReady: connectionUiState === "connected",
+        turnRunning: thread?.latestTurn?.state === "running",
+        activeTurnId: thread?.session?.activeTurnId,
+        supportsTurnSteering: provider?.supportsTurnSteering === true,
+        queuedModelSelection: message.modelSelection,
+        activeModelSelection: activeSelection,
+        queuedRuntimeMode: message.runtimeMode,
+        activeRuntimeMode: thread?.runtimeMode,
+        queuedInteractionMode: message.interactionMode,
+        activeInteractionMode: thread?.interactionMode,
+        queuedTokenMode: message.tokenMode,
+        activeTokenMode: thread?.tokenMode ?? "balanced",
+      });
+    },
+    [connectionUiState, project?.defaultModelSelection, providers, thread],
+  );
+
+  const getSteerUnavailableReason = useCallback(
+    (message: QueuedThreadMessage): string | null => {
+      const eligibility = getSteerEligibility(message);
+      return eligibility.allowed ? null : eligibility.reason;
+    },
+    [getSteerEligibility],
+  );
+
+  const steerQueuedMessage = useCallback(
+    async (message: QueuedThreadMessage) => {
+      const eligibility = getSteerEligibility(message);
+      if (!eligibility.allowed) {
+        setSendError(eligibility.reason);
+        return;
+      }
+      setSendError(null);
+      setSteeringMessageIds((current) => new Set(current).add(message.messageId));
+      try {
+        const attachments = await buildQueuedThreadMessageAttachments(message);
+        const requestedAt = new Date().toISOString();
+        await ensureEnvironmentApi(environmentId).orchestration.dispatchCommand(
+          buildQueuedMessageSteerCommand({
+            commandId: newCommandId(),
+            threadId,
+            expectedTurnId: eligibility.expectedTurnId,
+            messageId: MessageId.make(message.messageId),
+            text: message.text.trim() || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+            attachments,
+            createdAt: message.createdAt,
+            requestedAt,
+          }),
+        );
+      } catch (error) {
+        setSteeringMessageIds((current) => {
+          const next = new Set(current);
+          next.delete(message.messageId);
+          return next;
+        });
+        setSendError(error instanceof Error ? error.message : "The steer request failed.");
+      }
+    },
+    [environmentId, getSteerEligibility, threadId],
+  );
+
+  useEffect(() => {
+    if (!thread || steeringMessageIds.size === 0) return;
+    const projectedIds = new Set(thread.messages.map((message) => String(message.id)));
+    const rejected = new Map<string, string>();
+    for (const activity of thread.activities) {
+      if (activity.kind !== "provider.turn.steer.failed" || !activity.payload) continue;
+      const payload = activity.payload as { messageId?: unknown; error?: unknown };
+      if (typeof payload.messageId === "string") {
+        rejected.set(
+          payload.messageId,
+          typeof payload.error === "string" ? payload.error : "The provider rejected steering.",
+        );
+      }
+    }
+    let rejectionMessage: string | null = null;
+    for (const messageId of steeringMessageIds) {
+      if (projectedIds.has(messageId)) {
+        removeThreadOutboxMessage(messageId);
+      } else if (rejected.has(messageId)) {
+        rejectionMessage = rejected.get(messageId) ?? null;
+      }
+    }
+    setSteeringMessageIds((current) => {
+      const next = new Set(current);
+      for (const messageId of current) {
+        if (projectedIds.has(messageId) || rejected.has(messageId)) next.delete(messageId);
+      }
+      return next.size === current.size ? current : next;
+    });
+    if (rejectionMessage) setSendError(rejectionMessage);
+  }, [steeringMessageIds, thread]);
+
   const applyPolicy = useCallback(async (apply: () => Promise<void>) => {
     setPolicyBusy(true);
     setSendError(null);
@@ -356,7 +488,7 @@ export function ThreadDetailScreen(props: {
 
     const tokenMode = currentThread.tokenMode ?? "balanced";
     const threadBusy = currentThread.latestTurn?.state === "running";
-    const connected = getWsConnectionUiState(getWsConnectionStatus()) === "connected";
+    const connected = connectionUiState === "connected";
 
     return sendThreadTurn(
       {
@@ -559,6 +691,22 @@ export function ThreadDetailScreen(props: {
           ))}
         </ScrollView>
       ) : null}
+
+      <ThreadQueuedMessages
+        messages={queuedMessages}
+        steeringIds={steeringMessageIds}
+        getSteerUnavailableReason={getSteerUnavailableReason}
+        onSteer={(message) => void steerQueuedMessage(message)}
+        onRemove={(messageId) => {
+          removeThreadOutboxMessage(messageId);
+          setSteeringMessageIds((current) => {
+            if (!current.has(messageId)) return current;
+            const next = new Set(current);
+            next.delete(messageId);
+            return next;
+          });
+        }}
+      />
 
       <ThreadComposer
         onSend={onSend}

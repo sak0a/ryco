@@ -16,7 +16,9 @@ import type {
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
+  ProviderSteerTurnInput,
   ThreadId,
+  ProviderTurnSteerResult,
   ProviderTurnStartResult,
   TurnId,
 } from "@ryco/contracts";
@@ -24,12 +26,15 @@ import type { Effect } from "effect";
 import type { Stream } from "effect";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
+export type ProviderTurnSteeringMode = "native" | "unsupported";
 
 export interface ProviderAdapterCapabilities {
   /**
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  /** Native in-flight turn steering support. Missing is treated as unsupported. */
+  readonly turnSteering?: ProviderTurnSteeringMode;
 }
 
 export interface ProviderThreadTurnSnapshot {
@@ -62,6 +67,11 @@ export interface ProviderAdapterShape<TError> {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
+
+  /** Add user input to the exact active turn without starting a new turn. */
+  readonly steerTurn?: (
+    input: ProviderSteerTurnInput,
+  ) => Effect.Effect<ProviderTurnSteerResult, TError>;
 
   /**
    * Interrupt an active turn.

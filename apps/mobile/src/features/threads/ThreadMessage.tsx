@@ -64,6 +64,11 @@ export function ThreadMessage(props: { readonly message: ChatMessage }) {
             : "w-full px-1 py-1"
         }
       >
+        {isUser && props.message.dispatchMode === "steer" ? (
+          <Text className="mb-1 text-2xs font-ryco-bold uppercase tracking-wide text-foreground-muted">
+            Steered
+          </Text>
+        ) : null}
         {isUser || !hasNativeSelectableMarkdownText() ? (
           <Text
             selectable

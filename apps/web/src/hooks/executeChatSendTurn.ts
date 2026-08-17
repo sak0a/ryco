@@ -4,6 +4,7 @@ import {
   type EnvironmentApi,
   type EnvironmentId,
   type ModelSelection,
+  type MessageId,
   type ProjectId,
   type ProviderDriverKind,
   type ProviderInteractionMode,
@@ -155,6 +156,8 @@ export interface SendTurnReadComposer {
 }
 
 export interface ExecuteChatSendTurnInput {
+  /** Stable client id; queued sends reuse the id assigned at enqueue time. */
+  messageId?: MessageId;
   composer: SendTurnComposerSnapshot;
   thread: SendTurnThreadContext;
   worktree: SendTurnWorktreePlan;
@@ -253,6 +256,37 @@ export function rollbackSendTurn(input: {
 
 export { buildSendTurnBootstrap } from "@ryco/client-runtime/state/composer";
 
+export function buildOutgoingMessageText(input: {
+  readonly composer: SendTurnComposerSnapshot;
+  readonly formatOutgoingPrompt: ExecuteChatSendTurnInput["formatOutgoingPrompt"];
+}): string {
+  const messageTextForSend = appendTerminalContextsToPrompt(
+    input.composer.prompt,
+    input.composer.sendableTerminalContexts,
+  );
+  return input.formatOutgoingPrompt({
+    provider: input.composer.selectedProvider,
+    model: input.composer.selectedModel,
+    models: input.composer.selectedProviderModels,
+    effort: input.composer.selectedPromptEffort,
+    text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  });
+}
+
+export async function buildOutgoingTurnAttachments(images: readonly ComposerImageAttachment[]) {
+  return Promise.all(
+    images.map(async (image) =>
+      buildSendTurnDispatchAttachment({
+        attachment: await webAttachmentCodec.encode({
+          id: image.id,
+          file: image.file,
+        }),
+        name: image.name,
+      }),
+    ),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Core send turn
 // ---------------------------------------------------------------------------
@@ -286,34 +320,17 @@ export async function executeChatSendTurn(input: ExecuteChatSendTurnInput): Prom
   const terminalContextsSnapshot = [...composer.sendableTerminalContexts];
   const sourceControlSnapshot = [...composer.sourceControlContexts];
 
-  const messageTextForSend = appendTerminalContextsToPrompt(
-    composer.prompt,
-    terminalContextsSnapshot,
-  );
-  const messageIdForSend = newMessageId();
+  const messageIdForSend = input.messageId ?? newMessageId();
   const messageCreatedAt = new Date().toISOString();
-  const outgoingMessageText = formatOutgoingPrompt({
-    provider: composer.selectedProvider,
-    model: composer.selectedModel,
-    models: composer.selectedProviderModels,
-    effort: composer.selectedPromptEffort,
-    text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+  const outgoingMessageText = buildOutgoingMessageText({
+    composer,
+    formatOutgoingPrompt,
   });
 
   // Attachment-neutral send path: the web boundary encodes each DOM `File` to a
   // neutral `ComposerAttachment` via the AttachmentCodec, and the package builds
   // the outgoing turn attachment from the union alone (no `.file` in the engine).
-  const turnAttachmentsPromise = Promise.all(
-    imagesSnapshot.map(async (image) =>
-      buildSendTurnDispatchAttachment({
-        attachment: await webAttachmentCodec.encode({
-          id: image.id,
-          file: image.file,
-        }),
-        name: image.name,
-      }),
-    ),
-  );
+  const turnAttachmentsPromise = buildOutgoingTurnAttachments(imagesSnapshot);
 
   const optimisticAttachments = imagesSnapshot.map((image) => ({
     type: "image" as const,

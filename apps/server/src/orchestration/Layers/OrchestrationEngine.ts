@@ -86,6 +86,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
     case "thread.interaction-mode.set":
     case "thread.token-mode.set":
     case "thread.turn.start":
+    case "thread.turn.steer":
+    case "thread.turn.steer.resolve":
     case "thread.turn.interrupt":
     case "thread.approval.respond":
     case "thread.user-input.respond":
