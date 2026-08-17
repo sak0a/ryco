@@ -67,6 +67,7 @@ export interface SidebarTreeWorktree {
 export interface SidebarTreeProject {
   archivedSessions: ReadonlyArray<SidebarTreeThread>;
   archivedWorktrees: ReadonlyArray<SidebarTreeWorktree>;
+  draftSessions: ReadonlyArray<SidebarTreeThread>;
   flatSessions: ReadonlyArray<SidebarTreeThread>;
   isGitRepo: boolean;
   project: Project;
@@ -98,7 +99,6 @@ export type UseSidebarTreeInput = Omit<ComposeSidebarTreeInput, "nowMs"> & {
 export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree {
   const uniqueThreads = dedupeSidebarThreads(input.threads);
   const threadsByProjectId = groupBy(uniqueThreads, (thread) => thread.projectId);
-  const allThreadsByProjectId = groupBy(uniqueThreads, (thread) => thread.projectId);
   const explicitWorktreesByProjectId = groupBy(input.worktrees ?? [], (worktree) =>
     String(worktree.projectId),
   );
@@ -106,13 +106,18 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
   return {
     projects: input.projects.map((project) => {
       const projectThreads = threadsByProjectId.get(project.id) ?? [];
+      const draftSessions = projectThreads.filter(
+        (thread) => thread.draftId !== undefined && thread.archivedAt === null,
+      );
+      const materializedThreads = projectThreads.filter((thread) => thread.draftId === undefined);
       const isGitRepo = resolveProjectIsGitRepo(project, input.isGitRepoByProjectId);
-      const archivedSessions = projectThreads.filter((thread) => thread.archivedAt !== null);
+      const archivedSessions = materializedThreads.filter((thread) => thread.archivedAt !== null);
 
       if (!isGitRepo) {
         return {
           archivedSessions,
           archivedWorktrees: [],
+          draftSessions,
           flatSessions: projectThreads.filter((thread) => thread.archivedAt === null),
           isGitRepo,
           project,
@@ -122,7 +127,10 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
 
       const projectWorktrees = ensureProjectWorktrees({
         project,
-        threads: allThreadsByProjectId.get(project.id) ?? [],
+        // Drafts describe where a future session should run. They do not own a
+        // checkout yet, so allowing them into synthesis would make that intent
+        // look like a real worktree (and can overwrite the main row's branch).
+        threads: materializedThreads,
         worktrees: explicitWorktreesByProjectId.get(project.id) ?? [],
       });
       const mergedNodes = mergeEquivalentWorktrees(project, projectWorktrees);
@@ -136,13 +144,14 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
             composeWorktreeNode({
               diffStats: getDiffStats(input, worktree.worktreeId),
               nowMs: input.nowMs,
-              threads: projectThreads.filter((thread) =>
+              threads: materializedThreads.filter((thread) =>
                 belongsToWorktree(thread, worktree, project, mergedNodes),
               ),
               worktree,
             }),
           ),
         flatSessions: [],
+        draftSessions,
         isGitRepo,
         project,
         worktrees: sortWorktrees(mergedProjectWorktrees)
@@ -151,7 +160,7 @@ export function composeSidebarTree(input: ComposeSidebarTreeInput): SidebarTree 
             composeWorktreeNode({
               diffStats: getDiffStats(input, worktree.worktreeId),
               nowMs: input.nowMs,
-              threads: projectThreads.filter((thread) =>
+              threads: materializedThreads.filter((thread) =>
                 belongsToWorktree(thread, worktree, project, mergedNodes),
               ),
               worktree,

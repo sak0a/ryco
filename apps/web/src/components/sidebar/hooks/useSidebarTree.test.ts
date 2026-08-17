@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@ryco/contracts";
 import { DEFAULT_INTERACTION_MODE, type Project } from "../../../types";
+import { DraftId } from "../../../composerDraftStore";
 import { composeSidebarTree, type SidebarTreeThread, type SidebarWorktree } from "./useSidebarTree";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -131,6 +132,30 @@ describe("composeSidebarTree", () => {
     expect(worktree?.worktree.origin).toBe("main");
     expect(worktree?.worktree.branch).toBe("trunk");
     expect(worktree?.buckets.done).toHaveLength(1);
+  });
+
+  it("keeps drafts outside worktree synthesis and preserves the main branch label", () => {
+    const draft = makeThread({
+      id: ThreadId.make("thread-draft"),
+      branch: "release/next",
+      createdAt: "2026-05-03T00:00:00.000Z",
+      draftId: DraftId.make("draft-new-thread"),
+      title: "New thread",
+      updatedAt: "2026-05-03T00:00:00.000Z",
+    });
+    const tree = composeSidebarTree({
+      isGitRepoByProjectId: new Map([[ProjectId.make("project-1"), true]]),
+      nowMs: Date.parse("2026-05-08T00:00:00.000Z"),
+      projects: [makeProject()],
+      threads: [draft],
+      worktrees: [makeWorktree()],
+    });
+
+    const project = tree.projects[0];
+    expect(project?.draftSessions).toEqual([draft]);
+    expect(project?.worktrees).toHaveLength(1);
+    expect(project?.worktrees[0]?.worktree.branch).toBe("main");
+    expect(project?.worktrees[0]?.sessions).toEqual([]);
   });
 
   it("keeps changed branches in the original project directory under one row", () => {

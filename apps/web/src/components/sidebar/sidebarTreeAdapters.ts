@@ -258,7 +258,7 @@ function adaptDraftThreadForSidebarTree(input: {
     sourceProjectId: input.draftThread.projectId,
     sourceProjectCwd: input.sourceProjectCwd,
     statusPill: null,
-    title: "Empty Session",
+    title: "New thread",
     updatedAt: input.draftThread.createdAt,
     worktreePath: input.draftThread.worktreePath,
   };

@@ -181,7 +181,7 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
   const isConfirmingArchive = confirmingArchiveThreadKey === threadKey && !isThreadRunning;
   const canArchiveThread = !draftId && canArchiveSidebarThread(thread);
-  const canCloseThread = props.isTreeChild && !isThreadRunning;
+  const canCloseThread = (props.isTreeChild || draftId !== null) && !isThreadRunning;
   const threadMetaClassName = isConfirmingArchive
     ? "pointer-events-none opacity-0"
     : !isThreadRunning
@@ -474,6 +474,11 @@ export const SidebarThreadRowContent = memo(function SidebarThreadRowContent(
                     >
                       {thread.title}
                     </span>
+                    {draftId ? (
+                      <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                        Draft
+                      </span>
+                    ) : null}
                     {isPinned ? (
                       <PinIcon
                         className="size-3 shrink-0 text-muted-foreground/55"

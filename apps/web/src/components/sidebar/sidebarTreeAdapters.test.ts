@@ -30,7 +30,7 @@ describe("sidebarTreeAdapters", () => {
       draftId: "draft-1",
       id: draftThread.threadId,
       projectId: "environment-local:project-1",
-      title: "Empty Session",
+      title: "New thread",
       worktreePath: "/repo/project-feature",
     });
 
