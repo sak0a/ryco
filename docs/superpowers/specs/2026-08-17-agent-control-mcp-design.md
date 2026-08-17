@@ -29,14 +29,14 @@ The server remains the sole writer for application state. Agent Control never ch
 
 There are two ingress paths. Both use the same Agent Control service, proposal format, approval queue, executor, audit stream, and read models. They have independent credential issuance, default capabilities, rate limits, and tool catalogs.
 
-| Principal | Purpose | Credential and scope |
-| --- | --- | --- |
+| Principal                 | Purpose                                                          | Credential and scope                                                                  |
+| ------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Internal provider session | An agent already running in a Ryco thread coordinates Ryco work. | Per-provider-runtime, in-memory bearer; thread-bound and revoked on runtime teardown. |
-| External integration | A local MCP-capable client requests work from Ryco. | Paired, revocable integration credential with explicit project and capability scope. |
+| External integration      | A local MCP-capable client requests work from Ryco.              | Paired, revocable integration credential with explicit project and capability scope.  |
 
 The architecture is:
 
-~~~text
+```text
 Internal provider MCP ─┐
                        ├── protocol adapters ──> AgentControl service
 External stdio bridge ─┘                                │
@@ -45,7 +45,7 @@ External stdio bridge ─┘                                │
                                                         └── approved-plan executor
                                                                   │
                                                                   └── OrchestrationEngine
-~~~
+```
 
 ## Package boundaries
 
