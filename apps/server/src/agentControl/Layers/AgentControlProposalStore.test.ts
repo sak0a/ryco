@@ -1,0 +1,382 @@
+import {
+  AgentControlProposalId,
+  AgentControlRequestId,
+  AgentControlRiskTag,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+  type AgentControlActionPlan,
+  type AgentControlPrincipal,
+} from "@ryco/contracts";
+import { assert, it } from "@effect/vitest";
+import { Effect, Layer, Option } from "effect";
+
+import { ServerSettingsService } from "../../serverSettings.ts";
+import { AgentControlAuditRepository } from "../../persistence/Services/AgentControlAudit.ts";
+import { AgentControlProposalRepository } from "../../persistence/Services/AgentControlProposals.ts";
+import { AgentControlAuditRepositoryLive } from "../../persistence/Layers/AgentControlAudit.ts";
+import { AgentControlOperationRepositoryLive } from "../../persistence/Layers/AgentControlOperations.ts";
+import { AgentControlProposalRepositoryLive } from "../../persistence/Layers/AgentControlProposals.ts";
+import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { computeAgentControlPlanDigest } from "../planDigest.ts";
+import { AgentControlProposalStore } from "../Services/AgentControlProposalStore.ts";
+import { AgentControlPolicyLive } from "./AgentControlPolicy.ts";
+import { AgentControlProposalStoreLive } from "./AgentControlProposalStore.ts";
+
+const SECRET_PROMPT = "SECRET-PROMPT-TOKEN: rotate the API keys in vault";
+
+const principal: AgentControlPrincipal = {
+  kind: "provider-session",
+  threadId: ThreadId.make("thread-1"),
+  providerInstanceId: ProviderInstanceId.make("codex"),
+};
+
+const createThreadsPlan = (prompt: string): AgentControlActionPlan => ({
+  kind: "createThreads",
+  entries: [
+    {
+      projectId: ProjectId.make("project-1"),
+      title: "Fix the flaky test",
+      prompt,
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6" },
+      runtimeMode: "full-access",
+      envMode: "worktree",
+    },
+  ],
+});
+
+const submitInput = (requestIdValue: string, prompt: string = SECRET_PROMPT) => ({
+  principal,
+  requestId: AgentControlRequestId.make(requestIdValue),
+  plan: createThreadsPlan(prompt),
+  riskTags: [AgentControlRiskTag.make("creates-threads")],
+  promptSummary: "Create 1 thread in project-1",
+  expiresAt: "2026-08-17T01:00:00.000Z",
+  now: "2026-08-17T00:00:00.000Z",
+});
+
+const makeLayer = (enabled: boolean) =>
+  AgentControlProposalStoreLive.pipe(
+    Layer.provideMerge(AgentControlPolicyLive),
+    Layer.provideMerge(AgentControlProposalRepositoryLive),
+    Layer.provideMerge(AgentControlOperationRepositoryLive),
+    Layer.provideMerge(AgentControlAuditRepositoryLive),
+    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(
+      ServerSettingsService.layerTest(enabled ? { agentControl: { enabled: true } } : {}),
+    ),
+  );
+
+const disabledLayer = it.layer(makeLayer(false));
+const enabledLayer = it.layer(makeLayer(true));
+
+disabledLayer("AgentControlProposalStore (feature disabled)", (it) => {
+  it.effect("fails closed on every entry point", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+
+      const submitError = yield* Effect.flip(store.submit(submitInput("request-disabled")));
+      assert.strictEqual(submitError._tag, "AgentControlDisabledError");
+
+      const decideError = yield* Effect.flip(
+        store.decide({
+          proposalId: AgentControlProposalId.make("proposal-any"),
+          decision: "approved",
+          actor: "user",
+          decidedAt: "2026-08-17T00:00:01.000Z",
+        }),
+      );
+      assert.strictEqual(decideError._tag, "AgentControlDisabledError");
+
+      const beginError = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: AgentControlProposalId.make("proposal-any"),
+          actor: "executor",
+          now: "2026-08-17T00:00:01.000Z",
+        }),
+      );
+      assert.strictEqual(beginError._tag, "AgentControlDisabledError");
+    }),
+  );
+});
+
+enabledLayer("AgentControlProposalStore", (it) => {
+  it.effect("creates an immutable pending proposal with a computed digest and audit row", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const audit = yield* AgentControlAuditRepository;
+      const input = submitInput("request-create");
+
+      const { proposal, replayed } = yield* store.submit(input);
+      assert.isFalse(replayed);
+      assert.strictEqual(proposal.status, "pending-user-approval");
+      assert.strictEqual(proposal.planDigest, computeAgentControlPlanDigest(input.plan));
+      assert.strictEqual(proposal.decidedAt, null);
+      assert.strictEqual(proposal.result, null);
+
+      const trail = yield* audit.listByProposalId({ proposalId: proposal.proposalId });
+      assert.deepStrictEqual(
+        trail.map((row) => String(row.eventKind)),
+        ["proposal-created"],
+      );
+      assert.deepStrictEqual((yield* store.listPending({ limit: 50 })).length >= 1, true);
+    }),
+  );
+
+  it.effect("replays an identical request without creating a second proposal", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const audit = yield* AgentControlAuditRepository;
+      const input = submitInput("request-replay");
+
+      const first = yield* store.submit(input);
+      const second = yield* store.submit(input);
+      assert.isTrue(second.replayed);
+      assert.strictEqual(second.proposal.proposalId, first.proposal.proposalId);
+      assert.strictEqual(second.proposal.planDigest, first.proposal.planDigest);
+
+      const trail = yield* audit.listByProposalId({ proposalId: first.proposal.proposalId });
+      assert.deepStrictEqual(
+        trail.map((row) => String(row.eventKind)),
+        ["proposal-created"],
+      );
+    }),
+  );
+
+  it.effect("rejects reusing a request id with a different plan and audits the attempt", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const audit = yield* AgentControlAuditRepository;
+
+      const first = yield* store.submit(submitInput("request-dup"));
+      const error = yield* Effect.flip(
+        store.submit({
+          ...submitInput("request-dup", "A completely different prompt."),
+          now: "2026-08-17T00:00:01.000Z",
+        }),
+      );
+      assert.strictEqual(error._tag, "AgentControlDuplicateRequestError");
+      if (error._tag !== "AgentControlDuplicateRequestError") return;
+      assert.strictEqual(error.existingProposalId, first.proposal.proposalId);
+      assert.notStrictEqual(error.requestedPlanDigest, error.existingPlanDigest);
+
+      // The original proposal is untouched.
+      const unchanged = Option.getOrThrow(yield* store.getById(first.proposal.proposalId));
+      assert.strictEqual(unchanged.planDigest, first.proposal.planDigest);
+      assert.strictEqual(unchanged.status, "pending-user-approval");
+
+      const trail = yield* audit.listByProposalId({ proposalId: first.proposal.proposalId });
+      assert.deepStrictEqual(
+        trail.map((row) => String(row.eventKind)),
+        ["proposal-created", "duplicate-request-rejected"],
+      );
+    }),
+  );
+
+  it.effect("runs the approved lifecycle and preserves the digest through every transition", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const repository = yield* AgentControlProposalRepository;
+      const { proposal } = yield* store.submit(submitInput("request-lifecycle"));
+
+      const approved = yield* store.decide({
+        proposalId: proposal.proposalId,
+        decision: "approved",
+        actor: "user",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+      });
+      assert.strictEqual(approved.status, "approved");
+      assert.strictEqual(approved.decidedAt, "2026-08-17T00:05:00.000Z");
+
+      // Only the executor may move an accepted proposal into executing.
+      const userBegin = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: proposal.proposalId,
+          actor: "user",
+          now: "2026-08-17T00:06:00.000Z",
+        }),
+      );
+      assert.strictEqual(userBegin._tag, "AgentControlInvalidTransitionError");
+
+      const executing = yield* store.beginExecution({
+        proposalId: proposal.proposalId,
+        actor: "executor",
+        now: "2026-08-17T00:06:00.000Z",
+      });
+      assert.strictEqual(executing.status, "executing");
+
+      const completed = yield* store.settleExecution({
+        proposalId: proposal.proposalId,
+        result: {
+          outcome: "completed",
+          createdThreadIds: [ThreadId.make("thread-2")],
+          completedAt: "2026-08-17T00:07:00.000Z",
+        },
+        now: "2026-08-17T00:07:00.000Z",
+      });
+      assert.strictEqual(completed.status, "completed");
+
+      const row = Option.getOrThrow(yield* repository.getById({ proposalId: proposal.proposalId }));
+      assert.strictEqual(row.planDigest, proposal.planDigest);
+      assert.deepStrictEqual(row.plan, proposal.plan);
+      assert.strictEqual(row.result?.outcome, "completed");
+    }),
+  );
+
+  it.effect("rejects illegal transitions outright", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const { proposal } = yield* store.submit(submitInput("request-illegal"));
+
+      // Pending proposals cannot execute — not even for the executor.
+      const pendingBegin = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: proposal.proposalId,
+          actor: "executor",
+          now: "2026-08-17T00:01:00.000Z",
+        }),
+      );
+      assert.strictEqual(pendingBegin._tag, "AgentControlInvalidTransitionError");
+
+      // Settling something that never began executing is illegal.
+      const settleError = yield* Effect.flip(
+        store.settleExecution({
+          proposalId: proposal.proposalId,
+          result: { outcome: "completed", completedAt: "2026-08-17T00:01:00.000Z" },
+          now: "2026-08-17T00:01:00.000Z",
+        }),
+      );
+      assert.strictEqual(settleError._tag, "AgentControlInvalidTransitionError");
+
+      // Approval decisions belong to the user, not the executor.
+      const executorApprove = yield* Effect.flip(
+        store.decide({
+          proposalId: proposal.proposalId,
+          decision: "approved",
+          actor: "executor",
+          decidedAt: "2026-08-17T00:01:00.000Z",
+        }),
+      );
+      assert.strictEqual(executorApprove._tag, "AgentControlInvalidTransitionError");
+    }),
+  );
+
+  it.effect("never executes rejected or cancelled proposals", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+
+      const rejected = yield* store.submit(submitInput("request-rejected"));
+      yield* store.decide({
+        proposalId: rejected.proposal.proposalId,
+        decision: "rejected",
+        actor: "user",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+      });
+      const rejectedBegin = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: rejected.proposal.proposalId,
+          actor: "executor",
+          now: "2026-08-17T00:06:00.000Z",
+        }),
+      );
+      assert.strictEqual(rejectedBegin._tag, "AgentControlInvalidTransitionError");
+      const rejectedRow = Option.getOrThrow(yield* store.getById(rejected.proposal.proposalId));
+      assert.strictEqual(rejectedRow.result?.outcome, "failed");
+
+      const cancelled = yield* store.submit(submitInput("request-cancelled"));
+      yield* store.decide({
+        proposalId: cancelled.proposal.proposalId,
+        decision: "cancelled",
+        actor: "user",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+      });
+      const cancelledBegin = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: cancelled.proposal.proposalId,
+          actor: "executor",
+          now: "2026-08-17T00:06:00.000Z",
+        }),
+      );
+      assert.strictEqual(cancelledBegin._tag, "AgentControlInvalidTransitionError");
+    }),
+  );
+
+  it.effect("expires an approved proposal at execution time instead of running it", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const { proposal } = yield* store.submit(submitInput("request-expiry"));
+      yield* store.decide({
+        proposalId: proposal.proposalId,
+        decision: "approved",
+        actor: "user",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+      });
+
+      const expiredError = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: proposal.proposalId,
+          actor: "executor",
+          now: "2026-08-17T02:00:00.000Z",
+        }),
+      );
+      assert.strictEqual(expiredError._tag, "AgentControlProposalExpiredError");
+
+      const row = Option.getOrThrow(yield* store.getById(proposal.proposalId));
+      assert.strictEqual(row.status, "expired");
+      assert.strictEqual(row.result?.outcome, "failed");
+
+      // Terminal: a later execution attempt stays refused.
+      const retry = yield* Effect.flip(
+        store.beginExecution({
+          proposalId: proposal.proposalId,
+          actor: "executor",
+          now: "2026-08-17T02:01:00.000Z",
+        }),
+      );
+      assert.strictEqual(retry._tag, "AgentControlProposalExpiredError");
+    }),
+  );
+
+  it.effect("refuses to approve a proposal whose expiry already passed", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const { proposal } = yield* store.submit(submitInput("request-late-approve"));
+
+      const error = yield* Effect.flip(
+        store.decide({
+          proposalId: proposal.proposalId,
+          decision: "approved",
+          actor: "user",
+          decidedAt: "2026-08-17T03:00:00.000Z",
+        }),
+      );
+      assert.strictEqual(error._tag, "AgentControlProposalExpiredError");
+      const row = Option.getOrThrow(yield* store.getById(proposal.proposalId));
+      assert.strictEqual(row.status, "expired");
+    }),
+  );
+
+  it.effect("keeps prompts and plan payloads out of audit rows", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const audit = yield* AgentControlAuditRepository;
+      const { proposal } = yield* store.submit(submitInput("request-redaction"));
+      yield* store.decide({
+        proposalId: proposal.proposalId,
+        decision: "rejected",
+        actor: "user",
+        decidedAt: "2026-08-17T00:05:00.000Z",
+      });
+
+      const trail = yield* audit.listByProposalId({ proposalId: proposal.proposalId });
+      assert.isAtLeast(trail.length, 2);
+      const serialized = JSON.stringify(trail);
+      assert.notInclude(serialized, "SECRET-PROMPT-TOKEN");
+      assert.notInclude(serialized, "rotate the API keys");
+      assert.notInclude(serialized, "Fix the flaky test");
+      // Identifiers and the audit-safe summary are retained.
+      assert.include(serialized, proposal.planDigest);
+      assert.include(serialized, "Create 1 thread in project-1");
+    }),
+  );
+});

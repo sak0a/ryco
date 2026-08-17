@@ -97,6 +97,12 @@ import { AtlassianConnectionRepositoryLive } from "./persistence/Layers/Atlassia
 import { AtlassianResourceRepositoryLive } from "./persistence/Layers/AtlassianResources.ts";
 import { ProjectAtlassianLinkRepositoryLive } from "./persistence/Layers/ProjectAtlassianLinks.ts";
 import { ProjectionWorktreeRepositoryLive } from "./persistence/Layers/ProjectionWorktrees.ts";
+import { AgentControlAuditRepositoryLive } from "./persistence/Layers/AgentControlAudit.ts";
+import { AgentControlOperationRepositoryLive } from "./persistence/Layers/AgentControlOperations.ts";
+import { AgentControlProposalRepositoryLive } from "./persistence/Layers/AgentControlProposals.ts";
+import { AgentControlOperationStoreLive } from "./agentControl/Layers/AgentControlOperationStore.ts";
+import { AgentControlPolicyLive } from "./agentControl/Layers/AgentControlPolicy.ts";
+import { AgentControlProposalStoreLive } from "./agentControl/Layers/AgentControlProposalStore.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -193,6 +199,21 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+
+// Agent Control foundation: policy plus proposal/operation facades over
+// their dedicated repositories. The feature defaults to disabled and every
+// entry point fails closed, so composing these services has no runtime side
+// effects — they exist for tests and the future approval/executor slices.
+// No MCP endpoint, provider injection, or RPC surface consumes them yet.
+const AgentControlLayerLive = Layer.mergeAll(
+  AgentControlProposalStoreLive,
+  AgentControlOperationStoreLive,
+).pipe(
+  Layer.provideMerge(AgentControlPolicyLive),
+  Layer.provideMerge(AgentControlProposalRepositoryLive),
+  Layer.provideMerge(AgentControlOperationRepositoryLive),
+  Layer.provideMerge(AgentControlAuditRepositoryLive),
+);
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
@@ -304,6 +325,7 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
+  Layer.provideMerge(AgentControlLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(ProjectionWorktreeRepositoryLive),
   Layer.provideMerge(KeybindingsLive),
