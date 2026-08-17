@@ -110,3 +110,7 @@ export type AtlassianResourceRepositoryError = PersistenceSqlError | Persistence
 export type ProjectAtlassianLinkRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 
 export type ProjectionRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+
+export type AgentControlProposalRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+export type AgentControlOperationRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+export type AgentControlAuditRepositoryError = PersistenceSqlError | PersistenceDecodeError;
