@@ -4,6 +4,7 @@ import type * as EffectAcpProtocol from "effect-acp/protocol";
 
 import type { EventNdjsonLogger } from "../Layers/EventNdjsonLogger.ts";
 import type { AcpSessionRequestLogEvent, AcpSessionRuntimeOptions } from "./AcpSessionRuntime.ts";
+import { redactAgentControlSecrets } from "../../agentControl/ProviderInjection.ts";
 
 function writeNativeAcpLog(input: {
   readonly nativeEventLogger: EventNdjsonLogger | undefined;
@@ -33,13 +34,13 @@ function writeNativeAcpLog(input: {
 }
 
 function formatRequestLogPayload(event: AcpSessionRequestLogEvent) {
-  return {
+  return redactAgentControlSecrets({
     method: event.method,
     status: event.status,
     request: event.payload,
     ...(event.result !== undefined ? { result: event.result } : {}),
     ...(event.cause !== undefined ? { cause: Cause.pretty(event.cause) } : {}),
-  };
+  });
 }
 
 export function makeAcpNativeLoggers(input: {
@@ -67,7 +68,7 @@ export function makeAcpNativeLoggers(input: {
                 provider: input.provider,
                 threadId: input.threadId,
                 kind: "protocol",
-                payload: event,
+                payload: redactAgentControlSecrets(event),
               }),
           } satisfies NonNullable<AcpSessionRuntimeOptions["protocolLogging"]>,
         }

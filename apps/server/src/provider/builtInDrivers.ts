@@ -43,6 +43,7 @@ import type {
   ProviderDriver,
   ProviderDriverCreateInput,
 } from "./ProviderDriver.ts";
+import { agentControlSupportForDriver } from "../agentControl/ProviderInjection.ts";
 
 /**
  * Union of infrastructure services required to construct any built-in
@@ -81,6 +82,7 @@ const CodexLazyDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   metadata: {
     displayName: "Codex",
     supportsMultipleInstances: true,
+    agentControl: agentControlSupportForDriver(codexDriverKind),
   },
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => Schema.decodeSync(CodexSettings)({}),
@@ -96,6 +98,7 @@ const ClaudeLazyDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
   metadata: {
     displayName: "Claude",
     supportsMultipleInstances: true,
+    agentControl: agentControlSupportForDriver(claudeDriverKind),
   },
   configSchema: ClaudeSettings,
   defaultConfig: (): ClaudeSettings => Schema.decodeSync(ClaudeSettings)({}),
@@ -111,6 +114,7 @@ const CopilotLazyDriver: ProviderDriver<CopilotSettings, CopilotDriverEnv> = {
   metadata: {
     displayName: "GitHub Copilot",
     supportsMultipleInstances: true,
+    agentControl: agentControlSupportForDriver(copilotDriverKind),
   },
   configSchema: CopilotSettings,
   defaultConfig: (): CopilotSettings => Schema.decodeSync(CopilotSettings)({}),
@@ -126,6 +130,7 @@ const CursorLazyDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
   metadata: {
     displayName: "Cursor",
     supportsMultipleInstances: true,
+    agentControl: agentControlSupportForDriver(cursorDriverKind),
   },
   configSchema: CursorSettings,
   defaultConfig: (): CursorSettings => Schema.decodeSync(CursorSettings)({}),
@@ -141,6 +146,7 @@ const GrokLazyDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
   metadata: {
     displayName: "Grok",
     supportsMultipleInstances: true,
+    agentControl: agentControlSupportForDriver(grokDriverKind),
   },
   configSchema: GrokSettings,
   defaultConfig: (): GrokSettings => Schema.decodeSync(GrokSettings)({}),
@@ -156,6 +162,7 @@ const OpenCodeLazyDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = 
   metadata: {
     displayName: "OpenCode",
     supportsMultipleInstances: true,
+    agentControl: agentControlSupportForDriver(openCodeDriverKind),
   },
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => Schema.decodeSync(OpenCodeSettings)({}),

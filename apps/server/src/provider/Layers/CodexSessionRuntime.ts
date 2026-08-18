@@ -21,7 +21,7 @@ import {
   TurnId,
 } from "@ryco/contracts";
 import { normalizeModelSlug } from "@ryco/shared/model";
-import { Deferred, Effect, Exit, Layer, Queue, Ref, Scope, Schema, Stream } from "effect";
+import { Deferred, Effect, Exit, Layer, Queue, Redacted, Ref, Scope, Schema, Stream } from "effect";
 import * as SchemaIssue from "effect/SchemaIssue";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as CodexClient from "effect-codex-app-server/client";
@@ -85,6 +85,44 @@ type CodexThreadItem =
   | EffectCodexSchema.V2ThreadRollbackResponse["thread"]["turns"][number]["items"][number];
 type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["serviceTier"]>;
 
+/**
+ * Injected per-runtime Agent Control MCP connection. The bearer enters
+ * exactly one channel: the `thread/start` `config` record, which lands in
+ * the app-server's in-memory session-flags layer. It is never written to
+ * any config.toml, never placed in the process environment or argv, and
+ * therefore can never be inherited by shell subprocesses codex spawns.
+ */
+export interface CodexAgentControlInjection {
+  readonly serverName: string;
+  readonly endpointUrl: string;
+  readonly authorization: Redacted.Redacted<string>;
+  readonly instructions: string;
+}
+
+export const CODEX_AGENT_CONTROL_SERVER_NAME = "ryco";
+
+/**
+ * Session-flags config record advertising the private MCP endpoint to this
+ * runtime's codex app-server. `http_headers` carries the literal bearer —
+ * deliberately not `bearer_token_env_var`, which would force the token
+ * into the codex process env where agent shell commands inherit it.
+ */
+export function buildAgentControlThreadConfig(
+  injection: CodexAgentControlInjection,
+): Record<string, unknown> {
+  return {
+    mcp_servers: {
+      [injection.serverName]: {
+        url: injection.endpointUrl,
+        http_headers: {
+          Authorization: `Bearer ${Redacted.value(injection.authorization)}`,
+        },
+        startup_timeout_sec: 10,
+      },
+    },
+  };
+}
+
 export interface CodexSessionRuntimeOptions {
   readonly threadId: ThreadId;
   readonly providerInstanceId?: ProviderInstanceId;
@@ -98,6 +136,7 @@ export interface CodexSessionRuntimeOptions {
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly tokenReductionInstructions?: string | undefined;
+  readonly agentControl?: CodexAgentControlInjection | undefined;
   readonly resumeCursor?: CodexResumeCursor;
 }
 
@@ -321,25 +360,29 @@ function buildThreadStartParams(input: {
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly deviceToolBinding?: DeviceToolBinding | null;
+  readonly agentControl?: CodexAgentControlInjection | undefined;
 }): EffectCodexSchema.V2ThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const agentControlMcpServers = input.agentControl
+    ? (buildAgentControlThreadConfig(input.agentControl).mcp_servers as Record<string, unknown>)
+    : {};
+  const mcpServers = {
+    ...(input.deviceToolBinding
+      ? {
+          ryco_device: {
+            url: input.deviceToolBinding.url,
+            http_headers: { ...input.deviceToolBinding.headers },
+          },
+        }
+      : {}),
+    ...agentControlMcpServers,
+  };
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     approvalsReviewer: config.approvalsReviewer,
-    ...(input.deviceToolBinding
-      ? {
-          config: {
-            mcp_servers: {
-              ryco_device: {
-                url: input.deviceToolBinding.url,
-                http_headers: { ...input.deviceToolBinding.headers },
-              },
-            },
-          },
-        }
-      : {}),
+    ...(Object.keys(mcpServers).length > 0 ? { config: { mcp_servers: mcpServers } } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
@@ -372,12 +415,13 @@ function buildCodexCollaborationMode(input: {
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly customSystemPrompt?: string;
   readonly tokenReductionInstructions?: string;
+  readonly hostContextInstructions?: string;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
   }
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
-  const developerInstructions = appendProjectCustomSystemPrompt(
+  const baseInstructions = appendProjectCustomSystemPrompt(
     appendProjectCustomSystemPrompt(
       input.interactionMode === "plan"
         ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
@@ -388,6 +432,9 @@ function buildCodexCollaborationMode(input: {
     ),
     input.customSystemPrompt,
   );
+  const developerInstructions = input.hostContextInstructions
+    ? `${baseInstructions}\n\n${input.hostContextInstructions}`
+    : baseInstructions;
   return {
     // The Codex app-server protocol only knows the "plan" and "default"
     // collaboration modes; "ask" rides on "default" with ask developer
@@ -415,6 +462,7 @@ export function buildTurnStartParams(input: {
   readonly interactionMode?: ProviderInteractionMode;
   readonly customSystemPrompt?: string;
   readonly tokenReductionInstructions?: string;
+  readonly hostContextInstructions?: string;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -438,6 +486,9 @@ export function buildTurnStartParams(input: {
     ...(input.customSystemPrompt ? { customSystemPrompt: input.customSystemPrompt } : {}),
     ...(input.tokenReductionInstructions
       ? { tokenReductionInstructions: input.tokenReductionInstructions }
+      : {}),
+    ...(input.hostContextInstructions
+      ? { hostContextInstructions: input.hostContextInstructions }
       : {}),
   });
 
@@ -536,6 +587,7 @@ export const openCodexThread = (input: {
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
   readonly deviceToolBinding?: DeviceToolBinding | null;
+  readonly agentControl?: CodexAgentControlInjection | undefined;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -546,6 +598,7 @@ export const openCodexThread = (input: {
     ...(input.deviceToolBinding !== undefined
       ? { deviceToolBinding: input.deviceToolBinding }
       : {}),
+    ...(input.agentControl ? { agentControl: input.agentControl } : {}),
   });
 
   if (resumeThreadId === undefined) {
@@ -1774,6 +1827,7 @@ export const makeCodexSessionRuntime = (
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
         deviceToolBinding,
+        ...(options.agentControl ? { agentControl: options.agentControl } : {}),
       });
 
       const providerThreadId = opened.thread.id;
@@ -1839,6 +1893,9 @@ export const makeCodexSessionRuntime = (
             ...(input.customSystemPrompt ? { customSystemPrompt: input.customSystemPrompt } : {}),
             ...(options.tokenReductionInstructions
               ? { tokenReductionInstructions: options.tokenReductionInstructions }
+              : {}),
+            ...(options.agentControl
+              ? { hostContextInstructions: options.agentControl.instructions }
               : {}),
           });
           const rawResponse = yield* client.raw.request("turn/start", params);

@@ -1,0 +1,174 @@
+/**
+ * Pure Agent Control proposal-queue state: hydration from queue snapshots,
+ * per-proposal deduplicated change-event application, and selectors.
+ *
+ * The server is the only policy authority — this module never decides
+ * anything; it renders what the server published. Every change event
+ * carries the full proposal document, so applying state is an upsert
+ * keyed by `proposalId`:
+ *
+ *   - A snapshot replaces the environment's state wholesale (server
+ *     revisions are per-process, not durable, so each snapshot is a fresh
+ *     baseline).
+ *   - Per proposal, a document may never move backward through the legal
+ *     status progression (pending → approved → executing → terminal, each
+ *     status entered at most once). Ordering by status rather than by
+ *     event revision makes replayed, duplicated, or reordered deliveries
+ *     all harmless — a stale document simply loses the upsert.
+ *   - Terminal proposals stay as bounded history; the oldest are pruned.
+ */
+import {
+  AGENT_CONTROL_QUEUE_RECENT_LIMIT_DEFAULT,
+  AGENT_CONTROL_TERMINAL_PROPOSAL_STATUSES,
+  type AgentControlProposal,
+  type AgentControlProposalStatus,
+  type AgentControlProposalStreamEvent,
+  type ThreadId,
+} from "@ryco/contracts";
+
+export interface AgentControlQueueState {
+  /** Whether a snapshot has been applied since (re)subscribing. */
+  readonly hydrated: boolean;
+  /** Highest observed change revision; informational, not used to drop. */
+  readonly revision: number;
+  readonly proposalsById: Readonly<Record<string, AgentControlProposal>>;
+}
+
+export const EMPTY_AGENT_CONTROL_QUEUE_STATE: AgentControlQueueState = {
+  hydrated: false,
+  revision: 0,
+  proposalsById: {},
+};
+
+/** Terminal proposals kept as local history before pruning the oldest. */
+export const AGENT_CONTROL_CLIENT_HISTORY_LIMIT = AGENT_CONTROL_QUEUE_RECENT_LIMIT_DEFAULT;
+
+const TERMINAL_STATUSES: ReadonlySet<AgentControlProposalStatus> = new Set(
+  AGENT_CONTROL_TERMINAL_PROPOSAL_STATUSES,
+);
+
+export function isTerminalAgentControlStatus(status: AgentControlProposalStatus): boolean {
+  return TERMINAL_STATUSES.has(status);
+}
+
+/**
+ * Position in the one-way status progression from the server's legal
+ * transition table. All terminal statuses share a rank: a proposal enters
+ * exactly one of them, so equal-rank documents are identical.
+ */
+const STATUS_PROGRESSION_RANK: Record<AgentControlProposalStatus, number> = {
+  "pending-user-approval": 0,
+  approved: 1,
+  executing: 2,
+  rejected: 3,
+  expired: 3,
+  completed: 3,
+  failed: 3,
+  cancelled: 3,
+};
+
+function pruneTerminalHistory(
+  proposalsById: Readonly<Record<string, AgentControlProposal>>,
+): Readonly<Record<string, AgentControlProposal>> {
+  const terminal = Object.values(proposalsById).filter((proposal) =>
+    isTerminalAgentControlStatus(proposal.status),
+  );
+  if (terminal.length <= AGENT_CONTROL_CLIENT_HISTORY_LIMIT) {
+    return proposalsById;
+  }
+  const dropped = terminal
+    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+    .slice(AGENT_CONTROL_CLIENT_HISTORY_LIMIT);
+  const next = { ...proposalsById };
+  for (const proposal of dropped) {
+    delete next[proposal.proposalId];
+  }
+  return next;
+}
+
+export function applyAgentControlStreamEvent(
+  state: AgentControlQueueState,
+  event: AgentControlProposalStreamEvent,
+): AgentControlQueueState {
+  if (event.type === "snapshot") {
+    const proposalsById: Record<string, AgentControlProposal> = {};
+    for (const proposal of [...event.queue.active, ...event.queue.recent]) {
+      proposalsById[proposal.proposalId] = proposal;
+    }
+    return {
+      hydrated: true,
+      revision: event.queue.revision,
+      proposalsById,
+    };
+  }
+
+  // Change events before the first snapshot have no state to update; the
+  // snapshot that follows will cover them.
+  if (!state.hydrated) {
+    return state;
+  }
+  const next = event.proposal;
+  const current = state.proposalsById[next.proposalId];
+  if (current !== undefined) {
+    const currentRank = STATUS_PROGRESSION_RANK[current.status];
+    const nextRank = STATUS_PROGRESSION_RANK[next.status];
+    // Stale document from a reordered delivery: the progression never
+    // moves backward, so the lower-ranked document loses.
+    if (nextRank < currentRank) {
+      return state;
+    }
+    // Same rank means the same document (each status is entered at most
+    // once) — a replay; keep the state identity stable.
+    if (nextRank === currentRank) {
+      return state;
+    }
+  }
+  return {
+    hydrated: true,
+    revision: Math.max(state.revision, event.revision),
+    proposalsById: pruneTerminalHistory({
+      ...state.proposalsById,
+      [next.proposalId]: next,
+    }),
+  };
+}
+
+/** Non-terminal proposals, oldest first — the live queue. */
+export function selectActiveAgentControlProposals(
+  state: AgentControlQueueState,
+): ReadonlyArray<AgentControlProposal> {
+  return Object.values(state.proposalsById)
+    .filter((proposal) => !isTerminalAgentControlStatus(proposal.status))
+    .toSorted(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) ||
+        left.proposalId.localeCompare(right.proposalId),
+    );
+}
+
+/** Terminal proposals, most recently updated first — the history. */
+export function selectRecentAgentControlProposals(
+  state: AgentControlQueueState,
+): ReadonlyArray<AgentControlProposal> {
+  return Object.values(state.proposalsById)
+    .filter((proposal) => isTerminalAgentControlStatus(proposal.status))
+    .toSorted(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) ||
+        right.proposalId.localeCompare(left.proposalId),
+    );
+}
+
+/**
+ * Live proposals raised from inside `threadId` — the thread-local card
+ * shows the caller thread its own outstanding requests.
+ */
+export function selectAgentControlProposalsForThread(
+  state: AgentControlQueueState,
+  threadId: ThreadId,
+): ReadonlyArray<AgentControlProposal> {
+  return selectActiveAgentControlProposals(state).filter(
+    (proposal) =>
+      proposal.principal.kind === "provider-session" && proposal.principal.threadId === threadId,
+  );
+}

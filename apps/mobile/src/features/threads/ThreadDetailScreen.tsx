@@ -39,6 +39,11 @@ import {
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { newCommandId, newMessageId } from "../../lib/ids";
 import { useThemeColor } from "../../lib/useThemeColor";
+import {
+  selectAgentControlProposalsForThread,
+  useAgentControlStore,
+} from "../../state/agentControlRuntime";
+import { useAgentControlSync } from "../../state/agentControlSync";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
 import {
@@ -52,6 +57,7 @@ import type { QueuedThreadMessage } from "../../state/threadOutboxModel";
 import { useThreadTimeline } from "../../state/threadTimeline";
 import { selectProjectByRef, selectThreadByRef, useStore } from "../../state/threadsRuntime";
 import { useHomeEnvironments } from "../home/useHomeEnvironments";
+import { AgentControlProposalCard } from "./AgentControlProposalCard";
 import { executeSendTurn } from "./executeSendTurn";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
@@ -235,6 +241,20 @@ export function ThreadDetailScreen(props: {
   const environments = useHomeEnvironments();
   const pendingApprovals = built?.viewModel.pendingApprovals ?? [];
   const pendingUserInputs = built?.viewModel.pendingUserInputs ?? [];
+  // Agent Control proposals share the web runtime state; mobile only syncs
+  // while the server-side setting is enabled and renders the same queue.
+  const agentControlEnabled = serverConfig?.settings.agentControl.enabled ?? false;
+  useAgentControlSync(environmentId, agentControlEnabled);
+  const agentControlQueue = useAgentControlStore(
+    (state) => state.queueByEnvironmentId[environmentId] ?? null,
+  );
+  const agentControlProposals = useMemo(
+    () =>
+      agentControlEnabled && agentControlQueue !== null
+        ? selectAgentControlProposalsForThread(agentControlQueue, threadId)
+        : [],
+    [agentControlEnabled, agentControlQueue, threadId],
+  );
   const worktree = useMemo(
     () => (thread ? findThreadWorktree(thread, worktrees) : null),
     [thread, worktrees],
@@ -595,7 +615,8 @@ export function ThreadDetailScreen(props: {
       <TimelineRow entry={item.entry} />
     );
   const visibleError = sendError ?? thread?.error ?? null;
-  const hasPrompts = pendingApprovals.length > 0 || pendingUserInputs.length > 0;
+  const hasPrompts =
+    pendingApprovals.length > 0 || pendingUserInputs.length > 0 || agentControlProposals.length > 0;
 
   return (
     <KeyboardAvoidingView
@@ -687,6 +708,13 @@ export function ThreadDetailScreen(props: {
               environmentId={environmentId}
               threadId={threadId}
               userInput={userInput}
+            />
+          ))}
+          {agentControlProposals.map((proposal) => (
+            <AgentControlProposalCard
+              key={proposal.proposalId}
+              environmentId={environmentId}
+              proposal={proposal}
             />
           ))}
         </ScrollView>

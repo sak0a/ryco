@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  AGENT_CONTROL_WS_METHODS,
   CONTEXT_HANDOFF_WS_METHODS,
   DEVICE_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
@@ -16,10 +17,13 @@ describe("shared RPC access policy", () => {
         ...Object.values(ORCHESTRATION_WS_METHODS),
         ...Object.values(CONTEXT_HANDOFF_WS_METHODS),
         ...Object.values(DEVICE_WS_METHODS),
+        ...Object.values(AGENT_CONTROL_WS_METHODS),
       ]),
     );
     expect(rpcAccessFor(WS_METHODS.searchThreadMessages)).toBe("owner");
     expect(rpcAccessFor(ORCHESTRATION_WS_METHODS.searchThreadMessages)).toBe("viewer");
+    expect(rpcAccessFor(AGENT_CONTROL_WS_METHODS.listProposals)).toBe("owner");
+    expect(rpcAccessFor(AGENT_CONTROL_WS_METHODS.acceptProposal)).toBe("owner");
   });
 
   it("fails closed for missing or stale hosted roles", () => {

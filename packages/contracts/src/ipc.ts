@@ -32,6 +32,22 @@ import type {
   VcsStatusResult,
   VcsCreateRefResult,
 } from "./git.ts";
+import type {
+  AgentControlDecideProposalInput,
+  AgentControlGetProposalInput,
+  AgentControlGetProposalResult,
+  AgentControlListProposalsInput,
+  AgentControlProposalQueue,
+  AgentControlProposalReceipt,
+  AgentControlProposalStreamEvent,
+  AgentControlExternalIntegrationCreateInput,
+  AgentControlExternalIntegrationDeleteResult,
+  AgentControlExternalIntegrationIdInput,
+  AgentControlExternalIntegrationListResult,
+  AgentControlExternalIntegrationMutationResult,
+  AgentControlExternalIntegrationUpdateInput,
+  AgentControlExternalPairingResult,
+} from "./agentControl.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
   McpListServersInput,
@@ -779,5 +795,42 @@ export interface EnvironmentApi {
       input: ContextHandoffRawPayloadChunkInput,
     ) => Promise<ContextHandoffRawPayloadChunk>;
     readExportChunk: (input: ContextHandoffExportChunkInput) => Promise<ContextHandoffExportChunk>;
+  };
+  /**
+   * Agent Control approval surface. Optional as a whole so clients can
+   * feature-detect against environments predating Agent Control.
+   */
+  agentControl?: {
+    listProposals: (input: AgentControlListProposalsInput) => Promise<AgentControlProposalQueue>;
+    getProposal: (input: AgentControlGetProposalInput) => Promise<AgentControlGetProposalResult>;
+    acceptProposal: (
+      input: AgentControlDecideProposalInput,
+    ) => Promise<AgentControlProposalReceipt>;
+    rejectProposal: (
+      input: AgentControlDecideProposalInput,
+    ) => Promise<AgentControlProposalReceipt>;
+    subscribeProposals: (
+      callback: (event: AgentControlProposalStreamEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+        onError?: () => void;
+      },
+    ) => () => void;
+    listIntegrations: () => Promise<AgentControlExternalIntegrationListResult>;
+    createIntegration: (
+      input: AgentControlExternalIntegrationCreateInput,
+    ) => Promise<AgentControlExternalPairingResult>;
+    updateIntegration: (
+      input: AgentControlExternalIntegrationUpdateInput,
+    ) => Promise<AgentControlExternalIntegrationMutationResult>;
+    resumeIntegrationPairing: (
+      input: AgentControlExternalIntegrationIdInput,
+    ) => Promise<AgentControlExternalPairingResult>;
+    revokeIntegration: (
+      input: AgentControlExternalIntegrationIdInput,
+    ) => Promise<AgentControlExternalIntegrationMutationResult>;
+    deleteIntegration: (
+      input: AgentControlExternalIntegrationIdInput,
+    ) => Promise<AgentControlExternalIntegrationDeleteResult>;
   };
 }

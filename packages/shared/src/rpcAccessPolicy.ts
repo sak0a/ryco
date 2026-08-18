@@ -1,4 +1,5 @@
 import {
+  AGENT_CONTROL_WS_METHODS,
   CONTEXT_HANDOFF_WS_METHODS,
   DEVICE_WS_METHODS,
   ORCHESTRATION_WS_METHODS,
@@ -10,7 +11,8 @@ export type RpcMethod =
   | (typeof WS_METHODS)[keyof typeof WS_METHODS]
   | (typeof ORCHESTRATION_WS_METHODS)[keyof typeof ORCHESTRATION_WS_METHODS]
   | (typeof CONTEXT_HANDOFF_WS_METHODS)[keyof typeof CONTEXT_HANDOFF_WS_METHODS]
-  | (typeof DEVICE_WS_METHODS)[keyof typeof DEVICE_WS_METHODS];
+  | (typeof DEVICE_WS_METHODS)[keyof typeof DEVICE_WS_METHODS]
+  | (typeof AGENT_CONTROL_WS_METHODS)[keyof typeof AGENT_CONTROL_WS_METHODS];
 
 export type RpcAccess = RelayEffectiveRole | "authenticated" | "direct_owner";
 
@@ -21,6 +23,20 @@ export const RPC_ACCESS_POLICY = {
   [DEVICE_WS_METHODS.input]: "owner",
   [DEVICE_WS_METHODS.app]: "owner",
   [DEVICE_WS_METHODS.recording]: "owner",
+  // Agent Control approval decisions authorize agent-requested mutations
+  // and the queue exposes prompt summaries and target metadata, so the
+  // whole surface is owner-only — including reads and the push stream.
+  [AGENT_CONTROL_WS_METHODS.acceptProposal]: "owner",
+  [AGENT_CONTROL_WS_METHODS.getProposal]: "owner",
+  [AGENT_CONTROL_WS_METHODS.listProposals]: "owner",
+  [AGENT_CONTROL_WS_METHODS.rejectProposal]: "owner",
+  [AGENT_CONTROL_WS_METHODS.subscribeProposals]: "owner",
+  [AGENT_CONTROL_WS_METHODS.listIntegrations]: "owner",
+  [AGENT_CONTROL_WS_METHODS.createIntegration]: "owner",
+  [AGENT_CONTROL_WS_METHODS.updateIntegration]: "owner",
+  [AGENT_CONTROL_WS_METHODS.resumeIntegrationPairing]: "owner",
+  [AGENT_CONTROL_WS_METHODS.revokeIntegration]: "owner",
+  [AGENT_CONTROL_WS_METHODS.deleteIntegration]: "owner",
   [WS_METHODS.atlassianDisconnect]: "owner",
   [WS_METHODS.atlassianGetProjectLink]: "owner",
   [WS_METHODS.atlassianListConnections]: "owner",

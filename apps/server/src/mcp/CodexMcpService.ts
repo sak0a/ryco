@@ -89,7 +89,7 @@ function workspaceIdFor(sharedHomePath: string): McpWorkspaceId {
   return McpWorkspaceId.make(`codex:${Buffer.from(sharedHomePath, "utf8").toString("base64url")}`);
 }
 
-function mcpSupportForDriver(
+export function mcpSupportForDriver(
   driver: ProviderDriverKind,
 ): Pick<McpProviderSupport, "status" | "message"> {
   switch (driver) {
@@ -119,7 +119,8 @@ function mcpSupportForDriver(
     case CURSOR_DRIVER:
       return {
         status: "unsupported",
-        message: "Cursor ACP sessions are currently started without MCP server bindings in Ryco.",
+        message:
+          "Cursor user-managed MCP configuration is not exposed in this panel; Ryco may separately inject its private internal Agent Control server per session.",
       };
     default:
       return {

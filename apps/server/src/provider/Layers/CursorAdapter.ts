@@ -81,6 +81,12 @@ import {
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import {
+  agentControlHostContext,
+  installAgentControlAcp,
+  type AgentControlAcpInjection,
+  type AgentControlProviderBridge,
+} from "../../agentControl/ProviderInjection.ts";
 
 const PROVIDER = ProviderDriverKind.make("cursor");
 const CURSOR_RESUME_VERSION = 1 as const;
@@ -109,6 +115,8 @@ export interface CursorAdapterLiveOptions {
    * the latest snapshot so the closure isn't stale.
    */
   readonly resolveSettings?: Effect.Effect<CursorSettings>;
+  readonly agentControl?: AgentControlProviderBridge;
+  readonly stdioProxy?: { readonly command: string; readonly entryPoint: string };
 }
 
 interface PendingApproval {
@@ -125,6 +133,9 @@ interface CursorSessionContext {
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntimeShape;
+  readonly agentControl?: AgentControlAcpInjection;
+  readonly agentControlHostContext: string;
+  agentControlHostContextDelivered: boolean;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
@@ -525,6 +536,7 @@ export function makeCursorAdapter(
       Effect.gen(function* () {
         if (ctx.stopped) return;
         ctx.stopped = true;
+        if (ctx.agentControl) yield* ctx.agentControl.revoke("runtime-teardown");
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
         if (ctx.notificationFiber) {
@@ -604,6 +616,7 @@ export function makeCursorAdapter(
               Effect.sync(() => deviceToolBinding.dispose()),
             );
           }
+          let agentControl: AgentControlAcpInjection | undefined;
 
           const resumeSessionId =
             input.resumePolicy === "fresh"
@@ -649,6 +662,39 @@ export function makeCursorAdapter(
                   ],
                 }
               : {}),
+            resolveMcpServers: (initializeResult) =>
+              installAgentControlAcp(options?.agentControl, {
+                threadId: input.threadId,
+                providerInstanceId: boundInstanceId,
+                runtimeSessionId,
+                initializeResult,
+                proxyCommand: options?.stdioProxy?.command ?? process.execPath,
+                proxyEntryPoint: options?.stdioProxy?.entryPoint ?? process.argv[1] ?? "",
+              }).pipe(
+                Effect.tap(
+                  Option.match({
+                    onNone: () => Effect.void,
+                    onSome: (installed) =>
+                      installed
+                        .addScopeFinalizer(sessionScope)
+                        .pipe(Effect.tap(() => Effect.sync(() => (agentControl = installed)))),
+                  }),
+                ),
+                Effect.map(
+                  Option.match({
+                    onNone: () => [],
+                    onSome: (installed) => [installed.mcpServer],
+                  }),
+                ),
+              ),
+            onProcessExit: () =>
+              agentControl ? agentControl.revoke("runtime-teardown") : Effect.void,
+            onMcpSetupFailure: () =>
+              agentControl
+                ? agentControl
+                    .revoke("runtime-teardown")
+                    .pipe(Effect.tap(() => Effect.sync(() => (agentControl = undefined))))
+                : Effect.void,
             ...acpNativeLoggers,
           }).pipe(
             Effect.provideService(Scope.Scope, sessionScope),
@@ -858,6 +904,11 @@ export function makeCursorAdapter(
             session,
             scope: sessionScope,
             acp,
+            ...(agentControl ? { agentControl } : {}),
+            agentControlHostContext:
+              agentControl?.hostContext ??
+              (options?.agentControl ? agentControlHostContext(false) : ""),
+            agentControlHostContextDelivered: false,
             notificationFiber: undefined,
             pendingApprovals,
             pendingUserInputs,
@@ -1054,6 +1105,13 @@ export function makeCursorAdapter(
         });
 
         const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
+        if (!ctx.agentControlHostContextDelivered && ctx.agentControlHostContext.length > 0) {
+          promptParts.push({
+            type: "text",
+            text: `<ryco_host_context>${ctx.agentControlHostContext}</ryco_host_context>`,
+          });
+          ctx.agentControlHostContextDelivered = true;
+        }
         if (input.input?.trim()) {
           promptParts.push({ type: "text", text: input.input.trim() });
         }
@@ -1089,7 +1147,7 @@ export function makeCursorAdapter(
           }
         }
 
-        if (promptParts.length === 0) {
+        if (!input.input?.trim() && (!input.attachments || input.attachments.length === 0)) {
           return yield* new ProviderAdapterValidationError({
             provider: PROVIDER,
             operation: "sendTurn",
@@ -1097,6 +1155,7 @@ export function makeCursorAdapter(
           });
         }
 
+        if (ctx.agentControl) yield* ctx.agentControl.bindTurn(turnId);
         const result = yield* ctx.acp
           .prompt({
             prompt: promptParts,
@@ -1105,6 +1164,9 @@ export function makeCursorAdapter(
             Effect.mapError((error) =>
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
             ),
+          )
+          .pipe(
+            Effect.ensuring(ctx.agentControl ? ctx.agentControl.retireTurn(turnId) : Effect.void),
           );
 
         ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] });
@@ -1137,6 +1199,7 @@ export function makeCursorAdapter(
     const interruptTurn: CursorAdapterShape["interruptTurn"] = (threadId) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(threadId);
+        if (ctx.agentControl) yield* ctx.agentControl.retireTurn(ctx.activeTurnId);
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
         yield* Effect.ignore(

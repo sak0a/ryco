@@ -1,5 +1,5 @@
 import { CopilotSettings, ProviderDriverKind, type ServerProvider } from "@ryco/contracts";
-import { Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { ServerConfig } from "../../config.ts";
@@ -20,6 +20,7 @@ import {
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+import { AgentControlSessionRegistry } from "../../agentControl/Services/AgentControlSessionRegistry.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("copilot");
 
@@ -57,6 +58,7 @@ export const CopilotDriver: ProviderDriver<CopilotSettings, CopilotDriverEnv> = 
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const eventLoggers = yield* ProviderEventLoggers;
+      const agentControl = yield* Effect.serviceOption(AgentControlSessionRegistry);
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -73,6 +75,7 @@ export const CopilotDriver: ProviderDriver<CopilotSettings, CopilotDriverEnv> = 
       const adapter = yield* makeCopilotAdapter(effectiveConfig, {
         instanceId,
         environment: processEnv,
+        ...(Option.isSome(agentControl) ? { agentControl: agentControl.value } : {}),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
       const textGeneration = yield* makeCopilotTextGeneration(effectiveConfig, processEnv);

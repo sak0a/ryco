@@ -35,6 +35,12 @@ export interface AcpSessionRuntimeOptions {
   };
   readonly authMethodId: string;
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
+  /** Resolve runtime-scoped MCP servers only after the agent advertises capabilities. */
+  readonly resolveMcpServers?: (
+    initializeResult: EffectAcpSchema.InitializeResponse,
+  ) => Effect.Effect<ReadonlyArray<EffectAcpSchema.McpServer>>;
+  readonly onProcessExit?: () => Effect.Effect<void>;
+  readonly onMcpSetupFailure?: () => Effect.Effect<void>;
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>;
   readonly protocolLogging?: {
     readonly logIncoming?: boolean;
@@ -206,6 +212,14 @@ const makeAcpSessionRuntime = (
             }),
         ),
       );
+
+    if (options.onProcessExit) {
+      yield* child.exitCode.pipe(
+        Effect.flatMap(() => options.onProcessExit!()),
+        Effect.ignore,
+        Effect.forkScoped,
+      );
+    }
 
     const acpContext = yield* Layer.build(
       EffectAcpClient.layerChildProcess(child, {
@@ -379,16 +393,40 @@ const makeAcpSessionRuntime = (
         acp.agent.authenticate(authenticatePayload),
       );
 
+      const staticMcpServers = options.mcpServers ?? [];
+      const resolvedMcpServers = options.resolveMcpServers
+        ? yield* options.resolveMcpServers(initializeResult)
+        : [];
+      const mcpServers = [...staticMcpServers, ...resolvedMcpServers];
+
       let sessionId: string;
       let sessionSetupResult:
         | EffectAcpSchema.LoadSessionResponse
         | EffectAcpSchema.NewSessionResponse
         | EffectAcpSchema.ResumeSessionResponse;
+      const createSession = (servers: ReadonlyArray<EffectAcpSchema.McpServer>) => {
+        const createPayload = {
+          cwd: options.cwd,
+          mcpServers: servers,
+        } satisfies EffectAcpSchema.NewSessionRequest;
+        return runLoggedRequest(
+          "session/new",
+          createPayload,
+          acp.agent.createSession(createPayload),
+        );
+      };
+      const createSessionWithFallback = Effect.gen(function* () {
+        const created = yield* Effect.exit(createSession(mcpServers));
+        if (Exit.isSuccess(created)) return created.value;
+        if (resolvedMcpServers.length === 0) return yield* Effect.failCause(created.cause);
+        if (options.onMcpSetupFailure) yield* options.onMcpSetupFailure();
+        return yield* createSession(staticMcpServers);
+      });
       if (options.resumeSessionId) {
         const loadPayload = {
           sessionId: options.resumeSessionId,
           cwd: options.cwd,
-          mcpServers: options.mcpServers ?? [],
+          mcpServers,
         } satisfies EffectAcpSchema.LoadSessionRequest;
         const resumed = yield* runLoggedRequest(
           "session/load",
@@ -399,28 +437,12 @@ const makeAcpSessionRuntime = (
           sessionId = options.resumeSessionId;
           sessionSetupResult = resumed.value;
         } else {
-          const createPayload = {
-            cwd: options.cwd,
-            mcpServers: options.mcpServers ?? [],
-          } satisfies EffectAcpSchema.NewSessionRequest;
-          const created = yield* runLoggedRequest(
-            "session/new",
-            createPayload,
-            acp.agent.createSession(createPayload),
-          );
+          const created = yield* createSessionWithFallback;
           sessionId = created.sessionId;
           sessionSetupResult = created;
         }
       } else {
-        const createPayload = {
-          cwd: options.cwd,
-          mcpServers: options.mcpServers ?? [],
-        } satisfies EffectAcpSchema.NewSessionRequest;
-        const created = yield* runLoggedRequest(
-          "session/new",
-          createPayload,
-          acp.agent.createSession(createPayload),
-        );
+        const created = yield* createSessionWithFallback;
         sessionId = created.sessionId;
         sessionSetupResult = created;
       }

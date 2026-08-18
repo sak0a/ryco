@@ -1,0 +1,254 @@
+import {
+  AGENT_CONTROL_WS_METHODS,
+  AgentControlProposalStatus,
+  AgentControlRpcError,
+  AgentControlExternalRpcError,
+} from "@ryco/contracts";
+import { Effect, Option, Schema, Stream } from "effect";
+
+import type { AgentControlProposalStoreError } from "../agentControl/Services/AgentControlProposalStore.ts";
+import type { AgentControlExternalIntegrationServiceError } from "../agentControl/Services/AgentControlExternalIntegration.ts";
+import { observeRpcEffect, observeRpcStreamEffect } from "../observability/RpcInstrumentation.ts";
+import { defineWsHandlers, type WsRpcContext } from "./context.ts";
+
+const isProposalStatus = Schema.is(AgentControlProposalStatus);
+
+/**
+ * Map internal lifecycle failures onto the bounded RPC error. A decision
+ * conflict names the proposal's actual status so the client can render
+ * "already approved elsewhere"; nothing else about the resource — plans,
+ * prompts, storage details — crosses this boundary.
+ */
+export const toAgentControlRpcError = (
+  error: AgentControlProposalStoreError,
+): AgentControlRpcError => {
+  switch (error._tag) {
+    case "AgentControlDisabledError":
+      return new AgentControlRpcError({
+        code: "disabled",
+        message: "Agent Control is disabled.",
+      });
+    case "AgentControlProposalNotFoundError":
+      return new AgentControlRpcError({
+        code: "not-found",
+        message: "Agent Control proposal was not found.",
+      });
+    case "AgentControlProposalExpiredError":
+      return new AgentControlRpcError({
+        code: "expired",
+        message: "Proposal expired before the decision could apply.",
+        status: "expired",
+      });
+    case "AgentControlInvalidTransitionError":
+      return new AgentControlRpcError({
+        code: "conflict",
+        message: "Decision no longer applies to the proposal's current state.",
+        ...(isProposalStatus(error.from) ? { status: error.from } : {}),
+      });
+    case "AgentControlDuplicateRequestError":
+      return new AgentControlRpcError({
+        code: "conflict",
+        message: "Request id was already used with a different plan.",
+      });
+    default:
+      return new AgentControlRpcError({
+        code: "storage",
+        message: "Agent Control storage failed.",
+      });
+  }
+};
+
+export const toAgentControlExternalRpcError = (
+  error: AgentControlExternalIntegrationServiceError,
+): AgentControlExternalRpcError => {
+  if (error._tag === "AgentControlDisabledError") {
+    return new AgentControlExternalRpcError({
+      code: "disabled",
+      message: "Agent Control is disabled.",
+    });
+  }
+  if (error._tag === "AgentControlExternalIntegrationError") {
+    switch (error.reason) {
+      case "topology-unavailable":
+        return new AgentControlExternalRpcError({
+          code: "topology",
+          message:
+            "External integrations require a loopback-only Ryco without Hub or remote exposure.",
+        });
+      case "not-found":
+        return new AgentControlExternalRpcError({
+          code: "not-found",
+          message: "Integration was not found.",
+        });
+      case "capacity-exhausted":
+      case "task-conflict":
+        return new AgentControlExternalRpcError({
+          code: "conflict",
+          message: "Integration update conflicts with active work.",
+        });
+      default:
+        return new AgentControlExternalRpcError({
+          code: "invalid",
+          message: "Integration request was refused.",
+        });
+    }
+  }
+  return new AgentControlExternalRpcError({
+    code: "storage",
+    message: "Integration storage failed.",
+  });
+};
+
+export const makeAgentControlHandlers = (ctx: WsRpcContext) => {
+  const {
+    agentControlProposals,
+    agentControlExternalIntegrations,
+    ownerEffect,
+    ownerStreamEffect,
+  } = ctx;
+
+  const withService = <A, E>(
+    use: (
+      service: Option.Option.Value<typeof agentControlProposals>,
+    ) => Effect.Effect<A, E | AgentControlRpcError>,
+  ) =>
+    Option.match(agentControlProposals, {
+      onNone: () =>
+        Effect.fail(
+          new AgentControlRpcError({
+            code: "storage",
+            message: "Agent Control is unavailable.",
+          }),
+        ),
+      onSome: use,
+    });
+
+  const withExternalService = <A, E>(
+    use: (
+      service: Option.Option.Value<typeof agentControlExternalIntegrations>,
+    ) => Effect.Effect<A, E | AgentControlExternalRpcError>,
+  ) =>
+    Option.match(agentControlExternalIntegrations, {
+      onNone: () =>
+        Effect.fail(
+          new AgentControlExternalRpcError({
+            code: "storage",
+            message: "External integrations are unavailable.",
+          }),
+        ),
+      onSome: use,
+    });
+
+  return defineWsHandlers({
+    [AGENT_CONTROL_WS_METHODS.listProposals]: (input) =>
+      observeRpcEffect(
+        AGENT_CONTROL_WS_METHODS.listProposals,
+        ownerEffect(
+          AGENT_CONTROL_WS_METHODS.listProposals,
+          withService((service) =>
+            service
+              .getQueue({ activeLimit: input.activeLimit, recentLimit: input.recentLimit })
+              .pipe(Effect.mapError(toAgentControlRpcError)),
+          ),
+        ),
+        { "rpc.aggregate": "agent-control", "rpc.operation": "list" },
+      ),
+    [AGENT_CONTROL_WS_METHODS.getProposal]: (input) =>
+      observeRpcEffect(
+        AGENT_CONTROL_WS_METHODS.getProposal,
+        ownerEffect(
+          AGENT_CONTROL_WS_METHODS.getProposal,
+          withService((service) =>
+            service.getProposal(input.proposalId).pipe(
+              Effect.map((proposal) => ({ proposal: Option.getOrNull(proposal) })),
+              Effect.mapError(toAgentControlRpcError),
+            ),
+          ),
+        ),
+        { "rpc.aggregate": "agent-control", "rpc.operation": "get" },
+      ),
+    [AGENT_CONTROL_WS_METHODS.acceptProposal]: (input) =>
+      observeRpcEffect(
+        AGENT_CONTROL_WS_METHODS.acceptProposal,
+        ownerEffect(
+          AGENT_CONTROL_WS_METHODS.acceptProposal,
+          withService((service) =>
+            service
+              .accept({ proposalId: input.proposalId, decidedAt: new Date().toISOString() })
+              .pipe(Effect.mapError(toAgentControlRpcError)),
+          ),
+        ),
+        { "rpc.aggregate": "agent-control", "rpc.operation": "accept" },
+      ),
+    [AGENT_CONTROL_WS_METHODS.rejectProposal]: (input) =>
+      observeRpcEffect(
+        AGENT_CONTROL_WS_METHODS.rejectProposal,
+        ownerEffect(
+          AGENT_CONTROL_WS_METHODS.rejectProposal,
+          withService((service) =>
+            service
+              .reject({ proposalId: input.proposalId, decidedAt: new Date().toISOString() })
+              .pipe(Effect.mapError(toAgentControlRpcError)),
+          ),
+        ),
+        { "rpc.aggregate": "agent-control", "rpc.operation": "reject" },
+      ),
+    [AGENT_CONTROL_WS_METHODS.subscribeProposals]: (_input) =>
+      observeRpcStreamEffect(
+        AGENT_CONTROL_WS_METHODS.subscribeProposals,
+        ownerStreamEffect(
+          AGENT_CONTROL_WS_METHODS.subscribeProposals,
+          withService((service) =>
+            Effect.succeed(
+              service.subscribeQueue({}).pipe(Stream.mapError(toAgentControlRpcError)),
+            ),
+          ),
+        ),
+        { "rpc.aggregate": "agent-control" },
+      ),
+    [AGENT_CONTROL_WS_METHODS.listIntegrations]: () =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.listIntegrations,
+        withExternalService((service) =>
+          service.list().pipe(Effect.mapError(toAgentControlExternalRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.createIntegration]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.createIntegration,
+        withExternalService((service) =>
+          service.create(input).pipe(Effect.mapError(toAgentControlExternalRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.updateIntegration]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.updateIntegration,
+        withExternalService((service) =>
+          service.update(input).pipe(Effect.mapError(toAgentControlExternalRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.resumeIntegrationPairing]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.resumeIntegrationPairing,
+        withExternalService((service) =>
+          service
+            .resumePairing(input.integrationId)
+            .pipe(Effect.mapError(toAgentControlExternalRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.revokeIntegration]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.revokeIntegration,
+        withExternalService((service) =>
+          service.revoke(input.integrationId).pipe(Effect.mapError(toAgentControlExternalRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.deleteIntegration]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.deleteIntegration,
+        withExternalService((service) =>
+          service.delete(input.integrationId).pipe(Effect.mapError(toAgentControlExternalRpcError)),
+        ),
+      ),
+  });
+};

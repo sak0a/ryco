@@ -105,6 +105,14 @@ import {
 import { type ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
+import {
+  AGENT_CONTROL_INTERNAL_SERVER_NAME,
+  agentControlHostContext,
+  installAgentControlNativeHttp,
+  redactAgentControlSecrets,
+  type AgentControlProviderBridge,
+  type AgentControlRuntimeLease,
+} from "../../agentControl/ProviderInjection.ts";
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
@@ -202,6 +210,9 @@ interface ClaudeSessionContext {
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
   readonly deviceToolBinding: DeviceToolBinding | null;
+  readonly agentControl?: AgentControlRuntimeLease;
+  readonly agentControlHostContext: string;
+  agentControlHostContextDelivered: boolean;
   streamFiber: Fiber.Fiber<void, Error> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
@@ -272,11 +283,15 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly close: () => void;
+  readonly mcpServerStatus?: () => Promise<
+    ReadonlyArray<{ readonly name: string; readonly status: string }>
+  >;
 }
 
 export interface ClaudeAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly agentControl?: AgentControlProviderBridge;
   readonly createQuery?: (input: {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
@@ -1469,9 +1484,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ),
       );
     }
+    const safeEvent = redactAgentControlSecrets(event) as ProviderRuntimeEvent;
     return Queue.offer(
       runtimeEventQueue,
-      stampRuntimeEvent(event, {
+      stampRuntimeEvent(safeEvent, {
         providerInstanceId: boundInstanceId,
         runtimeSessionId: context.session.runtimeSessionId,
       }),
@@ -1618,7 +1634,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               }
             : {}),
           ...(itemId ? { itemId: ProviderItemId.make(itemId) } : {}),
-          payload: message,
+          payload: redactAgentControlSecrets(message),
         },
       },
       context.session.threadId,
@@ -2142,6 +2158,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       updatedAt,
       ...(status === "failed" && errorMessage ? { lastError: errorMessage } : {}),
     };
+    if (context.agentControl) yield* context.agentControl.retireTurn(turnState.turnId);
     yield* updateResumeCursor(context);
   });
 
@@ -3470,6 +3487,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     context.stopped = true;
     context.deviceToolBinding?.dispose();
+    if (context.agentControl) yield* context.agentControl.revoke("runtime-teardown");
 
     for (const [requestId, pending] of context.pendingApprovals) {
       yield* Deferred.succeed(pending.decision, "cancel");
@@ -3958,6 +3976,34 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         .map((part) => part?.trim())
         .filter((part): part is string => part !== undefined && part.length > 0)
         .join("\n\n");
+      let agentControl = Option.getOrUndefined(
+        yield* installAgentControlNativeHttp(options?.agentControl, {
+          threadId,
+          providerInstanceId: boundInstanceId,
+          runtimeSessionId,
+          injectionMode: "claude-http",
+        }),
+      );
+      const mcpServers = {
+        ...(deviceToolBinding
+          ? {
+              ryco_device: {
+                type: "http" as const,
+                url: deviceToolBinding.url,
+                headers: { ...deviceToolBinding.headers },
+                alwaysLoad: true,
+              },
+            }
+          : {}),
+        ...(agentControl
+          ? {
+              [AGENT_CONTROL_INTERNAL_SERVER_NAME]: {
+                ...agentControl.mcpServer,
+                alwaysLoad: true,
+              },
+            }
+          : {}),
+      };
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -3979,18 +4025,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
-        ...(deviceToolBinding
-          ? {
-              mcpServers: {
-                ryco_device: {
-                  type: "http",
-                  url: deviceToolBinding.url,
-                  headers: { ...deviceToolBinding.headers },
-                  alwaysLoad: true,
-                },
-              },
-            }
-          : {}),
+        ...(Object.keys(mcpServers).length > 0 ? { mcpServers } : {}),
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
@@ -4031,10 +4066,46 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           new ProviderAdapterProcessError({
             provider: PROVIDER,
             threadId,
-            detail: toMessage(cause, "Failed to start Claude runtime session."),
-            cause,
+            detail: redactAgentControlSecrets(
+              toMessage(cause, "Failed to start Claude runtime session."),
+            ) as string,
+            cause: redactAgentControlSecrets(cause),
           }),
-      }).pipe(Effect.tapError(() => Effect.sync(() => deviceToolBinding?.dispose())));
+      }).pipe(
+        Effect.tapError(() => Effect.sync(() => deviceToolBinding?.dispose())),
+        Effect.onError(() =>
+          agentControl ? agentControl.revoke("runtime-teardown") : Effect.void,
+        ),
+      );
+
+      if (agentControl) {
+        const status = queryRuntime.mcpServerStatus
+          ? yield* Effect.tryPromise({
+              try: () => queryRuntime.mcpServerStatus!(),
+              catch: (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId,
+                  detail: "Agent Control MCP status check failed.",
+                  cause: redactAgentControlSecrets(cause),
+                }),
+            }).pipe(
+              Effect.timeoutOption("8 seconds"),
+              Effect.onInterrupt(() => agentControl!.revoke("runtime-teardown")),
+              Effect.catch(() => Effect.succeed(Option.none())),
+            )
+          : Option.none<ReadonlyArray<{ readonly name: string; readonly status: string }>>();
+        const installed = Option.exists(status, (servers) =>
+          servers.some(
+            (server) =>
+              server.name === AGENT_CONTROL_INTERNAL_SERVER_NAME && server.status === "connected",
+          ),
+        );
+        if (!installed) {
+          yield* agentControl.revoke("runtime-teardown");
+          agentControl = undefined;
+        }
+      }
 
       const session: ProviderSession = {
         threadId,
@@ -4062,6 +4133,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         promptQueue,
         query: queryRuntime,
         deviceToolBinding,
+        ...(agentControl ? { agentControl } : {}),
+        agentControlHostContext:
+          agentControl?.hostContext ??
+          (options?.agentControl ? agentControlHostContext(false) : ""),
+        agentControlHostContextDelivered: false,
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
@@ -4246,16 +4322,41 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       providerRefs: {},
     });
 
-    const message = yield* buildUserMessageEffect(input, {
-      fileSystem,
-      attachmentsDir: serverConfig.attachmentsDir,
-      boundInstanceId,
-    });
+    const hostContextPrefix =
+      context.agentControlHostContextDelivered || context.agentControlHostContext.length === 0
+        ? undefined
+        : `<ryco_host_context>${context.agentControlHostContext}</ryco_host_context>`;
+    if (hostContextPrefix) context.agentControlHostContextDelivered = true;
+    const message = yield* buildUserMessageEffect(
+      hostContextPrefix
+        ? {
+            ...input,
+            input: [hostContextPrefix, input.input].filter(Boolean).join("\n\n"),
+          }
+        : input,
+      {
+        fileSystem,
+        attachmentsDir: serverConfig.attachmentsDir,
+        boundInstanceId,
+      },
+    );
 
     yield* Queue.offer(context.promptQueue, {
       type: "message",
       message,
     }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
+
+    if (context.agentControl) {
+      yield* context.agentControl.bindTurn(turnId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to bind Agent Control turn authority", {
+            threadId: input.threadId,
+            turnId,
+            cause,
+          }),
+        ),
+      );
+    }
 
     return {
       threadId: context.session.threadId,
@@ -4269,6 +4370,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const interruptTurn: ClaudeAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
     function* (threadId, _turnId) {
       const context = yield* requireSession(threadId);
+      if (context.agentControl) yield* context.agentControl.retireTurn(_turnId);
       // Stop-everything semantics: users reach for Stop precisely when a
       // fleet ran away. interrupt() alone only ends the parent turn —
       // background subagents/shells keep running and keep burning tokens.

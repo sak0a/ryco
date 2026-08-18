@@ -22,6 +22,7 @@
  * @module provider/ProviderDriver
  */
 import type {
+  AgentControlProviderSupport,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -48,6 +49,8 @@ export interface ProviderDriverMetadata {
    * rejects multi-instance configurations with a clear error.
    */
   readonly supportsMultipleInstances?: boolean;
+  /** Audited support decision for the internal, runtime-scoped Agent Control MCP server. */
+  readonly agentControl?: AgentControlProviderSupport;
 }
 
 /**

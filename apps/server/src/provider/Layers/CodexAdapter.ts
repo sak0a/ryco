@@ -60,13 +60,20 @@ import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { buildTokenReductionInstructions, checkRtkAvailability } from "../../tokenReduction.ts";
 import {
+  CODEX_AGENT_CONTROL_SERVER_NAME,
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
   makeCodexSessionRuntime,
+  type CodexAgentControlInjection,
   type CodexSessionRuntimeError,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
+import {
+  installAgentControlNativeHttp,
+  type AgentControlProviderBridge,
+  type AgentControlRuntimeLease,
+} from "../../agentControl/ProviderInjection.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
 
@@ -74,9 +81,34 @@ const PROVIDER = ProviderDriverKind.make("codex");
 const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES =
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS * PROVIDER_SEND_TURN_MAX_IMAGE_BYTES;
 
+/**
+ * Narrow Agent Control surface the adapter consumes: lease issuance at
+ * runtime start and revocation on every teardown path. The adapter never
+ * sees the listener, the tool catalog, or any credential it did not issue.
+ */
+export type CodexAgentControlBridge = AgentControlProviderBridge;
+
+/**
+ * Truthful host-context note injected only when a lease was actually
+ * issued. A runtime without a lease receives no mention of these tools.
+ * The revocation sentence keeps the note truthful for the runtime's whole
+ * lifetime: instructions are fixed at session start, but the lease can be
+ * revoked mid-session (feature disabled, listener stopped), after which
+ * every request is rejected as unauthorized.
+ */
+export const CODEX_AGENT_CONTROL_INSTRUCTIONS =
+  "Ryco Agent Control tools (ryco_*) are available through the " +
+  `'${CODEX_AGENT_CONTROL_SERVER_NAME}' MCP server on a private local connection. They can ` +
+  "inspect Ryco projects, threads, transcripts, and request status. During an active turn, " +
+  "the four thread-action tools create immutable requests that require user approval in Ryco; " +
+  "they never mutate immediately. If the server is " +
+  "unreachable or rejects requests as unauthorized, Ryco has revoked this session's " +
+  "access — treat the tools as unavailable instead of retrying.";
+
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly agentControl?: CodexAgentControlBridge;
   readonly makeRuntime?: (
     options: CodexSessionRuntimeOptions,
   ) => Effect.Effect<
@@ -94,6 +126,8 @@ interface CodexAdapterSessionContext {
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
+  /** Unique Agent Control lease id for this exact runtime, when issued. */
+  readonly agentControl?: AgentControlRuntimeLease;
   stopped: boolean;
 }
 
@@ -1766,6 +1800,28 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
         const tokenMode = input.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
         const tokenReductionInstructions = yield* readTokenReductionInstructions(tokenMode);
+
+        // Agent Control: a fresh per-runtime credential, or none. `none`
+        // (feature disabled, listener unhealthy, no bridge wired) starts
+        // the provider without Agent Control — no MCP server entry and no
+        // instruction text may claim tools that do not exist.
+        const agentControlLease = yield* installAgentControlNativeHttp(options?.agentControl, {
+          threadId: input.threadId,
+          providerInstanceId: boundInstanceId,
+          runtimeSessionId,
+          injectionMode: "codex-http",
+        });
+        const agentControlInjection: CodexAgentControlInjection | undefined = Option.isSome(
+          agentControlLease,
+        )
+          ? {
+              serverName: CODEX_AGENT_CONTROL_SERVER_NAME,
+              endpointUrl: agentControlLease.value.mcpServer.url,
+              authorization: agentControlLease.value.credential,
+              instructions: CODEX_AGENT_CONTROL_INSTRUCTIONS,
+            }
+          : undefined;
+
         const runtimeInput: CodexSessionRuntimeOptions = {
           threadId: input.threadId,
           providerInstanceId: boundInstanceId,
@@ -1775,6 +1831,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(tokenReductionInstructions ? { tokenReductionInstructions } : {}),
           ...(options?.environment ? { environment: options.environment } : {}),
           ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          ...(agentControlInjection ? { agentControl: agentControlInjection } : {}),
           ...(input.resumePolicy !== "fresh" &&
           Schema.is(CodexResumeCursorSchema)(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
@@ -1789,11 +1846,20 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { serviceTier: "fast" }
             : {}),
         };
+        const agentControl = Option.getOrUndefined(agentControlLease);
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>
           sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
         );
+        // The session scope is a teardown backstop: start-failure cleanup,
+        // epoch mismatch, instance rebuild, and server shutdown all close
+        // it. `stopSessionInternal` additionally revokes eagerly before the
+        // (interruptible, potentially wedged) runtime close, so a timed-out
+        // stop cannot leave the credential alive. Revocation targets the
+        // unique lease id — never the (thread, epoch) pair, which a
+        // recovered successor runtime may legitimately reuse.
+        if (agentControl) yield* agentControl.addScopeFinalizer(sessionScope);
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
@@ -1818,6 +1884,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                 runtimeSessionId,
               }),
             );
+            // A dead codex process cannot use its lease, but the read tools
+            // must not outlive the runtime either — revoke on exit even
+            // before anything calls stopSession on the stale record. By
+            // unique lease id: this fiber may outlive a replacement, and
+            // must never touch a successor's lease.
+            if (
+              agentControl &&
+              runtimeEvents.some((runtimeEvent) => runtimeEvent.type === "session.exited")
+            ) {
+              yield* agentControl.revoke("runtime-teardown");
+            }
+            if (agentControl) {
+              for (const runtimeEvent of runtimeEvents) {
+                if (runtimeEvent.type !== "turn.completed") continue;
+                yield* agentControl.retireTurn(runtimeEvent.turnId);
+              }
+            }
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
@@ -1872,6 +1955,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           scope: sessionScope,
           runtime,
           eventFiber,
+          ...(agentControl ? { agentControl } : {}),
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -2030,7 +2114,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         : undefined;
     const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
     const codexInput = formatted ? formatted + "\n\n" + (input.input ?? "") : input.input;
-    return yield* session.runtime
+    const result = yield* session.runtime
       .sendTurn({
         ...(codexInput !== undefined ? { input: codexInput } : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
@@ -2049,6 +2133,18 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
+    if (session.agentControl) {
+      yield* session.agentControl.bindTurn(result.turnId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to bind Agent Control turn authority", {
+            threadId: input.threadId,
+            turnId: result.turnId,
+            cause,
+          }),
+        ),
+      );
+    }
+    return result;
   });
 
   const steerTurn: NonNullable<CodexAdapterShape["steerTurn"]> = Effect.fn("steerTurn")(
@@ -2090,8 +2186,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (session.stopped) {
       return;
     }
-    session.stopped = true;
-    sessions.delete(session.threadId);
+    // Revoke the Agent Control lease first, in one uninterruptible step
+    // with the map removal: `ProviderService.stopExactBinding` wraps this
+    // stop in a timeout, and an interruption striking during the
+    // (potentially wedged) `runtime.close` below must not leave a dead
+    // runtime holding a valid credential. The session-scope finalizer
+    // repeats the revocation idempotently on the paths that do reach it.
+    yield* Effect.uninterruptible(
+      Effect.gen(function* () {
+        session.stopped = true;
+        sessions.delete(session.threadId);
+        if (session.agentControl) yield* session.agentControl.revoke("runtime-teardown");
+      }),
+    );
     yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
     yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
@@ -2100,7 +2207,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) =>
-        session.runtime.interruptTurn(turnId).pipe(
+        (session.agentControl ? session.agentControl.retireTurn(turnId) : Effect.void).pipe(
+          Effect.andThen(session.runtime.interruptTurn(turnId)),
           Effect.timeoutOption("15 seconds"),
           Effect.flatMap(
             Option.match({

@@ -33,6 +33,7 @@ import { ServerConfig } from "../../config.ts";
 import { makeServerQueueMetrics } from "../../observability/QueueMetrics.ts";
 import { createProcessDeviceToolBinding } from "../../providerTools/deviceToolGateway.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { agentControlHostContext } from "../../agentControl/ProviderInjection.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -92,6 +93,7 @@ interface OpenCodeSessionContext {
   activeTurnId: TurnId | undefined;
   activeAgent: string | undefined;
   activeVariant: string | undefined;
+  agentControlHostContextDelivered: boolean;
   /**
    * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
    * The session lifecycle is owned by `sessionScope`; this Ref exists only
@@ -1629,6 +1631,7 @@ export function makeOpenCodeAdapter(
           activeTurnId: undefined,
           activeAgent: undefined,
           activeVariant: undefined,
+          agentControlHostContextDelivered: false,
           stopped: yield* Ref.make(false),
           sessionScope: started.sessionScope,
         };
@@ -1681,9 +1684,7 @@ export function makeOpenCodeAdapter(
       }
 
       const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
-      const text = formatted
-        ? formatted + "\n\n" + (input.input?.trim() ?? "")
-        : input.input?.trim();
+      let text = formatted ? formatted + "\n\n" + (input.input?.trim() ?? "") : input.input?.trim();
       const fileParts = toOpenCodeFileParts({
         attachments: input.attachments,
         resolveAttachmentPath: (attachment) =>
@@ -1698,6 +1699,10 @@ export function makeOpenCodeAdapter(
           operation: "sendTurn",
           issue: "OpenCode turns require text input or at least one attachment.",
         });
+      }
+      if (!context.agentControlHostContextDelivered) {
+        text = `<ryco_host_context>${agentControlHostContext(false)}</ryco_host_context>${text ? `\n\n${text}` : ""}`;
+        context.agentControlHostContextDelivered = true;
       }
 
       const agent = getModelSelectionStringOptionValue(modelSelection, "agent");

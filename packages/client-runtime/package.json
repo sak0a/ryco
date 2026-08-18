@@ -44,6 +44,10 @@
       "types": "./src/relay/index.ts",
       "import": "./src/relay/index.ts"
     },
+    "./state/agentControl": {
+      "types": "./src/state/agentControl/index.ts",
+      "import": "./src/state/agentControl/index.ts"
+    },
     "./state/orchestration": {
       "types": "./src/state/orchestration/index.ts",
       "import": "./src/state/orchestration/index.ts"

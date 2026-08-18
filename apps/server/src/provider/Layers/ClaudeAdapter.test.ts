@@ -22,15 +22,17 @@ import {
   RuntimeSessionId,
 } from "@ryco/contracts";
 import { createModelSelection } from "@ryco/shared/model";
-import { assert, describe, it } from "@effect/vitest";
-import { Context, Effect, Fiber, Layer, Random, Schema, Stream } from "effect";
+import { assert, describe, it, vi } from "@effect/vitest";
+import { Context, Effect, Fiber, Layer, Option, Random, Redacted, Schema, Stream } from "effect";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { installProcessDeviceToolGateway } from "../../providerTools/deviceToolGateway.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
 import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import type { AgentControlProviderBridge } from "../../agentControl/ProviderInjection.ts";
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
@@ -52,6 +54,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
   public closeCalls = 0;
+  public mcpStatuses: ReadonlyArray<{ readonly name: string; readonly status: string }> = [];
 
   emit(message: SDKMessage): void {
     if (this.done) {
@@ -112,6 +115,8 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.finish();
   };
 
+  readonly mcpServerStatus = async () => this.mcpStatuses;
+
   [Symbol.asyncIterator](): AsyncIterator<SDKMessage> {
     return {
       next: () => {
@@ -153,6 +158,7 @@ function makeHarness(config?: {
   readonly baseDir?: string;
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
+  readonly agentControl?: AgentControlProviderBridge;
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -164,6 +170,7 @@ function makeHarness(config?: {
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
+    ...(config?.agentControl ? { agentControl: config.agentControl } : {}),
     createQuery: (input) => {
       createInput = input;
       return query;
@@ -264,7 +271,133 @@ async function readFirstPromptMessage(
 const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 
+function makeAgentControlBridge() {
+  const rawCredential = `rycoac_${"a".repeat(43)}`;
+  const revokeLease = vi.fn(
+    (_input: Parameters<AgentControlProviderBridge["revokeLease"]>[0]) => Effect.void,
+  );
+  const bindTurnAuthority = vi.fn(({ sessionId, turnId }) =>
+    Effect.succeed({ sessionId, threadId: THREAD_ID, turnId, boundAt: new Date().toISOString() }),
+  );
+  const retireTurnAuthority = vi.fn(() => Effect.void);
+  const bridge: AgentControlProviderBridge = {
+    issueLease: () =>
+      Effect.succeed(
+        Option.some({
+          sessionId: "claude-agent-control-session",
+          endpointUrl: "http://127.0.0.1:45000/mcp",
+          credential: Redacted.make(rawCredential),
+        }),
+      ),
+    issueStdioBootstrap: () => Effect.succeed(Option.none()),
+    revokeLease,
+    bindTurnAuthority,
+    retireTurnAuthority,
+  };
+  return { bridge, rawCredential, revokeLease, bindTurnAuthority, retireTurnAuthority };
+}
+
 describe("ClaudeAdapterLive", () => {
+  it.effect("composes device and Agent Control MCP servers in one Claude session", () => {
+    const state = makeAgentControlBridge();
+    const harness = makeHarness({ agentControl: state.bridge });
+    harness.query.mcpStatuses = [{ name: "ryco", status: "connected" }];
+    const dispose = vi.fn(() => undefined);
+    return Effect.gen(function* () {
+      installProcessDeviceToolGateway({
+        createBinding: () => ({
+          url: "http://127.0.0.1:46000/device",
+          headers: { Authorization: "Bearer device-token" },
+          dispose,
+        }),
+        close: async () => undefined,
+      });
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("runtime-claude-mcp-composition"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      const servers = harness.getLastCreateQueryInput()?.options.mcpServers;
+      assert.deepStrictEqual(servers?.ryco_device, {
+        type: "http",
+        url: "http://127.0.0.1:46000/device",
+        headers: { Authorization: "Bearer device-token" },
+        alwaysLoad: true,
+      });
+      assert.isDefined(servers?.ryco);
+      yield* adapter.stopSession(THREAD_ID);
+      assert.strictEqual(dispose.mock.calls.length, 1);
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => installProcessDeviceToolGateway(null))),
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("installs native session MCP, binds turns, and revokes on teardown", () => {
+    const state = makeAgentControlBridge();
+    const harness = makeHarness({ agentControl: state.bridge });
+    harness.query.mcpStatuses = [{ name: "ryco", status: "connected" }];
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("runtime-claude-agent-control"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      const options = harness.getLastCreateQueryInput()?.options;
+      assert.deepStrictEqual(options?.mcpServers?.ryco, {
+        type: "http",
+        url: "http://127.0.0.1:45000/mcp",
+        headers: { Authorization: `Bearer ${state.rawCredential}` },
+        alwaysLoad: true,
+      });
+      assert.notInclude(JSON.stringify(options?.env), state.rawCredential);
+
+      const prompt = Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()));
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Inspect" });
+      assert.include((yield* prompt) ?? "", "Ryco Agent Control tools");
+      assert.strictEqual(state.bindTurnAuthority.mock.calls.length, 1);
+      yield* adapter.stopSession(THREAD_ID);
+      assert.isAtLeast(state.revokeLease.mock.calls.length, 1);
+      assert.strictEqual(
+        state.revokeLease.mock.calls[0]?.[0].sessionId,
+        "claude-agent-control-session",
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("degrades to unavailable host context when Claude MCP connection fails", () => {
+    const state = makeAgentControlBridge();
+    const harness = makeHarness({ agentControl: state.bridge });
+    harness.query.mcpStatuses = [{ name: "ryco", status: "failed" }];
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        runtimeSessionId: RuntimeSessionId.make("runtime-claude-agent-control-failed"),
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+      const prompt = Effect.promise(() => readFirstPromptText(harness.getLastCreateQueryInput()));
+      yield* adapter.sendTurn({ threadId: THREAD_ID, input: "Continue" });
+      assert.include((yield* prompt) ?? "", "unavailable for this provider session");
+      assert.strictEqual(state.bindTurnAuthority.mock.calls.length, 0);
+      assert.isAtLeast(state.revokeLease.mock.calls.length, 1);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

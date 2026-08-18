@@ -29,6 +29,7 @@ export * from "./atlassian.ts";
 export * from "./workItems.ts";
 export * from "./threadGoal.ts";
 export * from "./orchestration.ts";
+export * from "./agentControl.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";

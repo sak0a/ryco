@@ -15,6 +15,8 @@ import {
 } from "@ryco/contracts";
 import { RpcGroup } from "effect/unstable/rpc";
 
+import { AgentControlProposalService } from "../agentControl/Services/AgentControlProposalService.ts";
+import { AgentControlExternalIntegrationService } from "../agentControl/Services/AgentControlExternalIntegration.ts";
 import { CheckpointDiffQuery } from "../checkpointing/Services/CheckpointDiffQuery.ts";
 import { resolveManagedWorktreesRoot, ServerConfig } from "../config.ts";
 import { Diagnostics } from "../diagnostics/Services/Diagnostics.ts";
@@ -108,6 +110,12 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     // the RPC under test. Keep this additive capability optional at context
     // construction; production provides it in `makeServerWsRpcLayer`.
     const contextHandoffInspection = yield* Effect.serviceOption(ContextHandoffInspection);
+    // Optional for the same route-test reason; production always provides it
+    // through the runtime's Agent Control layer.
+    const agentControlProposals = yield* Effect.serviceOption(AgentControlProposalService);
+    const agentControlExternalIntegrations = yield* Effect.serviceOption(
+      AgentControlExternalIntegrationService,
+    );
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
     const keybindings = yield* Keybindings;
     const open = yield* Open;
@@ -660,6 +668,8 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       usageService,
       orchestrationEngine,
       contextHandoffInspection,
+      agentControlProposals,
+      agentControlExternalIntegrations,
       checkpointDiffQuery,
       keybindings,
       open,

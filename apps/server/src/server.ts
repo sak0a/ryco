@@ -97,7 +97,24 @@ import { AtlassianConnectionRepositoryLive } from "./persistence/Layers/Atlassia
 import { AtlassianResourceRepositoryLive } from "./persistence/Layers/AtlassianResources.ts";
 import { ProjectAtlassianLinkRepositoryLive } from "./persistence/Layers/ProjectAtlassianLinks.ts";
 import { ProjectionWorktreeRepositoryLive } from "./persistence/Layers/ProjectionWorktrees.ts";
+import { AgentControlAuditRepositoryLive } from "./persistence/Layers/AgentControlAudit.ts";
+import { AgentControlOperationRepositoryLive } from "./persistence/Layers/AgentControlOperations.ts";
+import { AgentControlProposalRepositoryLive } from "./persistence/Layers/AgentControlProposals.ts";
+import { AgentControlExternalRepositoryLive } from "./persistence/Layers/AgentControlExternal.ts";
+import { AgentControlMcpServerLive } from "./agentControl/Layers/AgentControlMcpServer.ts";
+import { AgentControlOperationStoreLive } from "./agentControl/Layers/AgentControlOperationStore.ts";
+import { AgentControlPolicyLive } from "./agentControl/Layers/AgentControlPolicy.ts";
+import { AgentControlProposalEventsLive } from "./agentControl/Layers/AgentControlProposalEvents.ts";
+import { AgentControlProposalServiceLive } from "./agentControl/Layers/AgentControlProposalService.ts";
+import { AgentControlProposalStoreLive } from "./agentControl/Layers/AgentControlProposalStore.ts";
+import { AgentControlSessionRegistryLive } from "./agentControl/Layers/AgentControlSessionRegistry.ts";
+import { AgentControlActionValidatorLive } from "./agentControl/Layers/AgentControlActionValidator.ts";
+import { AgentControlExecutionLive } from "./agentControl/Layers/AgentControlExecution.ts";
+import { AgentControlExternalIntegrationServiceLive } from "./agentControl/Layers/AgentControlExternalIntegration.ts";
+import { AgentControlExternalTaskServiceLive } from "./agentControl/Layers/AgentControlExternalTask.ts";
+import { AgentControlExternalMcpServerLive } from "./agentControl/Layers/AgentControlExternalMcpServer.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
+import { OrchestrationCommandApplicationLive } from "./orchestration/Layers/OrchestrationCommandApplication.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -193,6 +210,40 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+
+// Agent Control: policy, proposal/operation facades over their dedicated
+// repositories, the proposal change feed, and the owner-facing approval
+// lifecycle service (consumed by the `agentControl.*` WS RPCs). The feature
+// defaults to disabled and every entry point fails closed; only the expiry
+// sweep runs unconditionally so stale proposals converge to `expired` even
+// while the feature is off. The internal provider-session MCP surface is
+// composed separately: the in-memory session registry rides low in the
+// runtime chain so provider drivers can reach it (`AgentControlSessionRegistryLayerLive`
+// below), and the private loopback listener lifecycle joins the runtime
+// services beside `ServerRuntimeStartupLive`.
+const AgentControlLayerLive = Layer.mergeAll(
+  AgentControlProposalServiceLive,
+  AgentControlOperationStoreLive,
+  AgentControlExternalIntegrationServiceLive,
+).pipe(
+  Layer.provideMerge(AgentControlProposalStoreLive),
+  Layer.provideMerge(AgentControlProposalEventsLive),
+  Layer.provideMerge(AgentControlPolicyLive),
+  Layer.provideMerge(AgentControlProposalRepositoryLive),
+  Layer.provideMerge(AgentControlOperationRepositoryLive),
+  Layer.provideMerge(AgentControlAuditRepositoryLive),
+  Layer.provideMerge(AgentControlExternalRepositoryLive),
+);
+
+// In-memory credential/lease authority for the internal provider-session
+// MCP surface. Deliberately a leaf: provider drivers resolve it from
+// ambient context at instance construction, and the MCP listener layer
+// publishes its private endpoint into it. `AgentControlPolicyLive` is the
+// same layer reference as inside `AgentControlLayerLive`, so memoization
+// builds it once.
+const AgentControlSessionRegistryLayerLive = AgentControlSessionRegistryLive.pipe(
+  Layer.provide(AgentControlPolicyLive),
+);
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
@@ -304,6 +355,7 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(VcsLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
+  Layer.provideMerge(AgentControlLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(ProjectionWorktreeRepositoryLive),
   Layer.provideMerge(KeybindingsLive),
@@ -314,6 +366,10 @@ const RuntimeCoreBaseDependenciesLive = ReactorLayerLive.pipe(
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+  // Below the instance registry so driver `create()` (which runs inside
+  // registry reconcile fibers) sees the Agent Control session registry in
+  // its ambient context; also merged upward for the MCP listener layer.
+  Layer.provideMerge(AgentControlSessionRegistryLayerLive),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).
@@ -352,7 +408,24 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provide(NetService.layer),
 );
 
-const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
+// The private Agent Control MCP listener joins the runtime services here:
+// it consumes projections, proposals, provider snapshots, and the session
+// registry from the runtime dependencies, and its endpoint never touches
+// the public HTTP server, router, or any client-visible state.
+const RuntimeServicesLive = Layer.mergeAll(
+  ServerRuntimeStartupLive,
+  AgentControlMcpServerLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+  AgentControlExternalMcpServerLive.pipe(
+    Layer.provideMerge(
+      AgentControlExternalTaskServiceLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+    ),
+  ),
+  AgentControlExecutionLive.pipe(
+    Layer.provideMerge(ServerRuntimeStartupLive),
+    Layer.provideMerge(AgentControlActionValidatorLive),
+    Layer.provideMerge(OrchestrationCommandApplicationLive),
+  ),
+).pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
   // One process-scoped manager is shared by control RPC, frame streaming,
   // provider tools, idle cleanup, and crash-recovery ownership.

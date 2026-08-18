@@ -12,7 +12,7 @@
  * @module provider/Drivers/CursorDriver
  */
 import { CursorSettings, ProviderDriverKind, type ServerProvider } from "@ryco/contracts";
-import { Effect, FileSystem, Path, Schema, Stream } from "effect";
+import { Effect, FileSystem, Option, Path, Schema, Stream } from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
@@ -40,6 +40,7 @@ import {
   resolveProviderMaintenanceCapabilitiesEffect,
 } from "../providerMaintenance.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { AgentControlSessionRegistry } from "../../agentControl/Services/AgentControlSessionRegistry.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("cursor");
 const UPDATE = makeStaticProviderMaintenanceResolver(
@@ -93,10 +94,12 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
+      const agentControl = yield* Effect.serviceOption(AgentControlSessionRegistry);
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
+        ...(Option.isSome(agentControl) ? { agentControl: agentControl.value } : {}),
       });
       const stampIdentity = withInstanceIdentity({
         instanceId,

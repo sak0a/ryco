@@ -96,6 +96,25 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       readRawPayloadChunk: rpcClient.contextHandoff.readRawPayloadChunk,
       readExportChunk: rpcClient.contextHandoff.readExportChunk,
     },
+    // Conditional like worktrees/threads: older environments (and partial
+    // test doubles) predate the Agent Control surface.
+    ...(rpcClient.agentControl
+      ? {
+          agentControl: {
+            listProposals: rpcClient.agentControl.listProposals,
+            getProposal: rpcClient.agentControl.getProposal,
+            acceptProposal: rpcClient.agentControl.acceptProposal,
+            rejectProposal: rpcClient.agentControl.rejectProposal,
+            subscribeProposals: rpcClient.agentControl.subscribeProposals,
+            listIntegrations: rpcClient.agentControl.listIntegrations,
+            createIntegration: rpcClient.agentControl.createIntegration,
+            updateIntegration: rpcClient.agentControl.updateIntegration,
+            resumeIntegrationPairing: rpcClient.agentControl.resumeIntegrationPairing,
+            revokeIntegration: rpcClient.agentControl.revokeIntegration,
+            deleteIntegration: rpcClient.agentControl.deleteIntegration,
+          },
+        }
+      : {}),
   };
 }
 

@@ -1,0 +1,1198 @@
+/**
+ * Agent Control contracts.
+ *
+ * Schema-only definitions for the Agent Control control plane: principals,
+ * capabilities, immutable action plans, approval proposals, and durable
+ * execution operations. Agents never receive ambient write access — every
+ * mutation is first captured as an immutable `AgentControlProposal` that a
+ * user must approve, and only the server-side executor may move an accepted
+ * proposal into execution.
+ *
+ * Extension rules
+ * ---------------
+ * These schemas are designed for additive extension:
+ *
+ *   - `AgentControlActionPlan` is a closed union discriminated by `kind`.
+ *     New action kinds are added as new union members; previously persisted
+ *     plans keep decoding unchanged.
+ *   - Capabilities, risk tags, and error codes are open branded slugs (the
+ *     same forward-compatibility posture as `ProviderDriverKind`): payloads
+ *     persisted by a newer build must decode on this build. Authorization is
+ *     the runtime's job and fails closed on capabilities it does not grant.
+ *   - Target selection always uses `ProviderInstanceId` + `ModelSelection`.
+ *     A static provider-kind targeting API would lose configured provider
+ *     instances and is deliberately not part of this contract.
+ *
+ * @module agentControl
+ */
+import { Effect, Schema } from "effect";
+import {
+  CommandId,
+  IsoDateTime,
+  NonNegativeInt,
+  PositiveInt,
+  ProjectId,
+  RuntimeSessionId,
+  ThreadId,
+  TrimmedNonEmptyString,
+  TurnId,
+} from "./baseSchemas.ts";
+import { ModelSelection, OrchestrationSessionStatus, RuntimeMode } from "./orchestration.ts";
+import { ProviderOptionSelections } from "./model.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
+import { ServerProviderAvailability, ServerProviderState } from "./server.ts";
+import { ThreadEnvMode } from "./settings.ts";
+import { WorktreeId } from "./worktree.ts";
+
+// ── Identifiers ───────────────────────────────────────────────────────
+
+export const AgentControlProposalId = TrimmedNonEmptyString.pipe(
+  Schema.brand("AgentControlProposalId"),
+);
+export type AgentControlProposalId = typeof AgentControlProposalId.Type;
+
+export const AgentControlOperationId = TrimmedNonEmptyString.pipe(
+  Schema.brand("AgentControlOperationId"),
+);
+export type AgentControlOperationId = typeof AgentControlOperationId.Type;
+
+export const AgentControlIntegrationId = TrimmedNonEmptyString.check(Schema.isMaxLength(128)).pipe(
+  Schema.brand("AgentControlIntegrationId"),
+);
+export type AgentControlIntegrationId = typeof AgentControlIntegrationId.Type;
+
+export const AgentControlExternalTaskId = TrimmedNonEmptyString.check(Schema.isMaxLength(128)).pipe(
+  Schema.brand("AgentControlExternalTaskId"),
+);
+export type AgentControlExternalTaskId = typeof AgentControlExternalTaskId.Type;
+
+/**
+ * Caller-chosen idempotency key. Unique within one principal's request-id
+ * scope: retrying an identical plan under the same id must return the
+ * original proposal, and reusing an id with a different plan must fail.
+ */
+export const AGENT_CONTROL_REQUEST_ID_MAX_CHARS = 128;
+export const AgentControlRequestId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_REQUEST_ID_MAX_CHARS),
+).pipe(Schema.brand("AgentControlRequestId"));
+export type AgentControlRequestId = typeof AgentControlRequestId.Type;
+
+// ── Principals ────────────────────────────────────────────────────────
+
+/**
+ * An agent already running inside a Ryco thread. Its credential is
+ * per-provider-runtime, in-memory, thread-bound, and revoked on runtime
+ * teardown — none of that credential material appears in this contract.
+ */
+export const AgentControlProviderSessionPrincipal = Schema.Struct({
+  kind: Schema.Literal("provider-session"),
+  threadId: ThreadId,
+  providerInstanceId: ProviderInstanceId,
+  /** Runtime epoch of the session that issued the request, when known. */
+  runtimeSessionId: Schema.optional(RuntimeSessionId),
+  /** The exact running turn the request was bound to, when known. */
+  turnId: Schema.optional(TurnId),
+  /** Immutable caller privilege/scope evidence captured when the proposal is created. */
+  originProjectId: Schema.optional(ProjectId),
+  originRuntimeMode: Schema.optional(RuntimeMode),
+  originEnvMode: Schema.optional(ThreadEnvMode),
+  /** Audit-safe target state used to reject stale approved plans. */
+  targetSnapshots: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        threadId: ThreadId,
+        projectId: ProjectId,
+        runtimeMode: RuntimeMode,
+        envMode: ThreadEnvMode,
+        archived: Schema.Boolean,
+        activeTurnId: Schema.NullOr(TurnId),
+      }),
+    ),
+  ),
+});
+export type AgentControlProviderSessionPrincipal = typeof AgentControlProviderSessionPrincipal.Type;
+
+/**
+ * A separately paired local MCP client. Pairing, credential issuance, and
+ * scope grants are owned by later PRs; the principal identity is defined
+ * here so proposals persist a stable, audit-safe origin from day one.
+ */
+export const AgentControlExternalIntegrationPrincipal = Schema.Struct({
+  kind: Schema.Literal("external-integration"),
+  integrationId: AgentControlIntegrationId,
+  label: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(120))),
+  /** Immutable execution-policy evidence captured when the proposal is created. */
+  projectId: Schema.optional(ProjectId),
+  runtimeMode: Schema.optional(RuntimeMode),
+  envMode: Schema.optional(ThreadEnvMode),
+});
+export type AgentControlExternalIntegrationPrincipal =
+  typeof AgentControlExternalIntegrationPrincipal.Type;
+
+export const AgentControlPrincipal = Schema.Union([
+  AgentControlProviderSessionPrincipal,
+  AgentControlExternalIntegrationPrincipal,
+]);
+export type AgentControlPrincipal = typeof AgentControlPrincipal.Type;
+
+// ── Capabilities ──────────────────────────────────────────────────────
+
+const AGENT_CONTROL_SLUG_MAX_CHARS = 64;
+const agentControlSlug = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_SLUG_MAX_CHARS),
+  Schema.isPattern(/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)*$/),
+);
+
+/**
+ * Open branded capability slug. Grants persisted by a newer build must
+ * decode here; the policy layer only ever authorizes capabilities it
+ * knows and grants, so unknown slugs fail closed at evaluation time.
+ */
+export const AgentControlCapability = agentControlSlug.pipe(Schema.brand("AgentControlCapability"));
+export type AgentControlCapability = typeof AgentControlCapability.Type;
+
+export const AGENT_CONTROL_CAPABILITIES = {
+  read: AgentControlCapability.make("read"),
+  createThreads: AgentControlCapability.make("threads.create"),
+  sendMessage: AgentControlCapability.make("threads.send-message"),
+  interruptThread: AgentControlCapability.make("threads.interrupt"),
+  updateThread: AgentControlCapability.make("threads.update"),
+  externalListProjects: AgentControlCapability.make("external.projects.list"),
+  externalCreateTask: AgentControlCapability.make("external.tasks.create"),
+  externalReadTask: AgentControlCapability.make("external.tasks.read"),
+  externalSharedCheckout: AgentControlCapability.make("external.checkout.shared"),
+  externalFullAccess: AgentControlCapability.make("external.runtime.full-access"),
+} as const;
+
+// ── Action plans ──────────────────────────────────────────────────────
+
+export const AgentControlActionKind = Schema.Literals([
+  "createThreads",
+  "sendMessage",
+  "interruptThread",
+  "updateThread",
+]);
+export type AgentControlActionKind = typeof AgentControlActionKind.Type;
+
+/** Required capability per mutation action kind. */
+export const AGENT_CONTROL_ACTION_CAPABILITIES: Record<
+  AgentControlActionKind,
+  AgentControlCapability
+> = {
+  createThreads: AGENT_CONTROL_CAPABILITIES.createThreads,
+  sendMessage: AGENT_CONTROL_CAPABILITIES.sendMessage,
+  interruptThread: AGENT_CONTROL_CAPABILITIES.interruptThread,
+  updateThread: AGENT_CONTROL_CAPABILITIES.updateThread,
+};
+
+export const AGENT_CONTROL_PLAN_VERSION = 1;
+/** Matches `PROVIDER_SEND_TURN_MAX_INPUT_CHARS` — a plan prompt becomes a turn input. */
+export const AGENT_CONTROL_PROMPT_MAX_CHARS = 120_000;
+export const AGENT_CONTROL_TITLE_MAX_CHARS = 200;
+export const AGENT_CONTROL_CREATE_THREADS_MAX_ENTRIES = 10;
+export const AGENT_CONTROL_PERSISTENT_GOAL_MAX_CHARS = 4_000;
+
+const AgentControlPrompt = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_PROMPT_MAX_CHARS),
+);
+const AgentControlTitle = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_TITLE_MAX_CHARS),
+);
+
+export const AgentControlCreateThreadEntry = Schema.Struct({
+  projectId: ProjectId,
+  title: AgentControlTitle,
+  prompt: AgentControlPrompt,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  /** Isolated worktree vs the project's shared local checkout. */
+  envMode: ThreadEnvMode,
+  /** Base ref for worktree creation; the project default when absent. */
+  baseRef: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCreateThreadEntry = typeof AgentControlCreateThreadEntry.Type;
+
+/** One exact immutable batch — never a generic spawning loop. */
+export const AgentControlCreateThreadsPlan = Schema.Struct({
+  kind: Schema.Literal("createThreads"),
+  entries: Schema.Array(AgentControlCreateThreadEntry).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(AGENT_CONTROL_CREATE_THREADS_MAX_ENTRIES),
+  ),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCreateThreadsPlan = typeof AgentControlCreateThreadsPlan.Type;
+
+export const AgentControlSendMessageDelivery = Schema.Literals(["queue", "steer"]);
+export type AgentControlSendMessageDelivery = typeof AgentControlSendMessageDelivery.Type;
+
+export const AgentControlSendMessagePlan = Schema.Struct({
+  kind: Schema.Literal("sendMessage"),
+  threadId: ThreadId,
+  text: AgentControlPrompt,
+  delivery: AgentControlSendMessageDelivery,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlSendMessagePlan = typeof AgentControlSendMessagePlan.Type;
+
+export const AgentControlInterruptThreadPlan = Schema.Struct({
+  kind: Schema.Literal("interruptThread"),
+  threadId: ThreadId,
+  /** When present, only this exact turn may be interrupted. */
+  turnId: Schema.optional(TurnId),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlInterruptThreadPlan = typeof AgentControlInterruptThreadPlan.Type;
+
+export const AgentControlUpdateThreadPlan = Schema.Struct({
+  kind: Schema.Literal("updateThread"),
+  threadId: ThreadId,
+  title: Schema.optional(AgentControlTitle),
+  archived: Schema.optional(Schema.Boolean),
+  /** An explicitly requested persistent goal; `null` clears it. */
+  persistentGoal: Schema.optional(
+    Schema.NullOr(
+      TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_PERSISTENT_GOAL_MAX_CHARS)),
+    ),
+  ),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlUpdateThreadPlan = typeof AgentControlUpdateThreadPlan.Type;
+
+export const AgentControlActionPlan = Schema.Union([
+  AgentControlCreateThreadsPlan,
+  AgentControlSendMessagePlan,
+  AgentControlInterruptThreadPlan,
+  AgentControlUpdateThreadPlan,
+]);
+export type AgentControlActionPlan = typeof AgentControlActionPlan.Type;
+
+// ── Digest, risk tags, prompt summary ─────────────────────────────────
+
+/** sha-256 hex over the canonical encoded plan payload. */
+export const AgentControlPlanDigest = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^[a-f0-9]{64}$/),
+);
+export type AgentControlPlanDigest = typeof AgentControlPlanDigest.Type;
+
+/** Open branded risk-tag slug; same forward-compat rules as capabilities. */
+export const AgentControlRiskTag = agentControlSlug.pipe(Schema.brand("AgentControlRiskTag"));
+export type AgentControlRiskTag = typeof AgentControlRiskTag.Type;
+
+export const AGENT_CONTROL_RISK_TAGS = {
+  createsThreads: AgentControlRiskTag.make("creates-threads"),
+  startsProviderTurn: AgentControlRiskTag.make("starts-provider-turn"),
+  interruptsThread: AgentControlRiskTag.make("interrupts-thread"),
+  modifiesThreadMetadata: AgentControlRiskTag.make("modifies-thread-metadata"),
+  sharedLocalCheckout: AgentControlRiskTag.make("shared-local-checkout"),
+  elevatedRuntimeMode: AgentControlRiskTag.make("elevated-runtime-mode"),
+} as const;
+
+/**
+ * Audit-safe compact summary shown on approval cards and retained in audit
+ * rows. Never a full prompt: bounded, and produced server-side.
+ */
+export const AGENT_CONTROL_PROMPT_SUMMARY_MAX_CHARS = 500;
+export const AgentControlPromptSummary = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_PROMPT_SUMMARY_MAX_CHARS),
+);
+export type AgentControlPromptSummary = typeof AgentControlPromptSummary.Type;
+
+// ── Result and error envelopes ────────────────────────────────────────
+
+export const AGENT_CONTROL_ERROR_MESSAGE_MAX_CHARS = 2_000;
+const AgentControlResultMessage = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_ERROR_MESSAGE_MAX_CHARS),
+);
+
+/** Open branded error-code slug; same forward-compat rules as capabilities. */
+export const AgentControlErrorCode = agentControlSlug.pipe(Schema.brand("AgentControlErrorCode"));
+export type AgentControlErrorCode = typeof AgentControlErrorCode.Type;
+
+export const AGENT_CONTROL_ERROR_CODES = {
+  rejected: AgentControlErrorCode.make("rejected"),
+  expired: AgentControlErrorCode.make("expired"),
+  cancelled: AgentControlErrorCode.make("cancelled"),
+  duplicateRequest: AgentControlErrorCode.make("duplicate-request"),
+  revalidationFailed: AgentControlErrorCode.make("revalidation-failed"),
+  executionFailed: AgentControlErrorCode.make("execution-failed"),
+  featureDisabled: AgentControlErrorCode.make("feature-disabled"),
+  capabilityDenied: AgentControlErrorCode.make("capability-denied"),
+} as const;
+
+export const AgentControlErrorEnvelope = Schema.Struct({
+  code: AgentControlErrorCode,
+  message: AgentControlResultMessage,
+  /** Whether a fresh request (with a new request id) could succeed. */
+  retryable: Schema.Boolean,
+});
+export type AgentControlErrorEnvelope = typeof AgentControlErrorEnvelope.Type;
+
+export const AgentControlDispatchedCommandReceipt = Schema.Struct({
+  commandId: CommandId,
+  commandType: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  sequence: NonNegativeInt,
+});
+export type AgentControlDispatchedCommandReceipt = typeof AgentControlDispatchedCommandReceipt.Type;
+
+export const AgentControlExecutionReceipt = Schema.Struct({
+  operationId: AgentControlOperationId,
+  commands: Schema.Array(AgentControlDispatchedCommandReceipt),
+  affectedThreadIds: Schema.Array(ThreadId),
+  worktreeIds: Schema.Array(WorktreeId),
+  delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
+  interrupt: Schema.optional(
+    Schema.Struct({
+      requestedTurnId: Schema.NullOr(TurnId),
+      settledStatus: OrchestrationSessionStatus,
+      settledActiveTurnId: Schema.NullOr(TurnId),
+    }),
+  ),
+  compensation: Schema.optional(
+    Schema.Struct({
+      attempted: Schema.Boolean,
+      completed: Schema.Boolean,
+    }),
+  ),
+});
+export type AgentControlExecutionReceipt = typeof AgentControlExecutionReceipt.Type;
+
+export const AgentControlCompletedResult = Schema.Struct({
+  outcome: Schema.Literal("completed"),
+  createdThreadIds: Schema.optional(Schema.Array(ThreadId)),
+  execution: Schema.optional(AgentControlExecutionReceipt),
+  detail: Schema.optional(AgentControlResultMessage),
+  completedAt: IsoDateTime,
+});
+export type AgentControlCompletedResult = typeof AgentControlCompletedResult.Type;
+
+export const AgentControlFailedResult = Schema.Struct({
+  outcome: Schema.Literal("failed"),
+  error: AgentControlErrorEnvelope,
+  execution: Schema.optional(AgentControlExecutionReceipt),
+  failedAt: IsoDateTime,
+});
+export type AgentControlFailedResult = typeof AgentControlFailedResult.Type;
+
+/** Terminal receipt readable by the originating MCP client. */
+export const AgentControlResultEnvelope = Schema.Union([
+  AgentControlCompletedResult,
+  AgentControlFailedResult,
+]);
+export type AgentControlResultEnvelope = typeof AgentControlResultEnvelope.Type;
+
+// ── Proposals ─────────────────────────────────────────────────────────
+
+export const AgentControlProposalStatus = Schema.Literals([
+  "pending-user-approval",
+  "approved",
+  "rejected",
+  "expired",
+  "executing",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type AgentControlProposalStatus = typeof AgentControlProposalStatus.Type;
+
+export const AGENT_CONTROL_TERMINAL_PROPOSAL_STATUSES: ReadonlyArray<AgentControlProposalStatus> = [
+  "rejected",
+  "expired",
+  "completed",
+  "failed",
+  "cancelled",
+];
+
+/**
+ * Immutable approval proposal. Accepting a proposal authorizes only its
+ * `planDigest` — the plan payload and digest are written once and never
+ * updated; a changed plan requires a new request.
+ */
+export const AgentControlProposal = Schema.Struct({
+  proposalId: AgentControlProposalId,
+  requestId: AgentControlRequestId,
+  principal: AgentControlPrincipal,
+  planVersion: Schema.Literal(AGENT_CONTROL_PLAN_VERSION),
+  plan: AgentControlActionPlan,
+  planDigest: AgentControlPlanDigest,
+  riskTags: Schema.Array(AgentControlRiskTag),
+  promptSummary: Schema.NullOr(AgentControlPromptSummary),
+  status: AgentControlProposalStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  expiresAt: IsoDateTime,
+  decidedAt: Schema.NullOr(IsoDateTime),
+  result: Schema.NullOr(AgentControlResultEnvelope),
+});
+export type AgentControlProposal = typeof AgentControlProposal.Type;
+
+// ── Approval queue and RPC surface ────────────────────────────────────
+
+export const AGENT_CONTROL_WS_METHODS = {
+  listProposals: "agentControl.listProposals",
+  getProposal: "agentControl.getProposal",
+  acceptProposal: "agentControl.acceptProposal",
+  rejectProposal: "agentControl.rejectProposal",
+  subscribeProposals: "agentControl.subscribeProposals",
+  listIntegrations: "agentControl.listIntegrations",
+  createIntegration: "agentControl.createIntegration",
+  updateIntegration: "agentControl.updateIntegration",
+  resumeIntegrationPairing: "agentControl.resumeIntegrationPairing",
+  revokeIntegration: "agentControl.revokeIntegration",
+  deleteIntegration: "agentControl.deleteIntegration",
+} as const;
+
+/** Proposals shown in the live approval queue (everything non-terminal). */
+export const AGENT_CONTROL_ACTIVE_PROPOSAL_STATUSES: ReadonlyArray<AgentControlProposalStatus> = [
+  "pending-user-approval",
+  "approved",
+  "executing",
+];
+
+export const AGENT_CONTROL_QUEUE_ACTIVE_LIMIT_MAX = 100;
+export const AGENT_CONTROL_QUEUE_RECENT_LIMIT_MAX = 100;
+export const AGENT_CONTROL_QUEUE_ACTIVE_LIMIT_DEFAULT = 50;
+export const AGENT_CONTROL_QUEUE_RECENT_LIMIT_DEFAULT = 20;
+
+/**
+ * Stable, bounded lifecycle receipt for one proposal: identifiers, status,
+ * digest, risk tags, timing, and the terminal result envelope. This is the
+ * shape future MCP read/wait tools return to the originating agent — never
+ * the plan payload or prompt text.
+ */
+export const AgentControlProposalReceipt = Schema.Struct({
+  proposalId: AgentControlProposalId,
+  requestId: AgentControlRequestId,
+  actionKind: AgentControlActionKind,
+  planDigest: AgentControlPlanDigest,
+  riskTags: Schema.Array(AgentControlRiskTag),
+  status: AgentControlProposalStatus,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  expiresAt: IsoDateTime,
+  decidedAt: Schema.NullOr(IsoDateTime),
+  result: Schema.NullOr(AgentControlResultEnvelope),
+});
+export type AgentControlProposalReceipt = typeof AgentControlProposalReceipt.Type;
+
+/**
+ * Queue snapshot: non-terminal proposals (oldest first) plus a bounded
+ * terminal history (newest first). `revision` is the server's per-process
+ * monotonic change counter at snapshot time — it orders proposal events
+ * within one subscription and is NOT durable across server restarts; every
+ * snapshot resets the client's dedupe baseline.
+ */
+export const AgentControlProposalQueue = Schema.Struct({
+  revision: NonNegativeInt,
+  active: Schema.Array(AgentControlProposal),
+  recent: Schema.Array(AgentControlProposal),
+});
+export type AgentControlProposalQueue = typeof AgentControlProposalQueue.Type;
+
+export const AgentControlListProposalsInput = Schema.Struct({
+  /** Capped server-side at `AGENT_CONTROL_QUEUE_ACTIVE_LIMIT_MAX`. */
+  activeLimit: Schema.optional(PositiveInt),
+  /** Capped server-side at `AGENT_CONTROL_QUEUE_RECENT_LIMIT_MAX`. */
+  recentLimit: Schema.optional(PositiveInt),
+});
+export type AgentControlListProposalsInput = typeof AgentControlListProposalsInput.Type;
+
+export const AgentControlGetProposalInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+});
+export type AgentControlGetProposalInput = typeof AgentControlGetProposalInput.Type;
+
+export const AgentControlGetProposalResult = Schema.Struct({
+  proposal: Schema.NullOr(AgentControlProposal),
+});
+export type AgentControlGetProposalResult = typeof AgentControlGetProposalResult.Type;
+
+export const AgentControlDecideProposalInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+});
+export type AgentControlDecideProposalInput = typeof AgentControlDecideProposalInput.Type;
+
+export const AgentControlProposalStreamSnapshotEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("snapshot"),
+  queue: AgentControlProposalQueue,
+});
+export type AgentControlProposalStreamSnapshotEvent =
+  typeof AgentControlProposalStreamSnapshotEvent.Type;
+
+/**
+ * One proposal creation or transition. The full proposal document is the
+ * payload — clients upsert by `proposalId` and never let a proposal move
+ * backward through the one-way status progression, so replayed, duplicated,
+ * or reordered deliveries are harmless.
+ */
+export const AgentControlProposalStreamProposalEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("proposal"),
+  revision: NonNegativeInt,
+  proposal: AgentControlProposal,
+});
+export type AgentControlProposalStreamProposalEvent =
+  typeof AgentControlProposalStreamProposalEvent.Type;
+
+export const AgentControlProposalStreamEvent = Schema.Union([
+  AgentControlProposalStreamSnapshotEvent,
+  AgentControlProposalStreamProposalEvent,
+]);
+export type AgentControlProposalStreamEvent = typeof AgentControlProposalStreamEvent.Type;
+
+/**
+ * Bounded RPC failure for the approval surface. Carries only the decision
+ * outcome category and, on decision conflicts, the proposal's actual status
+ * — never plan payloads, prompt text, or other resource details.
+ */
+export const AgentControlRpcErrorCode = Schema.Literals([
+  "disabled",
+  "not-found",
+  "expired",
+  "conflict",
+  "storage",
+]);
+export type AgentControlRpcErrorCode = typeof AgentControlRpcErrorCode.Type;
+
+export class AgentControlRpcError extends Schema.TaggedError<AgentControlRpcError>()(
+  "AgentControlRpcError",
+  {
+    code: AgentControlRpcErrorCode,
+    message: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_ERROR_MESSAGE_MAX_CHARS)),
+    /** The proposal's actual status when a decision lost to another actor. */
+    status: Schema.optional(AgentControlProposalStatus),
+  },
+) {}
+
+// ── Operations ────────────────────────────────────────────────────────
+
+export const AgentControlOperationStatus = Schema.Literals([
+  "pending",
+  "running",
+  "compensating",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type AgentControlOperationStatus = typeof AgentControlOperationStatus.Type;
+
+export const AGENT_CONTROL_TERMINAL_OPERATION_STATUSES: ReadonlyArray<AgentControlOperationStatus> =
+  ["completed", "failed", "cancelled"];
+
+/**
+ * Resources an operation has created so far. Persisted so restart recovery
+ * can prove operation ownership (e.g. of a preflighted worktree) and either
+ * clean up safely or surface a clearly terminal failure.
+ */
+export const AgentControlOperationResources = Schema.Struct({
+  threadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  ownedThreadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  worktreeIds: Schema.Array(WorktreeId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  ownedWorktrees: Schema.Array(
+    Schema.Struct({
+      worktreeId: WorktreeId,
+      projectId: ProjectId,
+      branch: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+      checkoutPath: TrimmedNonEmptyString,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type AgentControlOperationResources = typeof AgentControlOperationResources.Type;
+
+export const AgentControlOperationState = Schema.Struct({
+  completedSteps: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(128))).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  resources: AgentControlOperationResources.pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({ threadIds: [], ownedThreadIds: [], worktreeIds: [], ownedWorktrees: [] }),
+    ),
+  ),
+  commandReceipts: Schema.Array(AgentControlDispatchedCommandReceipt).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
+  interrupt: Schema.optional(
+    Schema.Struct({
+      requestedTurnId: Schema.NullOr(TurnId),
+      settledStatus: OrchestrationSessionStatus,
+      settledActiveTurnId: Schema.NullOr(TurnId),
+    }),
+  ),
+  compensation: Schema.optional(
+    Schema.Struct({ attempted: Schema.Boolean, completed: Schema.Boolean }),
+  ),
+  note: Schema.optional(AgentControlResultMessage),
+});
+export type AgentControlOperationState = typeof AgentControlOperationState.Type;
+
+/**
+ * Durable execution record for an accepted proposal. Exactly one operation
+ * exists per proposal; its monotonic state and resource evidence are what
+ * restart recovery replays.
+ */
+export const AgentControlOperation = Schema.Struct({
+  operationId: AgentControlOperationId,
+  proposalId: AgentControlProposalId,
+  actionKind: AgentControlActionKind,
+  status: AgentControlOperationStatus,
+  attempt: NonNegativeInt,
+  state: AgentControlOperationState,
+  result: Schema.NullOr(AgentControlResultEnvelope),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type AgentControlOperation = typeof AgentControlOperation.Type;
+
+// ── Internal provider-session MCP surface ─────────────────────────────
+//
+// The server exposes a private, loopback-only MCP endpoint to supported
+// provider runtimes. This section defines the tool names and the bounded
+// input/result payloads those tools exchange. The credential material that
+// authenticates a provider session never appears in these contracts — it
+// is issued in-memory per provider runtime and revoked with it.
+
+/** Transport actually installed for one internal provider runtime. */
+export const AgentControlInjectionMode = Schema.Literals([
+  "codex-http",
+  "claude-http",
+  "acp-http",
+  "acp-stdio-proxy",
+  "copilot-http",
+]);
+export type AgentControlInjectionMode = typeof AgentControlInjectionMode.Type;
+
+/** Code-facing support decision for one provider driver's internal MCP surface. */
+export const AgentControlProviderSupport = Schema.Struct({
+  supported: Schema.Boolean,
+  runtimeScoped: Schema.Boolean,
+  http: Schema.Literals(["native", "advertised", "unsupported"]),
+  stdio: Schema.Literals(["native", "proxy", "unsupported"]),
+  configurationScope: Schema.Literals([
+    "runtime-session",
+    "process",
+    "directory",
+    "user",
+    "global",
+    "unknown",
+  ]),
+  credentialIsolation: Schema.Literals([
+    "scoped-header",
+    "scoped-header-or-bootstrap",
+    "unsafe",
+    "unavailable",
+  ]),
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type AgentControlProviderSupport = typeof AgentControlProviderSupport.Type;
+
+export const AgentControlProviderAvailability = Schema.Struct({
+  ...AgentControlProviderSupport.fields,
+  available: Schema.Boolean,
+  unavailableReason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type AgentControlProviderAvailability = typeof AgentControlProviderAvailability.Type;
+
+/**
+ * The complete internal MCP tool catalog. Mutation tools create immutable
+ * approval proposals; they never execute their requested action inline.
+ */
+export const AGENT_CONTROL_MCP_TOOLS = {
+  context: "ryco_context",
+  capabilities: "ryco_capabilities",
+  listProjects: "ryco_list_projects",
+  listThreads: "ryco_list_threads",
+  readThread: "ryco_read_thread",
+  readControlRequest: "ryco_read_control_request",
+  waitForControlRequest: "ryco_wait_for_control_request",
+  createThreads: "ryco_create_threads",
+  sendMessage: "ryco_send_message",
+  interruptThread: "ryco_interrupt_thread",
+  updateThread: "ryco_update_thread",
+} as const;
+export type AgentControlMcpToolName =
+  (typeof AGENT_CONTROL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_MCP_TOOLS];
+
+export const AGENT_CONTROL_MCP_TOOL_NAMES: ReadonlyArray<AgentControlMcpToolName> =
+  Object.values(AGENT_CONTROL_MCP_TOOLS);
+
+// Server-side clamps for list/read tools. Inputs above a max are capped,
+// not rejected; absent limits use the defaults.
+export const AGENT_CONTROL_MCP_LIST_LIMIT_MAX = 50;
+export const AGENT_CONTROL_MCP_LIST_LIMIT_DEFAULT = 20;
+export const AGENT_CONTROL_MCP_MESSAGE_LIMIT_MAX = 50;
+export const AGENT_CONTROL_MCP_MESSAGE_LIMIT_DEFAULT = 20;
+/** Per-message transcript text cap; longer text is truncated and flagged. */
+export const AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS = 8_000;
+/**
+ * Aggregate transcript text budget per `ryco_read_thread` page. Newest
+ * messages keep their text; older messages beyond the budget are
+ * truncated (down to empty) and flagged, so a max-limit page of max-length
+ * messages still fits the listener's bounded response size even after the
+ * MCP dual text/structured serialization.
+ */
+export const AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS = 80_000;
+/** Wait bounds for `ryco_wait_for_control_request` (milliseconds). */
+export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_MAX = 50_000;
+export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_DEFAULT = 25_000;
+
+/**
+ * Opaque pagination cursor. List cursors are minted by the server and are
+ * only meaningful to the tool that issued them; thread-history cursors
+ * reuse the orchestration history cursor encoding. Bounded so a caller
+ * cannot smuggle unbounded payloads through the cursor field.
+ */
+export const AgentControlMcpCursor = TrimmedNonEmptyString.check(Schema.isMaxLength(1_024));
+export type AgentControlMcpCursor = typeof AgentControlMcpCursor.Type;
+
+// ── Tool inputs ───────────────────────────────────────────────────────
+
+export const AgentControlMcpListProjectsInput = Schema.Struct({
+  limit: Schema.optional(PositiveInt),
+  cursor: Schema.optional(AgentControlMcpCursor),
+});
+export type AgentControlMcpListProjectsInput = typeof AgentControlMcpListProjectsInput.Type;
+
+export const AgentControlMcpListThreadsInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  includeArchived: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(PositiveInt),
+  cursor: Schema.optional(AgentControlMcpCursor),
+});
+export type AgentControlMcpListThreadsInput = typeof AgentControlMcpListThreadsInput.Type;
+
+export const AgentControlMcpReadThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  messageLimit: Schema.optional(PositiveInt),
+  /** Page older history; minted by a previous `ryco_read_thread` call. */
+  cursor: Schema.optional(AgentControlMcpCursor),
+});
+export type AgentControlMcpReadThreadInput = typeof AgentControlMcpReadThreadInput.Type;
+
+export const AgentControlMcpReadControlRequestInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+});
+export type AgentControlMcpReadControlRequestInput =
+  typeof AgentControlMcpReadControlRequestInput.Type;
+
+export const AgentControlMcpWaitCondition = Schema.Literals(["decided", "terminal"]);
+export type AgentControlMcpWaitCondition = typeof AgentControlMcpWaitCondition.Type;
+
+export const AgentControlMcpWaitForControlRequestInput = Schema.Struct({
+  proposalId: AgentControlProposalId,
+  /** `decided` (default): any status past pending. `terminal`: a final outcome. */
+  waitFor: Schema.optional(AgentControlMcpWaitCondition),
+  /** Capped at `AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_MAX`. */
+  timeoutMs: Schema.optional(PositiveInt),
+});
+export type AgentControlMcpWaitForControlRequestInput =
+  typeof AgentControlMcpWaitForControlRequestInput.Type;
+
+export const AgentControlMcpCreateThreadsInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  entries: AgentControlCreateThreadsPlan.fields.entries,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpCreateThreadsInput = typeof AgentControlMcpCreateThreadsInput.Type;
+
+export const AgentControlMcpSendMessageInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  threadId: ThreadId,
+  text: AgentControlSendMessagePlan.fields.text,
+  delivery: AgentControlSendMessageDelivery,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpSendMessageInput = typeof AgentControlMcpSendMessageInput.Type;
+
+export const AgentControlMcpInterruptThreadInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  threadId: ThreadId,
+  turnId: Schema.optional(TurnId),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpInterruptThreadInput = typeof AgentControlMcpInterruptThreadInput.Type;
+
+export const AgentControlMcpUpdateThreadInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  threadId: ThreadId,
+  title: Schema.optional(AgentControlTitle),
+  archived: Schema.optional(Schema.Boolean),
+  persistentGoal: Schema.optional(
+    Schema.NullOr(
+      TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_PERSISTENT_GOAL_MAX_CHARS)),
+    ),
+  ),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpUpdateThreadInput = typeof AgentControlMcpUpdateThreadInput.Type;
+
+// ── Tool results ──────────────────────────────────────────────────────
+
+export const AgentControlMcpContextResult = Schema.Struct({
+  threadId: ThreadId,
+  threadTitle: Schema.NullOr(TrimmedNonEmptyString),
+  projectId: Schema.NullOr(ProjectId),
+  projectTitle: Schema.NullOr(TrimmedNonEmptyString),
+  providerInstanceId: ProviderInstanceId,
+  runtimeSessionId: RuntimeSessionId,
+  capabilities: Schema.Array(AgentControlCapability),
+  agentControl: Schema.Struct({
+    available: Schema.Literal(true),
+    injectionMode: AgentControlInjectionMode,
+  }),
+  /** True only while this MCP session owns exact active-turn write authority. */
+  writeToolsAvailable: Schema.Boolean,
+});
+export type AgentControlMcpContextResult = typeof AgentControlMcpContextResult.Type;
+
+export const AGENT_CONTROL_MCP_MODELS_PER_INSTANCE_MAX = 50;
+
+export const AgentControlMcpModelSummary = Schema.Struct({
+  slug: TrimmedNonEmptyString,
+  name: TrimmedNonEmptyString,
+});
+export type AgentControlMcpModelSummary = typeof AgentControlMcpModelSummary.Type;
+
+/**
+ * Bounded provider-instance availability for `ryco_capabilities`. Keyed by
+ * `ProviderInstanceId` — never a static provider name — and deliberately
+ * free of auth identity, rate limits, and maintenance internals.
+ */
+export const AgentControlMcpProviderInstanceSummary = Schema.Struct({
+  instanceId: ProviderInstanceId,
+  driver: ProviderDriverKind,
+  displayName: Schema.NullOr(TrimmedNonEmptyString),
+  enabled: Schema.Boolean,
+  status: ServerProviderState,
+  availability: ServerProviderAvailability,
+  models: Schema.Array(AgentControlMcpModelSummary),
+  agentControl: AgentControlProviderAvailability,
+});
+export type AgentControlMcpProviderInstanceSummary =
+  typeof AgentControlMcpProviderInstanceSummary.Type;
+
+export const AgentControlMcpCapabilitiesResult = Schema.Struct({
+  enabled: Schema.Boolean,
+  readOnly: Schema.Boolean,
+  tools: Schema.Array(TrimmedNonEmptyString),
+  grantedCapabilities: Schema.Array(AgentControlCapability),
+  agentControl: Schema.Struct({
+    available: Schema.Literal(true),
+    injectionMode: AgentControlInjectionMode,
+  }),
+  providerInstances: Schema.Array(AgentControlMcpProviderInstanceSummary),
+});
+export type AgentControlMcpCapabilitiesResult = typeof AgentControlMcpCapabilitiesResult.Type;
+
+export const AgentControlMcpProjectSummary = Schema.Struct({
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type AgentControlMcpProjectSummary = typeof AgentControlMcpProjectSummary.Type;
+
+export const AgentControlMcpListProjectsResult = Schema.Struct({
+  projects: Schema.Array(AgentControlMcpProjectSummary),
+  nextCursor: Schema.NullOr(AgentControlMcpCursor),
+});
+export type AgentControlMcpListProjectsResult = typeof AgentControlMcpListProjectsResult.Type;
+
+export const AgentControlMcpThreadSummary = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  status: OrchestrationSessionStatus,
+  activeTurnId: Schema.NullOr(TurnId),
+  providerInstanceId: Schema.NullOr(ProviderInstanceId),
+  archived: Schema.Boolean,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type AgentControlMcpThreadSummary = typeof AgentControlMcpThreadSummary.Type;
+
+export const AgentControlMcpListThreadsResult = Schema.Struct({
+  threads: Schema.Array(AgentControlMcpThreadSummary),
+  nextCursor: Schema.NullOr(AgentControlMcpCursor),
+});
+export type AgentControlMcpListThreadsResult = typeof AgentControlMcpListThreadsResult.Type;
+
+/**
+ * Redacted transcript entry: role, bounded text, and turn attribution
+ * only. Attachments surface as metadata counts; activity payloads, raw
+ * provider events, and file paths never cross this boundary.
+ */
+export const AgentControlMcpMessage = Schema.Struct({
+  messageId: TrimmedNonEmptyString,
+  role: Schema.Literals(["user", "assistant", "system"]),
+  text: Schema.String,
+  truncated: Schema.Boolean,
+  turnId: Schema.NullOr(TurnId),
+  attachmentCount: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+export type AgentControlMcpMessage = typeof AgentControlMcpMessage.Type;
+
+export const AgentControlMcpReadThreadResult = Schema.Struct({
+  thread: AgentControlMcpThreadSummary,
+  messages: Schema.Array(AgentControlMcpMessage),
+  hasMoreBefore: Schema.Boolean,
+  /** Cursor for the next-older page; `null` when history is exhausted. */
+  nextCursor: Schema.NullOr(AgentControlMcpCursor),
+});
+export type AgentControlMcpReadThreadResult = typeof AgentControlMcpReadThreadResult.Type;
+
+/**
+ * Control-request read/wait payload: the bounded lifecycle receipt plus
+ * wait metadata. Never the plan payload or prompt text.
+ */
+export const AgentControlMcpControlRequestResult = Schema.Struct({
+  receipt: AgentControlProposalReceipt,
+  /** Only set by the wait tool: `true` when it returned on timeout. */
+  timedOut: Schema.optional(Schema.Boolean),
+});
+export type AgentControlMcpControlRequestResult = typeof AgentControlMcpControlRequestResult.Type;
+
+export const AgentControlMcpMutationResult = Schema.Struct({
+  receipt: AgentControlProposalReceipt,
+  replayed: Schema.Boolean,
+});
+export type AgentControlMcpMutationResult = typeof AgentControlMcpMutationResult.Type;
+
+// ── Paired external MCP integrations ─────────────────────────────────
+
+export const AGENT_CONTROL_EXTERNAL_CREDENTIAL_AUDIENCE = "external-mcp" as const;
+export const AGENT_CONTROL_EXTERNAL_PAIRING_CODE_TTL_MS = 10 * 60_000;
+export const AGENT_CONTROL_EXTERNAL_PROPOSAL_TTL_MS = 15 * 60_000;
+export const AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX = 600;
+export const AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX = 10;
+
+export const AgentControlExternalClientKind = Schema.Literals([
+  "codex",
+  "claude-code",
+  "claude-desktop",
+  "generic-mcp",
+]);
+export type AgentControlExternalClientKind = typeof AgentControlExternalClientKind.Type;
+
+export const AgentControlExternalProjectScope = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("all") }),
+  Schema.Struct({
+    kind: Schema.Literal("selected"),
+    projectIds: Schema.Array(ProjectId).check(Schema.isMaxLength(500)),
+  }),
+]);
+export type AgentControlExternalProjectScope = typeof AgentControlExternalProjectScope.Type;
+
+export const AgentControlExternalPairingState = Schema.Literals(["unpaired", "pending", "paired"]);
+export type AgentControlExternalPairingState = typeof AgentControlExternalPairingState.Type;
+
+/** Public integration view. Credential and pairing-code hashes never cross this contract. */
+export const AgentControlExternalIntegration = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+  displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  clientKind: AgentControlExternalClientKind,
+  projectScope: AgentControlExternalProjectScope,
+  capabilities: Schema.Array(AgentControlCapability).check(Schema.isMaxLength(32)),
+  rateLimitPerMinute: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX),
+  ),
+  activeTaskLimit: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX),
+  ),
+  activeTaskCount: NonNegativeInt,
+  expiresAt: Schema.NullOr(IsoDateTime),
+  revokedAt: Schema.NullOr(IsoDateTime),
+  pairingState: AgentControlExternalPairingState,
+  pairingCodeExpiresAt: Schema.NullOr(IsoDateTime),
+  pairedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  lastUsedAt: Schema.NullOr(IsoDateTime),
+});
+export type AgentControlExternalIntegration = typeof AgentControlExternalIntegration.Type;
+
+export const AgentControlExternalTopology = Schema.Struct({
+  available: Schema.Boolean,
+  reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+});
+export type AgentControlExternalTopology = typeof AgentControlExternalTopology.Type;
+
+/** Safe local bridge invocation. It contains paths and an integration id, never a credential. */
+export const AgentControlExternalBridgeCommand = Schema.Struct({
+  command: TrimmedNonEmptyString,
+  args: Schema.Array(Schema.String),
+});
+export type AgentControlExternalBridgeCommand = typeof AgentControlExternalBridgeCommand.Type;
+
+export const AgentControlExternalSetup = Schema.Struct({
+  pairCommand: AgentControlExternalBridgeCommand,
+  serveCommand: AgentControlExternalBridgeCommand,
+  configuration: TrimmedNonEmptyString.check(Schema.isMaxLength(16_000)),
+});
+export type AgentControlExternalSetup = typeof AgentControlExternalSetup.Type;
+
+export const AgentControlExternalIntegrationDetail = Schema.Struct({
+  integration: AgentControlExternalIntegration,
+  setup: AgentControlExternalSetup,
+  topology: AgentControlExternalTopology,
+});
+export type AgentControlExternalIntegrationDetail =
+  typeof AgentControlExternalIntegrationDetail.Type;
+
+export const AgentControlExternalIntegrationCreateInput = Schema.Struct({
+  displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  clientKind: AgentControlExternalClientKind,
+  projectScope: AgentControlExternalProjectScope,
+  capabilities: Schema.Array(AgentControlCapability).check(Schema.isMaxLength(32)),
+  rateLimitPerMinute: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX),
+  ),
+  activeTaskLimit: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX),
+  ),
+  expiresAt: Schema.NullOr(IsoDateTime),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlExternalIntegrationCreateInput =
+  typeof AgentControlExternalIntegrationCreateInput.Type;
+
+export const AgentControlExternalIntegrationUpdateInput = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+  displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(120))),
+  clientKind: Schema.optional(AgentControlExternalClientKind),
+  projectScope: Schema.optional(AgentControlExternalProjectScope),
+  capabilities: Schema.optional(Schema.Array(AgentControlCapability).check(Schema.isMaxLength(32))),
+  rateLimitPerMinute: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX)),
+  ),
+  activeTaskLimit: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX)),
+  ),
+  expiresAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlExternalIntegrationUpdateInput =
+  typeof AgentControlExternalIntegrationUpdateInput.Type;
+
+export const AgentControlExternalIntegrationIdInput = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+});
+export type AgentControlExternalIntegrationIdInput =
+  typeof AgentControlExternalIntegrationIdInput.Type;
+
+export const AgentControlExternalIntegrationListResult = Schema.Struct({
+  integrations: Schema.Array(AgentControlExternalIntegrationDetail),
+  topology: AgentControlExternalTopology,
+});
+export type AgentControlExternalIntegrationListResult =
+  typeof AgentControlExternalIntegrationListResult.Type;
+
+/** The short-lived code is returned only for a new/resumed pairing ceremony. */
+export const AgentControlExternalPairingResult = Schema.Struct({
+  detail: AgentControlExternalIntegrationDetail,
+  pairingCode: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+});
+export type AgentControlExternalPairingResult = typeof AgentControlExternalPairingResult.Type;
+
+export const AgentControlExternalIntegrationMutationResult = Schema.Struct({
+  integration: AgentControlExternalIntegration,
+});
+export type AgentControlExternalIntegrationMutationResult =
+  typeof AgentControlExternalIntegrationMutationResult.Type;
+
+export const AgentControlExternalIntegrationDeleteResult = Schema.Struct({
+  deleted: Schema.Boolean,
+});
+export type AgentControlExternalIntegrationDeleteResult =
+  typeof AgentControlExternalIntegrationDeleteResult.Type;
+
+export const AgentControlExternalRpcErrorCode = Schema.Literals([
+  "disabled",
+  "topology",
+  "not-found",
+  "invalid",
+  "conflict",
+  "storage",
+]);
+export class AgentControlExternalRpcError extends Schema.TaggedError<AgentControlExternalRpcError>()(
+  "AgentControlExternalRpcError",
+  {
+    code: AgentControlExternalRpcErrorCode,
+    message: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_ERROR_MESSAGE_MAX_CHARS)),
+  },
+) {}
+
+// ── External stdio MCP tool catalog ──────────────────────────────────
+
+export const AGENT_CONTROL_EXTERNAL_MCP_TOOLS = {
+  overview: "ryco_overview",
+  capabilities: "ryco_capabilities",
+  listAllowedProjects: "ryco_list_allowed_projects",
+  createTask: "ryco_create_task",
+  readTask: "ryco_read_task",
+  waitForTask: "ryco_wait_for_task",
+} as const;
+export type AgentControlExternalMcpToolName =
+  (typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS];
+export const AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES: ReadonlyArray<AgentControlExternalMcpToolName> =
+  Object.values(AGENT_CONTROL_EXTERNAL_MCP_TOOLS);
+
+export const AgentControlExternalCreateTaskInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  /** Explicit even when empty, so retries have one canonical plan. */
+  options: ProviderOptionSelections,
+  title: Schema.optional(AgentControlTitle),
+  prompt: AgentControlPrompt,
+  environment: Schema.optional(ThreadEnvMode),
+  runtimeMode: Schema.optional(Schema.Literals(["approval-required", "full-access"])),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlExternalCreateTaskInput = typeof AgentControlExternalCreateTaskInput.Type;
+
+export const AgentControlExternalTaskIdInput = Schema.Struct({
+  taskId: AgentControlExternalTaskId,
+});
+export type AgentControlExternalTaskIdInput = typeof AgentControlExternalTaskIdInput.Type;
+
+export const AgentControlExternalWaitForTaskInput = Schema.Struct({
+  taskId: AgentControlExternalTaskId,
+  waitFor: Schema.optional(AgentControlMcpWaitCondition),
+  timeoutMs: Schema.optional(PositiveInt),
+});
+export type AgentControlExternalWaitForTaskInput = typeof AgentControlExternalWaitForTaskInput.Type;
+
+export const AgentControlExternalTask = Schema.Struct({
+  taskId: AgentControlExternalTaskId,
+  requestId: AgentControlRequestId,
+  proposalId: AgentControlProposalId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  environment: ThreadEnvMode,
+  runtimeMode: RuntimeMode,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  releasedAt: Schema.NullOr(IsoDateTime),
+});
+export type AgentControlExternalTask = typeof AgentControlExternalTask.Type;
+
+export const AgentControlExternalTaskResult = Schema.Struct({
+  task: AgentControlExternalTask,
+  receipt: AgentControlProposalReceipt,
+  replayed: Schema.optional(Schema.Boolean),
+  timedOut: Schema.optional(Schema.Boolean),
+});
+export type AgentControlExternalTaskResult = typeof AgentControlExternalTaskResult.Type;
+
+export const AgentControlExternalOverviewResult = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+  displayName: TrimmedNonEmptyString,
+  clientKind: AgentControlExternalClientKind,
+  notice: TrimmedNonEmptyString,
+});
+export type AgentControlExternalOverviewResult = typeof AgentControlExternalOverviewResult.Type;
+
+export const AgentControlExternalCapabilitiesResult = Schema.Struct({
+  tools: Schema.Array(TrimmedNonEmptyString),
+  grantedCapabilities: Schema.Array(AgentControlCapability),
+  projectScope: AgentControlExternalProjectScope,
+  rateLimitPerMinute: PositiveInt,
+  activeTaskLimit: PositiveInt,
+  activeTaskCount: NonNegativeInt,
+  providerInstances: Schema.Array(AgentControlMcpProviderInstanceSummary),
+});
+export type AgentControlExternalCapabilitiesResult =
+  typeof AgentControlExternalCapabilitiesResult.Type;
