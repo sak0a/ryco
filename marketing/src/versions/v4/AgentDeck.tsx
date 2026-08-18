@@ -1,7 +1,7 @@
 /**
  * AgentDeck — the "every agent, side by side" gallery.
  *
- * Desktop: a pinned horizontal scroll where the five providers glide past as a
+ * Desktop: a pinned horizontal scroll where the six providers glide past as a
  * 3D coverflow — the card nearest the centre faces you head-on while its
  * neighbours rotate away, scale down and dim. Scrolling down drives the sideways
  * motion (GSAP ScrollTrigger pin + scrub); a per-frame pass reads each card's
@@ -116,7 +116,7 @@ export function AgentDeck() {
               The line-up
             </p>
             <p className="mt-5 font-['Space_Grotesk'] text-3xl font-bold leading-tight tracking-[-0.02em] sm:text-4xl">
-              Five agents,
+              Six agents,
               <br />
               one continuous surface.
             </p>
@@ -151,12 +151,12 @@ export function AgentDeck() {
           >
             <ScreenshotFrame
               src="/shots/providers.png"
-              alt="Ryco settings showing all five providers authenticated with live version and subscription status."
+              alt="Ryco settings showing provider instances authenticated with live version and subscription status."
               theme="dark"
               chrome={false}
               className="shadow-[0_40px_120px_-50px_rgba(0,0,0,0.9)]"
             />
-            <p className="mt-4 text-sm text-white/50">All five, authenticated and live.</p>
+            <p className="mt-4 text-sm text-white/50">Authenticated and live.</p>
           </div>
         </div>
 
@@ -190,7 +190,7 @@ export function AgentDeck() {
         <div className="mx-auto mt-8 max-w-md px-5">
           <ScreenshotFrame
             src="/shots/providers.png"
-            alt="Ryco settings showing all five providers authenticated."
+            alt="Ryco settings showing provider instances authenticated."
             theme="dark"
             chrome={false}
             className="shadow-[0_30px_90px_-50px_rgba(0,0,0,0.9)]"

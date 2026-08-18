@@ -66,7 +66,7 @@ download → FAQ → final CTA → footer.**
 | Hero screenshot clip-reveal on load + scroll parallax                                                                         | `heroShotRef`                                |
 | Velocity-reactive marquee (speeds up with scroll, decays back)                                                                | `[data-marquee]`                             |
 | Section heading line-mask reveals                                                                                             | `[data-line-reveal]`                         |
-| **3D agent coverflow** — pinned horizontal scroll; the five providers tilt/scale/dim by distance from centre as they pan past | `AgentDeck.tsx`                              |
+| **3D agent coverflow** — pinned horizontal scroll; the six providers tilt/scale/dim by distance from centre as they pan past  | `AgentDeck.tsx`                              |
 | **Sticky scrollytelling** — screenshot swaps + step focus + counter                                                           | `[data-shot-step]`, `activeShot`             |
 | Timeline progress draw                                                                                                        | `[data-timeline-progress]`                   |
 | **Bespoke concept step-icons** (CSS loops: trace / bob / pulse / spin)                                                        | `process-icons.tsx`, How-it-works            |

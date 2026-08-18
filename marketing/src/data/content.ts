@@ -9,7 +9,7 @@ export const SITE = {
   name: "Ryco",
   tagline: "A fast local workspace for coding agents.",
   oneLiner:
-    "Run Codex, Claude, GitHub Copilot, OpenCode and Cursor side by side — fast local workflows, per-provider control, and full visibility into what each agent does.",
+    "Run Codex, Claude, GitHub Copilot, OpenCode, Cursor and Grok side by side — fast local workflows, per-provider control, and full visibility into what each agent does.",
   longDescription:
     "Ryco is a small, practical workspace for AI coding agents. It ships as a cross-platform desktop app and a local web CLI backed by an Effect/TypeScript server and a React/TanStack UI.",
   repo: "https://github.com/sak0a/ryco",
@@ -80,6 +80,16 @@ export const PROVIDERS: Provider[] = [
     detail: "Agent Client Protocol driver, sharing Ryco's Effect-based ACP helpers.",
     earlyAccess: true,
   },
+  {
+    id: "grok",
+    name: "Grok",
+    vendor: "xAI",
+    brand: "grok",
+    accent: "#a1a1aa",
+    blurb: "via the Grok ACP runtime",
+    detail: "Spawns the grok CLI over ACP, with xAI API-key or OAuth sign-in.",
+    earlyAccess: true,
+  },
 ];
 
 /** Model providers / routing surfaced through named provider instances. */
@@ -89,6 +99,7 @@ export const MODEL_PROVIDERS = [
   "GitHub",
   "OpenCode",
   "Cursor",
+  "xAI",
   "OpenRouter",
 ] as const;
 
@@ -141,7 +152,7 @@ export const FEATURES: Feature[] = [
     id: "multi-agent",
     title: "Every agent, side by side",
     blurb:
-      "Codex, Claude, Copilot, OpenCode and Cursor run together — switch providers per thread without losing context.",
+      "Codex, Claude, Copilot, OpenCode, Cursor and Grok run together — switch providers per thread without losing context.",
     icon: "LayoutGrid",
     group: "agents",
   },
@@ -263,7 +274,7 @@ export const FEATURE_GROUPS: FeatureGroup[] = [
     id: "agents",
     title: "Every agent, side by side",
     blurb:
-      "Codex, Claude, Copilot, OpenCode and Cursor run together — switch per thread, and run named instances like codex_personal and claude_openrouter at once, each with its own config and models.",
+      "Codex, Claude, Copilot, OpenCode, Cursor and Grok run together — switch per thread, and run named instances like codex_personal and claude_openrouter at once, each with its own config and models.",
   },
   {
     id: "worktrees",
@@ -298,7 +309,7 @@ export const FEATURE_GROUPS: FeatureGroup[] = [
 ];
 
 export const STATS = [
-  { value: "5", label: "coding agents, one workspace" },
+  { value: "6", label: "coding agents, one workspace" },
   { value: "3", label: "platforms — macOS · Linux · Windows" },
   { value: "0", label: "cloud required — it's all local" },
   { value: "⌘K", label: "everything a keystroke away" },
@@ -352,7 +363,7 @@ export const FAQ = [
   },
   {
     q: "Which agents are supported?",
-    a: "Codex, Claude, GitHub Copilot and OpenCode today, with Cursor in early access. Each runs through its native SDK or protocol.",
+    a: "Codex, Claude, GitHub Copilot and OpenCode today, with Cursor and Grok in early access. Each runs through its native SDK or protocol.",
   },
   {
     q: "What platforms are supported?",
