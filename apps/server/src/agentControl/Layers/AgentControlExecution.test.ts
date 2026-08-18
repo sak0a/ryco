@@ -16,7 +16,7 @@ import {
 } from "@ryco/contracts";
 import { assert, it, vi } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, Layer, Option, PubSub, Ref, Schema } from "effect";
+import { Effect, FileSystem, Layer, Option, PubSub, Ref, Schema } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
@@ -25,7 +25,7 @@ import { OrchestrationEngineService } from "../../orchestration/Services/Orchest
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
 import { WorkspaceAccessPolicy } from "../../workspace/Services/WorkspaceAccessPolicy.ts";
-import { AgentControlInvalidTransitionError } from "../Errors.ts";
+import { AgentControlInvalidTransitionError, AgentControlPlanValidationError } from "../Errors.ts";
 import { computeAgentControlPlanDigest } from "../planDigest.ts";
 import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
 import { AgentControlOperationStore } from "../Services/AgentControlOperationStore.ts";
@@ -120,16 +120,20 @@ const makeTestExecution = (input: {
   readonly engine?: unknown;
   readonly git?: unknown;
   readonly workspaceAccess?: unknown;
+  readonly validator?: unknown;
 }) =>
   makeAgentControlExecution({ disableBackground: true }).pipe(
     Effect.provideService(AgentControlProposalStore, input.proposalStore as never),
     Effect.provideService(AgentControlOperationStore, input.operationStore as never),
     Effect.provideService(AgentControlProposalEvents, {} as never),
-    Effect.provideService(AgentControlActionValidator, {
-      validateSubmission: () => Effect.die("unused"),
-      validateExternalSubmission: () => Effect.die("unused"),
-      revalidateExecution: () => Effect.void,
-    }),
+    Effect.provideService(
+      AgentControlActionValidator,
+      (input.validator ?? {
+        validateSubmission: () => Effect.die("unused"),
+        validateExternalSubmission: () => Effect.die("unused"),
+        revalidateExecution: () => Effect.void,
+      }) as never,
+    ),
     Effect.provideService(OrchestrationCommandApplication, input.commandApplication as never),
     Effect.provideService(OrchestrationEngineService, (input.engine ?? {}) as never),
     Effect.provideService(ProjectionSnapshotQuery, input.projections as never),
@@ -452,6 +456,145 @@ it.effect("executes one accepted proposal exactly once under concurrent retries"
     assert.strictEqual(settled.result.execution?.delivery, "queued");
     assert.strictEqual(settled.result.execution?.commands[0]?.commandType, "thread.turn.start");
   }),
+);
+
+it.effect("unlinks a project exactly once without deleting its workspace contents", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "ryco-agent-control-unlink-",
+      });
+      const sentinelPath = `${workspaceRoot}/must-survive.txt`;
+      yield* fs.writeFileString(sentinelPath, "working tree data");
+
+      const removePlan = {
+        kind: "removeProject" as const,
+        projectId,
+        expected: {
+          title: "Project one",
+          workspaceRoot,
+          repositoryIdentityKey: null,
+          updatedAt: now,
+        },
+        expectedThreadIds: [threadId],
+        force: true,
+      };
+      const proposal: AgentControlProposal = {
+        ...approvedProposal,
+        proposalId: AgentControlProposalId.make("proposal-remove-project"),
+        requestId: AgentControlRequestId.make("request-remove-project"),
+        plan: removePlan,
+        planDigest: computeAgentControlPlanDigest(removePlan),
+      };
+      const stores = yield* makeExecutionStores(proposal);
+      const commands = yield* Ref.make<ReadonlyArray<ClientOrchestrationCommand>>([]);
+      let revalidations = 0;
+      const execution = yield* makeTestExecution({
+        proposalStore: stores.proposalStore,
+        operationStore: stores.operationStore,
+        commandApplication: {
+          apply: (command: ClientOrchestrationCommand) =>
+            Ref.updateAndGet(commands, (current) => [...current, command]).pipe(
+              Effect.map((current) => ({ sequence: current.length })),
+            ),
+          applyWithDispatcher: () => Effect.die("unused"),
+        },
+        projections: {},
+        validator: {
+          validateSubmission: () => Effect.die("unused"),
+          validateExternalSubmission: () => Effect.die("unused"),
+          revalidateExecution: () =>
+            Effect.sync(() => {
+              revalidations += 1;
+            }),
+        },
+      });
+
+      yield* execution.executeApproved(proposal.proposalId);
+      yield* execution.executeApproved(proposal.proposalId);
+
+      const dispatched = yield* Ref.get(commands);
+      assert.strictEqual(dispatched.length, 1);
+      assert.strictEqual(dispatched[0]?.type, "project.delete");
+      if (dispatched[0]?.type !== "project.delete") return;
+      assert.strictEqual(dispatched[0].expectedUpdatedAt, now);
+      assert.deepStrictEqual(dispatched[0].expectedThreadIds, [threadId]);
+      assert.strictEqual(yield* fs.exists(sentinelPath), true);
+      assert.strictEqual(yield* fs.readFileString(sentinelPath), "working tree data");
+      assert.strictEqual(revalidations, 2);
+
+      const settled = yield* Ref.get(stores.proposalRef);
+      assert.strictEqual(settled.status, "completed");
+      assert.strictEqual(settled.result?.outcome, "completed");
+      if (settled.result?.outcome !== "completed") return;
+      assert.deepStrictEqual(settled.result.execution?.affectedProjectIds, [projectId]);
+      assert.deepStrictEqual(settled.result.execution?.affectedThreadIds, [threadId]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+);
+
+it.effect(
+  "refuses a stale approved project plan before dispatch and retains the failure detail",
+  () =>
+    Effect.gen(function* () {
+      const updatePlan = {
+        kind: "updateProject" as const,
+        projectId,
+        before: {
+          title: "Before",
+          workspaceRoot: "/workspace/project",
+          repositoryIdentityKey: null,
+          updatedAt: now,
+        },
+        after: {
+          title: "After",
+          workspaceRoot: "/workspace/project",
+          repositoryIdentityKey: null,
+        },
+      };
+      const proposal: AgentControlProposal = {
+        ...approvedProposal,
+        proposalId: AgentControlProposalId.make("proposal-stale-project"),
+        requestId: AgentControlRequestId.make("request-stale-project"),
+        plan: updatePlan,
+        planDigest: computeAgentControlPlanDigest(updatePlan),
+      };
+      const stores = yield* makeExecutionStores(proposal);
+      let dispatched = false;
+      const execution = yield* makeTestExecution({
+        proposalStore: stores.proposalStore,
+        operationStore: stores.operationStore,
+        commandApplication: {
+          apply: () => {
+            dispatched = true;
+            return Effect.die("stale project command must not dispatch");
+          },
+          applyWithDispatcher: () => Effect.die("unused"),
+        },
+        projections: {},
+        validator: {
+          validateSubmission: () => Effect.die("unused"),
+          validateExternalSubmission: () => Effect.die("unused"),
+          revalidateExecution: () =>
+            Effect.fail(
+              new AgentControlPlanValidationError({
+                reason: "project-stale",
+                detail: "The approved project revision changed.",
+              }),
+            ),
+        },
+      });
+
+      yield* execution.executeApproved(proposal.proposalId);
+
+      assert.isFalse(dispatched);
+      const settled = yield* Ref.get(stores.proposalRef);
+      assert.strictEqual(settled.status, "failed");
+      assert.strictEqual(settled.result?.outcome, "failed");
+      if (settled.result?.outcome !== "failed") return;
+      assert.include(settled.result.error.message, "approved project revision changed");
+    }),
 );
 
 it.effect("falls back from rejected steering to queueing and records the delivery", () =>

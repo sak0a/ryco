@@ -49,6 +49,19 @@ export interface AgentControlExecutionLiveOptions {
 
 const unique = <T>(items: ReadonlyArray<T>): Array<T> => [...new Set(items)];
 
+const isProjectAction = (proposal: AgentControlProposal): boolean =>
+  proposal.plan.kind === "createProject" ||
+  proposal.plan.kind === "updateProject" ||
+  proposal.plan.kind === "removeProject";
+
+const boundedCauseMessage = (cause: Cause.Cause<unknown>, fallback: string): string => {
+  const failure = Cause.squash(cause);
+  if (failure instanceof Error && failure.message.trim().length > 0) {
+    return failure.message.slice(0, 2_000);
+  }
+  return fallback;
+};
+
 const operationSlug = (operationId: AgentControlOperationId): string =>
   operationId.replaceAll(/[^a-zA-Z0-9-]/g, "-").slice(0, 24);
 
@@ -106,6 +119,7 @@ const executionReceipt = (operation: AgentControlOperation): AgentControlExecuti
   operationId: operation.operationId,
   commands: operation.state.commandReceipts,
   affectedThreadIds: operation.state.resources.threadIds,
+  affectedProjectIds: operation.state.resources.projectIds ?? [],
   worktreeIds: operation.state.resources.worktreeIds,
   ...(operation.state.delivery === undefined ? {} : { delivery: operation.state.delivery }),
   ...(operation.state.interrupt === undefined ? {} : { interrupt: operation.state.interrupt }),
@@ -121,6 +135,10 @@ const completedResult = (
   outcome: "completed",
   createdThreadIds:
     operation.actionKind === "createThreads" ? operation.state.resources.threadIds : undefined,
+  createdProjectIds:
+    operation.actionKind === "createProject"
+      ? (operation.state.resources.projectIds ?? [])
+      : undefined,
   execution: executionReceipt(operation),
   ...(detail ? { detail } : {}),
   completedAt: new Date().toISOString(),
@@ -411,6 +429,87 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             );
             return result;
           });
+
+        if (proposal.plan.kind === "createProject") {
+          const plan = proposal.plan;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+          yield* dispatch("project-created", {
+            type: "project.create",
+            commandId: commandIdFor(operation.operationId, "project-create"),
+            projectId: plan.projectId,
+            title: plan.title,
+            workspaceRoot: plan.workspaceRoot,
+            projectMetadataDir: plan.projectMetadataDir,
+            createWorkspaceRootIfMissing: false,
+            defaultModelSelection: null,
+            createdAt: new Date().toISOString(),
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "updateProject") {
+          const plan = proposal.plan;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+          yield* dispatch("project-metadata-updated", {
+            type: "project.meta.update",
+            commandId: commandIdFor(operation.operationId, "project-update"),
+            projectId: plan.projectId,
+            expectedUpdatedAt: plan.before.updatedAt,
+            ...(plan.after.title === plan.before.title ? {} : { title: plan.after.title }),
+            ...(plan.after.workspaceRoot === plan.before.workspaceRoot
+              ? {}
+              : { workspaceRoot: plan.after.workspaceRoot }),
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "removeProject") {
+          const plan = proposal.plan;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+              threadIds: unique([
+                ...operation.state.resources.threadIds,
+                ...plan.expectedThreadIds,
+              ]),
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+          // The authoritative project command only unlinks Ryco projection
+          // records (and, with force, the exact revalidated thread records).
+          // No filesystem API is used anywhere in this branch.
+          yield* dispatch("project-removed", {
+            type: "project.delete",
+            commandId: commandIdFor(operation.operationId, "project-remove"),
+            projectId: plan.projectId,
+            ...(plan.force ? { force: true } : {}),
+            expectedUpdatedAt: plan.expected.updatedAt,
+            expectedThreadIds: plan.expectedThreadIds,
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "changeSettings") {
+          return yield* Effect.fail(
+            new Error("Settings changes require fresh owner reauthentication."),
+          );
+        }
 
         if (proposal.plan.kind === "createThreads") {
           const plannedThreadIds = proposal.plan.entries.map((_, index) =>
@@ -832,7 +931,13 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
         if (validation._tag === "Failure") {
           yield* settleProposalFailure(executing, operation, {
             revalidation: true,
-            message: "The approved plan no longer passes current server validation.",
+            message:
+              isProjectAction(executing) || executing.plan.kind === "changeSettings"
+                ? boundedCauseMessage(
+                    validation.cause,
+                    "The approved plan no longer passes current server validation.",
+                  )
+                : "The approved plan no longer passes current server validation.",
             retryable: true,
           });
           return;
@@ -848,7 +953,12 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           );
           yield* settleProposalFailure(executing, compensated, {
             revalidation: false,
-            message: "The approved thread action failed during execution.",
+            message: isProjectAction(executing)
+              ? boundedCauseMessage(
+                  outcome.cause,
+                  "The approved project action failed during execution.",
+                )
+              : "The approved Agent Control action failed during execution.",
             retryable: false,
           });
           return;

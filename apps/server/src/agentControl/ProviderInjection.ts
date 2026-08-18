@@ -94,7 +94,7 @@ export const agentControlSupportForDriver = (
 
 export const agentControlHostContext = (available: boolean): string =>
   available
-    ? "Ryco Agent Control tools (ryco_*) are available through the private 'ryco' MCP server. Thread actions create approval requests and never mutate immediately. If the server rejects access, treat the tools as unavailable instead of retrying."
+    ? "Ryco Agent Control tools (ryco_*) are available through the private 'ryco' MCP server. Write tools create approval requests and never mutate immediately. If the server rejects access, treat the tools as unavailable instead of retrying."
     : "Ryco Agent Control tools (ryco_*) are unavailable for this provider session. Do not claim or attempt to use them.";
 
 export type AgentControlProviderBridge = Pick<
@@ -138,6 +138,11 @@ const grantedCapabilities = [
   AGENT_CONTROL_CAPABILITIES.sendMessage,
   AGENT_CONTROL_CAPABILITIES.interruptThread,
   AGENT_CONTROL_CAPABILITIES.updateThread,
+  AGENT_CONTROL_CAPABILITIES.createProject,
+  AGENT_CONTROL_CAPABILITIES.updateProject,
+  AGENT_CONTROL_CAPABILITIES.removeProject,
+  AGENT_CONTROL_CAPABILITIES.readSettings,
+  AGENT_CONTROL_CAPABILITIES.changeSettings,
 ] as const;
 
 const lifecycle = (input: {

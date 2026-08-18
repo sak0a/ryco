@@ -40,6 +40,11 @@ import type {
   SubmitAgentControlProposalInput,
   SubmitAgentControlProposalResult,
 } from "./AgentControlProposalStore.ts";
+import type { AgentControlSettingsChangeUnsupportedError } from "../Errors.ts";
+
+export type AgentControlProposalDecisionError =
+  | AgentControlProposalStoreError
+  | AgentControlSettingsChangeUnsupportedError;
 
 export interface AgentControlQueueLimitsInput {
   /** Capped at `AGENT_CONTROL_QUEUE_ACTIVE_LIMIT_MAX`. */
@@ -92,12 +97,12 @@ export interface AgentControlProposalServiceShape {
   /** Accept a pending proposal (idempotent when it is already approved). */
   readonly accept: (
     input: DecideAgentControlProposalRequest,
-  ) => Effect.Effect<AgentControlProposalReceipt, AgentControlProposalStoreError>;
+  ) => Effect.Effect<AgentControlProposalReceipt, AgentControlProposalDecisionError>;
 
   /** Reject a pending proposal (idempotent when it is already rejected). */
   readonly reject: (
     input: DecideAgentControlProposalRequest,
-  ) => Effect.Effect<AgentControlProposalReceipt, AgentControlProposalStoreError>;
+  ) => Effect.Effect<AgentControlProposalReceipt, AgentControlProposalDecisionError>;
 
   /** One expiry sweep pass; returns the proposals expired by this call. */
   readonly expireOverdue: (

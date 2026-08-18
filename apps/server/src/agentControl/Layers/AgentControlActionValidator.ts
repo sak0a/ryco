@@ -17,6 +17,8 @@ import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { AgentControlPlanValidationError } from "../Errors.ts";
+import { AgentControlProjectPlans } from "../Services/AgentControlProjectPlans.ts";
+import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
 import {
   AgentControlExternalIntegrationService,
   type AgentControlExternalIntegrationServiceError,
@@ -85,8 +87,24 @@ const providerForSelection = (
   return Effect.succeed(provider);
 };
 
-const targetThreadIds = (plan: AgentControlActionPlan): ReadonlyArray<string> =>
-  plan.kind === "createThreads" ? [] : [plan.threadId];
+const targetThreadIds = (plan: AgentControlActionPlan): ReadonlyArray<string> => {
+  switch (plan.kind) {
+    case "sendMessage":
+    case "interruptThread":
+    case "updateThread":
+      return [plan.threadId];
+    default:
+      return [];
+  }
+};
+
+const isProjectPlan = (
+  plan: AgentControlActionPlan,
+): plan is Extract<
+  AgentControlActionPlan,
+  { kind: "createProject" | "updateProject" | "removeProject" }
+> =>
+  plan.kind === "createProject" || plan.kind === "updateProject" || plan.kind === "removeProject";
 
 const requireThread = (snapshot: OrchestrationShellSnapshot, threadId: string) => {
   const thread = snapshot.threads.find((candidate) => candidate.id === threadId);
@@ -179,6 +197,14 @@ const validatePlanAgainstSnapshot = (input: {
       return;
     }
 
+    if (
+      input.plan.kind !== "sendMessage" &&
+      input.plan.kind !== "interruptThread" &&
+      input.plan.kind !== "updateThread"
+    ) {
+      return yield* fail("invalid-plan", "This action is not a thread control plan.");
+    }
+
     const target = yield* requireThread(input.snapshot, input.plan.threadId);
     if (target.projectId !== input.originProjectId) {
       return yield* fail("project-scope", "The target thread is outside caller project scope.");
@@ -234,6 +260,7 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
     import("@ryco/contracts").AgentControlExternalIntegration,
     AgentControlExternalIntegrationServiceError
   >;
+  readonly projectPlans?: AgentControlProjectPlansShape;
 }): AgentControlActionValidatorShape => {
   const loadState = Effect.all({
     snapshot: deps.projections.getShellSnapshot(),
@@ -282,15 +309,31 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
       }
 
       const originEnvMode = agentControlThreadEnvMode(caller);
-      yield* validatePlanAgainstSnapshot({
-        plan: input.plan,
-        originProjectId: caller.projectId,
-        originRuntimeMode: caller.runtimeMode,
-        originEnvMode,
-        snapshot,
-        providers,
-        requireBaseRef,
-      });
+      if (input.plan.kind === "changeSettings") {
+        return yield* fail(
+          "settings-unsupported",
+          "Settings changes require fresh owner reauthentication that this server cannot enforce.",
+        );
+      }
+      if (isProjectPlan(input.plan)) {
+        if (deps.projectPlans === undefined) {
+          return yield* fail("project-unavailable", "Project proposal validation is unavailable.");
+        }
+        if (input.plan.kind !== "createProject" && input.plan.projectId !== caller.projectId) {
+          return yield* fail("project-scope", "The requested project is outside caller scope.");
+        }
+        yield* deps.projectPlans.revalidate(input.plan);
+      } else {
+        yield* validatePlanAgainstSnapshot({
+          plan: input.plan,
+          originProjectId: caller.projectId,
+          originRuntimeMode: caller.runtimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+      }
 
       const targetSnapshots: Array<
         NonNullable<AgentControlProviderSessionPrincipal["targetSnapshots"]>[number]
@@ -404,6 +447,26 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
         }
       }
 
+      if (proposal.plan.kind === "changeSettings") {
+        return yield* fail(
+          "settings-unsupported",
+          "Settings changes require fresh owner reauthentication that this server cannot enforce.",
+        );
+      }
+      if (isProjectPlan(proposal.plan)) {
+        if (principal.kind !== "provider-session") {
+          return yield* fail("project-scope", "External integrations cannot manage projects.");
+        }
+        if (proposal.plan.kind !== "createProject" && proposal.plan.projectId !== originProjectId) {
+          return yield* fail("project-scope", "The approved project is outside caller scope.");
+        }
+        if (deps.projectPlans === undefined) {
+          return yield* fail("project-unavailable", "Project proposal validation is unavailable.");
+        }
+        yield* deps.projectPlans.revalidate(proposal.plan);
+        return;
+      }
+
       yield* validatePlanAgainstSnapshot({
         plan: proposal.plan,
         originProjectId,
@@ -449,10 +512,12 @@ const makeAgentControlActionValidator = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const git = yield* GitWorkflowService;
   const externalIntegrations = yield* Effect.serviceOption(AgentControlExternalIntegrationService);
+  const projectPlans = yield* AgentControlProjectPlans;
   return makeAgentControlActionValidatorFromDeps({
     projections,
     getProviders: providerRegistry.getProviders,
     listRefs: git.listRefs,
+    projectPlans,
     ...(Option.isSome(externalIntegrations)
       ? { revalidateExternal: externalIntegrations.value.revalidate }
       : {}),

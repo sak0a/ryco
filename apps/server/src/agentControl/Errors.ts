@@ -155,6 +155,7 @@ export class AgentControlPlanValidationError extends Schema.TaggedError<AgentCon
       "caller-stale",
       "project-scope",
       "project-unavailable",
+      "project-stale",
       "thread-unavailable",
       "thread-stale",
       "provider-unavailable",
@@ -164,12 +165,29 @@ export class AgentControlPlanValidationError extends Schema.TaggedError<AgentCon
       "privilege-escalation",
       "worktree-escalation",
       "worktree-preflight",
+      "settings-unsupported",
     ]),
     detail: Schema.String,
   },
 ) {
   override get message(): string {
     return `Agent Control plan validation failed (${this.reason}): ${this.detail}`;
+  }
+}
+
+/**
+ * Settings changes require fresh owner reauthentication evidence at both
+ * approval and execution. The node server cannot currently obtain or persist
+ * that evidence, so settings proposal approval fails closed.
+ */
+export class AgentControlSettingsChangeUnsupportedError extends Schema.TaggedError<AgentControlSettingsChangeUnsupportedError>()(
+  "AgentControlSettingsChangeUnsupportedError",
+  {
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
   }
 }
 

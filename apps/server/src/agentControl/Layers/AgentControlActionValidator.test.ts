@@ -24,6 +24,7 @@ import type {
   AgentControlSessionRecord,
   AgentControlTurnAuthority,
 } from "../Services/AgentControlSessionRegistry.ts";
+import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
 import { makeAgentControlActionValidatorFromDeps } from "./AgentControlActionValidator.ts";
 
 const now = "2026-08-18T00:00:00.000Z";
@@ -139,6 +140,7 @@ const makeValidator = (
   revalidateExternal?: (
     integrationId: AgentControlIntegrationId,
   ) => Effect.Effect<AgentControlExternalIntegration>,
+  projectPlans?: AgentControlProjectPlansShape,
 ) =>
   makeAgentControlActionValidatorFromDeps({
     projections: {
@@ -159,7 +161,75 @@ const makeValidator = (
         totalCount: availableRefs.length,
       }),
     ...(revalidateExternal === undefined ? {} : { revalidateExternal }),
+    ...(projectPlans === undefined ? {} : { projectPlans }),
   });
+
+it.effect("scopes project mutations and fails settings changes closed", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    let revalidations = 0;
+    const projectPlans: AgentControlProjectPlansShape = {
+      prepareCreate: () => Effect.die("unused"),
+      prepareUpdate: () => Effect.die("unused"),
+      prepareRemove: () => Effect.die("unused"),
+      revalidate: () =>
+        Effect.sync(() => {
+          revalidations += 1;
+        }),
+    };
+    const validator = makeValidator(snapshot, providers, [], undefined, projectPlans);
+    const state = {
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      repositoryIdentityKey: null,
+      updatedAt: project.updatedAt,
+    } as const;
+
+    yield* validator.validateSubmission({
+      session,
+      authority,
+      plan: {
+        kind: "updateProject",
+        projectId,
+        before: state,
+        after: {
+          title: "Renamed",
+          workspaceRoot: state.workspaceRoot,
+          repositoryIdentityKey: state.repositoryIdentityKey,
+        },
+      },
+    });
+    assert.strictEqual(revalidations, 1);
+
+    const scopeError = yield* Effect.flip(
+      validator.validateSubmission({
+        session,
+        authority,
+        plan: {
+          kind: "removeProject",
+          projectId: ProjectId.make("project-other"),
+          expected: state,
+          expectedThreadIds: [],
+          force: false,
+        },
+      }),
+    );
+    assert.strictEqual(scopeError.reason, "project-scope");
+
+    const settingsError = yield* Effect.flip(
+      validator.validateSubmission({
+        session,
+        authority,
+        plan: {
+          kind: "changeSettings",
+          change: { kind: "legacyTokenStreaming", before: false, after: true },
+        },
+      }),
+    );
+    assert.strictEqual(settingsError.reason, "settings-unsupported");
+  }),
+);
 
 it.effect("verifies an exact worktree base ref before creating a proposal", () =>
   Effect.gen(function* () {

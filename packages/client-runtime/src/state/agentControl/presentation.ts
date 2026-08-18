@@ -31,12 +31,14 @@ export interface AgentControlProposalCardModel {
   readonly targetLabel: string;
   readonly runtimeLabel: string | null;
   readonly riskLabels: ReadonlyArray<string>;
+  readonly isDestructive: boolean;
   readonly summary: string | null;
   readonly expiresAt: string;
   readonly isPending: boolean;
   readonly outcomeLabel: string | null;
   readonly executionLabel: string | null;
   readonly affectedThreadIds: ReadonlyArray<ThreadId>;
+  readonly affectedProjectIds: ReadonlyArray<string>;
   readonly detailSections: ReadonlyArray<AgentControlDetailSection>;
 }
 
@@ -148,6 +150,99 @@ function planPresentation(proposal: AgentControlProposal): {
         detailSections: [{ heading: "Changes", lines: [`Thread: ${plan.threadId}`, ...changes] }],
       };
     }
+    case "createProject":
+      return {
+        actionLabel: "Create project",
+        targetLabel: `project ${shortId(plan.projectId)}`,
+        runtimeLabel: null,
+        detailSections: [
+          { heading: "Before", lines: ["No Ryco project record with this ID."] },
+          {
+            heading: "After",
+            lines: [
+              `Project ID: ${plan.projectId}`,
+              `Display name: ${plan.title}`,
+              `Workspace path: ${plan.workspaceRoot}`,
+              `Metadata directory: ${plan.projectMetadataDir}`,
+              `Repository identity: ${plan.repositoryIdentityKey ?? "none"}`,
+              "Workspace must already exist; no directory is created by this action.",
+            ],
+          },
+        ],
+      };
+    case "updateProject":
+      return {
+        actionLabel: "Update project metadata",
+        targetLabel: `project ${shortId(plan.projectId)}`,
+        runtimeLabel: null,
+        detailSections: [
+          {
+            heading: "Before",
+            lines: [
+              `Display name: ${plan.before.title}`,
+              `Workspace path: ${plan.before.workspaceRoot}`,
+              `Repository identity: ${plan.before.repositoryIdentityKey ?? "none"}`,
+              `Expected revision: ${plan.before.updatedAt}`,
+            ],
+          },
+          {
+            heading: "After",
+            lines: [
+              `Display name: ${plan.after.title}`,
+              `Workspace path: ${plan.after.workspaceRoot}`,
+              `Repository identity: ${plan.after.repositoryIdentityKey ?? "none"}`,
+            ],
+          },
+        ],
+      };
+    case "removeProject":
+      return {
+        actionLabel: "Unlink project",
+        targetLabel: `project ${shortId(plan.projectId)}`,
+        runtimeLabel: null,
+        detailSections: [
+          {
+            heading: "Before · destructive Ryco record removal",
+            lines: [
+              `Project ID: ${plan.projectId}`,
+              `Display name: ${plan.expected.title}`,
+              `Workspace path: ${plan.expected.workspaceRoot}`,
+              `Expected revision: ${plan.expected.updatedAt}`,
+              `Force removal: ${plan.force ? "yes" : "no"}`,
+              ...(plan.expectedThreadIds.length === 0
+                ? ["Ryco thread records removed: none"]
+                : plan.expectedThreadIds.map(
+                    (threadId) => `Ryco thread record removed: ${threadId}`,
+                  )),
+              "Workspace files and repository contents will be retained.",
+            ],
+          },
+          {
+            heading: "After",
+            lines: [
+              "The Ryco project record and the exact listed Ryco thread records are unlinked.",
+              "The workspace directory and repository are unchanged.",
+            ],
+          },
+        ],
+      };
+    case "changeSettings":
+      return {
+        actionLabel: "Change setting",
+        targetLabel: plan.change.kind,
+        runtimeLabel: null,
+        detailSections: [
+          {
+            heading: "Exact setting change",
+            lines: [
+              `Setting: ${plan.change.kind}`,
+              `Before: ${String(plan.change.before)}`,
+              `After: ${String(plan.change.after)}`,
+              "Fresh owner reauthentication is required at approval and execution.",
+            ],
+          },
+        ],
+      };
   }
 }
 
@@ -156,10 +251,13 @@ function outcomeLabel(proposal: AgentControlProposal): string | null {
   if (result === null) return null;
   if (result.outcome === "completed") {
     const created = result.createdThreadIds?.length ?? 0;
+    const createdProjects = result.createdProjectIds?.length ?? 0;
     const detail = result.detail !== undefined ? ` · ${result.detail}` : "";
-    return created > 0
-      ? `Completed · created ${created} thread${created === 1 ? "" : "s"}${detail}`
-      : `Completed${detail}`;
+    return createdProjects > 0
+      ? `Completed · created ${createdProjects} project${createdProjects === 1 ? "" : "s"}${detail}`
+      : created > 0
+        ? `Completed · created ${created} thread${created === 1 ? "" : "s"}${detail}`
+        : `Completed${detail}`;
   }
   return `${result.error.code}: ${result.error.message}`;
 }
@@ -167,9 +265,12 @@ function outcomeLabel(proposal: AgentControlProposal): string | null {
 function executionPresentation(proposal: AgentControlProposal): {
   readonly label: string | null;
   readonly affectedThreadIds: ReadonlyArray<ThreadId>;
+  readonly affectedProjectIds: ReadonlyArray<string>;
 } {
   const execution = proposal.result?.execution;
-  if (execution === undefined) return { label: null, affectedThreadIds: [] };
+  if (execution === undefined) {
+    return { label: null, affectedThreadIds: [], affectedProjectIds: [] };
+  }
   const parts = [
     `Operation ${shortId(execution.operationId)}`,
     `${execution.commands.length} command${execution.commands.length === 1 ? "" : "s"}`,
@@ -186,7 +287,11 @@ function executionPresentation(proposal: AgentControlProposal): {
   if (execution.compensation !== undefined) {
     parts.push(execution.compensation.completed ? "cleanup completed" : "cleanup needs attention");
   }
-  return { label: parts.join(" · "), affectedThreadIds: execution.affectedThreadIds };
+  return {
+    label: parts.join(" · "),
+    affectedThreadIds: execution.affectedThreadIds,
+    affectedProjectIds: execution.affectedProjectIds ?? [],
+  };
 }
 
 export function buildAgentControlProposalCardModel(
@@ -207,12 +312,14 @@ export function buildAgentControlProposalCardModel(
     targetLabel: plan.targetLabel,
     runtimeLabel: plan.runtimeLabel,
     riskLabels: proposal.riskTags.map((tag) => riskLabelFromTag(String(tag))),
+    isDestructive: proposal.plan.kind === "removeProject",
     summary: proposal.promptSummary,
     expiresAt: proposal.expiresAt,
     isPending: proposal.status === "pending-user-approval",
     outcomeLabel: outcomeLabel(proposal),
     executionLabel: execution.label,
     affectedThreadIds: execution.affectedThreadIds,
+    affectedProjectIds: execution.affectedProjectIds,
     detailSections: plan.detailSections,
   };
 }

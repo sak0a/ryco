@@ -37,7 +37,12 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ModelSelection, OrchestrationSessionStatus, RuntimeMode } from "./orchestration.ts";
+import {
+  ModelSelection,
+  OrchestrationSessionStatus,
+  ProjectMetadataDir,
+  RuntimeMode,
+} from "./orchestration.ts";
 import { ProviderOptionSelections } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderAvailability, ServerProviderState } from "./server.ts";
@@ -157,6 +162,11 @@ export const AGENT_CONTROL_CAPABILITIES = {
   sendMessage: AgentControlCapability.make("threads.send-message"),
   interruptThread: AgentControlCapability.make("threads.interrupt"),
   updateThread: AgentControlCapability.make("threads.update"),
+  createProject: AgentControlCapability.make("projects.create"),
+  updateProject: AgentControlCapability.make("projects.update"),
+  removeProject: AgentControlCapability.make("projects.remove"),
+  readSettings: AgentControlCapability.make("settings.read"),
+  changeSettings: AgentControlCapability.make("settings.change"),
   externalListProjects: AgentControlCapability.make("external.projects.list"),
   externalCreateTask: AgentControlCapability.make("external.tasks.create"),
   externalReadTask: AgentControlCapability.make("external.tasks.read"),
@@ -171,6 +181,10 @@ export const AgentControlActionKind = Schema.Literals([
   "sendMessage",
   "interruptThread",
   "updateThread",
+  "createProject",
+  "updateProject",
+  "removeProject",
+  "changeSettings",
 ]);
 export type AgentControlActionKind = typeof AgentControlActionKind.Type;
 
@@ -183,6 +197,10 @@ export const AGENT_CONTROL_ACTION_CAPABILITIES: Record<
   sendMessage: AGENT_CONTROL_CAPABILITIES.sendMessage,
   interruptThread: AGENT_CONTROL_CAPABILITIES.interruptThread,
   updateThread: AGENT_CONTROL_CAPABILITIES.updateThread,
+  createProject: AGENT_CONTROL_CAPABILITIES.createProject,
+  updateProject: AGENT_CONTROL_CAPABILITIES.updateProject,
+  removeProject: AGENT_CONTROL_CAPABILITIES.removeProject,
+  changeSettings: AGENT_CONTROL_CAPABILITIES.changeSettings,
 };
 
 export const AGENT_CONTROL_PLAN_VERSION = 1;
@@ -255,11 +273,98 @@ export const AgentControlUpdateThreadPlan = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlUpdateThreadPlan = typeof AgentControlUpdateThreadPlan.Type;
 
+const AgentControlWorkspaceRoot = TrimmedNonEmptyString.check(Schema.isMaxLength(4_096));
+const AgentControlRepositoryIdentityKey = Schema.NullOr(
+  TrimmedNonEmptyString.check(Schema.isMaxLength(2_048)),
+);
+
+/** Canonical project state captured when a mutable project proposal is created. */
+export const AgentControlProjectState = Schema.Struct({
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+  repositoryIdentityKey: AgentControlRepositoryIdentityKey,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlProjectState = typeof AgentControlProjectState.Type;
+
+export const AgentControlProjectTarget = Schema.Struct({
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+  repositoryIdentityKey: AgentControlRepositoryIdentityKey,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlProjectTarget = typeof AgentControlProjectTarget.Type;
+
+/** Creates only Ryco's project record for an already-existing authorized directory. */
+export const AgentControlCreateProjectPlan = Schema.Struct({
+  kind: Schema.Literal("createProject"),
+  projectId: ProjectId,
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+  projectMetadataDir: ProjectMetadataDir,
+  repositoryIdentityKey: AgentControlRepositoryIdentityKey,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCreateProjectPlan = typeof AgentControlCreateProjectPlan.Type;
+
+/** Exact before/after metadata update; only display name and workspace path are supported. */
+export const AgentControlUpdateProjectPlan = Schema.Struct({
+  kind: Schema.Literal("updateProject"),
+  projectId: ProjectId,
+  before: AgentControlProjectState,
+  after: AgentControlProjectTarget,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlUpdateProjectPlan = typeof AgentControlUpdateProjectPlan.Type;
+
+/**
+ * Unlinks Ryco's project record. `force` may also remove the exact listed
+ * Ryco thread records, but never deletes the workspace directory or repository.
+ */
+export const AgentControlRemoveProjectPlan = Schema.Struct({
+  kind: Schema.Literal("removeProject"),
+  projectId: ProjectId,
+  expected: AgentControlProjectState,
+  expectedThreadIds: Schema.Array(ThreadId),
+  force: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlRemoveProjectPlan = typeof AgentControlRemoveProjectPlan.Type;
+
+export const AgentControlLegacyTokenStreamingChange = Schema.Struct({
+  kind: Schema.Literal("legacyTokenStreaming"),
+  before: Schema.Boolean,
+  after: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlLegacyTokenStreamingChange =
+  typeof AgentControlLegacyTokenStreamingChange.Type;
+
+export const AgentControlProviderUpdateChecksChange = Schema.Struct({
+  kind: Schema.Literal("providerUpdateChecks"),
+  before: Schema.Boolean,
+  after: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlProviderUpdateChecksChange =
+  typeof AgentControlProviderUpdateChecksChange.Type;
+
+/** Finite, non-secret settings allowlist. It is intentionally not a key/value patch. */
+export const AgentControlSettingsChange = Schema.Union([
+  AgentControlLegacyTokenStreamingChange,
+  AgentControlProviderUpdateChecksChange,
+]);
+export type AgentControlSettingsChange = typeof AgentControlSettingsChange.Type;
+
+export const AgentControlChangeSettingsPlan = Schema.Struct({
+  kind: Schema.Literal("changeSettings"),
+  change: AgentControlSettingsChange,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlChangeSettingsPlan = typeof AgentControlChangeSettingsPlan.Type;
+
 export const AgentControlActionPlan = Schema.Union([
   AgentControlCreateThreadsPlan,
   AgentControlSendMessagePlan,
   AgentControlInterruptThreadPlan,
   AgentControlUpdateThreadPlan,
+  AgentControlCreateProjectPlan,
+  AgentControlUpdateProjectPlan,
+  AgentControlRemoveProjectPlan,
+  AgentControlChangeSettingsPlan,
 ]);
 export type AgentControlActionPlan = typeof AgentControlActionPlan.Type;
 
@@ -280,6 +385,11 @@ export const AGENT_CONTROL_RISK_TAGS = {
   startsProviderTurn: AgentControlRiskTag.make("starts-provider-turn"),
   interruptsThread: AgentControlRiskTag.make("interrupts-thread"),
   modifiesThreadMetadata: AgentControlRiskTag.make("modifies-thread-metadata"),
+  createsProject: AgentControlRiskTag.make("creates-project"),
+  modifiesProjectMetadata: AgentControlRiskTag.make("modifies-project-metadata"),
+  removesProject: AgentControlRiskTag.make("removes-project"),
+  removesThreads: AgentControlRiskTag.make("removes-threads"),
+  changesSettings: AgentControlRiskTag.make("changes-settings"),
   sharedLocalCheckout: AgentControlRiskTag.make("shared-local-checkout"),
   elevatedRuntimeMode: AgentControlRiskTag.make("elevated-runtime-mode"),
 } as const;
@@ -335,6 +445,9 @@ export const AgentControlExecutionReceipt = Schema.Struct({
   operationId: AgentControlOperationId,
   commands: Schema.Array(AgentControlDispatchedCommandReceipt),
   affectedThreadIds: Schema.Array(ThreadId),
+  affectedProjectIds: Schema.optional(Schema.Array(ProjectId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   worktreeIds: Schema.Array(WorktreeId),
   delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
   interrupt: Schema.optional(
@@ -356,6 +469,7 @@ export type AgentControlExecutionReceipt = typeof AgentControlExecutionReceipt.T
 export const AgentControlCompletedResult = Schema.Struct({
   outcome: Schema.Literal("completed"),
   createdThreadIds: Schema.optional(Schema.Array(ThreadId)),
+  createdProjectIds: Schema.optional(Schema.Array(ProjectId)),
   execution: Schema.optional(AgentControlExecutionReceipt),
   detail: Schema.optional(AgentControlResultMessage),
   completedAt: IsoDateTime,
@@ -547,6 +661,7 @@ export const AgentControlRpcErrorCode = Schema.Literals([
   "not-found",
   "expired",
   "conflict",
+  "unsupported",
   "storage",
 ]);
 export type AgentControlRpcErrorCode = typeof AgentControlRpcErrorCode.Type;
@@ -582,6 +697,9 @@ export const AGENT_CONTROL_TERMINAL_OPERATION_STATUSES: ReadonlyArray<AgentContr
  * clean up safely or surface a clearly terminal failure.
  */
 export const AgentControlOperationResources = Schema.Struct({
+  projectIds: Schema.optional(Schema.Array(ProjectId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   threadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   ownedThreadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   worktreeIds: Schema.Array(WorktreeId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
@@ -602,7 +720,13 @@ export const AgentControlOperationState = Schema.Struct({
   ),
   resources: AgentControlOperationResources.pipe(
     Schema.withDecodingDefault(
-      Effect.succeed({ threadIds: [], ownedThreadIds: [], worktreeIds: [], ownedWorktrees: [] }),
+      Effect.succeed({
+        projectIds: [],
+        threadIds: [],
+        ownedThreadIds: [],
+        worktreeIds: [],
+        ownedWorktrees: [],
+      }),
     ),
   ),
   commandReceipts: Schema.Array(AgentControlDispatchedCommandReceipt).pipe(
@@ -706,6 +830,11 @@ export const AGENT_CONTROL_MCP_TOOLS = {
   sendMessage: "ryco_send_message",
   interruptThread: "ryco_interrupt_thread",
   updateThread: "ryco_update_thread",
+  settingsSummary: "ryco_settings_summary",
+  proposeProjectCreate: "ryco_propose_project_create",
+  proposeProjectUpdate: "ryco_propose_project_update",
+  proposeProjectRemove: "ryco_propose_project_remove",
+  proposeSettingsChange: "ryco_propose_settings_change",
 } as const;
 export type AgentControlMcpToolName =
   (typeof AGENT_CONTROL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_MCP_TOOLS];
@@ -819,6 +948,53 @@ export const AgentControlMcpUpdateThreadInput = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlMcpUpdateThreadInput = typeof AgentControlMcpUpdateThreadInput.Type;
 
+export const AgentControlMcpProposeProjectCreateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeProjectCreateInput =
+  typeof AgentControlMcpProposeProjectCreateInput.Type;
+
+export const AgentControlMcpProposeProjectUpdateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  expectedUpdatedAt: IsoDateTime,
+  title: Schema.optional(AgentControlTitle),
+  workspaceRoot: Schema.optional(AgentControlWorkspaceRoot),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeProjectUpdateInput =
+  typeof AgentControlMcpProposeProjectUpdateInput.Type;
+
+export const AgentControlMcpProposeProjectRemoveInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  expectedUpdatedAt: IsoDateTime,
+  force: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeProjectRemoveInput =
+  typeof AgentControlMcpProposeProjectRemoveInput.Type;
+
+export const AgentControlMcpSettingsChangeRequest = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("legacyTokenStreaming"),
+    value: Schema.Boolean,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("providerUpdateChecks"),
+    value: Schema.Boolean,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+]);
+export type AgentControlMcpSettingsChangeRequest = typeof AgentControlMcpSettingsChangeRequest.Type;
+
+export const AgentControlMcpProposeSettingsChangeInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  change: AgentControlMcpSettingsChangeRequest,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeSettingsChangeInput =
+  typeof AgentControlMcpProposeSettingsChangeInput.Type;
+
 // ── Tool results ──────────────────────────────────────────────────────
 
 export const AgentControlMcpContextResult = Schema.Struct({
@@ -890,6 +1066,41 @@ export const AgentControlMcpListProjectsResult = Schema.Struct({
   nextCursor: Schema.NullOr(AgentControlMcpCursor),
 });
 export type AgentControlMcpListProjectsResult = typeof AgentControlMcpListProjectsResult.Type;
+
+export const AgentControlMcpSettingsSummaryItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("legacyTokenStreaming"),
+    label: Schema.Literal("Legacy token streaming"),
+    value: Schema.Boolean,
+    changeSupported: Schema.Literal(false),
+    unsupportedReason: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("providerUpdateChecks"),
+    label: Schema.Literal("Provider update checks"),
+    value: Schema.Boolean,
+    changeSupported: Schema.Literal(false),
+    unsupportedReason: TrimmedNonEmptyString,
+  }),
+]);
+export type AgentControlMcpSettingsSummaryItem = typeof AgentControlMcpSettingsSummaryItem.Type;
+
+export const AgentControlMcpSettingsSummaryResult = Schema.Struct({
+  settings: Schema.Array(AgentControlMcpSettingsSummaryItem),
+  redacted: Schema.Literal(true),
+  omittedCategories: Schema.Array(
+    Schema.Literals([
+      "secrets-and-credentials",
+      "provider-runtime-configuration",
+      "mcp-server-configuration",
+      "remote-relay-hosted-authentication",
+      "filesystem-and-network-exposure",
+      "agent-control-policy",
+      "other-non-allowlisted-settings",
+    ]),
+  ),
+});
+export type AgentControlMcpSettingsSummaryResult = typeof AgentControlMcpSettingsSummaryResult.Type;
 
 export const AgentControlMcpThreadSummary = Schema.Struct({
   threadId: ThreadId,

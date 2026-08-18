@@ -86,6 +86,7 @@ describe("decider project scripts", () => {
           type: "project.meta.update",
           commandId: CommandId.make("cmd-project-update-scripts"),
           projectId: asProjectId("project-scripts"),
+          expectedUpdatedAt: now,
           scripts: Array.from(scripts),
         },
         readModel,
@@ -95,6 +96,21 @@ describe("decider project scripts", () => {
     const event = Array.isArray(result) ? result[0] : result;
     expect(event.type).toBe("project.meta-updated");
     expect((event.payload as { scripts?: unknown[] }).scripts).toEqual(scripts);
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "project.meta.update",
+            commandId: CommandId.make("cmd-project-update-scripts-stale"),
+            projectId: asProjectId("project-scripts"),
+            expectedUpdatedAt: "2020-01-01T00:00:00.000Z",
+            scripts: Array.from(scripts),
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toThrow("changed after the command was authorized");
   });
 
   it("propagates defaultModelSelection in project.meta.update payload and read model", async () => {

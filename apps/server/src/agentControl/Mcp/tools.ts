@@ -36,10 +36,15 @@ import {
   AgentControlMcpListThreadsResult,
   AgentControlMcpInterruptThreadInput,
   AgentControlMcpMutationResult,
+  AgentControlMcpProposeProjectCreateInput,
+  AgentControlMcpProposeProjectRemoveInput,
+  AgentControlMcpProposeProjectUpdateInput,
+  AgentControlMcpProposeSettingsChangeInput,
   AgentControlMcpReadControlRequestInput,
   AgentControlMcpReadThreadInput,
   AgentControlMcpReadThreadResult,
   AgentControlMcpSendMessageInput,
+  AgentControlMcpSettingsSummaryResult,
   AgentControlMcpUpdateThreadInput,
   AgentControlMcpWaitForControlRequestInput,
   OrchestrationThreadHistoryCursor,
@@ -55,6 +60,8 @@ import {
   type OrchestrationThreadHistoryPageInfo,
   type OrchestrationThreadShell,
   type ServerProvider,
+  type ServerSettings,
+  type ServerSettingsError,
 } from "@ryco/contracts";
 import { Duration, Effect, Option, Schema, Stream } from "effect";
 
@@ -63,12 +70,14 @@ import type { AgentControlPolicyShape } from "../Services/AgentControlPolicy.ts"
 import type { AgentControlActionValidatorShape } from "../Services/AgentControlActionValidator.ts";
 import type { AgentControlProposalEventsShape } from "../Services/AgentControlProposalEvents.ts";
 import type { AgentControlProposalServiceShape } from "../Services/AgentControlProposalService.ts";
+import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
 import { toAgentControlProposalReceipt } from "../Services/AgentControlProposalService.ts";
 import type {
   AgentControlSessionRecord,
   AgentControlTurnAuthority,
 } from "../Services/AgentControlSessionRegistry.ts";
 import { agentControlSupportForDriver } from "../ProviderInjection.ts";
+import { agentControlSettingsPlan, agentControlSettingsSummary } from "../settingsControl.ts";
 
 export interface AgentControlMcpToolDescriptor {
   readonly name: string;
@@ -90,6 +99,8 @@ export interface AgentControlMcpToolDeps {
   readonly projections: ProjectionSnapshotQueryShape;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
   readonly validator?: AgentControlActionValidatorShape;
+  readonly projectPlans?: AgentControlProjectPlansShape;
+  readonly getSettings?: Effect.Effect<ServerSettings, ServerSettingsError>;
   readonly getTurnAuthority?: (
     sessionId: string,
   ) => Effect.Effect<Option.Option<AgentControlTurnAuthority>>;
@@ -288,6 +299,96 @@ const TOOL_DESCRIPTORS: ReadonlyArray<AgentControlMcpToolDescriptor> = [
       additionalProperties: false,
     },
   },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.settingsSummary,
+    description:
+      "Read the redacted Agent Control settings allowlist and whether authoritative settings approval is currently supported. Secrets and control-plane configuration are omitted.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeProjectCreate,
+    description:
+      "Request user approval to link an existing authorized directory as one exact Ryco project. This does not create a project or directory immediately.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", maxLength: 128 },
+        projectId: { type: "string", minLength: 1, maxLength: 256 },
+        title: { type: "string", minLength: 1, maxLength: 200 },
+        workspaceRoot: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+      required: ["requestId", "projectId", "title", "workspaceRoot"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate,
+    description:
+      "Request user approval for an exact project display-name and/or existing authorized workspace-path change, guarded by the project's updatedAt revision.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", maxLength: 128 },
+        projectId: { type: "string", minLength: 1, maxLength: 256 },
+        expectedUpdatedAt: { type: "string", minLength: 1 },
+        title: { type: "string", minLength: 1, maxLength: 200 },
+        workspaceRoot: { type: "string", minLength: 1, maxLength: 4096 },
+      },
+      required: ["requestId", "projectId", "expectedUpdatedAt"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove,
+    description:
+      "Request user approval to unlink one exact Ryco project record. Force also removes only the listed Ryco thread records; workspace files are never deleted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", maxLength: 128 },
+        projectId: { type: "string", minLength: 1, maxLength: 256 },
+        expectedUpdatedAt: { type: "string", minLength: 1 },
+        force: { type: "boolean" },
+      },
+      required: ["requestId", "projectId", "expectedUpdatedAt"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange,
+    description:
+      "Request an exact allowlisted non-secret settings change. This fails closed until Ryco can enforce fresh owner reauthentication at approval and execution.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", maxLength: 128 },
+        change: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { const: "legacyTokenStreaming" },
+                value: { type: "boolean" },
+              },
+              required: ["kind", "value"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "providerUpdateChecks" },
+                value: { type: "boolean" },
+              },
+              required: ["kind", "value"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+      required: ["requestId", "change"],
+      additionalProperties: false,
+    },
+  },
 ];
 
 const WRITE_TOOL_NAMES = new Set<string>([
@@ -295,18 +396,39 @@ const WRITE_TOOL_NAMES = new Set<string>([
   AGENT_CONTROL_MCP_TOOLS.sendMessage,
   AGENT_CONTROL_MCP_TOOLS.interruptThread,
   AGENT_CONTROL_MCP_TOOLS.updateThread,
+  AGENT_CONTROL_MCP_TOOLS.proposeProjectCreate,
+  AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate,
+  AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove,
+  AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange,
 ]);
 
-const writeCapabilityForTool = (name: string): AgentControlCapability | null =>
-  name === AGENT_CONTROL_MCP_TOOLS.createThreads
-    ? AGENT_CONTROL_CAPABILITIES.createThreads
-    : name === AGENT_CONTROL_MCP_TOOLS.sendMessage
-      ? AGENT_CONTROL_CAPABILITIES.sendMessage
-      : name === AGENT_CONTROL_MCP_TOOLS.interruptThread
-        ? AGENT_CONTROL_CAPABILITIES.interruptThread
-        : name === AGENT_CONTROL_MCP_TOOLS.updateThread
-          ? AGENT_CONTROL_CAPABILITIES.updateThread
-          : null;
+const writeCapabilityForTool = (name: string): AgentControlCapability | null => {
+  switch (name) {
+    case AGENT_CONTROL_MCP_TOOLS.createThreads:
+      return AGENT_CONTROL_CAPABILITIES.createThreads;
+    case AGENT_CONTROL_MCP_TOOLS.sendMessage:
+      return AGENT_CONTROL_CAPABILITIES.sendMessage;
+    case AGENT_CONTROL_MCP_TOOLS.interruptThread:
+      return AGENT_CONTROL_CAPABILITIES.interruptThread;
+    case AGENT_CONTROL_MCP_TOOLS.updateThread:
+      return AGENT_CONTROL_CAPABILITIES.updateThread;
+    case AGENT_CONTROL_MCP_TOOLS.proposeProjectCreate:
+      return AGENT_CONTROL_CAPABILITIES.createProject;
+    case AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate:
+      return AGENT_CONTROL_CAPABILITIES.updateProject;
+    case AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove:
+      return AGENT_CONTROL_CAPABILITIES.removeProject;
+    case AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange:
+      return AGENT_CONTROL_CAPABILITIES.changeSettings;
+    default:
+      return null;
+  }
+};
+
+const readCapabilityForTool = (name: string): AgentControlCapability =>
+  name === AGENT_CONTROL_MCP_TOOLS.settingsSummary
+    ? AGENT_CONTROL_CAPABILITIES.readSettings
+    : AGENT_CONTROL_CAPABILITIES.read;
 
 const clampLimit = (value: number | undefined, fallback: number, max: number): number =>
   Math.min(value ?? fallback, max);
@@ -517,9 +639,10 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
       Effect.map((canWrite) =>
         TOOL_DESCRIPTORS.filter((descriptor) => {
           const capability = writeCapabilityForTool(descriptor.name);
-          return (
-            capability === null || (canWrite && session.grantedCapabilities.includes(capability))
-          );
+          if (capability !== null) {
+            return canWrite && session.grantedCapabilities.includes(capability);
+          }
+          return session.grantedCapabilities.includes(readCapabilityForTool(descriptor.name));
         }),
       ),
     );
@@ -529,7 +652,7 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
       Effect.mapError(() => new ToolFailure("Invalid tool arguments.")),
     ) as Effect.Effect<S["Type"], ToolFailure>;
 
-  const authorizeRead = (session: AgentControlSessionRecord, operation: string) =>
+  const authorizeRead = (session: AgentControlSessionRecord, toolName: string) =>
     deps.policy
       .authorize({
         principal: {
@@ -539,8 +662,8 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
           runtimeSessionId: session.runtimeSessionId,
         },
         grantedCapabilities: session.grantedCapabilities,
-        requiredCapability: AGENT_CONTROL_CAPABILITIES.read,
-        operation,
+        requiredCapability: readCapabilityForTool(toolName),
+        operation: `mcp:${toolName}`,
       })
       .pipe(
         Effect.mapError((error) =>
@@ -639,6 +762,17 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         return [AGENT_CONTROL_RISK_TAGS.interruptsThread];
       case "updateThread":
         return [AGENT_CONTROL_RISK_TAGS.modifiesThreadMetadata];
+      case "createProject":
+        return [AGENT_CONTROL_RISK_TAGS.createsProject];
+      case "updateProject":
+        return [AGENT_CONTROL_RISK_TAGS.modifiesProjectMetadata];
+      case "removeProject":
+        return [
+          AGENT_CONTROL_RISK_TAGS.removesProject,
+          ...(plan.expectedThreadIds.length > 0 ? [AGENT_CONTROL_RISK_TAGS.removesThreads] : []),
+        ];
+      case "changeSettings":
+        return [AGENT_CONTROL_RISK_TAGS.changesSettings];
     }
   };
 
@@ -652,6 +786,14 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         return `Interrupt thread ${plan.threadId}`;
       case "updateThread":
         return `Update thread ${plan.threadId}`;
+      case "createProject":
+        return `Create project ${plan.title}`;
+      case "updateProject":
+        return `Update project ${plan.projectId}`;
+      case "removeProject":
+        return `Unlink project ${plan.expected.title}; workspace files will be retained`;
+      case "changeSettings":
+        return `Change ${plan.change.kind}`;
     }
   };
 
@@ -771,6 +913,99 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
           ...(input.archived === undefined ? {} : { archived: input.archived }),
           ...(input.persistentGoal === undefined ? {} : { persistentGoal: input.persistentGoal }),
         },
+      });
+    });
+
+  const prepareProjectPlan = <A>(
+    prepare: (
+      plans: AgentControlProjectPlansShape,
+    ) => Effect.Effect<A, { readonly detail: string }>,
+  ) =>
+    deps.projectPlans === undefined
+      ? failTool("Project proposal creation is unavailable.")
+      : prepare(deps.projectPlans).pipe(
+          Effect.mapError((error) => new ToolFailure(error.detail.slice(0, 500))),
+        );
+
+  const proposeProjectCreate = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      const input = yield* decodeArgs(AgentControlMcpProposeProjectCreateInput, args);
+      const plan = yield* prepareProjectPlan((plans) => plans.prepareCreate(input));
+      return yield* submitMutation({
+        session,
+        authority,
+        requestId: input.requestId,
+        plan,
+      });
+    });
+
+  const proposeProjectUpdate = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      const input = yield* decodeArgs(AgentControlMcpProposeProjectUpdateInput, args);
+      const plan = yield* prepareProjectPlan((plans) => plans.prepareUpdate(input));
+      return yield* submitMutation({
+        session,
+        authority,
+        requestId: input.requestId,
+        plan,
+      });
+    });
+
+  const proposeProjectRemove = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      const input = yield* decodeArgs(AgentControlMcpProposeProjectRemoveInput, args);
+      const plan = yield* prepareProjectPlan((plans) => plans.prepareRemove(input));
+      return yield* submitMutation({
+        session,
+        authority,
+        requestId: input.requestId,
+        plan,
+      });
+    });
+
+  const settingsSummary = () =>
+    Effect.gen(function* () {
+      if (deps.getSettings === undefined) {
+        return yield* failTool("Settings summary is unavailable.");
+      }
+      const settings = yield* deps.getSettings.pipe(
+        Effect.mapError(() => new ToolFailure("Settings summary is unavailable.")),
+      );
+      return Schema.encodeSync(AgentControlMcpSettingsSummaryResult)(
+        agentControlSettingsSummary(settings),
+      );
+    });
+
+  const proposeSettingsChange = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      const input = yield* decodeArgs(AgentControlMcpProposeSettingsChangeInput, args);
+      if (deps.getSettings === undefined) {
+        return yield* failTool("Settings proposal creation is unavailable.");
+      }
+      const settings = yield* deps.getSettings.pipe(
+        Effect.mapError(() => new ToolFailure("Settings proposal creation is unavailable.")),
+      );
+      return yield* submitMutation({
+        session,
+        authority,
+        requestId: input.requestId,
+        plan: agentControlSettingsPlan(settings, input.change),
       });
     });
 
@@ -990,6 +1225,24 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
           return authority
             ? updateThread(session, authority, args)
             : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.settingsSummary:
+          return settingsSummary();
+        case AGENT_CONTROL_MCP_TOOLS.proposeProjectCreate:
+          return authority
+            ? proposeProjectCreate(session, authority, args)
+            : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate:
+          return authority
+            ? proposeProjectUpdate(session, authority, args)
+            : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove:
+          return authority
+            ? proposeProjectRemove(session, authority, args)
+            : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange:
+          return authority
+            ? proposeSettingsChange(session, authority, args)
+            : failTool("Exact active-turn write authority is unavailable.");
         default:
           return failTool("Unknown tool.");
       }
@@ -1027,7 +1280,7 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
             );
           return authority.value;
         })
-      : authorizeRead(session, `mcp:${name}`).pipe(Effect.as(null));
+      : authorizeRead(session, name).pipe(Effect.as(null));
 
     return authorize.pipe(
       Effect.flatMap(handler),

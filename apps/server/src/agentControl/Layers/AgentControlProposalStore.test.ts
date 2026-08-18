@@ -1,4 +1,5 @@
 import {
+  AgentControlOperationId,
   AgentControlProposalId,
   AgentControlRequestId,
   AgentControlRiskTag,
@@ -223,6 +224,81 @@ enabledLayer("AgentControlProposalStore", (it) => {
       assert.strictEqual(row.planDigest, proposal.planDigest);
       assert.deepStrictEqual(row.plan, proposal.plan);
       assert.strictEqual(row.result?.outcome, "completed");
+    }),
+  );
+
+  it.effect("preserves an exact project plan and its execution result with the audit trail", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const repository = yield* AgentControlProposalRepository;
+      const audit = yield* AgentControlAuditRepository;
+      const projectPlan: AgentControlActionPlan = {
+        kind: "updateProject",
+        projectId: ProjectId.make("project-1"),
+        before: {
+          title: "Before",
+          workspaceRoot: "/workspace/before",
+          repositoryIdentityKey: "git:example/project",
+          updatedAt: "2026-08-17T00:00:00.000Z",
+        },
+        after: {
+          title: "After",
+          workspaceRoot: "/workspace/after",
+          repositoryIdentityKey: "git:example/project",
+        },
+      };
+      const { proposal } = yield* store.submit({
+        principal,
+        requestId: AgentControlRequestId.make("request-project-audit"),
+        plan: projectPlan,
+        riskTags: [AgentControlRiskTag.make("modifies-project-metadata")],
+        promptSummary: "Update project project-1",
+        expiresAt: "2026-08-17T01:00:00.000Z",
+        now: "2026-08-17T00:00:00.000Z",
+      });
+      yield* store.decide({
+        proposalId: proposal.proposalId,
+        decision: "approved",
+        actor: "user",
+        decidedAt: "2026-08-17T00:01:00.000Z",
+      });
+      yield* store.beginExecution({
+        proposalId: proposal.proposalId,
+        actor: "executor",
+        now: "2026-08-17T00:02:00.000Z",
+      });
+      const operationId = AgentControlOperationId.make("operation-project-audit");
+      const result = {
+        outcome: "completed" as const,
+        execution: {
+          operationId,
+          commands: [],
+          affectedThreadIds: [],
+          affectedProjectIds: [ProjectId.make("project-1")],
+          worktreeIds: [],
+        },
+        completedAt: "2026-08-17T00:03:00.000Z",
+      };
+      yield* store.settleExecution({
+        proposalId: proposal.proposalId,
+        result,
+        now: result.completedAt,
+      });
+
+      const persisted = Option.getOrThrow(
+        yield* repository.getById({ proposalId: proposal.proposalId }),
+      );
+      assert.deepStrictEqual(persisted.plan, projectPlan);
+      assert.deepStrictEqual(persisted.result, result);
+
+      const trail = yield* audit.listByProposalId({ proposalId: proposal.proposalId });
+      assert.deepStrictEqual(
+        trail.map((row) => String(row.eventKind)),
+        ["proposal-created", "proposal-approved", "proposal-executing", "proposal-completed"],
+      );
+      assert.isTrue(trail.every((row) => row.metadata.planDigest === proposal.planDigest));
+      assert.strictEqual(trail.at(-1)?.metadata.outcome, "completed");
+      assert.strictEqual(trail.at(-1)?.metadata.operationId, operationId);
     }),
   );
 

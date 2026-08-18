@@ -155,7 +155,14 @@ const withListener = <A, E>(
         threadId: callerThreadId,
         providerInstanceId: codexInstance,
         runtimeSessionId: runtime1,
-        capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+        capabilities: [
+          AGENT_CONTROL_CAPABILITIES.read,
+          AGENT_CONTROL_CAPABILITIES.createProject,
+          AGENT_CONTROL_CAPABILITIES.updateProject,
+          AGENT_CONTROL_CAPABILITIES.removeProject,
+          AGENT_CONTROL_CAPABILITIES.readSettings,
+          AGENT_CONTROL_CAPABILITIES.changeSettings,
+        ],
         injectionMode: "codex-http",
       });
       assert.isTrue(Option.isSome(lease));
@@ -255,6 +262,10 @@ it.live("speaks the MCP protocol: initialize, ping, tools/list, tools/call", () 
               AGENT_CONTROL_MCP_TOOLS.sendMessage,
               AGENT_CONTROL_MCP_TOOLS.interruptThread,
               AGENT_CONTROL_MCP_TOOLS.updateThread,
+              AGENT_CONTROL_MCP_TOOLS.proposeProjectCreate,
+              AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate,
+              AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove,
+              AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange,
             ].includes(name as never),
         ).toSorted(),
       );

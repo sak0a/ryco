@@ -118,6 +118,48 @@ describe("buildAgentControlProposalCardModel", () => {
     ]);
   });
 
+  it("shows exact project and allowlisted settings plans", () => {
+    const remove = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "removeProject",
+          projectId: ProjectId.make("project-1"),
+          expected: {
+            title: "Project one",
+            workspaceRoot: "/workspace/project-one",
+            repositoryIdentityKey: "git:example/project-one",
+            updatedAt: "2026-08-17T00:00:00.000Z",
+          },
+          expectedThreadIds: [ThreadId.make("thread-target-5678")],
+          force: true,
+        },
+      }),
+    );
+    expect(remove.actionLabel).toBe("Unlink project");
+    expect(remove.isDestructive).toBe(true);
+    expect(remove.detailSections[0]?.lines).toContain(
+      "Workspace files and repository contents will be retained.",
+    );
+    expect(remove.detailSections[0]?.lines).toContain(
+      "Ryco thread record removed: thread-target-5678",
+    );
+
+    const settings = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "changeSettings",
+          change: { kind: "providerUpdateChecks", before: true, after: false },
+        },
+      }),
+    );
+    expect(settings.detailSections[0]?.lines).toEqual([
+      "Setting: providerUpdateChecks",
+      "Before: true",
+      "After: false",
+      "Fresh owner reauthentication is required at approval and execution.",
+    ]);
+  });
+
   it("identifies external integration origins without a caller thread", () => {
     const model = buildAgentControlProposalCardModel(
       makeProposal({
@@ -149,6 +191,7 @@ describe("buildAgentControlProposalCardModel", () => {
               },
             ],
             affectedThreadIds: [ThreadId.make("thread-new-1")],
+            affectedProjectIds: [ProjectId.make("project-1")],
             worktreeIds: [],
             delivery: "queued",
           },
@@ -159,6 +202,7 @@ describe("buildAgentControlProposalCardModel", () => {
     expect(completed.outcomeLabel).toBe("Completed · created 1 thread");
     expect(completed.executionLabel).toBe("Operation operatio… · 1 command · delivery: queued");
     expect(completed.affectedThreadIds).toEqual(["thread-new-1"]);
+    expect(completed.affectedProjectIds).toEqual(["project-1"]);
     expect(completed.isPending).toBe(false);
 
     const failed = buildAgentControlProposalCardModel(

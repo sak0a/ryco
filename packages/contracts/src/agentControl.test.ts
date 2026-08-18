@@ -85,6 +85,53 @@ describe("AgentControlActionPlan", () => {
     expect(decodePlan({ kind: "updateThread", threadId: "thread-1", archived: true }).kind).toBe(
       "updateThread",
     );
+    expect(
+      decodePlan({
+        kind: "createProject",
+        projectId: "project-new",
+        title: "New project",
+        workspaceRoot: "/workspace/new",
+        projectMetadataDir: ".ryco",
+        repositoryIdentityKey: "github.com/example/new",
+      }).kind,
+    ).toBe("createProject");
+    expect(
+      decodePlan({
+        kind: "updateProject",
+        projectId: "project-1",
+        before: {
+          title: "Before",
+          workspaceRoot: "/workspace/before",
+          repositoryIdentityKey: null,
+          updatedAt: "2026-08-18T00:00:00.000Z",
+        },
+        after: {
+          title: "After",
+          workspaceRoot: "/workspace/after",
+          repositoryIdentityKey: null,
+        },
+      }).kind,
+    ).toBe("updateProject");
+    expect(
+      decodePlan({
+        kind: "removeProject",
+        projectId: "project-1",
+        expected: {
+          title: "Project",
+          workspaceRoot: "/workspace/project",
+          repositoryIdentityKey: null,
+          updatedAt: "2026-08-18T00:00:00.000Z",
+        },
+        expectedThreadIds: ["thread-1"],
+        force: true,
+      }).kind,
+    ).toBe("removeProject");
+    expect(
+      decodePlan({
+        kind: "changeSettings",
+        change: { kind: "providerUpdateChecks", before: true, after: false },
+      }).kind,
+    ).toBe("changeSettings");
   });
 
   it("rejects unknown action kinds", () => {
@@ -197,9 +244,13 @@ describe("forward compatibility (additive extension)", () => {
       AGENT_CONTROL_CAPABILITIES.createThreads,
     );
     expect(Object.keys(AGENT_CONTROL_ACTION_CAPABILITIES).toSorted()).toEqual([
+      "changeSettings",
+      "createProject",
       "createThreads",
       "interruptThread",
+      "removeProject",
       "sendMessage",
+      "updateProject",
       "updateThread",
     ]);
   });
@@ -228,6 +279,7 @@ describe("AgentControlOperation", () => {
     const state = decodeOperationState({});
     expect(state.completedSteps).toEqual([]);
     expect(state.resources).toEqual({
+      projectIds: [],
       threadIds: [],
       ownedThreadIds: [],
       worktreeIds: [],
@@ -238,7 +290,7 @@ describe("AgentControlOperation", () => {
 });
 
 describe("Agent Control MCP contracts", () => {
-  it("catalogs exactly seven read tools and four proposal-backed mutation tools", async () => {
+  it("catalogs eight read tools and eight proposal-backed mutation tools", async () => {
     const { AGENT_CONTROL_MCP_TOOLS, AGENT_CONTROL_MCP_TOOL_NAMES } =
       await import("./agentControl.ts");
     expect([...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted()).toEqual(
@@ -254,20 +306,29 @@ describe("Agent Control MCP contracts", () => {
         "ryco_send_message",
         "ryco_interrupt_thread",
         "ryco_update_thread",
+        "ryco_settings_summary",
+        "ryco_propose_project_create",
+        "ryco_propose_project_update",
+        "ryco_propose_project_remove",
+        "ryco_propose_settings_change",
       ].toSorted(),
     );
-    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(11);
+    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(16);
     for (const name of AGENT_CONTROL_MCP_TOOL_NAMES) {
       expect(name.startsWith("ryco_")).toBe(true);
     }
   });
 
-  it("decodes only the four exact mutation payloads", async () => {
+  it("decodes only exact typed mutation payloads and rejects sensitive settings categories", async () => {
     const {
       AgentControlMcpCreateThreadsInput,
       AgentControlMcpInterruptThreadInput,
       AgentControlMcpSendMessageInput,
       AgentControlMcpUpdateThreadInput,
+      AgentControlMcpProposeProjectCreateInput,
+      AgentControlMcpProposeProjectUpdateInput,
+      AgentControlMcpProposeProjectRemoveInput,
+      AgentControlMcpProposeSettingsChangeInput,
     } = await import("./agentControl.ts");
 
     expect(
@@ -304,6 +365,73 @@ describe("Agent Control MCP contracts", () => {
         metadata: { arbitrary: true },
       }),
     ).toThrow();
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeProjectCreateInput)({
+        requestId: "request-project-create",
+        projectId: "project-new",
+        title: "New project",
+        workspaceRoot: "/workspace/new",
+      }).projectId,
+    ).toBe("project-new");
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeProjectUpdateInput)({
+        requestId: "request-project-update",
+        projectId: "project-1",
+        expectedUpdatedAt: "2026-08-18T00:00:00.000Z",
+        title: "Renamed",
+      }).title,
+    ).toBe("Renamed");
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeProjectRemoveInput)({
+        requestId: "request-project-remove",
+        projectId: "project-1",
+        expectedUpdatedAt: "2026-08-18T00:00:00.000Z",
+        force: true,
+      }).force,
+    ).toBe(true);
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeSettingsChangeInput)({
+        requestId: "request-settings",
+        change: { kind: "legacyTokenStreaming", value: true },
+      }).change.kind,
+    ).toBe("legacyTokenStreaming");
+
+    for (const kind of [
+      "apiKey",
+      "providerEnvironment",
+      "providerCommand",
+      "mcpServerUrl",
+      "relayUrl",
+      "authentication",
+      "filesystemRoot",
+      "networkExposure",
+      "agentControlEnabled",
+      "genericPatch",
+    ]) {
+      expect(() =>
+        Schema.decodeUnknownSync(AgentControlMcpProposeSettingsChangeInput)({
+          requestId: `request-${kind}`,
+          change: { kind, value: "secret" },
+        }),
+      ).toThrow();
+    }
+
+    for (const [field, value] of [
+      ["apiKey", "secret"],
+      ["environment", { API_KEY: "secret" }],
+      ["providerCommand", ["provider", "--unsafe"]],
+      ["mcpServerUrl", "https://private.example.test"],
+      ["relayUrl", "wss://relay.example.test"],
+      ["filesystemRoot", "/"],
+      ["agentControlEnabled", false],
+    ] as const) {
+      expect(() =>
+        Schema.decodeUnknownSync(AgentControlMcpProposeSettingsChangeInput)({
+          requestId: `request-extra-${field}`,
+          change: { kind: "legacyTokenStreaming", value: true, [field]: value },
+        }),
+      ).toThrow();
+    }
   });
 
   it("decodes list/read/wait inputs and rejects out-of-bounds payloads", async () => {

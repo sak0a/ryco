@@ -28,6 +28,7 @@ import { AgentControlPolicy } from "../Services/AgentControlPolicy.ts";
 import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
 import { AgentControlProposalEvents } from "../Services/AgentControlProposalEvents.ts";
 import { AgentControlProposalService } from "../Services/AgentControlProposalService.ts";
+import { AgentControlProjectPlans } from "../Services/AgentControlProjectPlans.ts";
 import {
   AgentControlSessionRegistry,
   type AgentControlLeaseRevocationReason,
@@ -40,6 +41,7 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
   const proposals = yield* AgentControlProposalService;
   const proposalEvents = yield* AgentControlProposalEvents;
   const projections = yield* ProjectionSnapshotQuery;
+  const projectPlans = yield* Effect.serviceOption(AgentControlProjectPlans);
   const providerRegistry = yield* ProviderRegistry;
   const serverSettings = yield* ServerSettingsService;
 
@@ -48,8 +50,10 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
     proposals,
     proposalEvents,
     projections,
+    getSettings: serverSettings.getSettings,
     getProviders: providerRegistry.getProviders,
     ...(Option.isSome(validator) ? { validator: validator.value } : {}),
+    ...(Option.isSome(projectPlans) ? { projectPlans: projectPlans.value } : {}),
     getTurnAuthority: registry.getTurnAuthority,
   });
 

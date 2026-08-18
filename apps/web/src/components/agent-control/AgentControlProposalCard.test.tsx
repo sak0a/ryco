@@ -91,6 +91,29 @@ describe("AgentControlProposalCard", () => {
     expect(markup).toContain("Show plan details");
   });
 
+  it("makes project unlink proposals visibly destructive", () => {
+    const markup = renderCard({
+      proposal: makeProposal({
+        plan: {
+          kind: "removeProject",
+          projectId: ProjectId.make("project-1"),
+          expected: {
+            title: "Project one",
+            workspaceRoot: "/workspace/project-one",
+            repositoryIdentityKey: null,
+            updatedAt: "2026-08-17T00:00:00.000Z",
+          },
+          expectedThreadIds: [],
+          force: false,
+        },
+        riskTags: [AgentControlRiskTag.make("removes-project")],
+      }),
+    });
+    expect(markup).toContain("Unlink project");
+    expect(markup).toContain("Destructive · Ryco records only");
+    expect(markup).toContain("border-destructive/70");
+  });
+
   it("disables decisions while a decision is submitting", () => {
     const markup = renderCard({ isSubmitting: true });
     const disabledButtons = markup.match(/ disabled=""/g) ?? [];

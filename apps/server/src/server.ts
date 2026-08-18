@@ -110,6 +110,7 @@ import { AgentControlProposalStoreLive } from "./agentControl/Layers/AgentContro
 import { AgentControlSessionRegistryLive } from "./agentControl/Layers/AgentControlSessionRegistry.ts";
 import { AgentControlActionValidatorLive } from "./agentControl/Layers/AgentControlActionValidator.ts";
 import { AgentControlExecutionLive } from "./agentControl/Layers/AgentControlExecution.ts";
+import { AgentControlProjectPlansLive } from "./agentControl/Layers/AgentControlProjectPlans.ts";
 import { AgentControlExternalIntegrationServiceLive } from "./agentControl/Layers/AgentControlExternalIntegration.ts";
 import { AgentControlExternalTaskServiceLive } from "./agentControl/Layers/AgentControlExternalTask.ts";
 import { AgentControlExternalMcpServerLive } from "./agentControl/Layers/AgentControlExternalMcpServer.ts";
@@ -414,15 +415,22 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 // the public HTTP server, router, or any client-visible state.
 const RuntimeServicesLive = Layer.mergeAll(
   ServerRuntimeStartupLive,
-  AgentControlMcpServerLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+  AgentControlMcpServerLive.pipe(
+    Layer.provideMerge(AgentControlActionValidatorLive),
+    Layer.provideMerge(AgentControlProjectPlansLive),
+  ),
   AgentControlExternalMcpServerLive.pipe(
     Layer.provideMerge(
-      AgentControlExternalTaskServiceLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+      AgentControlExternalTaskServiceLive.pipe(
+        Layer.provideMerge(AgentControlActionValidatorLive),
+        Layer.provideMerge(AgentControlProjectPlansLive),
+      ),
     ),
   ),
   AgentControlExecutionLive.pipe(
     Layer.provideMerge(ServerRuntimeStartupLive),
     Layer.provideMerge(AgentControlActionValidatorLive),
+    Layer.provideMerge(AgentControlProjectPlansLive),
     Layer.provideMerge(OrchestrationCommandApplicationLive),
   ),
 ).pipe(

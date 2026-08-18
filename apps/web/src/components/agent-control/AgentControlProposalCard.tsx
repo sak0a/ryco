@@ -53,7 +53,9 @@ export const AgentControlProposalCard = memo(function AgentControlProposalCard({
   return (
     <div
       data-testid="agent-control-proposal-card"
-      className="mb-2 rounded-lg border border-border/60 bg-muted/20"
+      className={`mb-2 rounded-lg border bg-muted/20 ${
+        model.isDestructive ? "border-destructive/70" : "border-border/60"
+      }`}
     >
       <div className="px-3 pt-2.5 sm:px-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -67,6 +69,11 @@ export const AgentControlProposalCard = memo(function AgentControlProposalCard({
             <span className="text-xs text-muted-foreground">
               {formatExpiresInLabel(model.expiresAt)}
             </span>
+          ) : null}
+          {model.isDestructive ? (
+            <Badge size="sm" variant="error">
+              Destructive · Ryco records only
+            </Badge>
           ) : null}
         </div>
         <p className="mt-1 text-sm font-medium text-foreground">
@@ -106,6 +113,12 @@ export const AgentControlProposalCard = memo(function AgentControlProposalCard({
               </a>
             ))}
           </div>
+        ) : null}
+        {model.affectedProjectIds.length > 0 ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            Project{model.affectedProjectIds.length === 1 ? "" : "s"}:{" "}
+            {model.affectedProjectIds.join(", ")}
+          </p>
         ) : null}
         {decisionError !== null ? (
           <p role="alert" className="mt-1 text-xs text-destructive">

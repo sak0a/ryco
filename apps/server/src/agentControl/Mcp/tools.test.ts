@@ -5,6 +5,7 @@ import {
   AGENT_CONTROL_MCP_TOOLS,
   AGENT_CONTROL_MCP_TOOL_NAMES,
   AGENT_CONTROL_ACTION_CAPABILITIES,
+  DEFAULT_SERVER_SETTINGS,
   AgentControlProposalId,
   AgentControlRequestId,
   OrchestrationProjectShell,
@@ -23,7 +24,11 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Fiber, Option, PubSub, Schema } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { AgentControlCapabilityDeniedError, AgentControlDisabledError } from "../Errors.ts";
+import {
+  AgentControlCapabilityDeniedError,
+  AgentControlDisabledError,
+  AgentControlPlanValidationError,
+} from "../Errors.ts";
 import type { AgentControlPolicyShape } from "../Services/AgentControlPolicy.ts";
 import type { AgentControlSessionRecord } from "../Services/AgentControlSessionRegistry.ts";
 import { makeAgentControlMcpTools, type AgentControlMcpToolDeps } from "./tools.ts";
@@ -347,7 +352,7 @@ const structured = (result: { readonly structuredContent?: unknown }): unknown =
 
 // ── Catalog ───────────────────────────────────────────────────────────
 
-it.effect("advertises only read tools without exact authority and all four writes with it", () =>
+it.effect("advertises scoped reads without authority and all eight writes with it", () =>
   Effect.gen(function* () {
     const tools = makeAgentControlMcpTools(makeDeps());
     const readDescriptors = yield* tools.descriptorsFor(session);
@@ -367,7 +372,7 @@ it.effect("advertises only read tools without exact authority and all four write
     );
     assert.strictEqual(
       writeDescriptors.filter((tool) => writeTools.isWriteTool(tool.name)).length,
-      4,
+      8,
     );
     assert.isTrue(tools.hasTool("ryco_create_threads"));
   }),
@@ -419,6 +424,29 @@ it.effect("rejects a write call without exact active-turn authority", () =>
       result.content[0]?.text,
       "Exact active-turn write authority is unavailable.",
     );
+  }),
+);
+
+it.effect("keeps each project mutation scoped to the requesting runtime's exact grant", () =>
+  Effect.gen(function* () {
+    const result = yield* call(
+      makeDeps({ getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)) }),
+      AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate,
+      {
+        requestId: "request-project-capability",
+        projectId: "project-1",
+        expectedUpdatedAt: projectOne.updatedAt,
+        title: "Must not reach preparation",
+      },
+      {
+        ...writeSession,
+        grantedCapabilities: writeSession.grantedCapabilities.filter(
+          (capability) => capability !== AGENT_CONTROL_CAPABILITIES.updateProject,
+        ),
+      },
+    );
+    assert.isTrue(result.isError);
+    assert.strictEqual(result.content[0]?.text, "Capability denied.");
   }),
 );
 
@@ -547,7 +575,9 @@ it.effect("ryco_capabilities uses provider instances and bounds model lists", ()
     assert.deepStrictEqual(
       [...payload.tools].toSorted(),
       AGENT_CONTROL_MCP_TOOL_NAMES.filter(
-        (name) => !makeAgentControlMcpTools(makeDeps()).isWriteTool(name),
+        (name) =>
+          !makeAgentControlMcpTools(makeDeps()).isWriteTool(name) &&
+          name !== AGENT_CONTROL_MCP_TOOLS.settingsSummary,
       ).toSorted(),
     );
     assert.strictEqual(payload.providerInstances[0]?.instanceId, "codex");
@@ -560,6 +590,222 @@ it.effect("ryco_capabilities uses provider instances and bounds model lists", ()
     assert.isTrue(payload.providerInstances[0]?.agentControl.available);
     // Account identity and other sensitive snapshot fields stay out.
     assert.notInclude(JSON.stringify(payload), "user@example.com");
+  }),
+);
+
+it.effect("ryco_settings_summary is separately capability-gated and never exposes secrets", () =>
+  Effect.gen(function* () {
+    const settings = {
+      ...DEFAULT_SERVER_SETTINGS,
+      enableLegacyTokenStreaming: true,
+      providers: {
+        ...DEFAULT_SERVER_SETTINGS.providers,
+        opencode: {
+          ...DEFAULT_SERVER_SETTINGS.providers.opencode,
+          serverPassword: "never-leak-this-password",
+          serverUrl: "https://private.example.test",
+        },
+      },
+      providerInstances: {
+        secret: {
+          driver: "codex",
+          environment: [{ name: "API_KEY", value: "never-leak-this-token", sensitive: true }],
+        },
+      },
+      addProjectBaseDirectory: "/private/root",
+      observability: { otlpTracesUrl: "https://private-collector", otlpMetricsUrl: "" },
+    } as typeof DEFAULT_SERVER_SETTINGS;
+    const denied = yield* call(
+      makeDeps({ getSettings: Effect.succeed(settings) }),
+      AGENT_CONTROL_MCP_TOOLS.settingsSummary,
+    );
+    assert.isTrue(denied.isError);
+    assert.strictEqual(denied.content[0]?.text, "Capability denied.");
+
+    const result = yield* call(
+      makeDeps({ getSettings: Effect.succeed(settings) }),
+      AGENT_CONTROL_MCP_TOOLS.settingsSummary,
+      {},
+      writeSession,
+    );
+    assert.isUndefined(result.isError);
+    const serialized = JSON.stringify(structured(result));
+    assert.include(serialized, "legacyTokenStreaming");
+    assert.include(serialized, "providerUpdateChecks");
+    assert.notInclude(serialized, "never-leak-this-password");
+    assert.notInclude(serialized, "never-leak-this-token");
+    assert.notInclude(serialized, "private.example.test");
+    assert.notInclude(serialized, "/private/root");
+    assert.notInclude(serialized, "private-collector");
+  }),
+);
+
+it.effect("project write tools create exact inert proposals and never dispatch mutations", () =>
+  Effect.gen(function* () {
+    const submitted: Array<
+      Parameters<NonNullable<AgentControlMcpToolDeps["proposals"]["submit"]>>[0]
+    > = [];
+    const projectPlans = {
+      prepareCreate: () =>
+        Effect.succeed({
+          kind: "createProject" as const,
+          projectId: projectTwo.id,
+          title: "Project two",
+          workspaceRoot: projectTwo.workspaceRoot,
+          projectMetadataDir: ".ryco" as const,
+          repositoryIdentityKey: null,
+        }),
+      prepareUpdate: () =>
+        Effect.succeed({
+          kind: "updateProject" as const,
+          projectId: projectOne.id,
+          before: {
+            title: projectOne.title,
+            workspaceRoot: projectOne.workspaceRoot,
+            repositoryIdentityKey: null,
+            updatedAt: projectOne.updatedAt,
+          },
+          after: {
+            title: "Renamed",
+            workspaceRoot: projectOne.workspaceRoot,
+            repositoryIdentityKey: null,
+          },
+        }),
+      prepareRemove: () =>
+        Effect.succeed({
+          kind: "removeProject" as const,
+          projectId: projectOne.id,
+          expected: {
+            title: projectOne.title,
+            workspaceRoot: projectOne.workspaceRoot,
+            repositoryIdentityKey: null,
+            updatedAt: projectOne.updatedAt,
+          },
+          expectedThreadIds: [callerThreadId],
+          force: true,
+        }),
+      revalidate: () => Effect.void,
+    };
+    const deps = makeDeps({
+      projectPlans,
+      getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)),
+      validator: {
+        validateSubmission: () =>
+          Effect.succeed({
+            kind: "provider-session",
+            threadId: callerThreadId,
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeSessionId: RuntimeSessionId.make("runtime-1"),
+            turnId: TurnId.make("turn-active"),
+            originProjectId: projectOne.id,
+            originRuntimeMode: "auto",
+            originEnvMode: "worktree",
+            targetSnapshots: [],
+          }),
+        validateExternalSubmission: () => Effect.die("unused"),
+        revalidateExecution: () => Effect.void,
+      },
+      proposals: {
+        getProposal: makeDeps().proposals.getProposal,
+        submit: (input) => {
+          submitted.push(input);
+          return Effect.succeed({
+            replayed: false,
+            proposal: {
+              ...proposalOwn,
+              proposalId: AgentControlProposalId.make(`proposal-${submitted.length}`),
+              requestId: input.requestId,
+              principal: input.principal,
+              plan: input.plan,
+              riskTags: input.riskTags,
+              promptSummary: input.promptSummary,
+            },
+          });
+        },
+      },
+    });
+
+    for (const [name, args] of [
+      [
+        AGENT_CONTROL_MCP_TOOLS.proposeProjectCreate,
+        {
+          requestId: "request-project-create",
+          projectId: "project-2",
+          title: "Project two",
+          workspaceRoot: projectTwo.workspaceRoot,
+        },
+      ],
+      [
+        AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate,
+        {
+          requestId: "request-project-update",
+          projectId: "project-1",
+          expectedUpdatedAt: projectOne.updatedAt,
+          title: "Renamed",
+        },
+      ],
+      [
+        AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove,
+        {
+          requestId: "request-project-remove",
+          projectId: "project-1",
+          expectedUpdatedAt: projectOne.updatedAt,
+          force: true,
+        },
+      ],
+    ] as const) {
+      const result = yield* call(deps, name, args, writeSession);
+      assert.isUndefined(result.isError);
+    }
+
+    assert.deepStrictEqual(
+      submitted.map((entry) => entry.plan.kind),
+      ["createProject", "updateProject", "removeProject"],
+    );
+    assert.strictEqual(shellSnapshot.projects[0], projectOne);
+    assert.strictEqual(shellSnapshot.threads[0], threadCaller);
+  }),
+);
+
+it.effect("settings proposals fail closed before persistence without fresh owner step-up", () =>
+  Effect.gen(function* () {
+    let submitted = false;
+    const deps = makeDeps({
+      getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
+      getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)),
+      validator: {
+        validateSubmission: ({ plan }) =>
+          plan.kind === "changeSettings"
+            ? Effect.fail(
+                new AgentControlPlanValidationError({
+                  reason: "settings-unsupported",
+                  detail: "Fresh owner reauthentication is unavailable.",
+                }),
+              )
+            : Effect.die("unexpected plan"),
+        validateExternalSubmission: () => Effect.die("unused"),
+        revalidateExecution: () => Effect.void,
+      },
+      proposals: {
+        getProposal: makeDeps().proposals.getProposal,
+        submit: () => {
+          submitted = true;
+          return Effect.die("settings proposal must not persist");
+        },
+      },
+    });
+    const result = yield* call(
+      deps,
+      AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange,
+      {
+        requestId: "request-settings-change",
+        change: { kind: "legacyTokenStreaming", value: true },
+      },
+      writeSession,
+    );
+    assert.isTrue(result.isError);
+    assert.include(result.content[0]?.text ?? "", "reauthentication");
+    assert.isFalse(submitted);
   }),
 );
 
