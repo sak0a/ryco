@@ -788,10 +788,10 @@ export default function Version4() {
               <Copyable text={SITE.npx} />
             </div>
 
-            {/* the five agents */}
+            {/* the six agents — one row on desktop, wraps centered on smaller screens */}
             <div
               data-hero-fade
-              className="mx-auto mt-12 flex max-w-2xl flex-wrap items-center justify-center gap-x-8 gap-y-4"
+              className="mx-auto mt-12 flex max-w-4xl flex-wrap items-center justify-center gap-x-8 gap-y-4"
             >
               {PROVIDERS.map((p) => (
                 <span
@@ -855,12 +855,12 @@ export default function Version4() {
         <section id="agents" className={cn("relative", NAV_OFFSET)}>
           <div className="mx-auto max-w-7xl px-5 pt-24 sm:px-8">
             <div data-reveal className="max-w-2xl">
-              <Eyebrow>Five agents · one workspace</Eyebrow>
+              <Eyebrow>Six agents · one workspace</Eyebrow>
               <SectionHeading className="mt-5">Every coding agent, side by side.</SectionHeading>
               <p className="mt-5 text-white/60 sm:text-lg">
-                Codex, Claude, GitHub Copilot, OpenCode and Cursor — each through its native SDK or
-                protocol, using the subscription you already pay for. Switch per thread without
-                losing context.
+                Codex, Claude, GitHub Copilot, OpenCode, Cursor and Grok — each through its native
+                SDK or protocol, using the subscription you already pay for. Switch per thread
+                without losing context.
               </p>
             </div>
           </div>
@@ -876,7 +876,7 @@ export default function Version4() {
               <div className="mt-5">
                 <ScreenshotFrame
                   src="/shots/providers.png"
-                  alt="Ryco settings showing all five providers authenticated with live version and subscription status."
+                  alt="Ryco settings showing provider instances authenticated with live version and subscription status."
                   theme="dark"
                   chrome={false}
                   className="shadow-[0_40px_120px_-55px_rgba(0,0,0,0.9)]"
@@ -884,7 +884,7 @@ export default function Version4() {
               </div>
             </div>
           ) : (
-            /* Motion — a pinned horizontal 3D coverflow of the five agents. */
+            /* Motion — a pinned horizontal 3D coverflow of the six agents. */
             <div className="mt-12">
               <AgentDeck />
             </div>
