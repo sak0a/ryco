@@ -20,8 +20,10 @@ import { Effect, Exit, Layer, Option, Scope, Stream } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { DeviceService } from "../../device/Services/DeviceService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { WorkspaceAccessPolicy } from "../../workspace/Services/WorkspaceAccessPolicy.ts";
 import { makeAgentControlMcpListener } from "../Mcp/listener.ts";
 import { makeAgentControlMcpTools } from "../Mcp/tools.ts";
 import { AgentControlPolicy } from "../Services/AgentControlPolicy.ts";
@@ -48,12 +50,16 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
   const diagnostics = yield* Effect.serviceOption(AgentControlDiagnosticsService);
   const providerRegistry = yield* ProviderRegistry;
   const serverSettings = yield* ServerSettingsService;
+  const deviceService = yield* Effect.serviceOption(DeviceService);
+  const workspaceAccess = yield* Effect.serviceOption(WorkspaceAccessPolicy);
 
   const tools = makeAgentControlMcpTools({
     policy,
     proposals,
     proposalEvents,
     projections,
+    ...(Option.isSome(deviceService) ? { deviceService: deviceService.value } : {}),
+    ...(Option.isSome(workspaceAccess) ? { workspaceAccess: workspaceAccess.value } : {}),
     ...(Option.isSome(automations) ? { automations: automations.value } : {}),
     ...(Option.isSome(diagnostics) ? { diagnostics: diagnostics.value } : {}),
     getSettings: serverSettings.getSettings,

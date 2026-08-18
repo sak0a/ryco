@@ -117,6 +117,30 @@ const auditMetadataForProposal = (proposal: AgentControlProposal): AgentControlA
           recoverySafety: "idempotent-occurrence-and-request",
           freshRunApproval: "true",
         };
+      case "deviceBoot":
+      case "deviceAttach":
+      case "deviceDetach":
+      case "deviceInstall":
+      case "deviceLaunch":
+      case "deviceOpenUrl":
+      case "deviceTap":
+      case "deviceSwipe":
+      case "devicePressButton":
+      case "deviceStartRecording":
+      case "deviceStopRecording":
+      case "deviceShutdown":
+        return {
+          deviceUdid: proposal.plan.udid,
+          projectId: proposal.plan.projectId,
+          expectedProjectUpdatedAt: proposal.plan.expectedProjectUpdatedAt,
+          providerInstanceId: proposal.plan.providerInstanceId,
+          deviceThreadId: proposal.plan.threadId,
+          expectedThreadDeviceVersion: String(proposal.plan.expectedThreadDeviceVersion),
+          expectedDeviceState: proposal.plan.expectedDeviceState,
+          expectedRecording: String(proposal.plan.expectedRecording),
+          riskClass: proposal.plan.riskClass,
+          sensitivePayloadsExcluded: "true",
+        };
       default:
         return {};
     }

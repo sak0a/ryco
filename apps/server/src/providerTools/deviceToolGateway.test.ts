@@ -4,6 +4,7 @@ import { DeviceManager } from "../device/DeviceManager.ts";
 import { FakeDeviceBackend } from "../device/FakeDeviceBackend.ts";
 import {
   DEVICE_TOOL_NAMES,
+  blockProcessDeviceToolsForAgentControl,
   deviceToolRequiresApproval,
   isViewerFacingDeviceToolError,
   startDeviceToolGateway,
@@ -88,6 +89,47 @@ describe("device tool gateway", () => {
     expect(deviceToolRequiresApproval("device_list")).toBe(false);
     expect(deviceToolRequiresApproval("device_screenshot")).toBe(false);
     expect(deviceToolRequiresApproval("device_describe_ui")).toBe(false);
+  });
+
+  it("cannot use legacy mutation or content tools to bypass an Agent Control lease", async () => {
+    const backend = new FakeDeviceBackend();
+    manager = new DeviceManager({ backend });
+    gateway = await startDeviceToolGateway(manager);
+    const binding = gateway.createBinding({ threadId: "thread-locked", isTurnActive: () => true });
+    const release = blockProcessDeviceToolsForAgentControl("thread-locked", "lease-1");
+
+    const listed = await post(binding.url, binding.headers, "tools/list");
+    expect(
+      (listed.body as { result: { tools: Array<{ name: string }> } }).result.tools.map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(["device_list"]);
+
+    for (const name of ["device_boot", "device_screenshot", "device_describe_ui"]) {
+      const denied = await post(binding.url, binding.headers, "tools/call", {
+        name,
+        arguments: { udid: "FAKE-0001" },
+      });
+      expect((denied.body as { result: { isError: boolean } }).result.isError).toBe(true);
+    }
+    expect(backend.calls).toEqual([]);
+
+    const releaseReplacement = blockProcessDeviceToolsForAgentControl("thread-locked", "lease-2");
+    release();
+    const stillLocked = await post(binding.url, binding.headers, "tools/list");
+    expect(
+      (stillLocked.body as { result: { tools: Array<{ name: string }> } }).result.tools.map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(["device_list"]);
+
+    releaseReplacement();
+    const restored = await post(binding.url, binding.headers, "tools/list");
+    expect(
+      (restored.body as { result: { tools: Array<{ name: string }> } }).result.tools.map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(DEVICE_TOOL_NAMES);
   });
 
   it("keeps recoverable navigation misses out of the viewer error state", () => {

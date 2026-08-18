@@ -187,6 +187,33 @@ describe("AgentControlActionPlan", () => {
     ).toBe("automationRun");
   });
 
+  it("accepts only explicit device mutations and bounded relative application artifacts", () => {
+    const target = {
+      threadId: "thread-1",
+      projectId: "project-1",
+      expectedProjectUpdatedAt: "2026-08-18T00:00:00.000Z",
+      providerInstanceId: "codex",
+      udid: "FAKE-0001",
+      expectedThreadDeviceVersion: 4,
+      expectedAttachedDeviceUdid: "FAKE-0001",
+      expectedDeviceState: "booted",
+      expectedDeviceBootSource: "ryco",
+      expectedRecording: false,
+      executionSummary: "Install an approved workspace application",
+      riskClass: "device-control",
+    };
+    expect(
+      decodePlan({ kind: "deviceInstall", ...target, artifactPath: "build/Test.app" }).kind,
+    ).toBe("deviceInstall");
+    expect(() =>
+      decodePlan({ kind: "deviceInstall", ...target, artifactPath: "/tmp/Test.app" }),
+    ).toThrow();
+    expect(() =>
+      decodePlan({ kind: "deviceInstall", ...target, artifactPath: "../Test.app" }),
+    ).toThrow();
+    expect(() => decodePlan({ kind: "device.call", method: "tap", payload: {} })).toThrow();
+  });
+
   it("rejects unknown action kinds", () => {
     expect(() => decodePlan({ kind: "runShellCommand", command: "rm -rf /" })).toThrow();
   });
@@ -303,6 +330,18 @@ describe("forward compatibility (additive extension)", () => {
       "createAutomation",
       "createProject",
       "createThreads",
+      "deviceAttach",
+      "deviceBoot",
+      "deviceDetach",
+      "deviceInstall",
+      "deviceLaunch",
+      "deviceOpenUrl",
+      "devicePressButton",
+      "deviceShutdown",
+      "deviceStartRecording",
+      "deviceStopRecording",
+      "deviceSwipe",
+      "deviceTap",
       "interruptThread",
       "removeProject",
       "sendMessage",
@@ -348,7 +387,7 @@ describe("AgentControlOperation", () => {
 });
 
 describe("Agent Control MCP contracts", () => {
-  it("catalogs fifteen read tools and eleven proposal-backed mutation tools", async () => {
+  it("catalogs the internal reads and proposal-backed mutation tools", async () => {
     const { AGENT_CONTROL_MCP_TOOLS, AGENT_CONTROL_MCP_TOOL_NAMES } =
       await import("./agentControl.ts");
     expect([...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted()).toEqual(
@@ -379,9 +418,22 @@ describe("Agent Control MCP contracts", () => {
         "ryco_propose_project_update",
         "ryco_propose_project_remove",
         "ryco_propose_settings_change",
+        "ryco_list_devices",
+        "ryco_read_device_state",
+        "ryco_read_device_screenshot",
+        "ryco_describe_device_ui",
+        "ryco_propose_device_boot",
+        "ryco_propose_device_attach",
+        "ryco_propose_device_detach",
+        "ryco_propose_device_install",
+        "ryco_propose_device_launch",
+        "ryco_propose_device_open_url",
+        "ryco_propose_device_input",
+        "ryco_propose_device_recording",
+        "ryco_propose_device_shutdown",
       ].toSorted(),
     );
-    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(26);
+    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(39);
     for (const name of AGENT_CONTROL_MCP_TOOL_NAMES) {
       expect(name.startsWith("ryco_")).toBe(true);
     }

@@ -54,7 +54,9 @@ export const AgentControlProposalCard = memo(function AgentControlProposalCard({
     <div
       data-testid="agent-control-proposal-card"
       className={`mb-2 rounded-lg border bg-muted/20 ${
-        model.isDestructive ? "border-destructive/70" : "border-border/60"
+        model.isDestructive || model.warningLabel !== null
+          ? "border-destructive/70"
+          : "border-border/60"
       }`}
     >
       <div className="px-3 pt-2.5 sm:px-4">
@@ -73,6 +75,11 @@ export const AgentControlProposalCard = memo(function AgentControlProposalCard({
           {model.isDestructive ? (
             <Badge size="sm" variant="error">
               Destructive · Ryco records only
+            </Badge>
+          ) : null}
+          {model.warningLabel !== null ? (
+            <Badge size="sm" variant="error">
+              {model.warningLabel}
             </Badge>
           ) : null}
         </div>

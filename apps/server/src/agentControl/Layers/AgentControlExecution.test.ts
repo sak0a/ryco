@@ -23,6 +23,9 @@ import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { OrchestrationCommandApplication } from "../../orchestration/Services/OrchestrationCommandApplication.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { DeviceManager } from "../../device/DeviceManager.ts";
+import { FakeDeviceBackend } from "../../device/FakeDeviceBackend.ts";
+import { DeviceService } from "../../device/Services/DeviceService.ts";
 import { ServerRuntimeStartup } from "../../serverRuntimeStartup.ts";
 import { WorkspaceAccessPolicy } from "../../workspace/Services/WorkspaceAccessPolicy.ts";
 import { AgentControlInvalidTransitionError, AgentControlPlanValidationError } from "../Errors.ts";
@@ -121,6 +124,7 @@ const makeTestExecution = (input: {
   readonly git?: unknown;
   readonly workspaceAccess?: unknown;
   readonly validator?: unknown;
+  readonly deviceService?: unknown;
 }) =>
   makeAgentControlExecution({ disableBackground: true }).pipe(
     Effect.provideService(AgentControlProposalStore, input.proposalStore as never),
@@ -139,6 +143,10 @@ const makeTestExecution = (input: {
     Effect.provideService(ProjectionSnapshotQuery, input.projections as never),
     Effect.provideService(GitWorkflowService, (input.git ?? {}) as never),
     Effect.provideService(WorkspaceAccessPolicy, (input.workspaceAccess ?? {}) as never),
+    Effect.provideService(
+      DeviceService,
+      (input.deviceService ?? { supported: false, manager: {} }) as never,
+    ),
     Effect.provideService(ServerRuntimeStartup, {} as never),
     Effect.provide(
       ServerConfig.layerTest(process.cwd(), {
@@ -311,6 +319,65 @@ it.effect("preflights checkout ownership, collisions, and exact base refs before
     );
     assert.include(collision.message, "already exists");
     assert.strictEqual(listRefs.mock.calls.length, callsBeforeCollision);
+  }),
+);
+
+it.effect("only the accepted-proposal executor invokes a governed device action", () =>
+  Effect.gen(function* () {
+    const backend = new FakeDeviceBackend();
+    const manager = new DeviceManager({ backend });
+    const devicePlan = {
+      kind: "deviceBoot" as const,
+      threadId: ThreadId.make("thread-origin"),
+      projectId,
+      expectedProjectUpdatedAt: now,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      udid: "FAKE-0001" as never,
+      expectedThreadDeviceVersion: 0,
+      expectedAttachedDeviceUdid: null,
+      expectedDeviceState: "shutdown" as const,
+      expectedDeviceBootSource: "user" as const,
+      expectedRecording: false,
+      executionSummary: "Boot iOS Simulator FAKE-0001",
+      riskClass: "device-lifecycle" as const,
+    };
+    const proposal: AgentControlProposal = {
+      ...approvedProposal,
+      proposalId: AgentControlProposalId.make("proposal-device-boot"),
+      requestId: AgentControlRequestId.make("request-device-boot"),
+      plan: devicePlan,
+      planDigest: computeAgentControlPlanDigest(devicePlan),
+    };
+    const stores = yield* makeExecutionStores(proposal);
+    const execution = yield* makeTestExecution({
+      proposalStore: stores.proposalStore,
+      operationStore: stores.operationStore,
+      commandApplication: {},
+      projections: {},
+      deviceService: { supported: true, manager },
+    });
+
+    assert.deepStrictEqual(backend.calls, []);
+    yield* execution.executeApproved(proposal.proposalId);
+    yield* execution.executeApproved(proposal.proposalId);
+    assert.deepStrictEqual(
+      backend.calls.filter((entry) => entry.kind === "boot"),
+      [{ kind: "boot", udid: "FAKE-0001" }],
+    );
+
+    const settled = yield* Ref.get(stores.proposalRef);
+    assert.strictEqual(settled.status, "completed");
+    assert.strictEqual(settled.result?.outcome, "completed");
+    if (settled.result?.outcome === "completed") {
+      assert.deepStrictEqual(settled.result.execution?.device, {
+        actionKind: "deviceBoot",
+        threadId: "thread-origin",
+        projectId: "project-1",
+        providerInstanceId: "codex",
+        udid: "FAKE-0001",
+      });
+    }
+    yield* Effect.promise(() => manager.dispose());
   }),
 );
 

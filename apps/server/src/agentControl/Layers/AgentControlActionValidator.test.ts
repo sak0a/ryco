@@ -21,6 +21,9 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Ref, Schema } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { DeviceManager } from "../../device/DeviceManager.ts";
+import { FakeDeviceBackend } from "../../device/FakeDeviceBackend.ts";
+import type { DeviceServiceShape } from "../../device/Services/DeviceService.ts";
 import type {
   AgentControlSessionRecord,
   AgentControlTurnAuthority,
@@ -144,6 +147,7 @@ const makeValidator = (
   ) => Effect.Effect<AgentControlExternalIntegration>,
   projectPlans?: AgentControlProjectPlansShape,
   automations?: AgentControlAutomationShape,
+  deviceService?: DeviceServiceShape,
 ) =>
   makeAgentControlActionValidatorFromDeps({
     projections: {
@@ -166,7 +170,161 @@ const makeValidator = (
     ...(revalidateExternal === undefined ? {} : { revalidateExternal }),
     ...(projectPlans === undefined ? {} : { projectPlans }),
     ...(automations === undefined ? {} : { automations }),
+    ...(deviceService === undefined ? {} : { deviceService }),
   });
+
+it.effect("binds device plans to exact thread, project, provider, attachment, and version", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    const backend = new FakeDeviceBackend();
+    backend.bootExternally("FAKE-0001");
+    const manager = new DeviceManager({ backend });
+    yield* Effect.promise(() => manager.attach(callerThreadId, "FAKE-0001"));
+    const deviceState = yield* Effect.promise(() => manager.getThreadState(callerThreadId));
+    const descriptor = deviceState.devices.find((device) => device.udid === "FAKE-0001")!;
+    const plan = {
+      kind: "deviceTap" as const,
+      threadId: callerThreadId,
+      projectId,
+      expectedProjectUpdatedAt: project.updatedAt,
+      providerInstanceId,
+      udid: descriptor.udid,
+      expectedThreadDeviceVersion: deviceState.version,
+      expectedAttachedDeviceUdid: descriptor.udid,
+      expectedDeviceState: descriptor.state,
+      expectedDeviceBootSource: descriptor.bootSource,
+      expectedRecording: false,
+      executionSummary: "Tap iOS Simulator FAKE-0001",
+      riskClass: "device-control" as const,
+      x: 10,
+      y: 20,
+    };
+    let submissionManagerAccessed = false;
+    const submissionValidator = makeValidator(
+      snapshot,
+      providers,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      {
+        supported: true,
+        manager: new Proxy({} as DeviceManager, {
+          get: () => {
+            submissionManagerAccessed = true;
+            throw new Error("Submission touched DeviceService before acceptance.");
+          },
+        }),
+      },
+    );
+    const validator = makeValidator(snapshot, providers, [], undefined, undefined, undefined, {
+      supported: true,
+      manager,
+    });
+
+    const principal = yield* submissionValidator.validateSubmission({ session, authority, plan });
+    assert.isFalse(submissionManagerAccessed);
+    const wrongProvider = yield* Effect.flip(
+      submissionValidator.validateSubmission({
+        session,
+        authority,
+        plan: { ...plan, providerInstanceId: ProviderInstanceId.make("other") },
+      }),
+    );
+    assert.strictEqual(wrongProvider.reason, "project-scope");
+    const wrongThread = yield* Effect.flip(
+      submissionValidator.validateSubmission({
+        session,
+        authority,
+        plan: { ...plan, threadId: targetThreadId },
+      }),
+    );
+    assert.strictEqual(wrongThread.reason, "project-scope");
+
+    const proposal: AgentControlProposal = {
+      proposalId: AgentControlProposalId.make("proposal-device"),
+      requestId: AgentControlRequestId.make("request-device"),
+      principal,
+      planVersion: 1,
+      plan,
+      planDigest: "d".repeat(64),
+      riskTags: [],
+      promptSummary: null,
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decidedAt: now,
+      result: null,
+    };
+    yield* validator.revalidateExecution(proposal);
+
+    yield* Ref.set(snapshot, {
+      ...makeSnapshot(),
+      projects: [{ ...project, updatedAt: "2026-08-18T00:00:01.000Z" }],
+    });
+    const staleProject = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(staleProject.reason, "project-stale");
+    yield* Ref.set(snapshot, makeSnapshot());
+
+    yield* Effect.promise(() => manager.detach(callerThreadId));
+    const stale = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(stale.reason, "thread-stale");
+    yield* Effect.promise(() => manager.dispose());
+  }),
+);
+
+it.effect("rejects a boot plan for a device deliberately attached to another thread", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    const manager = new DeviceManager({ backend: new FakeDeviceBackend() });
+    yield* Effect.promise(() => manager.attach(targetThreadId, "FAKE-0001"));
+    const callerState = yield* Effect.promise(() => manager.getThreadState(callerThreadId));
+    const descriptor = callerState.devices.find((device) => device.udid === "FAKE-0001")!;
+    const plan = {
+      kind: "deviceBoot" as const,
+      threadId: callerThreadId,
+      projectId,
+      expectedProjectUpdatedAt: project.updatedAt,
+      providerInstanceId,
+      udid: descriptor.udid,
+      expectedThreadDeviceVersion: callerState.version,
+      expectedAttachedDeviceUdid: null,
+      expectedDeviceState: descriptor.state,
+      expectedDeviceBootSource: descriptor.bootSource,
+      expectedRecording: false,
+      executionSummary: "Boot iOS Simulator FAKE-0001",
+      riskClass: "device-lifecycle" as const,
+    };
+    const validator = makeValidator(snapshot, providers, [], undefined, undefined, undefined, {
+      supported: true,
+      manager,
+    });
+    const principal = yield* validator.validateSubmission({ session, authority, plan });
+    const proposal: AgentControlProposal = {
+      proposalId: AgentControlProposalId.make("proposal-cross-thread-device"),
+      requestId: AgentControlRequestId.make("request-cross-thread-device"),
+      principal,
+      planVersion: 1,
+      plan,
+      planDigest: "e".repeat(64),
+      riskTags: [],
+      promptSummary: null,
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decidedAt: now,
+      result: null,
+    };
+
+    const rejected = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(rejected.reason, "thread-stale");
+    yield* Effect.promise(() => manager.dispose());
+  }),
+);
 
 it.effect("scopes project mutations and fails settings changes closed", () =>
   Effect.gen(function* () {

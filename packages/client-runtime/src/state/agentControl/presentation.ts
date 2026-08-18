@@ -36,6 +36,7 @@ export interface AgentControlProposalCardModel {
   readonly runtimeLabel: string | null;
   readonly riskLabels: ReadonlyArray<string>;
   readonly isDestructive: boolean;
+  readonly warningLabel: string | null;
   readonly summary: string | null;
   readonly expiresAt: string;
   readonly isPending: boolean;
@@ -116,6 +117,28 @@ function planPresentation(proposal: AgentControlProposal): {
     `Prompt: ${execution.prompt}`,
   ];
   const plan = proposal.plan;
+  const deviceDetails = (
+    devicePlan: Extract<AgentControlProposal["plan"], { kind: `device${string}` }>,
+    actionLines: ReadonlyArray<string>,
+  ): ReadonlyArray<AgentControlDetailSection> => [
+    {
+      heading: "Exact governed Simulator action",
+      lines: [
+        `Device UDID: ${devicePlan.udid}`,
+        `Thread: ${devicePlan.threadId}`,
+        `Project: ${devicePlan.projectId}`,
+        `Expected project revision: ${devicePlan.expectedProjectUpdatedAt}`,
+        `Provider instance: ${devicePlan.providerInstanceId}`,
+        `Expected attachment version: ${devicePlan.expectedThreadDeviceVersion}`,
+        `Expected attached device: ${devicePlan.expectedAttachedDeviceUdid ?? "none"}`,
+        `Expected lifecycle: ${devicePlan.expectedDeviceState}`,
+        `Expected boot owner: ${devicePlan.expectedDeviceBootSource}`,
+        `Expected recording: ${devicePlan.expectedRecording ? "yes" : "no"}`,
+        ...actionLines,
+        "Execution stops if the device, attachment, thread, project, provider, or owner authority changes.",
+      ],
+    },
+  ];
   switch (plan.kind) {
     case "createThreads": {
       const count = plan.entries.length;
@@ -359,6 +382,103 @@ function planPresentation(proposal: AgentControlProposal): {
           },
         ],
       };
+    case "deviceBoot":
+      return {
+        actionLabel: "Boot iOS Simulator",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, ["Action: boot this exact Simulator."]),
+      };
+    case "deviceAttach":
+      return {
+        actionLabel: "Attach iOS Simulator",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, ["Action: attach this device to the exact thread."]),
+      };
+    case "deviceDetach":
+      return {
+        actionLabel: "Detach iOS Simulator",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, ["Action: detach this device from the exact thread."]),
+      };
+    case "deviceInstall":
+      return {
+        actionLabel: "Install Simulator application",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, [
+          `Workspace-relative artifact: ${plan.artifactPath}`,
+          "The canonical artifact path is revalidated inside the project workspace at execution.",
+        ]),
+      };
+    case "deviceLaunch":
+      return {
+        actionLabel: "Launch Simulator application",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, [
+          `Installed bundle ID: ${plan.bundleId}`,
+          "Launch arguments are not permitted through Agent Control.",
+        ]),
+      };
+    case "deviceOpenUrl":
+      return {
+        actionLabel: "Open URL on iOS Simulator",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "high risk · open world",
+        detailSections: deviceDetails(plan, [
+          `Exact URL/deep link: ${plan.url}`,
+          "Credentials, file URLs, and unsafe schemes are rejected again at execution.",
+        ]),
+      };
+    case "deviceTap":
+      return {
+        actionLabel: "Tap iOS Simulator",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, [`Point: (${String(plan.x)}, ${String(plan.y)})`]),
+      };
+    case "deviceSwipe":
+      return {
+        actionLabel: "Swipe iOS Simulator",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, [
+          `From: (${plan.fromX}, ${plan.fromY})`,
+          `To: (${plan.toX}, ${plan.toY})`,
+          `Duration: ${plan.durationMs}ms`,
+        ]),
+      };
+    case "devicePressButton":
+      return {
+        actionLabel: "Press Simulator hardware control",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, [`Button: ${plan.button}`]),
+      };
+    case "deviceStartRecording":
+    case "deviceStopRecording":
+      return {
+        actionLabel:
+          plan.kind === "deviceStartRecording"
+            ? "Start Simulator recording"
+            : "Stop Simulator recording",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, [
+          `Action: ${plan.kind === "deviceStartRecording" ? "start" : "stop"} recording.`,
+          "Recording paths and frame content are excluded from proposals and audit.",
+        ]),
+      };
+    case "deviceShutdown":
+      return {
+        actionLabel: "Shut down iOS Simulator",
+        targetLabel: `device ${shortId(plan.udid)}`,
+        runtimeLabel: "explicit approval required",
+        detailSections: deviceDetails(plan, ["Action: shut down this exact Simulator."]),
+      };
   }
 }
 
@@ -429,6 +549,10 @@ export function buildAgentControlProposalCardModel(
     runtimeLabel: plan.runtimeLabel,
     riskLabels: proposal.riskTags.map((tag) => riskLabelFromTag(String(tag))),
     isDestructive: proposal.plan.kind === "removeProject",
+    warningLabel:
+      proposal.plan.kind === "deviceOpenUrl"
+        ? "High risk · opens an external URL or deep link"
+        : null,
     summary: proposal.promptSummary,
     expiresAt: proposal.expiresAt,
     isPending: proposal.status === "pending-user-approval",

@@ -9,6 +9,7 @@ import {
   ThreadId,
   WorktreeId,
   type AgentControlExecutionReceipt,
+  type AgentControlErrorCode,
   type AgentControlOperation,
   type AgentControlOperationState,
   type AgentControlProposal,
@@ -20,6 +21,7 @@ import { Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { resolveManagedWorktreesRoot, ServerConfig } from "../../config.ts";
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import { OrchestrationCommandApplication } from "../../orchestration/Services/OrchestrationCommandApplication.ts";
+import { DeviceService } from "../../device/Services/DeviceService.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { resolveWorktreeCheckoutPath } from "../../project/worktreeCheckoutPaths.ts";
@@ -30,6 +32,11 @@ import {
 } from "../../workspace/Services/WorkspaceAccessPolicy.ts";
 import { ignoreAlreadyMissingGitResource } from "../../ws/context/gitErrors.ts";
 import { computeAgentControlPlanDigest } from "../planDigest.ts";
+import {
+  assertSafeAgentControlDeviceUrl,
+  isAgentControlDevicePlan,
+  resolveAgentControlDeviceArtifact,
+} from "../deviceControl.ts";
 import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
 import { AgentControlAutomationService } from "../Services/AgentControlAutomation.ts";
 import {
@@ -55,12 +62,43 @@ const isProjectAction = (proposal: AgentControlProposal): boolean =>
   proposal.plan.kind === "updateProject" ||
   proposal.plan.kind === "removeProject";
 
+class AgentControlDeviceExecutionError extends Error {
+  readonly code: AgentControlErrorCode;
+  readonly retryable: boolean;
+
+  constructor(code: AgentControlErrorCode, message: string, retryable = false) {
+    super(message);
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
 const boundedCauseMessage = (cause: Cause.Cause<unknown>, fallback: string): string => {
   const failure = Cause.squash(cause);
   if (failure instanceof Error && failure.message.trim().length > 0) {
     return failure.message.slice(0, 2_000);
   }
   return fallback;
+};
+
+const deviceRevalidationErrorCode = (cause: Cause.Cause<unknown>): AgentControlErrorCode => {
+  const failure = Cause.squash(cause);
+  if (
+    typeof failure !== "object" ||
+    failure === null ||
+    !("_tag" in failure) ||
+    failure._tag !== "AgentControlPlanValidationError" ||
+    !("reason" in failure)
+  ) {
+    return AGENT_CONTROL_ERROR_CODES.deviceStaleState;
+  }
+  if (failure.reason === "thread-unavailable") {
+    return AGENT_CONTROL_ERROR_CODES.deviceUnavailable;
+  }
+  if (failure.reason === "invalid-plan") {
+    return AGENT_CONTROL_ERROR_CODES.deviceUnsupportedPlatform;
+  }
+  return AGENT_CONTROL_ERROR_CODES.deviceStaleState;
 };
 
 const operationSlug = (operationId: AgentControlOperationId): string =>
@@ -125,6 +163,7 @@ const executionReceipt = (operation: AgentControlOperation): AgentControlExecuti
   ...(operation.state.resources.automationRunId === undefined
     ? {}
     : { automationRunId: operation.state.resources.automationRunId }),
+  ...(operation.state.device === undefined ? {} : { device: operation.state.device }),
   worktreeIds: operation.state.resources.worktreeIds,
   ...(operation.state.delivery === undefined ? {} : { delivery: operation.state.delivery }),
   ...(operation.state.interrupt === undefined ? {} : { interrupt: operation.state.interrupt }),
@@ -153,13 +192,20 @@ const completedResult = (
 
 const failedResult = (
   operation: AgentControlOperation,
-  input: { readonly revalidation: boolean; readonly message: string; readonly retryable: boolean },
+  input: {
+    readonly revalidation: boolean;
+    readonly message: string;
+    readonly retryable: boolean;
+    readonly code?: AgentControlErrorCode;
+  },
 ): AgentControlResultEnvelope => ({
   outcome: "failed",
   error: {
-    code: input.revalidation
-      ? AGENT_CONTROL_ERROR_CODES.revalidationFailed
-      : AGENT_CONTROL_ERROR_CODES.executionFailed,
+    code:
+      input.code ??
+      (input.revalidation
+        ? AGENT_CONTROL_ERROR_CODES.revalidationFailed
+        : AGENT_CONTROL_ERROR_CODES.executionFailed),
     message: input.message.slice(0, 2_000),
     retryable: input.retryable,
   },
@@ -179,6 +225,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
     const projections = yield* ProjectionSnapshotQuery;
     const git = yield* GitWorkflowService;
     const workspaceAccess = yield* WorkspaceAccessPolicy;
+    const deviceService = yield* Effect.serviceOption(DeviceService);
     const config = yield* ServerConfig;
     const startup = yield* ServerRuntimeStartup;
     const managedWorktreesRoot = resolveManagedWorktreesRoot(config);
@@ -218,6 +265,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
         readonly revalidation: boolean;
         readonly message: string;
         readonly retryable: boolean;
+        readonly code?: AgentControlErrorCode;
       },
     ) =>
       Effect.gen(function* () {
@@ -437,6 +485,158 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             );
             return result;
           });
+
+        if (isAgentControlDevicePlan(proposal.plan)) {
+          const plan = proposal.plan;
+          if (Option.isNone(deviceService)) {
+            return yield* Effect.fail(
+              new AgentControlDeviceExecutionError(
+                AGENT_CONTROL_ERROR_CODES.deviceUnsupportedPlatform,
+                "iOS Simulator device control is unavailable.",
+              ),
+            );
+          }
+          const service = deviceService.value;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              threadIds: unique([...operation.state.resources.threadIds, plan.threadId]),
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+            },
+            device: {
+              actionKind: plan.kind,
+              threadId: plan.threadId,
+              projectId: plan.projectId,
+              providerInstanceId: plan.providerInstanceId,
+              udid: plan.udid,
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+
+          const run = async (): Promise<void> => {
+            switch (plan.kind) {
+              case "deviceBoot": {
+                const result = await service.manager.boot(plan.udid);
+                if (result.kind === "boot-limit-reached") {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceBootLimitReached,
+                    "The Ryco-owned Simulator boot limit was reached.",
+                    true,
+                  );
+                }
+                return;
+              }
+              case "deviceAttach":
+                await service.manager.attach(plan.threadId, plan.udid);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceDetach":
+                await service.manager.detach(plan.threadId);
+                return;
+              case "deviceInstall": {
+                const snapshot = await Effect.runPromise(projections.getShellSnapshot());
+                const project = snapshot.projects.find(
+                  (candidate) => candidate.id === plan.projectId,
+                );
+                if (!project) {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceStaleState,
+                    "The approved project workspace is unavailable.",
+                    true,
+                  );
+                }
+                const artifact = await Effect.runPromise(
+                  resolveAgentControlDeviceArtifact({
+                    workspaceRoot: project.workspaceRoot,
+                    artifactPath: plan.artifactPath,
+                    workspaceAccess,
+                  }),
+                ).catch(() => {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceInvalidInput,
+                    "The approved application artifact no longer resolves inside the project workspace.",
+                  );
+                });
+                await service.manager.install(plan.udid, artifact);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-install");
+                return;
+              }
+              case "deviceLaunch":
+                await service.manager.launch(plan.udid, plan.bundleId);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-launch");
+                return;
+              case "deviceOpenUrl":
+                try {
+                  assertSafeAgentControlDeviceUrl(plan.url);
+                } catch {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceInvalidInput,
+                    "The approved URL no longer meets device-control policy.",
+                  );
+                }
+                await service.manager.openUrl(plan.udid, plan.url);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceTap": {
+                await service.manager.tap(plan.udid, plan.x, plan.y);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              }
+              case "deviceSwipe":
+                await service.manager.swipe(plan.udid, {
+                  fromX: plan.fromX,
+                  fromY: plan.fromY,
+                  toX: plan.toX,
+                  toY: plan.toY,
+                  durationMs: plan.durationMs,
+                });
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "devicePressButton":
+                await service.manager.pressButton(plan.udid, plan.button);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceStartRecording":
+                await service.manager.startRecording(plan.udid);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceStopRecording":
+                await service.manager.stopRecording(plan.udid);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceShutdown":
+                await service.manager.shutdown(plan.udid);
+                return;
+            }
+          };
+
+          const action = () => run();
+          yield* Effect.tryPromise({
+            try: () =>
+              plan.kind === "deviceBoot" ||
+              plan.kind === "deviceAttach" ||
+              plan.kind === "deviceDetach" ||
+              plan.kind === "deviceShutdown"
+                ? action()
+                : service.manager.withAgentActivity(plan.threadId, action),
+            catch: (cause) =>
+              cause instanceof AgentControlDeviceExecutionError
+                ? cause
+                : new AgentControlDeviceExecutionError(
+                    plan.kind === "deviceAttach"
+                      ? AGENT_CONTROL_ERROR_CODES.deviceAttachTimeout
+                      : plan.kind === "deviceStartRecording" || plan.kind === "deviceStopRecording"
+                        ? AGENT_CONTROL_ERROR_CODES.deviceRecordingFailed
+                        : AGENT_CONTROL_ERROR_CODES.deviceOperationFailed,
+                    plan.kind === "deviceAttach"
+                      ? "The approved Simulator attachment failed."
+                      : "The approved Simulator action failed.",
+                  ),
+          });
+          yield* checkpoint(appendStep(operation.state, "device-action-completed"));
+          return operation;
+        }
 
         if (proposal.plan.kind === "createProject") {
           const plan = proposal.plan;
@@ -993,6 +1193,9 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
                   )
                 : "The approved plan no longer passes current server validation.",
             retryable: true,
+            ...(isAgentControlDevicePlan(executing.plan)
+              ? { code: deviceRevalidationErrorCode(validation.cause) }
+              : {}),
           });
           return;
         }
@@ -1005,6 +1208,9 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           const compensated = yield* compensate(durable).pipe(
             Effect.catch(() => Effect.succeed(durable)),
           );
+          const deviceFailure = isAgentControlDevicePlan(executing.plan)
+            ? Cause.squash(outcome.cause)
+            : null;
           yield* settleProposalFailure(executing, compensated, {
             revalidation: false,
             message: isProjectAction(executing)
@@ -1013,7 +1219,13 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
                   "The approved project action failed during execution.",
                 )
               : "The approved Agent Control action failed during execution.",
-            retryable: false,
+            retryable:
+              deviceFailure instanceof AgentControlDeviceExecutionError
+                ? deviceFailure.retryable
+                : false,
+            ...(deviceFailure instanceof AgentControlDeviceExecutionError
+              ? { code: deviceFailure.code, message: deviceFailure.message }
+              : {}),
           });
           return;
         }

@@ -48,6 +48,18 @@ import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderAvailability, ServerProviderState } from "./server.ts";
 import { ThreadEnvMode } from "./settings.ts";
 import { WorktreeId } from "./worktree.ts";
+import {
+  DeviceAttachPhase,
+  DeviceAvailability,
+  DeviceBootSource,
+  DeviceBundleId,
+  DeviceDescriptor,
+  DeviceHardwareButton,
+  DeviceRuntimeState,
+  DeviceUdid,
+  DEVICE_SWIPE_DURATION_MAX_MS,
+  DEVICE_SWIPE_DURATION_MIN_MS,
+} from "./device.ts";
 
 // ── Identifiers ───────────────────────────────────────────────────────
 
@@ -181,6 +193,9 @@ export const AGENT_CONTROL_CAPABILITIES = {
   manageAutomations: AgentControlCapability.make("automations.manage"),
   readActivity: AgentControlCapability.make("activity.read"),
   readDiagnostics: AgentControlCapability.make("diagnostics.read"),
+  readDevices: AgentControlCapability.make("devices.read"),
+  readDeviceContent: AgentControlCapability.make("devices.content.read"),
+  controlDevices: AgentControlCapability.make("devices.control"),
   externalListProjects: AgentControlCapability.make("external.projects.list"),
   externalCreateTask: AgentControlCapability.make("external.tasks.create"),
   externalReadTask: AgentControlCapability.make("external.tasks.read"),
@@ -207,8 +222,36 @@ export const AgentControlActionKind = Schema.Literals([
   "updateAutomation",
   "cancelAutomation",
   "automationRun",
+  "deviceBoot",
+  "deviceAttach",
+  "deviceDetach",
+  "deviceInstall",
+  "deviceLaunch",
+  "deviceOpenUrl",
+  "deviceTap",
+  "deviceSwipe",
+  "devicePressButton",
+  "deviceStartRecording",
+  "deviceStopRecording",
+  "deviceShutdown",
 ]);
 export type AgentControlActionKind = typeof AgentControlActionKind.Type;
+
+export const AGENT_CONTROL_DEVICE_ACTION_KINDS = [
+  "deviceBoot",
+  "deviceAttach",
+  "deviceDetach",
+  "deviceInstall",
+  "deviceLaunch",
+  "deviceOpenUrl",
+  "deviceTap",
+  "deviceSwipe",
+  "devicePressButton",
+  "deviceStartRecording",
+  "deviceStopRecording",
+  "deviceShutdown",
+] as const satisfies ReadonlyArray<AgentControlActionKind>;
+export type AgentControlDeviceActionKind = (typeof AGENT_CONTROL_DEVICE_ACTION_KINDS)[number];
 
 /** Required capability per mutation action kind. */
 export const AGENT_CONTROL_ACTION_CAPABILITIES: Record<
@@ -227,6 +270,18 @@ export const AGENT_CONTROL_ACTION_CAPABILITIES: Record<
   updateAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
   cancelAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
   automationRun: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  deviceBoot: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceAttach: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceDetach: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceInstall: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceLaunch: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceOpenUrl: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceTap: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceSwipe: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  devicePressButton: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceStartRecording: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceStopRecording: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceShutdown: AGENT_CONTROL_CAPABILITIES.controlDevices,
 };
 
 export const AGENT_CONTROL_PLAN_VERSION = 1;
@@ -242,6 +297,8 @@ export const AGENT_CONTROL_AUTOMATION_MAX_HORIZON_MS = 90 * 24 * 60 * 60_000;
 export const AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX = 50;
 export const AGENT_CONTROL_AUTOMATION_PROPOSAL_TTL_MS = 15 * 60_000;
 export const AGENT_CONTROL_AUTOMATION_SAFE_FAILURE_MAX_CHARS = 256;
+export const AGENT_CONTROL_DEVICE_ARTIFACT_PATH_MAX_CHARS = 1_024;
+export const AGENT_CONTROL_DEVICE_URL_MAX_CHARS = 2_048;
 
 const AgentControlPrompt = TrimmedNonEmptyString.check(
   Schema.isMaxLength(AGENT_CONTROL_PROMPT_MAX_CHARS),
@@ -476,6 +533,151 @@ export const AgentControlAutomationRunPlan = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlAutomationRunPlan = typeof AgentControlAutomationRunPlan.Type;
 
+// ── Governed iOS Simulator plans ────────────────────────────────────
+
+export const AgentControlDeviceRiskClass = Schema.Literals([
+  "device-control",
+  "device-lifecycle",
+  "open-world",
+]);
+export type AgentControlDeviceRiskClass = typeof AgentControlDeviceRiskClass.Type;
+
+export const AgentControlDeviceArtifactPath = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_DEVICE_ARTIFACT_PATH_MAX_CHARS),
+  Schema.isPattern(/^(?!\/)(?!~)(?![A-Za-z]:)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[^\0]+\.app$/u),
+);
+export type AgentControlDeviceArtifactPath = typeof AgentControlDeviceArtifactPath.Type;
+
+const AgentControlDeviceExecutionSummary = TrimmedNonEmptyString.check(Schema.isMaxLength(240));
+const AgentControlDeviceCoordinate = Schema.Finite.check(
+  Schema.isBetween({ minimum: 0, maximum: 20_000 }),
+);
+
+/**
+ * Exact device and attachment state captured at proposal creation. Device
+ * mutations fail closed if any of these values changes before execution.
+ */
+export const AgentControlDevicePlanTarget = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  expectedProjectUpdatedAt: IsoDateTime,
+  providerInstanceId: ProviderInstanceId,
+  udid: DeviceUdid,
+  expectedThreadDeviceVersion: NonNegativeInt,
+  expectedAttachedDeviceUdid: Schema.NullOr(DeviceUdid),
+  expectedDeviceState: DeviceRuntimeState,
+  expectedDeviceBootSource: DeviceBootSource,
+  expectedRecording: Schema.Boolean,
+  executionSummary: AgentControlDeviceExecutionSummary,
+  riskClass: AgentControlDeviceRiskClass,
+});
+export type AgentControlDevicePlanTarget = typeof AgentControlDevicePlanTarget.Type;
+
+export const AgentControlDeviceBootPlan = Schema.Struct({
+  kind: Schema.Literal("deviceBoot"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceBootPlan = typeof AgentControlDeviceBootPlan.Type;
+
+export const AgentControlDeviceAttachPlan = Schema.Struct({
+  kind: Schema.Literal("deviceAttach"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceAttachPlan = typeof AgentControlDeviceAttachPlan.Type;
+
+export const AgentControlDeviceDetachPlan = Schema.Struct({
+  kind: Schema.Literal("deviceDetach"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceDetachPlan = typeof AgentControlDeviceDetachPlan.Type;
+
+export const AgentControlDeviceInstallPlan = Schema.Struct({
+  kind: Schema.Literal("deviceInstall"),
+  ...AgentControlDevicePlanTarget.fields,
+  artifactPath: AgentControlDeviceArtifactPath,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceInstallPlan = typeof AgentControlDeviceInstallPlan.Type;
+
+/** Launch arguments are deliberately absent: they may contain user secrets. */
+export const AgentControlDeviceLaunchPlan = Schema.Struct({
+  kind: Schema.Literal("deviceLaunch"),
+  ...AgentControlDevicePlanTarget.fields,
+  bundleId: DeviceBundleId,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceLaunchPlan = typeof AgentControlDeviceLaunchPlan.Type;
+
+export const AgentControlDeviceOpenUrlPlan = Schema.Struct({
+  kind: Schema.Literal("deviceOpenUrl"),
+  ...AgentControlDevicePlanTarget.fields,
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_DEVICE_URL_MAX_CHARS)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceOpenUrlPlan = typeof AgentControlDeviceOpenUrlPlan.Type;
+
+export const AgentControlDeviceTapPlan = Schema.Struct({
+  kind: Schema.Literal("deviceTap"),
+  ...AgentControlDevicePlanTarget.fields,
+  x: AgentControlDeviceCoordinate,
+  y: AgentControlDeviceCoordinate,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceTapPlan = typeof AgentControlDeviceTapPlan.Type;
+
+export const AgentControlDeviceSwipePlan = Schema.Struct({
+  kind: Schema.Literal("deviceSwipe"),
+  ...AgentControlDevicePlanTarget.fields,
+  fromX: AgentControlDeviceCoordinate,
+  fromY: AgentControlDeviceCoordinate,
+  toX: AgentControlDeviceCoordinate,
+  toY: AgentControlDeviceCoordinate,
+  durationMs: Schema.Int.check(
+    Schema.isBetween({
+      minimum: DEVICE_SWIPE_DURATION_MIN_MS,
+      maximum: DEVICE_SWIPE_DURATION_MAX_MS,
+    }),
+  ),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceSwipePlan = typeof AgentControlDeviceSwipePlan.Type;
+
+export const AgentControlDevicePressButtonPlan = Schema.Struct({
+  kind: Schema.Literal("devicePressButton"),
+  ...AgentControlDevicePlanTarget.fields,
+  button: DeviceHardwareButton,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDevicePressButtonPlan = typeof AgentControlDevicePressButtonPlan.Type;
+
+export const AgentControlDeviceStartRecordingPlan = Schema.Struct({
+  kind: Schema.Literal("deviceStartRecording"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceStartRecordingPlan = typeof AgentControlDeviceStartRecordingPlan.Type;
+
+export const AgentControlDeviceStopRecordingPlan = Schema.Struct({
+  kind: Schema.Literal("deviceStopRecording"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceStopRecordingPlan = typeof AgentControlDeviceStopRecordingPlan.Type;
+
+export const AgentControlDeviceShutdownPlan = Schema.Struct({
+  kind: Schema.Literal("deviceShutdown"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceShutdownPlan = typeof AgentControlDeviceShutdownPlan.Type;
+
+export const AgentControlDeviceActionPlan = Schema.Union([
+  AgentControlDeviceBootPlan,
+  AgentControlDeviceAttachPlan,
+  AgentControlDeviceDetachPlan,
+  AgentControlDeviceInstallPlan,
+  AgentControlDeviceLaunchPlan,
+  AgentControlDeviceOpenUrlPlan,
+  AgentControlDeviceTapPlan,
+  AgentControlDeviceSwipePlan,
+  AgentControlDevicePressButtonPlan,
+  AgentControlDeviceStartRecordingPlan,
+  AgentControlDeviceStopRecordingPlan,
+  AgentControlDeviceShutdownPlan,
+]);
+export type AgentControlDeviceActionPlan = typeof AgentControlDeviceActionPlan.Type;
+
 export const AgentControlActionPlan = Schema.Union([
   AgentControlCreateThreadsPlan,
   AgentControlSendMessagePlan,
@@ -489,6 +691,7 @@ export const AgentControlActionPlan = Schema.Union([
   AgentControlUpdateAutomationPlan,
   AgentControlCancelAutomationPlan,
   AgentControlAutomationRunPlan,
+  AgentControlDeviceActionPlan,
 ]);
 export type AgentControlActionPlan = typeof AgentControlActionPlan.Type;
 
@@ -520,6 +723,9 @@ export const AGENT_CONTROL_RISK_TAGS = {
   modifiesAutomation: AgentControlRiskTag.make("modifies-automation"),
   cancelsAutomation: AgentControlRiskTag.make("cancels-automation"),
   scheduledRun: AgentControlRiskTag.make("scheduled-run"),
+  deviceMutation: AgentControlRiskTag.make("device-mutation"),
+  deviceLifecycle: AgentControlRiskTag.make("device-lifecycle"),
+  deviceOpenWorld: AgentControlRiskTag.make("device-open-world"),
 } as const;
 
 /**
@@ -552,6 +758,15 @@ export const AGENT_CONTROL_ERROR_CODES = {
   executionFailed: AgentControlErrorCode.make("execution-failed"),
   featureDisabled: AgentControlErrorCode.make("feature-disabled"),
   capabilityDenied: AgentControlErrorCode.make("capability-denied"),
+  deviceUnsupportedPlatform: AgentControlErrorCode.make("device.unsupported-platform"),
+  deviceSetupRequired: AgentControlErrorCode.make("device.setup-required"),
+  deviceUnavailable: AgentControlErrorCode.make("device.unavailable"),
+  deviceBootLimitReached: AgentControlErrorCode.make("device.boot-limit-reached"),
+  deviceAttachTimeout: AgentControlErrorCode.make("device.attach-timeout"),
+  deviceStaleState: AgentControlErrorCode.make("device.stale-state"),
+  deviceInvalidInput: AgentControlErrorCode.make("device.invalid-input"),
+  deviceRecordingFailed: AgentControlErrorCode.make("device.recording-failed"),
+  deviceOperationFailed: AgentControlErrorCode.make("device.operation-failed"),
 } as const;
 
 export const AgentControlErrorEnvelope = Schema.Struct({
@@ -569,6 +784,16 @@ export const AgentControlDispatchedCommandReceipt = Schema.Struct({
 });
 export type AgentControlDispatchedCommandReceipt = typeof AgentControlDispatchedCommandReceipt.Type;
 
+/** Audit-safe device execution evidence; never contains content, URLs, text, or paths. */
+export const AgentControlDeviceExecutionMetadata = Schema.Struct({
+  actionKind: AgentControlActionKind,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  udid: DeviceUdid,
+});
+export type AgentControlDeviceExecutionMetadata = typeof AgentControlDeviceExecutionMetadata.Type;
+
 export const AgentControlExecutionReceipt = Schema.Struct({
   operationId: AgentControlOperationId,
   commands: Schema.Array(AgentControlDispatchedCommandReceipt),
@@ -581,6 +806,7 @@ export const AgentControlExecutionReceipt = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   automationRunId: Schema.optional(AgentControlAutomationRunId),
+  device: Schema.optional(AgentControlDeviceExecutionMetadata),
   delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
   interrupt: Schema.optional(
     Schema.Struct({
@@ -881,6 +1107,7 @@ export const AgentControlOperationState = Schema.Struct({
     Schema.Struct({ attempted: Schema.Boolean, completed: Schema.Boolean }),
   ),
   note: Schema.optional(AgentControlResultMessage),
+  device: Schema.optional(AgentControlDeviceExecutionMetadata),
 });
 export type AgentControlOperationState = typeof AgentControlOperationState.Type;
 
@@ -1037,6 +1264,19 @@ export const AGENT_CONTROL_MCP_TOOLS = {
   orchestrationEvents: "ryco_orchestration_events",
   providerRuntimeEvents: "ryco_provider_runtime_events",
   diagnosticsSummary: "ryco_diagnostics_summary",
+  listDevices: "ryco_list_devices",
+  readDeviceState: "ryco_read_device_state",
+  readDeviceScreenshot: "ryco_read_device_screenshot",
+  describeDeviceUi: "ryco_describe_device_ui",
+  proposeDeviceBoot: "ryco_propose_device_boot",
+  proposeDeviceAttach: "ryco_propose_device_attach",
+  proposeDeviceDetach: "ryco_propose_device_detach",
+  proposeDeviceInstall: "ryco_propose_device_install",
+  proposeDeviceLaunch: "ryco_propose_device_launch",
+  proposeDeviceOpenUrl: "ryco_propose_device_open_url",
+  proposeDeviceInput: "ryco_propose_device_input",
+  proposeDeviceRecording: "ryco_propose_device_recording",
+  proposeDeviceShutdown: "ryco_propose_device_shutdown",
 } as const;
 export type AgentControlMcpToolName =
   (typeof AGENT_CONTROL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_MCP_TOOLS];
@@ -1282,6 +1522,117 @@ export const AgentControlMcpDiagnosticsSummaryInput = Schema.Struct({
 export type AgentControlMcpDiagnosticsSummaryInput =
   typeof AgentControlMcpDiagnosticsSummaryInput.Type;
 
+export const AgentControlMcpListDevicesInput = Schema.Struct({
+  includeShutdown: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpListDevicesInput = typeof AgentControlMcpListDevicesInput.Type;
+
+export const AgentControlMcpReadDeviceStateInput = Schema.Struct({}).annotate({
+  parseOptions: { onExcessProperty: "error" },
+});
+export type AgentControlMcpReadDeviceStateInput = typeof AgentControlMcpReadDeviceStateInput.Type;
+
+export const AgentControlMcpReadDeviceContentInput = Schema.Struct({
+  udid: DeviceUdid,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpReadDeviceContentInput =
+  typeof AgentControlMcpReadDeviceContentInput.Type;
+
+const AgentControlMcpDeviceMutationTarget = Schema.Struct({
+  requestId: AgentControlRequestId,
+  udid: DeviceUdid,
+  expectedThreadDeviceVersion: NonNegativeInt,
+  expectedAttachedDeviceUdid: Schema.NullOr(DeviceUdid),
+  expectedDeviceState: DeviceRuntimeState,
+  expectedDeviceBootSource: DeviceBootSource,
+  expectedRecording: Schema.Boolean,
+});
+
+export const AgentControlMcpProposeDeviceBootInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceBootInput =
+  typeof AgentControlMcpProposeDeviceBootInput.Type;
+
+export const AgentControlMcpProposeDeviceAttachInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceAttachInput =
+  typeof AgentControlMcpProposeDeviceAttachInput.Type;
+
+export const AgentControlMcpProposeDeviceDetachInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceDetachInput =
+  typeof AgentControlMcpProposeDeviceDetachInput.Type;
+
+export const AgentControlMcpProposeDeviceInstallInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  artifactPath: AgentControlDeviceArtifactPath,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceInstallInput =
+  typeof AgentControlMcpProposeDeviceInstallInput.Type;
+
+export const AgentControlMcpProposeDeviceLaunchInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  bundleId: DeviceBundleId,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceLaunchInput =
+  typeof AgentControlMcpProposeDeviceLaunchInput.Type;
+
+export const AgentControlMcpProposeDeviceOpenUrlInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_DEVICE_URL_MAX_CHARS)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceOpenUrlInput =
+  typeof AgentControlMcpProposeDeviceOpenUrlInput.Type;
+
+export const AgentControlMcpDeviceInputAction = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("tap"),
+    x: AgentControlDeviceCoordinate,
+    y: AgentControlDeviceCoordinate,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("swipe"),
+    fromX: AgentControlDeviceCoordinate,
+    fromY: AgentControlDeviceCoordinate,
+    toX: AgentControlDeviceCoordinate,
+    toY: AgentControlDeviceCoordinate,
+    durationMs: Schema.Int.check(
+      Schema.isBetween({
+        minimum: DEVICE_SWIPE_DURATION_MIN_MS,
+        maximum: DEVICE_SWIPE_DURATION_MAX_MS,
+      }),
+    ),
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("press-button"),
+    button: DeviceHardwareButton,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+]);
+export type AgentControlMcpDeviceInputAction = typeof AgentControlMcpDeviceInputAction.Type;
+
+export const AgentControlMcpProposeDeviceInputInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  action: AgentControlMcpDeviceInputAction,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceInputInput =
+  typeof AgentControlMcpProposeDeviceInputInput.Type;
+
+export const AgentControlMcpProposeDeviceRecordingInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  action: Schema.Literals(["start", "stop"]),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceRecordingInput =
+  typeof AgentControlMcpProposeDeviceRecordingInput.Type;
+
+export const AgentControlMcpProposeDeviceShutdownInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceShutdownInput =
+  typeof AgentControlMcpProposeDeviceShutdownInput.Type;
+
 // ── Tool results ──────────────────────────────────────────────────────
 
 export const AgentControlMcpContextResult = Schema.Struct({
@@ -1339,6 +1690,31 @@ export const AgentControlMcpCapabilitiesResult = Schema.Struct({
   providerInstances: Schema.Array(AgentControlMcpProviderInstanceSummary),
 });
 export type AgentControlMcpCapabilitiesResult = typeof AgentControlMcpCapabilitiesResult.Type;
+
+export const AgentControlMcpListDevicesResult = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  devices: Schema.Array(DeviceDescriptor).check(Schema.isMaxLength(256)),
+  recordingDeviceUdids: Schema.Array(DeviceUdid).check(Schema.isMaxLength(256)),
+  availability: DeviceAvailability,
+});
+export type AgentControlMcpListDevicesResult = typeof AgentControlMcpListDevicesResult.Type;
+
+export const AgentControlMcpReadDeviceStateResult = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  version: NonNegativeInt,
+  attachedDeviceUdid: Schema.NullOr(DeviceUdid),
+  attachPhase: Schema.NullOr(DeviceAttachPhase),
+  attachedDevice: Schema.NullOr(DeviceDescriptor),
+  recording: Schema.Boolean,
+  agentActive: Schema.Boolean,
+  availability: DeviceAvailability,
+  redacted: Schema.Literal(true),
+});
+export type AgentControlMcpReadDeviceStateResult = typeof AgentControlMcpReadDeviceStateResult.Type;
 
 export const AgentControlMcpProjectSummary = Schema.Struct({
   projectId: ProjectId,

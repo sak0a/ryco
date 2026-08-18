@@ -26,6 +26,8 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Fiber, Option, PubSub, Schema } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { DeviceManager } from "../../device/DeviceManager.ts";
+import { FakeDeviceBackend } from "../../device/FakeDeviceBackend.ts";
 import {
   AgentControlCapabilityDeniedError,
   AgentControlDisabledError,
@@ -366,7 +368,10 @@ it.effect("advertises capability-scoped reads and all proposal-only writes with 
     }
 
     const writeTools = makeAgentControlMcpTools(
-      makeDeps({ getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)) }),
+      makeDeps({
+        getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)),
+        deviceService: { supported: true, manager: {} as never },
+      }),
     );
     const writeDescriptors = yield* writeTools.descriptorsFor(writeSession);
     assert.deepStrictEqual(
@@ -375,10 +380,115 @@ it.effect("advertises capability-scoped reads and all proposal-only writes with 
     );
     assert.strictEqual(
       writeDescriptors.filter((tool) => writeTools.isWriteTool(tool.name)).length,
-      11,
+      20,
     );
     assert.isTrue(tools.hasTool("ryco_create_threads"));
   }),
+);
+
+it.effect("device mutation tools create immutable proposals without touching DeviceService", () =>
+  Effect.gen(function* () {
+    let managerAccessed = false;
+    const manager = new Proxy({} as DeviceManager, {
+      get: () => {
+        managerAccessed = true;
+        throw new Error("Mutation proposal touched DeviceService before acceptance.");
+      },
+    });
+    const submitted: Array<
+      Parameters<NonNullable<AgentControlMcpToolDeps["proposals"]["submit"]>>[0]
+    > = [];
+    const deps = makeDeps({
+      deviceService: { supported: true, manager },
+      getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)),
+      validator: {
+        validateSubmission: () => Effect.succeed(proposalOwn.principal as never),
+        validateExternalSubmission: () => Effect.die("unused"),
+        revalidateExecution: () => Effect.void,
+      },
+      proposals: {
+        getProposal: makeDeps().proposals.getProposal,
+        submit: (input) => {
+          submitted.push(input);
+          return Effect.succeed({
+            replayed: false,
+            proposal: {
+              ...proposalOwn,
+              requestId: input.requestId,
+              principal: input.principal,
+              plan: input.plan,
+              riskTags: input.riskTags,
+              promptSummary: input.promptSummary,
+            },
+          });
+        },
+      },
+    });
+
+    const result = yield* call(
+      deps,
+      AGENT_CONTROL_MCP_TOOLS.proposeDeviceBoot,
+      {
+        requestId: "request-device-boot",
+        udid: "FAKE-0001",
+        expectedThreadDeviceVersion: 0,
+        expectedAttachedDeviceUdid: null,
+        expectedDeviceState: "shutdown",
+        expectedDeviceBootSource: "user",
+        expectedRecording: false,
+      },
+      writeSession,
+    );
+    assert.isUndefined(result.isError);
+    assert.strictEqual(submitted.length, 1);
+    assert.strictEqual(submitted[0]?.plan.kind, "deviceBoot");
+    assert.isFalse(managerAccessed);
+  }),
+);
+
+it.effect(
+  "sensitive device reads stay attached-thread-only and never gain structured content",
+  () =>
+    Effect.gen(function* () {
+      const backend = new FakeDeviceBackend();
+      backend.bootExternally("FAKE-0001");
+      const manager = new DeviceManager({ backend });
+      yield* Effect.promise(() => manager.attach(callerThreadId, "FAKE-0001"));
+      const contentSession = {
+        ...writeSession,
+        grantedCapabilities: [AGENT_CONTROL_CAPABILITIES.readDeviceContent],
+      };
+      const deps = makeDeps({ deviceService: { supported: true, manager } });
+
+      const screenshot = yield* call(
+        deps,
+        AGENT_CONTROL_MCP_TOOLS.readDeviceScreenshot,
+        { udid: "FAKE-0001" },
+        contentSession,
+      );
+      assert.isUndefined(screenshot.isError);
+      assert.strictEqual(screenshot.content[0]?.type, "image");
+      assert.isUndefined(screenshot.structuredContent);
+
+      const ui = yield* call(
+        deps,
+        AGENT_CONTROL_MCP_TOOLS.describeDeviceUi,
+        { udid: "FAKE-0001" },
+        contentSession,
+      );
+      assert.isUndefined(ui.isError);
+      assert.isUndefined(ui.structuredContent);
+
+      const denied = yield* call(
+        deps,
+        AGENT_CONTROL_MCP_TOOLS.readDeviceScreenshot,
+        { udid: "FAKE-0002" },
+        contentSession,
+      );
+      assert.isTrue(denied.isError);
+      assert.strictEqual(backend.calls.filter((entry) => entry.kind === "screenshot").length, 1);
+      yield* Effect.promise(() => manager.dispose());
+    }),
 );
 
 it.effect("automation create, update, and cancel remain inert exact proposals until accepted", () =>

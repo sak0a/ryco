@@ -282,6 +282,18 @@ export class DeviceManager {
       .map((device) => this.describe(device));
   }
 
+  /** Safe lifecycle metadata used by scoped Agent Control stale-plan guards. */
+  isRecording(udid: string): boolean {
+    return this.recording.has(udid);
+  }
+
+  /** Exact thread attachments for cross-thread Agent Control isolation checks. */
+  attachedThreadIds(udid: string): readonly string[] {
+    return [...this.threads.entries()]
+      .filter(([, attachment]) => attachment.attachedDeviceUdid === udid)
+      .map(([threadId]) => threadId);
+  }
+
   /**
    * Forget devices that are no longer running.
    *

@@ -36,6 +36,23 @@ new default privilege. Automation, activity, and diagnostics capabilities must b
 explicitly and continue to enforce integration expiry/revocation, project scope, rate limits, and
 the existing shared-checkout/full-access restrictions.
 
-PR 9 must introduce a first-class Ryco-owned browser/device surface and an independent approval
-policy before any browser or device control can be considered. These automation templates contain
-no browser, device, shell, command, RPC, URL, webhook, script, or callback field.
+The governed iOS Simulator extension uses Ryco's existing thread-scoped `DeviceService`; it does
+not add a transport or a device-specific approval queue. Inventory and lifecycle metadata are
+available only to the exact internal provider session. Screenshots and accessibility trees are
+ephemeral MCP content for the exact current thread attachment: they are never copied into
+structured results, proposals, audit rows, diagnostics, or server logs. External integrations
+receive neither device metadata nor device content.
+
+Every device mutation is a separate immutable proposal and only the shared accepted-proposal
+executor can invoke `DeviceService`. Audit and diagnostic records retain safe identifiers, action
+kind, lifecycle expectations, decisions, outcomes, and typed error codes; they omit screenshots,
+frames, UI-tree contents, raw URLs, artifact paths, recording paths, helper payloads, and typed
+text. Legacy direct device mutation/content tools are suppressed while an Agent Control provider
+lease exists, preventing selection of the older gateway as an approval bypass.
+Coordinate taps, swipes, and hardware buttons are proposal-safe. Text typing, label-targeted taps,
+and scroll-to-element remain unavailable because their exact inputs can contain accessibility or
+user content that the durable proposal model must not persist. Launch arguments are unavailable
+for the same reason.
+
+Automation templates still contain no browser, device, shell, command, RPC, URL, webhook, script,
+or callback field. Browser/CDP/web-page control remains out of scope.

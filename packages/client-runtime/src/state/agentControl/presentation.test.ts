@@ -212,6 +212,38 @@ describe("buildAgentControlProposalCardModel", () => {
     );
   });
 
+  it("shows exact device scope and a high-risk URL warning", () => {
+    const model = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "deviceOpenUrl",
+          threadId: ThreadId.make("thread-caller-1234"),
+          projectId: ProjectId.make("project-1"),
+          expectedProjectUpdatedAt: "2026-08-18T00:00:00.000Z",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          udid: "FAKE-0001" as never,
+          expectedThreadDeviceVersion: 7,
+          expectedAttachedDeviceUdid: "FAKE-0001" as never,
+          expectedDeviceState: "booted",
+          expectedDeviceBootSource: "ryco",
+          expectedRecording: false,
+          executionSummary: "Open an approved URL or deep link",
+          riskClass: "open-world",
+          url: "https://example.test/exact-deep-link",
+        },
+        riskTags: ["device-mutation" as never, "device-open-world" as never],
+      }),
+    );
+
+    expect(model.warningLabel).toMatch(/High risk/);
+    expect(model.runtimeLabel).toBe("high risk · open world");
+    expect(model.detailSections[0]?.lines).toContain("Device UDID: FAKE-0001");
+    expect(model.detailSections[0]?.lines).toContain("Thread: thread-caller-1234");
+    expect(model.detailSections[0]?.lines).toContain(
+      "Exact URL/deep link: https://example.test/exact-deep-link",
+    );
+  });
+
   it("identifies external integration origins without a caller thread", () => {
     const model = buildAgentControlProposalCardModel(
       makeProposal({

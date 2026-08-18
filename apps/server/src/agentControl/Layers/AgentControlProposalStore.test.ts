@@ -534,4 +534,59 @@ enabledLayer("AgentControlProposalStore", (it) => {
       assert.include(serialized, "Create 1 thread in project-1");
     }),
   );
+
+  it.effect("keeps device URLs and artifact paths out of audit metadata", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const audit = yield* AgentControlAuditRepository;
+      const common = {
+        threadId: ThreadId.make("thread-1"),
+        projectId: ProjectId.make("project-1"),
+        expectedProjectUpdatedAt: "2026-08-17T00:00:00.000Z",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        udid: "FAKE-0001" as never,
+        expectedThreadDeviceVersion: 2,
+        expectedAttachedDeviceUdid: "FAKE-0001" as never,
+        expectedDeviceState: "booted" as const,
+        expectedDeviceBootSource: "ryco" as const,
+        expectedRecording: false,
+      };
+      const secretUrl = "ryco-secret://account/reset?token=never-audit-this";
+      const artifactPath = "private/build/SecretProduct.app";
+      const plans: readonly AgentControlActionPlan[] = [
+        {
+          kind: "deviceOpenUrl",
+          ...common,
+          executionSummary: "Open an approved URL or deep link",
+          riskClass: "open-world",
+          url: secretUrl,
+        },
+        {
+          kind: "deviceInstall",
+          ...common,
+          executionSummary: "Install an approved workspace application",
+          riskClass: "device-control",
+          artifactPath: artifactPath as never,
+        },
+      ];
+      for (const [index, plan] of plans.entries()) {
+        const { proposal } = yield* store.submit({
+          principal,
+          requestId: AgentControlRequestId.make(`request-device-redaction-${index}`),
+          plan,
+          riskTags: [AgentControlRiskTag.make("device-mutation")],
+          promptSummary: "Govern one exact Simulator action",
+          expiresAt: "2026-08-17T01:00:00.000Z",
+          now: "2026-08-17T00:00:00.000Z",
+        });
+        const serialized = JSON.stringify(
+          yield* audit.listByProposalId({ proposalId: proposal.proposalId }),
+        );
+        assert.notInclude(serialized, secretUrl);
+        assert.notInclude(serialized, artifactPath);
+        assert.include(serialized, "FAKE-0001");
+        assert.include(serialized, "sensitivePayloadsExcluded");
+      }
+    }),
+  );
 });

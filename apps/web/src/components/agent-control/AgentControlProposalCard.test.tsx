@@ -114,6 +114,32 @@ describe("AgentControlProposalCard", () => {
     expect(markup).toContain("border-destructive/70");
   });
 
+  it("makes open-world Simulator URL approval visibly high risk", () => {
+    const markup = renderCard({
+      proposal: makeProposal({
+        plan: {
+          kind: "deviceOpenUrl",
+          threadId: ThreadId.make("thread-caller-1234"),
+          projectId: ProjectId.make("project-1"),
+          expectedProjectUpdatedAt: "2026-08-18T00:00:00.000Z",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          udid: "FAKE-0001" as never,
+          expectedThreadDeviceVersion: 3,
+          expectedAttachedDeviceUdid: "FAKE-0001" as never,
+          expectedDeviceState: "booted",
+          expectedDeviceBootSource: "user",
+          expectedRecording: false,
+          executionSummary: "Open an approved URL or deep link",
+          riskClass: "open-world",
+          url: "https://example.test/path",
+        },
+        riskTags: [AgentControlRiskTag.make("device-open-world")],
+      }),
+    });
+    expect(markup).toContain("High risk · opens an external URL or deep link");
+    expect(markup).toContain("border-destructive/70");
+  });
+
   it("disables decisions while a decision is submitting", () => {
     const markup = renderCard({ isSubmitting: true });
     const disabledButtons = markup.match(/ disabled=""/g) ?? [];

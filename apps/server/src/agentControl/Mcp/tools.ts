@@ -37,6 +37,8 @@ import {
   AgentControlAutomationId,
   AgentControlMcpDiagnosticsSummaryInput,
   AgentControlMcpDiagnosticsSummaryResult,
+  AgentControlMcpListDevicesInput,
+  AgentControlMcpListDevicesResult,
   AgentControlMcpListAutomationsInput,
   AgentControlMcpListAutomationsResult,
   AgentControlMcpListAutomationRunsInput,
@@ -47,6 +49,18 @@ import {
   AgentControlMcpProposeAutomationCancelInput,
   AgentControlMcpProposeAutomationCreateInput,
   AgentControlMcpProposeAutomationUpdateInput,
+  AgentControlMcpProposeDeviceAttachInput,
+  AgentControlMcpProposeDeviceBootInput,
+  AgentControlMcpProposeDeviceDetachInput,
+  AgentControlMcpProposeDeviceInputInput,
+  AgentControlMcpProposeDeviceInstallInput,
+  AgentControlMcpProposeDeviceLaunchInput,
+  AgentControlMcpProposeDeviceOpenUrlInput,
+  AgentControlMcpProposeDeviceRecordingInput,
+  AgentControlMcpProposeDeviceShutdownInput,
+  AgentControlMcpReadDeviceContentInput,
+  AgentControlMcpReadDeviceStateInput,
+  AgentControlMcpReadDeviceStateResult,
   AgentControlMcpReadAutomationInput,
   AgentControlMcpReadAutomationResult,
   AgentControlMcpRecentActivityResult,
@@ -78,6 +92,7 @@ import {
   type AgentControlProposal,
   type AgentControlProposalStatus,
   type AgentControlActionPlan,
+  type AgentControlDeviceActionPlan,
   type AgentControlCapability,
   type OrchestrationMessage,
   type OrchestrationProjectShell,
@@ -90,6 +105,8 @@ import {
 import { Duration, Effect, Option, Schema, Stream } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import type { DeviceServiceShape } from "../../device/Services/DeviceService.ts";
+import type { WorkspaceAccessPolicyShape } from "../../workspace/Services/WorkspaceAccessPolicy.ts";
 import type { AgentControlPolicyShape } from "../Services/AgentControlPolicy.ts";
 import type { AgentControlActionValidatorShape } from "../Services/AgentControlActionValidator.ts";
 import type { AgentControlAutomationShape } from "../Services/AgentControlAutomation.ts";
@@ -104,6 +121,10 @@ import type {
 } from "../Services/AgentControlSessionRegistry.ts";
 import { agentControlSupportForDriver } from "../ProviderInjection.ts";
 import { agentControlSettingsPlan, agentControlSettingsSummary } from "../settingsControl.ts";
+import {
+  assertSafeAgentControlDeviceUrl,
+  resolveAgentControlDeviceArtifact,
+} from "../deviceControl.ts";
 
 export interface AgentControlMcpToolDescriptor {
   readonly name: string;
@@ -112,7 +133,16 @@ export interface AgentControlMcpToolDescriptor {
 }
 
 export interface AgentControlMcpToolResult {
-  readonly content: ReadonlyArray<{ readonly type: "text"; readonly text: string }>;
+  readonly content: ReadonlyArray<
+    | { readonly type: "text"; readonly text: string }
+    | {
+        readonly type: "image";
+        readonly data: string;
+        readonly mimeType: "image/png";
+        /** Type-only compatibility with existing text-result consumers; absent on the wire. */
+        readonly text: string;
+      }
+  >;
   readonly structuredContent?: unknown;
   readonly isError?: boolean;
 }
@@ -128,6 +158,8 @@ export interface AgentControlMcpToolDeps {
   readonly projectPlans?: AgentControlProjectPlansShape;
   readonly automations?: AgentControlAutomationShape;
   readonly diagnostics?: AgentControlDiagnosticsShape;
+  readonly deviceService?: DeviceServiceShape;
+  readonly workspaceAccess?: WorkspaceAccessPolicyShape;
   readonly getSettings?: Effect.Effect<ServerSettings, ServerSettingsError>;
   readonly getTurnAuthority?: (
     sessionId: string,
@@ -157,9 +189,21 @@ class ToolFailure {
   }
 }
 
+interface PrivateDeviceContentResult {
+  readonly _tag: "PrivateDeviceContentResult";
+  readonly content: AgentControlMcpToolResult["content"];
+}
+
+const isPrivateDeviceContentResult = (value: unknown): value is PrivateDeviceContentResult =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  value._tag === "PrivateDeviceContentResult";
+
 const failTool = (reason: string) => Effect.fail(new ToolFailure(reason));
 
 const cursorSchemaProperty = { type: "string", maxLength: 1_024 } as const;
+const AGENT_CONTROL_DEVICE_UI_CONTENT_MAX_CHARS = 512 * 1_024;
 const limitSchemaProperty = (maximum: number) =>
   ({ type: "integer", minimum: 1, maximum }) as const;
 const automationScheduleSchema = {
@@ -184,12 +228,198 @@ const automationScheduleSchema = {
   ],
 } as const;
 
+const deviceMutationTargetProperties = {
+  requestId: { type: "string", maxLength: 128 },
+  udid: { type: "string", maxLength: 128 },
+  expectedThreadDeviceVersion: { type: "integer", minimum: 0 },
+  expectedAttachedDeviceUdid: {
+    oneOf: [{ type: "string", maxLength: 128 }, { type: "null" }],
+  },
+  expectedDeviceState: {
+    type: "string",
+    enum: ["shutdown", "booting", "booted", "shutting-down"],
+  },
+  expectedDeviceBootSource: { type: "string", enum: ["ryco", "user"] },
+  expectedRecording: { type: "boolean" },
+} as const;
+
+const deviceMutationTargetRequired = [
+  "requestId",
+  "udid",
+  "expectedThreadDeviceVersion",
+  "expectedAttachedDeviceUdid",
+  "expectedDeviceState",
+  "expectedDeviceBootSource",
+  "expectedRecording",
+] as const;
+
 const TOOL_DESCRIPTORS: ReadonlyArray<AgentControlMcpToolDescriptor> = [
   {
     name: AGENT_CONTROL_MCP_TOOLS.context,
     description:
       "Identify this session's Ryco thread, project, provider instance, and granted Agent Control capabilities.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.listDevices,
+    description:
+      "List bounded iOS Simulator availability and inventory for this exact Ryco thread, project, and provider instance.",
+    inputSchema: {
+      type: "object",
+      properties: { includeShutdown: { type: "boolean" } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.readDeviceState,
+    description:
+      "Read redacted attachment and lifecycle state for this exact Ryco thread; device content is excluded.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.readDeviceScreenshot,
+    description:
+      "Read one ephemeral screenshot from the device currently attached to this exact thread. The image is never persisted or audited.",
+    inputSchema: {
+      type: "object",
+      properties: { udid: { type: "string", maxLength: 128 } },
+      required: ["udid"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.describeDeviceUi,
+    description:
+      "Read one bounded ephemeral accessibility tree from the device currently attached to this exact thread. Content is never persisted or audited.",
+    inputSchema: {
+      type: "object",
+      properties: { udid: { type: "string", maxLength: 128 } },
+      required: ["udid"],
+      additionalProperties: false,
+    },
+  },
+  ...[
+    [AGENT_CONTROL_MCP_TOOLS.proposeDeviceBoot, "boot"],
+    [AGENT_CONTROL_MCP_TOOLS.proposeDeviceAttach, "attach"],
+    [AGENT_CONTROL_MCP_TOOLS.proposeDeviceDetach, "detach"],
+    [AGENT_CONTROL_MCP_TOOLS.proposeDeviceShutdown, "shut down"],
+  ].map(([name, operation]) => ({
+    name: name!,
+    description: `Request approval to ${operation} one exact iOS Simulator. This creates a proposal and does not mutate the device inline.`,
+    inputSchema: {
+      type: "object",
+      properties: deviceMutationTargetProperties,
+      required: deviceMutationTargetRequired,
+      additionalProperties: false,
+    },
+  })),
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeDeviceInstall,
+    description:
+      "Request approval to install one exact workspace-contained .app artifact on the attached Simulator. No install occurs inline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...deviceMutationTargetProperties,
+        artifactPath: { type: "string", minLength: 1, maxLength: 1024 },
+      },
+      required: [...deviceMutationTargetRequired, "artifactPath"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeDeviceLaunch,
+    description:
+      "Request approval to launch one exact installed bundle without launch arguments on the attached Simulator. No launch occurs inline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...deviceMutationTargetProperties,
+        bundleId: { type: "string", minLength: 1, maxLength: 256 },
+      },
+      required: [...deviceMutationTargetRequired, "bundleId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeDeviceOpenUrl,
+    description:
+      "Request high-risk approval to open one exact safe URL or deep link on the attached Simulator. No URL is opened inline.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...deviceMutationTargetProperties,
+        url: { type: "string", minLength: 1, maxLength: 2048 },
+      },
+      required: [...deviceMutationTargetRequired, "url"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeDeviceInput,
+    description:
+      "Request approval for one exact bounded coordinate tap, swipe, or hardware-button action. Text typing and UI-label targeting are intentionally unavailable.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...deviceMutationTargetProperties,
+        action: {
+          oneOf: [
+            {
+              type: "object",
+              properties: {
+                kind: { const: "tap" },
+                x: { type: "number", minimum: 0, maximum: 20000 },
+                y: { type: "number", minimum: 0, maximum: 20000 },
+              },
+              required: ["kind", "x", "y"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "swipe" },
+                fromX: { type: "number", minimum: 0, maximum: 20000 },
+                fromY: { type: "number", minimum: 0, maximum: 20000 },
+                toX: { type: "number", minimum: 0, maximum: 20000 },
+                toY: { type: "number", minimum: 0, maximum: 20000 },
+                durationMs: { type: "integer", minimum: 0, maximum: 10000 },
+              },
+              required: ["kind", "fromX", "fromY", "toX", "toY", "durationMs"],
+              additionalProperties: false,
+            },
+            {
+              type: "object",
+              properties: {
+                kind: { const: "press-button" },
+                button: {
+                  type: "string",
+                  enum: ["home", "lock", "volume-up", "volume-down", "rotate"],
+                },
+              },
+              required: ["kind", "button"],
+              additionalProperties: false,
+            },
+          ],
+        },
+      },
+      required: [...deviceMutationTargetRequired, "action"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeDeviceRecording,
+    description:
+      "Request approval to start or stop Simulator recording. Recording paths never enter proposal, audit, or tool output.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...deviceMutationTargetProperties,
+        action: { type: "string", enum: ["start", "stop"] },
+      },
+      required: [...deviceMutationTargetRequired, "action"],
+      additionalProperties: false,
+    },
   },
   {
     name: AGENT_CONTROL_MCP_TOOLS.capabilities,
@@ -603,6 +833,31 @@ const WRITE_TOOL_NAMES = new Set<string>([
   AGENT_CONTROL_MCP_TOOLS.proposeAutomationCreate,
   AGENT_CONTROL_MCP_TOOLS.proposeAutomationUpdate,
   AGENT_CONTROL_MCP_TOOLS.proposeAutomationCancel,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceBoot,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceAttach,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceDetach,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceInstall,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceLaunch,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceOpenUrl,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceInput,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceRecording,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceShutdown,
+]);
+
+const DEVICE_CONTROL_TOOL_NAMES = new Set<string>([
+  AGENT_CONTROL_MCP_TOOLS.listDevices,
+  AGENT_CONTROL_MCP_TOOLS.readDeviceState,
+  AGENT_CONTROL_MCP_TOOLS.readDeviceScreenshot,
+  AGENT_CONTROL_MCP_TOOLS.describeDeviceUi,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceBoot,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceAttach,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceDetach,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceInstall,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceLaunch,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceOpenUrl,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceInput,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceRecording,
+  AGENT_CONTROL_MCP_TOOLS.proposeDeviceShutdown,
 ]);
 
 const writeCapabilityForTool = (name: string): AgentControlCapability | null => {
@@ -627,12 +882,32 @@ const writeCapabilityForTool = (name: string): AgentControlCapability | null => 
     case AGENT_CONTROL_MCP_TOOLS.proposeAutomationUpdate:
     case AGENT_CONTROL_MCP_TOOLS.proposeAutomationCancel:
       return AGENT_CONTROL_CAPABILITIES.manageAutomations;
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceBoot:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceAttach:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceDetach:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceInstall:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceLaunch:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceOpenUrl:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceInput:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceRecording:
+    case AGENT_CONTROL_MCP_TOOLS.proposeDeviceShutdown:
+      return AGENT_CONTROL_CAPABILITIES.controlDevices;
     default:
       return null;
   }
 };
 
 const readCapabilityForTool = (name: string): AgentControlCapability => {
+  if (
+    name === AGENT_CONTROL_MCP_TOOLS.readDeviceScreenshot ||
+    name === AGENT_CONTROL_MCP_TOOLS.describeDeviceUi
+  )
+    return AGENT_CONTROL_CAPABILITIES.readDeviceContent;
+  if (
+    name === AGENT_CONTROL_MCP_TOOLS.listDevices ||
+    name === AGENT_CONTROL_MCP_TOOLS.readDeviceState
+  )
+    return AGENT_CONTROL_CAPABILITIES.readDevices;
   if (name === AGENT_CONTROL_MCP_TOOLS.settingsSummary)
     return AGENT_CONTROL_CAPABILITIES.readSettings;
   if (
@@ -886,6 +1161,12 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
     hasWriteAuthority(session).pipe(
       Effect.map((canWrite) =>
         TOOL_DESCRIPTORS.filter((descriptor) => {
+          if (
+            DEVICE_CONTROL_TOOL_NAMES.has(descriptor.name) &&
+            deps.deviceService?.supported !== true
+          ) {
+            return false;
+          }
           const capability = writeCapabilityForTool(descriptor.name);
           if (capability !== null) {
             return canWrite && session.grantedCapabilities.includes(capability);
@@ -1033,6 +1314,21 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
           AGENT_CONTROL_RISK_TAGS.createsThreads,
           AGENT_CONTROL_RISK_TAGS.startsProviderTurn,
         ];
+      case "deviceOpenUrl":
+        return [AGENT_CONTROL_RISK_TAGS.deviceMutation, AGENT_CONTROL_RISK_TAGS.deviceOpenWorld];
+      case "deviceBoot":
+      case "deviceAttach":
+      case "deviceDetach":
+      case "deviceStartRecording":
+      case "deviceStopRecording":
+      case "deviceShutdown":
+        return [AGENT_CONTROL_RISK_TAGS.deviceMutation, AGENT_CONTROL_RISK_TAGS.deviceLifecycle];
+      case "deviceInstall":
+      case "deviceLaunch":
+      case "deviceTap":
+      case "deviceSwipe":
+      case "devicePressButton":
+        return [AGENT_CONTROL_RISK_TAGS.deviceMutation];
     }
   };
 
@@ -1062,6 +1358,19 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         return `Cancel future runs for automation ${plan.automationId}`;
       case "automationRun":
         return `Approve scheduled run ${plan.runId}`;
+      case "deviceBoot":
+      case "deviceAttach":
+      case "deviceDetach":
+      case "deviceInstall":
+      case "deviceLaunch":
+      case "deviceOpenUrl":
+      case "deviceTap":
+      case "deviceSwipe":
+      case "devicePressButton":
+      case "deviceStartRecording":
+      case "deviceStopRecording":
+      case "deviceShutdown":
+        return plan.executionSummary;
     }
   };
 
@@ -1282,14 +1591,348 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
       Effect.mapError(() => new ToolFailure("Project scope is unavailable.")),
       Effect.flatMap((thread) =>
         Option.isSome(thread) &&
-        thread.value.session?.providerInstanceId === session.providerInstanceId
+        thread.value.session?.providerInstanceId === session.providerInstanceId &&
+        thread.value.session.runtimeSessionId === session.runtimeSessionId
           ? Effect.succeed({
+              thread: thread.value,
               projectId: thread.value.projectId,
               providerInstanceId: session.providerInstanceId,
             })
           : failTool("Project scope is unavailable."),
       ),
     );
+
+  const requireDevice = () => {
+    if (deps.deviceService === undefined || !deps.deviceService.supported) {
+      return failTool("iOS Simulator device control is unavailable.");
+    }
+    return Effect.succeed(deps.deviceService);
+  };
+
+  const deviceContext = (session: AgentControlSessionRecord) =>
+    Effect.gen(function* () {
+      const service = yield* requireDevice();
+      const scope = yield* sessionScope(session);
+      const snapshot = yield* deps.projections
+        .getShellSnapshot()
+        .pipe(Effect.mapError(() => new ToolFailure("Device project scope is unavailable.")));
+      const project = snapshot.projects.find((candidate) => candidate.id === scope.projectId);
+      if (!project) return yield* failTool("Device project scope is unavailable.");
+      return { service, scope, project };
+    });
+
+  const devicePromise = <A>(run: () => Promise<A>, failure: string) =>
+    Effect.tryPromise({
+      try: run,
+      catch: () => new ToolFailure(failure),
+    });
+
+  const listDevices = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      const input = yield* decodeArgs(AgentControlMcpListDevicesInput, args);
+      const { service, scope } = yield* deviceContext(session);
+      const result = yield* devicePromise(
+        () =>
+          service.manager.list(
+            input.includeShutdown === undefined ? {} : { includeShutdown: input.includeShutdown },
+          ),
+        "Device inventory read failed.",
+      );
+      return Schema.encodeSync(AgentControlMcpListDevicesResult)({
+        threadId: session.threadId,
+        projectId: scope.projectId,
+        providerInstanceId: scope.providerInstanceId,
+        devices: result.devices,
+        recordingDeviceUdids: result.devices
+          .filter((device) => service.manager.isRecording(device.udid))
+          .map((device) => device.udid),
+        availability: result.availability,
+      });
+    });
+
+  const readDeviceState = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      yield* decodeArgs(AgentControlMcpReadDeviceStateInput, args);
+      const { service, scope } = yield* deviceContext(session);
+      const state = yield* devicePromise(
+        () => service.manager.getThreadState(session.threadId),
+        "Device state read failed.",
+      );
+      const attachedDevice =
+        state.devices.find((device) => device.udid === state.attachedDeviceUdid) ?? null;
+      return Schema.encodeSync(AgentControlMcpReadDeviceStateResult)({
+        threadId: session.threadId,
+        projectId: scope.projectId,
+        providerInstanceId: scope.providerInstanceId,
+        version: state.version,
+        attachedDeviceUdid: state.attachedDeviceUdid,
+        attachPhase: state.attachPhase ?? null,
+        attachedDevice,
+        recording:
+          state.attachedDeviceUdid === null
+            ? false
+            : service.manager.isRecording(state.attachedDeviceUdid),
+        agentActive: state.agentActive,
+        availability: state.availability,
+        redacted: true,
+      });
+    });
+
+  const requireAttachedDeviceContent = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      const input = yield* decodeArgs(AgentControlMcpReadDeviceContentInput, args);
+      const { service } = yield* deviceContext(session);
+      const state = yield* devicePromise(
+        () => service.manager.getThreadState(session.threadId),
+        "Device content read failed.",
+      );
+      if (state.attachedDeviceUdid !== input.udid) {
+        return yield* failTool("Device content is limited to this thread's current attachment.");
+      }
+      return { service, udid: input.udid };
+    });
+
+  const readDeviceScreenshot = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      const { service, udid } = yield* requireAttachedDeviceContent(session, args);
+      const screenshot = yield* devicePromise(
+        () => service.manager.screenshot(udid, { save: false }),
+        "Device screenshot read failed.",
+      );
+      return {
+        _tag: "PrivateDeviceContentResult",
+        content: [
+          {
+            type: "image",
+            data: screenshot.bytesBase64,
+            mimeType: "image/png",
+          } as AgentControlMcpToolResult["content"][number],
+        ],
+      } satisfies PrivateDeviceContentResult;
+    });
+
+  const describeDeviceUi = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      const { service, udid } = yield* requireAttachedDeviceContent(session, args);
+      const tree = yield* devicePromise(
+        () => service.manager.describeUi(udid),
+        "Device UI read failed.",
+      );
+      const encoded = JSON.stringify(tree);
+      if (encoded.length > AGENT_CONTROL_DEVICE_UI_CONTENT_MAX_CHARS) {
+        return yield* failTool("Device UI content exceeds the internal read limit.");
+      }
+      return {
+        _tag: "PrivateDeviceContentResult",
+        content: [{ type: "text", text: encoded }],
+      } satisfies PrivateDeviceContentResult;
+    });
+
+  const prepareDeviceTarget = (
+    session: AgentControlSessionRecord,
+    input: {
+      readonly udid: AgentControlDeviceActionPlan["udid"];
+      readonly expectedThreadDeviceVersion: number;
+      readonly expectedAttachedDeviceUdid: AgentControlDeviceActionPlan["expectedAttachedDeviceUdid"];
+      readonly expectedDeviceState: AgentControlDeviceActionPlan["expectedDeviceState"];
+      readonly expectedDeviceBootSource: AgentControlDeviceActionPlan["expectedDeviceBootSource"];
+      readonly expectedRecording: boolean;
+    },
+    executionSummary: string,
+    riskClass: AgentControlDeviceActionPlan["riskClass"],
+  ) =>
+    Effect.gen(function* () {
+      yield* requireDevice();
+      const scope = yield* sessionScope(session);
+      const snapshot = yield* deps.projections
+        .getShellSnapshot()
+        .pipe(Effect.mapError(() => new ToolFailure("Device project scope is unavailable.")));
+      const project = snapshot.projects.find((candidate) => candidate.id === scope.projectId);
+      if (!project) return yield* failTool("Device project scope is unavailable.");
+      return {
+        project,
+        target: {
+          threadId: session.threadId,
+          projectId: scope.projectId,
+          expectedProjectUpdatedAt: project.updatedAt,
+          providerInstanceId: scope.providerInstanceId,
+          udid: input.udid,
+          expectedThreadDeviceVersion: input.expectedThreadDeviceVersion,
+          expectedAttachedDeviceUdid: input.expectedAttachedDeviceUdid,
+          expectedDeviceState: input.expectedDeviceState,
+          expectedDeviceBootSource: input.expectedDeviceBootSource,
+          expectedRecording: input.expectedRecording,
+          executionSummary,
+          riskClass,
+        },
+      };
+    });
+
+  const proposeDeviceMutation = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    name: string,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      let requestId: Parameters<AgentControlProposalServiceShape["submit"]>[0]["requestId"];
+      let plan: AgentControlDeviceActionPlan;
+      switch (name) {
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceBoot: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceBootInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Boot iOS Simulator ${input.udid}`,
+            "device-lifecycle",
+          );
+          plan = { kind: "deviceBoot", ...prepared.target };
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceAttach: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceAttachInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Attach iOS Simulator ${input.udid} to this thread`,
+            "device-lifecycle",
+          );
+          plan = { kind: "deviceAttach", ...prepared.target };
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceDetach: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceDetachInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Detach iOS Simulator ${input.udid} from this thread`,
+            "device-lifecycle",
+          );
+          plan = { kind: "deviceDetach", ...prepared.target };
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceInstall: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceInstallInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Install an approved workspace application on iOS Simulator ${input.udid}`,
+            "device-control",
+          );
+          if (deps.workspaceAccess === undefined) {
+            return yield* failTool("Workspace artifact validation is unavailable.");
+          }
+          yield* resolveAgentControlDeviceArtifact({
+            workspaceRoot: prepared.project.workspaceRoot,
+            artifactPath: input.artifactPath,
+            workspaceAccess: deps.workspaceAccess,
+          }).pipe(Effect.mapError(() => new ToolFailure("Application artifact is unavailable.")));
+          plan = { kind: "deviceInstall", ...prepared.target, artifactPath: input.artifactPath };
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceLaunch: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceLaunchInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Launch installed application ${input.bundleId} on iOS Simulator ${input.udid}`,
+            "device-control",
+          );
+          plan = { kind: "deviceLaunch", ...prepared.target, bundleId: input.bundleId };
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceOpenUrl: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceOpenUrlInput, args);
+          requestId = input.requestId;
+          yield* Effect.try({
+            try: () => assertSafeAgentControlDeviceUrl(input.url),
+            catch: () => new ToolFailure("URL does not meet device-control policy."),
+          });
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Open an approved URL or deep link on iOS Simulator ${input.udid}`,
+            "open-world",
+          );
+          plan = { kind: "deviceOpenUrl", ...prepared.target, url: input.url };
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceInput: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceInputInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Perform one ${input.action.kind} action on iOS Simulator ${input.udid}`,
+            "device-control",
+          );
+          switch (input.action.kind) {
+            case "tap":
+              plan = {
+                kind: "deviceTap",
+                ...prepared.target,
+                x: input.action.x,
+                y: input.action.y,
+              };
+              break;
+            case "swipe":
+              plan = {
+                kind: "deviceSwipe",
+                ...prepared.target,
+                fromX: input.action.fromX,
+                fromY: input.action.fromY,
+                toX: input.action.toX,
+                toY: input.action.toY,
+                durationMs: input.action.durationMs,
+              };
+              break;
+            case "press-button":
+              plan = {
+                kind: "devicePressButton",
+                ...prepared.target,
+                button: input.action.button,
+              };
+              break;
+          }
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceRecording: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceRecordingInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `${input.action === "start" ? "Start" : "Stop"} recording iOS Simulator ${input.udid}`,
+            "device-lifecycle",
+          );
+          plan = {
+            kind: input.action === "start" ? "deviceStartRecording" : "deviceStopRecording",
+            ...prepared.target,
+          };
+          break;
+        }
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceShutdown: {
+          const input = yield* decodeArgs(AgentControlMcpProposeDeviceShutdownInput, args);
+          requestId = input.requestId;
+          const prepared = yield* prepareDeviceTarget(
+            session,
+            input,
+            `Shut down iOS Simulator ${input.udid}`,
+            "device-lifecycle",
+          );
+          plan = { kind: "deviceShutdown", ...prepared.target };
+          break;
+        }
+        default:
+          return yield* failTool("Unknown device control tool.");
+      }
+      return yield* submitMutation({ session, authority, requestId, plan });
+    });
 
   const automationFailure = () => new ToolFailure("Automation request failed.");
 
@@ -1729,6 +2372,14 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
           return context(session);
         case AGENT_CONTROL_MCP_TOOLS.capabilities:
           return capabilities(session);
+        case AGENT_CONTROL_MCP_TOOLS.listDevices:
+          return listDevices(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.readDeviceState:
+          return readDeviceState(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.readDeviceScreenshot:
+          return readDeviceScreenshot(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.describeDeviceUi:
+          return describeDeviceUi(session, args);
         case AGENT_CONTROL_MCP_TOOLS.listProjects:
           return listProjects(session, args);
         case AGENT_CONTROL_MCP_TOOLS.listThreads:
@@ -1799,6 +2450,18 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
           return authority
             ? proposeAutomationCancel(session, authority, args)
             : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceBoot:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceAttach:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceDetach:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceInstall:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceLaunch:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceOpenUrl:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceInput:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceRecording:
+        case AGENT_CONTROL_MCP_TOOLS.proposeDeviceShutdown:
+          return authority
+            ? proposeDeviceMutation(session, authority, name, args)
+            : failTool("Exact active-turn write authority is unavailable.");
         default:
           return failTool("Unknown tool.");
       }
@@ -1840,10 +2503,14 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
 
     return authorize.pipe(
       Effect.flatMap(handler),
-      Effect.map((result): AgentControlMcpToolResult => ({
-        content: [{ type: "text", text: JSON.stringify(result) }],
-        structuredContent: result,
-      })),
+      Effect.map((result): AgentControlMcpToolResult =>
+        isPrivateDeviceContentResult(result)
+          ? { content: result.content }
+          : {
+              content: [{ type: "text", text: JSON.stringify(result) }],
+              structuredContent: result,
+            },
+      ),
       Effect.catch((failure) =>
         Effect.succeed<AgentControlMcpToolResult>({
           content: [{ type: "text", text: failure.reason }],
