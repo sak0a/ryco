@@ -1,0 +1,65 @@
+import "../../index.css";
+
+import { page } from "vite-plus/test/browser";
+import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { render } from "vitest-browser-react";
+
+const harness = vi.hoisted(() => ({
+  enabled: false,
+  updateSettings: vi.fn(),
+  settingsAllowed: true,
+  settingsReason: null as string | null,
+}));
+
+vi.mock("../../hooks/useSettings", () => ({
+  useSettings: <T,>(selector: (settings: { agentControl: { enabled: boolean } }) => T): T =>
+    selector({ agentControl: { enabled: harness.enabled } }),
+  useUpdateSettings: () => ({ updateSettings: harness.updateSettings }),
+}));
+
+vi.mock("../../hostedHub/capabilities", () => ({
+  useHostedRpcCapability: () => ({
+    allowed: harness.settingsAllowed,
+    reason: harness.settingsReason,
+  }),
+}));
+
+vi.mock("./IntegrationsSettings", () => ({
+  ExternalIntegrationsSettings: () => <div data-testid="external-integrations">External MCP</div>,
+}));
+
+vi.mock("./McpServersSettings", () => ({
+  McpServersSettings: () => <div data-testid="mcp-servers">MCP servers</div>,
+}));
+
+import { IntegrationsSettingsPanel } from "./IntegrationsSettingsPanel";
+
+describe("IntegrationsSettingsPanel", () => {
+  beforeEach(() => {
+    harness.enabled = false;
+    harness.settingsAllowed = true;
+    harness.settingsReason = null;
+    vi.clearAllMocks();
+  });
+
+  it("persists the Agent Control feature gate from Settings", async () => {
+    render(<IntegrationsSettingsPanel />);
+
+    const toggle = page.getByLabelText("Enable Agent Control");
+    await expect.element(toggle).not.toBeChecked();
+    await expect.element(page.getByTestId("external-integrations")).not.toBeInTheDocument();
+
+    await toggle.click();
+
+    expect(harness.updateSettings).toHaveBeenCalledWith({ agentControl: { enabled: true } });
+  });
+
+  it("keeps the toggle disabled when Settings writes are unavailable", async () => {
+    harness.settingsAllowed = false;
+    harness.settingsReason = "Only an owner can change this setting.";
+    render(<IntegrationsSettingsPanel />);
+
+    await expect.element(page.getByLabelText("Enable Agent Control")).toBeDisabled();
+    await expect.element(page.getByText("Only an owner can change this setting.")).toBeVisible();
+  });
+});
