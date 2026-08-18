@@ -775,6 +775,56 @@ function startLifecycleRuntime() {
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
+  // Production calls startSession from a request fiber that finishes as soon as
+  // the session exists. Starting it in a fiber that finishes reproduces that
+  // lifecycle instead of keeping the event consumer alive under the test fiber.
+  it.effect("keeps consuming runtime events after the startSession fiber completes", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-outlives-start");
+      const startSessionFiber = yield* adapter
+        .startSession({
+          runtimeSessionId: RuntimeSessionId.make("test-codexadapter-outlives-start"),
+          provider: ProviderDriverKind.make("codex"),
+          threadId,
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.forkChild);
+      yield* Fiber.join(startSessionFiber);
+
+      const runtime = lifecycleRuntimeFactory.lastRuntime;
+      assert.ok(runtime);
+
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+      yield* runtime.emit({
+        id: asEventId("evt-after-start-session"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId,
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("msg_after_start"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "thread-outlives-start",
+          turnId: "turn-1",
+          item: {
+            type: "agentMessage",
+            id: "msg_after_start",
+            text: "emitted after startSession returned",
+          },
+        },
+      });
+
+      const firstEvent = yield* Fiber.join(firstEventFiber).pipe(Effect.timeout("10 seconds"));
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag === "Some") {
+        assert.equal(firstEvent.value.type, "item.completed");
+      }
+    }).pipe(TestClock.withLive),
+  );
+
   it.effect("recycles a provider session when its interrupt RPC never settles", () =>
     Effect.gen(function* () {
       const { adapter, runtime, session } = yield* startLifecycleRuntime();
