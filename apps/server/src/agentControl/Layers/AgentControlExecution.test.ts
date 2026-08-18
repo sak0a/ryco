@@ -127,6 +127,7 @@ const makeTestExecution = (input: {
     Effect.provideService(AgentControlProposalEvents, {} as never),
     Effect.provideService(AgentControlActionValidator, {
       validateSubmission: () => Effect.die("unused"),
+      validateExternalSubmission: () => Effect.die("unused"),
       revalidateExecution: () => Effect.void,
     }),
     Effect.provideService(OrchestrationCommandApplication, input.commandApplication as never),

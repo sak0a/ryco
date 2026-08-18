@@ -293,6 +293,16 @@ export interface WsRpcClient {
     readonly subscribeProposals: RpcStreamMethod<
       typeof AGENT_CONTROL_WS_METHODS.subscribeProposals
     >;
+    readonly listIntegrations: RpcUnaryNoArgMethod<
+      typeof AGENT_CONTROL_WS_METHODS.listIntegrations
+    >;
+    readonly createIntegration: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.createIntegration>;
+    readonly updateIntegration: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.updateIntegration>;
+    readonly resumeIntegrationPairing: RpcUnaryMethod<
+      typeof AGENT_CONTROL_WS_METHODS.resumeIntegrationPairing
+    >;
+    readonly revokeIntegration: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.revokeIntegration>;
+    readonly deleteIntegration: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.deleteIntegration>;
   };
 }
 
@@ -644,6 +654,20 @@ export function createWsRpcClient(transport: WsTransport, device?: DeviceRpcClie
           listener,
           { ...options, tag: AGENT_CONTROL_WS_METHODS.subscribeProposals },
         ),
+      listIntegrations: () =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.listIntegrations]({})),
+      createIntegration: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.createIntegration](input)),
+      updateIntegration: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.updateIntegration](input)),
+      resumeIntegrationPairing: (input) =>
+        transport.request((client) =>
+          client[AGENT_CONTROL_WS_METHODS.resumeIntegrationPairing](input),
+        ),
+      revokeIntegration: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.revokeIntegration](input)),
+      deleteIntegration: (input) =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.deleteIntegration](input)),
     },
   };
 }

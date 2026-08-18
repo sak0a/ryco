@@ -16,6 +16,7 @@ import {
 import { RpcGroup } from "effect/unstable/rpc";
 
 import { AgentControlProposalService } from "../agentControl/Services/AgentControlProposalService.ts";
+import { AgentControlExternalIntegrationService } from "../agentControl/Services/AgentControlExternalIntegration.ts";
 import { CheckpointDiffQuery } from "../checkpointing/Services/CheckpointDiffQuery.ts";
 import { resolveManagedWorktreesRoot, ServerConfig } from "../config.ts";
 import { Diagnostics } from "../diagnostics/Services/Diagnostics.ts";
@@ -112,6 +113,9 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     // Optional for the same route-test reason; production always provides it
     // through the runtime's Agent Control layer.
     const agentControlProposals = yield* Effect.serviceOption(AgentControlProposalService);
+    const agentControlExternalIntegrations = yield* Effect.serviceOption(
+      AgentControlExternalIntegrationService,
+    );
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
     const keybindings = yield* Keybindings;
     const open = yield* Open;
@@ -665,6 +669,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       orchestrationEngine,
       contextHandoffInspection,
       agentControlProposals,
+      agentControlExternalIntegrations,
       checkpointDiffQuery,
       keybindings,
       open,

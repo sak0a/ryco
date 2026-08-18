@@ -265,7 +265,13 @@ it.effect("injects the MCP connection into runtime options, never the environmen
         threadId,
         providerInstanceId: ProviderInstanceId.make("codex"),
         runtimeSessionId,
-        capabilities: Object.values(AGENT_CONTROL_CAPABILITIES),
+        capabilities: [
+          AGENT_CONTROL_CAPABILITIES.read,
+          AGENT_CONTROL_CAPABILITIES.createThreads,
+          AGENT_CONTROL_CAPABILITIES.sendMessage,
+          AGENT_CONTROL_CAPABILITIES.interruptThread,
+          AGENT_CONTROL_CAPABILITIES.updateThread,
+        ],
         injectionMode: "codex-http",
       });
 

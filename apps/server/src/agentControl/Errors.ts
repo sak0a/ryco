@@ -172,3 +172,29 @@ export class AgentControlPlanValidationError extends Schema.TaggedError<AgentCon
     return `Agent Control plan validation failed (${this.reason}): ${this.detail}`;
   }
 }
+
+export class AgentControlExternalIntegrationError extends Schema.TaggedError<AgentControlExternalIntegrationError>()(
+  "AgentControlExternalIntegrationError",
+  {
+    reason: Schema.Literals([
+      "not-found",
+      "topology-unavailable",
+      "revoked",
+      "expired",
+      "pairing-refused",
+      "credential-refused",
+      "audience-refused",
+      "project-denied",
+      "capability-denied",
+      "rate-limited",
+      "capacity-exhausted",
+      "task-not-found",
+      "task-conflict",
+      "storage",
+    ]),
+  },
+) {
+  override get message(): string {
+    return `External Agent Control integration refused: ${this.reason}`;
+  }
+}

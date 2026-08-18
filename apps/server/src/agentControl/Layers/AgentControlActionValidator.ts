@@ -8,7 +8,8 @@ import type {
   RuntimeMode,
   ServerProvider,
 } from "@ryco/contracts";
-import { Effect, Layer } from "effect";
+import { AGENT_CONTROL_CAPABILITIES } from "@ryco/contracts";
+import { Effect, Layer, Option } from "effect";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -16,6 +17,10 @@ import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { AgentControlPlanValidationError } from "../Errors.ts";
+import {
+  AgentControlExternalIntegrationService,
+  type AgentControlExternalIntegrationServiceError,
+} from "../Services/AgentControlExternalIntegration.ts";
 import {
   AgentControlActionValidator,
   agentControlThreadEnvMode,
@@ -220,6 +225,15 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
   readonly projections: ProjectionSnapshotQueryShape;
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
   readonly listRefs: GitWorkflowServiceShape["listRefs"];
+  readonly revalidateExternal?: (
+    integrationId: Extract<
+      AgentControlProposal["principal"],
+      { kind: "external-integration" }
+    >["integrationId"],
+  ) => Effect.Effect<
+    import("@ryco/contracts").AgentControlExternalIntegration,
+    AgentControlExternalIntegrationServiceError
+  >;
 }): AgentControlActionValidatorShape => {
   const loadState = Effect.all({
     snapshot: deps.projections.getShellSnapshot(),
@@ -306,6 +320,33 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
       } satisfies AgentControlProviderSessionPrincipal;
     });
 
+  const validateExternalSubmission: AgentControlActionValidatorShape["validateExternalSubmission"] =
+    (input) =>
+      Effect.gen(function* () {
+        if (input.plan.kind !== "createThreads" || input.plan.entries.length !== 1) {
+          return yield* fail("invalid-plan", "External integrations may request exactly one task.");
+        }
+        const entry = input.plan.entries[0]!;
+        const { snapshot, providers } = yield* loadState;
+        yield* validatePlanAgainstSnapshot({
+          plan: input.plan,
+          originProjectId: entry.projectId,
+          originRuntimeMode: entry.runtimeMode,
+          originEnvMode: entry.envMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+        return {
+          kind: "external-integration",
+          integrationId: input.integration.integrationId,
+          label: input.integration.displayName,
+          projectId: entry.projectId,
+          runtimeMode: entry.runtimeMode,
+          envMode: entry.envMode,
+        };
+      });
+
   const revalidateExecution: AgentControlActionValidatorShape["revalidateExecution"] = (
     proposal: AgentControlProposal,
     options,
@@ -314,17 +355,16 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
       const originProjectId =
         proposal.principal.kind === "provider-session"
           ? proposal.principal.originProjectId
-          : undefined;
+          : proposal.principal.projectId;
       const originRuntimeMode =
         proposal.principal.kind === "provider-session"
           ? proposal.principal.originRuntimeMode
-          : undefined;
+          : proposal.principal.runtimeMode;
       const originEnvMode =
         proposal.principal.kind === "provider-session"
           ? proposal.principal.originEnvMode
-          : undefined;
+          : proposal.principal.envMode;
       if (
-        proposal.principal.kind !== "provider-session" ||
         originProjectId === undefined ||
         originRuntimeMode === undefined ||
         originEnvMode === undefined
@@ -333,9 +373,35 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
       }
       const principal = proposal.principal;
       const { snapshot, providers } = yield* loadState;
-      const origin = snapshot.threads.find((thread) => thread.id === principal.threadId);
-      if (!origin || origin.projectId !== originProjectId) {
-        return yield* fail("caller-stale", "The originating thread is unavailable.");
+      if (principal.kind === "provider-session") {
+        const origin = snapshot.threads.find((thread) => thread.id === principal.threadId);
+        if (!origin || origin.projectId !== originProjectId) {
+          return yield* fail("caller-stale", "The originating thread is unavailable.");
+        }
+      } else {
+        if (deps.revalidateExternal === undefined) {
+          return yield* fail("caller-stale", "The external integration is unavailable.");
+        }
+        const checked = yield* Effect.exit(deps.revalidateExternal(principal.integrationId));
+        if (checked._tag === "Failure") {
+          return yield* fail("caller-stale", "The external integration is unavailable.");
+        }
+        const integration = checked.value;
+        const scopeAllowed =
+          integration.projectScope.kind === "all" ||
+          integration.projectScope.projectIds.includes(originProjectId);
+        if (
+          !scopeAllowed ||
+          !integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalCreateTask) ||
+          (originEnvMode === "local" &&
+            !integration.capabilities.includes(
+              AGENT_CONTROL_CAPABILITIES.externalSharedCheckout,
+            )) ||
+          (originRuntimeMode === "full-access" &&
+            !integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalFullAccess))
+        ) {
+          return yield* fail("caller-stale", "External integration authority changed.");
+        }
       }
 
       yield* validatePlanAgainstSnapshot({
@@ -348,7 +414,9 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
         requireBaseRef,
       });
 
-      for (const expected of principal.targetSnapshots ?? []) {
+      for (const expected of principal.kind === "provider-session"
+        ? (principal.targetSnapshots ?? [])
+        : []) {
         const current = snapshot.threads.find((thread) => thread.id === expected.threadId);
         if (!current) {
           return yield* fail("thread-unavailable", "The approved target thread was deleted.");
@@ -369,17 +437,25 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
       }
     });
 
-  return { validateSubmission, revalidateExecution } satisfies AgentControlActionValidatorShape;
+  return {
+    validateSubmission,
+    validateExternalSubmission,
+    revalidateExecution,
+  } satisfies AgentControlActionValidatorShape;
 };
 
 const makeAgentControlActionValidator = Effect.gen(function* () {
   const projections = yield* ProjectionSnapshotQuery;
   const providerRegistry = yield* ProviderRegistry;
   const git = yield* GitWorkflowService;
+  const externalIntegrations = yield* Effect.serviceOption(AgentControlExternalIntegrationService);
   return makeAgentControlActionValidatorFromDeps({
     projections,
     getProviders: providerRegistry.getProviders,
     listRefs: git.listRefs,
+    ...(Option.isSome(externalIntegrations)
+      ? { revalidateExternal: externalIntegrations.value.revalidate }
+      : {}),
   });
 });
 

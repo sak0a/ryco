@@ -38,6 +38,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ModelSelection, OrchestrationSessionStatus, RuntimeMode } from "./orchestration.ts";
+import { ProviderOptionSelections } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderAvailability, ServerProviderState } from "./server.ts";
 import { ThreadEnvMode } from "./settings.ts";
@@ -59,6 +60,11 @@ export const AgentControlIntegrationId = TrimmedNonEmptyString.check(Schema.isMa
   Schema.brand("AgentControlIntegrationId"),
 );
 export type AgentControlIntegrationId = typeof AgentControlIntegrationId.Type;
+
+export const AgentControlExternalTaskId = TrimmedNonEmptyString.check(Schema.isMaxLength(128)).pipe(
+  Schema.brand("AgentControlExternalTaskId"),
+);
+export type AgentControlExternalTaskId = typeof AgentControlExternalTaskId.Type;
 
 /**
  * Caller-chosen idempotency key. Unique within one principal's request-id
@@ -115,6 +121,10 @@ export const AgentControlExternalIntegrationPrincipal = Schema.Struct({
   kind: Schema.Literal("external-integration"),
   integrationId: AgentControlIntegrationId,
   label: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(120))),
+  /** Immutable execution-policy evidence captured when the proposal is created. */
+  projectId: Schema.optional(ProjectId),
+  runtimeMode: Schema.optional(RuntimeMode),
+  envMode: Schema.optional(ThreadEnvMode),
 });
 export type AgentControlExternalIntegrationPrincipal =
   typeof AgentControlExternalIntegrationPrincipal.Type;
@@ -147,6 +157,11 @@ export const AGENT_CONTROL_CAPABILITIES = {
   sendMessage: AgentControlCapability.make("threads.send-message"),
   interruptThread: AgentControlCapability.make("threads.interrupt"),
   updateThread: AgentControlCapability.make("threads.update"),
+  externalListProjects: AgentControlCapability.make("external.projects.list"),
+  externalCreateTask: AgentControlCapability.make("external.tasks.create"),
+  externalReadTask: AgentControlCapability.make("external.tasks.read"),
+  externalSharedCheckout: AgentControlCapability.make("external.checkout.shared"),
+  externalFullAccess: AgentControlCapability.make("external.runtime.full-access"),
 } as const;
 
 // ── Action plans ──────────────────────────────────────────────────────
@@ -415,6 +430,12 @@ export const AGENT_CONTROL_WS_METHODS = {
   acceptProposal: "agentControl.acceptProposal",
   rejectProposal: "agentControl.rejectProposal",
   subscribeProposals: "agentControl.subscribeProposals",
+  listIntegrations: "agentControl.listIntegrations",
+  createIntegration: "agentControl.createIntegration",
+  updateIntegration: "agentControl.updateIntegration",
+  resumeIntegrationPairing: "agentControl.resumeIntegrationPairing",
+  revokeIntegration: "agentControl.revokeIntegration",
+  deleteIntegration: "agentControl.deleteIntegration",
 } as const;
 
 /** Proposals shown in the live approval queue (everything non-terminal). */
@@ -930,3 +951,248 @@ export const AgentControlMcpMutationResult = Schema.Struct({
   replayed: Schema.Boolean,
 });
 export type AgentControlMcpMutationResult = typeof AgentControlMcpMutationResult.Type;
+
+// ── Paired external MCP integrations ─────────────────────────────────
+
+export const AGENT_CONTROL_EXTERNAL_CREDENTIAL_AUDIENCE = "external-mcp" as const;
+export const AGENT_CONTROL_EXTERNAL_PAIRING_CODE_TTL_MS = 10 * 60_000;
+export const AGENT_CONTROL_EXTERNAL_PROPOSAL_TTL_MS = 15 * 60_000;
+export const AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX = 600;
+export const AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX = 10;
+
+export const AgentControlExternalClientKind = Schema.Literals([
+  "codex",
+  "claude-code",
+  "claude-desktop",
+  "generic-mcp",
+]);
+export type AgentControlExternalClientKind = typeof AgentControlExternalClientKind.Type;
+
+export const AgentControlExternalProjectScope = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("all") }),
+  Schema.Struct({
+    kind: Schema.Literal("selected"),
+    projectIds: Schema.Array(ProjectId).check(Schema.isMaxLength(500)),
+  }),
+]);
+export type AgentControlExternalProjectScope = typeof AgentControlExternalProjectScope.Type;
+
+export const AgentControlExternalPairingState = Schema.Literals(["unpaired", "pending", "paired"]);
+export type AgentControlExternalPairingState = typeof AgentControlExternalPairingState.Type;
+
+/** Public integration view. Credential and pairing-code hashes never cross this contract. */
+export const AgentControlExternalIntegration = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+  displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  clientKind: AgentControlExternalClientKind,
+  projectScope: AgentControlExternalProjectScope,
+  capabilities: Schema.Array(AgentControlCapability).check(Schema.isMaxLength(32)),
+  rateLimitPerMinute: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX),
+  ),
+  activeTaskLimit: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX),
+  ),
+  activeTaskCount: NonNegativeInt,
+  expiresAt: Schema.NullOr(IsoDateTime),
+  revokedAt: Schema.NullOr(IsoDateTime),
+  pairingState: AgentControlExternalPairingState,
+  pairingCodeExpiresAt: Schema.NullOr(IsoDateTime),
+  pairedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  lastUsedAt: Schema.NullOr(IsoDateTime),
+});
+export type AgentControlExternalIntegration = typeof AgentControlExternalIntegration.Type;
+
+export const AgentControlExternalTopology = Schema.Struct({
+  available: Schema.Boolean,
+  reason: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+});
+export type AgentControlExternalTopology = typeof AgentControlExternalTopology.Type;
+
+/** Safe local bridge invocation. It contains paths and an integration id, never a credential. */
+export const AgentControlExternalBridgeCommand = Schema.Struct({
+  command: TrimmedNonEmptyString,
+  args: Schema.Array(Schema.String),
+});
+export type AgentControlExternalBridgeCommand = typeof AgentControlExternalBridgeCommand.Type;
+
+export const AgentControlExternalSetup = Schema.Struct({
+  pairCommand: AgentControlExternalBridgeCommand,
+  serveCommand: AgentControlExternalBridgeCommand,
+  configuration: TrimmedNonEmptyString.check(Schema.isMaxLength(16_000)),
+});
+export type AgentControlExternalSetup = typeof AgentControlExternalSetup.Type;
+
+export const AgentControlExternalIntegrationDetail = Schema.Struct({
+  integration: AgentControlExternalIntegration,
+  setup: AgentControlExternalSetup,
+  topology: AgentControlExternalTopology,
+});
+export type AgentControlExternalIntegrationDetail =
+  typeof AgentControlExternalIntegrationDetail.Type;
+
+export const AgentControlExternalIntegrationCreateInput = Schema.Struct({
+  displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  clientKind: AgentControlExternalClientKind,
+  projectScope: AgentControlExternalProjectScope,
+  capabilities: Schema.Array(AgentControlCapability).check(Schema.isMaxLength(32)),
+  rateLimitPerMinute: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX),
+  ),
+  activeTaskLimit: PositiveInt.check(
+    Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX),
+  ),
+  expiresAt: Schema.NullOr(IsoDateTime),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlExternalIntegrationCreateInput =
+  typeof AgentControlExternalIntegrationCreateInput.Type;
+
+export const AgentControlExternalIntegrationUpdateInput = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+  displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(120))),
+  clientKind: Schema.optional(AgentControlExternalClientKind),
+  projectScope: Schema.optional(AgentControlExternalProjectScope),
+  capabilities: Schema.optional(Schema.Array(AgentControlCapability).check(Schema.isMaxLength(32))),
+  rateLimitPerMinute: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX)),
+  ),
+  activeTaskLimit: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX)),
+  ),
+  expiresAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlExternalIntegrationUpdateInput =
+  typeof AgentControlExternalIntegrationUpdateInput.Type;
+
+export const AgentControlExternalIntegrationIdInput = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+});
+export type AgentControlExternalIntegrationIdInput =
+  typeof AgentControlExternalIntegrationIdInput.Type;
+
+export const AgentControlExternalIntegrationListResult = Schema.Struct({
+  integrations: Schema.Array(AgentControlExternalIntegrationDetail),
+  topology: AgentControlExternalTopology,
+});
+export type AgentControlExternalIntegrationListResult =
+  typeof AgentControlExternalIntegrationListResult.Type;
+
+/** The short-lived code is returned only for a new/resumed pairing ceremony. */
+export const AgentControlExternalPairingResult = Schema.Struct({
+  detail: AgentControlExternalIntegrationDetail,
+  pairingCode: TrimmedNonEmptyString.check(Schema.isMaxLength(64)),
+});
+export type AgentControlExternalPairingResult = typeof AgentControlExternalPairingResult.Type;
+
+export const AgentControlExternalIntegrationMutationResult = Schema.Struct({
+  integration: AgentControlExternalIntegration,
+});
+export type AgentControlExternalIntegrationMutationResult =
+  typeof AgentControlExternalIntegrationMutationResult.Type;
+
+export const AgentControlExternalIntegrationDeleteResult = Schema.Struct({
+  deleted: Schema.Boolean,
+});
+export type AgentControlExternalIntegrationDeleteResult =
+  typeof AgentControlExternalIntegrationDeleteResult.Type;
+
+export const AgentControlExternalRpcErrorCode = Schema.Literals([
+  "disabled",
+  "topology",
+  "not-found",
+  "invalid",
+  "conflict",
+  "storage",
+]);
+export class AgentControlExternalRpcError extends Schema.TaggedError<AgentControlExternalRpcError>()(
+  "AgentControlExternalRpcError",
+  {
+    code: AgentControlExternalRpcErrorCode,
+    message: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_ERROR_MESSAGE_MAX_CHARS)),
+  },
+) {}
+
+// ── External stdio MCP tool catalog ──────────────────────────────────
+
+export const AGENT_CONTROL_EXTERNAL_MCP_TOOLS = {
+  overview: "ryco_overview",
+  capabilities: "ryco_capabilities",
+  listAllowedProjects: "ryco_list_allowed_projects",
+  createTask: "ryco_create_task",
+  readTask: "ryco_read_task",
+  waitForTask: "ryco_wait_for_task",
+} as const;
+export type AgentControlExternalMcpToolName =
+  (typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS];
+export const AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES: ReadonlyArray<AgentControlExternalMcpToolName> =
+  Object.values(AGENT_CONTROL_EXTERNAL_MCP_TOOLS);
+
+export const AgentControlExternalCreateTaskInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  model: TrimmedNonEmptyString,
+  /** Explicit even when empty, so retries have one canonical plan. */
+  options: ProviderOptionSelections,
+  title: Schema.optional(AgentControlTitle),
+  prompt: AgentControlPrompt,
+  environment: Schema.optional(ThreadEnvMode),
+  runtimeMode: Schema.optional(Schema.Literals(["approval-required", "full-access"])),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlExternalCreateTaskInput = typeof AgentControlExternalCreateTaskInput.Type;
+
+export const AgentControlExternalTaskIdInput = Schema.Struct({
+  taskId: AgentControlExternalTaskId,
+});
+export type AgentControlExternalTaskIdInput = typeof AgentControlExternalTaskIdInput.Type;
+
+export const AgentControlExternalWaitForTaskInput = Schema.Struct({
+  taskId: AgentControlExternalTaskId,
+  waitFor: Schema.optional(AgentControlMcpWaitCondition),
+  timeoutMs: Schema.optional(PositiveInt),
+});
+export type AgentControlExternalWaitForTaskInput = typeof AgentControlExternalWaitForTaskInput.Type;
+
+export const AgentControlExternalTask = Schema.Struct({
+  taskId: AgentControlExternalTaskId,
+  requestId: AgentControlRequestId,
+  proposalId: AgentControlProposalId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  environment: ThreadEnvMode,
+  runtimeMode: RuntimeMode,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  releasedAt: Schema.NullOr(IsoDateTime),
+});
+export type AgentControlExternalTask = typeof AgentControlExternalTask.Type;
+
+export const AgentControlExternalTaskResult = Schema.Struct({
+  task: AgentControlExternalTask,
+  receipt: AgentControlProposalReceipt,
+  replayed: Schema.optional(Schema.Boolean),
+  timedOut: Schema.optional(Schema.Boolean),
+});
+export type AgentControlExternalTaskResult = typeof AgentControlExternalTaskResult.Type;
+
+export const AgentControlExternalOverviewResult = Schema.Struct({
+  integrationId: AgentControlIntegrationId,
+  displayName: TrimmedNonEmptyString,
+  clientKind: AgentControlExternalClientKind,
+  notice: TrimmedNonEmptyString,
+});
+export type AgentControlExternalOverviewResult = typeof AgentControlExternalOverviewResult.Type;
+
+export const AgentControlExternalCapabilitiesResult = Schema.Struct({
+  tools: Schema.Array(TrimmedNonEmptyString),
+  grantedCapabilities: Schema.Array(AgentControlCapability),
+  projectScope: AgentControlExternalProjectScope,
+  rateLimitPerMinute: PositiveInt,
+  activeTaskLimit: PositiveInt,
+  activeTaskCount: NonNegativeInt,
+  providerInstances: Schema.Array(AgentControlMcpProviderInstanceSummary),
+});
+export type AgentControlExternalCapabilitiesResult =
+  typeof AgentControlExternalCapabilitiesResult.Type;

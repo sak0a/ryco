@@ -1,5 +1,7 @@
 import type {
   AgentControlActionPlan,
+  AgentControlExternalIntegration,
+  AgentControlExternalIntegrationPrincipal,
   AgentControlProviderSessionPrincipal,
   AgentControlProposal,
   OrchestrationThreadShell,
@@ -20,11 +22,20 @@ export interface ValidateAgentControlSubmissionInput {
   readonly plan: AgentControlActionPlan;
 }
 
+export interface ValidateAgentControlExternalSubmissionInput {
+  readonly integration: AgentControlExternalIntegration;
+  readonly plan: AgentControlActionPlan;
+}
+
 export interface AgentControlActionValidatorShape {
   /** Validate live exact-turn authority and return immutable origin/target evidence. */
   readonly validateSubmission: (
     input: ValidateAgentControlSubmissionInput,
   ) => Effect.Effect<AgentControlProviderSessionPrincipal, AgentControlPlanValidationError>;
+
+  readonly validateExternalSubmission: (
+    input: ValidateAgentControlExternalSubmissionInput,
+  ) => Effect.Effect<AgentControlExternalIntegrationPrincipal, AgentControlPlanValidationError>;
 
   /** Revalidate the exact approved plan against current server state. */
   readonly revalidateExecution: (

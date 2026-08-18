@@ -13,6 +13,14 @@ import {
   AgentControlProposalReceipt,
   AgentControlProposalStreamEvent,
   AgentControlRpcError,
+  AgentControlExternalIntegrationCreateInput,
+  AgentControlExternalIntegrationDeleteResult,
+  AgentControlExternalIntegrationIdInput,
+  AgentControlExternalIntegrationListResult,
+  AgentControlExternalIntegrationMutationResult,
+  AgentControlExternalIntegrationUpdateInput,
+  AgentControlExternalPairingResult,
+  AgentControlExternalRpcError,
 } from "./agentControl.ts";
 import { AuthAccessStreamEvent, AuthRpcError } from "./auth.ts";
 import { DiagnosticsError, DiagnosticsSnapshot } from "./diagnostics.ts";
@@ -1472,6 +1480,60 @@ export const WsAgentControlSubscribeProposalsRpc = Rpc.make(
   },
 );
 
+export const WsAgentControlListIntegrationsRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.listIntegrations,
+  {
+    payload: Schema.Struct({}),
+    success: AgentControlExternalIntegrationListResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlCreateIntegrationRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.createIntegration,
+  {
+    payload: AgentControlExternalIntegrationCreateInput,
+    success: AgentControlExternalPairingResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlUpdateIntegrationRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.updateIntegration,
+  {
+    payload: AgentControlExternalIntegrationUpdateInput,
+    success: AgentControlExternalIntegrationMutationResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlResumeIntegrationPairingRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.resumeIntegrationPairing,
+  {
+    payload: AgentControlExternalIntegrationIdInput,
+    success: AgentControlExternalPairingResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlRevokeIntegrationRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.revokeIntegration,
+  {
+    payload: AgentControlExternalIntegrationIdInput,
+    success: AgentControlExternalIntegrationMutationResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlDeleteIntegrationRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.deleteIntegration,
+  {
+    payload: AgentControlExternalIntegrationIdInput,
+    success: AgentControlExternalIntegrationDeleteResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerGetAdvertisedEndpointsRpc,
@@ -1583,6 +1645,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentControlAcceptProposalRpc,
   WsAgentControlRejectProposalRpc,
   WsAgentControlSubscribeProposalsRpc,
+  WsAgentControlListIntegrationsRpc,
+  WsAgentControlCreateIntegrationRpc,
+  WsAgentControlUpdateIntegrationRpc,
+  WsAgentControlResumeIntegrationPairingRpc,
+  WsAgentControlRevokeIntegrationRpc,
+  WsAgentControlDeleteIntegrationRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetWorkflowScriptRpc,
   WsOrchestrationGetTaskOutputRpc,

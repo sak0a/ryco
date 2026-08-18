@@ -1,4 +1,6 @@
 import {
+  AGENT_CONTROL_CAPABILITIES,
+  AgentControlIntegrationId,
   AgentControlProposalId,
   AgentControlRequestId,
   OrchestrationProjectShell,
@@ -11,6 +13,7 @@ import {
   TurnId,
   WorktreeId,
   type AgentControlProposal,
+  type AgentControlExternalIntegration,
   type OrchestrationShellSnapshot,
 } from "@ryco/contracts";
 import { assert, it } from "@effect/vitest";
@@ -133,6 +136,9 @@ const makeValidator = (
   snapshotRef: Ref.Ref<OrchestrationShellSnapshot>,
   providersRef: Ref.Ref<ReadonlyArray<typeof provider>>,
   availableRefs: ReadonlyArray<string> = [],
+  revalidateExternal?: (
+    integrationId: AgentControlIntegrationId,
+  ) => Effect.Effect<AgentControlExternalIntegration>,
 ) =>
   makeAgentControlActionValidatorFromDeps({
     projections: {
@@ -152,6 +158,7 @@ const makeValidator = (
         nextCursor: null,
         totalCount: availableRefs.length,
       }),
+    ...(revalidateExternal === undefined ? {} : { revalidateExternal }),
   });
 
 it.effect("verifies an exact worktree base ref before creating a proposal", () =>
@@ -342,5 +349,76 @@ it.effect("allows an approved proposal to execute after the origin turn is torn 
       decidedAt: now,
       result: null,
     });
+  }),
+);
+
+it.effect("binds external proposals to current scope and revalidates grants before execution", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    const integrationId = AgentControlIntegrationId.make("integration-validator");
+    const integrationRef = yield* Ref.make<AgentControlExternalIntegration>({
+      integrationId,
+      displayName: "External Codex",
+      clientKind: "codex",
+      projectScope: { kind: "selected", projectIds: [projectId] },
+      capabilities: [
+        AGENT_CONTROL_CAPABILITIES.externalCreateTask,
+        AGENT_CONTROL_CAPABILITIES.externalReadTask,
+      ],
+      rateLimitPerMinute: 60,
+      activeTaskLimit: 1,
+      activeTaskCount: 0,
+      expiresAt: null,
+      revokedAt: null,
+      pairingState: "paired",
+      pairingCodeExpiresAt: null,
+      pairedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: null,
+    });
+    const validator = makeValidator(snapshot, providers, [], () => Ref.get(integrationRef));
+    const plan = {
+      kind: "createThreads" as const,
+      entries: [
+        {
+          projectId,
+          title: "External task",
+          prompt: "Run the focused fix.",
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5.6", options: [] },
+          runtimeMode: "approval-required" as const,
+          envMode: "worktree" as const,
+        },
+      ],
+    };
+    const principal = yield* validator.validateExternalSubmission({
+      integration: yield* Ref.get(integrationRef),
+      plan,
+    });
+    assert.strictEqual(principal.kind, "external-integration");
+    assert.strictEqual(principal.projectId, projectId);
+
+    const proposal: AgentControlProposal = {
+      proposalId: AgentControlProposalId.make("proposal-external"),
+      requestId: AgentControlRequestId.make("request-external"),
+      principal,
+      planVersion: 1,
+      plan,
+      planDigest: "c".repeat(64),
+      riskTags: [],
+      promptSummary: "External integration requested one task",
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decidedAt: now,
+      result: null,
+    };
+    yield* validator.revalidateExecution(proposal);
+
+    yield* Ref.update(integrationRef, (current) => ({ ...current, capabilities: [] }));
+    const changed = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(changed.reason, "caller-stale");
   }),
 );

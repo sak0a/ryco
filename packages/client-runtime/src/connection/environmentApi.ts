@@ -106,6 +106,12 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
             acceptProposal: rpcClient.agentControl.acceptProposal,
             rejectProposal: rpcClient.agentControl.rejectProposal,
             subscribeProposals: rpcClient.agentControl.subscribeProposals,
+            listIntegrations: rpcClient.agentControl.listIntegrations,
+            createIntegration: rpcClient.agentControl.createIntegration,
+            updateIntegration: rpcClient.agentControl.updateIntegration,
+            resumeIntegrationPairing: rpcClient.agentControl.resumeIntegrationPairing,
+            revokeIntegration: rpcClient.agentControl.revokeIntegration,
+            deleteIntegration: rpcClient.agentControl.deleteIntegration,
           },
         }
       : {}),

@@ -177,6 +177,12 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
   },
   {
     section: "mcp-servers",
+    title: "External integrations",
+    description: "Pair local Codex or Claude MCP clients with scoped, revocable access.",
+    keywords: "model context protocol tools pairing codex claude approval agent control",
+  },
+  {
+    section: "mcp-servers",
     title: "MCP Servers",
     description: "Manage Codex MCP servers and provider MCP support.",
     keywords: "model context protocol tools add server oauth",

@@ -40,6 +40,13 @@ import type {
   AgentControlProposalQueue,
   AgentControlProposalReceipt,
   AgentControlProposalStreamEvent,
+  AgentControlExternalIntegrationCreateInput,
+  AgentControlExternalIntegrationDeleteResult,
+  AgentControlExternalIntegrationIdInput,
+  AgentControlExternalIntegrationListResult,
+  AgentControlExternalIntegrationMutationResult,
+  AgentControlExternalIntegrationUpdateInput,
+  AgentControlExternalPairingResult,
 } from "./agentControl.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
@@ -809,5 +816,21 @@ export interface EnvironmentApi {
         onError?: () => void;
       },
     ) => () => void;
+    listIntegrations: () => Promise<AgentControlExternalIntegrationListResult>;
+    createIntegration: (
+      input: AgentControlExternalIntegrationCreateInput,
+    ) => Promise<AgentControlExternalPairingResult>;
+    updateIntegration: (
+      input: AgentControlExternalIntegrationUpdateInput,
+    ) => Promise<AgentControlExternalIntegrationMutationResult>;
+    resumeIntegrationPairing: (
+      input: AgentControlExternalIntegrationIdInput,
+    ) => Promise<AgentControlExternalPairingResult>;
+    revokeIntegration: (
+      input: AgentControlExternalIntegrationIdInput,
+    ) => Promise<AgentControlExternalIntegrationMutationResult>;
+    deleteIntegration: (
+      input: AgentControlExternalIntegrationIdInput,
+    ) => Promise<AgentControlExternalIntegrationDeleteResult>;
   };
 }

@@ -100,6 +100,7 @@ import { ProjectionWorktreeRepositoryLive } from "./persistence/Layers/Projectio
 import { AgentControlAuditRepositoryLive } from "./persistence/Layers/AgentControlAudit.ts";
 import { AgentControlOperationRepositoryLive } from "./persistence/Layers/AgentControlOperations.ts";
 import { AgentControlProposalRepositoryLive } from "./persistence/Layers/AgentControlProposals.ts";
+import { AgentControlExternalRepositoryLive } from "./persistence/Layers/AgentControlExternal.ts";
 import { AgentControlMcpServerLive } from "./agentControl/Layers/AgentControlMcpServer.ts";
 import { AgentControlOperationStoreLive } from "./agentControl/Layers/AgentControlOperationStore.ts";
 import { AgentControlPolicyLive } from "./agentControl/Layers/AgentControlPolicy.ts";
@@ -109,6 +110,9 @@ import { AgentControlProposalStoreLive } from "./agentControl/Layers/AgentContro
 import { AgentControlSessionRegistryLive } from "./agentControl/Layers/AgentControlSessionRegistry.ts";
 import { AgentControlActionValidatorLive } from "./agentControl/Layers/AgentControlActionValidator.ts";
 import { AgentControlExecutionLive } from "./agentControl/Layers/AgentControlExecution.ts";
+import { AgentControlExternalIntegrationServiceLive } from "./agentControl/Layers/AgentControlExternalIntegration.ts";
+import { AgentControlExternalTaskServiceLive } from "./agentControl/Layers/AgentControlExternalTask.ts";
+import { AgentControlExternalMcpServerLive } from "./agentControl/Layers/AgentControlExternalMcpServer.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { OrchestrationCommandApplicationLive } from "./orchestration/Layers/OrchestrationCommandApplication.ts";
 import {
@@ -220,6 +224,7 @@ const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersisten
 const AgentControlLayerLive = Layer.mergeAll(
   AgentControlProposalServiceLive,
   AgentControlOperationStoreLive,
+  AgentControlExternalIntegrationServiceLive,
 ).pipe(
   Layer.provideMerge(AgentControlProposalStoreLive),
   Layer.provideMerge(AgentControlProposalEventsLive),
@@ -227,6 +232,7 @@ const AgentControlLayerLive = Layer.mergeAll(
   Layer.provideMerge(AgentControlProposalRepositoryLive),
   Layer.provideMerge(AgentControlOperationRepositoryLive),
   Layer.provideMerge(AgentControlAuditRepositoryLive),
+  Layer.provideMerge(AgentControlExternalRepositoryLive),
 );
 
 // In-memory credential/lease authority for the internal provider-session
@@ -409,6 +415,11 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 const RuntimeServicesLive = Layer.mergeAll(
   ServerRuntimeStartupLive,
   AgentControlMcpServerLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+  AgentControlExternalMcpServerLive.pipe(
+    Layer.provideMerge(
+      AgentControlExternalTaskServiceLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+    ),
+  ),
   AgentControlExecutionLive.pipe(
     Layer.provideMerge(ServerRuntimeStartupLive),
     Layer.provideMerge(AgentControlActionValidatorLive),

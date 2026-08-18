@@ -309,6 +309,9 @@ it.live("rejects missing, malformed, unknown, and revoked credentials with 401",
       const malformed = yield* post(url, { bearer: "hub-session-token", body: "{}" });
       assert.strictEqual(malformed.status, 401);
 
+      const external = yield* post(url, { bearer: `rycoext_${"A".repeat(43)}`, body: "{}" });
+      assert.strictEqual(external.status, 401);
+
       const unknown = yield* post(url, { bearer: `rycoac_${"B".repeat(43)}`, body: "{}" });
       assert.strictEqual(unknown.status, 401);
 

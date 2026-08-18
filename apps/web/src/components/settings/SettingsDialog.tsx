@@ -45,7 +45,7 @@ const NAV_ITEMS: ReadonlyArray<NavItem> = [
   { id: "general", label: "General", icon: Settings2Icon },
   { id: "providers", label: "Providers", icon: BlocksIcon },
   { id: "opinionated-plugins", label: "Plugins", icon: PlugZapIcon },
-  { id: "mcp-servers", label: "MCP Servers", icon: ServerIcon },
+  { id: "mcp-servers", label: "Integrations", icon: ServerIcon },
   { id: "appearance", label: "Appearance", icon: PaletteIcon },
   { id: "keybindings", label: "Keybindings", icon: KeyboardIcon },
   { id: "source-control", label: "Source Control", icon: GitBranchIcon },
@@ -112,8 +112,10 @@ const LazyOpinionatedPluginsSettingsPanel = lazy(() =>
     default: module.OpinionatedPluginsSettingsPanel,
   })),
 );
-const LazyMcpServersSettings = lazy(() =>
-  import("./McpServersSettings").then((module) => ({ default: module.McpServersSettings })),
+const LazyIntegrationsSettings = lazy(() =>
+  import("./IntegrationsSettingsPanel").then((module) => ({
+    default: module.IntegrationsSettingsPanel,
+  })),
 );
 const LazyAppearanceSettingsPanel = lazy(() =>
   import("./AppearanceSettings").then((module) => ({ default: module.AppearanceSettingsPanel })),
@@ -177,7 +179,7 @@ function SectionPanel({
       {section === "general" ? <GeneralSettingsPanel searchTargetId={searchTargetId} /> : null}
       {section === "providers" ? <LazyProvidersSettingsPanel /> : null}
       {section === "opinionated-plugins" ? <LazyOpinionatedPluginsSettingsPanel /> : null}
-      {section === "mcp-servers" ? <LazyMcpServersSettings /> : null}
+      {section === "mcp-servers" ? <LazyIntegrationsSettings /> : null}
       {section === "appearance" ? <LazyAppearanceSettingsPanel /> : null}
       {section === "keybindings" ? <LazyKeybindingsSettingsPanel /> : null}
       {section === "source-control" ? <LazySourceControlSettingsPanel /> : null}

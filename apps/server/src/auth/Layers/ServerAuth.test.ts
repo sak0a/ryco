@@ -41,6 +41,14 @@ const makeCookieRequest = (
     headers: {},
   }) as unknown as Parameters<ServerAuthShape["authenticateHttpRequest"]>[0];
 
+const makeBearerRequest = (
+  token: string,
+): Parameters<ServerAuthShape["authenticateHttpRequest"]>[0] =>
+  ({
+    cookies: {},
+    headers: { authorization: `Bearer ${token}` },
+  }) as unknown as Parameters<ServerAuthShape["authenticateHttpRequest"]>[0];
+
 const requestMetadata = {
   deviceType: "desktop" as const,
   os: "macOS",
@@ -49,6 +57,17 @@ const requestMetadata = {
 };
 
 it.layer(NodeServices.layer)("ServerAuthLive", (it) => {
+  it.effect("never accepts an external MCP credential as HTTP or WebSocket auth", () =>
+    Effect.gen(function* () {
+      const serverAuth = yield* ServerAuth;
+      const request = makeBearerRequest(`rycoext_${"A".repeat(43)}`);
+      const http = yield* Effect.flip(serverAuth.authenticateHttpRequest(request));
+      expect(http.status).toBe(401);
+      const websocket = yield* Effect.flip(serverAuth.authenticateWebSocketUpgrade(request));
+      expect(websocket.status).toBe(401);
+    }).pipe(Effect.provide(makeServerAuthLayer())),
+  );
+
   it.effect("maps invalid bootstrap credential failures to 401", () =>
     Effect.sync(() => {
       const error = toBootstrapExchangeAuthError(

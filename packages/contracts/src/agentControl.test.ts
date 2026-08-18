@@ -386,3 +386,63 @@ describe("Agent Control MCP contracts", () => {
     expect(decoded.providerInstances[0]?.instanceId).toBe("codex_personal");
   });
 });
+
+describe("AgentControl external MCP", () => {
+  it("publishes exactly the six scoped external tools", async () => {
+    const { AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES } = await import("./agentControl.ts");
+    expect([...AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES]).toEqual([
+      "ryco_overview",
+      "ryco_capabilities",
+      "ryco_list_allowed_projects",
+      "ryco_create_task",
+      "ryco_read_task",
+      "ryco_wait_for_task",
+    ]);
+  });
+
+  it("requires stable task targeting and defaults no elevated policy on the wire", async () => {
+    const { AgentControlExternalCreateTaskInput } = await import("./agentControl.ts");
+    const decode = Schema.decodeUnknownSync(AgentControlExternalCreateTaskInput);
+    const value = decode({
+      requestId: "request-1",
+      projectId: "project-1",
+      providerInstanceId: "codex-main",
+      model: "gpt-5.6",
+      options: [],
+      prompt: "Fix the focused test.",
+    });
+    expect(value.environment).toBeUndefined();
+    expect(value.runtimeMode).toBeUndefined();
+    expect(() => decode({ ...value, requestId: undefined })).toThrow();
+    expect(() => decode({ ...value, projectId: undefined })).toThrow();
+    expect(() => decode({ ...value, options: undefined })).toThrow();
+    expect(() => decode({ ...value, runtimeMode: "auto" })).toThrow();
+  });
+
+  it("keeps credentials and secret hashes out of public integration schemas", async () => {
+    const { AgentControlExternalIntegration } = await import("./agentControl.ts");
+    const decode = Schema.decodeUnknownSync(AgentControlExternalIntegration);
+    const value = decode({
+      integrationId: "integration-1",
+      displayName: "Local Codex",
+      clientKind: "codex",
+      projectScope: { kind: "all" },
+      capabilities: ["external.tasks.create"],
+      rateLimitPerMinute: 60,
+      activeTaskLimit: 1,
+      activeTaskCount: 0,
+      expiresAt: null,
+      revokedAt: null,
+      pairingState: "pending",
+      pairingCodeExpiresAt: "2026-08-18T01:00:00.000Z",
+      pairedAt: null,
+      createdAt: "2026-08-18T00:00:00.000Z",
+      updatedAt: "2026-08-18T00:00:00.000Z",
+      lastUsedAt: null,
+      credential: "rycoext_forbidden",
+      credentialHash: "a".repeat(64),
+    });
+    expect(value).not.toHaveProperty("credential");
+    expect(value).not.toHaveProperty("credentialHash");
+  });
+});

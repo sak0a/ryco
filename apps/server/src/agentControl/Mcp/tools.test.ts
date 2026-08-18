@@ -454,6 +454,7 @@ it.effect("creates an immutable proposal without mutating the target", () =>
                     },
                   ],
           }),
+        validateExternalSubmission: () => Effect.die("unused"),
         revalidateExecution: () => Effect.void,
       },
       proposals: {
