@@ -61,6 +61,26 @@ const CAPABILITY_OPTIONS: ReadonlyArray<{
     description: "Read or wait only for tasks created by this integration.",
   },
   {
+    capability: AGENT_CONTROL_CAPABILITIES.externalReadAutomations,
+    label: "Read automations",
+    description: "Read bounded schedules and run outcomes inside the selected project scope.",
+  },
+  {
+    capability: AGENT_CONTROL_CAPABILITIES.externalManageAutomations,
+    label: "Request automations",
+    description: "Propose schedule changes; each due run still requires separate approval.",
+  },
+  {
+    capability: AGENT_CONTROL_CAPABILITIES.externalReadActivity,
+    label: "Read activity",
+    description: "Read bounded payload-free project and provider event summaries.",
+  },
+  {
+    capability: AGENT_CONTROL_CAPABILITIES.externalReadDiagnostics,
+    label: "Read diagnostics",
+    description: "Read redacted count-only health summaries for allowed projects.",
+  },
+  {
     capability: AGENT_CONTROL_CAPABILITIES.externalSharedCheckout,
     label: "Request shared checkout",
     description: "May request the local checkout; each request still needs approval.",

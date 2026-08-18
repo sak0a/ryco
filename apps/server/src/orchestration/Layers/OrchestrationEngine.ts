@@ -356,6 +356,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     limit,
   ) => eventStore.readPage(fromSequenceExclusive, limit);
 
+  const readRecentEvents: OrchestrationEngineShape["readRecentEvents"] = (input) =>
+    eventStore.readRecent === undefined ? Effect.succeed([]) : eventStore.readRecent(input);
+
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) =>
     Effect.gen(function* () {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>();
@@ -369,6 +372,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   return {
     readEvents,
     readEventsPage,
+    readRecentEvents,
     dispatch,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)

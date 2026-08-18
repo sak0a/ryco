@@ -264,6 +264,7 @@ layer("AgentControlOperationRepository", (it) => {
           completedSteps: ["worktree-preflight"],
           resources: {
             projectIds: [],
+            automationIds: [],
             threadIds: [ThreadId.make("thread-2")],
             ownedThreadIds: [],
             worktreeIds: [WorktreeId.make("worktree-1")],

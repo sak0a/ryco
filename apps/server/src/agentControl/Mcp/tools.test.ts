@@ -4,8 +4,10 @@ import {
   AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS,
   AGENT_CONTROL_MCP_TOOLS,
   AGENT_CONTROL_MCP_TOOL_NAMES,
+  AGENT_CONTROL_RISK_TAGS,
   AGENT_CONTROL_ACTION_CAPABILITIES,
   DEFAULT_SERVER_SETTINGS,
+  AgentControlAutomationId,
   AgentControlProposalId,
   AgentControlRequestId,
   OrchestrationProjectShell,
@@ -30,6 +32,7 @@ import {
   AgentControlPlanValidationError,
 } from "../Errors.ts";
 import type { AgentControlPolicyShape } from "../Services/AgentControlPolicy.ts";
+import type { AgentControlAutomationShape } from "../Services/AgentControlAutomation.ts";
 import type { AgentControlSessionRecord } from "../Services/AgentControlSessionRegistry.ts";
 import { makeAgentControlMcpTools, type AgentControlMcpToolDeps } from "./tools.ts";
 
@@ -352,7 +355,7 @@ const structured = (result: { readonly structuredContent?: unknown }): unknown =
 
 // ── Catalog ───────────────────────────────────────────────────────────
 
-it.effect("advertises scoped reads without authority and all eight writes with it", () =>
+it.effect("advertises capability-scoped reads and all proposal-only writes with authority", () =>
   Effect.gen(function* () {
     const tools = makeAgentControlMcpTools(makeDeps());
     const readDescriptors = yield* tools.descriptorsFor(session);
@@ -372,9 +375,211 @@ it.effect("advertises scoped reads without authority and all eight writes with i
     );
     assert.strictEqual(
       writeDescriptors.filter((tool) => writeTools.isWriteTool(tool.name)).length,
-      8,
+      11,
     );
     assert.isTrue(tools.hasTool("ryco_create_threads"));
+  }),
+);
+
+it.effect("automation create, update, and cancel remain inert exact proposals until accepted", () =>
+  Effect.gen(function* () {
+    const submitted: Array<
+      Parameters<NonNullable<AgentControlMcpToolDeps["proposals"]["submit"]>>[0]
+    > = [];
+    const currentAutomation = {
+      automationId: AgentControlAutomationId.make("automation-existing"),
+      principal: proposalOwn.principal,
+      projectId: projectOne.id,
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      definition: {
+        execution: {
+          projectId: projectOne.id,
+          title: "Existing bounded review",
+          prompt: "Review the project and report findings.",
+          modelSelection,
+          runtimeMode: "auto" as const,
+          envMode: "worktree" as const,
+        },
+        schedule: { kind: "once" as const, runAt: "2099-08-19T00:00:00.000Z" },
+        enabled: true,
+      },
+      revision: 1,
+      enabled: true,
+      cancelled: false,
+      cancelledAt: null,
+      nextRunAt: "2099-08-19T00:00:00.000Z",
+      createdAt: T0,
+      updatedAt: T1,
+    };
+    const deps = makeDeps({
+      automations: {
+        get: () => Effect.succeed(currentAutomation),
+      } as unknown as AgentControlAutomationShape,
+      getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)),
+      validator: {
+        validateSubmission: () =>
+          Effect.succeed({
+            kind: "provider-session",
+            threadId: callerThreadId,
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeSessionId: RuntimeSessionId.make("runtime-1"),
+            turnId: TurnId.make("turn-active"),
+            originProjectId: projectOne.id,
+            originRuntimeMode: "auto",
+            originEnvMode: "worktree",
+            targetSnapshots: [],
+          }),
+        validateExternalSubmission: () => Effect.die("unused"),
+        revalidateExecution: () => Effect.void,
+      },
+      proposals: {
+        getProposal: makeDeps().proposals.getProposal,
+        submit: (input) => {
+          submitted.push(input);
+          return Effect.succeed({
+            replayed: false,
+            proposal: {
+              ...proposalOwn,
+              proposalId: AgentControlProposalId.make("proposal-automation-create"),
+              requestId: input.requestId,
+              principal: input.principal,
+              plan: input.plan,
+              riskTags: input.riskTags,
+              promptSummary: input.promptSummary,
+            },
+          });
+        },
+      },
+    });
+    const beforeThreads = shellSnapshot.threads;
+    const calls = [
+      [
+        AGENT_CONTROL_MCP_TOOLS.proposeAutomationCreate,
+        {
+          requestId: "request-automation-create-inert",
+          projectId: "project-1",
+          providerInstanceId: "codex",
+          title: "Daily bounded review",
+          prompt: "Review the project and report findings.",
+          model: "gpt-5.3-codex",
+          options: [],
+          runtimeMode: "auto",
+          envMode: "worktree",
+          schedule: { kind: "once", runAt: "2099-08-19T00:00:00.000Z" },
+        },
+      ],
+      [
+        AGENT_CONTROL_MCP_TOOLS.proposeAutomationUpdate,
+        {
+          requestId: "request-automation-update-inert",
+          automationId: currentAutomation.automationId,
+          expectedRevision: 1,
+          title: "Updated bounded review",
+        },
+      ],
+      [
+        AGENT_CONTROL_MCP_TOOLS.proposeAutomationCancel,
+        {
+          requestId: "request-automation-cancel-inert",
+          automationId: currentAutomation.automationId,
+          expectedRevision: 1,
+        },
+      ],
+    ] as const;
+    for (const [name, args] of calls) {
+      const result = yield* call(deps, name, args, writeSession);
+      assert.isUndefined(result.isError);
+    }
+    assert.deepStrictEqual(
+      submitted.map((entry) => entry.plan.kind),
+      ["createAutomation", "updateAutomation", "cancelAutomation"],
+    );
+    assert.strictEqual(shellSnapshot.threads, beforeThreads);
+    assert.deepStrictEqual(
+      submitted.map((entry) => entry.riskTags),
+      [
+        [AGENT_CONTROL_RISK_TAGS.createsAutomation],
+        [AGENT_CONTROL_RISK_TAGS.modifiesAutomation],
+        [AGENT_CONTROL_RISK_TAGS.cancelsAutomation],
+      ],
+    );
+  }),
+);
+
+it.effect("diagnostic reads stay exact-scope and serialize only the redacted contract", () =>
+  Effect.gen(function* () {
+    const diagnostics = {
+      recentActivity: () => Effect.die("unused"),
+      orchestrationEvents: () => Effect.die("unused"),
+      providerRuntimeEvents: () => Effect.die("unused"),
+      summary: () =>
+        Effect.succeed({
+          generatedAt: T2,
+          health: "ok" as const,
+          projectId: projectOne.id,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          provider: {
+            status: "ready" as const,
+            availability: "available" as const,
+            enabled: true,
+            installed: true,
+          },
+          project: {
+            threadCount: 1,
+            activeThreadCount: 1,
+            enabledAutomationCount: 0,
+            pendingAutomationRunCount: 0,
+          },
+          server: { uptimeMs: 1, memoryRssBytes: 2, heapUsedBytes: 3, eventLoopDelayMs: null },
+          operational: {
+            failureCount: 0,
+            warningCount: 0,
+            retainedTraceCount: 0,
+            queueOverflowCount: 0,
+            providerLogDroppedRecords: 0,
+          },
+          redacted: true as const,
+          omitted: [
+            "credentials-and-environment" as const,
+            "paths-files-and-terminals" as const,
+            "commands-transcripts-and-payloads" as const,
+            "traces-logs-requests-and-relay" as const,
+            "hosted-browser-and-service-worker" as const,
+            "other-projects-and-provider-sessions" as const,
+          ],
+          secret: "never-leak-token",
+          rawPath: "/private/worktree",
+          terminal: "terminal contents",
+          transcript: "transcript dump",
+          requestBody: "raw request body",
+          relay: "hosted relay data",
+        }),
+    };
+    const result = yield* call(
+      makeDeps({ diagnostics }),
+      AGENT_CONTROL_MCP_TOOLS.diagnosticsSummary,
+      { projectId: "project-1", providerInstanceId: "codex" },
+      writeSession,
+    );
+    assert.isUndefined(result.isError);
+    const serialized = JSON.stringify(structured(result));
+    for (const forbidden of [
+      "never-leak-token",
+      "/private/worktree",
+      "terminal contents",
+      "transcript dump",
+      "raw request body",
+      "hosted relay data",
+    ])
+      assert.notInclude(serialized, forbidden);
+
+    const denied = yield* call(
+      makeDeps({ diagnostics }),
+      AGENT_CONTROL_MCP_TOOLS.diagnosticsSummary,
+      { projectId: "project-2", providerInstanceId: "codex" },
+      writeSession,
+    );
+    assert.isTrue(denied.isError);
   }),
 );
 
@@ -574,11 +779,15 @@ it.effect("ryco_capabilities uses provider instances and bounds model lists", ()
     assert.isTrue(payload.readOnly);
     assert.deepStrictEqual(
       [...payload.tools].toSorted(),
-      AGENT_CONTROL_MCP_TOOL_NAMES.filter(
-        (name) =>
-          !makeAgentControlMcpTools(makeDeps()).isWriteTool(name) &&
-          name !== AGENT_CONTROL_MCP_TOOLS.settingsSummary,
-      ).toSorted(),
+      [
+        AGENT_CONTROL_MCP_TOOLS.context,
+        AGENT_CONTROL_MCP_TOOLS.capabilities,
+        AGENT_CONTROL_MCP_TOOLS.listProjects,
+        AGENT_CONTROL_MCP_TOOLS.listThreads,
+        AGENT_CONTROL_MCP_TOOLS.readThread,
+        AGENT_CONTROL_MCP_TOOLS.readControlRequest,
+        AGENT_CONTROL_MCP_TOOLS.waitForControlRequest,
+      ].toSorted(),
     );
     assert.strictEqual(payload.providerInstances[0]?.instanceId, "codex");
     assert.strictEqual(payload.providerInstances[0]?.models.length, 50);

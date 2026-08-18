@@ -1,5 +1,6 @@
 import {
   AGENT_CONTROL_CAPABILITIES,
+  AgentControlAutomationId,
   AgentControlIntegrationId,
   AgentControlProposalId,
   AgentControlRequestId,
@@ -25,6 +26,7 @@ import type {
   AgentControlTurnAuthority,
 } from "../Services/AgentControlSessionRegistry.ts";
 import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
+import type { AgentControlAutomationShape } from "../Services/AgentControlAutomation.ts";
 import { makeAgentControlActionValidatorFromDeps } from "./AgentControlActionValidator.ts";
 
 const now = "2026-08-18T00:00:00.000Z";
@@ -141,6 +143,7 @@ const makeValidator = (
     integrationId: AgentControlIntegrationId,
   ) => Effect.Effect<AgentControlExternalIntegration>,
   projectPlans?: AgentControlProjectPlansShape,
+  automations?: AgentControlAutomationShape,
 ) =>
   makeAgentControlActionValidatorFromDeps({
     projections: {
@@ -162,6 +165,7 @@ const makeValidator = (
       }),
     ...(revalidateExternal === undefined ? {} : { revalidateExternal }),
     ...(projectPlans === undefined ? {} : { projectPlans }),
+    ...(automations === undefined ? {} : { automations }),
   });
 
 it.effect("scopes project mutations and fails settings changes closed", () =>
@@ -490,5 +494,101 @@ it.effect("binds external proposals to current scope and revalidates grants befo
     yield* Ref.update(integrationRef, (current) => ({ ...current, capabilities: [] }));
     const changed = yield* Effect.flip(validator.revalidateExecution(proposal));
     assert.strictEqual(changed.reason, "caller-stale");
+  }),
+);
+
+it.effect("binds external automation proposals to project, provider, and current grants", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    const integrationId = AgentControlIntegrationId.make("integration-automation-validator");
+    const integrationRef = yield* Ref.make<AgentControlExternalIntegration>({
+      integrationId,
+      displayName: "External scheduler",
+      clientKind: "generic-mcp",
+      projectScope: { kind: "selected", projectIds: [projectId] },
+      capabilities: [
+        AGENT_CONTROL_CAPABILITIES.externalCreateTask,
+        AGENT_CONTROL_CAPABILITIES.externalManageAutomations,
+      ],
+      rateLimitPerMinute: 60,
+      activeTaskLimit: 1,
+      activeTaskCount: 0,
+      expiresAt: null,
+      revokedAt: null,
+      pairingState: "paired",
+      pairingCodeExpiresAt: null,
+      pairedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: null,
+    });
+    const automations = {
+      validateLifecyclePlan: () => Effect.void,
+    } as unknown as AgentControlAutomationShape;
+    const validator = makeValidator(
+      snapshot,
+      providers,
+      [],
+      () => Ref.get(integrationRef),
+      undefined,
+      automations,
+    );
+    const plan = {
+      kind: "createAutomation" as const,
+      automationId: AgentControlAutomationId.make("automation-external-scope"),
+      definition: {
+        execution: {
+          projectId,
+          title: "Scoped scheduled task",
+          prompt: "Prepare one exact proposal when due.",
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5.6", options: [] },
+          runtimeMode: "approval-required" as const,
+          envMode: "worktree" as const,
+        },
+        schedule: { kind: "once" as const, runAt: "2099-01-01T00:00:00.000Z" },
+        enabled: true,
+      },
+    };
+
+    const principal = yield* validator.validateExternalSubmission({
+      integration: yield* Ref.get(integrationRef),
+      plan,
+    });
+    const proposal: AgentControlProposal = {
+      proposalId: AgentControlProposalId.make("proposal-external-automation"),
+      requestId: AgentControlRequestId.make("request-external-automation"),
+      principal,
+      planVersion: 1,
+      plan,
+      planDigest: "d".repeat(64),
+      riskTags: [],
+      promptSummary: "Create a governed automation",
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decidedAt: now,
+      result: null,
+    };
+    yield* validator.revalidateExecution(proposal);
+
+    const deniedScope = yield* Effect.flip(
+      validator.validateExternalSubmission({
+        integration: {
+          ...(yield* Ref.get(integrationRef)),
+          projectScope: { kind: "selected", projectIds: [] },
+        },
+        plan,
+      }),
+    );
+    assert.strictEqual(deniedScope.reason, "project-scope");
+
+    yield* Ref.update(integrationRef, (current) => ({
+      ...current,
+      capabilities: [AGENT_CONTROL_CAPABILITIES.externalCreateTask],
+    }));
+    const revoked = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(revoked.reason, "caller-stale");
   }),
 );

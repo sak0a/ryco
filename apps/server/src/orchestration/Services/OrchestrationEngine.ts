@@ -52,6 +52,12 @@ export interface OrchestrationEngineShape {
     never
   >;
 
+  /** Newest-first bounded persistence read for authorization-filtered summaries. */
+  readonly readRecentEvents?: (input: {
+    readonly since: string;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationEvent>, OrchestrationEventStoreError>;
+
   /**
    * Dispatch a validated orchestration command.
    *

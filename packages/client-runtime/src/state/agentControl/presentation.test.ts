@@ -160,6 +160,58 @@ describe("buildAgentControlProposalCardModel", () => {
     ]);
   });
 
+  it("distinguishes schedule-definition approval from fresh run approval", () => {
+    const execution = {
+      projectId: ProjectId.make("project-1"),
+      title: "Review failures",
+      prompt: "Review current failures and summarize.",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6" },
+      runtimeMode: "approval-required" as const,
+      envMode: "worktree" as const,
+    };
+    const schedule = {
+      kind: "fixed-interval" as const,
+      startsAt: "2026-08-18T10:00:00.000Z",
+      intervalMs: 900_000,
+      endsAt: "2026-08-19T10:00:00.000Z",
+    };
+    const definition = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "createAutomation",
+          automationId: "automation-1" as never,
+          definition: { execution, schedule, enabled: true },
+        },
+      }),
+    );
+    expect(definition.actionLabel).toBe("Create schedule definition");
+    expect(definition.detailSections[0]?.lines).toContain(
+      "This approval authorizes only the schedule definition.",
+    );
+    expect(definition.detailSections[0]?.lines).toContain(
+      "Every due run creates a fresh exact proposal and waits for user approval.",
+    );
+
+    const run = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "automationRun",
+          automationId: "automation-1" as never,
+          runId: "automation-run-1" as never,
+          automationRevision: 2,
+          scheduledFor: "2026-08-18T10:00:00.000Z",
+          coalescedOccurrences: 3,
+          execution,
+        },
+      }),
+    );
+    expect(run.actionLabel).toBe("Approve one scheduled run");
+    expect(run.detailSections[0]?.lines).toContain("Missed intervals coalesced: 3");
+    expect(run.detailSections[0]?.lines).toContain(
+      "Approving the schedule did not approve this run; this exact proposal does.",
+    );
+  });
+
   it("identifies external integration origins without a caller thread", () => {
     const model = buildAgentControlProposalCardModel(
       makeProposal({

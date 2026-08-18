@@ -43,6 +43,26 @@ const createThreadsPlan = {
   ],
 };
 
+const automationDefinition = {
+  execution: {
+    projectId: "project-1",
+    title: "Bounded review",
+    prompt: "Review the project and report findings.",
+    modelSelection: { instanceId: "codex", model: "gpt-5.6" },
+    runtimeMode: "approval-required",
+    envMode: "worktree",
+  },
+  schedule: { kind: "once", runAt: "2026-08-19T00:00:00.000Z" },
+  enabled: true,
+} as const;
+
+const automationRevision = {
+  revision: 1,
+  definition: automationDefinition,
+  cancelled: false,
+  updatedAt: "2026-08-18T00:00:00.000Z",
+} as const;
+
 const digest = "a".repeat(64);
 
 const proposalWire = {
@@ -132,6 +152,39 @@ describe("AgentControlActionPlan", () => {
         change: { kind: "providerUpdateChecks", before: true, after: false },
       }).kind,
     ).toBe("changeSettings");
+    expect(
+      decodePlan({
+        kind: "createAutomation",
+        automationId: "automation-1",
+        definition: automationDefinition,
+      }).kind,
+    ).toBe("createAutomation");
+    expect(
+      decodePlan({
+        kind: "updateAutomation",
+        automationId: "automation-1",
+        before: automationRevision,
+        after: automationDefinition,
+      }).kind,
+    ).toBe("updateAutomation");
+    expect(
+      decodePlan({
+        kind: "cancelAutomation",
+        automationId: "automation-1",
+        expected: automationRevision,
+      }).kind,
+    ).toBe("cancelAutomation");
+    expect(
+      decodePlan({
+        kind: "automationRun",
+        automationId: "automation-1",
+        runId: "automation-run-1",
+        automationRevision: 1,
+        scheduledFor: automationDefinition.schedule.runAt,
+        coalescedOccurrences: 0,
+        execution: automationDefinition.execution,
+      }).kind,
+    ).toBe("automationRun");
   });
 
   it("rejects unknown action kinds", () => {
@@ -244,12 +297,16 @@ describe("forward compatibility (additive extension)", () => {
       AGENT_CONTROL_CAPABILITIES.createThreads,
     );
     expect(Object.keys(AGENT_CONTROL_ACTION_CAPABILITIES).toSorted()).toEqual([
+      "automationRun",
+      "cancelAutomation",
       "changeSettings",
+      "createAutomation",
       "createProject",
       "createThreads",
       "interruptThread",
       "removeProject",
       "sendMessage",
+      "updateAutomation",
       "updateProject",
       "updateThread",
     ]);
@@ -280,6 +337,7 @@ describe("AgentControlOperation", () => {
     expect(state.completedSteps).toEqual([]);
     expect(state.resources).toEqual({
       projectIds: [],
+      automationIds: [],
       threadIds: [],
       ownedThreadIds: [],
       worktreeIds: [],
@@ -290,7 +348,7 @@ describe("AgentControlOperation", () => {
 });
 
 describe("Agent Control MCP contracts", () => {
-  it("catalogs eight read tools and eight proposal-backed mutation tools", async () => {
+  it("catalogs fifteen read tools and eleven proposal-backed mutation tools", async () => {
     const { AGENT_CONTROL_MCP_TOOLS, AGENT_CONTROL_MCP_TOOL_NAMES } =
       await import("./agentControl.ts");
     expect([...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted()).toEqual(
@@ -303,9 +361,19 @@ describe("Agent Control MCP contracts", () => {
         "ryco_read_control_request",
         "ryco_wait_for_control_request",
         "ryco_create_threads",
+        "ryco_diagnostics_summary",
         "ryco_send_message",
         "ryco_interrupt_thread",
         "ryco_update_thread",
+        "ryco_list_automations",
+        "ryco_read_automation",
+        "ryco_list_automation_runs",
+        "ryco_propose_automation_create",
+        "ryco_propose_automation_update",
+        "ryco_propose_automation_cancel",
+        "ryco_recent_activity",
+        "ryco_orchestration_events",
+        "ryco_provider_runtime_events",
         "ryco_settings_summary",
         "ryco_propose_project_create",
         "ryco_propose_project_update",
@@ -313,7 +381,7 @@ describe("Agent Control MCP contracts", () => {
         "ryco_propose_settings_change",
       ].toSorted(),
     );
-    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(16);
+    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(26);
     for (const name of AGENT_CONTROL_MCP_TOOL_NAMES) {
       expect(name.startsWith("ryco_")).toBe(true);
     }
@@ -516,7 +584,7 @@ describe("Agent Control MCP contracts", () => {
 });
 
 describe("AgentControl external MCP", () => {
-  it("publishes exactly the six scoped external tools", async () => {
+  it("publishes the scoped task, automation, activity, and diagnostics tools", async () => {
     const { AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES } = await import("./agentControl.ts");
     expect([...AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES]).toEqual([
       "ryco_overview",
@@ -525,6 +593,16 @@ describe("AgentControl external MCP", () => {
       "ryco_create_task",
       "ryco_read_task",
       "ryco_wait_for_task",
+      "ryco_list_automations",
+      "ryco_read_automation",
+      "ryco_list_automation_runs",
+      "ryco_propose_automation_create",
+      "ryco_propose_automation_update",
+      "ryco_propose_automation_cancel",
+      "ryco_recent_activity",
+      "ryco_orchestration_events",
+      "ryco_provider_runtime_events",
+      "ryco_diagnostics_summary",
     ]);
   });
 

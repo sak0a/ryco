@@ -1,7 +1,6 @@
 import {
   AGENT_CONTROL_CAPABILITIES,
   AGENT_CONTROL_MCP_TOOLS,
-  AGENT_CONTROL_MCP_TOOL_NAMES,
   AgentControlProposalId,
   AgentControlRequestId,
   ProviderInstanceId,
@@ -255,19 +254,16 @@ it.live("speaks the MCP protocol: initialize, ping, tools/list, tools/call", () 
         .tools;
       assert.deepStrictEqual(
         tools.map((tool) => tool.name).toSorted(),
-        AGENT_CONTROL_MCP_TOOL_NAMES.filter(
-          (name) =>
-            ![
-              AGENT_CONTROL_MCP_TOOLS.createThreads,
-              AGENT_CONTROL_MCP_TOOLS.sendMessage,
-              AGENT_CONTROL_MCP_TOOLS.interruptThread,
-              AGENT_CONTROL_MCP_TOOLS.updateThread,
-              AGENT_CONTROL_MCP_TOOLS.proposeProjectCreate,
-              AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate,
-              AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove,
-              AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange,
-            ].includes(name as never),
-        ).toSorted(),
+        [
+          AGENT_CONTROL_MCP_TOOLS.context,
+          AGENT_CONTROL_MCP_TOOLS.capabilities,
+          AGENT_CONTROL_MCP_TOOLS.listProjects,
+          AGENT_CONTROL_MCP_TOOLS.listThreads,
+          AGENT_CONTROL_MCP_TOOLS.readThread,
+          AGENT_CONTROL_MCP_TOOLS.readControlRequest,
+          AGENT_CONTROL_MCP_TOOLS.waitForControlRequest,
+          AGENT_CONTROL_MCP_TOOLS.settingsSummary,
+        ].toSorted(),
       );
 
       const contextCall = yield* rpc(url, bearer, "tools/call", {

@@ -26,6 +26,8 @@ import { makeAgentControlMcpListener } from "../Mcp/listener.ts";
 import { makeAgentControlMcpTools } from "../Mcp/tools.ts";
 import { AgentControlPolicy } from "../Services/AgentControlPolicy.ts";
 import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
+import { AgentControlAutomationService } from "../Services/AgentControlAutomation.ts";
+import { AgentControlDiagnosticsService } from "../Services/AgentControlDiagnostics.ts";
 import { AgentControlProposalEvents } from "../Services/AgentControlProposalEvents.ts";
 import { AgentControlProposalService } from "../Services/AgentControlProposalService.ts";
 import { AgentControlProjectPlans } from "../Services/AgentControlProjectPlans.ts";
@@ -42,6 +44,8 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
   const proposalEvents = yield* AgentControlProposalEvents;
   const projections = yield* ProjectionSnapshotQuery;
   const projectPlans = yield* Effect.serviceOption(AgentControlProjectPlans);
+  const automations = yield* Effect.serviceOption(AgentControlAutomationService);
+  const diagnostics = yield* Effect.serviceOption(AgentControlDiagnosticsService);
   const providerRegistry = yield* ProviderRegistry;
   const serverSettings = yield* ServerSettingsService;
 
@@ -50,6 +54,8 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
     proposals,
     proposalEvents,
     projections,
+    ...(Option.isSome(automations) ? { automations: automations.value } : {}),
+    ...(Option.isSome(diagnostics) ? { diagnostics: diagnostics.value } : {}),
     getSettings: serverSettings.getSettings,
     getProviders: providerRegistry.getProviders,
     ...(Option.isSome(validator) ? { validator: validator.value } : {}),

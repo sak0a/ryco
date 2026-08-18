@@ -79,6 +79,44 @@ const auditMetadataForProposal = (proposal: AgentControlProposal): AgentControlA
           before: String(proposal.plan.change.before),
           after: String(proposal.plan.change.after),
         };
+      case "createAutomation":
+        return {
+          automationId: proposal.plan.automationId,
+          projectId: proposal.plan.definition.execution.projectId,
+          providerInstanceId: proposal.plan.definition.execution.modelSelection.instanceId,
+          scheduleKind: proposal.plan.definition.schedule.kind,
+          scheduleApprovalOnly: "true",
+        };
+      case "updateAutomation":
+        return {
+          automationId: proposal.plan.automationId,
+          projectId: proposal.plan.after.execution.projectId,
+          providerInstanceId: proposal.plan.after.execution.modelSelection.instanceId,
+          expectedRevision: String(proposal.plan.before.revision),
+          scheduleKind: proposal.plan.after.schedule.kind,
+        };
+      case "cancelAutomation":
+        return {
+          automationId: proposal.plan.automationId,
+          projectId: proposal.plan.expected.definition.execution.projectId,
+          providerInstanceId: proposal.plan.expected.definition.execution.modelSelection.instanceId,
+          expectedRevision: String(proposal.plan.expected.revision),
+          affectsAcceptedRun: "false",
+        };
+      case "automationRun":
+        return {
+          automationId: proposal.plan.automationId,
+          automationRunId: proposal.plan.runId,
+          projectId: proposal.plan.execution.projectId,
+          providerInstanceId: proposal.plan.execution.modelSelection.instanceId,
+          automationRevision: String(proposal.plan.automationRevision),
+          scheduledFor: proposal.plan.scheduledFor,
+          coalescedOccurrences: String(proposal.plan.coalescedOccurrences),
+          schedulerOutcome:
+            proposal.plan.coalescedOccurrences > 0 ? "missed-intervals-coalesced" : "on-time",
+          recoverySafety: "idempotent-occurrence-and-request",
+          freshRunApproval: "true",
+        };
       default:
         return {};
     }

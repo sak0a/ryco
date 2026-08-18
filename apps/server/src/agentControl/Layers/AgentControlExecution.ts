@@ -31,6 +31,7 @@ import {
 import { ignoreAlreadyMissingGitResource } from "../../ws/context/gitErrors.ts";
 import { computeAgentControlPlanDigest } from "../planDigest.ts";
 import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
+import { AgentControlAutomationService } from "../Services/AgentControlAutomation.ts";
 import {
   AgentControlExecution,
   type AgentControlExecutionShape,
@@ -120,6 +121,10 @@ const executionReceipt = (operation: AgentControlOperation): AgentControlExecuti
   commands: operation.state.commandReceipts,
   affectedThreadIds: operation.state.resources.threadIds,
   affectedProjectIds: operation.state.resources.projectIds ?? [],
+  affectedAutomationIds: operation.state.resources.automationIds ?? [],
+  ...(operation.state.resources.automationRunId === undefined
+    ? {}
+    : { automationRunId: operation.state.resources.automationRunId }),
   worktreeIds: operation.state.resources.worktreeIds,
   ...(operation.state.delivery === undefined ? {} : { delivery: operation.state.delivery }),
   ...(operation.state.interrupt === undefined ? {} : { interrupt: operation.state.interrupt }),
@@ -134,7 +139,9 @@ const completedResult = (
 ): AgentControlResultEnvelope => ({
   outcome: "completed",
   createdThreadIds:
-    operation.actionKind === "createThreads" ? operation.state.resources.threadIds : undefined,
+    operation.actionKind === "createThreads" || operation.actionKind === "automationRun"
+      ? operation.state.resources.threadIds
+      : undefined,
   createdProjectIds:
     operation.actionKind === "createProject"
       ? (operation.state.resources.projectIds ?? [])
@@ -166,6 +173,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
     const operations = yield* AgentControlOperationStore;
     const proposalEvents = yield* AgentControlProposalEvents;
     const validator = yield* AgentControlActionValidator;
+    const automations = yield* Effect.serviceOption(AgentControlAutomationService);
     const commandApplication = yield* OrchestrationCommandApplication;
     const engine = yield* OrchestrationEngineService;
     const projections = yield* ProjectionSnapshotQuery;
@@ -511,8 +519,35 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           );
         }
 
-        if (proposal.plan.kind === "createThreads") {
-          const plannedThreadIds = proposal.plan.entries.map((_, index) =>
+        if (
+          proposal.plan.kind === "createAutomation" ||
+          proposal.plan.kind === "updateAutomation" ||
+          proposal.plan.kind === "cancelAutomation"
+        ) {
+          if (Option.isNone(automations)) {
+            return yield* Effect.fail(new Error("Automation execution is unavailable."));
+          }
+          const automation = yield* automations.value.applyLifecycle(proposal);
+          yield* checkpoint({
+            ...operation.state,
+            completedSteps: unique([...operation.state.completedSteps, "automation-lifecycle"]),
+            resources: {
+              ...operation.state.resources,
+              automationIds: unique([
+                ...(operation.state.resources.automationIds ?? []),
+                automation.automationId,
+              ]),
+            },
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "createThreads" || proposal.plan.kind === "automationRun") {
+          const entries =
+            proposal.plan.kind === "createThreads"
+              ? proposal.plan.entries
+              : [proposal.plan.execution];
+          const plannedThreadIds = entries.map((_, index) =>
             threadIdFor(operation.operationId, index),
           );
           yield* checkpoint({
@@ -521,6 +556,15 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             resources: {
               ...operation.state.resources,
               threadIds: unique([...operation.state.resources.threadIds, ...plannedThreadIds]),
+              ...(proposal.plan.kind === "automationRun"
+                ? {
+                    automationIds: unique([
+                      ...(operation.state.resources.automationIds ?? []),
+                      proposal.plan.automationId,
+                    ]),
+                    automationRunId: proposal.plan.runId,
+                  }
+                : {}),
             },
           });
 
@@ -542,7 +586,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           }>;
 
           // Entire batch preflight completes before any thread command is dispatched.
-          for (const [index, entry] of proposal.plan.entries.entries()) {
+          for (const [index, entry] of entries.entries()) {
             if (entry.envMode !== "worktree") continue;
             const project = snapshot.projects.find((candidate) => candidate.id === entry.projectId);
             if (!project) return yield* Effect.fail(new Error("Requested project is unavailable."));
@@ -637,7 +681,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             });
           }
 
-          for (const [index, entry] of proposal.plan.entries.entries()) {
+          for (const [index, entry] of entries.entries()) {
             const project = snapshot.projects.find((candidate) => candidate.id === entry.projectId);
             if (!project) return yield* Effect.fail(new Error("Requested project is unavailable."));
             const threadId = plannedThreadIds[index]!;
@@ -694,6 +738,12 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             });
           }
           return operation;
+        }
+
+        if (proposal.plan.kind !== "sendMessage" && proposal.plan.kind !== "interruptThread") {
+          if (proposal.plan.kind !== "updateThread") {
+            return yield* Effect.fail(new Error("Unsupported Agent Control action."));
+          }
         }
 
         yield* checkpoint({
@@ -932,7 +982,11 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           yield* settleProposalFailure(executing, operation, {
             revalidation: true,
             message:
-              isProjectAction(executing) || executing.plan.kind === "changeSettings"
+              isProjectAction(executing) ||
+              executing.plan.kind === "changeSettings" ||
+              executing.plan.kind === "createAutomation" ||
+              executing.plan.kind === "updateAutomation" ||
+              executing.plan.kind === "cancelAutomation"
                 ? boundedCauseMessage(
                     validation.cause,
                     "The approved plan no longer passes current server validation.",
@@ -1003,6 +1057,45 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           const proposalOption = yield* proposals.getById(operation.proposalId);
           if (Option.isNone(proposalOption)) continue;
           const proposal = proposalOption.value;
+          if (
+            operation.status === "running" &&
+            (proposal.plan.kind === "createAutomation" ||
+              proposal.plan.kind === "updateAutomation" ||
+              proposal.plan.kind === "cancelAutomation") &&
+            Option.isSome(automations)
+          ) {
+            const replayed = yield* Effect.exit(automations.value.applyLifecycle(proposal));
+            if (replayed._tag === "Success") {
+              const state = {
+                ...operation.state,
+                completedSteps: unique([...operation.state.completedSteps, "automation-lifecycle"]),
+                resources: {
+                  ...operation.state.resources,
+                  automationIds: unique([
+                    ...(operation.state.resources.automationIds ?? []),
+                    replayed.value.automationId,
+                  ]),
+                },
+              };
+              const result = completedResult({ ...operation, state });
+              const completed = yield* operations.transition({
+                operationId: operation.operationId,
+                expectedStatus: "running",
+                nextStatus: "completed",
+                actor: "executor",
+                attempt: operation.attempt,
+                state,
+                result,
+                updatedAt: new Date().toISOString(),
+              });
+              yield* proposals.settleExecution({
+                proposalId: proposal.proposalId,
+                result: completedResult(completed),
+                now: new Date().toISOString(),
+              });
+              continue;
+            }
+          }
           if (operation.status === "pending") {
             yield* settleProposalFailure(proposal, operation, {
               revalidation: false,

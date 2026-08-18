@@ -275,6 +275,7 @@ enabledLayer("AgentControlProposalStore", (it) => {
           commands: [],
           affectedThreadIds: [],
           affectedProjectIds: [ProjectId.make("project-1")],
+          affectedAutomationIds: [],
           worktreeIds: [],
         },
         completedAt: "2026-08-17T00:03:00.000Z",

@@ -1,4 +1,4 @@
-import { Effect, Exit, Layer, Scope, Stream } from "effect";
+import { Effect, Exit, Layer, Option, Scope, Stream } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import { ServerConfig } from "../../config.ts";
@@ -14,6 +14,10 @@ import { makeExternalMcpTools } from "../ExternalMcp/tools.ts";
 import { evaluateExternalMcpTopology } from "../externalTopology.ts";
 import { AgentControlExternalIntegrationService } from "../Services/AgentControlExternalIntegration.ts";
 import { AgentControlExternalTaskService } from "../Services/AgentControlExternalTask.ts";
+import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
+import { AgentControlAutomationService } from "../Services/AgentControlAutomation.ts";
+import { AgentControlDiagnosticsService } from "../Services/AgentControlDiagnostics.ts";
+import { AgentControlProposalService } from "../Services/AgentControlProposalService.ts";
 
 const makeAgentControlExternalMcpServer = Effect.gen(function* () {
   const config = yield* ServerConfig;
@@ -22,12 +26,20 @@ const makeAgentControlExternalMcpServer = Effect.gen(function* () {
   const tasks = yield* AgentControlExternalTaskService;
   const projections = yield* ProjectionSnapshotQuery;
   const providers = yield* ProviderRegistry;
+  const validator = yield* Effect.serviceOption(AgentControlActionValidator);
+  const automations = yield* Effect.serviceOption(AgentControlAutomationService);
+  const diagnostics = yield* Effect.serviceOption(AgentControlDiagnosticsService);
+  const proposals = yield* Effect.serviceOption(AgentControlProposalService);
   const topology = evaluateExternalMcpTopology(config);
   const tools = makeExternalMcpTools({
     integrations,
     tasks,
     projections,
     getProviders: providers.getProviders,
+    ...(Option.isSome(validator) ? { validator: validator.value } : {}),
+    ...(Option.isSome(automations) ? { automations: automations.value } : {}),
+    ...(Option.isSome(diagnostics) ? { diagnostics: diagnostics.value } : {}),
+    ...(Option.isSome(proposals) ? { proposals: proposals.value } : {}),
   });
   const transitions = yield* Semaphore.make(1);
   let listenerScope: Scope.Closeable | null = null;

@@ -143,6 +143,10 @@ const grantedCapabilities = [
   AGENT_CONTROL_CAPABILITIES.removeProject,
   AGENT_CONTROL_CAPABILITIES.readSettings,
   AGENT_CONTROL_CAPABILITIES.changeSettings,
+  AGENT_CONTROL_CAPABILITIES.readAutomations,
+  AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  AGENT_CONTROL_CAPABILITIES.readActivity,
+  AGENT_CONTROL_CAPABILITIES.readDiagnostics,
 ] as const;
 
 const lifecycle = (input: {

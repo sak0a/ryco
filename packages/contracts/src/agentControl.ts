@@ -71,6 +71,16 @@ export const AgentControlExternalTaskId = TrimmedNonEmptyString.check(Schema.isM
 );
 export type AgentControlExternalTaskId = typeof AgentControlExternalTaskId.Type;
 
+export const AgentControlAutomationId = TrimmedNonEmptyString.check(Schema.isMaxLength(128)).pipe(
+  Schema.brand("AgentControlAutomationId"),
+);
+export type AgentControlAutomationId = typeof AgentControlAutomationId.Type;
+
+export const AgentControlAutomationRunId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(128),
+).pipe(Schema.brand("AgentControlAutomationRunId"));
+export type AgentControlAutomationRunId = typeof AgentControlAutomationRunId.Type;
+
 /**
  * Caller-chosen idempotency key. Unique within one principal's request-id
  * scope: retrying an identical plan under the same id must return the
@@ -167,11 +177,19 @@ export const AGENT_CONTROL_CAPABILITIES = {
   removeProject: AgentControlCapability.make("projects.remove"),
   readSettings: AgentControlCapability.make("settings.read"),
   changeSettings: AgentControlCapability.make("settings.change"),
+  readAutomations: AgentControlCapability.make("automations.read"),
+  manageAutomations: AgentControlCapability.make("automations.manage"),
+  readActivity: AgentControlCapability.make("activity.read"),
+  readDiagnostics: AgentControlCapability.make("diagnostics.read"),
   externalListProjects: AgentControlCapability.make("external.projects.list"),
   externalCreateTask: AgentControlCapability.make("external.tasks.create"),
   externalReadTask: AgentControlCapability.make("external.tasks.read"),
   externalSharedCheckout: AgentControlCapability.make("external.checkout.shared"),
   externalFullAccess: AgentControlCapability.make("external.runtime.full-access"),
+  externalReadAutomations: AgentControlCapability.make("external.automations.read"),
+  externalManageAutomations: AgentControlCapability.make("external.automations.manage"),
+  externalReadActivity: AgentControlCapability.make("external.activity.read"),
+  externalReadDiagnostics: AgentControlCapability.make("external.diagnostics.read"),
 } as const;
 
 // ── Action plans ──────────────────────────────────────────────────────
@@ -185,6 +203,10 @@ export const AgentControlActionKind = Schema.Literals([
   "updateProject",
   "removeProject",
   "changeSettings",
+  "createAutomation",
+  "updateAutomation",
+  "cancelAutomation",
+  "automationRun",
 ]);
 export type AgentControlActionKind = typeof AgentControlActionKind.Type;
 
@@ -201,6 +223,10 @@ export const AGENT_CONTROL_ACTION_CAPABILITIES: Record<
   updateProject: AGENT_CONTROL_CAPABILITIES.updateProject,
   removeProject: AGENT_CONTROL_CAPABILITIES.removeProject,
   changeSettings: AGENT_CONTROL_CAPABILITIES.changeSettings,
+  createAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  updateAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  cancelAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  automationRun: AGENT_CONTROL_CAPABILITIES.manageAutomations,
 };
 
 export const AGENT_CONTROL_PLAN_VERSION = 1;
@@ -209,6 +235,13 @@ export const AGENT_CONTROL_PROMPT_MAX_CHARS = 120_000;
 export const AGENT_CONTROL_TITLE_MAX_CHARS = 200;
 export const AGENT_CONTROL_CREATE_THREADS_MAX_ENTRIES = 10;
 export const AGENT_CONTROL_PERSISTENT_GOAL_MAX_CHARS = 4_000;
+export const AGENT_CONTROL_AUTOMATION_PROMPT_MAX_CHARS = 12_000;
+export const AGENT_CONTROL_AUTOMATION_MIN_INTERVAL_MS = 15 * 60_000;
+export const AGENT_CONTROL_AUTOMATION_MAX_ACTIVE_PER_PROJECT = 25;
+export const AGENT_CONTROL_AUTOMATION_MAX_HORIZON_MS = 90 * 24 * 60 * 60_000;
+export const AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX = 50;
+export const AGENT_CONTROL_AUTOMATION_PROPOSAL_TTL_MS = 15 * 60_000;
+export const AGENT_CONTROL_AUTOMATION_SAFE_FAILURE_MAX_CHARS = 256;
 
 const AgentControlPrompt = TrimmedNonEmptyString.check(
   Schema.isMaxLength(AGENT_CONTROL_PROMPT_MAX_CHARS),
@@ -356,6 +389,93 @@ export const AgentControlChangeSettingsPlan = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlChangeSettingsPlan = typeof AgentControlChangeSettingsPlan.Type;
 
+// ── Governed automation plans ─────────────────────────────────────────
+
+/**
+ * A deliberately narrow future thread action. It is data only: no command,
+ * URL, webhook, browser/device operation, RPC method, or arbitrary code field
+ * exists in this schema. Each due occurrence copies this exact template into
+ * a fresh `automationRun` proposal that still requires user approval.
+ */
+export const AgentControlAutomationExecutionTemplate = Schema.Struct({
+  projectId: ProjectId,
+  title: AgentControlTitle,
+  prompt: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(AGENT_CONTROL_AUTOMATION_PROMPT_MAX_CHARS),
+  ),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  envMode: ThreadEnvMode,
+  baseRef: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationExecutionTemplate =
+  typeof AgentControlAutomationExecutionTemplate.Type;
+
+export const AgentControlAutomationSchedule = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("once"),
+    runAt: IsoDateTime,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("fixed-interval"),
+    startsAt: IsoDateTime,
+    intervalMs: PositiveInt,
+    /** Required finite end: recurring schedules are never unbounded. */
+    endsAt: IsoDateTime,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+]);
+export type AgentControlAutomationSchedule = typeof AgentControlAutomationSchedule.Type;
+
+export const AgentControlAutomationDefinition = Schema.Struct({
+  execution: AgentControlAutomationExecutionTemplate,
+  schedule: AgentControlAutomationSchedule,
+  enabled: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationDefinition = typeof AgentControlAutomationDefinition.Type;
+
+/** Exact persisted definition revision captured in update/cancel plans. */
+export const AgentControlAutomationRevisionState = Schema.Struct({
+  revision: PositiveInt,
+  definition: AgentControlAutomationDefinition,
+  cancelled: Schema.Boolean,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationRevisionState = typeof AgentControlAutomationRevisionState.Type;
+
+export const AgentControlCreateAutomationPlan = Schema.Struct({
+  kind: Schema.Literal("createAutomation"),
+  automationId: AgentControlAutomationId,
+  definition: AgentControlAutomationDefinition,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCreateAutomationPlan = typeof AgentControlCreateAutomationPlan.Type;
+
+export const AgentControlUpdateAutomationPlan = Schema.Struct({
+  kind: Schema.Literal("updateAutomation"),
+  automationId: AgentControlAutomationId,
+  before: AgentControlAutomationRevisionState,
+  after: AgentControlAutomationDefinition,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlUpdateAutomationPlan = typeof AgentControlUpdateAutomationPlan.Type;
+
+export const AgentControlCancelAutomationPlan = Schema.Struct({
+  kind: Schema.Literal("cancelAutomation"),
+  automationId: AgentControlAutomationId,
+  expected: AgentControlAutomationRevisionState,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCancelAutomationPlan = typeof AgentControlCancelAutomationPlan.Type;
+
+/** Server-materialized exact occurrence. No MCP mutation tool accepts this plan. */
+export const AgentControlAutomationRunPlan = Schema.Struct({
+  kind: Schema.Literal("automationRun"),
+  automationId: AgentControlAutomationId,
+  runId: AgentControlAutomationRunId,
+  automationRevision: PositiveInt,
+  scheduledFor: IsoDateTime,
+  coalescedOccurrences: NonNegativeInt,
+  execution: AgentControlAutomationExecutionTemplate,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationRunPlan = typeof AgentControlAutomationRunPlan.Type;
+
 export const AgentControlActionPlan = Schema.Union([
   AgentControlCreateThreadsPlan,
   AgentControlSendMessagePlan,
@@ -365,6 +485,10 @@ export const AgentControlActionPlan = Schema.Union([
   AgentControlUpdateProjectPlan,
   AgentControlRemoveProjectPlan,
   AgentControlChangeSettingsPlan,
+  AgentControlCreateAutomationPlan,
+  AgentControlUpdateAutomationPlan,
+  AgentControlCancelAutomationPlan,
+  AgentControlAutomationRunPlan,
 ]);
 export type AgentControlActionPlan = typeof AgentControlActionPlan.Type;
 
@@ -392,6 +516,10 @@ export const AGENT_CONTROL_RISK_TAGS = {
   changesSettings: AgentControlRiskTag.make("changes-settings"),
   sharedLocalCheckout: AgentControlRiskTag.make("shared-local-checkout"),
   elevatedRuntimeMode: AgentControlRiskTag.make("elevated-runtime-mode"),
+  createsAutomation: AgentControlRiskTag.make("creates-automation"),
+  modifiesAutomation: AgentControlRiskTag.make("modifies-automation"),
+  cancelsAutomation: AgentControlRiskTag.make("cancels-automation"),
+  scheduledRun: AgentControlRiskTag.make("scheduled-run"),
 } as const;
 
 /**
@@ -449,6 +577,10 @@ export const AgentControlExecutionReceipt = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   worktreeIds: Schema.Array(WorktreeId),
+  affectedAutomationIds: Schema.optional(Schema.Array(AgentControlAutomationId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  automationRunId: Schema.optional(AgentControlAutomationRunId),
   delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
   interrupt: Schema.optional(
     Schema.Struct({
@@ -700,6 +832,10 @@ export const AgentControlOperationResources = Schema.Struct({
   projectIds: Schema.optional(Schema.Array(ProjectId)).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  automationIds: Schema.optional(Schema.Array(AgentControlAutomationId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  automationRunId: Schema.optional(AgentControlAutomationRunId),
   threadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   ownedThreadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   worktreeIds: Schema.Array(WorktreeId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
@@ -722,6 +858,7 @@ export const AgentControlOperationState = Schema.Struct({
     Schema.withDecodingDefault(
       Effect.succeed({
         projectIds: [],
+        automationIds: [],
         threadIds: [],
         ownedThreadIds: [],
         worktreeIds: [],
@@ -764,6 +901,61 @@ export const AgentControlOperation = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type AgentControlOperation = typeof AgentControlOperation.Type;
+
+// ── Durable automation lifecycle ──────────────────────────────────────
+
+export const AgentControlAutomation = Schema.Struct({
+  automationId: AgentControlAutomationId,
+  principal: AgentControlPrincipal,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  definition: AgentControlAutomationDefinition,
+  revision: PositiveInt,
+  enabled: Schema.Boolean,
+  cancelled: Schema.Boolean,
+  cancelledAt: Schema.NullOr(IsoDateTime),
+  nextRunAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomation = typeof AgentControlAutomation.Type;
+
+export const AgentControlAutomationRunStatus = Schema.Literals([
+  "materializing",
+  "pending-approval",
+  "approved",
+  "executing",
+  "completed",
+  "failed",
+  "rejected",
+  "expired",
+  "cancelled",
+]);
+export type AgentControlAutomationRunStatus = typeof AgentControlAutomationRunStatus.Type;
+
+export const AGENT_CONTROL_ACTIVE_AUTOMATION_RUN_STATUSES: ReadonlyArray<AgentControlAutomationRunStatus> =
+  ["materializing", "pending-approval", "approved", "executing"];
+
+export const AgentControlAutomationRun = Schema.Struct({
+  runId: AgentControlAutomationRunId,
+  automationId: AgentControlAutomationId,
+  automationRevision: PositiveInt,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  scheduledFor: IsoDateTime,
+  coalescedOccurrences: NonNegativeInt,
+  status: AgentControlAutomationRunStatus,
+  proposalId: Schema.NullOr(AgentControlProposalId),
+  safeFailureDetail: Schema.NullOr(
+    TrimmedNonEmptyString.check(
+      Schema.isMaxLength(AGENT_CONTROL_AUTOMATION_SAFE_FAILURE_MAX_CHARS),
+    ),
+  ),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationRun = typeof AgentControlAutomationRun.Type;
 
 // ── Internal provider-session MCP surface ─────────────────────────────
 //
@@ -835,6 +1027,16 @@ export const AGENT_CONTROL_MCP_TOOLS = {
   proposeProjectUpdate: "ryco_propose_project_update",
   proposeProjectRemove: "ryco_propose_project_remove",
   proposeSettingsChange: "ryco_propose_settings_change",
+  listAutomations: "ryco_list_automations",
+  readAutomation: "ryco_read_automation",
+  listAutomationRuns: "ryco_list_automation_runs",
+  proposeAutomationCreate: "ryco_propose_automation_create",
+  proposeAutomationUpdate: "ryco_propose_automation_update",
+  proposeAutomationCancel: "ryco_propose_automation_cancel",
+  recentActivity: "ryco_recent_activity",
+  orchestrationEvents: "ryco_orchestration_events",
+  providerRuntimeEvents: "ryco_provider_runtime_events",
+  diagnosticsSummary: "ryco_diagnostics_summary",
 } as const;
 export type AgentControlMcpToolName =
   (typeof AGENT_CONTROL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_MCP_TOOLS];
@@ -861,6 +1063,13 @@ export const AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS = 80_000;
 /** Wait bounds for `ryco_wait_for_control_request` (milliseconds). */
 export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_MAX = 50_000;
 export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_DEFAULT = 25_000;
+export const AGENT_CONTROL_MCP_OPERATIONAL_LIMIT_MAX = 50;
+export const AGENT_CONTROL_MCP_OPERATIONAL_LIMIT_DEFAULT = 20;
+export const AGENT_CONTROL_MCP_OPERATIONAL_RANGE_MAX_MS = 24 * 60 * 60_000;
+export const AGENT_CONTROL_MCP_OPERATIONAL_RETENTION_MS = 7 * 24 * 60 * 60_000;
+export const AGENT_CONTROL_MCP_ORCHESTRATION_SCAN_MAX = 500;
+/** Per-item preview cap in list/activity responses; a single read returns the full bounded prompt. */
+export const AGENT_CONTROL_MCP_AUTOMATION_LIST_PROMPT_MAX_CHARS = 1_000;
 
 /**
  * Opaque pagination cursor. List cursors are minted by the server and are
@@ -994,6 +1203,84 @@ export const AgentControlMcpProposeSettingsChangeInput = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlMcpProposeSettingsChangeInput =
   typeof AgentControlMcpProposeSettingsChangeInput.Type;
+
+export const AgentControlMcpListAutomationsInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  includeDisabled: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(PositiveInt),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpListAutomationsInput = typeof AgentControlMcpListAutomationsInput.Type;
+
+export const AgentControlMcpReadAutomationInput = Schema.Struct({
+  automationId: AgentControlAutomationId,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpReadAutomationInput = typeof AgentControlMcpReadAutomationInput.Type;
+
+export const AgentControlMcpListAutomationRunsInput = Schema.Struct({
+  automationId: AgentControlAutomationId,
+  limit: Schema.optional(PositiveInt),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpListAutomationRunsInput =
+  typeof AgentControlMcpListAutomationRunsInput.Type;
+
+export const AgentControlMcpProposeAutomationCreateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  title: AgentControlAutomationExecutionTemplate.fields.title,
+  prompt: AgentControlAutomationExecutionTemplate.fields.prompt,
+  model: TrimmedNonEmptyString,
+  options: ProviderOptionSelections,
+  runtimeMode: RuntimeMode,
+  envMode: ThreadEnvMode,
+  baseRef: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+  schedule: AgentControlAutomationSchedule,
+  enabled: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeAutomationCreateInput =
+  typeof AgentControlMcpProposeAutomationCreateInput.Type;
+
+export const AgentControlMcpProposeAutomationUpdateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  automationId: AgentControlAutomationId,
+  expectedRevision: PositiveInt,
+  title: Schema.optional(AgentControlAutomationExecutionTemplate.fields.title),
+  prompt: Schema.optional(AgentControlAutomationExecutionTemplate.fields.prompt),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  model: Schema.optional(TrimmedNonEmptyString),
+  options: Schema.optional(ProviderOptionSelections),
+  runtimeMode: Schema.optional(RuntimeMode),
+  envMode: Schema.optional(ThreadEnvMode),
+  baseRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256)))),
+  schedule: Schema.optional(AgentControlAutomationSchedule),
+  enabled: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeAutomationUpdateInput =
+  typeof AgentControlMcpProposeAutomationUpdateInput.Type;
+
+export const AgentControlMcpProposeAutomationCancelInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  automationId: AgentControlAutomationId,
+  expectedRevision: PositiveInt,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeAutomationCancelInput =
+  typeof AgentControlMcpProposeAutomationCancelInput.Type;
+
+export const AgentControlMcpOperationalReadInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  threadId: Schema.optional(ThreadId),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  since: Schema.optional(IsoDateTime),
+  limit: Schema.optional(PositiveInt),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpOperationalReadInput = typeof AgentControlMcpOperationalReadInput.Type;
+
+export const AgentControlMcpDiagnosticsSummaryInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpDiagnosticsSummaryInput =
+  typeof AgentControlMcpDiagnosticsSummaryInput.Type;
 
 // ── Tool results ──────────────────────────────────────────────────────
 
@@ -1162,6 +1449,158 @@ export const AgentControlMcpMutationResult = Schema.Struct({
   replayed: Schema.Boolean,
 });
 export type AgentControlMcpMutationResult = typeof AgentControlMcpMutationResult.Type;
+
+export const AgentControlMcpAutomationSummary = Schema.Struct({
+  automationId: AgentControlAutomationId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  execution: AgentControlAutomationExecutionTemplate,
+  promptTruncated: Schema.Boolean,
+  schedule: AgentControlAutomationSchedule,
+  revision: PositiveInt,
+  enabled: Schema.Boolean,
+  cancelled: Schema.Boolean,
+  nextRunAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpAutomationSummary = typeof AgentControlMcpAutomationSummary.Type;
+
+export const AgentControlMcpListAutomationsResult = Schema.Struct({
+  automations: Schema.Array(AgentControlMcpAutomationSummary),
+  limits: Schema.Struct({
+    maxActivePerProject: PositiveInt,
+    minIntervalMs: PositiveInt,
+    maxHorizonMs: PositiveInt,
+    runHistoryMax: PositiveInt,
+  }),
+});
+export type AgentControlMcpListAutomationsResult = typeof AgentControlMcpListAutomationsResult.Type;
+
+export const AgentControlMcpReadAutomationResult = Schema.Struct({
+  automation: AgentControlMcpAutomationSummary,
+});
+export type AgentControlMcpReadAutomationResult = typeof AgentControlMcpReadAutomationResult.Type;
+
+export const AgentControlMcpListAutomationRunsResult = Schema.Struct({
+  runs: Schema.Array(AgentControlAutomationRun),
+  historyLimit: PositiveInt,
+});
+export type AgentControlMcpListAutomationRunsResult =
+  typeof AgentControlMcpListAutomationRunsResult.Type;
+
+export const AgentControlMcpOperationalCoverage = Schema.Struct({
+  effectiveSince: IsoDateTime,
+  retentionStartsAt: IsoDateTime,
+  generatedAt: IsoDateTime,
+  truncated: Schema.Boolean,
+  pageLimit: PositiveInt,
+});
+export type AgentControlMcpOperationalCoverage = typeof AgentControlMcpOperationalCoverage.Type;
+
+export const AgentControlMcpActivitySummary = Schema.Struct({
+  activityId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  projectId: ProjectId,
+  threadId: ThreadId,
+  kind: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  tone: Schema.Literals(["info", "tool", "approval", "error"]),
+  turnId: Schema.NullOr(TurnId),
+  occurredAt: IsoDateTime,
+});
+export type AgentControlMcpActivitySummary = typeof AgentControlMcpActivitySummary.Type;
+
+export const AgentControlMcpRecentActivityResult = Schema.Struct({
+  activity: Schema.Array(AgentControlMcpActivitySummary),
+  automations: Schema.Array(AgentControlMcpAutomationSummary),
+  runs: Schema.Array(AgentControlAutomationRun),
+  coverage: AgentControlMcpOperationalCoverage,
+});
+export type AgentControlMcpRecentActivityResult = typeof AgentControlMcpRecentActivityResult.Type;
+
+export const AgentControlMcpOrchestrationEventSummary = Schema.Struct({
+  sequence: NonNegativeInt,
+  eventId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  type: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  aggregateKind: Schema.Literals(["project", "thread", "worktree"]),
+  aggregateId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  projectId: ProjectId,
+  threadId: Schema.NullOr(ThreadId),
+  occurredAt: IsoDateTime,
+  providerAttributed: Schema.Boolean,
+});
+export type AgentControlMcpOrchestrationEventSummary =
+  typeof AgentControlMcpOrchestrationEventSummary.Type;
+
+export const AgentControlMcpOrchestrationEventsResult = Schema.Struct({
+  events: Schema.Array(AgentControlMcpOrchestrationEventSummary),
+  coverage: AgentControlMcpOperationalCoverage,
+});
+export type AgentControlMcpOrchestrationEventsResult =
+  typeof AgentControlMcpOrchestrationEventsResult.Type;
+
+export const AgentControlMcpProviderRuntimeEventSummary = Schema.Struct({
+  eventId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  type: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  projectId: ProjectId,
+  threadId: ThreadId,
+  providerInstanceId: ProviderInstanceId,
+  turnId: Schema.NullOr(TurnId),
+  occurredAt: IsoDateTime,
+});
+export type AgentControlMcpProviderRuntimeEventSummary =
+  typeof AgentControlMcpProviderRuntimeEventSummary.Type;
+
+export const AgentControlMcpProviderRuntimeEventsResult = Schema.Struct({
+  events: Schema.Array(AgentControlMcpProviderRuntimeEventSummary),
+  coverage: AgentControlMcpOperationalCoverage,
+});
+export type AgentControlMcpProviderRuntimeEventsResult =
+  typeof AgentControlMcpProviderRuntimeEventsResult.Type;
+
+export const AgentControlMcpDiagnosticsSummaryResult = Schema.Struct({
+  generatedAt: IsoDateTime,
+  health: Schema.Literals(["ok", "degraded"]),
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  provider: Schema.Struct({
+    status: ServerProviderState,
+    availability: ServerProviderAvailability,
+    enabled: Schema.Boolean,
+    installed: Schema.Boolean,
+  }),
+  project: Schema.Struct({
+    threadCount: NonNegativeInt,
+    activeThreadCount: NonNegativeInt,
+    enabledAutomationCount: NonNegativeInt,
+    pendingAutomationRunCount: NonNegativeInt,
+  }),
+  server: Schema.Struct({
+    uptimeMs: NonNegativeInt,
+    memoryRssBytes: NonNegativeInt,
+    heapUsedBytes: NonNegativeInt,
+    eventLoopDelayMs: Schema.NullOr(Schema.Number),
+  }),
+  operational: Schema.Struct({
+    failureCount: NonNegativeInt,
+    warningCount: NonNegativeInt,
+    retainedTraceCount: NonNegativeInt,
+    queueOverflowCount: NonNegativeInt,
+    providerLogDroppedRecords: NonNegativeInt,
+  }),
+  redacted: Schema.Literal(true),
+  omitted: Schema.Array(
+    Schema.Literals([
+      "credentials-and-environment",
+      "paths-files-and-terminals",
+      "commands-transcripts-and-payloads",
+      "traces-logs-requests-and-relay",
+      "hosted-browser-and-service-worker",
+      "other-projects-and-provider-sessions",
+    ]),
+  ),
+});
+export type AgentControlMcpDiagnosticsSummaryResult =
+  typeof AgentControlMcpDiagnosticsSummaryResult.Type;
 
 // ── Paired external MCP integrations ─────────────────────────────────
 
@@ -1334,6 +1773,16 @@ export const AGENT_CONTROL_EXTERNAL_MCP_TOOLS = {
   createTask: "ryco_create_task",
   readTask: "ryco_read_task",
   waitForTask: "ryco_wait_for_task",
+  listAutomations: "ryco_list_automations",
+  readAutomation: "ryco_read_automation",
+  listAutomationRuns: "ryco_list_automation_runs",
+  proposeAutomationCreate: "ryco_propose_automation_create",
+  proposeAutomationUpdate: "ryco_propose_automation_update",
+  proposeAutomationCancel: "ryco_propose_automation_cancel",
+  recentActivity: "ryco_recent_activity",
+  orchestrationEvents: "ryco_orchestration_events",
+  providerRuntimeEvents: "ryco_provider_runtime_events",
+  diagnosticsSummary: "ryco_diagnostics_summary",
 } as const;
 export type AgentControlExternalMcpToolName =
   (typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS];

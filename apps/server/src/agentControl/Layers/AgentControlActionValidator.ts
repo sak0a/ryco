@@ -17,6 +17,8 @@ import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { AgentControlPlanValidationError } from "../Errors.ts";
+import { AgentControlAutomationService } from "../Services/AgentControlAutomation.ts";
+import type { AgentControlAutomationShape } from "../Services/AgentControlAutomation.ts";
 import { AgentControlProjectPlans } from "../Services/AgentControlProjectPlans.ts";
 import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
 import {
@@ -105,6 +107,32 @@ const isProjectPlan = (
   { kind: "createProject" | "updateProject" | "removeProject" }
 > =>
   plan.kind === "createProject" || plan.kind === "updateProject" || plan.kind === "removeProject";
+
+const isAutomationLifecyclePlan = (
+  plan: AgentControlActionPlan,
+): plan is Extract<
+  AgentControlActionPlan,
+  { kind: "createAutomation" | "updateAutomation" | "cancelAutomation" }
+> =>
+  plan.kind === "createAutomation" ||
+  plan.kind === "updateAutomation" ||
+  plan.kind === "cancelAutomation";
+
+const automationDefinitionForPlan = (
+  plan: Extract<
+    AgentControlActionPlan,
+    { kind: "createAutomation" | "updateAutomation" | "automationRun" }
+  >,
+) =>
+  plan.kind === "createAutomation"
+    ? plan.definition
+    : plan.kind === "updateAutomation"
+      ? plan.after
+      : {
+          execution: plan.execution,
+          schedule: { kind: "once" as const, runAt: plan.scheduledFor },
+          enabled: true,
+        };
 
 const requireThread = (snapshot: OrchestrationShellSnapshot, threadId: string) => {
   const thread = snapshot.threads.find((candidate) => candidate.id === threadId);
@@ -261,7 +289,22 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
     AgentControlExternalIntegrationServiceError
   >;
   readonly projectPlans?: AgentControlProjectPlansShape;
+  readonly automations?: AgentControlAutomationShape;
 }): AgentControlActionValidatorShape => {
+  const validateAutomation = <A, E>(effect: Effect.Effect<A, E>) =>
+    effect.pipe(
+      Effect.mapError((error) =>
+        typeof error === "object" &&
+        error !== null &&
+        "_tag" in error &&
+        error._tag === "AgentControlPlanValidationError"
+          ? (error as unknown as AgentControlPlanValidationError)
+          : new AgentControlPlanValidationError({
+              reason: "automation-unavailable",
+              detail: "Automation state is unavailable.",
+            }),
+      ),
+    );
   const loadState = Effect.all({
     snapshot: deps.projections.getShellSnapshot(),
     providers: deps.getProviders,
@@ -315,7 +358,46 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
           "Settings changes require fresh owner reauthentication that this server cannot enforce.",
         );
       }
-      if (isProjectPlan(input.plan)) {
+      if (input.plan.kind === "automationRun") {
+        return yield* fail("invalid-plan", "Scheduled run proposals are server-owned.");
+      }
+      if (isAutomationLifecyclePlan(input.plan)) {
+        if (deps.automations === undefined) {
+          return yield* fail("automation-unavailable", "Automation control is unavailable.");
+        }
+        yield* validateAutomation(deps.automations.validateLifecyclePlan(input.plan));
+        const automation =
+          input.plan.kind === "createAutomation"
+            ? undefined
+            : yield* validateAutomation(
+                deps.automations.get(input.plan.automationId, {
+                  projectId: caller.projectId,
+                  providerInstanceId: input.session.providerInstanceId,
+                }),
+              );
+        const definition =
+          input.plan.kind === "cancelAutomation"
+            ? automation!.definition
+            : automationDefinitionForPlan(input.plan);
+        if (
+          definition.execution.projectId !== caller.projectId ||
+          definition.execution.modelSelection.instanceId !== input.session.providerInstanceId
+        ) {
+          return yield* fail(
+            "project-scope",
+            "Automation project and provider must match the exact provider session.",
+          );
+        }
+        yield* validatePlanAgainstSnapshot({
+          plan: { kind: "createThreads", entries: [definition.execution] },
+          originProjectId: caller.projectId,
+          originRuntimeMode: caller.runtimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+      } else if (isProjectPlan(input.plan)) {
         if (deps.projectPlans === undefined) {
           return yield* fail("project-unavailable", "Project proposal validation is unavailable.");
         }
@@ -366,6 +448,60 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
   const validateExternalSubmission: AgentControlActionValidatorShape["validateExternalSubmission"] =
     (input) =>
       Effect.gen(function* () {
+        if (isAutomationLifecyclePlan(input.plan)) {
+          if (
+            deps.automations === undefined ||
+            !input.integration.capabilities.includes(
+              AGENT_CONTROL_CAPABILITIES.externalManageAutomations,
+            ) ||
+            !input.integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalCreateTask)
+          ) {
+            return yield* fail("privilege-escalation", "External automation authority is absent.");
+          }
+          yield* validateAutomation(deps.automations.validateLifecyclePlan(input.plan));
+          const definition =
+            input.plan.kind === "createAutomation"
+              ? input.plan.definition
+              : input.plan.kind === "updateAutomation"
+                ? input.plan.after
+                : input.plan.expected.definition;
+          const scopeAllowed =
+            input.integration.projectScope.kind === "all" ||
+            input.integration.projectScope.projectIds.includes(definition.execution.projectId);
+          if (!scopeAllowed) {
+            return yield* fail("project-scope", "Automation project is outside integration scope.");
+          }
+          if (
+            (definition.execution.envMode === "local" &&
+              !input.integration.capabilities.includes(
+                AGENT_CONTROL_CAPABILITIES.externalSharedCheckout,
+              )) ||
+            (definition.execution.runtimeMode === "full-access" &&
+              !input.integration.capabilities.includes(
+                AGENT_CONTROL_CAPABILITIES.externalFullAccess,
+              ))
+          ) {
+            return yield* fail("privilege-escalation", "Automation execution scope is denied.");
+          }
+          const { snapshot, providers } = yield* loadState;
+          yield* validatePlanAgainstSnapshot({
+            plan: { kind: "createThreads", entries: [definition.execution] },
+            originProjectId: definition.execution.projectId,
+            originRuntimeMode: definition.execution.runtimeMode,
+            originEnvMode: definition.execution.envMode,
+            snapshot,
+            providers,
+            requireBaseRef,
+          });
+          return {
+            kind: "external-integration",
+            integrationId: input.integration.integrationId,
+            label: input.integration.displayName,
+            projectId: definition.execution.projectId,
+            runtimeMode: definition.execution.runtimeMode,
+            envMode: definition.execution.envMode,
+          };
+        }
         if (input.plan.kind !== "createThreads" || input.plan.entries.length !== 1) {
           return yield* fail("invalid-plan", "External integrations may request exactly one task.");
         }
@@ -433,9 +569,19 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
         const scopeAllowed =
           integration.projectScope.kind === "all" ||
           integration.projectScope.projectIds.includes(originProjectId);
+        const externalCapability =
+          proposal.plan.kind === "automationRun"
+            ? AGENT_CONTROL_CAPABILITIES.externalManageAutomations
+            : isAutomationLifecyclePlan(proposal.plan)
+              ? AGENT_CONTROL_CAPABILITIES.externalManageAutomations
+              : AGENT_CONTROL_CAPABILITIES.externalCreateTask;
+        const requiresTaskCapability =
+          proposal.plan.kind === "automationRun" || isAutomationLifecyclePlan(proposal.plan);
         if (
           !scopeAllowed ||
-          !integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalCreateTask) ||
+          !integration.capabilities.includes(externalCapability) ||
+          (requiresTaskCapability &&
+            !integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalCreateTask)) ||
           (originEnvMode === "local" &&
             !integration.capabilities.includes(
               AGENT_CONTROL_CAPABILITIES.externalSharedCheckout,
@@ -452,6 +598,46 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
           "settings-unsupported",
           "Settings changes require fresh owner reauthentication that this server cannot enforce.",
         );
+      }
+      if (isAutomationLifecyclePlan(proposal.plan)) {
+        if (deps.automations === undefined) {
+          return yield* fail("automation-unavailable", "Automation control is unavailable.");
+        }
+        yield* validateAutomation(deps.automations.validateLifecyclePlan(proposal.plan));
+        const definition =
+          proposal.plan.kind === "cancelAutomation"
+            ? (yield* validateAutomation(
+                deps.automations.get(proposal.plan.automationId, {
+                  projectId: originProjectId,
+                }),
+              )).definition
+            : automationDefinitionForPlan(proposal.plan);
+        yield* validatePlanAgainstSnapshot({
+          plan: { kind: "createThreads", entries: [definition.execution] },
+          originProjectId,
+          originRuntimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+        return;
+      }
+      if (proposal.plan.kind === "automationRun") {
+        if (deps.automations === undefined) {
+          return yield* fail("automation-unavailable", "Automation control is unavailable.");
+        }
+        yield* validateAutomation(deps.automations.validateRun(proposal));
+        yield* validatePlanAgainstSnapshot({
+          plan: { kind: "createThreads", entries: [proposal.plan.execution] },
+          originProjectId,
+          originRuntimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+        return;
       }
       if (isProjectPlan(proposal.plan)) {
         if (principal.kind !== "provider-session") {
@@ -513,11 +699,13 @@ const makeAgentControlActionValidator = Effect.gen(function* () {
   const git = yield* GitWorkflowService;
   const externalIntegrations = yield* Effect.serviceOption(AgentControlExternalIntegrationService);
   const projectPlans = yield* AgentControlProjectPlans;
+  const automations = yield* Effect.serviceOption(AgentControlAutomationService);
   return makeAgentControlActionValidatorFromDeps({
     projections,
     getProviders: providerRegistry.getProviders,
     listRefs: git.listRefs,
     projectPlans,
+    ...(Option.isSome(automations) ? { automations: automations.value } : {}),
     ...(Option.isSome(externalIntegrations)
       ? { revalidateExternal: externalIntegrations.value.revalidate }
       : {}),

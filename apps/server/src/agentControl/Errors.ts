@@ -166,6 +166,10 @@ export class AgentControlPlanValidationError extends Schema.TaggedError<AgentCon
       "worktree-escalation",
       "worktree-preflight",
       "settings-unsupported",
+      "automation-unavailable",
+      "automation-stale",
+      "automation-limit",
+      "schedule-invalid",
     ]),
     detail: Schema.String,
   },
@@ -216,3 +220,9 @@ export class AgentControlExternalIntegrationError extends Schema.TaggedError<Age
     return `External Agent Control integration refused: ${this.reason}`;
   }
 }
+
+/** Bounded operational read failure; deliberately carries no underlying payload. */
+export class AgentControlDiagnosticsReadError extends Schema.TaggedError<AgentControlDiagnosticsReadError>()(
+  "AgentControlDiagnosticsReadError",
+  { operation: Schema.String },
+) {}

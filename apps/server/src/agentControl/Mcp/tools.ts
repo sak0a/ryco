@@ -11,9 +11,16 @@
  *
  * @module agentControl/Mcp/tools
  */
+import { createHash } from "node:crypto";
+
 import {
+  AGENT_CONTROL_AUTOMATION_MAX_ACTIVE_PER_PROJECT,
+  AGENT_CONTROL_AUTOMATION_MAX_HORIZON_MS,
+  AGENT_CONTROL_AUTOMATION_MIN_INTERVAL_MS,
+  AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX,
   AGENT_CONTROL_MCP_LIST_LIMIT_DEFAULT,
   AGENT_CONTROL_MCP_LIST_LIMIT_MAX,
+  AGENT_CONTROL_MCP_AUTOMATION_LIST_PROMPT_MAX_CHARS,
   AGENT_CONTROL_MCP_MESSAGE_LIMIT_DEFAULT,
   AGENT_CONTROL_MCP_MESSAGE_LIMIT_MAX,
   AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS,
@@ -27,6 +34,22 @@ import {
   AGENT_CONTROL_RISK_TAGS,
   AGENT_CONTROL_TERMINAL_PROPOSAL_STATUSES,
   AgentControlMcpCapabilitiesResult,
+  AgentControlAutomationId,
+  AgentControlMcpDiagnosticsSummaryInput,
+  AgentControlMcpDiagnosticsSummaryResult,
+  AgentControlMcpListAutomationsInput,
+  AgentControlMcpListAutomationsResult,
+  AgentControlMcpListAutomationRunsInput,
+  AgentControlMcpListAutomationRunsResult,
+  AgentControlMcpOperationalReadInput,
+  AgentControlMcpOrchestrationEventsResult,
+  AgentControlMcpProviderRuntimeEventsResult,
+  AgentControlMcpProposeAutomationCancelInput,
+  AgentControlMcpProposeAutomationCreateInput,
+  AgentControlMcpProposeAutomationUpdateInput,
+  AgentControlMcpReadAutomationInput,
+  AgentControlMcpReadAutomationResult,
+  AgentControlMcpRecentActivityResult,
   AgentControlMcpCreateThreadsInput,
   AgentControlMcpContextResult,
   AgentControlMcpControlRequestResult,
@@ -49,6 +72,7 @@ import {
   AgentControlMcpWaitForControlRequestInput,
   OrchestrationThreadHistoryCursor,
   type AgentControlMcpMessage,
+  type AgentControlAutomation,
   type AgentControlMcpProviderInstanceSummary,
   type AgentControlMcpThreadSummary,
   type AgentControlProposal,
@@ -68,6 +92,8 @@ import { Duration, Effect, Option, Schema, Stream } from "effect";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import type { AgentControlPolicyShape } from "../Services/AgentControlPolicy.ts";
 import type { AgentControlActionValidatorShape } from "../Services/AgentControlActionValidator.ts";
+import type { AgentControlAutomationShape } from "../Services/AgentControlAutomation.ts";
+import type { AgentControlDiagnosticsShape } from "../Services/AgentControlDiagnostics.ts";
 import type { AgentControlProposalEventsShape } from "../Services/AgentControlProposalEvents.ts";
 import type { AgentControlProposalServiceShape } from "../Services/AgentControlProposalService.ts";
 import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
@@ -100,6 +126,8 @@ export interface AgentControlMcpToolDeps {
   readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
   readonly validator?: AgentControlActionValidatorShape;
   readonly projectPlans?: AgentControlProjectPlansShape;
+  readonly automations?: AgentControlAutomationShape;
+  readonly diagnostics?: AgentControlDiagnosticsShape;
   readonly getSettings?: Effect.Effect<ServerSettings, ServerSettingsError>;
   readonly getTurnAuthority?: (
     sessionId: string,
@@ -134,6 +162,27 @@ const failTool = (reason: string) => Effect.fail(new ToolFailure(reason));
 const cursorSchemaProperty = { type: "string", maxLength: 1_024 } as const;
 const limitSchemaProperty = (maximum: number) =>
   ({ type: "integer", minimum: 1, maximum }) as const;
+const automationScheduleSchema = {
+  oneOf: [
+    {
+      type: "object",
+      properties: { kind: { const: "once" }, runAt: { type: "string" } },
+      required: ["kind", "runAt"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: {
+        kind: { const: "fixed-interval" },
+        startsAt: { type: "string" },
+        intervalMs: { type: "integer", minimum: AGENT_CONTROL_AUTOMATION_MIN_INTERVAL_MS },
+        endsAt: { type: "string" },
+      },
+      required: ["kind", "startsAt", "intervalMs", "endsAt"],
+      additionalProperties: false,
+    },
+  ],
+} as const;
 
 const TOOL_DESCRIPTORS: ReadonlyArray<AgentControlMcpToolDescriptor> = [
   {
@@ -389,6 +438,157 @@ const TOOL_DESCRIPTORS: ReadonlyArray<AgentControlMcpToolDescriptor> = [
       additionalProperties: false,
     },
   },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.listAutomations,
+    description: "List bounded schedule definitions in this exact project/provider scope.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", maxLength: 256 },
+        includeDisabled: { type: "boolean" },
+        limit: limitSchemaProperty(AGENT_CONTROL_MCP_LIST_LIMIT_MAX),
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.readAutomation,
+    description: "Read one schedule definition in this exact project/provider scope.",
+    inputSchema: {
+      type: "object",
+      properties: { automationId: { type: "string", maxLength: 128 } },
+      required: ["automationId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.listAutomationRuns,
+    description: "List bounded run outcomes for one authorized automation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        automationId: { type: "string", maxLength: 128 },
+        limit: limitSchemaProperty(AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX),
+      },
+      required: ["automationId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeAutomationCreate,
+    description:
+      "Request approval for a bounded schedule definition. Approval creates no thread or provider turn; every due run gets a new approval request.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", maxLength: 128 },
+        projectId: { type: "string", maxLength: 256 },
+        providerInstanceId: { type: "string", maxLength: 256 },
+        title: { type: "string", maxLength: 200 },
+        prompt: { type: "string", maxLength: 12000 },
+        model: { type: "string" },
+        options: { type: "array" },
+        runtimeMode: { type: "string" },
+        envMode: { type: "string", enum: ["local", "worktree"] },
+        baseRef: { type: "string", maxLength: 256 },
+        schedule: automationScheduleSchema,
+        enabled: { type: "boolean" },
+      },
+      required: [
+        "requestId",
+        "projectId",
+        "providerInstanceId",
+        "title",
+        "prompt",
+        "model",
+        "options",
+        "runtimeMode",
+        "envMode",
+        "schedule",
+      ],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeAutomationUpdate,
+    description: "Request approval for an exact revision-guarded schedule replacement.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", maxLength: 128 },
+        automationId: { type: "string", maxLength: 128 },
+        expectedRevision: { type: "integer", minimum: 1 },
+        title: { type: "string", maxLength: 200 },
+        prompt: { type: "string", maxLength: 12000 },
+        providerInstanceId: { type: "string", maxLength: 256 },
+        model: { type: "string" },
+        options: { type: "array" },
+        runtimeMode: { type: "string" },
+        envMode: { type: "string", enum: ["local", "worktree"] },
+        baseRef: { anyOf: [{ type: "string", maxLength: 256 }, { type: "null" }] },
+        schedule: automationScheduleSchema,
+        enabled: { type: "boolean" },
+      },
+      required: ["requestId", "automationId", "expectedRevision"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.proposeAutomationCancel,
+    description:
+      "Request approval to cancel future occurrences. Already accepted/executing runs are not interrupted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        requestId: { type: "string", maxLength: 128 },
+        automationId: { type: "string", maxLength: 128 },
+        expectedRevision: { type: "integer", minimum: 1 },
+      },
+      required: ["requestId", "automationId", "expectedRevision"],
+      additionalProperties: false,
+    },
+  },
+  ...[
+    [
+      AGENT_CONTROL_MCP_TOOLS.recentActivity,
+      "Read bounded, payload-free project/thread activity and automation outcomes.",
+    ],
+    [
+      AGENT_CONTROL_MCP_TOOLS.orchestrationEvents,
+      "Read bounded, payload-free orchestration event metadata.",
+    ],
+    [
+      AGENT_CONTROL_MCP_TOOLS.providerRuntimeEvents,
+      "Read bounded, payload-free provider runtime event metadata.",
+    ],
+  ].map(([name, description]) => ({
+    name: name!,
+    description: description!,
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", maxLength: 256 },
+        threadId: { type: "string", maxLength: 256 },
+        providerInstanceId: { type: "string", maxLength: 256 },
+        since: { type: "string" },
+        limit: limitSchemaProperty(AGENT_CONTROL_MCP_LIST_LIMIT_MAX),
+      },
+      additionalProperties: false,
+    },
+  })),
+  {
+    name: AGENT_CONTROL_MCP_TOOLS.diagnosticsSummary,
+    description:
+      "Read a redacted health summary with counts only; paths, terminals, logs, traces, requests, and payloads are omitted.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", maxLength: 256 },
+        providerInstanceId: { type: "string", maxLength: 256 },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 const WRITE_TOOL_NAMES = new Set<string>([
@@ -400,6 +600,9 @@ const WRITE_TOOL_NAMES = new Set<string>([
   AGENT_CONTROL_MCP_TOOLS.proposeProjectUpdate,
   AGENT_CONTROL_MCP_TOOLS.proposeProjectRemove,
   AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange,
+  AGENT_CONTROL_MCP_TOOLS.proposeAutomationCreate,
+  AGENT_CONTROL_MCP_TOOLS.proposeAutomationUpdate,
+  AGENT_CONTROL_MCP_TOOLS.proposeAutomationCancel,
 ]);
 
 const writeCapabilityForTool = (name: string): AgentControlCapability | null => {
@@ -420,15 +623,35 @@ const writeCapabilityForTool = (name: string): AgentControlCapability | null => 
       return AGENT_CONTROL_CAPABILITIES.removeProject;
     case AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange:
       return AGENT_CONTROL_CAPABILITIES.changeSettings;
+    case AGENT_CONTROL_MCP_TOOLS.proposeAutomationCreate:
+    case AGENT_CONTROL_MCP_TOOLS.proposeAutomationUpdate:
+    case AGENT_CONTROL_MCP_TOOLS.proposeAutomationCancel:
+      return AGENT_CONTROL_CAPABILITIES.manageAutomations;
     default:
       return null;
   }
 };
 
-const readCapabilityForTool = (name: string): AgentControlCapability =>
-  name === AGENT_CONTROL_MCP_TOOLS.settingsSummary
-    ? AGENT_CONTROL_CAPABILITIES.readSettings
-    : AGENT_CONTROL_CAPABILITIES.read;
+const readCapabilityForTool = (name: string): AgentControlCapability => {
+  if (name === AGENT_CONTROL_MCP_TOOLS.settingsSummary)
+    return AGENT_CONTROL_CAPABILITIES.readSettings;
+  if (
+    name === AGENT_CONTROL_MCP_TOOLS.listAutomations ||
+    name === AGENT_CONTROL_MCP_TOOLS.readAutomation ||
+    name === AGENT_CONTROL_MCP_TOOLS.listAutomationRuns
+  )
+    return AGENT_CONTROL_CAPABILITIES.readAutomations;
+  if (
+    name === AGENT_CONTROL_MCP_TOOLS.recentActivity ||
+    name === AGENT_CONTROL_MCP_TOOLS.orchestrationEvents ||
+    name === AGENT_CONTROL_MCP_TOOLS.providerRuntimeEvents
+  )
+    return AGENT_CONTROL_CAPABILITIES.readActivity;
+  if (name === AGENT_CONTROL_MCP_TOOLS.diagnosticsSummary) {
+    return AGENT_CONTROL_CAPABILITIES.readDiagnostics;
+  }
+  return AGENT_CONTROL_CAPABILITIES.read;
+};
 
 const clampLimit = (value: number | undefined, fallback: number, max: number): number =>
   Math.min(value ?? fallback, max);
@@ -527,6 +750,31 @@ const toThreadSummary = (shell: OrchestrationThreadShell): AgentControlMcpThread
   createdAt: shell.createdAt,
   updatedAt: shell.updatedAt,
 });
+
+const toAutomationSummary = (automation: AgentControlAutomation, fullPrompt = false) => {
+  const prompt = automation.definition.execution.prompt;
+  const promptTruncated =
+    !fullPrompt && prompt.length > AGENT_CONTROL_MCP_AUTOMATION_LIST_PROMPT_MAX_CHARS;
+  return {
+    automationId: automation.automationId,
+    projectId: automation.projectId,
+    providerInstanceId: automation.providerInstanceId,
+    execution: {
+      ...automation.definition.execution,
+      prompt: promptTruncated
+        ? prompt.slice(0, AGENT_CONTROL_MCP_AUTOMATION_LIST_PROMPT_MAX_CHARS)
+        : prompt,
+    },
+    promptTruncated,
+    schedule: automation.definition.schedule,
+    revision: automation.revision,
+    enabled: automation.enabled,
+    cancelled: automation.cancelled,
+    nextRunAt: automation.nextRunAt,
+    createdAt: automation.createdAt,
+    updatedAt: automation.updatedAt,
+  };
+};
 
 const toMcpMessage = (message: OrchestrationMessage): AgentControlMcpMessage => {
   const truncated = message.text.length > AGENT_CONTROL_MCP_MESSAGE_TEXT_MAX_CHARS;
@@ -773,6 +1021,18 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         ];
       case "changeSettings":
         return [AGENT_CONTROL_RISK_TAGS.changesSettings];
+      case "createAutomation":
+        return [AGENT_CONTROL_RISK_TAGS.createsAutomation];
+      case "updateAutomation":
+        return [AGENT_CONTROL_RISK_TAGS.modifiesAutomation];
+      case "cancelAutomation":
+        return [AGENT_CONTROL_RISK_TAGS.cancelsAutomation];
+      case "automationRun":
+        return [
+          AGENT_CONTROL_RISK_TAGS.scheduledRun,
+          AGENT_CONTROL_RISK_TAGS.createsThreads,
+          AGENT_CONTROL_RISK_TAGS.startsProviderTurn,
+        ];
     }
   };
 
@@ -794,6 +1054,14 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         return `Unlink project ${plan.expected.title}; workspace files will be retained`;
       case "changeSettings":
         return `Change ${plan.change.kind}`;
+      case "createAutomation":
+        return `Create automation ${plan.automationId}; each run requires separate approval`;
+      case "updateAutomation":
+        return `Update automation ${plan.automationId} from revision ${plan.before.revision}`;
+      case "cancelAutomation":
+        return `Cancel future runs for automation ${plan.automationId}`;
+      case "automationRun":
+        return `Approve scheduled run ${plan.runId}`;
     }
   };
 
@@ -1009,6 +1277,268 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
       });
     });
 
+  const sessionScope = (session: AgentControlSessionRecord) =>
+    deps.projections.getThreadShellById(session.threadId).pipe(
+      Effect.mapError(() => new ToolFailure("Project scope is unavailable.")),
+      Effect.flatMap((thread) =>
+        Option.isSome(thread) &&
+        thread.value.session?.providerInstanceId === session.providerInstanceId
+          ? Effect.succeed({
+              projectId: thread.value.projectId,
+              providerInstanceId: session.providerInstanceId,
+            })
+          : failTool("Project scope is unavailable."),
+      ),
+    );
+
+  const automationFailure = () => new ToolFailure("Automation request failed.");
+
+  const listAutomations = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      if (deps.automations === undefined)
+        return yield* failTool("Automation reads are unavailable.");
+      const input = yield* decodeArgs(AgentControlMcpListAutomationsInput, args);
+      const scope = yield* sessionScope(session);
+      if (input.projectId !== undefined && input.projectId !== scope.projectId) {
+        return yield* failTool("Project scope denied.");
+      }
+      const automations = yield* deps.automations
+        .list({
+          ...scope,
+          includeDisabled: input.includeDisabled ?? false,
+          limit: clampLimit(
+            input.limit,
+            AGENT_CONTROL_MCP_LIST_LIMIT_DEFAULT,
+            AGENT_CONTROL_MCP_LIST_LIMIT_MAX,
+          ),
+        })
+        .pipe(Effect.mapError(automationFailure));
+      return Schema.encodeSync(AgentControlMcpListAutomationsResult)({
+        automations: automations.map((automation) => toAutomationSummary(automation)),
+        limits: {
+          maxActivePerProject: AGENT_CONTROL_AUTOMATION_MAX_ACTIVE_PER_PROJECT,
+          minIntervalMs: AGENT_CONTROL_AUTOMATION_MIN_INTERVAL_MS,
+          maxHorizonMs: AGENT_CONTROL_AUTOMATION_MAX_HORIZON_MS,
+          runHistoryMax: AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX,
+        },
+      });
+    });
+
+  const readAutomation = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      if (deps.automations === undefined)
+        return yield* failTool("Automation reads are unavailable.");
+      const input = yield* decodeArgs(AgentControlMcpReadAutomationInput, args);
+      const scope = yield* sessionScope(session);
+      const automation = yield* deps.automations
+        .get(input.automationId, scope)
+        .pipe(Effect.mapError(automationFailure));
+      return Schema.encodeSync(AgentControlMcpReadAutomationResult)({
+        automation: toAutomationSummary(automation, true),
+      });
+    });
+
+  const listAutomationRuns = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      if (deps.automations === undefined)
+        return yield* failTool("Automation reads are unavailable.");
+      const input = yield* decodeArgs(AgentControlMcpListAutomationRunsInput, args);
+      const scope = yield* sessionScope(session);
+      const limit = clampLimit(
+        input.limit,
+        AGENT_CONTROL_MCP_LIST_LIMIT_DEFAULT,
+        AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX,
+      );
+      const runs = yield* deps.automations
+        .listRuns(input.automationId, { ...scope, limit })
+        .pipe(Effect.mapError(automationFailure));
+      return Schema.encodeSync(AgentControlMcpListAutomationRunsResult)({
+        runs,
+        historyLimit: AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX,
+      });
+    });
+
+  const proposeAutomationCreate = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      const input = yield* decodeArgs(AgentControlMcpProposeAutomationCreateInput, args);
+      const automationId = AgentControlAutomationId.make(
+        `automation-${createHash("sha256")
+          .update(`${session.threadId}:${input.requestId}`)
+          .digest("hex")
+          .slice(0, 32)}`,
+      );
+      return yield* submitMutation({
+        session,
+        authority,
+        requestId: input.requestId,
+        plan: {
+          kind: "createAutomation",
+          automationId,
+          definition: {
+            execution: {
+              projectId: input.projectId,
+              title: input.title,
+              prompt: input.prompt,
+              modelSelection: {
+                instanceId: input.providerInstanceId,
+                model: input.model,
+                options: input.options,
+              },
+              runtimeMode: input.runtimeMode,
+              envMode: input.envMode,
+              ...(input.baseRef === undefined ? {} : { baseRef: input.baseRef }),
+            },
+            schedule: input.schedule,
+            enabled: input.enabled ?? true,
+          },
+        },
+      });
+    });
+
+  const proposeAutomationUpdate = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      if (deps.automations === undefined) {
+        return yield* failTool("Automation proposal creation is unavailable.");
+      }
+      const input = yield* decodeArgs(AgentControlMcpProposeAutomationUpdateInput, args);
+      const scope = yield* sessionScope(session);
+      const current = yield* deps.automations
+        .get(input.automationId, scope)
+        .pipe(Effect.mapError(automationFailure));
+      if (current.revision !== input.expectedRevision) {
+        return yield* failTool("Automation revision changed.");
+      }
+      const currentExecution = current.definition.execution;
+      const nextBaseRef =
+        input.baseRef === null ? undefined : (input.baseRef ?? currentExecution.baseRef);
+      const nextOptions = input.options ?? currentExecution.modelSelection.options;
+      return yield* submitMutation({
+        session,
+        authority,
+        requestId: input.requestId,
+        plan: {
+          kind: "updateAutomation",
+          automationId: current.automationId,
+          before: {
+            revision: current.revision,
+            definition: current.definition,
+            cancelled: current.cancelled,
+            updatedAt: current.updatedAt,
+          },
+          after: {
+            execution: {
+              projectId: currentExecution.projectId,
+              title: input.title ?? currentExecution.title,
+              prompt: input.prompt ?? currentExecution.prompt,
+              modelSelection: {
+                instanceId: input.providerInstanceId ?? currentExecution.modelSelection.instanceId,
+                model: input.model ?? currentExecution.modelSelection.model,
+                ...(nextOptions === undefined ? {} : { options: nextOptions }),
+              },
+              runtimeMode: input.runtimeMode ?? currentExecution.runtimeMode,
+              envMode: input.envMode ?? currentExecution.envMode,
+              ...(nextBaseRef === undefined ? {} : { baseRef: nextBaseRef }),
+            },
+            schedule: input.schedule ?? current.definition.schedule,
+            enabled: input.enabled ?? current.definition.enabled,
+          },
+        },
+      });
+    });
+
+  const proposeAutomationCancel = (
+    session: AgentControlSessionRecord,
+    authority: AgentControlTurnAuthority,
+    args: unknown,
+  ) =>
+    Effect.gen(function* () {
+      if (deps.automations === undefined) {
+        return yield* failTool("Automation proposal creation is unavailable.");
+      }
+      const input = yield* decodeArgs(AgentControlMcpProposeAutomationCancelInput, args);
+      const scope = yield* sessionScope(session);
+      const current = yield* deps.automations
+        .get(input.automationId, scope)
+        .pipe(Effect.mapError(automationFailure));
+      if (current.revision !== input.expectedRevision) {
+        return yield* failTool("Automation revision changed.");
+      }
+      return yield* submitMutation({
+        session,
+        authority,
+        requestId: input.requestId,
+        plan: {
+          kind: "cancelAutomation",
+          automationId: current.automationId,
+          expected: {
+            revision: current.revision,
+            definition: current.definition,
+            cancelled: current.cancelled,
+            updatedAt: current.updatedAt,
+          },
+        },
+      });
+    });
+
+  const operationalInput = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      if (deps.diagnostics === undefined)
+        return yield* failTool("Operational reads are unavailable.");
+      const input = yield* decodeArgs(AgentControlMcpOperationalReadInput, args);
+      const scope = yield* sessionScope(session);
+      return { diagnostics: deps.diagnostics, input, scope };
+    });
+
+  const recentActivity = (session: AgentControlSessionRecord, args: unknown) =>
+    operationalInput(session, args).pipe(
+      Effect.flatMap(({ diagnostics, input, scope }) => diagnostics.recentActivity(scope, input)),
+      Effect.map(Schema.encodeSync(AgentControlMcpRecentActivityResult)),
+      Effect.mapError(() => new ToolFailure("Operational read failed.")),
+    );
+
+  const orchestrationEvents = (session: AgentControlSessionRecord, args: unknown) =>
+    operationalInput(session, args).pipe(
+      Effect.flatMap(({ diagnostics, input, scope }) =>
+        diagnostics.orchestrationEvents(scope, input),
+      ),
+      Effect.map(Schema.encodeSync(AgentControlMcpOrchestrationEventsResult)),
+      Effect.mapError(() => new ToolFailure("Operational read failed.")),
+    );
+
+  const providerRuntimeEvents = (session: AgentControlSessionRecord, args: unknown) =>
+    operationalInput(session, args).pipe(
+      Effect.flatMap(({ diagnostics, input, scope }) =>
+        diagnostics.providerRuntimeEvents(scope, input),
+      ),
+      Effect.map(Schema.encodeSync(AgentControlMcpProviderRuntimeEventsResult)),
+      Effect.mapError(() => new ToolFailure("Operational read failed.")),
+    );
+
+  const diagnosticsSummary = (session: AgentControlSessionRecord, args: unknown) =>
+    Effect.gen(function* () {
+      if (deps.diagnostics === undefined) return yield* failTool("Diagnostics are unavailable.");
+      const input = yield* decodeArgs(AgentControlMcpDiagnosticsSummaryInput, args);
+      const scope = yield* sessionScope(session);
+      if (
+        (input.projectId !== undefined && input.projectId !== scope.projectId) ||
+        (input.providerInstanceId !== undefined &&
+          input.providerInstanceId !== scope.providerInstanceId)
+      )
+        return yield* failTool("Diagnostics scope denied.");
+      const result = yield* deps.diagnostics
+        .summary(scope)
+        .pipe(Effect.mapError(() => new ToolFailure("Diagnostics read failed.")));
+      return Schema.encodeSync(AgentControlMcpDiagnosticsSummaryResult)(result);
+    });
+
   const listProjects = (_session: AgentControlSessionRecord, args: unknown) =>
     Effect.gen(function* () {
       const input = yield* decodeArgs(AgentControlMcpListProjectsInput, args);
@@ -1209,6 +1739,20 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
           return readControlRequest(session, args);
         case AGENT_CONTROL_MCP_TOOLS.waitForControlRequest:
           return waitForControlRequest(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.listAutomations:
+          return listAutomations(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.readAutomation:
+          return readAutomation(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.listAutomationRuns:
+          return listAutomationRuns(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.recentActivity:
+          return recentActivity(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.orchestrationEvents:
+          return orchestrationEvents(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.providerRuntimeEvents:
+          return providerRuntimeEvents(session, args);
+        case AGENT_CONTROL_MCP_TOOLS.diagnosticsSummary:
+          return diagnosticsSummary(session, args);
         case AGENT_CONTROL_MCP_TOOLS.createThreads:
           return authority
             ? createThreads(session, authority, args)
@@ -1242,6 +1786,18 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         case AGENT_CONTROL_MCP_TOOLS.proposeSettingsChange:
           return authority
             ? proposeSettingsChange(session, authority, args)
+            : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.proposeAutomationCreate:
+          return authority
+            ? proposeAutomationCreate(session, authority, args)
+            : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.proposeAutomationUpdate:
+          return authority
+            ? proposeAutomationUpdate(session, authority, args)
+            : failTool("Exact active-turn write authority is unavailable.");
+        case AGENT_CONTROL_MCP_TOOLS.proposeAutomationCancel:
+          return authority
+            ? proposeAutomationCancel(session, authority, args)
             : failTool("Exact active-turn write authority is unavailable.");
         default:
           return failTool("Unknown tool.");
