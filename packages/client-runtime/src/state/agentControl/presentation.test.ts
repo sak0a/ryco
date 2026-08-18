@@ -111,6 +111,7 @@ describe("buildAgentControlProposalCardModel", () => {
     );
     expect(update.actionLabel).toBe("Update thread");
     expect(update.detailSections[0]?.lines).toEqual([
+      "Thread: thread-target-5678",
       "Title: New title",
       "Archive thread",
       "Clear persistent goal",
@@ -138,11 +139,26 @@ describe("buildAgentControlProposalCardModel", () => {
         result: {
           outcome: "completed",
           createdThreadIds: [ThreadId.make("thread-new-1")],
+          execution: {
+            operationId: "operation-123456789" as never,
+            commands: [
+              {
+                commandId: "command-1" as never,
+                commandType: "thread.turn.start",
+                sequence: 17,
+              },
+            ],
+            affectedThreadIds: [ThreadId.make("thread-new-1")],
+            worktreeIds: [],
+            delivery: "queued",
+          },
           completedAt: "2026-08-17T00:10:00.000Z",
         },
       }),
     );
     expect(completed.outcomeLabel).toBe("Completed · created 1 thread");
+    expect(completed.executionLabel).toBe("Operation operatio… · 1 command · delivery: queued");
+    expect(completed.affectedThreadIds).toEqual(["thread-new-1"]);
     expect(completed.isPending).toBe(false);
 
     const failed = buildAgentControlProposalCardModel(

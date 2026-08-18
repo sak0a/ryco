@@ -155,12 +155,12 @@ export interface AgentControlSessionRegistryShape {
   readonly registerInFlight: (
     sessionId: string,
     request: AgentControlInFlightRequest,
-  ) => Effect.Effect<() => void>;
+  ) => Effect.Effect<() => void, AgentControlTurnAuthorityError>;
 
   /**
    * Bind write authority to the exact running turn. At most one authority
-   * per session; binding again replaces it. No tool in this slice may
-   * exercise the authority — it exists for the thread-actions slice.
+   * per session; binding again replaces it. Proposal-backed mutation tools
+   * must present this exact authority while creating their immutable plan.
    */
   readonly bindTurnAuthority: (input: {
     readonly sessionId: string;

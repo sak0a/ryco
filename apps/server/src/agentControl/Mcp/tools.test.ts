@@ -14,6 +14,7 @@ import {
   RuntimeSessionId,
   ServerProvider,
   ThreadId,
+  TurnId,
   type AgentControlProposal,
   type AgentControlProposalStreamProposalEvent,
   type OrchestrationShellSnapshot,
@@ -251,6 +252,18 @@ const session: AgentControlSessionRecord = {
   issuedAt: T0,
 };
 
+const writeSession: AgentControlSessionRecord = {
+  ...session,
+  grantedCapabilities: Object.values(AGENT_CONTROL_CAPABILITIES),
+};
+
+const activeAuthority = {
+  sessionId: session.sessionId,
+  threadId: callerThreadId,
+  turnId: TurnId.make("turn-active"),
+  boundAt: T1,
+} as const;
+
 // ── Stub deps ─────────────────────────────────────────────────────────
 
 const allowPolicy: AgentControlPolicyShape = {
@@ -333,18 +346,29 @@ const structured = (result: { readonly structuredContent?: unknown }): unknown =
 
 // ── Catalog ───────────────────────────────────────────────────────────
 
-it.effect("advertises exactly the seven read-only tools and no mutations", () =>
-  Effect.sync(() => {
+it.effect("advertises only read tools without exact authority and all four writes with it", () =>
+  Effect.gen(function* () {
     const tools = makeAgentControlMcpTools(makeDeps());
-    assert.deepStrictEqual(
-      tools.descriptors.map((descriptor) => descriptor.name).toSorted(),
-      [...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted(),
-    );
-    const serialized = JSON.stringify(tools.descriptors).toLowerCase();
+    const readDescriptors = yield* tools.descriptorsFor(session);
+    assert.strictEqual(readDescriptors.length, 7);
+    const serialized = JSON.stringify(readDescriptors).toLowerCase();
     for (const mutation of ["create_thread", "send_message", "interrupt", "update_thread"]) {
       assert.notInclude(serialized, mutation);
     }
-    assert.isFalse(tools.hasTool("ryco_create_threads"));
+
+    const writeTools = makeAgentControlMcpTools(
+      makeDeps({ getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)) }),
+    );
+    const writeDescriptors = yield* writeTools.descriptorsFor(writeSession);
+    assert.deepStrictEqual(
+      writeDescriptors.map((descriptor) => descriptor.name).toSorted(),
+      [...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted(),
+    );
+    assert.strictEqual(
+      writeDescriptors.filter((tool) => writeTools.isWriteTool(tool.name)).length,
+      4,
+    );
+    assert.isTrue(tools.hasTool("ryco_create_threads"));
   }),
 );
 
@@ -373,6 +397,114 @@ it.effect("denies a session whose grants lack the read capability", () =>
     });
     assert.isTrue(result.isError);
     assert.strictEqual(result.content[0]?.text, "Capability denied.");
+  }),
+);
+
+it.effect("rejects a write call without exact active-turn authority", () =>
+  Effect.gen(function* () {
+    const result = yield* call(
+      makeDeps(),
+      AGENT_CONTROL_MCP_TOOLS.sendMessage,
+      {
+        requestId: "request-no-authority",
+        threadId: "thread-caller",
+        text: "Continue",
+        delivery: "queue",
+      },
+      writeSession,
+    );
+    assert.isTrue(result.isError);
+    assert.strictEqual(
+      result.content[0]?.text,
+      "Exact active-turn write authority is unavailable.",
+    );
+  }),
+);
+
+it.effect("creates an immutable proposal without mutating the target", () =>
+  Effect.gen(function* () {
+    const submitted: Array<
+      Parameters<NonNullable<AgentControlMcpToolDeps["proposals"]["submit"]>>[0]
+    > = [];
+    const deps = makeDeps({
+      getTurnAuthority: () => Effect.succeed(Option.some(activeAuthority)),
+      validator: {
+        validateSubmission: ({ plan }) =>
+          Effect.succeed({
+            kind: "provider-session",
+            threadId: callerThreadId,
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeSessionId: RuntimeSessionId.make("runtime-1"),
+            turnId: TurnId.make("turn-active"),
+            originProjectId: projectOne.id,
+            originRuntimeMode: "auto",
+            originEnvMode: "worktree",
+            targetSnapshots:
+              plan.kind === "createThreads"
+                ? []
+                : [
+                    {
+                      threadId: callerThreadId,
+                      projectId: projectOne.id,
+                      runtimeMode: "auto",
+                      envMode: "worktree",
+                      archived: false,
+                      activeTurnId: TurnId.make("turn-active"),
+                    },
+                  ],
+          }),
+        revalidateExecution: () => Effect.void,
+      },
+      proposals: {
+        getProposal: makeDeps().proposals.getProposal,
+        submit: (input) => {
+          submitted.push(input);
+          return Effect.succeed({
+            replayed: false,
+            proposal: {
+              proposalId: AgentControlProposalId.make("proposal-created"),
+              requestId: input.requestId,
+              principal: input.principal,
+              planVersion: 1,
+              plan: input.plan,
+              planDigest: "b".repeat(64),
+              riskTags: input.riskTags,
+              promptSummary: input.promptSummary,
+              status: "pending-user-approval",
+              createdAt: input.now,
+              updatedAt: input.now,
+              expiresAt: input.expiresAt,
+              decidedAt: null,
+              result: null,
+            },
+          });
+        },
+      },
+    });
+
+    const before = shellSnapshot.threads;
+    const result = yield* call(
+      deps,
+      AGENT_CONTROL_MCP_TOOLS.sendMessage,
+      {
+        requestId: "request-proposal-only",
+        threadId: "thread-caller",
+        text: "Continue",
+        delivery: "queue",
+      },
+      writeSession,
+    );
+
+    assert.isUndefined(result.isError);
+    assert.strictEqual(submitted.length, 1);
+    assert.deepStrictEqual(submitted[0]?.plan, {
+      kind: "sendMessage",
+      threadId: callerThreadId,
+      text: "Continue",
+      delivery: "queue",
+    });
+    assert.strictEqual(shellSnapshot.threads, before);
+    assert.strictEqual((structured(result) as { replayed: boolean }).replayed, false);
   }),
 );
 
@@ -406,7 +538,9 @@ it.effect("ryco_capabilities uses provider instances and bounds model lists", ()
     assert.isTrue(payload.readOnly);
     assert.deepStrictEqual(
       [...payload.tools].toSorted(),
-      [...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted(),
+      AGENT_CONTROL_MCP_TOOL_NAMES.filter(
+        (name) => !makeAgentControlMcpTools(makeDeps()).isWriteTool(name),
+      ).toSorted(),
     );
     assert.strictEqual(payload.providerInstances[0]?.instanceId, "codex");
     assert.strictEqual(payload.providerInstances[0]?.models.length, 50);
@@ -684,6 +818,63 @@ it.live("wait returns immediately when the proposal is already decided", () =>
     };
     assert.strictEqual(payload.receipt.status, "rejected");
     assert.isFalse(payload.timedOut);
+  }),
+);
+
+it.live("read and terminal wait return durable execution receipts", () =>
+  Effect.gen(function* () {
+    const completed: AgentControlProposal = {
+      ...proposalOwn,
+      status: "completed",
+      decidedAt: T1,
+      result: {
+        outcome: "completed",
+        execution: {
+          operationId: "operation-1" as never,
+          commands: [
+            {
+              commandId: "command-1" as never,
+              commandType: "thread.turn.start",
+              sequence: 42,
+            },
+          ],
+          affectedThreadIds: [ThreadId.make("thread-other")],
+          worktreeIds: [],
+          delivery: "queued",
+        },
+        completedAt: T2,
+      },
+    };
+    const { deps } = yield* makeWaitDeps(completed);
+
+    for (const tool of [
+      AGENT_CONTROL_MCP_TOOLS.readControlRequest,
+      AGENT_CONTROL_MCP_TOOLS.waitForControlRequest,
+    ]) {
+      const result = yield* call(deps, tool, {
+        proposalId: "proposal-own",
+        ...(tool === AGENT_CONTROL_MCP_TOOLS.waitForControlRequest
+          ? { waitFor: "terminal", timeoutMs: 5_000 }
+          : {}),
+      });
+      assert.isUndefined(result.isError);
+      const payload = structured(result) as {
+        readonly receipt: {
+          readonly result: {
+            readonly outcome: string;
+            readonly execution: {
+              readonly commands: ReadonlyArray<{ readonly sequence: number }>;
+              readonly affectedThreadIds: ReadonlyArray<string>;
+              readonly delivery: string;
+            };
+          };
+        };
+      };
+      assert.strictEqual(payload.receipt.result.outcome, "completed");
+      assert.strictEqual(payload.receipt.result.execution.commands[0]?.sequence, 42);
+      assert.deepStrictEqual(payload.receipt.result.execution.affectedThreadIds, ["thread-other"]);
+      assert.strictEqual(payload.receipt.result.execution.delivery, "queued");
+    }
   }),
 );
 

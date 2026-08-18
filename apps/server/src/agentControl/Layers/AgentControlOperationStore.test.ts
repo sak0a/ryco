@@ -113,7 +113,16 @@ disabledLayer("AgentControlOperationStore (feature disabled)", (it) => {
           actionKind: "createThreads",
           status,
           attempt: 0,
-          state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+          state: {
+            completedSteps: [],
+            commandReceipts: [],
+            resources: {
+              threadIds: [],
+              ownedThreadIds: [],
+              worktreeIds: [],
+              ownedWorktrees: [],
+            },
+          },
           result: null,
           createdAt: "2026-08-17T00:00:00.000Z",
           updatedAt: "2026-08-17T00:00:00.000Z",
@@ -130,7 +139,16 @@ disabledLayer("AgentControlOperationStore (feature disabled)", (it) => {
           nextStatus: "running",
           actor: "executor",
           attempt: 1,
-          state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+          state: {
+            completedSteps: [],
+            commandReceipts: [],
+            resources: {
+              threadIds: [],
+              ownedThreadIds: [],
+              worktreeIds: [],
+              ownedWorktrees: [],
+            },
+          },
           result: null,
           updatedAt: "2026-08-17T00:01:00.000Z",
         }),
@@ -145,7 +163,16 @@ disabledLayer("AgentControlOperationStore (feature disabled)", (it) => {
         nextStatus: "compensating",
         actor: "executor",
         attempt: 1,
-        state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+        state: {
+          completedSteps: [],
+          commandReceipts: [],
+          resources: {
+            threadIds: [],
+            ownedThreadIds: [],
+            worktreeIds: [],
+            ownedWorktrees: [],
+          },
+        },
         result: null,
         updatedAt: "2026-08-17T00:01:00.000Z",
       });
@@ -233,7 +260,13 @@ enabledLayer("AgentControlOperationStore", (it) => {
         attempt: 1,
         state: {
           completedSteps: ["worktree-preflight"],
-          resources: { threadIds: [], worktreeIds: [WorktreeId.make("worktree-1")] },
+          commandReceipts: [],
+          resources: {
+            threadIds: [],
+            ownedThreadIds: [],
+            worktreeIds: [WorktreeId.make("worktree-1")],
+            ownedWorktrees: [],
+          },
         },
         result: null,
         updatedAt: "2026-08-17T00:07:00.000Z",

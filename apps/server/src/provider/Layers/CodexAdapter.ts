@@ -85,7 +85,7 @@ const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES =
  */
 export type CodexAgentControlBridge = Pick<
   AgentControlSessionRegistryShape,
-  "issueLease" | "revokeLease"
+  "issueLease" | "revokeLease" | "bindTurnAuthority" | "retireTurnAuthority"
 >;
 
 /**
@@ -97,10 +97,11 @@ export type CodexAgentControlBridge = Pick<
  * every request is rejected as unauthorized.
  */
 export const CODEX_AGENT_CONTROL_INSTRUCTIONS =
-  "Ryco Agent Control: read-only Ryco control tools (ryco_*) are available through the " +
+  "Ryco Agent Control tools (ryco_*) are available through the " +
   `'${CODEX_AGENT_CONTROL_SERVER_NAME}' MCP server on a private local connection. They can ` +
-  "inspect Ryco projects, threads, transcripts, and Agent Control request status. " +
-  "No tool on that server can change Ryco state in this build. If the server is " +
+  "inspect Ryco projects, threads, transcripts, and request status. During an active turn, " +
+  "the four thread-action tools create immutable requests that require user approval in Ryco; " +
+  "they never mutate immediately. If the server is " +
   "unreachable or rejects requests as unauthorized, Ryco has revoked this session's " +
   "access — treat the tools as unavailable instead of retrying.";
 
@@ -1809,7 +1810,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               threadId: input.threadId,
               providerInstanceId: boundInstanceId,
               runtimeSessionId,
-              capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+              capabilities: [
+                AGENT_CONTROL_CAPABILITIES.read,
+                AGENT_CONTROL_CAPABILITIES.createThreads,
+                AGENT_CONTROL_CAPABILITIES.sendMessage,
+                AGENT_CONTROL_CAPABILITIES.interruptThread,
+                AGENT_CONTROL_CAPABILITIES.updateThread,
+              ],
             })
           : Option.none<never>();
         const agentControlInjection: CodexAgentControlInjection | undefined = Option.isSome(
@@ -1907,6 +1914,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               yield* options.agentControl
                 .revokeLease({ sessionId: agentControlSessionId, reason: "runtime-teardown" })
                 .pipe(Effect.ignore);
+            }
+            if (options?.agentControl && agentControlSessionId !== undefined) {
+              for (const runtimeEvent of runtimeEvents) {
+                if (runtimeEvent.type !== "turn.completed") continue;
+                yield* options.agentControl
+                  .retireTurnAuthority({
+                    threadId: input.threadId,
+                    ...(runtimeEvent.turnId === undefined ? {} : { turnId: runtimeEvent.turnId }),
+                  })
+                  .pipe(Effect.ignore);
+              }
             }
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
@@ -2121,7 +2139,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         : undefined;
     const formatted = formatSourceControlContextsForAgent(input.sourceControlContexts ?? []);
     const codexInput = formatted ? formatted + "\n\n" + (input.input ?? "") : input.input;
-    return yield* session.runtime
+    const result = yield* session.runtime
       .sendTurn({
         ...(codexInput !== undefined ? { input: codexInput } : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
@@ -2140,6 +2158,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
+    if (options?.agentControl && session.agentControlSessionId !== undefined) {
+      yield* options.agentControl
+        .bindTurnAuthority({
+          sessionId: session.agentControlSessionId,
+          turnId: result.turnId,
+        })
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to bind Agent Control turn authority", {
+              threadId: input.threadId,
+              turnId: result.turnId,
+              cause,
+            }),
+          ),
+        );
+    }
+    return result;
   });
 
   const steerTurn: NonNullable<CodexAdapterShape["steerTurn"]> = Effect.fn("steerTurn")(
@@ -2206,7 +2241,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) =>
-        session.runtime.interruptTurn(turnId).pipe(
+        (options?.agentControl
+          ? options.agentControl.retireTurnAuthority({
+              threadId,
+              ...(turnId === undefined ? {} : { turnId }),
+            })
+          : Effect.void
+        ).pipe(
+          Effect.andThen(session.runtime.interruptTurn(turnId)),
           Effect.timeoutOption("15 seconds"),
           Effect.flatMap(
             Option.match({

@@ -35,6 +35,8 @@ export interface AgentControlProposalCardModel {
   readonly expiresAt: string;
   readonly isPending: boolean;
   readonly outcomeLabel: string | null;
+  readonly executionLabel: string | null;
+  readonly affectedThreadIds: ReadonlyArray<ThreadId>;
   readonly detailSections: ReadonlyArray<AgentControlDetailSection>;
 }
 
@@ -111,7 +113,7 @@ function planPresentation(proposal: AgentControlProposal): {
         actionLabel: plan.delivery === "steer" ? "Steer thread" : "Queue message",
         targetLabel: `thread ${shortId(plan.threadId)}`,
         runtimeLabel: null,
-        detailSections: [{ heading: "Message", lines: [plan.text] }],
+        detailSections: [{ heading: "Message", lines: [`Thread: ${plan.threadId}`, plan.text] }],
       };
     case "interruptThread":
       return {
@@ -143,7 +145,7 @@ function planPresentation(proposal: AgentControlProposal): {
         actionLabel: "Update thread",
         targetLabel: `thread ${shortId(plan.threadId)}`,
         runtimeLabel: null,
-        detailSections: [{ heading: "Changes", lines: changes }],
+        detailSections: [{ heading: "Changes", lines: [`Thread: ${plan.threadId}`, ...changes] }],
       };
     }
   }
@@ -162,12 +164,38 @@ function outcomeLabel(proposal: AgentControlProposal): string | null {
   return `${result.error.code}: ${result.error.message}`;
 }
 
+function executionPresentation(proposal: AgentControlProposal): {
+  readonly label: string | null;
+  readonly affectedThreadIds: ReadonlyArray<ThreadId>;
+} {
+  const execution = proposal.result?.execution;
+  if (execution === undefined) return { label: null, affectedThreadIds: [] };
+  const parts = [
+    `Operation ${shortId(execution.operationId)}`,
+    `${execution.commands.length} command${execution.commands.length === 1 ? "" : "s"}`,
+  ];
+  if (execution.worktreeIds.length > 0) {
+    parts.push(
+      `${execution.worktreeIds.length} worktree${execution.worktreeIds.length === 1 ? "" : "s"}`,
+    );
+  }
+  if (execution.delivery !== undefined) parts.push(`delivery: ${execution.delivery}`);
+  if (execution.interrupt !== undefined) {
+    parts.push(`interrupt settled: ${execution.interrupt.settledStatus}`);
+  }
+  if (execution.compensation !== undefined) {
+    parts.push(execution.compensation.completed ? "cleanup completed" : "cleanup needs attention");
+  }
+  return { label: parts.join(" · "), affectedThreadIds: execution.affectedThreadIds };
+}
+
 export function buildAgentControlProposalCardModel(
   proposal: AgentControlProposal,
 ): AgentControlProposalCardModel {
   const status = STATUS_PRESENTATION[proposal.status];
   const origin = originPresentation(proposal);
   const plan = planPresentation(proposal);
+  const execution = executionPresentation(proposal);
   return {
     proposalId: proposal.proposalId,
     status: proposal.status,
@@ -183,6 +211,8 @@ export function buildAgentControlProposalCardModel(
     expiresAt: proposal.expiresAt,
     isPending: proposal.status === "pending-user-approval",
     outcomeLabel: outcomeLabel(proposal),
+    executionLabel: execution.label,
+    affectedThreadIds: execution.affectedThreadIds,
     detailSections: plan.detailSections,
   };
 }

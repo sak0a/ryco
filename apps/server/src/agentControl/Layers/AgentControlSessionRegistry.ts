@@ -166,21 +166,23 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
     sessionId,
     request,
   ) =>
-    Effect.sync(() => {
+    Effect.suspend(() => {
       const session = sessionsById.get(sessionId);
       if (session === undefined) {
-        // Session already revoked: abort immediately, nothing to track.
-        try {
-          request.abort();
-        } catch {
-          // ignore
+        return Effect.fail(new AgentControlTurnAuthorityError({ reason: "session-unknown" }));
+      }
+      if (request.turnId !== undefined) {
+        if (session.turnAuthority === null) {
+          return Effect.fail(new AgentControlTurnAuthorityError({ reason: "authority-retired" }));
         }
-        return () => {};
+        if (session.turnAuthority.turnId !== request.turnId) {
+          return Effect.fail(new AgentControlTurnAuthorityError({ reason: "turn-mismatch" }));
+        }
       }
       session.inFlight.add(request);
-      return () => {
+      return Effect.succeed(() => {
         session.inFlight.delete(request);
-      };
+      });
     });
 
   const bindTurnAuthority: AgentControlSessionRegistryShape["bindTurnAuthority"] = (input) =>
@@ -195,7 +197,11 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
         turnId: input.turnId,
         boundAt: new Date().toISOString(),
       };
+      const previous = session.turnAuthority;
       session.turnAuthority = authority;
+      if (previous !== null && previous.turnId !== authority.turnId) {
+        abortRequests(session, (request) => request.turnId === previous.turnId);
+      }
       return Effect.succeed(authority);
     });
 

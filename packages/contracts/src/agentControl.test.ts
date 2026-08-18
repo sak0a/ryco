@@ -227,12 +227,18 @@ describe("AgentControlOperation", () => {
   it("defaults absent state collections so older rows keep decoding", () => {
     const state = decodeOperationState({});
     expect(state.completedSteps).toEqual([]);
-    expect(state.resources).toEqual({ threadIds: [], worktreeIds: [] });
+    expect(state.resources).toEqual({
+      threadIds: [],
+      ownedThreadIds: [],
+      worktreeIds: [],
+      ownedWorktrees: [],
+    });
+    expect(state.commandReceipts).toEqual([]);
   });
 });
 
 describe("Agent Control MCP contracts", () => {
-  it("catalogs exactly the seven read-only tools", async () => {
+  it("catalogs exactly seven read tools and four proposal-backed mutation tools", async () => {
     const { AGENT_CONTROL_MCP_TOOLS, AGENT_CONTROL_MCP_TOOL_NAMES } =
       await import("./agentControl.ts");
     expect([...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted()).toEqual(
@@ -244,12 +250,60 @@ describe("Agent Control MCP contracts", () => {
         "ryco_read_thread",
         "ryco_read_control_request",
         "ryco_wait_for_control_request",
+        "ryco_create_threads",
+        "ryco_send_message",
+        "ryco_interrupt_thread",
+        "ryco_update_thread",
       ].toSorted(),
     );
-    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(7);
+    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(11);
     for (const name of AGENT_CONTROL_MCP_TOOL_NAMES) {
       expect(name.startsWith("ryco_")).toBe(true);
     }
+  });
+
+  it("decodes only the four exact mutation payloads", async () => {
+    const {
+      AgentControlMcpCreateThreadsInput,
+      AgentControlMcpInterruptThreadInput,
+      AgentControlMcpSendMessageInput,
+      AgentControlMcpUpdateThreadInput,
+    } = await import("./agentControl.ts");
+
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpCreateThreadsInput)({
+        requestId: "request-create",
+        entries: [createThreadsPlan.entries[0]],
+      }).entries,
+    ).toHaveLength(1);
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpSendMessageInput)({
+        requestId: "request-send",
+        threadId: "thread-1",
+        text: "Continue",
+        delivery: "steer",
+      }).delivery,
+    ).toBe("steer");
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpInterruptThreadInput)({
+        requestId: "request-interrupt",
+        threadId: "thread-1",
+      }).threadId,
+    ).toBe("thread-1");
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpUpdateThreadInput)({
+        requestId: "request-update",
+        threadId: "thread-1",
+        persistentGoal: null,
+      }).persistentGoal,
+    ).toBeNull();
+    expect(() =>
+      Schema.decodeUnknownSync(AgentControlMcpUpdateThreadInput)({
+        requestId: "request-update",
+        threadId: "thread-1",
+        metadata: { arbitrary: true },
+      }),
+    ).toThrow();
   });
 
   it("decodes list/read/wait inputs and rejects out-of-bounds payloads", async () => {

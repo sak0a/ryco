@@ -238,6 +238,19 @@ enabledLayer("AgentControlSessionRegistry", (it) => {
       });
       yield* registry.registerInFlight(lease.sessionId, { abort: sessionScopedAbort });
 
+      // Binding a replacement turn synchronously retires the old turn and
+      // aborts only its write requests; no request can inherit authority.
+      yield* registry.bindTurnAuthority({ sessionId: lease.sessionId, turnId: turn2 });
+      assert.strictEqual(turnScopedAbort.mock.calls.length, 1);
+      assert.strictEqual(sessionScopedAbort.mock.calls.length, 0);
+      assert.strictEqual(
+        Option.getOrThrow(yield* registry.getTurnAuthority(lease.sessionId)).turnId,
+        turn2,
+      );
+
+      // Restore turn 1 to exercise exact retirement below.
+      yield* registry.bindTurnAuthority({ sessionId: lease.sessionId, turnId: turn1 });
+
       // Retiring a different turn is a no-op.
       yield* registry.retireTurnAuthority({ threadId: threadA, turnId: turn2 });
       assert.isTrue(Option.isSome(yield* registry.getTurnAuthority(lease.sessionId)));

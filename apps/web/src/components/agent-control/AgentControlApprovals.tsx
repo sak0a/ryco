@@ -149,6 +149,7 @@ export function AgentControlApprovals({
         <AgentControlProposalCard
           key={proposal.proposalId}
           model={buildAgentControlProposalCardModel(proposal)}
+          environmentId={environmentId}
           isSubmitting={submittingIds.includes(proposal.proposalId)}
           decisionError={decisionErrorsById[proposal.proposalId] ?? null}
           disabledReason={decisionCapability.allowed ? null : (decisionCapability.reason ?? null)}
@@ -181,7 +182,17 @@ export function AgentControlApprovals({
                     </span>
                     <span className="min-w-0 truncate">
                       {model.actionLabel} · {model.targetLabel} · {model.originLabel}
+                      {model.executionLabel !== null ? ` · ${model.executionLabel}` : null}
                     </span>
+                    {model.affectedThreadIds.map((threadId) => (
+                      <a
+                        key={threadId}
+                        className="shrink-0 text-primary underline-offset-2 hover:underline"
+                        href={`/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`}
+                      >
+                        Open {threadId.length > 10 ? `${threadId.slice(0, 8)}…` : threadId}
+                      </a>
+                    ))}
                     <span className="ml-auto shrink-0">
                       {formatRelativeTimeLabel(proposal.updatedAt)}
                     </span>

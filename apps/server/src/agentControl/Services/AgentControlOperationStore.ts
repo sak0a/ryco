@@ -54,6 +54,14 @@ export interface TransitionAgentControlOperationInput {
   readonly updatedAt: IsoDateTime;
 }
 
+export interface CheckpointAgentControlOperationInput {
+  readonly operationId: AgentControlOperationId;
+  readonly expectedStatus: Extract<AgentControlOperationStatus, "running" | "compensating">;
+  readonly attempt: number;
+  readonly state: AgentControlOperationState;
+  readonly updatedAt: IsoDateTime;
+}
+
 export type AgentControlOperationStoreError =
   | AgentControlDisabledError
   | AgentControlOperationNotFoundError
@@ -82,6 +90,11 @@ export interface AgentControlOperationStoreShape {
   /** Validated, winner-takes-once operation transition. */
   readonly transition: (
     input: TransitionAgentControlOperationInput,
+  ) => Effect.Effect<AgentControlOperation, AgentControlOperationStoreError>;
+
+  /** Durably replace execution evidence without changing the operation status. */
+  readonly checkpoint: (
+    input: CheckpointAgentControlOperationInput,
   ) => Effect.Effect<AgentControlOperation, AgentControlOperationStoreError>;
 }
 

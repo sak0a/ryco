@@ -138,3 +138,29 @@ export class AgentControlTurnAuthorityError extends Schema.TaggedError<AgentCont
     return `Agent Control turn authority refused: ${this.reason}`;
   }
 }
+
+/** A proposal plan failed server-side scope, availability, or stale-state validation. */
+export class AgentControlPlanValidationError extends Schema.TaggedError<AgentControlPlanValidationError>()(
+  "AgentControlPlanValidationError",
+  {
+    reason: Schema.Literals([
+      "caller-stale",
+      "project-scope",
+      "project-unavailable",
+      "thread-unavailable",
+      "thread-stale",
+      "provider-unavailable",
+      "model-unavailable",
+      "invalid-options",
+      "invalid-plan",
+      "privilege-escalation",
+      "worktree-escalation",
+      "worktree-preflight",
+    ]),
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Agent Control plan validation failed (${this.reason}): ${this.detail}`;
+  }
+}

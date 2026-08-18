@@ -60,6 +60,7 @@ function renderCard(input: {
   return renderToStaticMarkup(
     <AgentControlProposalCard
       model={buildAgentControlProposalCardModel(input.proposal ?? makeProposal())}
+      environmentId={"local" as never}
       isSubmitting={input.isSubmitting ?? false}
       decisionError={input.decisionError ?? null}
       disabledReason={input.disabledReason ?? null}
@@ -130,6 +131,33 @@ describe("AgentControlProposalCard", () => {
     expect(markup).toContain("Rejected");
     expect(markup).toContain("rejected: Proposal was rejected");
     expect(markup).not.toContain(">Approve<");
+  });
+
+  it("shows durable execution progress and links affected Ryco threads", () => {
+    const markup = renderCard({
+      proposal: makeProposal({
+        status: "completed",
+        result: {
+          outcome: "completed",
+          execution: {
+            operationId: "operation-123456789" as never,
+            commands: [
+              {
+                commandId: "command-1" as never,
+                commandType: "thread.turn.start",
+                sequence: 12,
+              },
+            ],
+            affectedThreadIds: [ThreadId.make("thread-created-1234")],
+            worktreeIds: [],
+          },
+          completedAt: "2026-08-17T00:10:00.000Z",
+        },
+      }),
+    });
+    expect(markup).toContain("Operation operatio… · 1 command");
+    expect(markup).toContain('href="/local/thread-created-1234"');
+    expect(markup).toContain("Open thread thread-c…");
   });
 
   it("shows an expired proposal with its terminal result", () => {

@@ -51,13 +51,14 @@ export const AGENT_CONTROL_MCP_SERVER_INFO = {
 } as const;
 
 /**
- * Truthful for this slice: the connection exists, and it is read-only.
- * The adapter must not inject this server at all when setup fails.
+ * The adapter must not inject this server at all when setup fails. Mutation
+ * tools are advertised only during an exact active turn and create approval
+ * proposals rather than mutating inline.
  */
 export const AGENT_CONTROL_MCP_INITIALIZE_INSTRUCTIONS =
-  "Ryco Agent Control tools over a private local connection. Read-only in this build: " +
-  "inspect Ryco projects, threads, transcripts, and Agent Control request status. " +
-  "No tool here can change Ryco state.";
+  "Ryco Agent Control tools over a private local connection. Read tools inspect Ryco state. " +
+  "During this exact active turn, mutation tools may request immutable action plans; every " +
+  "request requires user approval in Ryco and never mutates inline.";
 
 export class AgentControlMcpListenerError extends Schema.TaggedError<AgentControlMcpListenerError>()(
   "AgentControlMcpListenerError",
@@ -71,7 +72,10 @@ export class AgentControlMcpListenerError extends Schema.TaggedError<AgentContro
 }
 
 export interface AgentControlMcpListenerDeps {
-  readonly registry: Pick<AgentControlSessionRegistryShape, "authenticate" | "registerInFlight">;
+  readonly registry: Pick<
+    AgentControlSessionRegistryShape,
+    "authenticate" | "registerInFlight" | "getTurnAuthority"
+  >;
   readonly tools: AgentControlMcpTools;
 }
 
@@ -200,7 +204,8 @@ const makeRequestHandler = (deps: AgentControlMcpListenerDeps) => {
         return;
       }
       case "tools/list": {
-        endJson(response, 200, jsonRpcResult(id ?? null, { tools: deps.tools.descriptors }));
+        const descriptors = await Effect.runPromise(deps.tools.descriptorsFor(session.value));
+        endJson(response, 200, jsonRpcResult(id ?? null, { tools: descriptors }));
         return;
       }
       case "tools/call": {
@@ -221,11 +226,32 @@ const makeRequestHandler = (deps: AgentControlMcpListenerDeps) => {
         // controller, which interrupts the running tool effect.
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), AGENT_CONTROL_MCP_REQUEST_TIMEOUT_MS);
-        const unregister = await Effect.runPromise(
-          deps.registry.registerInFlight(session.value.sessionId, {
-            abort: () => controller.abort(),
-          }),
+        const authority = deps.tools.isWriteTool(toolName)
+          ? await Effect.runPromise(deps.registry.getTurnAuthority(session.value.sessionId))
+          : undefined;
+        const registration = await Effect.runPromise(
+          Effect.option(
+            deps.registry.registerInFlight(session.value.sessionId, {
+              abort: () => controller.abort(),
+              ...(authority && authority._tag === "Some" ? { turnId: authority.value.turnId } : {}),
+            }),
+          ),
         );
+        if (registration._tag === "None") {
+          clearTimeout(timeout);
+          endJson(
+            response,
+            200,
+            jsonRpcResult(id ?? null, {
+              content: [
+                { type: "text", text: "Exact active-turn write authority is unavailable." },
+              ],
+              isError: true,
+            }),
+          );
+          return;
+        }
+        const unregister = registration.value;
         try {
           const result = await Effect.runPromise(
             deps.tools.callTool(session.value, toolName, call.arguments),

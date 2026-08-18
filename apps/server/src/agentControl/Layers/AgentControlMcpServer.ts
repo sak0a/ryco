@@ -16,7 +16,7 @@
  *
  * @module AgentControlMcpServer
  */
-import { Effect, Exit, Layer, Scope, Stream } from "effect";
+import { Effect, Exit, Layer, Option, Scope, Stream } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -25,6 +25,7 @@ import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeAgentControlMcpListener } from "../Mcp/listener.ts";
 import { makeAgentControlMcpTools } from "../Mcp/tools.ts";
 import { AgentControlPolicy } from "../Services/AgentControlPolicy.ts";
+import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
 import { AgentControlProposalEvents } from "../Services/AgentControlProposalEvents.ts";
 import { AgentControlProposalService } from "../Services/AgentControlProposalService.ts";
 import {
@@ -35,6 +36,7 @@ import {
 const makeAgentControlMcpServer = Effect.gen(function* () {
   const registry = yield* AgentControlSessionRegistry;
   const policy = yield* AgentControlPolicy;
+  const validator = yield* Effect.serviceOption(AgentControlActionValidator);
   const proposals = yield* AgentControlProposalService;
   const proposalEvents = yield* AgentControlProposalEvents;
   const projections = yield* ProjectionSnapshotQuery;
@@ -47,6 +49,8 @@ const makeAgentControlMcpServer = Effect.gen(function* () {
     proposalEvents,
     projections,
     getProviders: providerRegistry.getProviders,
+    ...(Option.isSome(validator) ? { validator: validator.value } : {}),
+    getTurnAuthority: registry.getTurnAuthority,
   });
 
   // Start/stop transitions are serialized so a rapid settings flip cannot

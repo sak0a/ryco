@@ -231,7 +231,7 @@ it.live("speaks the MCP protocol: initialize, ping, tools/list, tools/call", () 
       const initializeResult = parseBody(initialize).result as Record<string, unknown>;
       assert.strictEqual(initializeResult.protocolVersion, "2025-03-26");
       assert.deepStrictEqual(initializeResult.capabilities, { tools: { listChanged: false } });
-      assert.include(initializeResult.instructions as string, "Read-only");
+      assert.include(initializeResult.instructions as string, "user approval");
 
       const initialized = yield* post(url, {
         bearer,
@@ -247,7 +247,15 @@ it.live("speaks the MCP protocol: initialize, ping, tools/list, tools/call", () 
         .tools;
       assert.deepStrictEqual(
         tools.map((tool) => tool.name).toSorted(),
-        [...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted(),
+        AGENT_CONTROL_MCP_TOOL_NAMES.filter(
+          (name) =>
+            ![
+              AGENT_CONTROL_MCP_TOOLS.createThreads,
+              AGENT_CONTROL_MCP_TOOLS.sendMessage,
+              AGENT_CONTROL_MCP_TOOLS.interruptThread,
+              AGENT_CONTROL_MCP_TOOLS.updateThread,
+            ].includes(name as never),
+        ).toSorted(),
       );
 
       const contextCall = yield* rpc(url, bearer, "tools/call", {
@@ -353,7 +361,12 @@ it.live("bounds request bodies, refuses batches, and answers protocol errors", (
         name: "ryco_create_threads",
         arguments: {},
       });
-      assert.strictEqual((parseBody(unknownTool).error as { code: number }).code, -32602);
+      const denied = parseBody(unknownTool).result as {
+        readonly isError: boolean;
+        readonly content: ReadonlyArray<{ readonly text: string }>;
+      };
+      assert.isTrue(denied.isError);
+      assert.include(denied.content[0]?.text ?? "", "Exact active-turn");
     }),
   ),
 );

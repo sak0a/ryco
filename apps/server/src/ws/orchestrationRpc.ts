@@ -2,7 +2,6 @@ import { Effect, Option, Schema, Stream } from "effect";
 import { clamp } from "effect/Number";
 import {
   AuthRpcError,
-  CommandId,
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
@@ -20,6 +19,7 @@ import {
 } from "@ryco/contracts";
 
 import { normalizeDispatchCommand } from "../orchestration/Normalizer.ts";
+import { applyOrchestrationCommand } from "../orchestration/Layers/OrchestrationCommandApplication.ts";
 import { readTaskOutput, taskOutputRootsFromSettings } from "../orchestration/taskOutputQuery.ts";
 import {
   readWorkflowScript,
@@ -202,57 +202,12 @@ export const makeOrchestrationHandlers = (ctx: WsRpcContext) => {
         ORCHESTRATION_WS_METHODS.dispatchCommand,
         ownerEffect(
           ORCHESTRATION_WS_METHODS.dispatchCommand,
-          Effect.gen(function* () {
-            const normalizedCommand = yield* normalizeDispatchCommand(command);
-            const shouldStopSessionAfterArchive =
-              normalizedCommand.type === "thread.archive"
-                ? yield* projectionSnapshotQuery
-                    .getThreadShellById(normalizedCommand.threadId)
-                    .pipe(
-                      Effect.map(
-                        Option.match({
-                          onNone: () => false,
-                          onSome: (thread) =>
-                            thread.session !== null && thread.session.status !== "stopped",
-                        }),
-                      ),
-                      Effect.catch(() => Effect.succeed(false)),
-                    )
-                : false;
-            const result = yield* dispatchNormalizedCommand(normalizedCommand);
-            if (normalizedCommand.type === "thread.archive") {
-              if (shouldStopSessionAfterArchive) {
-                yield* Effect.gen(function* () {
-                  const stopCommand = yield* normalizeDispatchCommand({
-                    type: "thread.session.stop",
-                    commandId: CommandId.make(
-                      `session-stop-for-archive:${normalizedCommand.commandId}`,
-                    ),
-                    threadId: normalizedCommand.threadId,
-                    createdAt: new Date().toISOString(),
-                  });
-
-                  yield* dispatchNormalizedCommand(stopCommand);
-                }).pipe(
-                  Effect.catchCause((cause) =>
-                    Effect.logWarning("failed to stop provider session during archive", {
-                      threadId: normalizedCommand.threadId,
-                      cause,
-                    }),
-                  ),
-                );
-              }
-
-              yield* terminalManager.close({ threadId: normalizedCommand.threadId }).pipe(
-                Effect.catch((error) =>
-                  Effect.logWarning("failed to close thread terminals after archive", {
-                    threadId: normalizedCommand.threadId,
-                    error: error.message,
-                  }),
-                ),
-              );
-            }
-            return result;
+          applyOrchestrationCommand({
+            command,
+            normalize: normalizeDispatchCommand,
+            dispatch: dispatchNormalizedCommand,
+            projections: projectionSnapshotQuery,
+            terminals: terminalManager,
           }).pipe(
             Effect.mapError((cause) =>
               Schema.is(OrchestrationDispatchCommandError)(cause)

@@ -46,7 +46,16 @@ const makeAgentControlOperationStore = Effect.gen(function* () {
         actionKind: input.proposal.plan.kind,
         status: "pending",
         attempt: 0,
-        state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+        state: {
+          completedSteps: [],
+          resources: {
+            threadIds: [],
+            ownedThreadIds: [],
+            worktreeIds: [],
+            ownedWorktrees: [],
+          },
+          commandReceipts: [],
+        },
         result: null,
         createdAt: input.now,
         updatedAt: input.now,
@@ -119,11 +128,36 @@ const makeAgentControlOperationStore = Effect.gen(function* () {
       return yield* getOrNotFound(input.operationId);
     });
 
+  const checkpoint: AgentControlOperationStoreShape["checkpoint"] = (input) =>
+    Effect.gen(function* () {
+      const won = yield* operations.compareAndSet({
+        operationId: input.operationId,
+        expectedStatus: input.expectedStatus,
+        nextStatus: input.expectedStatus,
+        attempt: input.attempt,
+        state: input.state,
+        result: null,
+        updatedAt: input.updatedAt,
+      });
+      if (!won) {
+        const actual = yield* getOrNotFound(input.operationId);
+        return yield* new AgentControlInvalidTransitionError({
+          entity: "operation",
+          from: actual.status,
+          to: input.expectedStatus,
+          actor: "executor",
+          detail: `lost checkpoint race; operation is now ${actual.status}`,
+        });
+      }
+      return yield* getOrNotFound(input.operationId);
+    });
+
   return {
     createForProposal,
     getByProposalId,
     listRecoverable,
     transition,
+    checkpoint,
   } satisfies AgentControlOperationStoreShape;
 });
 

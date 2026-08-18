@@ -27,6 +27,7 @@
  */
 import { Effect, Schema } from "effect";
 import {
+  CommandId,
   IsoDateTime,
   NonNegativeInt,
   PositiveInt,
@@ -85,6 +86,23 @@ export const AgentControlProviderSessionPrincipal = Schema.Struct({
   runtimeSessionId: Schema.optional(RuntimeSessionId),
   /** The exact running turn the request was bound to, when known. */
   turnId: Schema.optional(TurnId),
+  /** Immutable caller privilege/scope evidence captured when the proposal is created. */
+  originProjectId: Schema.optional(ProjectId),
+  originRuntimeMode: Schema.optional(RuntimeMode),
+  originEnvMode: Schema.optional(ThreadEnvMode),
+  /** Audit-safe target state used to reject stale approved plans. */
+  targetSnapshots: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        threadId: ThreadId,
+        projectId: ProjectId,
+        runtimeMode: RuntimeMode,
+        envMode: ThreadEnvMode,
+        archived: Schema.Boolean,
+        activeTurnId: Schema.NullOr(TurnId),
+      }),
+    ),
+  ),
 });
 export type AgentControlProviderSessionPrincipal = typeof AgentControlProviderSessionPrincipal.Type;
 
@@ -176,7 +194,7 @@ export const AgentControlCreateThreadEntry = Schema.Struct({
   envMode: ThreadEnvMode,
   /** Base ref for worktree creation; the project default when absent. */
   baseRef: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
-});
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlCreateThreadEntry = typeof AgentControlCreateThreadEntry.Type;
 
 /** One exact immutable batch — never a generic spawning loop. */
@@ -186,7 +204,7 @@ export const AgentControlCreateThreadsPlan = Schema.Struct({
     Schema.isMinLength(1),
     Schema.isMaxLength(AGENT_CONTROL_CREATE_THREADS_MAX_ENTRIES),
   ),
-});
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlCreateThreadsPlan = typeof AgentControlCreateThreadsPlan.Type;
 
 export const AgentControlSendMessageDelivery = Schema.Literals(["queue", "steer"]);
@@ -197,7 +215,7 @@ export const AgentControlSendMessagePlan = Schema.Struct({
   threadId: ThreadId,
   text: AgentControlPrompt,
   delivery: AgentControlSendMessageDelivery,
-});
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlSendMessagePlan = typeof AgentControlSendMessagePlan.Type;
 
 export const AgentControlInterruptThreadPlan = Schema.Struct({
@@ -205,7 +223,7 @@ export const AgentControlInterruptThreadPlan = Schema.Struct({
   threadId: ThreadId,
   /** When present, only this exact turn may be interrupted. */
   turnId: Schema.optional(TurnId),
-});
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlInterruptThreadPlan = typeof AgentControlInterruptThreadPlan.Type;
 
 export const AgentControlUpdateThreadPlan = Schema.Struct({
@@ -219,7 +237,7 @@ export const AgentControlUpdateThreadPlan = Schema.Struct({
       TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_PERSISTENT_GOAL_MAX_CHARS)),
     ),
   ),
-});
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlUpdateThreadPlan = typeof AgentControlUpdateThreadPlan.Type;
 
 export const AgentControlActionPlan = Schema.Union([
@@ -291,9 +309,39 @@ export const AgentControlErrorEnvelope = Schema.Struct({
 });
 export type AgentControlErrorEnvelope = typeof AgentControlErrorEnvelope.Type;
 
+export const AgentControlDispatchedCommandReceipt = Schema.Struct({
+  commandId: CommandId,
+  commandType: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  sequence: NonNegativeInt,
+});
+export type AgentControlDispatchedCommandReceipt = typeof AgentControlDispatchedCommandReceipt.Type;
+
+export const AgentControlExecutionReceipt = Schema.Struct({
+  operationId: AgentControlOperationId,
+  commands: Schema.Array(AgentControlDispatchedCommandReceipt),
+  affectedThreadIds: Schema.Array(ThreadId),
+  worktreeIds: Schema.Array(WorktreeId),
+  delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
+  interrupt: Schema.optional(
+    Schema.Struct({
+      requestedTurnId: Schema.NullOr(TurnId),
+      settledStatus: OrchestrationSessionStatus,
+      settledActiveTurnId: Schema.NullOr(TurnId),
+    }),
+  ),
+  compensation: Schema.optional(
+    Schema.Struct({
+      attempted: Schema.Boolean,
+      completed: Schema.Boolean,
+    }),
+  ),
+});
+export type AgentControlExecutionReceipt = typeof AgentControlExecutionReceipt.Type;
+
 export const AgentControlCompletedResult = Schema.Struct({
   outcome: Schema.Literal("completed"),
   createdThreadIds: Schema.optional(Schema.Array(ThreadId)),
+  execution: Schema.optional(AgentControlExecutionReceipt),
   detail: Schema.optional(AgentControlResultMessage),
   completedAt: IsoDateTime,
 });
@@ -302,6 +350,7 @@ export type AgentControlCompletedResult = typeof AgentControlCompletedResult.Typ
 export const AgentControlFailedResult = Schema.Struct({
   outcome: Schema.Literal("failed"),
   error: AgentControlErrorEnvelope,
+  execution: Schema.optional(AgentControlExecutionReceipt),
   failedAt: IsoDateTime,
 });
 export type AgentControlFailedResult = typeof AgentControlFailedResult.Type;
@@ -513,7 +562,16 @@ export const AGENT_CONTROL_TERMINAL_OPERATION_STATUSES: ReadonlyArray<AgentContr
  */
 export const AgentControlOperationResources = Schema.Struct({
   threadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  ownedThreadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   worktreeIds: Schema.Array(WorktreeId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  ownedWorktrees: Schema.Array(
+    Schema.Struct({
+      worktreeId: WorktreeId,
+      projectId: ProjectId,
+      branch: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+      checkoutPath: TrimmedNonEmptyString,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type AgentControlOperationResources = typeof AgentControlOperationResources.Type;
 
@@ -522,7 +580,23 @@ export const AgentControlOperationState = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   resources: AgentControlOperationResources.pipe(
-    Schema.withDecodingDefault(Effect.succeed({ threadIds: [], worktreeIds: [] })),
+    Schema.withDecodingDefault(
+      Effect.succeed({ threadIds: [], ownedThreadIds: [], worktreeIds: [], ownedWorktrees: [] }),
+    ),
+  ),
+  commandReceipts: Schema.Array(AgentControlDispatchedCommandReceipt).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
+  interrupt: Schema.optional(
+    Schema.Struct({
+      requestedTurnId: Schema.NullOr(TurnId),
+      settledStatus: OrchestrationSessionStatus,
+      settledActiveTurnId: Schema.NullOr(TurnId),
+    }),
+  ),
+  compensation: Schema.optional(
+    Schema.Struct({ attempted: Schema.Boolean, completed: Schema.Boolean }),
   ),
   note: Schema.optional(AgentControlResultMessage),
 });
@@ -555,9 +629,8 @@ export type AgentControlOperation = typeof AgentControlOperation.Type;
 // is issued in-memory per provider runtime and revoked with it.
 
 /**
- * The complete internal MCP tool catalog. Read-only by design in this
- * slice: no mutation tool may be advertised until the proposal-backed
- * thread actions ship, and even then every mutation is approval-gated.
+ * The complete internal MCP tool catalog. Mutation tools create immutable
+ * approval proposals; they never execute their requested action inline.
  */
 export const AGENT_CONTROL_MCP_TOOLS = {
   context: "ryco_context",
@@ -567,6 +640,10 @@ export const AGENT_CONTROL_MCP_TOOLS = {
   readThread: "ryco_read_thread",
   readControlRequest: "ryco_read_control_request",
   waitForControlRequest: "ryco_wait_for_control_request",
+  createThreads: "ryco_create_threads",
+  sendMessage: "ryco_send_message",
+  interruptThread: "ryco_interrupt_thread",
+  updateThread: "ryco_update_thread",
 } as const;
 export type AgentControlMcpToolName =
   (typeof AGENT_CONTROL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_MCP_TOOLS];
@@ -646,6 +723,40 @@ export const AgentControlMcpWaitForControlRequestInput = Schema.Struct({
 export type AgentControlMcpWaitForControlRequestInput =
   typeof AgentControlMcpWaitForControlRequestInput.Type;
 
+export const AgentControlMcpCreateThreadsInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  entries: AgentControlCreateThreadsPlan.fields.entries,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpCreateThreadsInput = typeof AgentControlMcpCreateThreadsInput.Type;
+
+export const AgentControlMcpSendMessageInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  threadId: ThreadId,
+  text: AgentControlSendMessagePlan.fields.text,
+  delivery: AgentControlSendMessageDelivery,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpSendMessageInput = typeof AgentControlMcpSendMessageInput.Type;
+
+export const AgentControlMcpInterruptThreadInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  threadId: ThreadId,
+  turnId: Schema.optional(TurnId),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpInterruptThreadInput = typeof AgentControlMcpInterruptThreadInput.Type;
+
+export const AgentControlMcpUpdateThreadInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  threadId: ThreadId,
+  title: Schema.optional(AgentControlTitle),
+  archived: Schema.optional(Schema.Boolean),
+  persistentGoal: Schema.optional(
+    Schema.NullOr(
+      TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_PERSISTENT_GOAL_MAX_CHARS)),
+    ),
+  ),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpUpdateThreadInput = typeof AgentControlMcpUpdateThreadInput.Type;
+
 // ── Tool results ──────────────────────────────────────────────────────
 
 export const AgentControlMcpContextResult = Schema.Struct({
@@ -656,7 +767,7 @@ export const AgentControlMcpContextResult = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   runtimeSessionId: RuntimeSessionId,
   capabilities: Schema.Array(AgentControlCapability),
-  /** Truthful advertisement: `false` until proposal-backed mutations ship. */
+  /** True only while this MCP session owns exact active-turn write authority. */
   writeToolsAvailable: Schema.Boolean,
 });
 export type AgentControlMcpContextResult = typeof AgentControlMcpContextResult.Type;
@@ -763,3 +874,9 @@ export const AgentControlMcpControlRequestResult = Schema.Struct({
   timedOut: Schema.optional(Schema.Boolean),
 });
 export type AgentControlMcpControlRequestResult = typeof AgentControlMcpControlRequestResult.Type;
+
+export const AgentControlMcpMutationResult = Schema.Struct({
+  receipt: AgentControlProposalReceipt,
+  replayed: Schema.Boolean,
+});
+export type AgentControlMcpMutationResult = typeof AgentControlMcpMutationResult.Type;

@@ -91,7 +91,16 @@ function pendingOperation(
     actionKind: "createThreads",
     status: "pending",
     attempt: 0,
-    state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+    state: {
+      completedSteps: [],
+      resources: {
+        threadIds: [],
+        ownedThreadIds: [],
+        worktreeIds: [],
+        ownedWorktrees: [],
+      },
+      commandReceipts: [],
+    },
     result: null,
     createdAt,
     updatedAt: createdAt,
@@ -255,8 +264,11 @@ layer("AgentControlOperationRepository", (it) => {
           completedSteps: ["worktree-preflight"],
           resources: {
             threadIds: [ThreadId.make("thread-2")],
+            ownedThreadIds: [],
             worktreeIds: [WorktreeId.make("worktree-1")],
+            ownedWorktrees: [],
           },
+          commandReceipts: [],
         },
       });
 
@@ -296,7 +308,16 @@ layer("AgentControlOperationRepository", (it) => {
           expectedStatus: "pending",
           nextStatus: "running",
           attempt: 1,
-          state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+          state: {
+            completedSteps: [],
+            resources: {
+              threadIds: [],
+              ownedThreadIds: [],
+              worktreeIds: [],
+              ownedWorktrees: [],
+            },
+            commandReceipts: [],
+          },
           result: null,
           updatedAt: "2026-08-17T00:00:09.000Z",
         }),
@@ -307,7 +328,16 @@ layer("AgentControlOperationRepository", (it) => {
           expectedStatus: "pending",
           nextStatus: "cancelled",
           attempt: 1,
-          state: { completedSteps: [], resources: { threadIds: [], worktreeIds: [] } },
+          state: {
+            completedSteps: [],
+            resources: {
+              threadIds: [],
+              ownedThreadIds: [],
+              worktreeIds: [],
+              ownedWorktrees: [],
+            },
+            commandReceipts: [],
+          },
           result: null,
           updatedAt: "2026-08-17T00:00:10.000Z",
         }),

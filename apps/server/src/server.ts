@@ -107,7 +107,10 @@ import { AgentControlProposalEventsLive } from "./agentControl/Layers/AgentContr
 import { AgentControlProposalServiceLive } from "./agentControl/Layers/AgentControlProposalService.ts";
 import { AgentControlProposalStoreLive } from "./agentControl/Layers/AgentControlProposalStore.ts";
 import { AgentControlSessionRegistryLive } from "./agentControl/Layers/AgentControlSessionRegistry.ts";
+import { AgentControlActionValidatorLive } from "./agentControl/Layers/AgentControlActionValidator.ts";
+import { AgentControlExecutionLive } from "./agentControl/Layers/AgentControlExecution.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
+import { OrchestrationCommandApplicationLive } from "./orchestration/Layers/OrchestrationCommandApplication.ts";
 import {
   clearPersistedServerRuntimeState,
   makePersistedServerRuntimeState,
@@ -405,7 +408,12 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 // the public HTTP server, router, or any client-visible state.
 const RuntimeServicesLive = Layer.mergeAll(
   ServerRuntimeStartupLive,
-  AgentControlMcpServerLive,
+  AgentControlMcpServerLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+  AgentControlExecutionLive.pipe(
+    Layer.provideMerge(ServerRuntimeStartupLive),
+    Layer.provideMerge(AgentControlActionValidatorLive),
+    Layer.provideMerge(OrchestrationCommandApplicationLive),
+  ),
 ).pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
   // One process-scoped manager is shared by control RPC, frame streaming,

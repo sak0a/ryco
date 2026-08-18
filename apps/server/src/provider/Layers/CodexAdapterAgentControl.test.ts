@@ -10,6 +10,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderEvent,
   type ProviderSession,
+  type ProviderTurnSteerResult,
   type ProviderTurnStartResult,
   type ProviderUserInputAnswers,
 } from "@ryco/contracts";
@@ -28,12 +29,14 @@ import {
   Stream,
 } from "effect";
 import * as CodexErrors from "effect-codex-app-server/errors";
+import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type {
   AgentControlIssuedLease,
   IssueAgentControlLeaseInput,
+  RetireAgentControlTurnAuthorityInput,
 } from "../../agentControl/Services/AgentControlSessionRegistry.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
@@ -42,6 +45,7 @@ import {
   CODEX_AGENT_CONTROL_SERVER_NAME,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeSendTurnInput,
+  type CodexSessionRuntimeSteerTurnInput,
   type CodexSessionRuntimeShape,
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
@@ -95,6 +99,13 @@ class FakeRuntime implements CodexSessionRuntimeShape {
     } satisfies ProviderTurnStartResult);
   }
 
+  steerTurn(input: CodexSessionRuntimeSteerTurnInput) {
+    return Effect.succeed({
+      threadId: this.options.threadId,
+      turnId: input.expectedTurnId,
+    } satisfies ProviderTurnSteerResult);
+  }
+
   interruptTurn(_turnId?: TurnId) {
     return Effect.void;
   }
@@ -104,6 +115,26 @@ class FakeRuntime implements CodexSessionRuntimeShape {
   rollbackThread(_numTurns: number) {
     return Effect.succeed<CodexThreadSnapshot>({ threadId: "provider-thread", turns: [] });
   }
+
+  setGoal(input: Omit<EffectCodexSchema.V2ThreadGoalSetParams, "threadId">) {
+    const timestamp = Math.floor(Date.now() / 1_000);
+    return Effect.succeed({
+      goal: {
+        threadId: "provider-thread",
+        objective: input.objective ?? "Test goal",
+        status: input.status ?? "active",
+        tokenBudget: input.tokenBudget ?? null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    });
+  }
+
+  getGoal = Effect.succeed({ goal: null });
+
+  clearGoal = Effect.succeed({ cleared: true });
 
   respondToRequest(_requestId: ApprovalRequestId, _decision: ProviderApprovalDecision) {
     return Effect.void;
@@ -137,13 +168,24 @@ const makeBridge = (input?: { readonly withLease?: boolean }) => {
     ),
   );
   const revokeLease = vi.fn((_input: { sessionId: string; reason: string }) => Effect.void);
+  const bindTurnAuthority = vi.fn((input: { sessionId: string; turnId: TurnId }) =>
+    Effect.succeed({
+      sessionId: input.sessionId,
+      threadId,
+      turnId: input.turnId,
+      boundAt: new Date().toISOString(),
+    }),
+  );
+  const retireTurnAuthority = vi.fn((_input: RetireAgentControlTurnAuthorityInput) => Effect.void);
   const bridge: CodexAgentControlBridge = {
     issueLease: (leaseInput) => issueLease(leaseInput),
     // Suspend so the spy counts revocation *executions*, not the eager
     // construction of the finalizer effect at registration time.
     revokeLease: (revokeInput) => Effect.suspend(() => revokeLease(revokeInput)),
+    bindTurnAuthority: (bindInput) => bindTurnAuthority(bindInput),
+    retireTurnAuthority: (retireInput) => retireTurnAuthority(retireInput),
   };
-  return { bridge, issueLease, revokeLease };
+  return { bridge, issueLease, revokeLease, bindTurnAuthority, retireTurnAuthority };
 };
 
 const makeRuntimeFactory = (options?: { readonly failConstruction?: boolean }) => {
@@ -222,7 +264,7 @@ it.effect("injects the MCP connection into runtime options, never the environmen
         threadId,
         providerInstanceId: ProviderInstanceId.make("codex"),
         runtimeSessionId,
-        capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+        capabilities: Object.values(AGENT_CONTROL_CAPABILITIES),
       });
 
       const options = runtimeFactory.lastRuntime?.options;
@@ -287,6 +329,53 @@ it.effect("revokes the lease on stopSession (runtime teardown)", () =>
         });
       }
       assert.ok(runtimeFactory.lastRuntime?.closeImpl.mock.calls.length);
+    }).pipe(Effect.provide(makeAdapterLayer({ bridge, runtimeFactory })));
+  }),
+);
+
+it.live("binds write authority to the exact started turn and retires it on completion", () =>
+  Effect.gen(function* () {
+    const { bridge, bindTurnAuthority, retireTurnAuthority } = makeBridge();
+    const runtimeFactory = makeRuntimeFactory();
+
+    yield* Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession(startInput);
+      const started = yield* adapter.sendTurn({ threadId, input: "Start" });
+      assert.strictEqual(started.turnId, TurnId.make("turn-1"));
+      assert.strictEqual(bindTurnAuthority.mock.calls.length, 1);
+      assert.deepStrictEqual(bindTurnAuthority.mock.calls[0]?.[0], {
+        sessionId: "session-ac",
+        turnId: TurnId.make("turn-1"),
+      });
+
+      const runtime = runtimeFactory.lastRuntime;
+      assert.ok(runtime);
+      yield* runtime.emit({
+        id: crypto.randomUUID(),
+        provider: ProviderDriverKind.make("codex"),
+        method: "turn/completed",
+        threadId,
+        turnId: TurnId.make("turn-1"),
+        createdAt: new Date().toISOString(),
+        payload: {
+          threadId: "provider-thread",
+          turn: { id: "turn-1", status: "completed", items: [] },
+        },
+      } as unknown as ProviderEvent);
+
+      for (
+        let attempt = 0;
+        attempt < 100 && retireTurnAuthority.mock.calls.length === 0;
+        attempt += 1
+      ) {
+        yield* Effect.sleep("10 millis");
+      }
+      assert.deepStrictEqual(retireTurnAuthority.mock.calls[0]?.[0], {
+        threadId,
+        turnId: TurnId.make("turn-1"),
+      });
+      yield* adapter.stopSession(threadId);
     }).pipe(Effect.provide(makeAdapterLayer({ bridge, runtimeFactory })));
   }),
 );

@@ -1,4 +1,5 @@
 import { memo, useState } from "react";
+import type { EnvironmentId } from "@ryco/contracts";
 
 import { formatExpiresInLabel } from "../../timestampFormat";
 import { Badge } from "../ui/badge";
@@ -21,6 +22,7 @@ const TONE_BADGE_VARIANT: Record<
 
 export interface AgentControlProposalCardProps {
   readonly model: AgentControlProposalCardModel;
+  readonly environmentId: EnvironmentId;
   readonly isSubmitting: boolean;
   readonly decisionError: string | null;
   /** Non-null when decisions are unavailable (e.g. hosted role too low). */
@@ -38,6 +40,7 @@ export interface AgentControlProposalCardProps {
  */
 export const AgentControlProposalCard = memo(function AgentControlProposalCard({
   model,
+  environmentId,
   isSubmitting,
   decisionError,
   disabledReason,
@@ -87,6 +90,22 @@ export const AgentControlProposalCard = memo(function AgentControlProposalCard({
         ) : null}
         {model.outcomeLabel !== null ? (
           <p className="mt-1 text-xs text-muted-foreground">{model.outcomeLabel}</p>
+        ) : null}
+        {model.executionLabel !== null ? (
+          <p className="mt-1 text-xs text-muted-foreground">{model.executionLabel}</p>
+        ) : null}
+        {model.affectedThreadIds.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs">
+            {model.affectedThreadIds.map((threadId) => (
+              <a
+                key={threadId}
+                className="text-primary underline-offset-2 hover:underline"
+                href={`/${encodeURIComponent(environmentId)}/${encodeURIComponent(threadId)}`}
+              >
+                Open thread {threadId.length > 10 ? `${threadId.slice(0, 8)}…` : threadId}
+              </a>
+            ))}
+          </div>
         ) : null}
         {decisionError !== null ? (
           <p role="alert" className="mt-1 text-xs text-destructive">
