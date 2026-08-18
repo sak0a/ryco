@@ -8,7 +8,6 @@
  * @module CodexAdapterLive
  */
 import {
-  AGENT_CONTROL_CAPABILITIES,
   type AgentTokenMode,
   type CanonicalItemType,
   type CanonicalRequestType,
@@ -70,7 +69,11 @@ import {
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeShape,
 } from "./CodexSessionRuntime.ts";
-import type { AgentControlSessionRegistryShape } from "../../agentControl/Services/AgentControlSessionRegistry.ts";
+import {
+  installAgentControlNativeHttp,
+  type AgentControlProviderBridge,
+  type AgentControlRuntimeLease,
+} from "../../agentControl/ProviderInjection.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { requireRuntimeSessionId, stampRuntimeEvent } from "../runtimeSession.ts";
 
@@ -83,10 +86,7 @@ const PROVIDER_SEND_TURN_MAX_ATTACHMENT_TOTAL_BYTES =
  * runtime start and revocation on every teardown path. The adapter never
  * sees the listener, the tool catalog, or any credential it did not issue.
  */
-export type CodexAgentControlBridge = Pick<
-  AgentControlSessionRegistryShape,
-  "issueLease" | "revokeLease" | "bindTurnAuthority" | "retireTurnAuthority"
->;
+export type CodexAgentControlBridge = AgentControlProviderBridge;
 
 /**
  * Truthful host-context note injected only when a lease was actually
@@ -127,7 +127,7 @@ interface CodexAdapterSessionContext {
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
   /** Unique Agent Control lease id for this exact runtime, when issued. */
-  readonly agentControlSessionId?: string;
+  readonly agentControl?: AgentControlRuntimeLease;
   stopped: boolean;
 }
 
@@ -1805,26 +1805,18 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         // (feature disabled, listener unhealthy, no bridge wired) starts
         // the provider without Agent Control — no MCP server entry and no
         // instruction text may claim tools that do not exist.
-        const agentControlLease = options?.agentControl
-          ? yield* options.agentControl.issueLease({
-              threadId: input.threadId,
-              providerInstanceId: boundInstanceId,
-              runtimeSessionId,
-              capabilities: [
-                AGENT_CONTROL_CAPABILITIES.read,
-                AGENT_CONTROL_CAPABILITIES.createThreads,
-                AGENT_CONTROL_CAPABILITIES.sendMessage,
-                AGENT_CONTROL_CAPABILITIES.interruptThread,
-                AGENT_CONTROL_CAPABILITIES.updateThread,
-              ],
-            })
-          : Option.none<never>();
+        const agentControlLease = yield* installAgentControlNativeHttp(options?.agentControl, {
+          threadId: input.threadId,
+          providerInstanceId: boundInstanceId,
+          runtimeSessionId,
+          injectionMode: "codex-http",
+        });
         const agentControlInjection: CodexAgentControlInjection | undefined = Option.isSome(
           agentControlLease,
         )
           ? {
               serverName: CODEX_AGENT_CONTROL_SERVER_NAME,
-              endpointUrl: agentControlLease.value.endpointUrl,
+              endpointUrl: agentControlLease.value.mcpServer.url,
               authorization: agentControlLease.value.credential,
               instructions: CODEX_AGENT_CONTROL_INSTRUCTIONS,
             }
@@ -1854,9 +1846,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { serviceTier: "fast" }
             : {}),
         };
-        const agentControlSessionId = Option.isSome(agentControlLease)
-          ? agentControlLease.value.sessionId
-          : undefined;
+        const agentControl = Option.getOrUndefined(agentControlLease);
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
         yield* Effect.addFinalizer(() =>
@@ -1869,14 +1859,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         // stop cannot leave the credential alive. Revocation targets the
         // unique lease id — never the (thread, epoch) pair, which a
         // recovered successor runtime may legitimately reuse.
-        if (options?.agentControl && agentControlSessionId !== undefined) {
-          yield* Scope.addFinalizer(
-            sessionScope,
-            options.agentControl
-              .revokeLease({ sessionId: agentControlSessionId, reason: "runtime-teardown" })
-              .pipe(Effect.ignore),
-          );
-        }
+        if (agentControl) yield* agentControl.addScopeFinalizer(sessionScope);
         const createRuntime = options?.makeRuntime ?? makeCodexSessionRuntime;
         const runtime = yield* createRuntime(runtimeInput).pipe(
           Effect.provideService(Scope.Scope, sessionScope),
@@ -1907,23 +1890,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             // unique lease id: this fiber may outlive a replacement, and
             // must never touch a successor's lease.
             if (
-              options?.agentControl &&
-              agentControlSessionId !== undefined &&
+              agentControl &&
               runtimeEvents.some((runtimeEvent) => runtimeEvent.type === "session.exited")
             ) {
-              yield* options.agentControl
-                .revokeLease({ sessionId: agentControlSessionId, reason: "runtime-teardown" })
-                .pipe(Effect.ignore);
+              yield* agentControl.revoke("runtime-teardown");
             }
-            if (options?.agentControl && agentControlSessionId !== undefined) {
+            if (agentControl) {
               for (const runtimeEvent of runtimeEvents) {
                 if (runtimeEvent.type !== "turn.completed") continue;
-                yield* options.agentControl
-                  .retireTurnAuthority({
-                    threadId: input.threadId,
-                    ...(runtimeEvent.turnId === undefined ? {} : { turnId: runtimeEvent.turnId }),
-                  })
-                  .pipe(Effect.ignore);
+                yield* agentControl.retireTurn(runtimeEvent.turnId);
               }
             }
             if (runtimeEvents.length === 0) {
@@ -1980,7 +1955,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           scope: sessionScope,
           runtime,
           eventFiber,
-          ...(agentControlSessionId !== undefined ? { agentControlSessionId } : {}),
+          ...(agentControl ? { agentControl } : {}),
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -2158,21 +2133,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
       })
       .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
-    if (options?.agentControl && session.agentControlSessionId !== undefined) {
-      yield* options.agentControl
-        .bindTurnAuthority({
-          sessionId: session.agentControlSessionId,
-          turnId: result.turnId,
-        })
-        .pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("failed to bind Agent Control turn authority", {
-              threadId: input.threadId,
-              turnId: result.turnId,
-              cause,
-            }),
-          ),
-        );
+    if (session.agentControl) {
+      yield* session.agentControl.bindTurn(result.turnId).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to bind Agent Control turn authority", {
+            threadId: input.threadId,
+            turnId: result.turnId,
+            cause,
+          }),
+        ),
+      );
     }
     return result;
   });
@@ -2226,11 +2196,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       Effect.gen(function* () {
         session.stopped = true;
         sessions.delete(session.threadId);
-        if (options?.agentControl && session.agentControlSessionId !== undefined) {
-          yield* options.agentControl
-            .revokeLease({ sessionId: session.agentControlSessionId, reason: "runtime-teardown" })
-            .pipe(Effect.ignore);
-        }
+        if (session.agentControl) yield* session.agentControl.revoke("runtime-teardown");
       }),
     );
     yield* session.runtime.close.pipe(Effect.ignore);
@@ -2241,13 +2207,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) =>
-        (options?.agentControl
-          ? options.agentControl.retireTurnAuthority({
-              threadId,
-              ...(turnId === undefined ? {} : { turnId }),
-            })
-          : Effect.void
-        ).pipe(
+        (session.agentControl ? session.agentControl.retireTurn(turnId) : Effect.void).pipe(
           Effect.andThen(session.runtime.interruptTurn(turnId)),
           Effect.timeoutOption("15 seconds"),
           Effect.flatMap(

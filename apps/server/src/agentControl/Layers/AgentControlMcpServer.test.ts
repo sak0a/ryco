@@ -156,6 +156,7 @@ const withListener = <A, E>(
         providerInstanceId: codexInstance,
         runtimeSessionId: runtime1,
         capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+        injectionMode: "codex-http",
       });
       assert.isTrue(Option.isSome(lease));
 
@@ -268,6 +269,31 @@ it.live("speaks the MCP protocol: initialize, ping, tools/list, tools/call", () 
       };
       assert.isUndefined(callResult.isError);
       assert.strictEqual(callResult.structuredContent.threadId, "thread-caller");
+    }),
+  ),
+);
+
+it.live("exchanges an ACP stdio bootstrap exactly once on the private listener", () =>
+  withListener(({ url, registry }) =>
+    Effect.gen(function* () {
+      const issued = yield* registry.issueStdioBootstrap({
+        threadId: callerThreadId,
+        providerInstanceId: ProviderInstanceId.make("cursor"),
+        runtimeSessionId: runtime1,
+        capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+        injectionMode: "acp-stdio-proxy",
+      });
+      assert.isTrue(Option.isSome(issued));
+      if (Option.isNone(issued)) return;
+      const bootstrapUrl = url.replace(/\/mcp$/, "/_agent-control/bootstrap");
+      const token = Redacted.value(issued.value.bootstrapToken);
+      const first = yield* post(bootstrapUrl, { body: JSON.stringify({ token }) });
+      assert.strictEqual(first.status, 200);
+      const payload = JSON.parse(first.body) as { authorization: string; endpointUrl: string };
+      assert.match(payload.authorization, /^Bearer rycoac_/);
+      assert.strictEqual(payload.endpointUrl, url);
+      const second = yield* post(bootstrapUrl, { body: JSON.stringify({ token }) });
+      assert.strictEqual(second.status, 401);
     }),
   ),
 );
@@ -451,6 +477,7 @@ it.live("feature-disabled mode starts no listener and issues no leases", () =>
         providerInstanceId: codexInstance,
         runtimeSessionId: runtime1,
         capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+        injectionMode: "codex-http",
       });
       assert.isTrue(Option.isNone(lease));
     }),
@@ -526,6 +553,7 @@ it.live("disabling the setting at runtime stops the listener and revokes leases"
         providerInstanceId: codexInstance,
         runtimeSessionId: runtime1,
         capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+        injectionMode: "codex-http",
       });
       assert.isTrue(Option.isSome(lease));
       const bearer = Redacted.value(
@@ -575,6 +603,7 @@ it.live("server shutdown closes the listener and invalidates credentials", () =>
       providerInstanceId: codexInstance,
       runtimeSessionId: runtime1,
       capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+      injectionMode: "codex-http",
     });
     assert.isTrue(Option.isSome(lease));
     const bearer = Redacted.value((lease as Option.Some<AgentControlIssuedLease>).value.credential);

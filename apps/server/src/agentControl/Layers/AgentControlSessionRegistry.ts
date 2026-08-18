@@ -2,7 +2,11 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { Effect, Layer, Option, Redacted } from "effect";
 
-import { AgentControlMcpAuthError, AgentControlTurnAuthorityError } from "../Errors.ts";
+import {
+  AgentControlBootstrapError,
+  AgentControlMcpAuthError,
+  AgentControlTurnAuthorityError,
+} from "../Errors.ts";
 import {
   AgentControlSessionRegistry,
   type AgentControlInFlightRequest,
@@ -21,6 +25,9 @@ import { AgentControlPolicy } from "../Services/AgentControlPolicy.ts";
  */
 const CREDENTIAL_PREFIX = "rycoac_";
 const CREDENTIAL_PATTERN = /^rycoac_[A-Za-z0-9_-]{43}$/;
+const BOOTSTRAP_PREFIX = "rycoacb_";
+const BOOTSTRAP_PATTERN = /^rycoacb_[A-Za-z0-9_-]{43}$/;
+export const AGENT_CONTROL_BOOTSTRAP_TTL_MS = 30_000;
 const BEARER_PATTERN = /^Bearer ([^\s]+)$/;
 
 const digestCredential = (credential: string): string =>
@@ -31,6 +38,13 @@ interface RegistrySession {
   readonly record: AgentControlSessionRecord;
   readonly inFlight: Set<AgentControlInFlightRequest>;
   turnAuthority: AgentControlTurnAuthority | null;
+}
+
+interface RegistryBootstrap {
+  readonly sessionId: string;
+  readonly endpointUrl: string;
+  readonly credential: Redacted.Redacted<string>;
+  readonly expiresAt: number;
 }
 
 const abortRequests = (
@@ -60,6 +74,7 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
   const sessionsByDigest = new Map<string, RegistrySession>();
   const sessionsById = new Map<string, RegistrySession>();
   const digestsByThread = new Map<string, Set<string>>();
+  const bootstrapsByDigest = new Map<string, RegistryBootstrap>();
   let endpoint: AgentControlMcpEndpoint | null = null;
 
   const dropSession = (session: RegistrySession): void => {
@@ -67,6 +82,9 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
     session.turnAuthority = null;
     sessionsByDigest.delete(session.digest);
     sessionsById.delete(session.record.sessionId);
+    for (const [digest, bootstrap] of bootstrapsByDigest) {
+      if (bootstrap.sessionId === session.record.sessionId) bootstrapsByDigest.delete(digest);
+    }
     const threadDigests = digestsByThread.get(session.record.threadId);
     if (threadDigests) {
       threadDigests.delete(session.digest);
@@ -106,6 +124,7 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
             runtimeSessionId: input.runtimeSessionId,
             grantedCapabilities: [...input.capabilities],
             issuedAt: new Date().toISOString(),
+            injectionMode: input.injectionMode,
           },
           inFlight: new Set(),
           turnAuthority: null,
@@ -123,6 +142,55 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
         });
       }),
     );
+
+  const issueStdioBootstrap: AgentControlSessionRegistryShape["issueStdioBootstrap"] = (input) =>
+    issueLease(input).pipe(
+      Effect.map(
+        Option.map((lease) => {
+          const token = `${BOOTSTRAP_PREFIX}${randomBytes(32).toString("base64url")}`;
+          const expiresAt = Date.now() + AGENT_CONTROL_BOOTSTRAP_TTL_MS;
+          bootstrapsByDigest.set(digestCredential(token), {
+            sessionId: lease.sessionId,
+            endpointUrl: lease.endpointUrl,
+            credential: lease.credential,
+            expiresAt,
+          });
+          return {
+            sessionId: lease.sessionId,
+            endpointUrl: lease.endpointUrl,
+            bootstrapToken: Redacted.make(token),
+            expiresAt,
+          };
+        }),
+      ),
+    );
+
+  const exchangeStdioBootstrap: AgentControlSessionRegistryShape["exchangeStdioBootstrap"] = (
+    bootstrapToken,
+  ) =>
+    Effect.suspend(() => {
+      if (!BOOTSTRAP_PATTERN.test(bootstrapToken)) {
+        return Effect.fail(new AgentControlBootstrapError({ reason: "malformed" }));
+      }
+      const digest = digestCredential(bootstrapToken);
+      const bootstrap = bootstrapsByDigest.get(digest);
+      // Delete before any check or return: every well-formed lookup is one-shot,
+      // including an expired token raced by two proxy processes.
+      bootstrapsByDigest.delete(digest);
+      if (bootstrap === undefined || !sessionsById.has(bootstrap.sessionId)) {
+        return Effect.fail(new AgentControlBootstrapError({ reason: "unknown" }));
+      }
+      if (Date.now() >= bootstrap.expiresAt) {
+        const session = sessionsById.get(bootstrap.sessionId);
+        if (session) dropSession(session);
+        return Effect.fail(new AgentControlBootstrapError({ reason: "expired" }));
+      }
+      return Effect.succeed({
+        sessionId: bootstrap.sessionId,
+        endpointUrl: bootstrap.endpointUrl,
+        credential: bootstrap.credential,
+      });
+    });
 
   const authenticate: AgentControlSessionRegistryShape["authenticate"] = (authorizationHeader) =>
     Effect.suspend(() => {
@@ -242,6 +310,8 @@ const makeAgentControlSessionRegistry = Effect.gen(function* () {
 
   return {
     issueLease,
+    issueStdioBootstrap,
+    exchangeStdioBootstrap,
     authenticate,
     revokeLease,
     revokeLeases,

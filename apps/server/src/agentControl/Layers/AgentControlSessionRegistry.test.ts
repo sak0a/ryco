@@ -11,6 +11,7 @@ import { Context, Effect, Exit, Layer, Option, Redacted, Scope } from "effect";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { AgentControlPolicyLive } from "./AgentControlPolicy.ts";
 import { AgentControlSessionRegistryLive } from "./AgentControlSessionRegistry.ts";
+import { AGENT_CONTROL_BOOTSTRAP_TTL_MS } from "./AgentControlSessionRegistry.ts";
 import {
   AgentControlSessionRegistry,
   type AgentControlIssuedLease,
@@ -44,6 +45,7 @@ const issue = (input?: {
       providerInstanceId: codexInstance,
       runtimeSessionId: input?.runtimeSessionId ?? runtime1,
       capabilities: READ,
+      injectionMode: "codex-http",
     });
     assert.isTrue(Option.isSome(lease));
     return (lease as Option.Some<AgentControlIssuedLease>).value;
@@ -64,6 +66,7 @@ disabledLayer("AgentControlSessionRegistry (feature disabled)", (it) => {
         providerInstanceId: codexInstance,
         runtimeSessionId: runtime1,
         capabilities: READ,
+        injectionMode: "codex-http",
       });
       assert.isTrue(Option.isNone(lease));
       assert.strictEqual(yield* registry.activeSessionCount, 0);
@@ -72,6 +75,73 @@ disabledLayer("AgentControlSessionRegistry (feature disabled)", (it) => {
 });
 
 enabledLayer("AgentControlSessionRegistry", (it) => {
+  it.effect("exchanges a stdio bootstrap once and rejects reuse", () =>
+    Effect.gen(function* () {
+      const registry = yield* AgentControlSessionRegistry;
+      yield* registry.publishEndpoint(ENDPOINT);
+      const issued = yield* registry.issueStdioBootstrap({
+        threadId: threadA,
+        providerInstanceId: ProviderInstanceId.make("cursor"),
+        runtimeSessionId: runtime1,
+        capabilities: READ,
+        injectionMode: "acp-stdio-proxy",
+      });
+      assert.isTrue(Option.isSome(issued));
+      if (Option.isNone(issued)) return;
+      const token = Redacted.value(issued.value.bootstrapToken);
+      const lease = yield* registry.exchangeStdioBootstrap(token);
+      assert.strictEqual(lease.sessionId, issued.value.sessionId);
+      assert.strictEqual(
+        (yield* registry.authenticate(`Bearer ${Redacted.value(lease.credential)}`)).threadId,
+        threadA,
+      );
+      const reused = yield* Effect.flip(registry.exchangeStdioBootstrap(token));
+      assert.strictEqual(reused.reason, "unknown");
+    }),
+  );
+
+  it.effect(
+    "expires a bootstrap, revokes its matching lease, and leaves other threads intact",
+    () =>
+      Effect.gen(function* () {
+        vi.useFakeTimers();
+        try {
+          vi.setSystemTime(new Date("2026-08-18T00:00:00.000Z"));
+          const registry = yield* AgentControlSessionRegistry;
+          yield* registry.publishEndpoint(ENDPOINT);
+          const expiring = yield* registry.issueStdioBootstrap({
+            threadId: threadA,
+            providerInstanceId: ProviderInstanceId.make("cursor"),
+            runtimeSessionId: runtime1,
+            capabilities: READ,
+            injectionMode: "acp-stdio-proxy",
+          });
+          assert.isTrue(Option.isSome(expiring));
+          if (Option.isNone(expiring)) return;
+          const other = yield* registry.issueLease({
+            threadId: threadB,
+            providerInstanceId: codexInstance,
+            runtimeSessionId: runtime2,
+            capabilities: READ,
+            injectionMode: "codex-http",
+          });
+          assert.isTrue(Option.isSome(other));
+          if (Option.isNone(other)) return;
+          vi.setSystemTime(new Date(Date.now() + AGENT_CONTROL_BOOTSTRAP_TTL_MS));
+          const expired = yield* Effect.flip(
+            registry.exchangeStdioBootstrap(Redacted.value(expiring.value.bootstrapToken)),
+          );
+          assert.strictEqual(expired.reason, "expired");
+          const otherSession = yield* registry.authenticate(
+            `Bearer ${Redacted.value(other.value.credential)}`,
+          );
+          assert.strictEqual(otherSession.threadId, threadB);
+        } finally {
+          vi.useRealTimers();
+        }
+      }),
+  );
+
   it.effect("refuses to issue leases without a healthy listener endpoint", () =>
     Effect.gen(function* () {
       const registry = yield* AgentControlSessionRegistry;
@@ -81,6 +151,7 @@ enabledLayer("AgentControlSessionRegistry", (it) => {
         providerInstanceId: codexInstance,
         runtimeSessionId: runtime1,
         capabilities: READ,
+        injectionMode: "codex-http",
       });
       assert.isTrue(Option.isNone(lease));
     }),
@@ -282,6 +353,7 @@ it.effect("server shutdown (layer scope close) revokes every credential", () =>
       providerInstanceId: codexInstance,
       runtimeSessionId: runtime1,
       capabilities: READ,
+      injectionMode: "codex-http",
     });
     assert.isTrue(Option.isSome(lease));
     const credential = `Bearer ${Redacted.value(

@@ -19,7 +19,7 @@ import {
   type SessionConfig,
   type SessionEvent,
 } from "@github/copilot-sdk";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { getModelSelectionStringOptionValue } from "@ryco/shared/model";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -45,6 +45,11 @@ import {
   selectionTargetsCopilotInstance,
   toMessage,
 } from "./CopilotAdapter.types.ts";
+import {
+  installAgentControlNativeHttp,
+  type AgentControlNativeHttpInjection,
+  redactAgentControlSecrets,
+} from "../../agentControl/ProviderInjection.ts";
 
 type CopilotReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
@@ -72,6 +77,7 @@ export interface SessionOpsDeps {
       runtimeSessionId: RuntimeSessionId;
       cwd?: string;
       modelSelection?: ProviderSendTurnInput["modelSelection"] | ProviderSession["resumeCursor"];
+      agentControl?: AgentControlNativeHttpInjection;
     },
     pendingApprovals: Map<string, PendingApprovalRequest>,
     pendingUserInputs: Map<string, PendingUserInputRequest>,
@@ -201,51 +207,84 @@ export const makeStartSession =
         threadId: input.threadId,
         isTurnActive: () => activeTurn !== undefined && !stoppedRef.stopped,
       });
-      const baseSessionConfig = deps.buildSessionConfig(
-        {
+      let agentControl = Option.getOrUndefined(
+        yield* installAgentControlNativeHttp(deps.options?.agentControl, {
           threadId: input.threadId,
-          runtimeMode: input.runtimeMode,
+          providerInstanceId: deps.instanceId,
           runtimeSessionId,
-          ...(input.cwd ? { cwd: input.cwd } : {}),
-          ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
-        },
-        pendingApprovals,
-        pendingUserInputs,
-        () => activeTurn,
-        stoppedRef,
+          injectionMode: "copilot-http",
+        }),
       );
-      const sessionConfig: SessionConfig = {
-        ...baseSessionConfig,
-        ...(deviceToolBinding
-          ? {
-              mcpServers: {
-                ...baseSessionConfig.mcpServers,
-                ryco_device: {
-                  type: "http",
-                  url: deviceToolBinding.url,
-                  headers: { ...deviceToolBinding.headers },
+      const buildConfig = (): SessionConfig => {
+        const baseSessionConfig = deps.buildSessionConfig(
+          {
+            threadId: input.threadId,
+            runtimeMode: input.runtimeMode,
+            runtimeSessionId,
+            ...(input.cwd ? { cwd: input.cwd } : {}),
+            ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+            ...(agentControl ? { agentControl } : {}),
+          },
+          pendingApprovals,
+          pendingUserInputs,
+          () => activeTurn,
+          stoppedRef,
+        );
+        return {
+          ...baseSessionConfig,
+          ...(deviceToolBinding
+            ? {
+                mcpServers: {
+                  ...baseSessionConfig.mcpServers,
+                  ryco_device: {
+                    type: "http",
+                    url: deviceToolBinding.url,
+                    headers: { ...deviceToolBinding.headers },
+                  },
                 },
-              },
-            }
-          : {}),
+              }
+            : {}),
+        };
       };
+      let sessionConfig = buildConfig();
 
       const effectiveResumeCursor = input.resumePolicy === "fresh" ? undefined : input.resumeCursor;
-      const session = yield* Effect.tryPromise({
-        try: () => {
-          const sessionId = parseResumeCursor(effectiveResumeCursor);
-          return sessionId
-            ? client.resumeSession(sessionId, sessionConfig)
-            : client.createSession(sessionConfig);
-        },
-        catch: (cause) =>
-          new ProviderAdapterProcessError({
-            provider: COPILOT_DRIVER_KIND,
-            threadId: input.threadId,
-            detail: toMessage(cause, "Failed to start GitHub Copilot session."),
-            cause,
-          }),
-      }).pipe(Effect.tapError(() => Effect.sync(() => deviceToolBinding?.dispose())));
+      const createSession = (config: SessionConfig) =>
+        Effect.tryPromise({
+          try: () => {
+            const sessionId = parseResumeCursor(effectiveResumeCursor);
+            return sessionId
+              ? client.resumeSession(sessionId, config)
+              : client.createSession(config);
+          },
+          catch: (cause) =>
+            new ProviderAdapterProcessError({
+              provider: COPILOT_DRIVER_KIND,
+              threadId: input.threadId,
+              detail: redactAgentControlSecrets(
+                toMessage(cause, "Failed to start GitHub Copilot session."),
+              ) as string,
+              cause: redactAgentControlSecrets(cause),
+            }),
+        });
+      let attempt = yield* Effect.exit(
+        createSession(sessionConfig).pipe(
+          Effect.onInterrupt(() =>
+            agentControl ? agentControl.revoke("runtime-teardown") : Effect.void,
+          ),
+        ),
+      );
+      if (attempt._tag === "Failure" && agentControl) {
+        yield* agentControl.revoke("runtime-teardown");
+        agentControl = undefined;
+        sessionConfig = buildConfig();
+        attempt = yield* Effect.exit(createSession(sessionConfig));
+      }
+      if (attempt._tag === "Failure") {
+        deviceToolBinding?.dispose();
+        return yield* Effect.failCause(attempt.cause);
+      }
+      const session = attempt.value;
 
       const createdAt = new Date().toISOString();
       const tokenMode = input.tokenMode ?? DEFAULT_AGENT_TOKEN_MODE;
@@ -255,6 +294,7 @@ export const makeStartSession =
         threadId: input.threadId,
         providerInstanceId: deps.instanceId,
         runtimeSessionId,
+        ...(agentControl ? { agentControl } : {}),
         createdAt,
         runtimeMode: input.runtimeMode,
         tokenMode,
@@ -335,7 +375,15 @@ export const makeStartSession =
         createdAt,
         updatedAt: createdAt,
       } satisfies ProviderSession;
-    });
+    }).pipe(
+      Effect.onError(() =>
+        Effect.sync(() => deps.sessions.get(input.threadId)?.agentControl).pipe(
+          Effect.flatMap((connection) =>
+            connection ? connection.revoke("runtime-teardown") : Effect.void,
+          ),
+        ),
+      ),
+    );
 
 export const makeSendTurn =
   (deps: SessionOpsDeps): CopilotAdapterShape["sendTurn"] =>
@@ -469,6 +517,8 @@ export const makeSendTurn =
           }),
       });
 
+      if (record.agentControl) yield* record.agentControl.bindTurn(turnId!);
+
       return {
         threadId: input.threadId,
         turnId: turnId!,
@@ -481,6 +531,7 @@ export const makeInterruptTurn =
   (threadId) =>
     Effect.gen(function* () {
       const record = yield* deps.requireSession(threadId);
+      if (record.agentControl) yield* record.agentControl.retireTurn(record.activeTurnId);
       yield* Effect.tryPromise({
         try: () => record.session.abort(),
         catch: (cause) =>
@@ -496,37 +547,43 @@ export const makeInterruptTurn =
 export const stopSessionRecord = (
   record: ActiveCopilotSession,
 ): Effect.Effect<void, ProviderAdapterRequestError> =>
-  Effect.tryPromise({
-    try: async () => {
-      record.stopped = true;
-      record.deviceToolBinding?.dispose();
-      record.unsubscribe();
-      for (const pending of record.pendingApprovals.values()) {
-        pending.resolve({ kind: "reject" });
-      }
-      for (const pending of record.pendingUserInputs.values()) {
-        pending.resolve({ answer: "", wasFreeform: true });
-      }
-      for (const pending of record.pendingTurnStarts.values()) {
-        pending.reject(new Error("GitHub Copilot session stopped before turn start."));
-      }
-      record.pendingApprovals.clear();
-      record.pendingUserInputs.clear();
-      record.pendingTurnStarts.clear();
-      try {
-        await record.session.disconnect();
-      } finally {
-        await record.client.stop();
-      }
-    },
-    catch: (cause) =>
-      new ProviderAdapterRequestError({
-        provider: COPILOT_DRIVER_KIND,
-        method: "session.stop",
-        detail: toMessage(cause, "Failed to stop GitHub Copilot session."),
-        cause,
+  Effect.sync(() => record.deviceToolBinding?.dispose()).pipe(
+    Effect.andThen(
+      record.agentControl ? record.agentControl.revoke("runtime-teardown") : Effect.void,
+    ),
+    Effect.andThen(
+      Effect.tryPromise({
+        try: async () => {
+          record.stopped = true;
+          record.unsubscribe();
+          for (const pending of record.pendingApprovals.values()) {
+            pending.resolve({ kind: "reject" });
+          }
+          for (const pending of record.pendingUserInputs.values()) {
+            pending.resolve({ answer: "", wasFreeform: true });
+          }
+          for (const pending of record.pendingTurnStarts.values()) {
+            pending.reject(new Error("GitHub Copilot session stopped before turn start."));
+          }
+          record.pendingApprovals.clear();
+          record.pendingUserInputs.clear();
+          record.pendingTurnStarts.clear();
+          try {
+            await record.session.disconnect();
+          } finally {
+            await record.client.stop();
+          }
+        },
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: COPILOT_DRIVER_KIND,
+            method: "session.stop",
+            detail: toMessage(cause, "Failed to stop GitHub Copilot session."),
+            cause,
+          }),
       }),
-  });
+    ),
+  );
 
 export const makeStopSession =
   (deps: SessionOpsDeps): CopilotAdapterShape["stopSession"] =>

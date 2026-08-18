@@ -104,6 +104,7 @@ const session: AgentControlSessionRecord = {
   runtimeSessionId,
   grantedCapabilities: [],
   issuedAt: now,
+  injectionMode: "codex-http",
 };
 
 const authority: AgentControlTurnAuthority = {

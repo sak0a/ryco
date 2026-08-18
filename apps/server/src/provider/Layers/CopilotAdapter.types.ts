@@ -32,6 +32,10 @@ import type {
   ProviderThreadSnapshot,
   ProviderThreadTurnSnapshot,
 } from "../Services/ProviderAdapter.ts";
+import type {
+  AgentControlProviderBridge,
+  AgentControlRuntimeLease,
+} from "../../agentControl/ProviderInjection.ts";
 
 export const COPILOT_DRIVER_KIND = ProviderDriverKind.make("copilot");
 export const DEFAULT_BINARY_PATH = "copilot";
@@ -71,6 +75,7 @@ export interface ActiveCopilotSession {
   readonly threadId: ThreadId;
   readonly providerInstanceId: ProviderInstanceId;
   readonly runtimeSessionId: RuntimeSessionId;
+  readonly agentControl?: AgentControlRuntimeLease;
   readonly createdAt: string;
   readonly runtimeMode: ProviderSession["runtimeMode"];
   readonly tokenMode: AgentTokenMode;
@@ -98,6 +103,7 @@ export interface CopilotAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly agentControl?: AgentControlProviderBridge;
 }
 
 export function resolveCopilotCliPath(

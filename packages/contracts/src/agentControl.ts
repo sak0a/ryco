@@ -628,6 +628,47 @@ export type AgentControlOperation = typeof AgentControlOperation.Type;
 // authenticates a provider session never appears in these contracts — it
 // is issued in-memory per provider runtime and revoked with it.
 
+/** Transport actually installed for one internal provider runtime. */
+export const AgentControlInjectionMode = Schema.Literals([
+  "codex-http",
+  "claude-http",
+  "acp-http",
+  "acp-stdio-proxy",
+  "copilot-http",
+]);
+export type AgentControlInjectionMode = typeof AgentControlInjectionMode.Type;
+
+/** Code-facing support decision for one provider driver's internal MCP surface. */
+export const AgentControlProviderSupport = Schema.Struct({
+  supported: Schema.Boolean,
+  runtimeScoped: Schema.Boolean,
+  http: Schema.Literals(["native", "advertised", "unsupported"]),
+  stdio: Schema.Literals(["native", "proxy", "unsupported"]),
+  configurationScope: Schema.Literals([
+    "runtime-session",
+    "process",
+    "directory",
+    "user",
+    "global",
+    "unknown",
+  ]),
+  credentialIsolation: Schema.Literals([
+    "scoped-header",
+    "scoped-header-or-bootstrap",
+    "unsafe",
+    "unavailable",
+  ]),
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type AgentControlProviderSupport = typeof AgentControlProviderSupport.Type;
+
+export const AgentControlProviderAvailability = Schema.Struct({
+  ...AgentControlProviderSupport.fields,
+  available: Schema.Boolean,
+  unavailableReason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type AgentControlProviderAvailability = typeof AgentControlProviderAvailability.Type;
+
 /**
  * The complete internal MCP tool catalog. Mutation tools create immutable
  * approval proposals; they never execute their requested action inline.
@@ -767,6 +808,10 @@ export const AgentControlMcpContextResult = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   runtimeSessionId: RuntimeSessionId,
   capabilities: Schema.Array(AgentControlCapability),
+  agentControl: Schema.Struct({
+    available: Schema.Literal(true),
+    injectionMode: AgentControlInjectionMode,
+  }),
   /** True only while this MCP session owns exact active-turn write authority. */
   writeToolsAvailable: Schema.Boolean,
 });
@@ -793,6 +838,7 @@ export const AgentControlMcpProviderInstanceSummary = Schema.Struct({
   status: ServerProviderState,
   availability: ServerProviderAvailability,
   models: Schema.Array(AgentControlMcpModelSummary),
+  agentControl: AgentControlProviderAvailability,
 });
 export type AgentControlMcpProviderInstanceSummary =
   typeof AgentControlMcpProviderInstanceSummary.Type;
@@ -802,6 +848,10 @@ export const AgentControlMcpCapabilitiesResult = Schema.Struct({
   readOnly: Schema.Boolean,
   tools: Schema.Array(TrimmedNonEmptyString),
   grantedCapabilities: Schema.Array(AgentControlCapability),
+  agentControl: Schema.Struct({
+    available: Schema.Literal(true),
+    injectionMode: AgentControlInjectionMode,
+  }),
   providerInstances: Schema.Array(AgentControlMcpProviderInstanceSummary),
 });
 export type AgentControlMcpCapabilitiesResult = typeof AgentControlMcpCapabilitiesResult.Type;

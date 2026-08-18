@@ -11,6 +11,7 @@
  */
 
 export const AGENT_CONTROL_MCP_PATH = "/mcp";
+export const AGENT_CONTROL_BOOTSTRAP_PATH = "/_agent-control/bootstrap";
 /** Bound on a single request body; a bearer plus one tool call is tiny. */
 export const AGENT_CONTROL_MCP_MAX_BODY_BYTES = 128 * 1024;
 /** Bound on one request's total processing time. */
@@ -82,4 +83,18 @@ export function rejectAgentControlMcpTransport(
     return { status: 415, reason: "unsupported content type" };
   }
   return null;
+}
+
+/** The one-shot proxy exchange has the same browser-hostile local boundary as MCP. */
+export function rejectAgentControlBootstrapTransport(
+  input: AgentControlMcpTransportInput,
+): AgentControlMcpTransportRejection | null {
+  const shared = rejectAgentControlMcpTransport({
+    ...input,
+    pathname: AGENT_CONTROL_MCP_PATH,
+  });
+  if (shared !== null) return shared;
+  return input.pathname === AGENT_CONTROL_BOOTSTRAP_PATH
+    ? null
+    : { status: 404, reason: "unknown path" };
 }

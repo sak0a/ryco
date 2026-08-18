@@ -16,6 +16,131 @@ const mockAgentPath = path.join(__dirname, "../../../scripts/acp-mock-agent.ts")
 const bunExe = "bun";
 
 describe("AcpSessionRuntime", () => {
+  it.effect("passes resolved MCP servers to session/new after initialize negotiation", () => {
+    const requestEvents: Array<AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime;
+      yield* runtime.start();
+      const setup = requestEvents.find(
+        (event) => event.method === "session/new" && event.status === "started",
+      );
+      expect(setup?.payload).toMatchObject({
+        mcpServers: [
+          {
+            type: "http",
+            name: "ryco",
+            url: "http://127.0.0.1:45000/mcp",
+          },
+        ],
+      });
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: { command: bunExe, args: [mockAgentPath] },
+          cwd: process.cwd(),
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
+          authMethodId: "test",
+          resolveMcpServers: () =>
+            Effect.succeed([
+              {
+                type: "http" as const,
+                name: "ryco",
+                url: "http://127.0.0.1:45000/mcp",
+                headers: [{ name: "Authorization", value: "Bearer test" }],
+              },
+            ]),
+          requestLogger: (event) => Effect.sync(() => requestEvents.push(event)),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
+  it.effect("retries session/new without Agent Control when MCP setup fails", () => {
+    const requestEvents: Array<AcpSessionRequestLogEvent> = [];
+    let cleanupCalls = 0;
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime;
+      const started = yield* runtime.start();
+      expect(started.sessionId).toBe("mock-session-1");
+      expect(cleanupCalls).toBe(1);
+      const setupPayloads = requestEvents
+        .filter((event) => event.method === "session/new" && event.status === "started")
+        .map((event) => event.payload as { mcpServers: ReadonlyArray<unknown> });
+      expect(setupPayloads).toHaveLength(2);
+      expect(setupPayloads[0]?.mcpServers).toHaveLength(1);
+      expect(setupPayloads[1]?.mcpServers).toHaveLength(0);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: bunExe,
+            args: [mockAgentPath],
+            env: { RYCO_ACP_FAIL_MCP_SETUP_ONCE: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
+          authMethodId: "test",
+          resolveMcpServers: () =>
+            Effect.succeed([{ name: "ryco", command: "proxy", args: [], env: [] }]),
+          onMcpSetupFailure: () => Effect.sync(() => cleanupCalls++),
+          requestLogger: (event) => Effect.sync(() => requestEvents.push(event)),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
+  it.effect("preserves static MCP servers when resolved Agent Control setup falls back", () => {
+    const requestEvents: Array<AcpSessionRequestLogEvent> = [];
+    let cleanupCalls = 0;
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime;
+      yield* runtime.start();
+      const setupPayloads = requestEvents
+        .filter((event) => event.method === "session/new" && event.status === "started")
+        .map(
+          (event) =>
+            event.payload as {
+              mcpServers: ReadonlyArray<{ readonly name: string }>;
+            },
+        );
+      expect(
+        setupPayloads.map((payload) => payload.mcpServers.map((server) => server.name)),
+      ).toEqual([["ryco-device", "ryco"], ["ryco-device"]]);
+      expect(cleanupCalls).toBe(1);
+    }).pipe(
+      Effect.provide(
+        AcpSessionRuntime.layer({
+          spawn: {
+            command: bunExe,
+            args: [mockAgentPath],
+            env: { RYCO_ACP_FAIL_MCP_SETUP_ONCE: "1" },
+          },
+          cwd: process.cwd(),
+          clientInfo: { name: "ryco-test", version: "0.0.0" },
+          authMethodId: "test",
+          mcpServers: [
+            {
+              type: "http",
+              name: "ryco-device",
+              url: "http://127.0.0.1:46000/mcp",
+              headers: [],
+            },
+          ],
+          resolveMcpServers: () =>
+            Effect.succeed([{ name: "ryco", command: "proxy", args: [], env: [] }]),
+          onMcpSetupFailure: () => Effect.sync(() => cleanupCalls++),
+          requestLogger: (event) => Effect.sync(() => requestEvents.push(event)),
+        }),
+      ),
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
   it.effect("merges custom initialize client capabilities into the ACP handshake", () => {
     const requestEvents: Array<AcpSessionRequestLogEvent> = [];
     return Effect.gen(function* () {

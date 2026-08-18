@@ -19,7 +19,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import { Effect, Schema, Scope } from "effect";
+import { Effect, Option, Redacted, Schema, Scope } from "effect";
 
 import type { AgentControlSessionRegistryShape } from "../Services/AgentControlSessionRegistry.ts";
 import {
@@ -34,6 +34,8 @@ import {
   AGENT_CONTROL_MCP_MAX_RESPONSE_BYTES,
   AGENT_CONTROL_MCP_PATH,
   AGENT_CONTROL_MCP_REQUEST_TIMEOUT_MS,
+  AGENT_CONTROL_BOOTSTRAP_PATH,
+  rejectAgentControlBootstrapTransport,
   rejectAgentControlMcpTransport,
 } from "./transportGuard.ts";
 import type { AgentControlMcpTools } from "./tools.ts";
@@ -74,7 +76,7 @@ export class AgentControlMcpListenerError extends Schema.TaggedError<AgentContro
 export interface AgentControlMcpListenerDeps {
   readonly registry: Pick<
     AgentControlSessionRegistryShape,
-    "authenticate" | "registerInFlight" | "getTurnAuthority"
+    "authenticate" | "registerInFlight" | "getTurnAuthority" | "exchangeStdioBootstrap"
   >;
   readonly tools: AgentControlMcpTools;
 }
@@ -136,6 +138,53 @@ const negotiateProtocolVersion = (requested: unknown): string => {
 const makeRequestHandler = (deps: AgentControlMcpListenerDeps) => {
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const url = request.url === undefined ? undefined : new URL(request.url, "http://localhost");
+    if (url?.pathname === AGENT_CONTROL_BOOTSTRAP_PATH) {
+      const rejection = rejectAgentControlBootstrapTransport({
+        method: request.method,
+        pathname: url.pathname,
+        remoteAddress: request.socket.remoteAddress,
+        origin: typeof request.headers.origin === "string" ? request.headers.origin : undefined,
+        contentType: request.headers["content-type"],
+        hasCookieHeader: request.headers.cookie !== undefined,
+        hasDpopHeader: request.headers.dpop !== undefined,
+        hasDesktopControlHeader: request.headers["x-ryco-desktop-control"] !== undefined,
+      });
+      if (rejection !== null) {
+        endEmpty(response, rejection.status);
+        return;
+      }
+      const body = await readBoundedBody(request);
+      if (body === null) {
+        endEmpty(response, 413);
+        return;
+      }
+      let token: unknown;
+      try {
+        token = (JSON.parse(body) as { token?: unknown }).token;
+      } catch {
+        endEmpty(response, 400);
+        return;
+      }
+      if (typeof token !== "string") {
+        endEmpty(response, 400);
+        return;
+      }
+      const exchange = await Effect.runPromise(
+        Effect.option(deps.registry.exchangeStdioBootstrap(token)),
+      );
+      if (Option.isNone(exchange)) {
+        endEmpty(response, 401);
+        return;
+      }
+      response.writeHead(200, { ...RESPONSE_HEADERS, "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          endpointUrl: exchange.value.endpointUrl,
+          authorization: `Bearer ${Redacted.value(exchange.value.credential)}`,
+        }),
+      );
+      return;
+    }
     const rejection = rejectAgentControlMcpTransport({
       method: request.method,
       pathname: url?.pathname,

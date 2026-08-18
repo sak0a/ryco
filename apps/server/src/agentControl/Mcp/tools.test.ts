@@ -250,6 +250,7 @@ const session: AgentControlSessionRecord = {
   runtimeSessionId: RuntimeSessionId.make("runtime-1"),
   grantedCapabilities: [AGENT_CONTROL_CAPABILITIES.read],
   issuedAt: T0,
+  injectionMode: "codex-http",
 };
 
 const writeSession: AgentControlSessionRecord = {
@@ -519,6 +520,10 @@ it.effect("ryco_context reports the caller's thread, project, and grants", () =>
     assert.strictEqual(payload.threadTitle, "Caller thread");
     assert.strictEqual(payload.projectId, "project-1");
     assert.strictEqual(payload.projectTitle, "Project one");
+    assert.deepStrictEqual(payload.agentControl, {
+      available: true,
+      injectionMode: "codex-http",
+    });
     assert.strictEqual(payload.writeToolsAvailable, false);
   }),
 );
@@ -533,7 +538,9 @@ it.effect("ryco_capabilities uses provider instances and bounds model lists", ()
       readonly providerInstances: ReadonlyArray<{
         readonly instanceId: string;
         readonly models: ReadonlyArray<unknown>;
+        readonly agentControl: { readonly supported: boolean; readonly available: boolean };
       }>;
+      readonly agentControl: { readonly available: boolean; readonly injectionMode: string };
     };
     assert.isTrue(payload.readOnly);
     assert.deepStrictEqual(
@@ -544,9 +551,47 @@ it.effect("ryco_capabilities uses provider instances and bounds model lists", ()
     );
     assert.strictEqual(payload.providerInstances[0]?.instanceId, "codex");
     assert.strictEqual(payload.providerInstances[0]?.models.length, 50);
+    assert.deepStrictEqual(payload.agentControl, {
+      available: true,
+      injectionMode: "codex-http",
+    });
+    assert.isTrue(payload.providerInstances[0]?.agentControl.supported);
+    assert.isTrue(payload.providerInstances[0]?.agentControl.available);
     // Account identity and other sensitive snapshot fields stay out.
     assert.notInclude(JSON.stringify(payload), "user@example.com");
   }),
+);
+
+it.effect(
+  "ryco_capabilities reports unsupported provider reasons without claiming availability",
+  () =>
+    Effect.gen(function* () {
+      const openCode = decodeProvider({
+        ...Schema.encodeSync(ServerProvider)(codexProvider),
+        instanceId: "opencode",
+        driver: "opencode",
+        displayName: "OpenCode",
+      });
+      const result = yield* call(
+        makeDeps({ getProviders: Effect.succeed([openCode]) }),
+        AGENT_CONTROL_MCP_TOOLS.capabilities,
+      );
+      const payload = structured(result) as {
+        readonly providerInstances: ReadonlyArray<{
+          readonly agentControl: {
+            readonly supported: boolean;
+            readonly available: boolean;
+            readonly unavailableReason: string | null;
+          };
+        }>;
+      };
+      assert.isFalse(payload.providerInstances[0]!.agentControl.supported);
+      assert.isFalse(payload.providerInstances[0]!.agentControl.available);
+      assert.match(
+        payload.providerInstances[0]!.agentControl.unavailableReason ?? "",
+        /another Ryco thread/,
+      );
+    }),
 );
 
 // ── Lists ─────────────────────────────────────────────────────────────

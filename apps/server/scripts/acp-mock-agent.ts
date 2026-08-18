@@ -27,6 +27,8 @@ const emitStaleXAiPromptCompleteBeforeSecondHang =
 const emitLateIdlessXAiPromptSequence =
   readEnv("RYCO_ACP_EMIT_LATE_IDLESS_XAI_PROMPT_SEQUENCE") === "1";
 const failSetConfigOption = readEnv("RYCO_ACP_FAIL_SET_CONFIG_OPTION") === "1";
+const advertiseHttpMcp = readEnv("RYCO_ACP_ADVERTISE_HTTP_MCP") === "1";
+const failMcpSetupOnce = readEnv("RYCO_ACP_FAIL_MCP_SETUP_ONCE") === "1";
 const exitOnSetConfigOption = readEnv("RYCO_ACP_EXIT_ON_SET_CONFIG_OPTION") === "1";
 const promptResponseText = readEnv("RYCO_ACP_PROMPT_RESPONSE_TEXT");
 const permissionOptionIds = {
@@ -43,6 +45,7 @@ let currentReasoning = "medium";
 let currentContext = "272k";
 let currentFast = false;
 let promptCount = 0;
+let mcpSetupFailures = 0;
 const cancelledSessions = new Set<string>();
 
 function promptIdFromRequestMeta(
@@ -290,20 +293,25 @@ const program = Effect.gen(function* () {
         request.clientCapabilities?._meta?.parameterizedModelPicker === true;
       return {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true },
+        agentCapabilities: {
+          loadSession: true,
+          ...(advertiseHttpMcp ? { mcpCapabilities: { http: true } } : {}),
+        },
       };
     }),
   );
 
   yield* agent.handleAuthenticate(() => Effect.succeed({}));
 
-  yield* agent.handleCreateSession(() =>
-    Effect.succeed({
-      sessionId,
-      modes: modeState(),
-      models: modelState(),
-      configOptions: configOptions(),
-    }),
+  yield* agent.handleCreateSession((request) =>
+    failMcpSetupOnce && request.mcpServers.length > 0 && mcpSetupFailures++ === 0
+      ? Effect.fail(AcpError.AcpRequestError.invalidParams("mock MCP setup failure"))
+      : Effect.succeed({
+          sessionId,
+          modes: modeState(),
+          models: modelState(),
+          configOptions: configOptions(),
+        }),
   );
 
   yield* agent.handleLoadSession((request) =>

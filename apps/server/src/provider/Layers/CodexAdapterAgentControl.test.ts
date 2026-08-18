@@ -179,6 +179,7 @@ const makeBridge = (input?: { readonly withLease?: boolean }) => {
   const retireTurnAuthority = vi.fn((_input: RetireAgentControlTurnAuthorityInput) => Effect.void);
   const bridge: CodexAgentControlBridge = {
     issueLease: (leaseInput) => issueLease(leaseInput),
+    issueStdioBootstrap: () => Effect.succeed(Option.none()),
     // Suspend so the spy counts revocation *executions*, not the eager
     // construction of the finalizer effect at registration time.
     revokeLease: (revokeInput) => Effect.suspend(() => revokeLease(revokeInput)),
@@ -265,6 +266,7 @@ it.effect("injects the MCP connection into runtime options, never the environmen
         providerInstanceId: ProviderInstanceId.make("codex"),
         runtimeSessionId,
         capabilities: Object.values(AGENT_CONTROL_CAPABILITIES),
+        injectionMode: "codex-http",
       });
 
       const options = runtimeFactory.lastRuntime?.options;

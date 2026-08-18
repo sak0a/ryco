@@ -48,6 +48,12 @@ import {
   makeStopAll,
   makeStopSession,
 } from "./CopilotAdapter.session.ts";
+import {
+  AGENT_CONTROL_INTERNAL_SERVER_NAME,
+  agentControlHostContext,
+  redactAgentControlSecrets,
+  type AgentControlNativeHttpInjection,
+} from "../../agentControl/ProviderInjection.ts";
 
 export { makeCopilotClientOptions, resolveCopilotCliPath } from "./CopilotAdapter.types.ts";
 export type { CopilotAdapterLiveOptions } from "./CopilotAdapter.types.ts";
@@ -105,7 +111,10 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         );
       }
     }
-    return Queue.offerAll(runtimeEventQueue, events).pipe(
+    const safeEvents = events.map(
+      (event) => redactAgentControlSecrets(event) as ProviderRuntimeEvent,
+    );
+    return Queue.offerAll(runtimeEventQueue, safeEvents).pipe(
       Effect.andThen(runtimeEventQueueMetrics.recordEnqueued(events.length)),
       Effect.asVoid,
     );
@@ -120,7 +129,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       .write(
         {
           observedAt: new Date().toISOString(),
-          event,
+          event: redactAgentControlSecrets(event),
         },
         threadId,
       )
@@ -203,6 +212,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
 
     if (event.type === "session.error") {
       session.lastError = event.data.message;
+      if (session.agentControl) yield* session.agentControl.revoke("runtime-teardown");
     }
 
     yield* logNativeEvent(session.threadId, event);
@@ -217,8 +227,14 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
     }
 
     if (clearsActiveTurn) {
+      if (session.agentControl && session.activeTurnId) {
+        yield* session.agentControl.retireTurn(session.activeTurnId);
+      }
       session.activeTurnId = undefined;
       session.activeMessageId = undefined;
+    }
+    if (event.type === "assistant.turn_end" && session.agentControl && session.activeTurnId) {
+      yield* session.agentControl.retireTurn(session.activeTurnId);
     }
   });
 
@@ -229,6 +245,7 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
       runtimeSessionId: RuntimeSessionId;
       cwd?: string;
       modelSelection?: ProviderSendTurnInput["modelSelection"] | ProviderSession["resumeCursor"];
+      agentControl?: AgentControlNativeHttpInjection;
     },
     pendingApprovals: Map<string, PendingApprovalRequest>,
     pendingUserInputs: Map<string, PendingUserInputRequest>,
@@ -257,8 +274,21 @@ export const makeCopilotAdapter = Effect.fn("makeCopilotAdapter")(function* (
         "Use it when the task requires live web interaction, navigation, UI verification, login flows, repros, scraping, or screenshots. " +
         "Prefer codebase inspection first when the task is local-only. " +
         "Summarize what was verified, including URL and important observations. " +
-        "Avoid unnecessary browser use when terminal or file tools are sufficient.",
+        "Avoid unnecessary browser use when terminal or file tools are sufficient." +
+        (input.agentControl
+          ? `\n\n${input.agentControl.hostContext}`
+          : options?.agentControl
+            ? `\n\n${agentControlHostContext(false)}`
+            : ""),
     },
+    ...(input.agentControl
+      ? {
+          mcpOAuthTokenStorage: "in-memory",
+          mcpServers: {
+            [AGENT_CONTROL_INTERNAL_SERVER_NAME]: input.agentControl.mcpServer,
+          },
+        }
+      : {}),
     onPermissionRequest: (request) =>
       new Promise<PermissionRequestResult>((resolve) => {
         const requestId = randomUUID();

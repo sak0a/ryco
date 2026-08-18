@@ -25,6 +25,7 @@
  */
 import type {
   AgentControlCapability,
+  AgentControlInjectionMode,
   ProviderInstanceId,
   RuntimeSessionId,
   ThreadId,
@@ -33,7 +34,11 @@ import type {
 import { Context } from "effect";
 import type { Effect, Option, Redacted } from "effect";
 
-import type { AgentControlMcpAuthError, AgentControlTurnAuthorityError } from "../Errors.ts";
+import type {
+  AgentControlBootstrapError,
+  AgentControlMcpAuthError,
+  AgentControlTurnAuthorityError,
+} from "../Errors.ts";
 
 /** Private loopback endpoint of the internal MCP listener. */
 export interface AgentControlMcpEndpoint {
@@ -45,6 +50,7 @@ export interface IssueAgentControlLeaseInput {
   readonly providerInstanceId: ProviderInstanceId;
   readonly runtimeSessionId: RuntimeSessionId;
   readonly capabilities: ReadonlyArray<AgentControlCapability>;
+  readonly injectionMode: AgentControlInjectionMode;
 }
 
 /**
@@ -58,6 +64,14 @@ export interface AgentControlIssuedLease {
   readonly credential: Redacted.Redacted<string>;
 }
 
+/** A stdio proxy receives only this short-lived, one-shot bootstrap secret. */
+export interface AgentControlIssuedBootstrap {
+  readonly sessionId: string;
+  readonly endpointUrl: string;
+  readonly bootstrapToken: Redacted.Redacted<string>;
+  readonly expiresAt: number;
+}
+
 /** Authenticated caller identity for one internal MCP request. */
 export interface AgentControlSessionRecord {
   readonly sessionId: string;
@@ -66,6 +80,7 @@ export interface AgentControlSessionRecord {
   readonly runtimeSessionId: RuntimeSessionId;
   readonly grantedCapabilities: ReadonlyArray<AgentControlCapability>;
   readonly issuedAt: string;
+  readonly injectionMode: AgentControlInjectionMode;
 }
 
 export type AgentControlLeaseRevocationReason =
@@ -118,6 +133,16 @@ export interface AgentControlSessionRegistryShape {
   readonly issueLease: (
     input: IssueAgentControlLeaseInput,
   ) => Effect.Effect<Option.Option<AgentControlIssuedLease>>;
+
+  /** Issue a lease whose bearer can only be obtained by one bootstrap exchange. */
+  readonly issueStdioBootstrap: (
+    input: IssueAgentControlLeaseInput,
+  ) => Effect.Effect<Option.Option<AgentControlIssuedBootstrap>>;
+
+  /** Consume a bootstrap token exactly once. Invalid attempts reveal no session details. */
+  readonly exchangeStdioBootstrap: (
+    bootstrapToken: string,
+  ) => Effect.Effect<AgentControlIssuedLease, AgentControlBootstrapError>;
 
   /**
    * Authenticate an `Authorization` header value. Missing, malformed,

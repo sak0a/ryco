@@ -68,6 +68,7 @@ import type {
   AgentControlSessionRecord,
   AgentControlTurnAuthority,
 } from "../Services/AgentControlSessionRegistry.ts";
+import { agentControlSupportForDriver } from "../ProviderInjection.ts";
 
 export interface AgentControlMcpToolDescriptor {
   readonly name: string;
@@ -444,17 +445,32 @@ const applyTranscriptTextBudget = (
   return bounded;
 };
 
-const toInstanceSummary = (provider: ServerProvider): AgentControlMcpProviderInstanceSummary => ({
-  instanceId: provider.instanceId,
-  driver: provider.driver,
-  displayName: provider.displayName ?? null,
-  enabled: provider.enabled,
-  status: provider.status,
-  availability: provider.availability ?? "available",
-  models: provider.models
-    .slice(0, AGENT_CONTROL_MCP_MODELS_PER_INSTANCE_MAX)
-    .map((model) => ({ slug: model.slug, name: model.name })),
-});
+const toInstanceSummary = (provider: ServerProvider): AgentControlMcpProviderInstanceSummary => {
+  const support = agentControlSupportForDriver(provider.driver);
+  const unavailableReason = !support.supported
+    ? support.reason
+    : !provider.enabled
+      ? "Provider instance is disabled."
+      : provider.availability === "unavailable" || provider.status === "error"
+        ? "Provider instance is unavailable."
+        : null;
+  return {
+    instanceId: provider.instanceId,
+    driver: provider.driver,
+    displayName: provider.displayName ?? null,
+    enabled: provider.enabled,
+    status: provider.status,
+    availability: provider.availability ?? "available",
+    agentControl: {
+      ...support,
+      available: unavailableReason === null,
+      unavailableReason,
+    },
+    models: provider.models
+      .slice(0, AGENT_CONTROL_MCP_MODELS_PER_INSTANCE_MAX)
+      .map((model) => ({ slug: model.slug, name: model.name })),
+  };
+};
 
 /**
  * A proposal is visible to a provider-session caller iff it was created by
@@ -581,6 +597,7 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         providerInstanceId: session.providerInstanceId,
         runtimeSessionId: session.runtimeSessionId,
         capabilities: session.grantedCapabilities,
+        agentControl: { available: true, injectionMode: session.injectionMode },
         writeToolsAvailable,
       });
     });
@@ -596,6 +613,7 @@ export const makeAgentControlMcpTools = (deps: AgentControlMcpToolDeps): AgentCo
         readOnly: !writeToolsAvailable,
         tools: tools.map((tool) => tool.name),
         grantedCapabilities: session.grantedCapabilities,
+        agentControl: { available: true, injectionMode: session.injectionMode },
         providerInstances: providers.map(toInstanceSummary),
       });
     });

@@ -16,6 +16,7 @@ import {
 import { createModelSelection } from "@ryco/shared/model";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { agentControlHostContext } from "../../agentControl/ProviderInjection.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
@@ -451,7 +452,12 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         },
         agent: "github-copilot",
         variant: "high",
-        parts: [{ type: "text", text: "Fix it" }],
+        parts: [
+          {
+            type: "text",
+            text: `<ryco_host_context>${agentControlHostContext(false)}</ryco_host_context>\n\nFix it`,
+          },
+        ],
       });
     }).pipe(Effect.provide(adapterLayer));
   });
@@ -496,7 +502,12 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
           providerID: "anthropic",
           modelID: "claude-sonnet-4-5",
         },
-        parts: [{ type: "text", text: "Fix it" }],
+        parts: [
+          {
+            type: "text",
+            text: `<ryco_host_context>${agentControlHostContext(false)}</ryco_host_context>\n\nFix it`,
+          },
+        ],
       });
     }).pipe(Effect.provide(adapterLayer));
   });

@@ -123,6 +123,14 @@ export class AgentControlMcpAuthError extends Schema.TaggedError<AgentControlMcp
   }
 }
 
+/** One-shot stdio bootstrap material was absent, malformed, expired, or already consumed. */
+export class AgentControlBootstrapError extends Schema.TaggedError<AgentControlBootstrapError>()(
+  "AgentControlBootstrapError",
+  {
+    reason: Schema.Literals(["malformed", "unknown", "expired"]),
+  },
+) {}
+
 /**
  * Exact-turn write authority could not be bound or exercised. Raised by
  * the session registry's lease API; consumed by the proposal-backed

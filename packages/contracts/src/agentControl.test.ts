@@ -359,6 +359,7 @@ describe("Agent Control MCP contracts", () => {
       readOnly: true,
       tools: ["ryco_context"],
       grantedCapabilities: ["read"],
+      agentControl: { available: true, injectionMode: "codex-http" },
       providerInstances: [
         {
           instanceId: "codex_personal",
@@ -368,6 +369,17 @@ describe("Agent Control MCP contracts", () => {
           status: "ready",
           availability: "available",
           models: [{ slug: "gpt-5.6", name: "GPT-5.6" }],
+          agentControl: {
+            supported: true,
+            runtimeScoped: true,
+            http: "native",
+            stdio: "unsupported",
+            configurationScope: "runtime-session",
+            credentialIsolation: "scoped-header",
+            reason: null,
+            available: true,
+            unavailableReason: null,
+          },
         },
       ],
     });
