@@ -71,6 +71,7 @@ import {
   ProviderService,
   type ProviderFreshSessionStartInput,
   type ProviderServiceShape,
+  type ProviderRuntimeEventSummary,
   type ProviderSessionBindingStopResult,
 } from "../Services/ProviderService.ts";
 import {
@@ -281,6 +282,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.bounded<ProviderRuntimeEvent>(4_096);
+  const recentRuntimeEvents = yield* Ref.make<ReadonlyArray<ProviderRuntimeEventSummary>>([]);
   const staleSessionBindings = yield* Ref.make(new Map<string, ProviderRuntimeBinding>());
   const staleSessionStopTimeoutMs = normalizePositiveInt(
     options?.staleSessionStopTimeoutMs,
@@ -324,6 +326,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
+      Effect.tap((canonicalEvent) =>
+        canonicalEvent.providerInstanceId === undefined
+          ? Effect.void
+          : Ref.update(recentRuntimeEvents, (current) =>
+              [
+                {
+                  eventId: canonicalEvent.eventId,
+                  type: canonicalEvent.type,
+                  threadId: canonicalEvent.threadId,
+                  providerInstanceId: canonicalEvent.providerInstanceId!,
+                  turnId: canonicalEvent.turnId ?? null,
+                  occurredAt: canonicalEvent.createdAt,
+                },
+                ...current,
+              ].slice(0, 500),
+            ),
+      ),
       Effect.tap((canonicalEvent) =>
         canonicalEventLogger
           ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
@@ -1621,6 +1640,20 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getCapabilities,
     getInstanceInfo,
     rollbackConversation,
+    readRecentEventSummaries: (input) =>
+      Ref.get(recentRuntimeEvents).pipe(
+        Effect.map((events) =>
+          events
+            .filter(
+              (event) =>
+                event.occurredAt >= input.since &&
+                (input.threadId === undefined || event.threadId === input.threadId) &&
+                (input.providerInstanceId === undefined ||
+                  event.providerInstanceId === input.providerInstanceId),
+            )
+            .slice(0, Math.min(Math.max(1, Math.floor(input.limit)), 50)),
+        ),
+      ),
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.

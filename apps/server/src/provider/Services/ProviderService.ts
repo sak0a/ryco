@@ -51,6 +51,16 @@ export interface ProviderFreshSessionStartResult {
 
 export type ProviderSessionBindingStopResult = "stopped" | "not-found" | "timed-out";
 
+/** Payload-free runtime event metadata retained only in a small in-memory ring. */
+export interface ProviderRuntimeEventSummary {
+  readonly eventId: ProviderRuntimeEvent["eventId"];
+  readonly type: ProviderRuntimeEvent["type"];
+  readonly threadId: ThreadId;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly turnId: ProviderRuntimeEvent["turnId"] | null;
+  readonly occurredAt: string;
+}
+
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
@@ -183,6 +193,14 @@ export interface ProviderServiceShape {
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+
+  /** Newest-first bounded metadata only; never includes payload/raw/session data. */
+  readonly readRecentEventSummaries?: (input: {
+    readonly since: string;
+    readonly limit: number;
+    readonly threadId?: ThreadId;
+    readonly providerInstanceId?: ProviderInstanceId;
+  }) => Effect.Effect<ReadonlyArray<ProviderRuntimeEventSummary>>;
 }
 
 /**

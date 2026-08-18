@@ -175,11 +175,49 @@ describe("decider deletion flows", () => {
 
   it("reuses thread.delete semantics when force-deleting a non-empty project", async () => {
     const readModel = await seedReadModel();
+    const projectUpdatedAt = readModel.projects.find(
+      (project) => project.id === asProjectId("project-delete"),
+    )!.updatedAt;
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "project.delete",
+            commandId: asCommandId("cmd-project-delete-stale-revision"),
+            projectId: asProjectId("project-delete"),
+            force: true,
+            expectedUpdatedAt: "2020-01-01T00:00:00.000Z",
+            expectedThreadIds: [asThreadId("thread-delete-1"), asThreadId("thread-delete-2")],
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toThrow("changed after the command was authorized");
+
+    await expect(
+      Effect.runPromise(
+        decideOrchestrationCommand({
+          command: {
+            type: "project.delete",
+            commandId: asCommandId("cmd-project-delete-stale-threads"),
+            projectId: asProjectId("project-delete"),
+            force: true,
+            expectedUpdatedAt: projectUpdatedAt,
+            expectedThreadIds: [asThreadId("thread-delete-1")],
+          },
+          readModel,
+        }),
+      ),
+    ).rejects.toThrow("thread set changed after the command was authorized");
+
     const projectDeleteCommand: Extract<OrchestrationCommand, { type: "project.delete" }> = {
       type: "project.delete",
       commandId: asCommandId("cmd-project-delete-force"),
       projectId: asProjectId("project-delete"),
       force: true,
+      expectedUpdatedAt: projectUpdatedAt,
+      expectedThreadIds: [asThreadId("thread-delete-1"), asThreadId("thread-delete-2")],
     };
 
     const forcedResult = await Effect.runPromise(

@@ -52,22 +52,126 @@ const DECISION_ERROR_CODES = {
 } as const;
 
 /**
- * Identifier-only audit metadata. Deliberately never derived from plan
- * content: no prompt text, titles, or message bodies may enter audit rows.
+ * Bounded audit-safe metadata. Exact plans and results remain in the immutable
+ * proposal row referenced by proposal id and digest; prompts, titles, paths,
+ * credentials, and other unbounded plan content never enter audit rows.
  */
-const auditMetadataForProposal = (proposal: AgentControlProposal): AgentControlAuditMetadata => ({
-  requestId: proposal.requestId,
-  actionKind: proposal.plan.kind,
-  planDigest: proposal.planDigest,
-  principalKind: proposal.principal.kind,
-  expiresAt: proposal.expiresAt,
-  ...(proposal.principal.kind === "provider-session"
-    ? {
-        threadId: proposal.principal.threadId,
-        providerInstanceId: proposal.principal.providerInstanceId,
-      }
-    : { integrationId: proposal.principal.integrationId }),
-});
+const auditMetadataForProposal = (proposal: AgentControlProposal): AgentControlAuditMetadata => {
+  const planMetadata: AgentControlAuditMetadata = (() => {
+    switch (proposal.plan.kind) {
+      case "createProject":
+        return { projectId: proposal.plan.projectId };
+      case "updateProject":
+        return {
+          projectId: proposal.plan.projectId,
+          expectedUpdatedAt: proposal.plan.before.updatedAt,
+        };
+      case "removeProject":
+        return {
+          projectId: proposal.plan.projectId,
+          expectedUpdatedAt: proposal.plan.expected.updatedAt,
+          force: String(proposal.plan.force),
+          expectedThreadCount: String(proposal.plan.expectedThreadIds.length),
+        };
+      case "changeSettings":
+        return {
+          settingKind: proposal.plan.change.kind,
+          before: String(proposal.plan.change.before),
+          after: String(proposal.plan.change.after),
+        };
+      case "createAutomation":
+        return {
+          automationId: proposal.plan.automationId,
+          projectId: proposal.plan.definition.execution.projectId,
+          providerInstanceId: proposal.plan.definition.execution.modelSelection.instanceId,
+          scheduleKind: proposal.plan.definition.schedule.kind,
+          scheduleApprovalOnly: "true",
+        };
+      case "updateAutomation":
+        return {
+          automationId: proposal.plan.automationId,
+          projectId: proposal.plan.after.execution.projectId,
+          providerInstanceId: proposal.plan.after.execution.modelSelection.instanceId,
+          expectedRevision: String(proposal.plan.before.revision),
+          scheduleKind: proposal.plan.after.schedule.kind,
+        };
+      case "cancelAutomation":
+        return {
+          automationId: proposal.plan.automationId,
+          projectId: proposal.plan.expected.definition.execution.projectId,
+          providerInstanceId: proposal.plan.expected.definition.execution.modelSelection.instanceId,
+          expectedRevision: String(proposal.plan.expected.revision),
+          affectsAcceptedRun: "false",
+        };
+      case "automationRun":
+        return {
+          automationId: proposal.plan.automationId,
+          automationRunId: proposal.plan.runId,
+          projectId: proposal.plan.execution.projectId,
+          providerInstanceId: proposal.plan.execution.modelSelection.instanceId,
+          automationRevision: String(proposal.plan.automationRevision),
+          scheduledFor: proposal.plan.scheduledFor,
+          coalescedOccurrences: String(proposal.plan.coalescedOccurrences),
+          schedulerOutcome:
+            proposal.plan.coalescedOccurrences > 0 ? "missed-intervals-coalesced" : "on-time",
+          recoverySafety: "idempotent-occurrence-and-request",
+          freshRunApproval: "true",
+        };
+      case "deviceBoot":
+      case "deviceAttach":
+      case "deviceDetach":
+      case "deviceInstall":
+      case "deviceLaunch":
+      case "deviceOpenUrl":
+      case "deviceTap":
+      case "deviceSwipe":
+      case "devicePressButton":
+      case "deviceStartRecording":
+      case "deviceStopRecording":
+      case "deviceShutdown":
+        return {
+          deviceUdid: proposal.plan.udid,
+          projectId: proposal.plan.projectId,
+          expectedProjectUpdatedAt: proposal.plan.expectedProjectUpdatedAt,
+          providerInstanceId: proposal.plan.providerInstanceId,
+          deviceThreadId: proposal.plan.threadId,
+          expectedThreadDeviceVersion: String(proposal.plan.expectedThreadDeviceVersion),
+          expectedDeviceState: proposal.plan.expectedDeviceState,
+          expectedRecording: String(proposal.plan.expectedRecording),
+          riskClass: proposal.plan.riskClass,
+          sensitivePayloadsExcluded: "true",
+        };
+      default:
+        return {};
+    }
+  })();
+  return {
+    requestId: proposal.requestId,
+    actionKind: proposal.plan.kind,
+    planDigest: proposal.planDigest,
+    principalKind: proposal.principal.kind,
+    expiresAt: proposal.expiresAt,
+    ...planMetadata,
+    ...(proposal.principal.kind === "provider-session"
+      ? {
+          threadId: proposal.principal.threadId,
+          providerInstanceId: proposal.principal.providerInstanceId,
+          ...(proposal.principal.runtimeSessionId === undefined
+            ? {}
+            : { runtimeSessionId: proposal.principal.runtimeSessionId }),
+          ...(proposal.principal.turnId === undefined ? {} : { turnId: proposal.principal.turnId }),
+          ...(proposal.principal.originProjectId === undefined
+            ? {}
+            : { originProjectId: proposal.principal.originProjectId }),
+        }
+      : {
+          integrationId: proposal.principal.integrationId,
+          ...(proposal.principal.projectId === undefined
+            ? {}
+            : { originProjectId: proposal.principal.projectId }),
+        }),
+  };
+};
 
 const makeAgentControlProposalStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -174,6 +278,26 @@ const makeAgentControlProposalStore = Effect.gen(function* () {
               principalScope: agentControlPrincipalScope(updated.principal),
               eventKind: input.eventKind,
               createdAt: input.updatedAt,
+              ...(input.result === null
+                ? {}
+                : {
+                    extraMetadata:
+                      input.result.outcome === "completed"
+                        ? {
+                            outcome: input.result.outcome,
+                            ...(input.result.execution === undefined
+                              ? {}
+                              : { operationId: input.result.execution.operationId }),
+                          }
+                        : {
+                            outcome: input.result.outcome,
+                            errorCode: input.result.error.code,
+                            failureDetail: input.result.error.message.slice(0, 256),
+                            ...(input.result.execution === undefined
+                              ? {}
+                              : { operationId: input.result.execution.operationId }),
+                          },
+                  }),
             });
           }
           return won;

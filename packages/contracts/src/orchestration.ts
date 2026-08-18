@@ -980,6 +980,8 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   type: Schema.Literal("project.meta.update"),
   commandId: CommandId,
   projectId: ProjectId,
+  /** Optional compare-and-set guard used by governed mutation flows. */
+  expectedUpdatedAt: Schema.optional(IsoDateTime),
   title: Schema.optional(TrimmedNonEmptyString),
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   projectMetadataDir: Schema.optional(ProjectMetadataDir),
@@ -1001,6 +1003,9 @@ const ProjectDeleteCommand = Schema.Struct({
   commandId: CommandId,
   projectId: ProjectId,
   force: Schema.optional(Schema.Boolean),
+  /** Optional compare-and-set guards used by governed mutation flows. */
+  expectedUpdatedAt: Schema.optional(IsoDateTime),
+  expectedThreadIds: Schema.optional(Schema.Array(ThreadId)),
 });
 
 const ThreadCreateCommand = Schema.Struct({

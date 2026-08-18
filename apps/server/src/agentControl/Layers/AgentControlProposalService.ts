@@ -17,6 +17,8 @@ import {
 } from "../Services/AgentControlProposalService.ts";
 import { AgentControlProposalStore } from "../Services/AgentControlProposalStore.ts";
 import type { AgentControlProposalDecision } from "../Services/AgentControlProposalStore.ts";
+import { AgentControlSettingsChangeUnsupportedError } from "../Errors.ts";
+import { AGENT_CONTROL_SETTINGS_CHANGE_UNSUPPORTED_REASON } from "../settingsControl.ts";
 
 const DEFAULT_EXPIRY_SWEEP_INTERVAL_MS = 30_000;
 
@@ -88,29 +90,44 @@ const makeAgentControlProposalService = (options?: AgentControlProposalServiceLi
       decision: Extract<AgentControlProposalDecision, "approved" | "rejected">,
       input: DecideAgentControlProposalRequest,
     ) =>
-      store
-        .decide({
+      Effect.gen(function* () {
+        yield* policy.requireEnabled("AgentControlProposalService.decide");
+        if (decision === "approved") {
+          const proposal = yield* store.getById(input.proposalId);
+          if (
+            Option.isSome(proposal) &&
+            proposal.value.plan.kind === "changeSettings" &&
+            (proposal.value.status === "pending-user-approval" ||
+              proposal.value.status === "approved") &&
+            input.decidedAt < proposal.value.expiresAt
+          ) {
+            return yield* new AgentControlSettingsChangeUnsupportedError({
+              detail: AGENT_CONTROL_SETTINGS_CHANGE_UNSUPPORTED_REASON,
+            });
+          }
+        }
+        return yield* store.decide({
           proposalId: input.proposalId,
           decision,
           actor: "user",
           decidedAt: input.decidedAt,
-        })
-        .pipe(
-          Effect.map(toAgentControlProposalReceipt),
-          Effect.catchTag("AgentControlInvalidTransitionError", (error) =>
-            store.getById(input.proposalId).pipe(
-              Effect.flatMap(
-                Option.match({
-                  onNone: () => Effect.fail(error),
-                  onSome: (current) =>
-                    current.status === decision
-                      ? Effect.succeed(toAgentControlProposalReceipt(current))
-                      : Effect.fail(error),
-                }),
-              ),
+        });
+      }).pipe(
+        Effect.map(toAgentControlProposalReceipt),
+        Effect.catchTag("AgentControlInvalidTransitionError", (error) =>
+          store.getById(input.proposalId).pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () => Effect.fail(error),
+                onSome: (current) =>
+                  current.status === decision
+                    ? Effect.succeed(toAgentControlProposalReceipt(current))
+                    : Effect.fail(error),
+              }),
             ),
           ),
-        );
+        ),
+      );
 
     const accept: AgentControlProposalServiceShape["accept"] = (input) => decide("approved", input);
 

@@ -10,9 +10,9 @@ import { acceptAgentControlProposal, rejectAgentControlProposal } from "./agentC
 
 /**
  * Native Agent Control proposal card. Renders the shared presentation
- * model (audit-safe summary — never the full prompt), and sends explicit
- * accept/reject decisions through the EnvironmentApi seam. Terminal
- * proposals render their outcome without actions.
+ * model, including the exact immutable plan the user is deciding on, and
+ * sends explicit accept/reject decisions through the EnvironmentApi seam.
+ * Terminal proposals render their outcome without actions.
  */
 export function AgentControlProposalCard(props: {
   readonly environmentId: EnvironmentId;
@@ -46,13 +46,22 @@ export function AgentControlProposalCard(props: {
   };
 
   return (
-    <View className="mx-4 my-2 rounded-2xl border border-border bg-card p-4">
+    <View
+      className={`mx-4 my-2 rounded-2xl border bg-card p-4 ${
+        model.isDestructive ? "border-danger-border" : "border-border"
+      }`}
+    >
       <Text className="text-xs font-ryco-bold uppercase tracking-wide text-foreground-muted">
         Agent Control · {model.statusLabel}
       </Text>
       <Text className="mt-1 font-sans text-base text-foreground">
         {model.actionLabel} · {model.targetLabel}
       </Text>
+      {model.isDestructive ? (
+        <Text className="mt-1 font-ryco-bold text-sm text-danger-foreground">
+          Destructive Ryco record removal · workspace files retained
+        </Text>
+      ) : null}
       <Text className="mt-0.5 font-sans text-sm text-foreground-muted">
         {model.originLabel}
         {model.runtimeLabel !== null ? ` · ${model.runtimeLabel}` : ""}
@@ -67,6 +76,21 @@ export function AgentControlProposalCard(props: {
           {model.outcomeLabel}
         </Text>
       ) : null}
+      {model.detailSections.map((section) => (
+        <View key={section.heading} className="mt-2 rounded-xl border border-border p-3">
+          <Text className="font-ryco-bold text-sm text-foreground">{section.heading}</Text>
+          {section.lines.map((line, index) => (
+            <Text
+              // Immutable plan fragments may repeat; position is stable inside the proposal.
+              // eslint-disable-next-line react/no-array-index-key
+              key={index}
+              className="mt-0.5 font-mono text-xs text-foreground-muted"
+            >
+              {line}
+            </Text>
+          ))}
+        </View>
+      ))}
       {error !== null ? (
         <Text className="mt-1 font-sans text-sm text-danger-foreground" numberOfLines={3}>
           {error}

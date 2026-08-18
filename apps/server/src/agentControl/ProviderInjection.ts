@@ -15,6 +15,7 @@ import type {
   AgentControlLeaseRevocationReason,
   AgentControlSessionRegistryShape,
 } from "./Services/AgentControlSessionRegistry.ts";
+import { blockProcessDeviceToolsForAgentControl } from "../providerTools/deviceToolGateway.ts";
 
 export const AGENT_CONTROL_INTERNAL_SERVER_NAME = "ryco";
 export const AGENT_CONTROL_STDIO_PROXY_ARG = "__agent-control-stdio-proxy";
@@ -94,7 +95,7 @@ export const agentControlSupportForDriver = (
 
 export const agentControlHostContext = (available: boolean): string =>
   available
-    ? "Ryco Agent Control tools (ryco_*) are available through the private 'ryco' MCP server. Thread actions create approval requests and never mutate immediately. If the server rejects access, treat the tools as unavailable instead of retrying."
+    ? "Ryco Agent Control tools (ryco_*) are available through the private 'ryco' MCP server. Write tools create approval requests and never mutate immediately. If the server rejects access, treat the tools as unavailable instead of retrying."
     : "Ryco Agent Control tools (ryco_*) are unavailable for this provider session. Do not claim or attempt to use them.";
 
 export type AgentControlProviderBridge = Pick<
@@ -138,6 +139,18 @@ const grantedCapabilities = [
   AGENT_CONTROL_CAPABILITIES.sendMessage,
   AGENT_CONTROL_CAPABILITIES.interruptThread,
   AGENT_CONTROL_CAPABILITIES.updateThread,
+  AGENT_CONTROL_CAPABILITIES.createProject,
+  AGENT_CONTROL_CAPABILITIES.updateProject,
+  AGENT_CONTROL_CAPABILITIES.removeProject,
+  AGENT_CONTROL_CAPABILITIES.readSettings,
+  AGENT_CONTROL_CAPABILITIES.changeSettings,
+  AGENT_CONTROL_CAPABILITIES.readAutomations,
+  AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  AGENT_CONTROL_CAPABILITIES.readActivity,
+  AGENT_CONTROL_CAPABILITIES.readDiagnostics,
+  AGENT_CONTROL_CAPABILITIES.readDevices,
+  AGENT_CONTROL_CAPABILITIES.readDeviceContent,
+  AGENT_CONTROL_CAPABILITIES.controlDevices,
 ] as const;
 
 const lifecycle = (input: {
@@ -146,8 +159,14 @@ const lifecycle = (input: {
   readonly sessionId: string;
   readonly injectionMode: AgentControlInjectionMode;
 }): AgentControlRuntimeLease => {
+  const releaseLegacyDeviceTools = blockProcessDeviceToolsForAgentControl(
+    input.threadId,
+    input.sessionId,
+  );
   const revoke = (reason: AgentControlLeaseRevocationReason) =>
-    input.bridge.revokeLease({ sessionId: input.sessionId, reason }).pipe(Effect.ignore);
+    input.bridge
+      .revokeLease({ sessionId: input.sessionId, reason })
+      .pipe(Effect.ignore, Effect.ensuring(Effect.sync(releaseLegacyDeviceTools)));
   return {
     sessionId: input.sessionId,
     injectionMode: input.injectionMode,

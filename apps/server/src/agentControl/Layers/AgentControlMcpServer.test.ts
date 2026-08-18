@@ -1,7 +1,6 @@
 import {
   AGENT_CONTROL_CAPABILITIES,
   AGENT_CONTROL_MCP_TOOLS,
-  AGENT_CONTROL_MCP_TOOL_NAMES,
   AgentControlProposalId,
   AgentControlRequestId,
   ProviderInstanceId,
@@ -155,7 +154,14 @@ const withListener = <A, E>(
         threadId: callerThreadId,
         providerInstanceId: codexInstance,
         runtimeSessionId: runtime1,
-        capabilities: [AGENT_CONTROL_CAPABILITIES.read],
+        capabilities: [
+          AGENT_CONTROL_CAPABILITIES.read,
+          AGENT_CONTROL_CAPABILITIES.createProject,
+          AGENT_CONTROL_CAPABILITIES.updateProject,
+          AGENT_CONTROL_CAPABILITIES.removeProject,
+          AGENT_CONTROL_CAPABILITIES.readSettings,
+          AGENT_CONTROL_CAPABILITIES.changeSettings,
+        ],
         injectionMode: "codex-http",
       });
       assert.isTrue(Option.isSome(lease));
@@ -248,15 +254,16 @@ it.live("speaks the MCP protocol: initialize, ping, tools/list, tools/call", () 
         .tools;
       assert.deepStrictEqual(
         tools.map((tool) => tool.name).toSorted(),
-        AGENT_CONTROL_MCP_TOOL_NAMES.filter(
-          (name) =>
-            ![
-              AGENT_CONTROL_MCP_TOOLS.createThreads,
-              AGENT_CONTROL_MCP_TOOLS.sendMessage,
-              AGENT_CONTROL_MCP_TOOLS.interruptThread,
-              AGENT_CONTROL_MCP_TOOLS.updateThread,
-            ].includes(name as never),
-        ).toSorted(),
+        [
+          AGENT_CONTROL_MCP_TOOLS.context,
+          AGENT_CONTROL_MCP_TOOLS.capabilities,
+          AGENT_CONTROL_MCP_TOOLS.listProjects,
+          AGENT_CONTROL_MCP_TOOLS.listThreads,
+          AGENT_CONTROL_MCP_TOOLS.readThread,
+          AGENT_CONTROL_MCP_TOOLS.readControlRequest,
+          AGENT_CONTROL_MCP_TOOLS.waitForControlRequest,
+          AGENT_CONTROL_MCP_TOOLS.settingsSummary,
+        ].toSorted(),
       );
 
       const contextCall = yield* rpc(url, bearer, "tools/call", {

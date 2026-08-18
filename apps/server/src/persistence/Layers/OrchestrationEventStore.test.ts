@@ -167,4 +167,39 @@ layer("OrchestrationEventStore", (it) => {
       assert.equal(secondPage.hasMore, false);
     }),
   );
+
+  it.effect("reads recent events newest first and clamps the requested page", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const since = "2026-08-18T00:00:00.000Z";
+      for (const index of [1, 2, 3]) {
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.make(`evt-store-recent-${index}`),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make(`project-recent-${index}`),
+          occurredAt: `2026-08-18T00:00:0${index}.000Z`,
+          commandId: CommandId.make(`cmd-store-recent-${index}`),
+          causationEventId: null,
+          correlationId: CommandId.make(`cmd-store-recent-${index}`),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make(`project-recent-${index}`),
+            title: `Recent Project ${index}`,
+            workspaceRoot: `/secret/recent-project-${index}`,
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: `2026-08-18T00:00:0${index}.000Z`,
+            updatedAt: `2026-08-18T00:00:0${index}.000Z`,
+          },
+        });
+      }
+
+      const recent = yield* eventStore.readRecent!({ since, limit: 2 });
+      assert.deepEqual(
+        recent.map((event) => event.eventId),
+        [EventId.make("evt-store-recent-3"), EventId.make("evt-store-recent-2")],
+      );
+    }),
+  );
 });

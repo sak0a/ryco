@@ -9,6 +9,7 @@ import {
   ThreadId,
   WorktreeId,
   type AgentControlExecutionReceipt,
+  type AgentControlErrorCode,
   type AgentControlOperation,
   type AgentControlOperationState,
   type AgentControlProposal,
@@ -20,6 +21,7 @@ import { Cause, Duration, Effect, Layer, Option, Stream } from "effect";
 import { resolveManagedWorktreesRoot, ServerConfig } from "../../config.ts";
 import { GitWorkflowService, type GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import { OrchestrationCommandApplication } from "../../orchestration/Services/OrchestrationCommandApplication.ts";
+import { DeviceService } from "../../device/Services/DeviceService.ts";
 import { OrchestrationEngineService } from "../../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { resolveWorktreeCheckoutPath } from "../../project/worktreeCheckoutPaths.ts";
@@ -30,7 +32,13 @@ import {
 } from "../../workspace/Services/WorkspaceAccessPolicy.ts";
 import { ignoreAlreadyMissingGitResource } from "../../ws/context/gitErrors.ts";
 import { computeAgentControlPlanDigest } from "../planDigest.ts";
+import {
+  assertSafeAgentControlDeviceUrl,
+  isAgentControlDevicePlan,
+  resolveAgentControlDeviceArtifact,
+} from "../deviceControl.ts";
 import { AgentControlActionValidator } from "../Services/AgentControlActionValidator.ts";
+import { AgentControlAutomationService } from "../Services/AgentControlAutomation.ts";
 import {
   AgentControlExecution,
   type AgentControlExecutionShape,
@@ -48,6 +56,50 @@ export interface AgentControlExecutionLiveOptions {
 }
 
 const unique = <T>(items: ReadonlyArray<T>): Array<T> => [...new Set(items)];
+
+const isProjectAction = (proposal: AgentControlProposal): boolean =>
+  proposal.plan.kind === "createProject" ||
+  proposal.plan.kind === "updateProject" ||
+  proposal.plan.kind === "removeProject";
+
+class AgentControlDeviceExecutionError extends Error {
+  readonly code: AgentControlErrorCode;
+  readonly retryable: boolean;
+
+  constructor(code: AgentControlErrorCode, message: string, retryable = false) {
+    super(message);
+    this.code = code;
+    this.retryable = retryable;
+  }
+}
+
+const boundedCauseMessage = (cause: Cause.Cause<unknown>, fallback: string): string => {
+  const failure = Cause.squash(cause);
+  if (failure instanceof Error && failure.message.trim().length > 0) {
+    return failure.message.slice(0, 2_000);
+  }
+  return fallback;
+};
+
+const deviceRevalidationErrorCode = (cause: Cause.Cause<unknown>): AgentControlErrorCode => {
+  const failure = Cause.squash(cause);
+  if (
+    typeof failure !== "object" ||
+    failure === null ||
+    !("_tag" in failure) ||
+    failure._tag !== "AgentControlPlanValidationError" ||
+    !("reason" in failure)
+  ) {
+    return AGENT_CONTROL_ERROR_CODES.deviceStaleState;
+  }
+  if (failure.reason === "thread-unavailable") {
+    return AGENT_CONTROL_ERROR_CODES.deviceUnavailable;
+  }
+  if (failure.reason === "invalid-plan") {
+    return AGENT_CONTROL_ERROR_CODES.deviceUnsupportedPlatform;
+  }
+  return AGENT_CONTROL_ERROR_CODES.deviceStaleState;
+};
 
 const operationSlug = (operationId: AgentControlOperationId): string =>
   operationId.replaceAll(/[^a-zA-Z0-9-]/g, "-").slice(0, 24);
@@ -106,6 +158,12 @@ const executionReceipt = (operation: AgentControlOperation): AgentControlExecuti
   operationId: operation.operationId,
   commands: operation.state.commandReceipts,
   affectedThreadIds: operation.state.resources.threadIds,
+  affectedProjectIds: operation.state.resources.projectIds ?? [],
+  affectedAutomationIds: operation.state.resources.automationIds ?? [],
+  ...(operation.state.resources.automationRunId === undefined
+    ? {}
+    : { automationRunId: operation.state.resources.automationRunId }),
+  ...(operation.state.device === undefined ? {} : { device: operation.state.device }),
   worktreeIds: operation.state.resources.worktreeIds,
   ...(operation.state.delivery === undefined ? {} : { delivery: operation.state.delivery }),
   ...(operation.state.interrupt === undefined ? {} : { interrupt: operation.state.interrupt }),
@@ -120,7 +178,13 @@ const completedResult = (
 ): AgentControlResultEnvelope => ({
   outcome: "completed",
   createdThreadIds:
-    operation.actionKind === "createThreads" ? operation.state.resources.threadIds : undefined,
+    operation.actionKind === "createThreads" || operation.actionKind === "automationRun"
+      ? operation.state.resources.threadIds
+      : undefined,
+  createdProjectIds:
+    operation.actionKind === "createProject"
+      ? (operation.state.resources.projectIds ?? [])
+      : undefined,
   execution: executionReceipt(operation),
   ...(detail ? { detail } : {}),
   completedAt: new Date().toISOString(),
@@ -128,13 +192,20 @@ const completedResult = (
 
 const failedResult = (
   operation: AgentControlOperation,
-  input: { readonly revalidation: boolean; readonly message: string; readonly retryable: boolean },
+  input: {
+    readonly revalidation: boolean;
+    readonly message: string;
+    readonly retryable: boolean;
+    readonly code?: AgentControlErrorCode;
+  },
 ): AgentControlResultEnvelope => ({
   outcome: "failed",
   error: {
-    code: input.revalidation
-      ? AGENT_CONTROL_ERROR_CODES.revalidationFailed
-      : AGENT_CONTROL_ERROR_CODES.executionFailed,
+    code:
+      input.code ??
+      (input.revalidation
+        ? AGENT_CONTROL_ERROR_CODES.revalidationFailed
+        : AGENT_CONTROL_ERROR_CODES.executionFailed),
     message: input.message.slice(0, 2_000),
     retryable: input.retryable,
   },
@@ -148,11 +219,13 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
     const operations = yield* AgentControlOperationStore;
     const proposalEvents = yield* AgentControlProposalEvents;
     const validator = yield* AgentControlActionValidator;
+    const automations = yield* Effect.serviceOption(AgentControlAutomationService);
     const commandApplication = yield* OrchestrationCommandApplication;
     const engine = yield* OrchestrationEngineService;
     const projections = yield* ProjectionSnapshotQuery;
     const git = yield* GitWorkflowService;
     const workspaceAccess = yield* WorkspaceAccessPolicy;
+    const deviceService = yield* Effect.serviceOption(DeviceService);
     const config = yield* ServerConfig;
     const startup = yield* ServerRuntimeStartup;
     const managedWorktreesRoot = resolveManagedWorktreesRoot(config);
@@ -192,6 +265,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
         readonly revalidation: boolean;
         readonly message: string;
         readonly retryable: boolean;
+        readonly code?: AgentControlErrorCode;
       },
     ) =>
       Effect.gen(function* () {
@@ -412,8 +486,268 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             return result;
           });
 
-        if (proposal.plan.kind === "createThreads") {
-          const plannedThreadIds = proposal.plan.entries.map((_, index) =>
+        if (isAgentControlDevicePlan(proposal.plan)) {
+          const plan = proposal.plan;
+          if (Option.isNone(deviceService)) {
+            return yield* Effect.fail(
+              new AgentControlDeviceExecutionError(
+                AGENT_CONTROL_ERROR_CODES.deviceUnsupportedPlatform,
+                "iOS Simulator device control is unavailable.",
+              ),
+            );
+          }
+          const service = deviceService.value;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              threadIds: unique([...operation.state.resources.threadIds, plan.threadId]),
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+            },
+            device: {
+              actionKind: plan.kind,
+              threadId: plan.threadId,
+              projectId: plan.projectId,
+              providerInstanceId: plan.providerInstanceId,
+              udid: plan.udid,
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+
+          const run = async (): Promise<void> => {
+            switch (plan.kind) {
+              case "deviceBoot": {
+                const result = await service.manager.boot(plan.udid);
+                if (result.kind === "boot-limit-reached") {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceBootLimitReached,
+                    "The Ryco-owned Simulator boot limit was reached.",
+                    true,
+                  );
+                }
+                return;
+              }
+              case "deviceAttach":
+                await service.manager.attach(plan.threadId, plan.udid);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceDetach":
+                await service.manager.detach(plan.threadId);
+                return;
+              case "deviceInstall": {
+                const snapshot = await Effect.runPromise(projections.getShellSnapshot());
+                const project = snapshot.projects.find(
+                  (candidate) => candidate.id === plan.projectId,
+                );
+                if (!project) {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceStaleState,
+                    "The approved project workspace is unavailable.",
+                    true,
+                  );
+                }
+                const artifact = await Effect.runPromise(
+                  resolveAgentControlDeviceArtifact({
+                    workspaceRoot: project.workspaceRoot,
+                    artifactPath: plan.artifactPath,
+                    workspaceAccess,
+                  }),
+                ).catch(() => {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceInvalidInput,
+                    "The approved application artifact no longer resolves inside the project workspace.",
+                  );
+                });
+                await service.manager.install(plan.udid, artifact);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-install");
+                return;
+              }
+              case "deviceLaunch":
+                await service.manager.launch(plan.udid, plan.bundleId);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-launch");
+                return;
+              case "deviceOpenUrl":
+                try {
+                  assertSafeAgentControlDeviceUrl(plan.url);
+                } catch {
+                  throw new AgentControlDeviceExecutionError(
+                    AGENT_CONTROL_ERROR_CODES.deviceInvalidInput,
+                    "The approved URL no longer meets device-control policy.",
+                  );
+                }
+                await service.manager.openUrl(plan.udid, plan.url);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceTap": {
+                await service.manager.tap(plan.udid, plan.x, plan.y);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              }
+              case "deviceSwipe":
+                await service.manager.swipe(plan.udid, {
+                  fromX: plan.fromX,
+                  fromY: plan.fromY,
+                  toX: plan.toX,
+                  toY: plan.toY,
+                  durationMs: plan.durationMs,
+                });
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "devicePressButton":
+                await service.manager.pressButton(plan.udid, plan.button);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceStartRecording":
+                await service.manager.startRecording(plan.udid);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceStopRecording":
+                await service.manager.stopRecording(plan.udid);
+                service.manager.requestOpenPane(plan.threadId, plan.udid, "agent-tool");
+                return;
+              case "deviceShutdown":
+                await service.manager.shutdown(plan.udid);
+                return;
+            }
+          };
+
+          const action = () => run();
+          yield* Effect.tryPromise({
+            try: () =>
+              plan.kind === "deviceBoot" ||
+              plan.kind === "deviceAttach" ||
+              plan.kind === "deviceDetach" ||
+              plan.kind === "deviceShutdown"
+                ? action()
+                : service.manager.withAgentActivity(plan.threadId, action),
+            catch: (cause) =>
+              cause instanceof AgentControlDeviceExecutionError
+                ? cause
+                : new AgentControlDeviceExecutionError(
+                    plan.kind === "deviceAttach"
+                      ? AGENT_CONTROL_ERROR_CODES.deviceAttachTimeout
+                      : plan.kind === "deviceStartRecording" || plan.kind === "deviceStopRecording"
+                        ? AGENT_CONTROL_ERROR_CODES.deviceRecordingFailed
+                        : AGENT_CONTROL_ERROR_CODES.deviceOperationFailed,
+                    plan.kind === "deviceAttach"
+                      ? "The approved Simulator attachment failed."
+                      : "The approved Simulator action failed.",
+                  ),
+          });
+          yield* checkpoint(appendStep(operation.state, "device-action-completed"));
+          return operation;
+        }
+
+        if (proposal.plan.kind === "createProject") {
+          const plan = proposal.plan;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+          yield* dispatch("project-created", {
+            type: "project.create",
+            commandId: commandIdFor(operation.operationId, "project-create"),
+            projectId: plan.projectId,
+            title: plan.title,
+            workspaceRoot: plan.workspaceRoot,
+            projectMetadataDir: plan.projectMetadataDir,
+            createWorkspaceRootIfMissing: false,
+            defaultModelSelection: null,
+            createdAt: new Date().toISOString(),
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "updateProject") {
+          const plan = proposal.plan;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+          yield* dispatch("project-metadata-updated", {
+            type: "project.meta.update",
+            commandId: commandIdFor(operation.operationId, "project-update"),
+            projectId: plan.projectId,
+            expectedUpdatedAt: plan.before.updatedAt,
+            ...(plan.after.title === plan.before.title ? {} : { title: plan.after.title }),
+            ...(plan.after.workspaceRoot === plan.before.workspaceRoot
+              ? {}
+              : { workspaceRoot: plan.after.workspaceRoot }),
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "removeProject") {
+          const plan = proposal.plan;
+          yield* checkpoint({
+            ...operation.state,
+            resources: {
+              ...operation.state.resources,
+              projectIds: unique([...(operation.state.resources.projectIds ?? []), plan.projectId]),
+              threadIds: unique([
+                ...operation.state.resources.threadIds,
+                ...plan.expectedThreadIds,
+              ]),
+            },
+          });
+          yield* validator.revalidateExecution(proposal);
+          // The authoritative project command only unlinks Ryco projection
+          // records (and, with force, the exact revalidated thread records).
+          // No filesystem API is used anywhere in this branch.
+          yield* dispatch("project-removed", {
+            type: "project.delete",
+            commandId: commandIdFor(operation.operationId, "project-remove"),
+            projectId: plan.projectId,
+            ...(plan.force ? { force: true } : {}),
+            expectedUpdatedAt: plan.expected.updatedAt,
+            expectedThreadIds: plan.expectedThreadIds,
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "changeSettings") {
+          return yield* Effect.fail(
+            new Error("Settings changes require fresh owner reauthentication."),
+          );
+        }
+
+        if (
+          proposal.plan.kind === "createAutomation" ||
+          proposal.plan.kind === "updateAutomation" ||
+          proposal.plan.kind === "cancelAutomation"
+        ) {
+          if (Option.isNone(automations)) {
+            return yield* Effect.fail(new Error("Automation execution is unavailable."));
+          }
+          const automation = yield* automations.value.applyLifecycle(proposal);
+          yield* checkpoint({
+            ...operation.state,
+            completedSteps: unique([...operation.state.completedSteps, "automation-lifecycle"]),
+            resources: {
+              ...operation.state.resources,
+              automationIds: unique([
+                ...(operation.state.resources.automationIds ?? []),
+                automation.automationId,
+              ]),
+            },
+          });
+          return operation;
+        }
+
+        if (proposal.plan.kind === "createThreads" || proposal.plan.kind === "automationRun") {
+          const entries =
+            proposal.plan.kind === "createThreads"
+              ? proposal.plan.entries
+              : [proposal.plan.execution];
+          const plannedThreadIds = entries.map((_, index) =>
             threadIdFor(operation.operationId, index),
           );
           yield* checkpoint({
@@ -422,6 +756,15 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             resources: {
               ...operation.state.resources,
               threadIds: unique([...operation.state.resources.threadIds, ...plannedThreadIds]),
+              ...(proposal.plan.kind === "automationRun"
+                ? {
+                    automationIds: unique([
+                      ...(operation.state.resources.automationIds ?? []),
+                      proposal.plan.automationId,
+                    ]),
+                    automationRunId: proposal.plan.runId,
+                  }
+                : {}),
             },
           });
 
@@ -443,7 +786,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           }>;
 
           // Entire batch preflight completes before any thread command is dispatched.
-          for (const [index, entry] of proposal.plan.entries.entries()) {
+          for (const [index, entry] of entries.entries()) {
             if (entry.envMode !== "worktree") continue;
             const project = snapshot.projects.find((candidate) => candidate.id === entry.projectId);
             if (!project) return yield* Effect.fail(new Error("Requested project is unavailable."));
@@ -538,7 +881,7 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             });
           }
 
-          for (const [index, entry] of proposal.plan.entries.entries()) {
+          for (const [index, entry] of entries.entries()) {
             const project = snapshot.projects.find((candidate) => candidate.id === entry.projectId);
             if (!project) return yield* Effect.fail(new Error("Requested project is unavailable."));
             const threadId = plannedThreadIds[index]!;
@@ -595,6 +938,12 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
             });
           }
           return operation;
+        }
+
+        if (proposal.plan.kind !== "sendMessage" && proposal.plan.kind !== "interruptThread") {
+          if (proposal.plan.kind !== "updateThread") {
+            return yield* Effect.fail(new Error("Unsupported Agent Control action."));
+          }
         }
 
         yield* checkpoint({
@@ -832,8 +1181,21 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
         if (validation._tag === "Failure") {
           yield* settleProposalFailure(executing, operation, {
             revalidation: true,
-            message: "The approved plan no longer passes current server validation.",
+            message:
+              isProjectAction(executing) ||
+              executing.plan.kind === "changeSettings" ||
+              executing.plan.kind === "createAutomation" ||
+              executing.plan.kind === "updateAutomation" ||
+              executing.plan.kind === "cancelAutomation"
+                ? boundedCauseMessage(
+                    validation.cause,
+                    "The approved plan no longer passes current server validation.",
+                  )
+                : "The approved plan no longer passes current server validation.",
             retryable: true,
+            ...(isAgentControlDevicePlan(executing.plan)
+              ? { code: deviceRevalidationErrorCode(validation.cause) }
+              : {}),
           });
           return;
         }
@@ -846,10 +1208,24 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           const compensated = yield* compensate(durable).pipe(
             Effect.catch(() => Effect.succeed(durable)),
           );
+          const deviceFailure = isAgentControlDevicePlan(executing.plan)
+            ? Cause.squash(outcome.cause)
+            : null;
           yield* settleProposalFailure(executing, compensated, {
             revalidation: false,
-            message: "The approved thread action failed during execution.",
-            retryable: false,
+            message: isProjectAction(executing)
+              ? boundedCauseMessage(
+                  outcome.cause,
+                  "The approved project action failed during execution.",
+                )
+              : "The approved Agent Control action failed during execution.",
+            retryable:
+              deviceFailure instanceof AgentControlDeviceExecutionError
+                ? deviceFailure.retryable
+                : false,
+            ...(deviceFailure instanceof AgentControlDeviceExecutionError
+              ? { code: deviceFailure.code, message: deviceFailure.message }
+              : {}),
           });
           return;
         }
@@ -893,6 +1269,45 @@ export const makeAgentControlExecution = (options?: AgentControlExecutionLiveOpt
           const proposalOption = yield* proposals.getById(operation.proposalId);
           if (Option.isNone(proposalOption)) continue;
           const proposal = proposalOption.value;
+          if (
+            operation.status === "running" &&
+            (proposal.plan.kind === "createAutomation" ||
+              proposal.plan.kind === "updateAutomation" ||
+              proposal.plan.kind === "cancelAutomation") &&
+            Option.isSome(automations)
+          ) {
+            const replayed = yield* Effect.exit(automations.value.applyLifecycle(proposal));
+            if (replayed._tag === "Success") {
+              const state = {
+                ...operation.state,
+                completedSteps: unique([...operation.state.completedSteps, "automation-lifecycle"]),
+                resources: {
+                  ...operation.state.resources,
+                  automationIds: unique([
+                    ...(operation.state.resources.automationIds ?? []),
+                    replayed.value.automationId,
+                  ]),
+                },
+              };
+              const result = completedResult({ ...operation, state });
+              const completed = yield* operations.transition({
+                operationId: operation.operationId,
+                expectedStatus: "running",
+                nextStatus: "completed",
+                actor: "executor",
+                attempt: operation.attempt,
+                state,
+                result,
+                updatedAt: new Date().toISOString(),
+              });
+              yield* proposals.settleExecution({
+                proposalId: proposal.proposalId,
+                result: completedResult(completed),
+                now: new Date().toISOString(),
+              });
+              continue;
+            }
+          }
           if (operation.status === "pending") {
             yield* settleProposalFailure(proposal, operation, {
               revalidation: false,

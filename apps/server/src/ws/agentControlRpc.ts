@@ -6,7 +6,7 @@ import {
 } from "@ryco/contracts";
 import { Effect, Option, Schema, Stream } from "effect";
 
-import type { AgentControlProposalStoreError } from "../agentControl/Services/AgentControlProposalStore.ts";
+import type { AgentControlProposalDecisionError } from "../agentControl/Services/AgentControlProposalService.ts";
 import type { AgentControlExternalIntegrationServiceError } from "../agentControl/Services/AgentControlExternalIntegration.ts";
 import { observeRpcEffect, observeRpcStreamEffect } from "../observability/RpcInstrumentation.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
@@ -20,7 +20,7 @@ const isProposalStatus = Schema.is(AgentControlProposalStatus);
  * prompts, storage details — crosses this boundary.
  */
 export const toAgentControlRpcError = (
-  error: AgentControlProposalStoreError,
+  error: AgentControlProposalDecisionError,
 ): AgentControlRpcError => {
   switch (error._tag) {
     case "AgentControlDisabledError":
@@ -49,6 +49,11 @@ export const toAgentControlRpcError = (
       return new AgentControlRpcError({
         code: "conflict",
         message: "Request id was already used with a different plan.",
+      });
+    case "AgentControlSettingsChangeUnsupportedError":
+      return new AgentControlRpcError({
+        code: "unsupported",
+        message: error.detail,
       });
     default:
       return new AgentControlRpcError({

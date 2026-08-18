@@ -49,6 +49,8 @@ const makeAgentControlOperationStore = Effect.gen(function* () {
         state: {
           completedSteps: [],
           resources: {
+            projectIds: [],
+            automationIds: [],
             threadIds: [],
             ownedThreadIds: [],
             worktreeIds: [],

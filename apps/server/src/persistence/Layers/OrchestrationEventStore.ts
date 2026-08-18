@@ -179,6 +179,22 @@ const makeEventStore = Effect.gen(function* () {
       `,
   });
 
+  const readRecentEventRows = SqlSchema.findAll({
+    Request: Schema.Struct({ since: IsoDateTime, limit: Schema.Int }),
+    Result: OrchestrationEventPersistedRowSchema,
+    execute: ({ since, limit }) => sql`
+      SELECT sequence, event_id AS "eventId", event_type AS "type",
+        aggregate_kind AS "aggregateKind", stream_id AS "aggregateId",
+        occurred_at AS "occurredAt", command_id AS "commandId",
+        causation_event_id AS "causationEventId", correlation_id AS "correlationId",
+        payload_json AS "payload", metadata_json AS "metadata"
+      FROM orchestration_events
+      WHERE occurred_at >= ${since}
+      ORDER BY sequence DESC
+      LIMIT ${limit}
+    `,
+  });
+
   const append: OrchestrationEventStoreShape["append"] = (event) =>
     appendEventRow({
       eventId: event.eventId,
@@ -300,9 +316,32 @@ const makeEventStore = Effect.gen(function* () {
     );
   };
 
+  const readRecent: OrchestrationEventStoreShape["readRecent"] = (input) =>
+    readRecentEventRows({
+      since: input.since,
+      limit: Math.min(Math.max(1, Math.floor(input.limit)), 500),
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "OrchestrationEventStore.readRecent:query",
+          "OrchestrationEventStore.readRecent:decodeRows",
+        ),
+      ),
+      Effect.flatMap((rows) =>
+        Effect.forEach(rows, (row) =>
+          decodeEvent(row).pipe(
+            Effect.mapError(
+              toPersistenceDecodeError("OrchestrationEventStore.readRecent:rowToEvent"),
+            ),
+          ),
+        ),
+      ),
+    );
+
   return {
     append,
     readPage,
+    readRecent,
     readFromSequence,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
   } satisfies OrchestrationEventStoreShape;

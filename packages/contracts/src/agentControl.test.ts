@@ -43,6 +43,26 @@ const createThreadsPlan = {
   ],
 };
 
+const automationDefinition = {
+  execution: {
+    projectId: "project-1",
+    title: "Bounded review",
+    prompt: "Review the project and report findings.",
+    modelSelection: { instanceId: "codex", model: "gpt-5.6" },
+    runtimeMode: "approval-required",
+    envMode: "worktree",
+  },
+  schedule: { kind: "once", runAt: "2026-08-19T00:00:00.000Z" },
+  enabled: true,
+} as const;
+
+const automationRevision = {
+  revision: 1,
+  definition: automationDefinition,
+  cancelled: false,
+  updatedAt: "2026-08-18T00:00:00.000Z",
+} as const;
+
 const digest = "a".repeat(64);
 
 const proposalWire = {
@@ -85,6 +105,113 @@ describe("AgentControlActionPlan", () => {
     expect(decodePlan({ kind: "updateThread", threadId: "thread-1", archived: true }).kind).toBe(
       "updateThread",
     );
+    expect(
+      decodePlan({
+        kind: "createProject",
+        projectId: "project-new",
+        title: "New project",
+        workspaceRoot: "/workspace/new",
+        projectMetadataDir: ".ryco",
+        repositoryIdentityKey: "github.com/example/new",
+      }).kind,
+    ).toBe("createProject");
+    expect(
+      decodePlan({
+        kind: "updateProject",
+        projectId: "project-1",
+        before: {
+          title: "Before",
+          workspaceRoot: "/workspace/before",
+          repositoryIdentityKey: null,
+          updatedAt: "2026-08-18T00:00:00.000Z",
+        },
+        after: {
+          title: "After",
+          workspaceRoot: "/workspace/after",
+          repositoryIdentityKey: null,
+        },
+      }).kind,
+    ).toBe("updateProject");
+    expect(
+      decodePlan({
+        kind: "removeProject",
+        projectId: "project-1",
+        expected: {
+          title: "Project",
+          workspaceRoot: "/workspace/project",
+          repositoryIdentityKey: null,
+          updatedAt: "2026-08-18T00:00:00.000Z",
+        },
+        expectedThreadIds: ["thread-1"],
+        force: true,
+      }).kind,
+    ).toBe("removeProject");
+    expect(
+      decodePlan({
+        kind: "changeSettings",
+        change: { kind: "providerUpdateChecks", before: true, after: false },
+      }).kind,
+    ).toBe("changeSettings");
+    expect(
+      decodePlan({
+        kind: "createAutomation",
+        automationId: "automation-1",
+        definition: automationDefinition,
+      }).kind,
+    ).toBe("createAutomation");
+    expect(
+      decodePlan({
+        kind: "updateAutomation",
+        automationId: "automation-1",
+        before: automationRevision,
+        after: automationDefinition,
+      }).kind,
+    ).toBe("updateAutomation");
+    expect(
+      decodePlan({
+        kind: "cancelAutomation",
+        automationId: "automation-1",
+        expected: automationRevision,
+      }).kind,
+    ).toBe("cancelAutomation");
+    expect(
+      decodePlan({
+        kind: "automationRun",
+        automationId: "automation-1",
+        runId: "automation-run-1",
+        automationRevision: 1,
+        scheduledFor: automationDefinition.schedule.runAt,
+        coalescedOccurrences: 0,
+        execution: automationDefinition.execution,
+      }).kind,
+    ).toBe("automationRun");
+  });
+
+  it("accepts only explicit device mutations and bounded relative application artifacts", () => {
+    const target = {
+      threadId: "thread-1",
+      projectId: "project-1",
+      expectedProjectUpdatedAt: "2026-08-18T00:00:00.000Z",
+      providerInstanceId: "codex",
+      udid: "FAKE-0001",
+      expectedThreadDeviceVersion: 4,
+      expectedAttachedDeviceUdid: "FAKE-0001",
+      expectedDeviceState: "booted",
+      expectedDeviceBootSource: "ryco",
+      expectedRecording: false,
+      executionSummary: "Install an approved workspace application",
+      riskClass: "device-control",
+    };
+    expect(
+      decodePlan({ kind: "deviceInstall", ...target, artifactPath: "build/Test.app" }).kind,
+    ).toBe("deviceInstall");
+    expect(() =>
+      decodePlan({ kind: "deviceInstall", ...target, artifactPath: "/tmp/Test.app" }),
+    ).toThrow();
+    expect(() =>
+      decodePlan({ kind: "deviceInstall", ...target, artifactPath: "../Test.app" }),
+    ).toThrow();
+    expect(() => decodePlan({ kind: "device.call", method: "tap", payload: {} })).toThrow();
   });
 
   it("rejects unknown action kinds", () => {
@@ -197,9 +324,29 @@ describe("forward compatibility (additive extension)", () => {
       AGENT_CONTROL_CAPABILITIES.createThreads,
     );
     expect(Object.keys(AGENT_CONTROL_ACTION_CAPABILITIES).toSorted()).toEqual([
+      "automationRun",
+      "cancelAutomation",
+      "changeSettings",
+      "createAutomation",
+      "createProject",
       "createThreads",
+      "deviceAttach",
+      "deviceBoot",
+      "deviceDetach",
+      "deviceInstall",
+      "deviceLaunch",
+      "deviceOpenUrl",
+      "devicePressButton",
+      "deviceShutdown",
+      "deviceStartRecording",
+      "deviceStopRecording",
+      "deviceSwipe",
+      "deviceTap",
       "interruptThread",
+      "removeProject",
       "sendMessage",
+      "updateAutomation",
+      "updateProject",
       "updateThread",
     ]);
   });
@@ -228,6 +375,8 @@ describe("AgentControlOperation", () => {
     const state = decodeOperationState({});
     expect(state.completedSteps).toEqual([]);
     expect(state.resources).toEqual({
+      projectIds: [],
+      automationIds: [],
       threadIds: [],
       ownedThreadIds: [],
       worktreeIds: [],
@@ -238,7 +387,7 @@ describe("AgentControlOperation", () => {
 });
 
 describe("Agent Control MCP contracts", () => {
-  it("catalogs exactly seven read tools and four proposal-backed mutation tools", async () => {
+  it("catalogs the internal reads and proposal-backed mutation tools", async () => {
     const { AGENT_CONTROL_MCP_TOOLS, AGENT_CONTROL_MCP_TOOL_NAMES } =
       await import("./agentControl.ts");
     expect([...AGENT_CONTROL_MCP_TOOL_NAMES].toSorted()).toEqual(
@@ -251,23 +400,55 @@ describe("Agent Control MCP contracts", () => {
         "ryco_read_control_request",
         "ryco_wait_for_control_request",
         "ryco_create_threads",
+        "ryco_diagnostics_summary",
         "ryco_send_message",
         "ryco_interrupt_thread",
         "ryco_update_thread",
+        "ryco_list_automations",
+        "ryco_read_automation",
+        "ryco_list_automation_runs",
+        "ryco_propose_automation_create",
+        "ryco_propose_automation_update",
+        "ryco_propose_automation_cancel",
+        "ryco_recent_activity",
+        "ryco_orchestration_events",
+        "ryco_provider_runtime_events",
+        "ryco_settings_summary",
+        "ryco_propose_project_create",
+        "ryco_propose_project_update",
+        "ryco_propose_project_remove",
+        "ryco_propose_settings_change",
+        "ryco_list_devices",
+        "ryco_read_device_state",
+        "ryco_read_device_screenshot",
+        "ryco_describe_device_ui",
+        "ryco_propose_device_boot",
+        "ryco_propose_device_attach",
+        "ryco_propose_device_detach",
+        "ryco_propose_device_install",
+        "ryco_propose_device_launch",
+        "ryco_propose_device_open_url",
+        "ryco_propose_device_input",
+        "ryco_propose_device_recording",
+        "ryco_propose_device_shutdown",
       ].toSorted(),
     );
-    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(11);
+    expect(Object.values(AGENT_CONTROL_MCP_TOOLS)).toHaveLength(39);
     for (const name of AGENT_CONTROL_MCP_TOOL_NAMES) {
       expect(name.startsWith("ryco_")).toBe(true);
     }
   });
 
-  it("decodes only the four exact mutation payloads", async () => {
+  it("decodes only exact typed mutation payloads and rejects sensitive settings categories", async () => {
     const {
       AgentControlMcpCreateThreadsInput,
       AgentControlMcpInterruptThreadInput,
       AgentControlMcpSendMessageInput,
       AgentControlMcpUpdateThreadInput,
+      AgentControlMcpProposeProjectCreateInput,
+      AgentControlMcpProposeProjectUpdateInput,
+      AgentControlMcpProposeProjectRemoveInput,
+      AgentControlMcpProposeSettingsChangeInput,
     } = await import("./agentControl.ts");
 
     expect(
@@ -304,6 +485,73 @@ describe("Agent Control MCP contracts", () => {
         metadata: { arbitrary: true },
       }),
     ).toThrow();
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeProjectCreateInput)({
+        requestId: "request-project-create",
+        projectId: "project-new",
+        title: "New project",
+        workspaceRoot: "/workspace/new",
+      }).projectId,
+    ).toBe("project-new");
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeProjectUpdateInput)({
+        requestId: "request-project-update",
+        projectId: "project-1",
+        expectedUpdatedAt: "2026-08-18T00:00:00.000Z",
+        title: "Renamed",
+      }).title,
+    ).toBe("Renamed");
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeProjectRemoveInput)({
+        requestId: "request-project-remove",
+        projectId: "project-1",
+        expectedUpdatedAt: "2026-08-18T00:00:00.000Z",
+        force: true,
+      }).force,
+    ).toBe(true);
+    expect(
+      Schema.decodeUnknownSync(AgentControlMcpProposeSettingsChangeInput)({
+        requestId: "request-settings",
+        change: { kind: "legacyTokenStreaming", value: true },
+      }).change.kind,
+    ).toBe("legacyTokenStreaming");
+
+    for (const kind of [
+      "apiKey",
+      "providerEnvironment",
+      "providerCommand",
+      "mcpServerUrl",
+      "relayUrl",
+      "authentication",
+      "filesystemRoot",
+      "networkExposure",
+      "agentControlEnabled",
+      "genericPatch",
+    ]) {
+      expect(() =>
+        Schema.decodeUnknownSync(AgentControlMcpProposeSettingsChangeInput)({
+          requestId: `request-${kind}`,
+          change: { kind, value: "secret" },
+        }),
+      ).toThrow();
+    }
+
+    for (const [field, value] of [
+      ["apiKey", "secret"],
+      ["environment", { API_KEY: "secret" }],
+      ["providerCommand", ["provider", "--unsafe"]],
+      ["mcpServerUrl", "https://private.example.test"],
+      ["relayUrl", "wss://relay.example.test"],
+      ["filesystemRoot", "/"],
+      ["agentControlEnabled", false],
+    ] as const) {
+      expect(() =>
+        Schema.decodeUnknownSync(AgentControlMcpProposeSettingsChangeInput)({
+          requestId: `request-extra-${field}`,
+          change: { kind: "legacyTokenStreaming", value: true, [field]: value },
+        }),
+      ).toThrow();
+    }
   });
 
   it("decodes list/read/wait inputs and rejects out-of-bounds payloads", async () => {
@@ -388,7 +636,7 @@ describe("Agent Control MCP contracts", () => {
 });
 
 describe("AgentControl external MCP", () => {
-  it("publishes exactly the six scoped external tools", async () => {
+  it("publishes the scoped task, automation, activity, and diagnostics tools", async () => {
     const { AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES } = await import("./agentControl.ts");
     expect([...AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES]).toEqual([
       "ryco_overview",
@@ -397,6 +645,16 @@ describe("AgentControl external MCP", () => {
       "ryco_create_task",
       "ryco_read_task",
       "ryco_wait_for_task",
+      "ryco_list_automations",
+      "ryco_read_automation",
+      "ryco_list_automation_runs",
+      "ryco_propose_automation_create",
+      "ryco_propose_automation_update",
+      "ryco_propose_automation_cancel",
+      "ryco_recent_activity",
+      "ryco_orchestration_events",
+      "ryco_provider_runtime_events",
+      "ryco_diagnostics_summary",
     ]);
   });
 

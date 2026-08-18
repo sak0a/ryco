@@ -138,11 +138,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.meta.update": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
       });
+      if (
+        command.expectedUpdatedAt !== undefined &&
+        project.updatedAt !== command.expectedUpdatedAt
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' changed after the command was authorized.`,
+        });
+      }
       const occurredAt = nowIso();
       return {
         ...withEventBase({
@@ -198,14 +207,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "project.delete": {
-      yield* requireProject({
+      const project = yield* requireProject({
         readModel,
         command,
         projectId: command.projectId,
       });
+      if (
+        command.expectedUpdatedAt !== undefined &&
+        project.updatedAt !== command.expectedUpdatedAt
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Project '${command.projectId}' changed after the command was authorized.`,
+        });
+      }
       const activeThreads = listThreadsByProjectId(readModel, command.projectId).filter(
         (thread) => thread.deletedAt === null,
       );
+      if (command.expectedThreadIds !== undefined) {
+        const expectedThreadIds = command.expectedThreadIds.toSorted();
+        const actualThreadIds = activeThreads.map((thread) => thread.id).toSorted();
+        if (
+          expectedThreadIds.length !== actualThreadIds.length ||
+          !expectedThreadIds.every((threadId, index) => threadId === actualThreadIds[index])
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Project '${command.projectId}' thread set changed after the command was authorized.`,
+          });
+        }
+      }
       if (activeThreads.length > 0 && command.force !== true) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,

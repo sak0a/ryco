@@ -1,4 +1,5 @@
 import {
+  AgentControlOperationId,
   AgentControlProposalId,
   AgentControlRequestId,
   AgentControlRiskTag,
@@ -223,6 +224,82 @@ enabledLayer("AgentControlProposalStore", (it) => {
       assert.strictEqual(row.planDigest, proposal.planDigest);
       assert.deepStrictEqual(row.plan, proposal.plan);
       assert.strictEqual(row.result?.outcome, "completed");
+    }),
+  );
+
+  it.effect("preserves an exact project plan and its execution result with the audit trail", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const repository = yield* AgentControlProposalRepository;
+      const audit = yield* AgentControlAuditRepository;
+      const projectPlan: AgentControlActionPlan = {
+        kind: "updateProject",
+        projectId: ProjectId.make("project-1"),
+        before: {
+          title: "Before",
+          workspaceRoot: "/workspace/before",
+          repositoryIdentityKey: "git:example/project",
+          updatedAt: "2026-08-17T00:00:00.000Z",
+        },
+        after: {
+          title: "After",
+          workspaceRoot: "/workspace/after",
+          repositoryIdentityKey: "git:example/project",
+        },
+      };
+      const { proposal } = yield* store.submit({
+        principal,
+        requestId: AgentControlRequestId.make("request-project-audit"),
+        plan: projectPlan,
+        riskTags: [AgentControlRiskTag.make("modifies-project-metadata")],
+        promptSummary: "Update project project-1",
+        expiresAt: "2026-08-17T01:00:00.000Z",
+        now: "2026-08-17T00:00:00.000Z",
+      });
+      yield* store.decide({
+        proposalId: proposal.proposalId,
+        decision: "approved",
+        actor: "user",
+        decidedAt: "2026-08-17T00:01:00.000Z",
+      });
+      yield* store.beginExecution({
+        proposalId: proposal.proposalId,
+        actor: "executor",
+        now: "2026-08-17T00:02:00.000Z",
+      });
+      const operationId = AgentControlOperationId.make("operation-project-audit");
+      const result = {
+        outcome: "completed" as const,
+        execution: {
+          operationId,
+          commands: [],
+          affectedThreadIds: [],
+          affectedProjectIds: [ProjectId.make("project-1")],
+          affectedAutomationIds: [],
+          worktreeIds: [],
+        },
+        completedAt: "2026-08-17T00:03:00.000Z",
+      };
+      yield* store.settleExecution({
+        proposalId: proposal.proposalId,
+        result,
+        now: result.completedAt,
+      });
+
+      const persisted = Option.getOrThrow(
+        yield* repository.getById({ proposalId: proposal.proposalId }),
+      );
+      assert.deepStrictEqual(persisted.plan, projectPlan);
+      assert.deepStrictEqual(persisted.result, result);
+
+      const trail = yield* audit.listByProposalId({ proposalId: proposal.proposalId });
+      assert.deepStrictEqual(
+        trail.map((row) => String(row.eventKind)),
+        ["proposal-created", "proposal-approved", "proposal-executing", "proposal-completed"],
+      );
+      assert.isTrue(trail.every((row) => row.metadata.planDigest === proposal.planDigest));
+      assert.strictEqual(trail.at(-1)?.metadata.outcome, "completed");
+      assert.strictEqual(trail.at(-1)?.metadata.operationId, operationId);
     }),
   );
 
@@ -455,6 +532,61 @@ enabledLayer("AgentControlProposalStore", (it) => {
       // Identifiers and the audit-safe summary are retained.
       assert.include(serialized, proposal.planDigest);
       assert.include(serialized, "Create 1 thread in project-1");
+    }),
+  );
+
+  it.effect("keeps device URLs and artifact paths out of audit metadata", () =>
+    Effect.gen(function* () {
+      const store = yield* AgentControlProposalStore;
+      const audit = yield* AgentControlAuditRepository;
+      const common = {
+        threadId: ThreadId.make("thread-1"),
+        projectId: ProjectId.make("project-1"),
+        expectedProjectUpdatedAt: "2026-08-17T00:00:00.000Z",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        udid: "FAKE-0001" as never,
+        expectedThreadDeviceVersion: 2,
+        expectedAttachedDeviceUdid: "FAKE-0001" as never,
+        expectedDeviceState: "booted" as const,
+        expectedDeviceBootSource: "ryco" as const,
+        expectedRecording: false,
+      };
+      const secretUrl = "ryco-secret://account/reset?token=never-audit-this";
+      const artifactPath = "private/build/SecretProduct.app";
+      const plans: readonly AgentControlActionPlan[] = [
+        {
+          kind: "deviceOpenUrl",
+          ...common,
+          executionSummary: "Open an approved URL or deep link",
+          riskClass: "open-world",
+          url: secretUrl,
+        },
+        {
+          kind: "deviceInstall",
+          ...common,
+          executionSummary: "Install an approved workspace application",
+          riskClass: "device-control",
+          artifactPath: artifactPath as never,
+        },
+      ];
+      for (const [index, plan] of plans.entries()) {
+        const { proposal } = yield* store.submit({
+          principal,
+          requestId: AgentControlRequestId.make(`request-device-redaction-${index}`),
+          plan,
+          riskTags: [AgentControlRiskTag.make("device-mutation")],
+          promptSummary: "Govern one exact Simulator action",
+          expiresAt: "2026-08-17T01:00:00.000Z",
+          now: "2026-08-17T00:00:00.000Z",
+        });
+        const serialized = JSON.stringify(
+          yield* audit.listByProposalId({ proposalId: proposal.proposalId }),
+        );
+        assert.notInclude(serialized, secretUrl);
+        assert.notInclude(serialized, artifactPath);
+        assert.include(serialized, "FAKE-0001");
+        assert.include(serialized, "sensitivePayloadsExcluded");
+      }
     }),
   );
 });

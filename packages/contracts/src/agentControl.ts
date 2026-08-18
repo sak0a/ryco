@@ -37,12 +37,29 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ModelSelection, OrchestrationSessionStatus, RuntimeMode } from "./orchestration.ts";
+import {
+  ModelSelection,
+  OrchestrationSessionStatus,
+  ProjectMetadataDir,
+  RuntimeMode,
+} from "./orchestration.ts";
 import { ProviderOptionSelections } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerProviderAvailability, ServerProviderState } from "./server.ts";
 import { ThreadEnvMode } from "./settings.ts";
 import { WorktreeId } from "./worktree.ts";
+import {
+  DeviceAttachPhase,
+  DeviceAvailability,
+  DeviceBootSource,
+  DeviceBundleId,
+  DeviceDescriptor,
+  DeviceHardwareButton,
+  DeviceRuntimeState,
+  DeviceUdid,
+  DEVICE_SWIPE_DURATION_MAX_MS,
+  DEVICE_SWIPE_DURATION_MIN_MS,
+} from "./device.ts";
 
 // ── Identifiers ───────────────────────────────────────────────────────
 
@@ -65,6 +82,16 @@ export const AgentControlExternalTaskId = TrimmedNonEmptyString.check(Schema.isM
   Schema.brand("AgentControlExternalTaskId"),
 );
 export type AgentControlExternalTaskId = typeof AgentControlExternalTaskId.Type;
+
+export const AgentControlAutomationId = TrimmedNonEmptyString.check(Schema.isMaxLength(128)).pipe(
+  Schema.brand("AgentControlAutomationId"),
+);
+export type AgentControlAutomationId = typeof AgentControlAutomationId.Type;
+
+export const AgentControlAutomationRunId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(128),
+).pipe(Schema.brand("AgentControlAutomationRunId"));
+export type AgentControlAutomationRunId = typeof AgentControlAutomationRunId.Type;
 
 /**
  * Caller-chosen idempotency key. Unique within one principal's request-id
@@ -157,11 +184,27 @@ export const AGENT_CONTROL_CAPABILITIES = {
   sendMessage: AgentControlCapability.make("threads.send-message"),
   interruptThread: AgentControlCapability.make("threads.interrupt"),
   updateThread: AgentControlCapability.make("threads.update"),
+  createProject: AgentControlCapability.make("projects.create"),
+  updateProject: AgentControlCapability.make("projects.update"),
+  removeProject: AgentControlCapability.make("projects.remove"),
+  readSettings: AgentControlCapability.make("settings.read"),
+  changeSettings: AgentControlCapability.make("settings.change"),
+  readAutomations: AgentControlCapability.make("automations.read"),
+  manageAutomations: AgentControlCapability.make("automations.manage"),
+  readActivity: AgentControlCapability.make("activity.read"),
+  readDiagnostics: AgentControlCapability.make("diagnostics.read"),
+  readDevices: AgentControlCapability.make("devices.read"),
+  readDeviceContent: AgentControlCapability.make("devices.content.read"),
+  controlDevices: AgentControlCapability.make("devices.control"),
   externalListProjects: AgentControlCapability.make("external.projects.list"),
   externalCreateTask: AgentControlCapability.make("external.tasks.create"),
   externalReadTask: AgentControlCapability.make("external.tasks.read"),
   externalSharedCheckout: AgentControlCapability.make("external.checkout.shared"),
   externalFullAccess: AgentControlCapability.make("external.runtime.full-access"),
+  externalReadAutomations: AgentControlCapability.make("external.automations.read"),
+  externalManageAutomations: AgentControlCapability.make("external.automations.manage"),
+  externalReadActivity: AgentControlCapability.make("external.activity.read"),
+  externalReadDiagnostics: AgentControlCapability.make("external.diagnostics.read"),
 } as const;
 
 // ── Action plans ──────────────────────────────────────────────────────
@@ -171,8 +214,44 @@ export const AgentControlActionKind = Schema.Literals([
   "sendMessage",
   "interruptThread",
   "updateThread",
+  "createProject",
+  "updateProject",
+  "removeProject",
+  "changeSettings",
+  "createAutomation",
+  "updateAutomation",
+  "cancelAutomation",
+  "automationRun",
+  "deviceBoot",
+  "deviceAttach",
+  "deviceDetach",
+  "deviceInstall",
+  "deviceLaunch",
+  "deviceOpenUrl",
+  "deviceTap",
+  "deviceSwipe",
+  "devicePressButton",
+  "deviceStartRecording",
+  "deviceStopRecording",
+  "deviceShutdown",
 ]);
 export type AgentControlActionKind = typeof AgentControlActionKind.Type;
+
+export const AGENT_CONTROL_DEVICE_ACTION_KINDS = [
+  "deviceBoot",
+  "deviceAttach",
+  "deviceDetach",
+  "deviceInstall",
+  "deviceLaunch",
+  "deviceOpenUrl",
+  "deviceTap",
+  "deviceSwipe",
+  "devicePressButton",
+  "deviceStartRecording",
+  "deviceStopRecording",
+  "deviceShutdown",
+] as const satisfies ReadonlyArray<AgentControlActionKind>;
+export type AgentControlDeviceActionKind = (typeof AGENT_CONTROL_DEVICE_ACTION_KINDS)[number];
 
 /** Required capability per mutation action kind. */
 export const AGENT_CONTROL_ACTION_CAPABILITIES: Record<
@@ -183,6 +262,26 @@ export const AGENT_CONTROL_ACTION_CAPABILITIES: Record<
   sendMessage: AGENT_CONTROL_CAPABILITIES.sendMessage,
   interruptThread: AGENT_CONTROL_CAPABILITIES.interruptThread,
   updateThread: AGENT_CONTROL_CAPABILITIES.updateThread,
+  createProject: AGENT_CONTROL_CAPABILITIES.createProject,
+  updateProject: AGENT_CONTROL_CAPABILITIES.updateProject,
+  removeProject: AGENT_CONTROL_CAPABILITIES.removeProject,
+  changeSettings: AGENT_CONTROL_CAPABILITIES.changeSettings,
+  createAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  updateAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  cancelAutomation: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  automationRun: AGENT_CONTROL_CAPABILITIES.manageAutomations,
+  deviceBoot: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceAttach: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceDetach: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceInstall: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceLaunch: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceOpenUrl: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceTap: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceSwipe: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  devicePressButton: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceStartRecording: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceStopRecording: AGENT_CONTROL_CAPABILITIES.controlDevices,
+  deviceShutdown: AGENT_CONTROL_CAPABILITIES.controlDevices,
 };
 
 export const AGENT_CONTROL_PLAN_VERSION = 1;
@@ -191,6 +290,15 @@ export const AGENT_CONTROL_PROMPT_MAX_CHARS = 120_000;
 export const AGENT_CONTROL_TITLE_MAX_CHARS = 200;
 export const AGENT_CONTROL_CREATE_THREADS_MAX_ENTRIES = 10;
 export const AGENT_CONTROL_PERSISTENT_GOAL_MAX_CHARS = 4_000;
+export const AGENT_CONTROL_AUTOMATION_PROMPT_MAX_CHARS = 12_000;
+export const AGENT_CONTROL_AUTOMATION_MIN_INTERVAL_MS = 15 * 60_000;
+export const AGENT_CONTROL_AUTOMATION_MAX_ACTIVE_PER_PROJECT = 25;
+export const AGENT_CONTROL_AUTOMATION_MAX_HORIZON_MS = 90 * 24 * 60 * 60_000;
+export const AGENT_CONTROL_AUTOMATION_RUN_HISTORY_MAX = 50;
+export const AGENT_CONTROL_AUTOMATION_PROPOSAL_TTL_MS = 15 * 60_000;
+export const AGENT_CONTROL_AUTOMATION_SAFE_FAILURE_MAX_CHARS = 256;
+export const AGENT_CONTROL_DEVICE_ARTIFACT_PATH_MAX_CHARS = 1_024;
+export const AGENT_CONTROL_DEVICE_URL_MAX_CHARS = 2_048;
 
 const AgentControlPrompt = TrimmedNonEmptyString.check(
   Schema.isMaxLength(AGENT_CONTROL_PROMPT_MAX_CHARS),
@@ -255,11 +363,335 @@ export const AgentControlUpdateThreadPlan = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlUpdateThreadPlan = typeof AgentControlUpdateThreadPlan.Type;
 
+const AgentControlWorkspaceRoot = TrimmedNonEmptyString.check(Schema.isMaxLength(4_096));
+const AgentControlRepositoryIdentityKey = Schema.NullOr(
+  TrimmedNonEmptyString.check(Schema.isMaxLength(2_048)),
+);
+
+/** Canonical project state captured when a mutable project proposal is created. */
+export const AgentControlProjectState = Schema.Struct({
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+  repositoryIdentityKey: AgentControlRepositoryIdentityKey,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlProjectState = typeof AgentControlProjectState.Type;
+
+export const AgentControlProjectTarget = Schema.Struct({
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+  repositoryIdentityKey: AgentControlRepositoryIdentityKey,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlProjectTarget = typeof AgentControlProjectTarget.Type;
+
+/** Creates only Ryco's project record for an already-existing authorized directory. */
+export const AgentControlCreateProjectPlan = Schema.Struct({
+  kind: Schema.Literal("createProject"),
+  projectId: ProjectId,
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+  projectMetadataDir: ProjectMetadataDir,
+  repositoryIdentityKey: AgentControlRepositoryIdentityKey,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCreateProjectPlan = typeof AgentControlCreateProjectPlan.Type;
+
+/** Exact before/after metadata update; only display name and workspace path are supported. */
+export const AgentControlUpdateProjectPlan = Schema.Struct({
+  kind: Schema.Literal("updateProject"),
+  projectId: ProjectId,
+  before: AgentControlProjectState,
+  after: AgentControlProjectTarget,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlUpdateProjectPlan = typeof AgentControlUpdateProjectPlan.Type;
+
+/**
+ * Unlinks Ryco's project record. `force` may also remove the exact listed
+ * Ryco thread records, but never deletes the workspace directory or repository.
+ */
+export const AgentControlRemoveProjectPlan = Schema.Struct({
+  kind: Schema.Literal("removeProject"),
+  projectId: ProjectId,
+  expected: AgentControlProjectState,
+  expectedThreadIds: Schema.Array(ThreadId),
+  force: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlRemoveProjectPlan = typeof AgentControlRemoveProjectPlan.Type;
+
+export const AgentControlLegacyTokenStreamingChange = Schema.Struct({
+  kind: Schema.Literal("legacyTokenStreaming"),
+  before: Schema.Boolean,
+  after: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlLegacyTokenStreamingChange =
+  typeof AgentControlLegacyTokenStreamingChange.Type;
+
+export const AgentControlProviderUpdateChecksChange = Schema.Struct({
+  kind: Schema.Literal("providerUpdateChecks"),
+  before: Schema.Boolean,
+  after: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlProviderUpdateChecksChange =
+  typeof AgentControlProviderUpdateChecksChange.Type;
+
+/** Finite, non-secret settings allowlist. It is intentionally not a key/value patch. */
+export const AgentControlSettingsChange = Schema.Union([
+  AgentControlLegacyTokenStreamingChange,
+  AgentControlProviderUpdateChecksChange,
+]);
+export type AgentControlSettingsChange = typeof AgentControlSettingsChange.Type;
+
+export const AgentControlChangeSettingsPlan = Schema.Struct({
+  kind: Schema.Literal("changeSettings"),
+  change: AgentControlSettingsChange,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlChangeSettingsPlan = typeof AgentControlChangeSettingsPlan.Type;
+
+// ── Governed automation plans ─────────────────────────────────────────
+
+/**
+ * A deliberately narrow future thread action. It is data only: no command,
+ * URL, webhook, browser/device operation, RPC method, or arbitrary code field
+ * exists in this schema. Each due occurrence copies this exact template into
+ * a fresh `automationRun` proposal that still requires user approval.
+ */
+export const AgentControlAutomationExecutionTemplate = Schema.Struct({
+  projectId: ProjectId,
+  title: AgentControlTitle,
+  prompt: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(AGENT_CONTROL_AUTOMATION_PROMPT_MAX_CHARS),
+  ),
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  envMode: ThreadEnvMode,
+  baseRef: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationExecutionTemplate =
+  typeof AgentControlAutomationExecutionTemplate.Type;
+
+export const AgentControlAutomationSchedule = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("once"),
+    runAt: IsoDateTime,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("fixed-interval"),
+    startsAt: IsoDateTime,
+    intervalMs: PositiveInt,
+    /** Required finite end: recurring schedules are never unbounded. */
+    endsAt: IsoDateTime,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+]);
+export type AgentControlAutomationSchedule = typeof AgentControlAutomationSchedule.Type;
+
+export const AgentControlAutomationDefinition = Schema.Struct({
+  execution: AgentControlAutomationExecutionTemplate,
+  schedule: AgentControlAutomationSchedule,
+  enabled: Schema.Boolean,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationDefinition = typeof AgentControlAutomationDefinition.Type;
+
+/** Exact persisted definition revision captured in update/cancel plans. */
+export const AgentControlAutomationRevisionState = Schema.Struct({
+  revision: PositiveInt,
+  definition: AgentControlAutomationDefinition,
+  cancelled: Schema.Boolean,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationRevisionState = typeof AgentControlAutomationRevisionState.Type;
+
+export const AgentControlCreateAutomationPlan = Schema.Struct({
+  kind: Schema.Literal("createAutomation"),
+  automationId: AgentControlAutomationId,
+  definition: AgentControlAutomationDefinition,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCreateAutomationPlan = typeof AgentControlCreateAutomationPlan.Type;
+
+export const AgentControlUpdateAutomationPlan = Schema.Struct({
+  kind: Schema.Literal("updateAutomation"),
+  automationId: AgentControlAutomationId,
+  before: AgentControlAutomationRevisionState,
+  after: AgentControlAutomationDefinition,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlUpdateAutomationPlan = typeof AgentControlUpdateAutomationPlan.Type;
+
+export const AgentControlCancelAutomationPlan = Schema.Struct({
+  kind: Schema.Literal("cancelAutomation"),
+  automationId: AgentControlAutomationId,
+  expected: AgentControlAutomationRevisionState,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlCancelAutomationPlan = typeof AgentControlCancelAutomationPlan.Type;
+
+/** Server-materialized exact occurrence. No MCP mutation tool accepts this plan. */
+export const AgentControlAutomationRunPlan = Schema.Struct({
+  kind: Schema.Literal("automationRun"),
+  automationId: AgentControlAutomationId,
+  runId: AgentControlAutomationRunId,
+  automationRevision: PositiveInt,
+  scheduledFor: IsoDateTime,
+  coalescedOccurrences: NonNegativeInt,
+  execution: AgentControlAutomationExecutionTemplate,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationRunPlan = typeof AgentControlAutomationRunPlan.Type;
+
+// ── Governed iOS Simulator plans ────────────────────────────────────
+
+export const AgentControlDeviceRiskClass = Schema.Literals([
+  "device-control",
+  "device-lifecycle",
+  "open-world",
+]);
+export type AgentControlDeviceRiskClass = typeof AgentControlDeviceRiskClass.Type;
+
+export const AgentControlDeviceArtifactPath = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(AGENT_CONTROL_DEVICE_ARTIFACT_PATH_MAX_CHARS),
+  Schema.isPattern(/^(?!\/)(?!~)(?![A-Za-z]:)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[^\0]+\.app$/u),
+);
+export type AgentControlDeviceArtifactPath = typeof AgentControlDeviceArtifactPath.Type;
+
+const AgentControlDeviceExecutionSummary = TrimmedNonEmptyString.check(Schema.isMaxLength(240));
+const AgentControlDeviceCoordinate = Schema.Finite.check(
+  Schema.isBetween({ minimum: 0, maximum: 20_000 }),
+);
+
+/**
+ * Exact device and attachment state captured at proposal creation. Device
+ * mutations fail closed if any of these values changes before execution.
+ */
+export const AgentControlDevicePlanTarget = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  expectedProjectUpdatedAt: IsoDateTime,
+  providerInstanceId: ProviderInstanceId,
+  udid: DeviceUdid,
+  expectedThreadDeviceVersion: NonNegativeInt,
+  expectedAttachedDeviceUdid: Schema.NullOr(DeviceUdid),
+  expectedDeviceState: DeviceRuntimeState,
+  expectedDeviceBootSource: DeviceBootSource,
+  expectedRecording: Schema.Boolean,
+  executionSummary: AgentControlDeviceExecutionSummary,
+  riskClass: AgentControlDeviceRiskClass,
+});
+export type AgentControlDevicePlanTarget = typeof AgentControlDevicePlanTarget.Type;
+
+export const AgentControlDeviceBootPlan = Schema.Struct({
+  kind: Schema.Literal("deviceBoot"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceBootPlan = typeof AgentControlDeviceBootPlan.Type;
+
+export const AgentControlDeviceAttachPlan = Schema.Struct({
+  kind: Schema.Literal("deviceAttach"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceAttachPlan = typeof AgentControlDeviceAttachPlan.Type;
+
+export const AgentControlDeviceDetachPlan = Schema.Struct({
+  kind: Schema.Literal("deviceDetach"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceDetachPlan = typeof AgentControlDeviceDetachPlan.Type;
+
+export const AgentControlDeviceInstallPlan = Schema.Struct({
+  kind: Schema.Literal("deviceInstall"),
+  ...AgentControlDevicePlanTarget.fields,
+  artifactPath: AgentControlDeviceArtifactPath,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceInstallPlan = typeof AgentControlDeviceInstallPlan.Type;
+
+/** Launch arguments are deliberately absent: they may contain user secrets. */
+export const AgentControlDeviceLaunchPlan = Schema.Struct({
+  kind: Schema.Literal("deviceLaunch"),
+  ...AgentControlDevicePlanTarget.fields,
+  bundleId: DeviceBundleId,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceLaunchPlan = typeof AgentControlDeviceLaunchPlan.Type;
+
+export const AgentControlDeviceOpenUrlPlan = Schema.Struct({
+  kind: Schema.Literal("deviceOpenUrl"),
+  ...AgentControlDevicePlanTarget.fields,
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_DEVICE_URL_MAX_CHARS)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceOpenUrlPlan = typeof AgentControlDeviceOpenUrlPlan.Type;
+
+export const AgentControlDeviceTapPlan = Schema.Struct({
+  kind: Schema.Literal("deviceTap"),
+  ...AgentControlDevicePlanTarget.fields,
+  x: AgentControlDeviceCoordinate,
+  y: AgentControlDeviceCoordinate,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceTapPlan = typeof AgentControlDeviceTapPlan.Type;
+
+export const AgentControlDeviceSwipePlan = Schema.Struct({
+  kind: Schema.Literal("deviceSwipe"),
+  ...AgentControlDevicePlanTarget.fields,
+  fromX: AgentControlDeviceCoordinate,
+  fromY: AgentControlDeviceCoordinate,
+  toX: AgentControlDeviceCoordinate,
+  toY: AgentControlDeviceCoordinate,
+  durationMs: Schema.Int.check(
+    Schema.isBetween({
+      minimum: DEVICE_SWIPE_DURATION_MIN_MS,
+      maximum: DEVICE_SWIPE_DURATION_MAX_MS,
+    }),
+  ),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceSwipePlan = typeof AgentControlDeviceSwipePlan.Type;
+
+export const AgentControlDevicePressButtonPlan = Schema.Struct({
+  kind: Schema.Literal("devicePressButton"),
+  ...AgentControlDevicePlanTarget.fields,
+  button: DeviceHardwareButton,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDevicePressButtonPlan = typeof AgentControlDevicePressButtonPlan.Type;
+
+export const AgentControlDeviceStartRecordingPlan = Schema.Struct({
+  kind: Schema.Literal("deviceStartRecording"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceStartRecordingPlan = typeof AgentControlDeviceStartRecordingPlan.Type;
+
+export const AgentControlDeviceStopRecordingPlan = Schema.Struct({
+  kind: Schema.Literal("deviceStopRecording"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceStopRecordingPlan = typeof AgentControlDeviceStopRecordingPlan.Type;
+
+export const AgentControlDeviceShutdownPlan = Schema.Struct({
+  kind: Schema.Literal("deviceShutdown"),
+  ...AgentControlDevicePlanTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlDeviceShutdownPlan = typeof AgentControlDeviceShutdownPlan.Type;
+
+export const AgentControlDeviceActionPlan = Schema.Union([
+  AgentControlDeviceBootPlan,
+  AgentControlDeviceAttachPlan,
+  AgentControlDeviceDetachPlan,
+  AgentControlDeviceInstallPlan,
+  AgentControlDeviceLaunchPlan,
+  AgentControlDeviceOpenUrlPlan,
+  AgentControlDeviceTapPlan,
+  AgentControlDeviceSwipePlan,
+  AgentControlDevicePressButtonPlan,
+  AgentControlDeviceStartRecordingPlan,
+  AgentControlDeviceStopRecordingPlan,
+  AgentControlDeviceShutdownPlan,
+]);
+export type AgentControlDeviceActionPlan = typeof AgentControlDeviceActionPlan.Type;
+
 export const AgentControlActionPlan = Schema.Union([
   AgentControlCreateThreadsPlan,
   AgentControlSendMessagePlan,
   AgentControlInterruptThreadPlan,
   AgentControlUpdateThreadPlan,
+  AgentControlCreateProjectPlan,
+  AgentControlUpdateProjectPlan,
+  AgentControlRemoveProjectPlan,
+  AgentControlChangeSettingsPlan,
+  AgentControlCreateAutomationPlan,
+  AgentControlUpdateAutomationPlan,
+  AgentControlCancelAutomationPlan,
+  AgentControlAutomationRunPlan,
+  AgentControlDeviceActionPlan,
 ]);
 export type AgentControlActionPlan = typeof AgentControlActionPlan.Type;
 
@@ -280,8 +712,20 @@ export const AGENT_CONTROL_RISK_TAGS = {
   startsProviderTurn: AgentControlRiskTag.make("starts-provider-turn"),
   interruptsThread: AgentControlRiskTag.make("interrupts-thread"),
   modifiesThreadMetadata: AgentControlRiskTag.make("modifies-thread-metadata"),
+  createsProject: AgentControlRiskTag.make("creates-project"),
+  modifiesProjectMetadata: AgentControlRiskTag.make("modifies-project-metadata"),
+  removesProject: AgentControlRiskTag.make("removes-project"),
+  removesThreads: AgentControlRiskTag.make("removes-threads"),
+  changesSettings: AgentControlRiskTag.make("changes-settings"),
   sharedLocalCheckout: AgentControlRiskTag.make("shared-local-checkout"),
   elevatedRuntimeMode: AgentControlRiskTag.make("elevated-runtime-mode"),
+  createsAutomation: AgentControlRiskTag.make("creates-automation"),
+  modifiesAutomation: AgentControlRiskTag.make("modifies-automation"),
+  cancelsAutomation: AgentControlRiskTag.make("cancels-automation"),
+  scheduledRun: AgentControlRiskTag.make("scheduled-run"),
+  deviceMutation: AgentControlRiskTag.make("device-mutation"),
+  deviceLifecycle: AgentControlRiskTag.make("device-lifecycle"),
+  deviceOpenWorld: AgentControlRiskTag.make("device-open-world"),
 } as const;
 
 /**
@@ -314,6 +758,15 @@ export const AGENT_CONTROL_ERROR_CODES = {
   executionFailed: AgentControlErrorCode.make("execution-failed"),
   featureDisabled: AgentControlErrorCode.make("feature-disabled"),
   capabilityDenied: AgentControlErrorCode.make("capability-denied"),
+  deviceUnsupportedPlatform: AgentControlErrorCode.make("device.unsupported-platform"),
+  deviceSetupRequired: AgentControlErrorCode.make("device.setup-required"),
+  deviceUnavailable: AgentControlErrorCode.make("device.unavailable"),
+  deviceBootLimitReached: AgentControlErrorCode.make("device.boot-limit-reached"),
+  deviceAttachTimeout: AgentControlErrorCode.make("device.attach-timeout"),
+  deviceStaleState: AgentControlErrorCode.make("device.stale-state"),
+  deviceInvalidInput: AgentControlErrorCode.make("device.invalid-input"),
+  deviceRecordingFailed: AgentControlErrorCode.make("device.recording-failed"),
+  deviceOperationFailed: AgentControlErrorCode.make("device.operation-failed"),
 } as const;
 
 export const AgentControlErrorEnvelope = Schema.Struct({
@@ -331,11 +784,29 @@ export const AgentControlDispatchedCommandReceipt = Schema.Struct({
 });
 export type AgentControlDispatchedCommandReceipt = typeof AgentControlDispatchedCommandReceipt.Type;
 
+/** Audit-safe device execution evidence; never contains content, URLs, text, or paths. */
+export const AgentControlDeviceExecutionMetadata = Schema.Struct({
+  actionKind: AgentControlActionKind,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  udid: DeviceUdid,
+});
+export type AgentControlDeviceExecutionMetadata = typeof AgentControlDeviceExecutionMetadata.Type;
+
 export const AgentControlExecutionReceipt = Schema.Struct({
   operationId: AgentControlOperationId,
   commands: Schema.Array(AgentControlDispatchedCommandReceipt),
   affectedThreadIds: Schema.Array(ThreadId),
+  affectedProjectIds: Schema.optional(Schema.Array(ProjectId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   worktreeIds: Schema.Array(WorktreeId),
+  affectedAutomationIds: Schema.optional(Schema.Array(AgentControlAutomationId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  automationRunId: Schema.optional(AgentControlAutomationRunId),
+  device: Schema.optional(AgentControlDeviceExecutionMetadata),
   delivery: Schema.optional(Schema.Literals(["queued", "steered", "queued-after-steer-fallback"])),
   interrupt: Schema.optional(
     Schema.Struct({
@@ -356,6 +827,7 @@ export type AgentControlExecutionReceipt = typeof AgentControlExecutionReceipt.T
 export const AgentControlCompletedResult = Schema.Struct({
   outcome: Schema.Literal("completed"),
   createdThreadIds: Schema.optional(Schema.Array(ThreadId)),
+  createdProjectIds: Schema.optional(Schema.Array(ProjectId)),
   execution: Schema.optional(AgentControlExecutionReceipt),
   detail: Schema.optional(AgentControlResultMessage),
   completedAt: IsoDateTime,
@@ -547,6 +1019,7 @@ export const AgentControlRpcErrorCode = Schema.Literals([
   "not-found",
   "expired",
   "conflict",
+  "unsupported",
   "storage",
 ]);
 export type AgentControlRpcErrorCode = typeof AgentControlRpcErrorCode.Type;
@@ -582,6 +1055,13 @@ export const AGENT_CONTROL_TERMINAL_OPERATION_STATUSES: ReadonlyArray<AgentContr
  * clean up safely or surface a clearly terminal failure.
  */
 export const AgentControlOperationResources = Schema.Struct({
+  projectIds: Schema.optional(Schema.Array(ProjectId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  automationIds: Schema.optional(Schema.Array(AgentControlAutomationId)).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  automationRunId: Schema.optional(AgentControlAutomationRunId),
   threadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   ownedThreadIds: Schema.Array(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   worktreeIds: Schema.Array(WorktreeId).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
@@ -602,7 +1082,14 @@ export const AgentControlOperationState = Schema.Struct({
   ),
   resources: AgentControlOperationResources.pipe(
     Schema.withDecodingDefault(
-      Effect.succeed({ threadIds: [], ownedThreadIds: [], worktreeIds: [], ownedWorktrees: [] }),
+      Effect.succeed({
+        projectIds: [],
+        automationIds: [],
+        threadIds: [],
+        ownedThreadIds: [],
+        worktreeIds: [],
+        ownedWorktrees: [],
+      }),
     ),
   ),
   commandReceipts: Schema.Array(AgentControlDispatchedCommandReceipt).pipe(
@@ -620,6 +1107,7 @@ export const AgentControlOperationState = Schema.Struct({
     Schema.Struct({ attempted: Schema.Boolean, completed: Schema.Boolean }),
   ),
   note: Schema.optional(AgentControlResultMessage),
+  device: Schema.optional(AgentControlDeviceExecutionMetadata),
 });
 export type AgentControlOperationState = typeof AgentControlOperationState.Type;
 
@@ -640,6 +1128,61 @@ export const AgentControlOperation = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type AgentControlOperation = typeof AgentControlOperation.Type;
+
+// ── Durable automation lifecycle ──────────────────────────────────────
+
+export const AgentControlAutomation = Schema.Struct({
+  automationId: AgentControlAutomationId,
+  principal: AgentControlPrincipal,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  definition: AgentControlAutomationDefinition,
+  revision: PositiveInt,
+  enabled: Schema.Boolean,
+  cancelled: Schema.Boolean,
+  cancelledAt: Schema.NullOr(IsoDateTime),
+  nextRunAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomation = typeof AgentControlAutomation.Type;
+
+export const AgentControlAutomationRunStatus = Schema.Literals([
+  "materializing",
+  "pending-approval",
+  "approved",
+  "executing",
+  "completed",
+  "failed",
+  "rejected",
+  "expired",
+  "cancelled",
+]);
+export type AgentControlAutomationRunStatus = typeof AgentControlAutomationRunStatus.Type;
+
+export const AGENT_CONTROL_ACTIVE_AUTOMATION_RUN_STATUSES: ReadonlyArray<AgentControlAutomationRunStatus> =
+  ["materializing", "pending-approval", "approved", "executing"];
+
+export const AgentControlAutomationRun = Schema.Struct({
+  runId: AgentControlAutomationRunId,
+  automationId: AgentControlAutomationId,
+  automationRevision: PositiveInt,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  scheduledFor: IsoDateTime,
+  coalescedOccurrences: NonNegativeInt,
+  status: AgentControlAutomationRunStatus,
+  proposalId: Schema.NullOr(AgentControlProposalId),
+  safeFailureDetail: Schema.NullOr(
+    TrimmedNonEmptyString.check(
+      Schema.isMaxLength(AGENT_CONTROL_AUTOMATION_SAFE_FAILURE_MAX_CHARS),
+    ),
+  ),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  completedAt: Schema.NullOr(IsoDateTime),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlAutomationRun = typeof AgentControlAutomationRun.Type;
 
 // ── Internal provider-session MCP surface ─────────────────────────────
 //
@@ -706,6 +1249,34 @@ export const AGENT_CONTROL_MCP_TOOLS = {
   sendMessage: "ryco_send_message",
   interruptThread: "ryco_interrupt_thread",
   updateThread: "ryco_update_thread",
+  settingsSummary: "ryco_settings_summary",
+  proposeProjectCreate: "ryco_propose_project_create",
+  proposeProjectUpdate: "ryco_propose_project_update",
+  proposeProjectRemove: "ryco_propose_project_remove",
+  proposeSettingsChange: "ryco_propose_settings_change",
+  listAutomations: "ryco_list_automations",
+  readAutomation: "ryco_read_automation",
+  listAutomationRuns: "ryco_list_automation_runs",
+  proposeAutomationCreate: "ryco_propose_automation_create",
+  proposeAutomationUpdate: "ryco_propose_automation_update",
+  proposeAutomationCancel: "ryco_propose_automation_cancel",
+  recentActivity: "ryco_recent_activity",
+  orchestrationEvents: "ryco_orchestration_events",
+  providerRuntimeEvents: "ryco_provider_runtime_events",
+  diagnosticsSummary: "ryco_diagnostics_summary",
+  listDevices: "ryco_list_devices",
+  readDeviceState: "ryco_read_device_state",
+  readDeviceScreenshot: "ryco_read_device_screenshot",
+  describeDeviceUi: "ryco_describe_device_ui",
+  proposeDeviceBoot: "ryco_propose_device_boot",
+  proposeDeviceAttach: "ryco_propose_device_attach",
+  proposeDeviceDetach: "ryco_propose_device_detach",
+  proposeDeviceInstall: "ryco_propose_device_install",
+  proposeDeviceLaunch: "ryco_propose_device_launch",
+  proposeDeviceOpenUrl: "ryco_propose_device_open_url",
+  proposeDeviceInput: "ryco_propose_device_input",
+  proposeDeviceRecording: "ryco_propose_device_recording",
+  proposeDeviceShutdown: "ryco_propose_device_shutdown",
 } as const;
 export type AgentControlMcpToolName =
   (typeof AGENT_CONTROL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_MCP_TOOLS];
@@ -732,6 +1303,13 @@ export const AGENT_CONTROL_MCP_READ_THREAD_TEXT_BUDGET_CHARS = 80_000;
 /** Wait bounds for `ryco_wait_for_control_request` (milliseconds). */
 export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_MAX = 50_000;
 export const AGENT_CONTROL_MCP_WAIT_TIMEOUT_MS_DEFAULT = 25_000;
+export const AGENT_CONTROL_MCP_OPERATIONAL_LIMIT_MAX = 50;
+export const AGENT_CONTROL_MCP_OPERATIONAL_LIMIT_DEFAULT = 20;
+export const AGENT_CONTROL_MCP_OPERATIONAL_RANGE_MAX_MS = 24 * 60 * 60_000;
+export const AGENT_CONTROL_MCP_OPERATIONAL_RETENTION_MS = 7 * 24 * 60 * 60_000;
+export const AGENT_CONTROL_MCP_ORCHESTRATION_SCAN_MAX = 500;
+/** Per-item preview cap in list/activity responses; a single read returns the full bounded prompt. */
+export const AGENT_CONTROL_MCP_AUTOMATION_LIST_PROMPT_MAX_CHARS = 1_000;
 
 /**
  * Opaque pagination cursor. List cursors are minted by the server and are
@@ -819,6 +1397,242 @@ export const AgentControlMcpUpdateThreadInput = Schema.Struct({
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 export type AgentControlMcpUpdateThreadInput = typeof AgentControlMcpUpdateThreadInput.Type;
 
+export const AgentControlMcpProposeProjectCreateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  title: AgentControlTitle,
+  workspaceRoot: AgentControlWorkspaceRoot,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeProjectCreateInput =
+  typeof AgentControlMcpProposeProjectCreateInput.Type;
+
+export const AgentControlMcpProposeProjectUpdateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  expectedUpdatedAt: IsoDateTime,
+  title: Schema.optional(AgentControlTitle),
+  workspaceRoot: Schema.optional(AgentControlWorkspaceRoot),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeProjectUpdateInput =
+  typeof AgentControlMcpProposeProjectUpdateInput.Type;
+
+export const AgentControlMcpProposeProjectRemoveInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  expectedUpdatedAt: IsoDateTime,
+  force: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeProjectRemoveInput =
+  typeof AgentControlMcpProposeProjectRemoveInput.Type;
+
+export const AgentControlMcpSettingsChangeRequest = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("legacyTokenStreaming"),
+    value: Schema.Boolean,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("providerUpdateChecks"),
+    value: Schema.Boolean,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+]);
+export type AgentControlMcpSettingsChangeRequest = typeof AgentControlMcpSettingsChangeRequest.Type;
+
+export const AgentControlMcpProposeSettingsChangeInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  change: AgentControlMcpSettingsChangeRequest,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeSettingsChangeInput =
+  typeof AgentControlMcpProposeSettingsChangeInput.Type;
+
+export const AgentControlMcpListAutomationsInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  includeDisabled: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(PositiveInt),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpListAutomationsInput = typeof AgentControlMcpListAutomationsInput.Type;
+
+export const AgentControlMcpReadAutomationInput = Schema.Struct({
+  automationId: AgentControlAutomationId,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpReadAutomationInput = typeof AgentControlMcpReadAutomationInput.Type;
+
+export const AgentControlMcpListAutomationRunsInput = Schema.Struct({
+  automationId: AgentControlAutomationId,
+  limit: Schema.optional(PositiveInt),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpListAutomationRunsInput =
+  typeof AgentControlMcpListAutomationRunsInput.Type;
+
+export const AgentControlMcpProposeAutomationCreateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  title: AgentControlAutomationExecutionTemplate.fields.title,
+  prompt: AgentControlAutomationExecutionTemplate.fields.prompt,
+  model: TrimmedNonEmptyString,
+  options: ProviderOptionSelections,
+  runtimeMode: RuntimeMode,
+  envMode: ThreadEnvMode,
+  baseRef: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(256))),
+  schedule: AgentControlAutomationSchedule,
+  enabled: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeAutomationCreateInput =
+  typeof AgentControlMcpProposeAutomationCreateInput.Type;
+
+export const AgentControlMcpProposeAutomationUpdateInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  automationId: AgentControlAutomationId,
+  expectedRevision: PositiveInt,
+  title: Schema.optional(AgentControlAutomationExecutionTemplate.fields.title),
+  prompt: Schema.optional(AgentControlAutomationExecutionTemplate.fields.prompt),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  model: Schema.optional(TrimmedNonEmptyString),
+  options: Schema.optional(ProviderOptionSelections),
+  runtimeMode: Schema.optional(RuntimeMode),
+  envMode: Schema.optional(ThreadEnvMode),
+  baseRef: Schema.optional(Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(256)))),
+  schedule: Schema.optional(AgentControlAutomationSchedule),
+  enabled: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeAutomationUpdateInput =
+  typeof AgentControlMcpProposeAutomationUpdateInput.Type;
+
+export const AgentControlMcpProposeAutomationCancelInput = Schema.Struct({
+  requestId: AgentControlRequestId,
+  automationId: AgentControlAutomationId,
+  expectedRevision: PositiveInt,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeAutomationCancelInput =
+  typeof AgentControlMcpProposeAutomationCancelInput.Type;
+
+export const AgentControlMcpOperationalReadInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  threadId: Schema.optional(ThreadId),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  since: Schema.optional(IsoDateTime),
+  limit: Schema.optional(PositiveInt),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpOperationalReadInput = typeof AgentControlMcpOperationalReadInput.Type;
+
+export const AgentControlMcpDiagnosticsSummaryInput = Schema.Struct({
+  projectId: Schema.optional(ProjectId),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpDiagnosticsSummaryInput =
+  typeof AgentControlMcpDiagnosticsSummaryInput.Type;
+
+export const AgentControlMcpListDevicesInput = Schema.Struct({
+  includeShutdown: Schema.optional(Schema.Boolean),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpListDevicesInput = typeof AgentControlMcpListDevicesInput.Type;
+
+export const AgentControlMcpReadDeviceStateInput = Schema.Struct({}).annotate({
+  parseOptions: { onExcessProperty: "error" },
+});
+export type AgentControlMcpReadDeviceStateInput = typeof AgentControlMcpReadDeviceStateInput.Type;
+
+export const AgentControlMcpReadDeviceContentInput = Schema.Struct({
+  udid: DeviceUdid,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpReadDeviceContentInput =
+  typeof AgentControlMcpReadDeviceContentInput.Type;
+
+const AgentControlMcpDeviceMutationTarget = Schema.Struct({
+  requestId: AgentControlRequestId,
+  udid: DeviceUdid,
+  expectedThreadDeviceVersion: NonNegativeInt,
+  expectedAttachedDeviceUdid: Schema.NullOr(DeviceUdid),
+  expectedDeviceState: DeviceRuntimeState,
+  expectedDeviceBootSource: DeviceBootSource,
+  expectedRecording: Schema.Boolean,
+});
+
+export const AgentControlMcpProposeDeviceBootInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceBootInput =
+  typeof AgentControlMcpProposeDeviceBootInput.Type;
+
+export const AgentControlMcpProposeDeviceAttachInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceAttachInput =
+  typeof AgentControlMcpProposeDeviceAttachInput.Type;
+
+export const AgentControlMcpProposeDeviceDetachInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceDetachInput =
+  typeof AgentControlMcpProposeDeviceDetachInput.Type;
+
+export const AgentControlMcpProposeDeviceInstallInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  artifactPath: AgentControlDeviceArtifactPath,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceInstallInput =
+  typeof AgentControlMcpProposeDeviceInstallInput.Type;
+
+export const AgentControlMcpProposeDeviceLaunchInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  bundleId: DeviceBundleId,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceLaunchInput =
+  typeof AgentControlMcpProposeDeviceLaunchInput.Type;
+
+export const AgentControlMcpProposeDeviceOpenUrlInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  url: TrimmedNonEmptyString.check(Schema.isMaxLength(AGENT_CONTROL_DEVICE_URL_MAX_CHARS)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceOpenUrlInput =
+  typeof AgentControlMcpProposeDeviceOpenUrlInput.Type;
+
+export const AgentControlMcpDeviceInputAction = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("tap"),
+    x: AgentControlDeviceCoordinate,
+    y: AgentControlDeviceCoordinate,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("swipe"),
+    fromX: AgentControlDeviceCoordinate,
+    fromY: AgentControlDeviceCoordinate,
+    toX: AgentControlDeviceCoordinate,
+    toY: AgentControlDeviceCoordinate,
+    durationMs: Schema.Int.check(
+      Schema.isBetween({
+        minimum: DEVICE_SWIPE_DURATION_MIN_MS,
+        maximum: DEVICE_SWIPE_DURATION_MAX_MS,
+      }),
+    ),
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+  Schema.Struct({
+    kind: Schema.Literal("press-button"),
+    button: DeviceHardwareButton,
+  }).annotate({ parseOptions: { onExcessProperty: "error" } }),
+]);
+export type AgentControlMcpDeviceInputAction = typeof AgentControlMcpDeviceInputAction.Type;
+
+export const AgentControlMcpProposeDeviceInputInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  action: AgentControlMcpDeviceInputAction,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceInputInput =
+  typeof AgentControlMcpProposeDeviceInputInput.Type;
+
+export const AgentControlMcpProposeDeviceRecordingInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+  action: Schema.Literals(["start", "stop"]),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceRecordingInput =
+  typeof AgentControlMcpProposeDeviceRecordingInput.Type;
+
+export const AgentControlMcpProposeDeviceShutdownInput = Schema.Struct({
+  ...AgentControlMcpDeviceMutationTarget.fields,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpProposeDeviceShutdownInput =
+  typeof AgentControlMcpProposeDeviceShutdownInput.Type;
+
 // ── Tool results ──────────────────────────────────────────────────────
 
 export const AgentControlMcpContextResult = Schema.Struct({
@@ -877,6 +1691,31 @@ export const AgentControlMcpCapabilitiesResult = Schema.Struct({
 });
 export type AgentControlMcpCapabilitiesResult = typeof AgentControlMcpCapabilitiesResult.Type;
 
+export const AgentControlMcpListDevicesResult = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  devices: Schema.Array(DeviceDescriptor).check(Schema.isMaxLength(256)),
+  recordingDeviceUdids: Schema.Array(DeviceUdid).check(Schema.isMaxLength(256)),
+  availability: DeviceAvailability,
+});
+export type AgentControlMcpListDevicesResult = typeof AgentControlMcpListDevicesResult.Type;
+
+export const AgentControlMcpReadDeviceStateResult = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  version: NonNegativeInt,
+  attachedDeviceUdid: Schema.NullOr(DeviceUdid),
+  attachPhase: Schema.NullOr(DeviceAttachPhase),
+  attachedDevice: Schema.NullOr(DeviceDescriptor),
+  recording: Schema.Boolean,
+  agentActive: Schema.Boolean,
+  availability: DeviceAvailability,
+  redacted: Schema.Literal(true),
+});
+export type AgentControlMcpReadDeviceStateResult = typeof AgentControlMcpReadDeviceStateResult.Type;
+
 export const AgentControlMcpProjectSummary = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -890,6 +1729,41 @@ export const AgentControlMcpListProjectsResult = Schema.Struct({
   nextCursor: Schema.NullOr(AgentControlMcpCursor),
 });
 export type AgentControlMcpListProjectsResult = typeof AgentControlMcpListProjectsResult.Type;
+
+export const AgentControlMcpSettingsSummaryItem = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("legacyTokenStreaming"),
+    label: Schema.Literal("Legacy token streaming"),
+    value: Schema.Boolean,
+    changeSupported: Schema.Literal(false),
+    unsupportedReason: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("providerUpdateChecks"),
+    label: Schema.Literal("Provider update checks"),
+    value: Schema.Boolean,
+    changeSupported: Schema.Literal(false),
+    unsupportedReason: TrimmedNonEmptyString,
+  }),
+]);
+export type AgentControlMcpSettingsSummaryItem = typeof AgentControlMcpSettingsSummaryItem.Type;
+
+export const AgentControlMcpSettingsSummaryResult = Schema.Struct({
+  settings: Schema.Array(AgentControlMcpSettingsSummaryItem),
+  redacted: Schema.Literal(true),
+  omittedCategories: Schema.Array(
+    Schema.Literals([
+      "secrets-and-credentials",
+      "provider-runtime-configuration",
+      "mcp-server-configuration",
+      "remote-relay-hosted-authentication",
+      "filesystem-and-network-exposure",
+      "agent-control-policy",
+      "other-non-allowlisted-settings",
+    ]),
+  ),
+});
+export type AgentControlMcpSettingsSummaryResult = typeof AgentControlMcpSettingsSummaryResult.Type;
 
 export const AgentControlMcpThreadSummary = Schema.Struct({
   threadId: ThreadId,
@@ -951,6 +1825,158 @@ export const AgentControlMcpMutationResult = Schema.Struct({
   replayed: Schema.Boolean,
 });
 export type AgentControlMcpMutationResult = typeof AgentControlMcpMutationResult.Type;
+
+export const AgentControlMcpAutomationSummary = Schema.Struct({
+  automationId: AgentControlAutomationId,
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  execution: AgentControlAutomationExecutionTemplate,
+  promptTruncated: Schema.Boolean,
+  schedule: AgentControlAutomationSchedule,
+  revision: PositiveInt,
+  enabled: Schema.Boolean,
+  cancelled: Schema.Boolean,
+  nextRunAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpAutomationSummary = typeof AgentControlMcpAutomationSummary.Type;
+
+export const AgentControlMcpListAutomationsResult = Schema.Struct({
+  automations: Schema.Array(AgentControlMcpAutomationSummary),
+  limits: Schema.Struct({
+    maxActivePerProject: PositiveInt,
+    minIntervalMs: PositiveInt,
+    maxHorizonMs: PositiveInt,
+    runHistoryMax: PositiveInt,
+  }),
+});
+export type AgentControlMcpListAutomationsResult = typeof AgentControlMcpListAutomationsResult.Type;
+
+export const AgentControlMcpReadAutomationResult = Schema.Struct({
+  automation: AgentControlMcpAutomationSummary,
+});
+export type AgentControlMcpReadAutomationResult = typeof AgentControlMcpReadAutomationResult.Type;
+
+export const AgentControlMcpListAutomationRunsResult = Schema.Struct({
+  runs: Schema.Array(AgentControlAutomationRun),
+  historyLimit: PositiveInt,
+});
+export type AgentControlMcpListAutomationRunsResult =
+  typeof AgentControlMcpListAutomationRunsResult.Type;
+
+export const AgentControlMcpOperationalCoverage = Schema.Struct({
+  effectiveSince: IsoDateTime,
+  retentionStartsAt: IsoDateTime,
+  generatedAt: IsoDateTime,
+  truncated: Schema.Boolean,
+  pageLimit: PositiveInt,
+});
+export type AgentControlMcpOperationalCoverage = typeof AgentControlMcpOperationalCoverage.Type;
+
+export const AgentControlMcpActivitySummary = Schema.Struct({
+  activityId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  projectId: ProjectId,
+  threadId: ThreadId,
+  kind: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  tone: Schema.Literals(["info", "tool", "approval", "error"]),
+  turnId: Schema.NullOr(TurnId),
+  occurredAt: IsoDateTime,
+});
+export type AgentControlMcpActivitySummary = typeof AgentControlMcpActivitySummary.Type;
+
+export const AgentControlMcpRecentActivityResult = Schema.Struct({
+  activity: Schema.Array(AgentControlMcpActivitySummary),
+  automations: Schema.Array(AgentControlMcpAutomationSummary),
+  runs: Schema.Array(AgentControlAutomationRun),
+  coverage: AgentControlMcpOperationalCoverage,
+});
+export type AgentControlMcpRecentActivityResult = typeof AgentControlMcpRecentActivityResult.Type;
+
+export const AgentControlMcpOrchestrationEventSummary = Schema.Struct({
+  sequence: NonNegativeInt,
+  eventId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  type: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  aggregateKind: Schema.Literals(["project", "thread", "worktree"]),
+  aggregateId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  projectId: ProjectId,
+  threadId: Schema.NullOr(ThreadId),
+  occurredAt: IsoDateTime,
+  providerAttributed: Schema.Boolean,
+});
+export type AgentControlMcpOrchestrationEventSummary =
+  typeof AgentControlMcpOrchestrationEventSummary.Type;
+
+export const AgentControlMcpOrchestrationEventsResult = Schema.Struct({
+  events: Schema.Array(AgentControlMcpOrchestrationEventSummary),
+  coverage: AgentControlMcpOperationalCoverage,
+});
+export type AgentControlMcpOrchestrationEventsResult =
+  typeof AgentControlMcpOrchestrationEventsResult.Type;
+
+export const AgentControlMcpProviderRuntimeEventSummary = Schema.Struct({
+  eventId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  type: TrimmedNonEmptyString.check(Schema.isMaxLength(128)),
+  projectId: ProjectId,
+  threadId: ThreadId,
+  providerInstanceId: ProviderInstanceId,
+  turnId: Schema.NullOr(TurnId),
+  occurredAt: IsoDateTime,
+});
+export type AgentControlMcpProviderRuntimeEventSummary =
+  typeof AgentControlMcpProviderRuntimeEventSummary.Type;
+
+export const AgentControlMcpProviderRuntimeEventsResult = Schema.Struct({
+  events: Schema.Array(AgentControlMcpProviderRuntimeEventSummary),
+  coverage: AgentControlMcpOperationalCoverage,
+});
+export type AgentControlMcpProviderRuntimeEventsResult =
+  typeof AgentControlMcpProviderRuntimeEventsResult.Type;
+
+export const AgentControlMcpDiagnosticsSummaryResult = Schema.Struct({
+  generatedAt: IsoDateTime,
+  health: Schema.Literals(["ok", "degraded"]),
+  projectId: ProjectId,
+  providerInstanceId: ProviderInstanceId,
+  provider: Schema.Struct({
+    status: ServerProviderState,
+    availability: ServerProviderAvailability,
+    enabled: Schema.Boolean,
+    installed: Schema.Boolean,
+  }),
+  project: Schema.Struct({
+    threadCount: NonNegativeInt,
+    activeThreadCount: NonNegativeInt,
+    enabledAutomationCount: NonNegativeInt,
+    pendingAutomationRunCount: NonNegativeInt,
+  }),
+  server: Schema.Struct({
+    uptimeMs: NonNegativeInt,
+    memoryRssBytes: NonNegativeInt,
+    heapUsedBytes: NonNegativeInt,
+    eventLoopDelayMs: Schema.NullOr(Schema.Number),
+  }),
+  operational: Schema.Struct({
+    failureCount: NonNegativeInt,
+    warningCount: NonNegativeInt,
+    retainedTraceCount: NonNegativeInt,
+    queueOverflowCount: NonNegativeInt,
+    providerLogDroppedRecords: NonNegativeInt,
+  }),
+  redacted: Schema.Literal(true),
+  omitted: Schema.Array(
+    Schema.Literals([
+      "credentials-and-environment",
+      "paths-files-and-terminals",
+      "commands-transcripts-and-payloads",
+      "traces-logs-requests-and-relay",
+      "hosted-browser-and-service-worker",
+      "other-projects-and-provider-sessions",
+    ]),
+  ),
+});
+export type AgentControlMcpDiagnosticsSummaryResult =
+  typeof AgentControlMcpDiagnosticsSummaryResult.Type;
 
 // ── Paired external MCP integrations ─────────────────────────────────
 
@@ -1123,6 +2149,16 @@ export const AGENT_CONTROL_EXTERNAL_MCP_TOOLS = {
   createTask: "ryco_create_task",
   readTask: "ryco_read_task",
   waitForTask: "ryco_wait_for_task",
+  listAutomations: "ryco_list_automations",
+  readAutomation: "ryco_read_automation",
+  listAutomationRuns: "ryco_list_automation_runs",
+  proposeAutomationCreate: "ryco_propose_automation_create",
+  proposeAutomationUpdate: "ryco_propose_automation_update",
+  proposeAutomationCancel: "ryco_propose_automation_cancel",
+  recentActivity: "ryco_recent_activity",
+  orchestrationEvents: "ryco_orchestration_events",
+  providerRuntimeEvents: "ryco_provider_runtime_events",
+  diagnosticsSummary: "ryco_diagnostics_summary",
 } as const;
 export type AgentControlExternalMcpToolName =
   (typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS)[keyof typeof AGENT_CONTROL_EXTERNAL_MCP_TOOLS];

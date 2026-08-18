@@ -1,5 +1,6 @@
 import {
   AGENT_CONTROL_CAPABILITIES,
+  AgentControlAutomationId,
   AgentControlIntegrationId,
   AgentControlProposalId,
   AgentControlRequestId,
@@ -20,10 +21,15 @@ import { assert, it } from "@effect/vitest";
 import { Effect, Ref, Schema } from "effect";
 
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { DeviceManager } from "../../device/DeviceManager.ts";
+import { FakeDeviceBackend } from "../../device/FakeDeviceBackend.ts";
+import type { DeviceServiceShape } from "../../device/Services/DeviceService.ts";
 import type {
   AgentControlSessionRecord,
   AgentControlTurnAuthority,
 } from "../Services/AgentControlSessionRegistry.ts";
+import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
+import type { AgentControlAutomationShape } from "../Services/AgentControlAutomation.ts";
 import { makeAgentControlActionValidatorFromDeps } from "./AgentControlActionValidator.ts";
 
 const now = "2026-08-18T00:00:00.000Z";
@@ -139,6 +145,9 @@ const makeValidator = (
   revalidateExternal?: (
     integrationId: AgentControlIntegrationId,
   ) => Effect.Effect<AgentControlExternalIntegration>,
+  projectPlans?: AgentControlProjectPlansShape,
+  automations?: AgentControlAutomationShape,
+  deviceService?: DeviceServiceShape,
 ) =>
   makeAgentControlActionValidatorFromDeps({
     projections: {
@@ -159,7 +168,230 @@ const makeValidator = (
         totalCount: availableRefs.length,
       }),
     ...(revalidateExternal === undefined ? {} : { revalidateExternal }),
+    ...(projectPlans === undefined ? {} : { projectPlans }),
+    ...(automations === undefined ? {} : { automations }),
+    ...(deviceService === undefined ? {} : { deviceService }),
   });
+
+it.effect("binds device plans to exact thread, project, provider, attachment, and version", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    const backend = new FakeDeviceBackend();
+    backend.bootExternally("FAKE-0001");
+    const manager = new DeviceManager({ backend });
+    yield* Effect.promise(() => manager.attach(callerThreadId, "FAKE-0001"));
+    const deviceState = yield* Effect.promise(() => manager.getThreadState(callerThreadId));
+    const descriptor = deviceState.devices.find((device) => device.udid === "FAKE-0001")!;
+    const plan = {
+      kind: "deviceTap" as const,
+      threadId: callerThreadId,
+      projectId,
+      expectedProjectUpdatedAt: project.updatedAt,
+      providerInstanceId,
+      udid: descriptor.udid,
+      expectedThreadDeviceVersion: deviceState.version,
+      expectedAttachedDeviceUdid: descriptor.udid,
+      expectedDeviceState: descriptor.state,
+      expectedDeviceBootSource: descriptor.bootSource,
+      expectedRecording: false,
+      executionSummary: "Tap iOS Simulator FAKE-0001",
+      riskClass: "device-control" as const,
+      x: 10,
+      y: 20,
+    };
+    let submissionManagerAccessed = false;
+    const submissionValidator = makeValidator(
+      snapshot,
+      providers,
+      [],
+      undefined,
+      undefined,
+      undefined,
+      {
+        supported: true,
+        manager: new Proxy({} as DeviceManager, {
+          get: () => {
+            submissionManagerAccessed = true;
+            throw new Error("Submission touched DeviceService before acceptance.");
+          },
+        }),
+      },
+    );
+    const validator = makeValidator(snapshot, providers, [], undefined, undefined, undefined, {
+      supported: true,
+      manager,
+    });
+
+    const principal = yield* submissionValidator.validateSubmission({ session, authority, plan });
+    assert.isFalse(submissionManagerAccessed);
+    const wrongProvider = yield* Effect.flip(
+      submissionValidator.validateSubmission({
+        session,
+        authority,
+        plan: { ...plan, providerInstanceId: ProviderInstanceId.make("other") },
+      }),
+    );
+    assert.strictEqual(wrongProvider.reason, "project-scope");
+    const wrongThread = yield* Effect.flip(
+      submissionValidator.validateSubmission({
+        session,
+        authority,
+        plan: { ...plan, threadId: targetThreadId },
+      }),
+    );
+    assert.strictEqual(wrongThread.reason, "project-scope");
+
+    const proposal: AgentControlProposal = {
+      proposalId: AgentControlProposalId.make("proposal-device"),
+      requestId: AgentControlRequestId.make("request-device"),
+      principal,
+      planVersion: 1,
+      plan,
+      planDigest: "d".repeat(64),
+      riskTags: [],
+      promptSummary: null,
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decidedAt: now,
+      result: null,
+    };
+    yield* validator.revalidateExecution(proposal);
+
+    yield* Ref.set(snapshot, {
+      ...makeSnapshot(),
+      projects: [{ ...project, updatedAt: "2026-08-18T00:00:01.000Z" }],
+    });
+    const staleProject = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(staleProject.reason, "project-stale");
+    yield* Ref.set(snapshot, makeSnapshot());
+
+    yield* Effect.promise(() => manager.detach(callerThreadId));
+    const stale = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(stale.reason, "thread-stale");
+    yield* Effect.promise(() => manager.dispose());
+  }),
+);
+
+it.effect("rejects a boot plan for a device deliberately attached to another thread", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    const manager = new DeviceManager({ backend: new FakeDeviceBackend() });
+    yield* Effect.promise(() => manager.attach(targetThreadId, "FAKE-0001"));
+    const callerState = yield* Effect.promise(() => manager.getThreadState(callerThreadId));
+    const descriptor = callerState.devices.find((device) => device.udid === "FAKE-0001")!;
+    const plan = {
+      kind: "deviceBoot" as const,
+      threadId: callerThreadId,
+      projectId,
+      expectedProjectUpdatedAt: project.updatedAt,
+      providerInstanceId,
+      udid: descriptor.udid,
+      expectedThreadDeviceVersion: callerState.version,
+      expectedAttachedDeviceUdid: null,
+      expectedDeviceState: descriptor.state,
+      expectedDeviceBootSource: descriptor.bootSource,
+      expectedRecording: false,
+      executionSummary: "Boot iOS Simulator FAKE-0001",
+      riskClass: "device-lifecycle" as const,
+    };
+    const validator = makeValidator(snapshot, providers, [], undefined, undefined, undefined, {
+      supported: true,
+      manager,
+    });
+    const principal = yield* validator.validateSubmission({ session, authority, plan });
+    const proposal: AgentControlProposal = {
+      proposalId: AgentControlProposalId.make("proposal-cross-thread-device"),
+      requestId: AgentControlRequestId.make("request-cross-thread-device"),
+      principal,
+      planVersion: 1,
+      plan,
+      planDigest: "e".repeat(64),
+      riskTags: [],
+      promptSummary: null,
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decidedAt: now,
+      result: null,
+    };
+
+    const rejected = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(rejected.reason, "thread-stale");
+    yield* Effect.promise(() => manager.dispose());
+  }),
+);
+
+it.effect("scopes project mutations and fails settings changes closed", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    let revalidations = 0;
+    const projectPlans: AgentControlProjectPlansShape = {
+      prepareCreate: () => Effect.die("unused"),
+      prepareUpdate: () => Effect.die("unused"),
+      prepareRemove: () => Effect.die("unused"),
+      revalidate: () =>
+        Effect.sync(() => {
+          revalidations += 1;
+        }),
+    };
+    const validator = makeValidator(snapshot, providers, [], undefined, projectPlans);
+    const state = {
+      title: project.title,
+      workspaceRoot: project.workspaceRoot,
+      repositoryIdentityKey: null,
+      updatedAt: project.updatedAt,
+    } as const;
+
+    yield* validator.validateSubmission({
+      session,
+      authority,
+      plan: {
+        kind: "updateProject",
+        projectId,
+        before: state,
+        after: {
+          title: "Renamed",
+          workspaceRoot: state.workspaceRoot,
+          repositoryIdentityKey: state.repositoryIdentityKey,
+        },
+      },
+    });
+    assert.strictEqual(revalidations, 1);
+
+    const scopeError = yield* Effect.flip(
+      validator.validateSubmission({
+        session,
+        authority,
+        plan: {
+          kind: "removeProject",
+          projectId: ProjectId.make("project-other"),
+          expected: state,
+          expectedThreadIds: [],
+          force: false,
+        },
+      }),
+    );
+    assert.strictEqual(scopeError.reason, "project-scope");
+
+    const settingsError = yield* Effect.flip(
+      validator.validateSubmission({
+        session,
+        authority,
+        plan: {
+          kind: "changeSettings",
+          change: { kind: "legacyTokenStreaming", before: false, after: true },
+        },
+      }),
+    );
+    assert.strictEqual(settingsError.reason, "settings-unsupported");
+  }),
+);
 
 it.effect("verifies an exact worktree base ref before creating a proposal", () =>
   Effect.gen(function* () {
@@ -420,5 +652,101 @@ it.effect("binds external proposals to current scope and revalidates grants befo
     yield* Ref.update(integrationRef, (current) => ({ ...current, capabilities: [] }));
     const changed = yield* Effect.flip(validator.revalidateExecution(proposal));
     assert.strictEqual(changed.reason, "caller-stale");
+  }),
+);
+
+it.effect("binds external automation proposals to project, provider, and current grants", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Ref.make(makeSnapshot());
+    const providers = yield* Ref.make<ReadonlyArray<typeof provider>>([provider]);
+    const integrationId = AgentControlIntegrationId.make("integration-automation-validator");
+    const integrationRef = yield* Ref.make<AgentControlExternalIntegration>({
+      integrationId,
+      displayName: "External scheduler",
+      clientKind: "generic-mcp",
+      projectScope: { kind: "selected", projectIds: [projectId] },
+      capabilities: [
+        AGENT_CONTROL_CAPABILITIES.externalCreateTask,
+        AGENT_CONTROL_CAPABILITIES.externalManageAutomations,
+      ],
+      rateLimitPerMinute: 60,
+      activeTaskLimit: 1,
+      activeTaskCount: 0,
+      expiresAt: null,
+      revokedAt: null,
+      pairingState: "paired",
+      pairingCodeExpiresAt: null,
+      pairedAt: now,
+      createdAt: now,
+      updatedAt: now,
+      lastUsedAt: null,
+    });
+    const automations = {
+      validateLifecyclePlan: () => Effect.void,
+    } as unknown as AgentControlAutomationShape;
+    const validator = makeValidator(
+      snapshot,
+      providers,
+      [],
+      () => Ref.get(integrationRef),
+      undefined,
+      automations,
+    );
+    const plan = {
+      kind: "createAutomation" as const,
+      automationId: AgentControlAutomationId.make("automation-external-scope"),
+      definition: {
+        execution: {
+          projectId,
+          title: "Scoped scheduled task",
+          prompt: "Prepare one exact proposal when due.",
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5.6", options: [] },
+          runtimeMode: "approval-required" as const,
+          envMode: "worktree" as const,
+        },
+        schedule: { kind: "once" as const, runAt: "2099-01-01T00:00:00.000Z" },
+        enabled: true,
+      },
+    };
+
+    const principal = yield* validator.validateExternalSubmission({
+      integration: yield* Ref.get(integrationRef),
+      plan,
+    });
+    const proposal: AgentControlProposal = {
+      proposalId: AgentControlProposalId.make("proposal-external-automation"),
+      requestId: AgentControlRequestId.make("request-external-automation"),
+      principal,
+      planVersion: 1,
+      plan,
+      planDigest: "d".repeat(64),
+      riskTags: [],
+      promptSummary: "Create a governed automation",
+      status: "approved",
+      createdAt: now,
+      updatedAt: now,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decidedAt: now,
+      result: null,
+    };
+    yield* validator.revalidateExecution(proposal);
+
+    const deniedScope = yield* Effect.flip(
+      validator.validateExternalSubmission({
+        integration: {
+          ...(yield* Ref.get(integrationRef)),
+          projectScope: { kind: "selected", projectIds: [] },
+        },
+        plan,
+      }),
+    );
+    assert.strictEqual(deniedScope.reason, "project-scope");
+
+    yield* Ref.update(integrationRef, (current) => ({
+      ...current,
+      capabilities: [AGENT_CONTROL_CAPABILITIES.externalCreateTask],
+    }));
+    const revoked = yield* Effect.flip(validator.revalidateExecution(proposal));
+    assert.strictEqual(revoked.reason, "caller-stale");
   }),
 );

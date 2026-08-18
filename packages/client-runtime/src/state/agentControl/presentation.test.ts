@@ -118,6 +118,132 @@ describe("buildAgentControlProposalCardModel", () => {
     ]);
   });
 
+  it("shows exact project and allowlisted settings plans", () => {
+    const remove = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "removeProject",
+          projectId: ProjectId.make("project-1"),
+          expected: {
+            title: "Project one",
+            workspaceRoot: "/workspace/project-one",
+            repositoryIdentityKey: "git:example/project-one",
+            updatedAt: "2026-08-17T00:00:00.000Z",
+          },
+          expectedThreadIds: [ThreadId.make("thread-target-5678")],
+          force: true,
+        },
+      }),
+    );
+    expect(remove.actionLabel).toBe("Unlink project");
+    expect(remove.isDestructive).toBe(true);
+    expect(remove.detailSections[0]?.lines).toContain(
+      "Workspace files and repository contents will be retained.",
+    );
+    expect(remove.detailSections[0]?.lines).toContain(
+      "Ryco thread record removed: thread-target-5678",
+    );
+
+    const settings = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "changeSettings",
+          change: { kind: "providerUpdateChecks", before: true, after: false },
+        },
+      }),
+    );
+    expect(settings.detailSections[0]?.lines).toEqual([
+      "Setting: providerUpdateChecks",
+      "Before: true",
+      "After: false",
+      "Fresh owner reauthentication is required at approval and execution.",
+    ]);
+  });
+
+  it("distinguishes schedule-definition approval from fresh run approval", () => {
+    const execution = {
+      projectId: ProjectId.make("project-1"),
+      title: "Review failures",
+      prompt: "Review current failures and summarize.",
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6" },
+      runtimeMode: "approval-required" as const,
+      envMode: "worktree" as const,
+    };
+    const schedule = {
+      kind: "fixed-interval" as const,
+      startsAt: "2026-08-18T10:00:00.000Z",
+      intervalMs: 900_000,
+      endsAt: "2026-08-19T10:00:00.000Z",
+    };
+    const definition = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "createAutomation",
+          automationId: "automation-1" as never,
+          definition: { execution, schedule, enabled: true },
+        },
+      }),
+    );
+    expect(definition.actionLabel).toBe("Create schedule definition");
+    expect(definition.detailSections[0]?.lines).toContain(
+      "This approval authorizes only the schedule definition.",
+    );
+    expect(definition.detailSections[0]?.lines).toContain(
+      "Every due run creates a fresh exact proposal and waits for user approval.",
+    );
+
+    const run = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "automationRun",
+          automationId: "automation-1" as never,
+          runId: "automation-run-1" as never,
+          automationRevision: 2,
+          scheduledFor: "2026-08-18T10:00:00.000Z",
+          coalescedOccurrences: 3,
+          execution,
+        },
+      }),
+    );
+    expect(run.actionLabel).toBe("Approve one scheduled run");
+    expect(run.detailSections[0]?.lines).toContain("Missed intervals coalesced: 3");
+    expect(run.detailSections[0]?.lines).toContain(
+      "Approving the schedule did not approve this run; this exact proposal does.",
+    );
+  });
+
+  it("shows exact device scope and a high-risk URL warning", () => {
+    const model = buildAgentControlProposalCardModel(
+      makeProposal({
+        plan: {
+          kind: "deviceOpenUrl",
+          threadId: ThreadId.make("thread-caller-1234"),
+          projectId: ProjectId.make("project-1"),
+          expectedProjectUpdatedAt: "2026-08-18T00:00:00.000Z",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          udid: "FAKE-0001" as never,
+          expectedThreadDeviceVersion: 7,
+          expectedAttachedDeviceUdid: "FAKE-0001" as never,
+          expectedDeviceState: "booted",
+          expectedDeviceBootSource: "ryco",
+          expectedRecording: false,
+          executionSummary: "Open an approved URL or deep link",
+          riskClass: "open-world",
+          url: "https://example.test/exact-deep-link",
+        },
+        riskTags: ["device-mutation" as never, "device-open-world" as never],
+      }),
+    );
+
+    expect(model.warningLabel).toMatch(/High risk/);
+    expect(model.runtimeLabel).toBe("high risk · open world");
+    expect(model.detailSections[0]?.lines).toContain("Device UDID: FAKE-0001");
+    expect(model.detailSections[0]?.lines).toContain("Thread: thread-caller-1234");
+    expect(model.detailSections[0]?.lines).toContain(
+      "Exact URL/deep link: https://example.test/exact-deep-link",
+    );
+  });
+
   it("identifies external integration origins without a caller thread", () => {
     const model = buildAgentControlProposalCardModel(
       makeProposal({
@@ -149,6 +275,7 @@ describe("buildAgentControlProposalCardModel", () => {
               },
             ],
             affectedThreadIds: [ThreadId.make("thread-new-1")],
+            affectedProjectIds: [ProjectId.make("project-1")],
             worktreeIds: [],
             delivery: "queued",
           },
@@ -159,6 +286,7 @@ describe("buildAgentControlProposalCardModel", () => {
     expect(completed.outcomeLabel).toBe("Completed · created 1 thread");
     expect(completed.executionLabel).toBe("Operation operatio… · 1 command · delivery: queued");
     expect(completed.affectedThreadIds).toEqual(["thread-new-1"]);
+    expect(completed.affectedProjectIds).toEqual(["project-1"]);
     expect(completed.isPending).toBe(false);
 
     const failed = buildAgentControlProposalCardModel(

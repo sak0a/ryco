@@ -101,6 +101,7 @@ import { AgentControlAuditRepositoryLive } from "./persistence/Layers/AgentContr
 import { AgentControlOperationRepositoryLive } from "./persistence/Layers/AgentControlOperations.ts";
 import { AgentControlProposalRepositoryLive } from "./persistence/Layers/AgentControlProposals.ts";
 import { AgentControlExternalRepositoryLive } from "./persistence/Layers/AgentControlExternal.ts";
+import { AgentControlAutomationRepositoryLive } from "./persistence/Layers/AgentControlAutomations.ts";
 import { AgentControlMcpServerLive } from "./agentControl/Layers/AgentControlMcpServer.ts";
 import { AgentControlOperationStoreLive } from "./agentControl/Layers/AgentControlOperationStore.ts";
 import { AgentControlPolicyLive } from "./agentControl/Layers/AgentControlPolicy.ts";
@@ -110,9 +111,12 @@ import { AgentControlProposalStoreLive } from "./agentControl/Layers/AgentContro
 import { AgentControlSessionRegistryLive } from "./agentControl/Layers/AgentControlSessionRegistry.ts";
 import { AgentControlActionValidatorLive } from "./agentControl/Layers/AgentControlActionValidator.ts";
 import { AgentControlExecutionLive } from "./agentControl/Layers/AgentControlExecution.ts";
+import { AgentControlProjectPlansLive } from "./agentControl/Layers/AgentControlProjectPlans.ts";
 import { AgentControlExternalIntegrationServiceLive } from "./agentControl/Layers/AgentControlExternalIntegration.ts";
 import { AgentControlExternalTaskServiceLive } from "./agentControl/Layers/AgentControlExternalTask.ts";
 import { AgentControlExternalMcpServerLive } from "./agentControl/Layers/AgentControlExternalMcpServer.ts";
+import { AgentControlAutomationServiceLive } from "./agentControl/Layers/AgentControlAutomation.ts";
+import { AgentControlDiagnosticsServiceLive } from "./agentControl/Layers/AgentControlDiagnostics.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { OrchestrationCommandApplicationLive } from "./orchestration/Layers/OrchestrationCommandApplication.ts";
 import {
@@ -221,10 +225,14 @@ const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersisten
 // runtime chain so provider drivers can reach it (`AgentControlSessionRegistryLayerLive`
 // below), and the private loopback listener lifecycle joins the runtime
 // services beside `ServerRuntimeStartupLive`.
+const AgentControlAutomationLayerLive = AgentControlAutomationServiceLive.pipe(
+  Layer.provideMerge(AgentControlExternalIntegrationServiceLive),
+);
+
 const AgentControlLayerLive = Layer.mergeAll(
   AgentControlProposalServiceLive,
   AgentControlOperationStoreLive,
-  AgentControlExternalIntegrationServiceLive,
+  AgentControlAutomationLayerLive,
 ).pipe(
   Layer.provideMerge(AgentControlProposalStoreLive),
   Layer.provideMerge(AgentControlProposalEventsLive),
@@ -233,6 +241,7 @@ const AgentControlLayerLive = Layer.mergeAll(
   Layer.provideMerge(AgentControlOperationRepositoryLive),
   Layer.provideMerge(AgentControlAuditRepositoryLive),
   Layer.provideMerge(AgentControlExternalRepositoryLive),
+  Layer.provideMerge(AgentControlAutomationRepositoryLive),
 );
 
 // In-memory credential/lease authority for the internal provider-session
@@ -414,15 +423,26 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 // the public HTTP server, router, or any client-visible state.
 const RuntimeServicesLive = Layer.mergeAll(
   ServerRuntimeStartupLive,
-  AgentControlMcpServerLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+  AgentControlMcpServerLive.pipe(
+    Layer.provideMerge(AgentControlDiagnosticsServiceLive),
+    Layer.provideMerge(AgentControlActionValidatorLive),
+    Layer.provideMerge(AgentControlProjectPlansLive),
+  ),
   AgentControlExternalMcpServerLive.pipe(
+    Layer.provideMerge(AgentControlDiagnosticsServiceLive),
+    Layer.provideMerge(AgentControlActionValidatorLive),
+    Layer.provideMerge(AgentControlProjectPlansLive),
     Layer.provideMerge(
-      AgentControlExternalTaskServiceLive.pipe(Layer.provideMerge(AgentControlActionValidatorLive)),
+      AgentControlExternalTaskServiceLive.pipe(
+        Layer.provideMerge(AgentControlActionValidatorLive),
+        Layer.provideMerge(AgentControlProjectPlansLive),
+      ),
     ),
   ),
   AgentControlExecutionLive.pipe(
     Layer.provideMerge(ServerRuntimeStartupLive),
     Layer.provideMerge(AgentControlActionValidatorLive),
+    Layer.provideMerge(AgentControlProjectPlansLive),
     Layer.provideMerge(OrchestrationCommandApplicationLive),
   ),
 ).pipe(

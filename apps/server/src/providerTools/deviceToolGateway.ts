@@ -51,6 +51,37 @@ const APPROVAL_REQUIRED = new Set<DeviceToolName>([
   "device_scroll_to_element",
 ]);
 
+const AGENT_CONTROL_SAFE_LEGACY_TOOLS = new Set<DeviceToolName>(["device_list"]);
+const agentControlLocksByThread = new Map<string, Set<string>>();
+
+/**
+ * Suppress the legacy direct device catalog while the same thread owns an
+ * Agent Control session. The returned release is idempotent and lease-scoped.
+ */
+export function blockProcessDeviceToolsForAgentControl(
+  threadId: string,
+  leaseId: string,
+): () => void {
+  const locks = agentControlLocksByThread.get(threadId) ?? new Set<string>();
+  // A thread has one authoritative provider runtime. Installing its successor
+  // supersedes any lock whose registry lease was synchronously revoked.
+  locks.clear();
+  locks.add(leaseId);
+  agentControlLocksByThread.set(threadId, locks);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const current = agentControlLocksByThread.get(threadId);
+    current?.delete(leaseId);
+    if (current?.size === 0) agentControlLocksByThread.delete(threadId);
+  };
+}
+
+const agentControlBlocksLegacyTool = (threadId: string, name: DeviceToolName): boolean =>
+  (agentControlLocksByThread.get(threadId)?.size ?? 0) > 0 &&
+  !AGENT_CONTROL_SAFE_LEGACY_TOOLS.has(name);
+
 export function deviceToolRequiresApproval(name: string): boolean {
   return APPROVAL_REQUIRED.has(name as DeviceToolName);
 }
@@ -578,7 +609,13 @@ export async function startDeviceToolGateway(manager: DeviceManager): Promise<De
       }
       if (method === "ping") return json(response, 200, mcpSuccess(id, {}));
       if (method === "tools/list") {
-        return json(response, 200, mcpSuccess(id, { tools: DEVICE_TOOL_DEFINITIONS }));
+        const tools =
+          (agentControlLocksByThread.get(binding.threadId)?.size ?? 0) > 0
+            ? DEVICE_TOOL_DEFINITIONS.filter((tool) =>
+                AGENT_CONTROL_SAFE_LEGACY_TOOLS.has(tool.name),
+              )
+            : DEVICE_TOOL_DEFINITIONS;
+        return json(response, 200, mcpSuccess(id, { tools }));
       }
       if (method !== "tools/call") {
         return json(
@@ -604,6 +641,21 @@ export async function startDeviceToolGateway(manager: DeviceManager): Promise<De
       const name = params.name;
       if (typeof name !== "string" || !DEVICE_TOOL_NAMES.includes(name as DeviceToolName)) {
         return json(response, 200, mcpError(id, -32602, "Unknown device tool."));
+      }
+      if (agentControlBlocksLegacyTool(binding.threadId, name as DeviceToolName)) {
+        return json(
+          response,
+          200,
+          mcpSuccess(id, {
+            isError: true,
+            content: [
+              {
+                type: "text",
+                text: "Use the Ryco Agent Control device tools for this provider session.",
+              },
+            ],
+          }),
+        );
       }
       try {
         const value = await executeDeviceTool({

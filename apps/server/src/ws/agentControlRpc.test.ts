@@ -19,6 +19,7 @@ import {
   AgentControlInvalidTransitionError,
   AgentControlProposalExpiredError,
   AgentControlProposalNotFoundError,
+  AgentControlSettingsChangeUnsupportedError,
 } from "../agentControl/Errors.ts";
 import {
   toAgentControlProposalReceipt,
@@ -271,6 +272,14 @@ it.effect("maps lifecycle failures onto bounded RPC error codes", () =>
     );
     expect(conflict.code).toBe("conflict");
     expect(conflict.status).toBe("rejected");
+
+    const unsupported = toAgentControlRpcError(
+      new AgentControlSettingsChangeUnsupportedError({
+        detail: "Fresh owner reauthentication is unavailable.",
+      }),
+    );
+    expect(unsupported.code).toBe("unsupported");
+    expect(unsupported.message).toContain("reauthentication");
 
     const storage = toAgentControlRpcError(
       new PersistenceSqlError({ operation: "op", detail: "database is locked" }),

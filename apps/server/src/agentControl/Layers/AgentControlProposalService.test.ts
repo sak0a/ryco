@@ -112,6 +112,47 @@ disabledLayer("AgentControlProposalService (feature disabled)", (it) => {
 });
 
 enabledLayer("AgentControlProposalService", (it) => {
+  it.effect(
+    "keeps allowlisted settings proposals inert when fresh owner step-up is unavailable",
+    () =>
+      Effect.gen(function* () {
+        const service = yield* AgentControlProposalService;
+        const store = yield* AgentControlProposalStore;
+        const settings = yield* ServerSettingsService;
+        const before = yield* settings.getSettings;
+        const submitted = yield* service.submit({
+          principal,
+          requestId: AgentControlRequestId.make("request-settings-step-up"),
+          plan: {
+            kind: "changeSettings",
+            change: { kind: "legacyTokenStreaming", before: false, after: true },
+          },
+          riskTags: [AgentControlRiskTag.make("changes-settings")],
+          promptSummary: "Enable legacy token streaming",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          now: "2026-08-17T00:00:00.000Z",
+        });
+
+        const unsupported = yield* Effect.flip(
+          service.accept({
+            proposalId: submitted.proposal.proposalId,
+            decidedAt: "2026-08-17T00:05:00.000Z",
+          }),
+        );
+        assert.strictEqual(unsupported._tag, "AgentControlSettingsChangeUnsupportedError");
+        if (unsupported._tag !== "AgentControlSettingsChangeUnsupportedError") return;
+        assert.include(unsupported.detail, "reauthentication");
+
+        const unchanged = Option.getOrThrow(yield* store.getById(submitted.proposal.proposalId));
+        assert.strictEqual(unchanged.status, "pending-user-approval");
+        assert.strictEqual(unchanged.result, null);
+        assert.strictEqual(
+          (yield* settings.getSettings).enableLegacyTokenStreaming,
+          before.enableLegacyTokenStreaming,
+        );
+      }),
+  );
+
   it.effect("accepts a pending proposal and returns a bounded receipt", () =>
     Effect.gen(function* () {
       const service = yield* AgentControlProposalService;

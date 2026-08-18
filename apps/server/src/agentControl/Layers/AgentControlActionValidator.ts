@@ -1,5 +1,6 @@
 import type {
   AgentControlActionPlan,
+  AgentControlDeviceActionPlan,
   AgentControlProviderSessionPrincipal,
   AgentControlProposal,
   ModelSelection,
@@ -12,11 +13,16 @@ import { AGENT_CONTROL_CAPABILITIES } from "@ryco/contracts";
 import { Effect, Layer, Option } from "effect";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { DeviceService, type DeviceServiceShape } from "../../device/Services/DeviceService.ts";
 import type { ProjectionSnapshotQueryShape } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import type { GitWorkflowServiceShape } from "../../git/GitWorkflowService.ts";
 import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { AgentControlPlanValidationError } from "../Errors.ts";
+import { AgentControlAutomationService } from "../Services/AgentControlAutomation.ts";
+import type { AgentControlAutomationShape } from "../Services/AgentControlAutomation.ts";
+import { AgentControlProjectPlans } from "../Services/AgentControlProjectPlans.ts";
+import type { AgentControlProjectPlansShape } from "../Services/AgentControlProjectPlans.ts";
 import {
   AgentControlExternalIntegrationService,
   type AgentControlExternalIntegrationServiceError,
@@ -27,6 +33,7 @@ import {
   isAgentControlProviderReady,
   type AgentControlActionValidatorShape,
 } from "../Services/AgentControlActionValidator.ts";
+import { assertSafeAgentControlDeviceUrl, isAgentControlDevicePlan } from "../deviceControl.ts";
 
 const fail = (
   reason: ConstructorParameters<typeof AgentControlPlanValidationError>[0]["reason"],
@@ -85,8 +92,170 @@ const providerForSelection = (
   return Effect.succeed(provider);
 };
 
-const targetThreadIds = (plan: AgentControlActionPlan): ReadonlyArray<string> =>
-  plan.kind === "createThreads" ? [] : [plan.threadId];
+const targetThreadIds = (plan: AgentControlActionPlan): ReadonlyArray<string> => {
+  switch (plan.kind) {
+    case "sendMessage":
+    case "interruptThread":
+    case "updateThread":
+      return [plan.threadId];
+    default:
+      return isAgentControlDevicePlan(plan) ? [plan.threadId] : [];
+  }
+};
+
+const validateDevicePlanScope = (
+  plan: AgentControlDeviceActionPlan,
+  input: {
+    readonly originThreadId: string;
+    readonly originProjectId: string;
+    readonly originProviderInstanceId: string;
+  },
+) =>
+  Effect.gen(function* () {
+    if (
+      plan.threadId !== input.originThreadId ||
+      plan.projectId !== input.originProjectId ||
+      plan.providerInstanceId !== input.originProviderInstanceId
+    ) {
+      return yield* fail(
+        "project-scope",
+        "Device control must remain in the exact originating thread, project, and provider instance.",
+      );
+    }
+    if (plan.kind === "deviceOpenUrl") {
+      yield* Effect.try({
+        try: () => assertSafeAgentControlDeviceUrl(plan.url),
+        catch: () =>
+          new AgentControlPlanValidationError({
+            reason: "invalid-plan",
+            detail: "The approved URL does not meet device-control policy.",
+          }),
+      });
+    }
+  });
+
+const validateDevicePlanCurrentState = (
+  plan: AgentControlDeviceActionPlan,
+  input: {
+    readonly originThreadId: string;
+    readonly originProjectId: string;
+    readonly originProviderInstanceId: string;
+    readonly currentProjectUpdatedAt: string;
+    readonly deviceService: DeviceServiceShape | undefined;
+  },
+) =>
+  Effect.gen(function* () {
+    yield* validateDevicePlanScope(plan, input);
+    if (plan.expectedProjectUpdatedAt !== input.currentProjectUpdatedAt) {
+      return yield* fail("project-stale", "The approved project scope changed.");
+    }
+    if (input.deviceService === undefined || !input.deviceService.supported) {
+      return yield* fail("invalid-plan", "iOS Simulator device control is unavailable.");
+    }
+
+    const [threadState, listing] = yield* Effect.tryPromise({
+      try: () =>
+        Promise.all([
+          input.deviceService!.manager.getThreadState(plan.threadId),
+          input.deviceService!.manager.list({ includeShutdown: true }),
+        ]),
+      catch: () =>
+        new AgentControlPlanValidationError({
+          reason: "thread-unavailable",
+          detail: "Current device state is unavailable.",
+        }),
+    });
+    const device = listing.devices.find((candidate) => candidate.udid === plan.udid);
+    if (!device) return yield* fail("thread-unavailable", "The approved device is unavailable.");
+    if (
+      threadState.version !== plan.expectedThreadDeviceVersion ||
+      threadState.attachedDeviceUdid !== plan.expectedAttachedDeviceUdid ||
+      device.state !== plan.expectedDeviceState ||
+      device.bootSource !== plan.expectedDeviceBootSource ||
+      input.deviceService.manager.isRecording(plan.udid) !== plan.expectedRecording
+    ) {
+      return yield* fail("thread-stale", "The approved device or attachment state changed.");
+    }
+    if (
+      input.deviceService.manager
+        .attachedThreadIds(plan.udid)
+        .some((threadId) => threadId !== plan.threadId)
+    ) {
+      return yield* fail(
+        "thread-stale",
+        "The device is deliberately attached to a different thread.",
+      );
+    }
+
+    if (plan.kind === "deviceAttach") {
+      if (threadState.attachedDeviceUdid !== null && threadState.attachedDeviceUdid !== plan.udid) {
+        return yield* fail(
+          "thread-stale",
+          "The thread already has a different deliberate device attachment.",
+        );
+      }
+      if (device.state !== "booted") {
+        return yield* fail("thread-unavailable", "Only a booted device can be attached.");
+      }
+      return;
+    }
+    if (plan.kind === "deviceBoot") {
+      if (device.state !== "shutdown") {
+        return yield* fail("thread-stale", "The approved device is no longer shut down.");
+      }
+      return;
+    }
+    if (threadState.attachedDeviceUdid !== plan.udid) {
+      return yield* fail(
+        "thread-stale",
+        "The approved device is no longer attached to the originating thread.",
+      );
+    }
+    if (plan.kind === "deviceDetach") return;
+    if (device.state !== "booted") {
+      return yield* fail("thread-unavailable", "The attached device is not booted.");
+    }
+    if (plan.kind === "deviceStartRecording" && plan.expectedRecording) {
+      return yield* fail("thread-stale", "The device is already recording.");
+    }
+    if (plan.kind === "deviceStopRecording" && !plan.expectedRecording) {
+      return yield* fail("thread-stale", "The device is not recording.");
+    }
+  });
+
+const isProjectPlan = (
+  plan: AgentControlActionPlan,
+): plan is Extract<
+  AgentControlActionPlan,
+  { kind: "createProject" | "updateProject" | "removeProject" }
+> =>
+  plan.kind === "createProject" || plan.kind === "updateProject" || plan.kind === "removeProject";
+
+const isAutomationLifecyclePlan = (
+  plan: AgentControlActionPlan,
+): plan is Extract<
+  AgentControlActionPlan,
+  { kind: "createAutomation" | "updateAutomation" | "cancelAutomation" }
+> =>
+  plan.kind === "createAutomation" ||
+  plan.kind === "updateAutomation" ||
+  plan.kind === "cancelAutomation";
+
+const automationDefinitionForPlan = (
+  plan: Extract<
+    AgentControlActionPlan,
+    { kind: "createAutomation" | "updateAutomation" | "automationRun" }
+  >,
+) =>
+  plan.kind === "createAutomation"
+    ? plan.definition
+    : plan.kind === "updateAutomation"
+      ? plan.after
+      : {
+          execution: plan.execution,
+          schedule: { kind: "once" as const, runAt: plan.scheduledFor },
+          enabled: true,
+        };
 
 const requireThread = (snapshot: OrchestrationShellSnapshot, threadId: string) => {
   const thread = snapshot.threads.find((candidate) => candidate.id === threadId);
@@ -179,6 +348,14 @@ const validatePlanAgainstSnapshot = (input: {
       return;
     }
 
+    if (
+      input.plan.kind !== "sendMessage" &&
+      input.plan.kind !== "interruptThread" &&
+      input.plan.kind !== "updateThread"
+    ) {
+      return yield* fail("invalid-plan", "This action is not a thread control plan.");
+    }
+
     const target = yield* requireThread(input.snapshot, input.plan.threadId);
     if (target.projectId !== input.originProjectId) {
       return yield* fail("project-scope", "The target thread is outside caller project scope.");
@@ -234,7 +411,24 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
     import("@ryco/contracts").AgentControlExternalIntegration,
     AgentControlExternalIntegrationServiceError
   >;
+  readonly projectPlans?: AgentControlProjectPlansShape;
+  readonly automations?: AgentControlAutomationShape;
+  readonly deviceService?: DeviceServiceShape;
 }): AgentControlActionValidatorShape => {
+  const validateAutomation = <A, E>(effect: Effect.Effect<A, E>) =>
+    effect.pipe(
+      Effect.mapError((error) =>
+        typeof error === "object" &&
+        error !== null &&
+        "_tag" in error &&
+        error._tag === "AgentControlPlanValidationError"
+          ? (error as unknown as AgentControlPlanValidationError)
+          : new AgentControlPlanValidationError({
+              reason: "automation-unavailable",
+              detail: "Automation state is unavailable.",
+            }),
+      ),
+    );
   const loadState = Effect.all({
     snapshot: deps.projections.getShellSnapshot(),
     providers: deps.getProviders,
@@ -282,15 +476,78 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
       }
 
       const originEnvMode = agentControlThreadEnvMode(caller);
-      yield* validatePlanAgainstSnapshot({
-        plan: input.plan,
-        originProjectId: caller.projectId,
-        originRuntimeMode: caller.runtimeMode,
-        originEnvMode,
-        snapshot,
-        providers,
-        requireBaseRef,
-      });
+      if (input.plan.kind === "changeSettings") {
+        return yield* fail(
+          "settings-unsupported",
+          "Settings changes require fresh owner reauthentication that this server cannot enforce.",
+        );
+      }
+      if (input.plan.kind === "automationRun") {
+        return yield* fail("invalid-plan", "Scheduled run proposals are server-owned.");
+      }
+      if (isAgentControlDevicePlan(input.plan)) {
+        // Proposal submission validates immutable scope and bounded input only.
+        // Authoritative device state is deliberately read only after approval.
+        yield* validateDevicePlanScope(input.plan, {
+          originThreadId: caller.id,
+          originProjectId: caller.projectId,
+          originProviderInstanceId: input.session.providerInstanceId,
+        });
+      } else if (isAutomationLifecyclePlan(input.plan)) {
+        if (deps.automations === undefined) {
+          return yield* fail("automation-unavailable", "Automation control is unavailable.");
+        }
+        yield* validateAutomation(deps.automations.validateLifecyclePlan(input.plan));
+        const automation =
+          input.plan.kind === "createAutomation"
+            ? undefined
+            : yield* validateAutomation(
+                deps.automations.get(input.plan.automationId, {
+                  projectId: caller.projectId,
+                  providerInstanceId: input.session.providerInstanceId,
+                }),
+              );
+        const definition =
+          input.plan.kind === "cancelAutomation"
+            ? automation!.definition
+            : automationDefinitionForPlan(input.plan);
+        if (
+          definition.execution.projectId !== caller.projectId ||
+          definition.execution.modelSelection.instanceId !== input.session.providerInstanceId
+        ) {
+          return yield* fail(
+            "project-scope",
+            "Automation project and provider must match the exact provider session.",
+          );
+        }
+        yield* validatePlanAgainstSnapshot({
+          plan: { kind: "createThreads", entries: [definition.execution] },
+          originProjectId: caller.projectId,
+          originRuntimeMode: caller.runtimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+      } else if (isProjectPlan(input.plan)) {
+        if (deps.projectPlans === undefined) {
+          return yield* fail("project-unavailable", "Project proposal validation is unavailable.");
+        }
+        if (input.plan.kind !== "createProject" && input.plan.projectId !== caller.projectId) {
+          return yield* fail("project-scope", "The requested project is outside caller scope.");
+        }
+        yield* deps.projectPlans.revalidate(input.plan);
+      } else {
+        yield* validatePlanAgainstSnapshot({
+          plan: input.plan,
+          originProjectId: caller.projectId,
+          originRuntimeMode: caller.runtimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+      }
 
       const targetSnapshots: Array<
         NonNullable<AgentControlProviderSessionPrincipal["targetSnapshots"]>[number]
@@ -323,6 +580,66 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
   const validateExternalSubmission: AgentControlActionValidatorShape["validateExternalSubmission"] =
     (input) =>
       Effect.gen(function* () {
+        if (isAgentControlDevicePlan(input.plan)) {
+          return yield* fail(
+            "privilege-escalation",
+            "External integrations cannot control devices.",
+          );
+        }
+        if (isAutomationLifecyclePlan(input.plan)) {
+          if (
+            deps.automations === undefined ||
+            !input.integration.capabilities.includes(
+              AGENT_CONTROL_CAPABILITIES.externalManageAutomations,
+            ) ||
+            !input.integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalCreateTask)
+          ) {
+            return yield* fail("privilege-escalation", "External automation authority is absent.");
+          }
+          yield* validateAutomation(deps.automations.validateLifecyclePlan(input.plan));
+          const definition =
+            input.plan.kind === "createAutomation"
+              ? input.plan.definition
+              : input.plan.kind === "updateAutomation"
+                ? input.plan.after
+                : input.plan.expected.definition;
+          const scopeAllowed =
+            input.integration.projectScope.kind === "all" ||
+            input.integration.projectScope.projectIds.includes(definition.execution.projectId);
+          if (!scopeAllowed) {
+            return yield* fail("project-scope", "Automation project is outside integration scope.");
+          }
+          if (
+            (definition.execution.envMode === "local" &&
+              !input.integration.capabilities.includes(
+                AGENT_CONTROL_CAPABILITIES.externalSharedCheckout,
+              )) ||
+            (definition.execution.runtimeMode === "full-access" &&
+              !input.integration.capabilities.includes(
+                AGENT_CONTROL_CAPABILITIES.externalFullAccess,
+              ))
+          ) {
+            return yield* fail("privilege-escalation", "Automation execution scope is denied.");
+          }
+          const { snapshot, providers } = yield* loadState;
+          yield* validatePlanAgainstSnapshot({
+            plan: { kind: "createThreads", entries: [definition.execution] },
+            originProjectId: definition.execution.projectId,
+            originRuntimeMode: definition.execution.runtimeMode,
+            originEnvMode: definition.execution.envMode,
+            snapshot,
+            providers,
+            requireBaseRef,
+          });
+          return {
+            kind: "external-integration",
+            integrationId: input.integration.integrationId,
+            label: input.integration.displayName,
+            projectId: definition.execution.projectId,
+            runtimeMode: definition.execution.runtimeMode,
+            envMode: definition.execution.envMode,
+          };
+        }
         if (input.plan.kind !== "createThreads" || input.plan.entries.length !== 1) {
           return yield* fail("invalid-plan", "External integrations may request exactly one task.");
         }
@@ -390,9 +707,19 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
         const scopeAllowed =
           integration.projectScope.kind === "all" ||
           integration.projectScope.projectIds.includes(originProjectId);
+        const externalCapability =
+          proposal.plan.kind === "automationRun"
+            ? AGENT_CONTROL_CAPABILITIES.externalManageAutomations
+            : isAutomationLifecyclePlan(proposal.plan)
+              ? AGENT_CONTROL_CAPABILITIES.externalManageAutomations
+              : AGENT_CONTROL_CAPABILITIES.externalCreateTask;
+        const requiresTaskCapability =
+          proposal.plan.kind === "automationRun" || isAutomationLifecyclePlan(proposal.plan);
         if (
           !scopeAllowed ||
-          !integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalCreateTask) ||
+          !integration.capabilities.includes(externalCapability) ||
+          (requiresTaskCapability &&
+            !integration.capabilities.includes(AGENT_CONTROL_CAPABILITIES.externalCreateTask)) ||
           (originEnvMode === "local" &&
             !integration.capabilities.includes(
               AGENT_CONTROL_CAPABILITIES.externalSharedCheckout,
@@ -402,6 +729,92 @@ export const makeAgentControlActionValidatorFromDeps = (deps: {
         ) {
           return yield* fail("caller-stale", "External integration authority changed.");
         }
+      }
+
+      if (proposal.plan.kind === "changeSettings") {
+        return yield* fail(
+          "settings-unsupported",
+          "Settings changes require fresh owner reauthentication that this server cannot enforce.",
+        );
+      }
+      if (isAgentControlDevicePlan(proposal.plan)) {
+        if (principal.kind !== "provider-session") {
+          return yield* fail(
+            "privilege-escalation",
+            "External integrations cannot control devices.",
+          );
+        }
+        const origin = snapshot.threads.find((thread) => thread.id === principal.threadId);
+        const project = snapshot.projects.find((candidate) => candidate.id === originProjectId);
+        if (
+          !origin ||
+          !project ||
+          origin.session?.providerInstanceId !== principal.providerInstanceId ||
+          proposal.plan.providerInstanceId !== principal.providerInstanceId
+        ) {
+          return yield* fail("caller-stale", "The originating provider instance changed.");
+        }
+        yield* validateDevicePlanCurrentState(proposal.plan, {
+          originThreadId: principal.threadId,
+          originProjectId,
+          originProviderInstanceId: principal.providerInstanceId,
+          currentProjectUpdatedAt: project.updatedAt,
+          deviceService: deps.deviceService,
+        });
+        return;
+      }
+      if (isAutomationLifecyclePlan(proposal.plan)) {
+        if (deps.automations === undefined) {
+          return yield* fail("automation-unavailable", "Automation control is unavailable.");
+        }
+        yield* validateAutomation(deps.automations.validateLifecyclePlan(proposal.plan));
+        const definition =
+          proposal.plan.kind === "cancelAutomation"
+            ? (yield* validateAutomation(
+                deps.automations.get(proposal.plan.automationId, {
+                  projectId: originProjectId,
+                }),
+              )).definition
+            : automationDefinitionForPlan(proposal.plan);
+        yield* validatePlanAgainstSnapshot({
+          plan: { kind: "createThreads", entries: [definition.execution] },
+          originProjectId,
+          originRuntimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+        return;
+      }
+      if (proposal.plan.kind === "automationRun") {
+        if (deps.automations === undefined) {
+          return yield* fail("automation-unavailable", "Automation control is unavailable.");
+        }
+        yield* validateAutomation(deps.automations.validateRun(proposal));
+        yield* validatePlanAgainstSnapshot({
+          plan: { kind: "createThreads", entries: [proposal.plan.execution] },
+          originProjectId,
+          originRuntimeMode,
+          originEnvMode,
+          snapshot,
+          providers,
+          requireBaseRef,
+        });
+        return;
+      }
+      if (isProjectPlan(proposal.plan)) {
+        if (principal.kind !== "provider-session") {
+          return yield* fail("project-scope", "External integrations cannot manage projects.");
+        }
+        if (proposal.plan.kind !== "createProject" && proposal.plan.projectId !== originProjectId) {
+          return yield* fail("project-scope", "The approved project is outside caller scope.");
+        }
+        if (deps.projectPlans === undefined) {
+          return yield* fail("project-unavailable", "Project proposal validation is unavailable.");
+        }
+        yield* deps.projectPlans.revalidate(proposal.plan);
+        return;
       }
 
       yield* validatePlanAgainstSnapshot({
@@ -449,10 +862,16 @@ const makeAgentControlActionValidator = Effect.gen(function* () {
   const providerRegistry = yield* ProviderRegistry;
   const git = yield* GitWorkflowService;
   const externalIntegrations = yield* Effect.serviceOption(AgentControlExternalIntegrationService);
+  const projectPlans = yield* AgentControlProjectPlans;
+  const automations = yield* Effect.serviceOption(AgentControlAutomationService);
+  const deviceService = yield* Effect.serviceOption(DeviceService);
   return makeAgentControlActionValidatorFromDeps({
     projections,
     getProviders: providerRegistry.getProviders,
     listRefs: git.listRefs,
+    projectPlans,
+    ...(Option.isSome(deviceService) ? { deviceService: deviceService.value } : {}),
+    ...(Option.isSome(automations) ? { automations: automations.value } : {}),
     ...(Option.isSome(externalIntegrations)
       ? { revalidateExternal: externalIntegrations.value.revalidate }
       : {}),

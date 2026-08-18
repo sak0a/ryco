@@ -64,6 +64,12 @@ export interface OrchestrationEventStoreShape {
     OrchestrationEventStoreError
   >;
 
+  /** Newest-first bounded operational read. Callers must authorization-filter aggregates. */
+  readonly readRecent?: (input: {
+    readonly since: string;
+    readonly limit: number;
+  }) => Effect.Effect<ReadonlyArray<OrchestrationEvent>, OrchestrationEventStoreError>;
+
   /**
    * Read all events from the beginning of the stream.
    *
