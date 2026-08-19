@@ -19,6 +19,7 @@ import {
   McpWorkspaceId,
   type McpListServersResult,
   type McpListWorkspacesResult,
+  type McpProviderCapabilities,
   type McpProviderSupport,
   type McpServer,
   type McpWorkspace,
@@ -30,6 +31,7 @@ import {
   configFromMcpServerForm,
   createEmptyMcpServerForm,
   formFromMcpServer,
+  secretMutationsFromMcpServerForm,
   summarizeMcpServerConnection,
   validateMcpServerForm,
   type McpServerFormState,
@@ -136,6 +138,15 @@ function providerDisplayName(provider: McpProviderSupport): string {
   );
 }
 
+function workspaceProviderDisplayName(workspace: McpWorkspace | null): string {
+  if (!workspace) return "the provider";
+  return (
+    workspace.providerDisplayName ??
+    getDriverOption(workspace.driver)?.label ??
+    formatProviderDriverKindLabel(workspace.driver)
+  );
+}
+
 function FieldLabel(props: { readonly label: string; readonly children: React.ReactNode }) {
   return (
     <label className="grid gap-1.5 text-xs font-medium text-foreground/80">
@@ -186,11 +197,13 @@ function TransportToggle({
 function McpServerDialog({
   open,
   server,
+  providerName,
   onOpenChange,
   onSubmit,
 }: {
   readonly open: boolean;
   readonly server: McpServer | null;
+  readonly providerName: string;
   readonly onOpenChange: (open: boolean) => void;
   readonly onSubmit: (form: McpServerFormState) => Promise<void>;
 }) {
@@ -232,7 +245,9 @@ function McpServerDialog({
         <DialogHeader>
           <DialogTitle>{editing ? "Edit MCP server" : "Add MCP server"}</DialogTitle>
           <DialogDescription>
-            Configuration is written to the selected Codex config and reloaded after save.
+            Configuration is written through {providerName}&apos;s native MCP management surface.
+            Existing secret values are never loaded into this form and are retained unless you enter
+            replacements with the same keys.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-5">
@@ -329,7 +344,7 @@ function McpServerDialog({
                 placeholder="API_BASE=https://example.com"
                 spellCheck={false}
               />
-              <TextareaHelp>KEY=VALUE lines stored in Codex config.</TextareaHelp>
+              <TextareaHelp>KEY=VALUE lines stored by the selected provider.</TextareaHelp>
             </FieldLabel>
             <FieldLabel label="Environment allow-list">
               <Textarea
@@ -401,6 +416,33 @@ function McpServerDialog({
               Required
             </label>
           </div>
+
+          {form.secretFields.length > 0 ? (
+            <fieldset className="grid gap-2 border-t pt-4">
+              <legend className="text-xs font-medium">Stored secret fields</legend>
+              <p className="text-[11px] leading-relaxed text-muted-foreground/70">
+                Values remain inside the provider configuration and are never loaded by this page.
+                Select a field only when you want it removed on save.
+              </p>
+              {form.secretFields.map((field) => (
+                <label key={field} className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={form.clearedSecretFields.includes(field)}
+                    onChange={(event) =>
+                      setField(
+                        "clearedSecretFields",
+                        event.target.checked
+                          ? [...form.clearedSecretFields, field]
+                          : form.clearedSecretFields.filter((entry) => entry !== field),
+                      )
+                    }
+                  />
+                  Clear <code className="font-mono">{field}</code>
+                </label>
+              ))}
+            </fieldset>
+          ) : null}
 
           {validationError ? (
             <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/6 px-3 py-2 text-xs text-destructive-foreground">
@@ -520,7 +562,8 @@ function ProviderSupportSection({
                       if (provider.workspaceId) onSelectWorkspace(provider.workspaceId);
                     }}
                   >
-                    Codex workspace
+                    {driverOption?.label ?? formatProviderDriverKindLabel(provider.driver)}{" "}
+                    workspace
                   </Button>
                 ) : null}
               </div>
@@ -597,6 +640,7 @@ function InventoryList({ server }: { readonly server: McpServer }) {
 
 function McpServerCard({
   server,
+  capabilities,
   mutating,
   onToggleEnabled,
   onEdit,
@@ -604,6 +648,7 @@ function McpServerCard({
   onOauthLogin,
 }: {
   readonly server: McpServer;
+  readonly capabilities: McpProviderCapabilities;
   readonly mutating: boolean;
   readonly onToggleEnabled: (server: McpServer, enabled: boolean) => void;
   readonly onEdit: (server: McpServer) => void;
@@ -612,7 +657,10 @@ function McpServerCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const connection = summarizeMcpServerConnection(server);
-  const inventoryLabel = `${server.tools.length} tools · ${server.resources.length + server.resourceTemplates.length} resources`;
+  const inventoryAvailable = capabilities.inventory === "available";
+  const inventoryLabel = inventoryAvailable
+    ? `${server.tools.length} tools · ${server.resources.length + server.resourceTemplates.length} resources`
+    : "Inventory not available";
 
   return (
     <article className="rounded-lg border bg-card text-card-foreground shadow-sm/4">
@@ -642,7 +690,7 @@ function McpServerCard({
         </div>
 
         <div className="flex shrink-0 items-center gap-1.5">
-          {server.authStatus === "notLoggedIn" ? (
+          {capabilities.oauth === "available" && server.authStatus === "notLoggedIn" ? (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -660,43 +708,51 @@ function McpServerCard({
               <TooltipPopup>Start OAuth login</TooltipPopup>
             </Tooltip>
           ) : null}
-          <Button size="sm" variant="outline" onClick={() => onEdit(server)} disabled={mutating}>
-            Edit
-          </Button>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="destructive-outline"
-                  disabled={mutating}
-                  onClick={() => onRemove(server)}
-                  aria-label={`Remove ${server.name}`}
-                >
-                  <Trash2Icon />
-                </Button>
-              }
+          {capabilities.upsert === "available" ? (
+            <Button size="sm" variant="outline" onClick={() => onEdit(server)} disabled={mutating}>
+              Edit
+            </Button>
+          ) : null}
+          {capabilities.remove === "available" ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="destructive-outline"
+                    disabled={mutating}
+                    onClick={() => onRemove(server)}
+                    aria-label={`Remove ${server.name}`}
+                  >
+                    <Trash2Icon />
+                  </Button>
+                }
+              />
+              <TooltipPopup>Remove server</TooltipPopup>
+            </Tooltip>
+          ) : null}
+          {capabilities.enableDisable === "available" ? (
+            <Switch
+              checked={server.config.enabled}
+              disabled={mutating}
+              onCheckedChange={(checked) => onToggleEnabled(server, Boolean(checked))}
+              aria-label={`Enable ${server.name}`}
             />
-            <TooltipPopup>Remove server</TooltipPopup>
-          </Tooltip>
-          <Switch
-            checked={server.config.enabled}
-            disabled={mutating}
-            onCheckedChange={(checked) => onToggleEnabled(server, Boolean(checked))}
-            aria-label={`Enable ${server.name}`}
-          />
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() => setExpanded((current) => !current)}
-            aria-label={`Toggle ${server.name} inventory`}
-          >
-            <ChevronDownIcon className={cn("transition-transform", expanded && "rotate-180")} />
-          </Button>
+          ) : null}
+          {inventoryAvailable ? (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={() => setExpanded((current) => !current)}
+              aria-label={`Toggle ${server.name} inventory`}
+            >
+              <ChevronDownIcon className={cn("transition-transform", expanded && "rotate-180")} />
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      {expanded ? (
+      {expanded && inventoryAvailable ? (
         <div className="border-t bg-muted/20 p-4">
           <InventoryList server={server} />
         </div>
@@ -722,6 +778,8 @@ export function McpServersSettings() {
     () => workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null,
     [selectedWorkspaceId, workspaces],
   );
+  const selectedCapabilities = selectedWorkspace?.capabilities;
+  const selectedProviderName = workspaceProviderDisplayName(selectedWorkspace);
 
   const loadServers = useCallback(async (workspaceId: string, options?: { quiet?: boolean }) => {
     if (!options?.quiet) setRefreshing(true);
@@ -798,6 +856,7 @@ export function McpServersSettings() {
       workspaceId: McpWorkspaceId.make(selectedWorkspaceId),
       name: McpServerName.make(form.name.trim()),
       config: configFromMcpServerForm(form),
+      secretMutations: secretMutationsFromMcpServerForm(form),
     });
     setSnapshot(result);
     toastManager.add(stackedThreadToast({ type: "success", title: "MCP server saved" }));
@@ -878,8 +937,8 @@ export function McpServersSettings() {
             </div>
             <h2 className="mt-1 text-lg font-semibold tracking-[-0.01em]">MCP Servers</h2>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground/80">
-              Manage Codex MCP servers and inspect how other provider instances currently expose MCP
-              support.
+              Manage MCP servers through each provider&apos;s native configuration surface. Controls
+              appear only when that provider exposes a reliable operation.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -907,18 +966,22 @@ export function McpServersSettings() {
               />
               <TooltipPopup>Refresh</TooltipPopup>
             </Tooltip>
-            <Button
-              variant="outline"
-              disabled={!selectedWorkspaceId || refreshing}
-              onClick={() => void reload()}
-            >
-              <WrenchIcon />
-              Reload
-            </Button>
-            <Button disabled={!selectedWorkspaceId} onClick={openAddDialog}>
-              <PlusIcon />
-              Add server
-            </Button>
+            {selectedCapabilities?.reload === "available" ? (
+              <Button
+                variant="outline"
+                disabled={!selectedWorkspaceId || refreshing}
+                onClick={() => void reload()}
+              >
+                <WrenchIcon />
+                Reload
+              </Button>
+            ) : null}
+            {selectedCapabilities?.upsert === "available" ? (
+              <Button disabled={!selectedWorkspaceId} onClick={openAddDialog}>
+                <PlusIcon />
+                Add server
+              </Button>
+            ) : null}
           </div>
         </header>
 
@@ -936,7 +999,7 @@ export function McpServersSettings() {
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <span className="min-w-0 break-all font-mono">{selectedWorkspace.displayPath}</span>
               <span>
-                {selectedWorkspace.mode === "authOverlay" ? "Auth overlay" : "Direct home"}
+                {selectedWorkspace.nativeScope} scope · {selectedWorkspace.formatGeneration}
               </span>
               <span>
                 Used by{" "}
@@ -972,6 +1035,20 @@ export function McpServersSettings() {
           </div>
         ) : null}
 
+        {selectedWorkspace ? (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+            {selectedWorkspace.capabilities.health !== "available" ? (
+              <span>Live health is not reported by {selectedProviderName}.</span>
+            ) : null}
+            {selectedWorkspace.capabilities.inventory !== "available" ? (
+              <span>Tool and resource inventory is unavailable.</span>
+            ) : null}
+            {selectedWorkspace.capabilities.enableDisable !== "available" ? (
+              <span>Individual enable/disable is not supported.</span>
+            ) : null}
+          </div>
+        ) : null}
+
         {loading ? (
           <div className="flex min-h-48 items-center justify-center rounded-lg border border-dashed">
             <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
@@ -979,9 +1056,9 @@ export function McpServersSettings() {
         ) : workspaces.length === 0 ? (
           <div className="rounded-lg border border-dashed p-8 text-center">
             <ServerIcon className="mx-auto size-7 text-muted-foreground/60" />
-            <h3 className="mt-3 text-sm font-semibold">No Codex workspaces</h3>
+            <h3 className="mt-3 text-sm font-semibold">No MCP provider profiles</h3>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground/80">
-              Add or enable a Codex provider instance before managing MCP servers.
+              Add or enable a provider instance with a supported MCP configuration surface.
             </p>
           </div>
         ) : snapshot?.servers.length === 0 ? (
@@ -989,12 +1066,15 @@ export function McpServersSettings() {
             <CheckCircle2Icon className="mx-auto size-7 text-muted-foreground/60" />
             <h3 className="mt-3 text-sm font-semibold">No MCP servers configured</h3>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground/80">
-              Add a stdio or HTTP server to make its tools available to Codex sessions.
+              Add a stdio or HTTP server to make its tools available to {selectedProviderName}
+              sessions.
             </p>
-            <Button className="mt-4" onClick={openAddDialog}>
-              <PlusIcon />
-              Add server
-            </Button>
+            {selectedCapabilities?.upsert === "available" ? (
+              <Button className="mt-4" onClick={openAddDialog}>
+                <PlusIcon />
+                Add server
+              </Button>
+            ) : null}
           </div>
         ) : (
           <div className="grid gap-3">
@@ -1002,6 +1082,21 @@ export function McpServersSettings() {
               <McpServerCard
                 key={server.name}
                 server={server}
+                capabilities={
+                  selectedCapabilities ?? {
+                    readConfiguration: "unavailable",
+                    upsert: "unavailable",
+                    remove: "unavailable",
+                    enableDisable: "unavailable",
+                    reload: "unavailable",
+                    health: "unavailable",
+                    inventory: "unavailable",
+                    oauth: "unavailable",
+                    externalAgentControl: "unavailable",
+                    automaticAgentControl: "unavailable",
+                    scopes: [],
+                  }
+                }
                 mutating={mutatingName === server.name}
                 onToggleEnabled={(target, enabled) => void toggleEnabled(target, enabled)}
                 onEdit={openEditDialog}
@@ -1016,6 +1111,7 @@ export function McpServersSettings() {
       <McpServerDialog
         open={dialogOpen}
         server={editingServer}
+        providerName={selectedProviderName}
         onOpenChange={setDialogOpen}
         onSubmit={submitForm}
       />

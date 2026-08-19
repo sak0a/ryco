@@ -75,6 +75,20 @@ describe("Claude MCP config decoding", () => {
     expect(decodeClaudeMcpServer({ command: "node", args: ["ok", 1] })).toBeNull();
   });
 
+  it("normalizes HTTP entries without treating headers as ordinary fields", () => {
+    expect(
+      decodeClaudeMcpServer({
+        type: "http",
+        url: "https://mcp.example.test/api",
+        headers: { Authorization: "Bearer canary" },
+      }),
+    ).toMatchObject({
+      transport: "http",
+      url: "https://mcp.example.test/api",
+      httpHeaders: { Authorization: "Bearer canary" },
+    });
+  });
+
   it("reads only the named top-level MCP server", () => {
     const document = {
       unrelated: { keep: true },
@@ -169,5 +183,125 @@ describe("ClaudeMcpAdapter external Agent Control", () => {
       ],
     });
     expect(document.unrelated).toEqual({ keep: true });
+  });
+});
+
+describe("ClaudeMcpAdapter general MCP management", () => {
+  it("lists redacted native entries and updates them through add-json", async () => {
+    let document: Record<string, unknown> = {
+      unrelated: { keep: true },
+      mcpServers: {
+        tools: {
+          type: "stdio",
+          command: "node",
+          args: ["old.js"],
+          env: { API_TOKEN: "claude-secret-canary" },
+        },
+        malformed: { type: "stdio", command: 42 },
+      },
+    };
+    const calls: ReadonlyArray<string>[] = [];
+    const io: ClaudeMcpAdapterIo = {
+      run: async (_command, args) => {
+        calls.push(args);
+        const root = document as { mcpServers: Record<string, unknown> };
+        if (args[1] === "add-json") root.mcpServers[args[4]!] = JSON.parse(args[5]!);
+        if (args[1] === "remove") delete root.mcpServers[args[4]!];
+        return success;
+      },
+      readText: async () => JSON.stringify(document),
+    };
+
+    const result = await runAdapter(
+      Effect.gen(function* () {
+        const adapter = yield* makeClaudeMcpAdapter(io);
+        const discovery = yield* adapter.listWorkspaces;
+        const workspaceId = discovery.workspaces[0]!.id;
+        const listed = yield* adapter.listServers!({ workspaceId, detail: "full" });
+        const tools = listed.servers.find((server) => server.name === "tools")!;
+        const updated = yield* adapter.upsertServer!({
+          workspaceId,
+          name: McpServerName.make("tools"),
+          config: { ...tools.config, args: ["new.js"] },
+        });
+        return { discovery, listed, updated };
+      }),
+    );
+
+    expect(result.discovery.workspaces[0]?.capabilities).toMatchObject({
+      readConfiguration: "available",
+      upsert: "available",
+      remove: "available",
+      health: "unknown",
+      inventory: "unavailable",
+    });
+    expect(result.listed.warnings).toContain(
+      "Claude MCP server malformed uses an unsupported or malformed format.",
+    );
+    const listedTools = result.listed.servers.find((server) => server.name === "tools")!;
+    expect(listedTools.config.env).toEqual({});
+    expect(listedTools.config.secretFields).toEqual({ "env.API_TOKEN": "present" });
+    expect(JSON.stringify(result)).not.toContain("claude-secret-canary");
+    expect(
+      (document as { mcpServers: Record<string, { env?: Record<string, string> }> }).mcpServers
+        .tools?.env,
+    ).toEqual({ API_TOKEN: "claude-secret-canary" });
+    expect(calls[0]?.slice(0, 5)).toEqual(["mcp", "add-json", "--scope", "user", "tools"]);
+    expect(result.updated.servers.find((server) => server.name === "tools")?.config.args).toEqual([
+      "new.js",
+    ]);
+    expect(document.unrelated).toEqual({ keep: true });
+  });
+
+  it("adds HTTP servers, redacts headers, and removes by explicit user scope", async () => {
+    let document: Record<string, unknown> = { mcpServers: {} };
+    const calls: ReadonlyArray<string>[] = [];
+    const io: ClaudeMcpAdapterIo = {
+      run: async (_command, args) => {
+        calls.push(args);
+        const root = document as { mcpServers: Record<string, unknown> };
+        if (args[1] === "add-json") root.mcpServers[args[4]!] = JSON.parse(args[5]!);
+        if (args[1] === "remove") delete root.mcpServers[args[4]!];
+        return success;
+      },
+      readText: async () => JSON.stringify(document),
+    };
+
+    const result = await runAdapter(
+      Effect.gen(function* () {
+        const adapter = yield* makeClaudeMcpAdapter(io);
+        const discovery = yield* adapter.listWorkspaces;
+        const workspaceId = discovery.workspaces[0]!.id;
+        const added = yield* adapter.upsertServer!({
+          workspaceId,
+          name: McpServerName.make("remote"),
+          config: {
+            transport: "http",
+            url: "https://mcp.example.test/api",
+            args: [],
+            env: {},
+            envVars: [],
+            httpHeaders: { Authorization: "Bearer header-canary" },
+            envHttpHeaders: {},
+            enabled: true,
+            enabledTools: [],
+            disabledTools: [],
+            oauthScopes: [],
+          },
+        });
+        const removed = yield* adapter.removeServer!({
+          workspaceId,
+          name: McpServerName.make("remote"),
+        });
+        return { added, removed };
+      }),
+    );
+
+    const remote = result.added.servers.find((server) => server.name === "remote")!;
+    expect(remote.config.httpHeaders).toEqual({});
+    expect(remote.config.secretFields).toEqual({ "header.Authorization": "present" });
+    expect(JSON.stringify(result)).not.toContain("header-canary");
+    expect(result.removed.servers).toHaveLength(0);
+    expect(calls[1]).toEqual(["mcp", "remove", "--scope", "user", "remote"]);
   });
 });

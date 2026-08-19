@@ -4,8 +4,11 @@ import path from "node:path";
 
 import {
   ClaudeSettings,
+  McpListServersResult,
   McpProviderCapabilities,
   McpProviderSupport,
+  McpServer,
+  McpServerName,
   McpServerWritableConfig,
   McpSettingsError,
   McpWorkspace,
@@ -29,12 +32,22 @@ import {
   externalAgentControlServerConfig,
 } from "../externalAgentControlEntry.ts";
 import type { ProviderMcpAdapter } from "../ProviderMcpAdapter.ts";
+import {
+  applyProviderMcpSecretMutations,
+  providerMcpSecretPresence,
+} from "../ProviderMcpSecrets.ts";
 
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
 const CLAUDE_MCP_TIMEOUT_MS = 20_000;
 const CLAUDE_MCP_OUTPUT_LIMIT = 256 * 1024;
 
 const capabilities = Schema.decodeSync(McpProviderCapabilities)({
+  readConfiguration: "available",
+  upsert: "available",
+  remove: "available",
+  health: "unknown",
+  inventory: "unavailable",
+  oauth: "unknown",
   externalAgentControl: "available",
   automaticAgentControl: "available",
   scopes: ["user"],
@@ -72,9 +85,9 @@ function toMcpError(message: string, cause?: unknown): McpSettingsError {
   return new McpSettingsError({ message, ...(cause === undefined ? {} : { cause }) });
 }
 
-function workspaceIdFor(homePath: string): McpWorkspaceId {
+function workspaceIdFor(configPath: string): McpWorkspaceId {
   return McpWorkspaceId.make(
-    `claudeAgent:${createHash("sha256").update(homePath, "utf8").digest("base64url")}`,
+    `claudeAgent:${createHash("sha256").update(configPath, "utf8").digest("base64url")}`,
   );
 }
 
@@ -86,7 +99,28 @@ function record(value: unknown): Record<string, unknown> | null {
 
 export function decodeClaudeMcpServer(value: unknown): McpServerWritableConfigType | null {
   const entry = record(value);
-  if (!entry || typeof entry.command !== "string") return null;
+  if (!entry) return null;
+  const type = entry.type;
+  if ((type === "http" || type === "sse") && typeof entry.url === "string") {
+    const headerRecord = record(entry.headers);
+    const headers =
+      headerRecord === null
+        ? {}
+        : Object.fromEntries(
+            Object.entries(headerRecord).filter((item): item is [string, string] =>
+              item.every((part) => typeof part === "string"),
+            ),
+          );
+    if (headerRecord !== null && Object.keys(headers).length !== Object.keys(headerRecord).length) {
+      return null;
+    }
+    return Schema.decodeSync(McpServerWritableConfig)({
+      transport: "http",
+      url: entry.url,
+      httpHeaders: headers,
+    });
+  }
+  if (typeof entry.command !== "string") return null;
   const args = Array.isArray(entry.args)
     ? entry.args.filter((item): item is string => typeof item === "string")
     : [];
@@ -107,6 +141,88 @@ export function decodeClaudeMcpServer(value: unknown): McpServerWritableConfigTy
     args,
     env,
   });
+}
+
+function readClaudeMcpEntries(document: unknown): ReadonlyArray<readonly [string, unknown]> {
+  const root = record(document);
+  const servers = record(root?.mcpServers);
+  return servers === null ? [] : Object.entries(servers);
+}
+
+function sortedRecord(input: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(input).toSorted(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+export function claudeMcpConfigFingerprint(config: McpServerWritableConfigType): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        transport: config.transport,
+        command: config.command ?? null,
+        args: config.args,
+        url: config.url ?? null,
+        env: sortedRecord(config.env),
+        httpHeaders: sortedRecord(config.httpHeaders),
+      }),
+      "utf8",
+    )
+    .digest("base64url");
+}
+
+function publicClaudeMcpServer(name: string, config: McpServerWritableConfigType) {
+  const secretFields = providerMcpSecretPresence([
+    { prefix: "env", values: config.env },
+    { prefix: "header", values: config.httpHeaders },
+  ]);
+  return Schema.decodeSync(McpServer)({
+    name,
+    config: {
+      ...config,
+      env: {},
+      httpHeaders: {},
+      secretFields,
+    },
+    source: "user",
+    startupStatus: "unknown",
+    authStatus: "unknown",
+    tools: [],
+    resources: [],
+    resourceTemplates: [],
+  });
+}
+
+function nativeClaudeMcpEntry(
+  input: Parameters<NonNullable<ProviderMcpAdapter["upsertServer"]>>[0],
+  existing: McpServerWritableConfigType | null,
+): Record<string, unknown> {
+  const mutations = input.secretMutations ?? {};
+  if (input.config.transport === "stdio") {
+    const command = input.config.command?.trim();
+    if (!command) throw toMcpError("Claude stdio MCP servers require a command.");
+    return {
+      type: "stdio",
+      command,
+      args: input.config.args,
+      env: applyProviderMcpSecretMutations(existing?.env ?? {}, input.config.env, "env", mutations),
+    };
+  }
+  if (input.config.transport === "http") {
+    const url = input.config.url?.trim();
+    if (!url) throw toMcpError("Claude HTTP MCP servers require a URL.");
+    return {
+      type: "http",
+      url,
+      headers: applyProviderMcpSecretMutations(
+        existing?.httpHeaders ?? {},
+        input.config.httpHeaders,
+        "header",
+        mutations,
+      ),
+    };
+  }
+  throw toMcpError("Claude does not support this MCP transport.");
 }
 
 export function readClaudeMcpEntry(
@@ -148,7 +264,15 @@ export const makeClaudeMcpAdapter = (io: ClaudeMcpAdapterIo = defaultIo) =>
         const homePath = yield* resolveClaudeHomePath(claudeSettings).pipe(
           Effect.provideService(Path.Path, pathService),
         );
-        const workspaceId = workspaceIdFor(homePath);
+        const processEnv = yield* makeClaudeEnvironment(
+          claudeSettings,
+          mergeProviderInstanceEnvironment(instance.environment),
+        ).pipe(Effect.provideService(Path.Path, pathService));
+        const configuredDirectory = processEnv.CLAUDE_CONFIG_DIR?.trim();
+        const configPath = configuredDirectory
+          ? path.join(pathService.resolve(configuredDirectory), ".claude.json")
+          : path.join(homePath, ".claude.json");
+        const workspaceId = workspaceIdFor(configPath);
         providers.push(
           Schema.decodeSync(McpProviderSupport)({
             instanceId,
@@ -183,11 +307,6 @@ export const makeClaudeMcpAdapter = (io: ClaudeMcpAdapterIo = defaultIo) =>
           continue;
         }
 
-        const processEnv = yield* makeClaudeEnvironment(
-          claudeSettings,
-          mergeProviderInstanceEnvironment(instance.environment),
-        ).pipe(Effect.provideService(Path.Path, pathService));
-        const configPath = path.join(homePath, ".claude.json");
         groups.set(workspaceId, {
           workspace: Schema.decodeSync(McpWorkspace)({
             id: workspaceId,
@@ -259,15 +378,92 @@ export const makeClaudeMcpAdapter = (io: ClaudeMcpAdapterIo = defaultIo) =>
 
     const runClaudeMcp = (runtime: ClaudeMcpRuntime, args: ReadonlyArray<string>) =>
       Effect.tryPromise({
-        try: () =>
-          io.run(runtime.binaryPath, args, {
+        try: async () => {
+          const result = await io.run(runtime.binaryPath, args, {
             cwd: serverConfig.cwd,
             env: runtime.processEnv,
             timeoutMs: CLAUDE_MCP_TIMEOUT_MS,
             maxBufferBytes: CLAUDE_MCP_OUTPUT_LIMIT,
             outputMode: "truncate",
-          }),
+          });
+          if (result.timedOut) throw new Error("Claude MCP command timed out.");
+          if (result.code !== 0) throw new Error("Claude MCP command exited unsuccessfully.");
+          return result;
+        },
         catch: (cause) => toMcpError("Claude MCP command failed.", cause),
+      });
+
+    const listServers = (input: Parameters<NonNullable<ProviderMcpAdapter["listServers"]>>[0]) =>
+      Effect.gen(function* () {
+        const runtime = yield* findRuntime(input.workspaceId);
+        const document = yield* readDocument(runtime);
+        const servers: Array<typeof McpServer.Type> = [];
+        const warnings: string[] = [];
+        for (const [name, value] of readClaudeMcpEntries(document)) {
+          if (!Schema.is(McpServerName)(name)) {
+            warnings.push("Claude has an MCP entry with a name Ryco cannot manage.");
+            continue;
+          }
+          const config = decodeClaudeMcpServer(value);
+          if (!config) {
+            warnings.push(`Claude MCP server ${name} uses an unsupported or malformed format.`);
+            continue;
+          }
+          servers.push(publicClaudeMcpServer(name, config));
+        }
+        return Schema.decodeSync(McpListServersResult)({
+          workspace: runtime.workspace,
+          servers,
+          configPath: runtime.configPath,
+          warnings,
+        });
+      });
+
+    const upsertServer: NonNullable<ProviderMcpAdapter["upsertServer"]> = (input) =>
+      Effect.gen(function* () {
+        const runtime = yield* findRuntime(input.workspaceId);
+        const beforeDocument = yield* readDocument(runtime);
+        const existing = readClaudeMcpEntry(beforeDocument, input.name);
+        const nativeEntry = yield* Effect.try({
+          try: () => nativeClaudeMcpEntry(input, existing),
+          catch: (cause) =>
+            Schema.is(McpSettingsError)(cause)
+              ? cause
+              : toMcpError("Invalid Claude MCP configuration.", cause),
+        });
+        const desired = decodeClaudeMcpServer(nativeEntry);
+        if (!desired) {
+          return yield* Effect.fail(toMcpError("Invalid Claude MCP configuration."));
+        }
+        yield* runClaudeMcp(runtime, [
+          "mcp",
+          "add-json",
+          "--scope",
+          "user",
+          input.name,
+          JSON.stringify(nativeEntry),
+        ]);
+        const written = readClaudeMcpEntry(yield* readDocument(runtime), input.name);
+        if (
+          !written ||
+          claudeMcpConfigFingerprint(written) !== claudeMcpConfigFingerprint(desired)
+        ) {
+          return yield* Effect.fail(toMcpError("Claude did not preserve the MCP server update."));
+        }
+        return yield* listServers({ workspaceId: input.workspaceId, detail: "full" });
+      });
+
+    const removeServer: NonNullable<ProviderMcpAdapter["removeServer"]> = (input) =>
+      Effect.gen(function* () {
+        const runtime = yield* findRuntime(input.workspaceId);
+        const existing = readClaudeMcpEntry(yield* readDocument(runtime), input.name);
+        if (!existing)
+          return yield* listServers({ workspaceId: input.workspaceId, detail: "full" });
+        yield* runClaudeMcp(runtime, ["mcp", "remove", "--scope", "user", input.name]);
+        const remaining = readClaudeMcpEntry(yield* readDocument(runtime), input.name);
+        if (remaining)
+          return yield* Effect.fail(toMcpError("Claude did not remove the MCP entry."));
+        return yield* listServers({ workspaceId: input.workspaceId, detail: "full" });
       });
 
     return {
@@ -280,6 +476,9 @@ export const makeClaudeMcpAdapter = (io: ClaudeMcpAdapterIo = defaultIo) =>
           issues,
         })),
       ),
+      listServers,
+      upsertServer,
+      removeServer,
       externalAgentControl: {
         inspect,
         install: (input) =>

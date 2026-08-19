@@ -184,8 +184,8 @@ export const SETTINGS_SEARCH_INDEX: ReadonlyArray<SettingsSearchEntry> = [
   {
     section: "mcp-servers",
     title: "MCP Servers",
-    description: "Manage Codex MCP servers and provider MCP support.",
-    keywords: "model context protocol tools add server oauth",
+    description: "Manage Codex, Claude, and other provider-native MCP servers.",
+    keywords: "model context protocol tools add server oauth profiles providers",
   },
   {
     section: "keybindings",

@@ -1,4 +1,9 @@
-import type { McpServer, McpServerConfig, McpTransport } from "@ryco/contracts";
+import type {
+  McpSecretMutationMap,
+  McpServer,
+  McpServerConfig,
+  McpTransport,
+} from "@ryco/contracts";
 
 export const MCP_SERVER_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 
@@ -21,6 +26,8 @@ export interface McpServerFormState {
   readonly enabledToolsText: string;
   readonly disabledToolsText: string;
   readonly oauthScopesText: string;
+  readonly secretFields: ReadonlyArray<string>;
+  readonly clearedSecretFields: ReadonlyArray<string>;
 }
 
 export function createEmptyMcpServerForm(): McpServerFormState {
@@ -43,6 +50,8 @@ export function createEmptyMcpServerForm(): McpServerFormState {
     enabledToolsText: "",
     disabledToolsText: "",
     oauthScopesText: "",
+    secretFields: [],
+    clearedSecretFields: [],
   };
 }
 
@@ -77,6 +86,11 @@ export function formFromMcpServer(server: McpServer): McpServerFormState {
     enabledToolsText: joinList(config.enabledTools),
     disabledToolsText: joinList(config.disabledTools),
     oauthScopesText: joinList(config.oauthScopes),
+    secretFields: Object.entries(config.secretFields ?? {})
+      .filter(([, presence]) => presence === "present")
+      .map(([field]) => field)
+      .toSorted(),
+    clearedSecretFields: [],
   };
 }
 
@@ -156,6 +170,17 @@ export function configFromMcpServerForm(form: McpServerFormState): McpServerConf
     disabledTools: parseList(form.disabledToolsText),
     oauthScopes: parseList(form.oauthScopesText),
   };
+}
+
+export function secretMutationsFromMcpServerForm(form: McpServerFormState): McpSecretMutationMap {
+  return Object.fromEntries(
+    form.secretFields.map((field) => [
+      field,
+      form.clearedSecretFields.includes(field)
+        ? ({ action: "clear" } as const)
+        : ({ action: "retain" } as const),
+    ]),
+  );
 }
 
 export function summarizeMcpServerConnection(server: McpServer): string {

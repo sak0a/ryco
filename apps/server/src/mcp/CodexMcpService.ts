@@ -43,6 +43,10 @@ import {
 import { deriveProviderInstanceConfigMap } from "../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { buildCodexInitializeParams } from "../provider/Layers/CodexProvider.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
+import {
+  applyProviderMcpSecretMutations,
+  providerMcpSecretPresence,
+} from "./ProviderMcpSecrets.ts";
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
@@ -291,12 +295,11 @@ function collectLayerServers(
   return layerServers;
 }
 
-function normalizeServerConfig(raw: unknown): McpServerConfig {
+function decodeServerConfig(raw: unknown): McpServerConfig {
   const record = asRecord(raw);
   if (!record) {
     return Schema.decodeSync(McpServerConfig)({
       transport: "unknown",
-      ...(raw === undefined ? {} : { rawConfig: raw }),
     });
   }
 
@@ -319,7 +322,6 @@ function normalizeServerConfig(raw: unknown): McpServerConfig {
     enabledTools: asStringArray(record.enabled_tools),
     disabledTools: asStringArray(record.disabled_tools),
     oauthScopes: asStringArray(record.oauth_scopes),
-    rawConfig: raw,
   };
   const command = asOptionalString(record.command);
   const url = asOptionalString(record.url);
@@ -332,6 +334,38 @@ function normalizeServerConfig(raw: unknown): McpServerConfig {
   if (startupTimeoutSec !== undefined) input.startupTimeoutSec = startupTimeoutSec;
   if (toolTimeoutSec !== undefined) input.toolTimeoutSec = toolTimeoutSec;
   return Schema.decodeUnknownSync(McpServerConfig)(input);
+}
+
+function normalizeServerConfig(raw: unknown): McpServerConfig {
+  const decoded = decodeServerConfig(raw);
+  return Schema.decodeSync(McpServerConfig)({
+    ...decoded,
+    env: {},
+    httpHeaders: {},
+    secretFields: providerMcpSecretPresence([
+      { prefix: "env", values: decoded.env },
+      { prefix: "header", values: decoded.httpHeaders },
+    ]),
+  });
+}
+
+function mergeServerSecrets(raw: unknown, input: McpServerUpsertInput): McpServerConfig {
+  const existing = decodeServerConfig(raw);
+  return Schema.decodeSync(McpServerConfig)({
+    ...input.config,
+    env: applyProviderMcpSecretMutations(
+      existing.env,
+      input.config.env,
+      "env",
+      input.secretMutations,
+    ),
+    httpHeaders: applyProviderMcpSecretMutations(
+      existing.httpHeaders,
+      input.config.httpHeaders,
+      "header",
+      input.secretMutations,
+    ),
+  });
 }
 
 function encodeServerConfig(config: McpServerConfig): Record<string, unknown> {
@@ -773,16 +807,26 @@ export const makeCodexMcpService = Effect.gen(function* () {
     ),
     listServers: listServersForWorkspace,
     upsertServer: (input) =>
-      mutateWithAppServer(input.workspaceId, (client) =>
-        client.request("config/batchWrite", {
-          edits: [
-            {
-              keyPath: `mcp_servers.${input.name}`,
-              mergeStrategy: "replace",
-              value: encodeServerConfig(input.config),
-            },
-          ],
-          reloadUserConfig: true,
+      mutateWithAppServer(
+        input.workspaceId,
+        Effect.fn(function* (client) {
+          const current = yield* client.request("config/read", {
+            cwd: serverConfig.cwd,
+            includeLayers: false,
+          });
+          const configRecord = current.config as Record<string, unknown>;
+          const configuredServers = asRecord(configRecord.mcp_servers) ?? {};
+          const config = mergeServerSecrets(configuredServers[input.name], input);
+          return yield* client.request("config/batchWrite", {
+            edits: [
+              {
+                keyPath: `mcp_servers.${input.name}`,
+                mergeStrategy: "replace",
+                value: encodeServerConfig(config),
+              },
+            ],
+            reloadUserConfig: true,
+          });
         }),
       ),
     setServerEnabled: (input) =>
