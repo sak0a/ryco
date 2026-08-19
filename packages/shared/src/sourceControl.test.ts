@@ -4,6 +4,7 @@ import {
   classifySourceControlCommentAuthorRole,
   detectSourceControlProviderFromRemoteUrl,
   getChangeRequestTerminologyForKind,
+  parseGitHubRepositoryIdentityFromUrl,
   parseGitHubRepositoryOwnerFromUrl,
   resolveChangeRequestPresentation,
 } from "./sourceControl.ts";
@@ -174,5 +175,46 @@ describe("parseGitHubRepositoryOwnerFromUrl", () => {
   it("returns null for invalid or incomplete URLs", () => {
     expect(parseGitHubRepositoryOwnerFromUrl("not a url")).toBeNull();
     expect(parseGitHubRepositoryOwnerFromUrl("https://github.com/owner")).toBeNull();
+  });
+});
+
+describe("parseGitHubRepositoryIdentityFromUrl", () => {
+  it("extracts the authoritative base repository from GitHub PR and repository URLs", () => {
+    expect(
+      parseGitHubRepositoryIdentityFromUrl("https://github.com/Acme/Ryco/pull/42/files"),
+    ).toEqual({
+      host: "github.com",
+      owner: "Acme",
+      repository: "Ryco",
+      nameWithOwner: "Acme/Ryco",
+    });
+    expect(
+      parseGitHubRepositoryIdentityFromUrl("https://github.com/acme/ryco.git/commits"),
+    ).toEqual({
+      host: "github.com",
+      owner: "acme",
+      repository: "ryco",
+      nameWithOwner: "acme/ryco",
+    });
+  });
+
+  it("supports enterprise-style hosts and preserves their port", () => {
+    expect(
+      parseGitHubRepositoryIdentityFromUrl(
+        "https://github.enterprise.test:8443/Platform/Ryco/pull/9",
+      ),
+    ).toEqual({
+      host: "github.enterprise.test:8443",
+      owner: "Platform",
+      repository: "Ryco",
+      nameWithOwner: "Platform/Ryco",
+    });
+  });
+
+  it("rejects malformed, credentialed, and incomplete URLs", () => {
+    expect(parseGitHubRepositoryIdentityFromUrl("not a url")).toBeNull();
+    expect(parseGitHubRepositoryIdentityFromUrl("https://github.com/acme")).toBeNull();
+    expect(parseGitHubRepositoryIdentityFromUrl("git@github.com:acme/ryco.git")).toBeNull();
+    expect(parseGitHubRepositoryIdentityFromUrl("https://token@github.com/acme/ryco")).toBeNull();
   });
 });

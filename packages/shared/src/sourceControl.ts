@@ -207,17 +207,47 @@ export function classifySourceControlCommentAuthorRole(
  * or repository URLs such as `https://github.com/owner/repo/issues/42`.
  */
 export function parseGitHubRepositoryOwnerFromUrl(url: string | null | undefined): string | null {
+  return parseGitHubRepositoryIdentityFromUrl(url)?.owner ?? null;
+}
+
+export interface GitHubRepositoryIdentity {
+  readonly host: string;
+  readonly owner: string;
+  readonly repository: string;
+  readonly nameWithOwner: string;
+}
+
+/**
+ * Parses the base repository identity from a GitHub repository, issue, or PR
+ * URL. This intentionally uses the public item URL rather than a local remote,
+ * because a pull request's head may live in a fork.
+ */
+export function parseGitHubRepositoryIdentityFromUrl(
+  url: string | null | undefined,
+): GitHubRepositoryIdentity | null {
   const trimmed = url?.trim() ?? "";
-  if (trimmed.length === 0) {
-    return null;
-  }
+  if (trimmed.length === 0) return null;
 
   try {
     const parsed = new URL(trimmed);
-    const segments = parsed.pathname.split("/").filter((segment) => segment.length > 0);
+    if (
+      (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+      parsed.username ||
+      parsed.password
+    ) {
+      return null;
+    }
+    const segments = parsed.pathname.split("/").filter(Boolean);
     const owner = segments[0]?.trim() ?? "";
-    const repo = segments[1]?.trim() ?? "";
-    return owner.length > 0 && repo.length > 0 ? owner : null;
+    const repository = (segments[1]?.trim() ?? "").replace(/\.git$/iu, "");
+    if (!owner || !repository || owner === "." || owner === "..") return null;
+    if (/%2f/iu.test(owner) || /%2f/iu.test(repository)) return null;
+    return {
+      host: parsed.host.toLowerCase(),
+      owner,
+      repository,
+      nameWithOwner: `${owner}/${repository}`,
+    };
   } catch {
     return null;
   }

@@ -3,6 +3,7 @@ import type {
   EnvironmentId,
   SourceControlAssigneeCandidate,
   SourceControlChangeRequestDetail,
+  SourceControlChangeRequestMergeMethod,
   SourceControlIssueDetail,
   SourceControlIssueSummary,
   SourceControlLabel,
@@ -11,6 +12,7 @@ import type {
   SourceControlWorkflowJobLogResult,
   SourceControlWorkflowRunJobsResult,
   SourceControlWorkflowRunListResult,
+  SourceControlMergeChangeRequestResult,
 } from "@ryco/contracts";
 import { requireEnvironmentConnection } from "~/environments/runtime";
 import {
@@ -781,6 +783,24 @@ export function invalidateSourceControl(input?: {
     }
     deleteDetailCacheEntry(cacheKey);
   }
+}
+
+export async function mergeSourceControlChangeRequest(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+  readonly reference: string | null;
+  readonly mergeMethod: SourceControlChangeRequestMergeMethod;
+}): Promise<SourceControlMergeChangeRequestResult> {
+  if (!input.environmentId || !input.cwd || !input.reference) {
+    throw new Error("Pull request merging is unavailable.");
+  }
+  const result = await sourceControlClient(input.environmentId).mergeChangeRequest({
+    cwd: input.cwd,
+    reference: input.reference,
+    mergeMethod: input.mergeMethod,
+  });
+  invalidateSourceControl({ environmentId: input.environmentId, cwd: input.cwd });
+  return result;
 }
 
 // ---------------------------------------------------------------------------

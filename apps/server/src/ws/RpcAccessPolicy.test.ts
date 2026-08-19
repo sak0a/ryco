@@ -30,6 +30,7 @@ describe("RPC access policy", () => {
     expect(rpcAccessFor(WS_METHODS.serverGetUsageSummary)).toBe("owner");
     expect(rpcAccessFor(WS_METHODS.searchThreadMessages)).toBe("owner");
     expect(rpcAccessFor(ORCHESTRATION_WS_METHODS.searchThreadMessages)).toBe("viewer");
+    expect(rpcAccessFor(WS_METHODS.sourceControlMergeChangeRequest)).toBe("operator");
   });
 
   it("keeps the entire Agent Control approval surface owner-only", () => {

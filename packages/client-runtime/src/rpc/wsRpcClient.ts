@@ -102,6 +102,7 @@ export interface WsRpcClient {
     readonly getChangeRequestDiff: RpcUnaryMethod<
       typeof WS_METHODS.sourceControlGetChangeRequestDiff
     >;
+    readonly mergeChangeRequest: RpcUnaryMethod<typeof WS_METHODS.sourceControlMergeChangeRequest>;
     readonly createIssue: RpcUnaryMethod<typeof WS_METHODS.sourceControlCreateIssue>;
     readonly addIssueComment: RpcUnaryMethod<typeof WS_METHODS.sourceControlAddIssueComment>;
     readonly addIssueCommentReaction: RpcUnaryMethod<
@@ -386,6 +387,8 @@ export function createWsRpcClient(transport: WsTransport, device?: DeviceRpcClie
         ),
       getChangeRequestDiff: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlGetChangeRequestDiff](input)),
+      mergeChangeRequest: (input) =>
+        transport.request((client) => client[WS_METHODS.sourceControlMergeChangeRequest](input)),
       createIssue: (input) =>
         transport.request((client) => client[WS_METHODS.sourceControlCreateIssue](input)),
       addIssueComment: (input) =>

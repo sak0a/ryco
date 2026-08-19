@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { AtlassianSaveProjectLinkInput } from "./atlassian.ts";
 import { CONTEXT_HANDOFF_WS_METHODS, ORCHESTRATION_WS_METHODS } from "./orchestration.ts";
-import { WS_METHODS } from "./rpc.ts";
+import { WS_METHODS, WsRpcGroup } from "./rpc.ts";
 import { StatisticsSnapshot } from "./statistics.ts";
 import { USAGE_CONTRACT_VERSION } from "./usage.ts";
 import { WorkItemGetInput } from "./workItems.ts";
@@ -27,6 +27,8 @@ describe("WS_METHODS Atlassian and work item names", () => {
     expect(WS_METHODS.sourceControlAddChangeRequestCommentReaction).toBe(
       "sourceControl.addChangeRequestCommentReaction",
     );
+    expect(WS_METHODS.sourceControlMergeChangeRequest).toBe("sourceControl.mergeChangeRequest");
+    expect(WsRpcGroup.requests.has(WS_METHODS.sourceControlMergeChangeRequest)).toBe(true);
     expect(ORCHESTRATION_WS_METHODS.searchThreadMessages).toBe(
       "orchestration.searchThreadMessages",
     );

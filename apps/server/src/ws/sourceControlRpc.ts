@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import { WS_METHODS } from "@ryco/contracts";
+import { SourceControlProviderError, WS_METHODS } from "@ryco/contracts";
 
 import { observeRpcEffect } from "../observability/RpcInstrumentation.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
@@ -320,6 +320,48 @@ export const makeSourceControlHandlers = (ctx: WsRpcContext) => {
           sourceControlRegistry
             .resolve({ cwd })
             .pipe(Effect.flatMap((provider) => provider.getChangeRequestDiff({ cwd, reference }))),
+        ),
+        {
+          "rpc.aggregate": "source-control",
+        },
+      ),
+    [WS_METHODS.sourceControlMergeChangeRequest]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.sourceControlMergeChangeRequest,
+        ownerEffect(
+          WS_METHODS.sourceControlMergeChangeRequest,
+          sourceControlRegistry.resolve({ cwd: input.cwd }).pipe(
+            Effect.flatMap((provider) => {
+              const mergeChangeRequest = provider.mergeChangeRequest;
+              return mergeChangeRequest
+                ? mergeChangeRequest(input)
+                : Effect.fail(
+                    new SourceControlProviderError({
+                      provider: provider.kind,
+                      operation: "mergeChangeRequest",
+                      detail: "This source control provider does not support pull request merges.",
+                    }),
+                  );
+            }),
+            Effect.tap(() =>
+              Effect.all(
+                [
+                  refreshStateForLinkedReference({
+                    cwd: input.cwd,
+                    kind: "pr",
+                    reference: input.reference,
+                  }),
+                  refreshLinkedWorktreeSourceControlStates({
+                    cwd: input.cwd,
+                    reason: "sourceControl.mergeChangeRequest",
+                    force: true,
+                  }),
+                  refreshGitStatus(input.cwd),
+                ],
+                { concurrency: 3 },
+              ),
+            ),
+          ),
         ),
         {
           "rpc.aggregate": "source-control",

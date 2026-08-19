@@ -196,6 +196,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const refreshLinkedWorktreeSourceControlStates = (input: {
       readonly cwd: string;
       readonly reason: string;
+      readonly force?: boolean;
     }) =>
       Effect.gen(function* () {
         const projectOpt = yield* projectionSnapshotQuery
@@ -207,7 +208,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
         const key = `${project.id}:${input.cwd}`;
         const now = Date.now();
         const lastRefreshAt = linkedSourceControlRefreshAtByProject.get(key) ?? 0;
-        if (now - lastRefreshAt < SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS) {
+        if (!input.force && now - lastRefreshAt < SOURCE_CONTROL_LINKED_REFRESH_DEBOUNCE_MS) {
           return;
         }
         linkedSourceControlRefreshAtByProject.set(key, now);

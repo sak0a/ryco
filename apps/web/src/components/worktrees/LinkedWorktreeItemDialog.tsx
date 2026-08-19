@@ -82,6 +82,7 @@ export function LinkedWorktreeItemDialog(props: LinkedWorktreeItemDialogProps) {
               pullRequestNumber={pivot.number}
               onBack={handleBackFromPivot}
               onSelectLinkedIssue={handleSelectLinkedIssue}
+              onSelectPullRequest={handleSelectLinkedChangeRequest}
             />
           )
         ) : item.kind === "workItem" ? (
@@ -100,6 +101,7 @@ export function LinkedWorktreeItemDialog(props: LinkedWorktreeItemDialogProps) {
             pullRequestNumber={item.number}
             onBack={close}
             onSelectLinkedIssue={handleSelectLinkedIssue}
+            onSelectPullRequest={handleSelectLinkedChangeRequest}
           />
         ) : (
           <IssueDetail

@@ -38,9 +38,93 @@ function mutationMarker(clientMutationId: string): string {
 
 function makeProvider(github: Partial<GitHubCli.GitHubCliShape>) {
   return GitHubSourceControlProvider.make().pipe(
-    Effect.provide(Layer.mergeAll(Layer.mock(GitHubCli.GitHubCli)(github), NodeServices.layer)),
+    Effect.provide(
+      Layer.mergeAll(
+        Layer.mock(GitHubCli.GitHubCli)({
+          getPullRequestStack: () => Effect.succeed(null),
+          getPullRequestStackSummaries: () => Effect.succeed(new Map()),
+          getRepositoryMergeCapabilities: () =>
+            Effect.fail(
+              new GitHubCli.GitHubCliError({
+                operation: "getRepositoryMergeCapabilities",
+                detail: "not configured in this test",
+              }),
+            ),
+          ...github,
+        }),
+        NodeServices.layer,
+      ),
+    ),
   );
 }
+
+const stack = {
+  number: 7,
+  size: 3,
+  position: 2,
+  baseRefName: "main",
+  entries: [
+    {
+      position: 1,
+      number: 41,
+      title: "Foundation",
+      url: "https://github.com/owner/repo/pull/41",
+      headRefName: "feature/41",
+      baseRefName: "main",
+      state: "open" as const,
+      isDraft: false,
+      mergeability: "mergeable" as const,
+      mergeStateStatus: "CLEAN",
+    },
+    {
+      position: 2,
+      number: 42,
+      title: "Middle",
+      url: "https://github.com/owner/repo/pull/42",
+      headRefName: "feature/42",
+      baseRefName: "feature/41",
+      state: "open" as const,
+      isDraft: false,
+      mergeability: "mergeable" as const,
+      mergeStateStatus: "CLEAN",
+    },
+    {
+      position: 3,
+      number: 43,
+      title: "Top",
+      url: "https://github.com/owner/repo/pull/43",
+      headRefName: "feature/43",
+      baseRefName: "feature/42",
+      state: "open" as const,
+      isDraft: false,
+      mergeability: "unknown" as const,
+      mergeStateStatus: "UNKNOWN",
+    },
+  ],
+};
+
+const githubPullRequestDetail = {
+  number: 42,
+  title: "Middle",
+  url: "https://github.com/owner/repo/pull/42",
+  baseRefName: "feature/41",
+  headRefName: "feature/42",
+  state: "open" as const,
+  isDraft: false,
+  author: "alice",
+  assignees: [],
+  labels: [],
+  commentsCount: 0,
+  body: "Body",
+  comments: [],
+  linkedIssueNumbers: [],
+  reviewers: [],
+  commits: [],
+  additions: 1,
+  deletions: 0,
+  changedFiles: 1,
+  files: [],
+} satisfies GitHubCli.GitHubPullRequestDetail;
 
 it("parses structured gh auth status hosts output", () => {
   const status = parseGitHubAuthStatus(
@@ -609,6 +693,156 @@ it.effect("getChangeRequestDetail returns body and comments", () =>
     assert.strictEqual(detail.comments[0]?.author, "reviewer");
     assert.strictEqual(detail.comments[0]?.body, "Looks good!");
     assert.strictEqual(detail.truncated, false);
+  }),
+);
+
+it.effect("enriches pull request lists with stack summaries", () =>
+  Effect.gen(function* () {
+    let summaryInput:
+      | Parameters<GitHubCli.GitHubCliShape["getPullRequestStackSummaries"]>[0]
+      | null = null;
+    const provider = yield* makeProvider({
+      listOpenPullRequests: () => Effect.succeed([githubPullRequestDetail]),
+      getPullRequestStackSummaries: (input) => {
+        summaryInput = input;
+        return Effect.succeed(
+          new Map([[42, { number: 7, size: 3, position: 2, baseRefName: "main" }]]),
+        );
+      },
+    });
+
+    const items = yield* provider.listChangeRequests({
+      cwd: "/repo",
+      state: "open",
+      headSelector: "feature/42",
+    });
+
+    assert.deepStrictEqual(summaryInput, {
+      cwd: "/repo",
+      host: "github.com",
+      repository: "owner/repo",
+      numbers: [42],
+    });
+    assert.deepStrictEqual(items[0]?.stackSummary, {
+      number: 7,
+      size: 3,
+      position: 2,
+      baseRefName: "main",
+    });
+  }),
+);
+
+it.effect("preserves pull request list and search results when stack enrichment fails", () =>
+  Effect.gen(function* () {
+    const enrichmentFailure = () =>
+      Effect.fail(
+        new GitHubCli.GitHubCliError({
+          operation: "getPullRequestStackSummaries",
+          detail: "preview unavailable",
+        }),
+      );
+    const provider = yield* makeProvider({
+      listOpenPullRequests: () => Effect.succeed([githubPullRequestDetail]),
+      searchPullRequests: () => Effect.succeed([githubPullRequestDetail]),
+      getPullRequestStackSummaries: enrichmentFailure,
+    });
+
+    const listed = yield* provider.listChangeRequests({
+      cwd: "/repo",
+      state: "open",
+      headSelector: "feature/42",
+    });
+    const searched = yield* provider.searchChangeRequests({ cwd: "/repo", query: "Middle" });
+
+    assert.equal(listed[0]?.number, 42);
+    assert.equal(listed[0]?.stackSummary, undefined);
+    assert.equal(searched[0]?.number, 42);
+    assert.equal(searched[0]?.stackSummary, undefined);
+  }),
+);
+
+it.effect("loads full stack and merge capabilities into pull request detail", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      getPullRequestDetail: () => Effect.succeed(githubPullRequestDetail),
+      getPullRequestStack: () => Effect.succeed(stack),
+      getRepositoryMergeCapabilities: () =>
+        Effect.succeed({ merge: true, squash: true, rebase: false }),
+    });
+
+    const detail = yield* provider.getChangeRequestDetail({ cwd: "/repo", reference: "42" });
+    assert.deepStrictEqual(detail.stack, stack);
+    assert.equal(detail.stackMetadataIncomplete, false);
+    assert.deepStrictEqual(detail.mergeCapabilities, {
+      merge: true,
+      squash: true,
+      rebase: false,
+    });
+  }),
+);
+
+it.effect("keeps core detail readable when stack metadata lookup fails", () =>
+  Effect.gen(function* () {
+    const provider = yield* makeProvider({
+      getPullRequestDetail: () => Effect.succeed(githubPullRequestDetail),
+      getPullRequestStack: () =>
+        Effect.fail(
+          new GitHubCli.GitHubCliError({
+            operation: "getPullRequestStack",
+            detail: "preview permission denied",
+          }),
+        ),
+      getRepositoryMergeCapabilities: () =>
+        Effect.succeed({ merge: true, squash: false, rebase: false }),
+    });
+
+    const detail = yield* provider.getChangeRequestDetail({ cwd: "/repo", reference: "42" });
+    assert.equal(detail.number, 42);
+    assert.equal(detail.stack, undefined);
+    assert.equal(detail.stackMetadataIncomplete, true);
+    assert.deepStrictEqual(detail.mergeCapabilities, {
+      merge: true,
+      squash: false,
+      rebase: false,
+    });
+  }),
+);
+
+it.effect("revalidates stack membership and allowed method before merging", () =>
+  Effect.gen(function* () {
+    let asyncInput: Parameters<GitHubCli.GitHubCliShape["mergePullRequestAsync"]>[0] | null = null;
+    let stackLookups = 0;
+    const provider = yield* makeProvider({
+      getPullRequest: () => Effect.succeed(githubPullRequestDetail),
+      getPullRequestStack: () => {
+        stackLookups += 1;
+        return Effect.succeed(stack);
+      },
+      getRepositoryMergeCapabilities: () =>
+        Effect.succeed({ merge: false, squash: true, rebase: false }),
+      mergePullRequestAsync: (input) => {
+        asyncInput = input;
+        return Effect.succeed({ outcome: "enqueued" });
+      },
+    });
+    const merge = provider.mergeChangeRequest;
+    assert.ok(merge);
+    const result = yield* merge({ cwd: "/repo", reference: "42", mergeMethod: "squash" });
+    assert.equal(result.outcome, "enqueued");
+    assert.equal(stackLookups, 1);
+    assert.deepStrictEqual(asyncInput, {
+      cwd: "/repo",
+      host: "github.com",
+      repository: "owner/repo",
+      number: 42,
+      mergeMethod: "squash",
+      stackMembership: "stacked",
+    });
+
+    const unsupported = yield* merge({ cwd: "/repo", reference: "42", mergeMethod: "rebase" }).pipe(
+      Effect.flip,
+    );
+    assert.include(unsupported.detail, "disabled");
   }),
 );
 

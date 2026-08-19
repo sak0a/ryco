@@ -7,6 +7,8 @@ import type {
   SourceControlAssigneeCandidate,
   SourceControlAddCommentReactionInput,
   SourceControlChangeRequestDetail,
+  SourceControlMergeChangeRequestInput,
+  SourceControlMergeChangeRequestResult,
   SourceControlWorkflowJobLogResult,
   SourceControlWorkflowRerunInput,
   SourceControlWorkflowRerunResult,
@@ -180,6 +182,11 @@ export interface SourceControlProviderShape {
     readonly context?: SourceControlProviderContext;
     readonly reference: string;
   }) => Effect.Effect<string, SourceControlProviderError>;
+  readonly mergeChangeRequest?: (
+    input: SourceControlMergeChangeRequestInput & {
+      readonly context?: SourceControlProviderContext;
+    },
+  ) => Effect.Effect<SourceControlMergeChangeRequestResult, SourceControlProviderError>;
   readonly createIssue: (input: {
     readonly cwd: string;
     readonly context?: SourceControlProviderContext;

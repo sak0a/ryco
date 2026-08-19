@@ -216,6 +216,8 @@ import {
   SourceControlAddIssueCommentReactionResult,
   SourceControlCreateIssueInput,
   SourceControlLabel,
+  SourceControlMergeChangeRequestInput,
+  SourceControlMergeChangeRequestResult,
   SourceControlWorkflowJobLogInput,
   SourceControlWorkflowJobLogResult,
   SourceControlWorkflowRerunInput,
@@ -344,6 +346,7 @@ export const WS_METHODS = {
   sourceControlSearchChangeRequests: "sourceControl.searchChangeRequests",
   sourceControlGetChangeRequestDetail: "sourceControl.getChangeRequestDetail",
   sourceControlGetChangeRequestDiff: "sourceControl.getChangeRequestDiff",
+  sourceControlMergeChangeRequest: "sourceControl.mergeChangeRequest",
   sourceControlCreateIssue: "sourceControl.createIssue",
   sourceControlAddIssueComment: "sourceControl.addIssueComment",
   sourceControlAddIssueCommentReaction: "sourceControl.addIssueCommentReaction",
@@ -788,6 +791,15 @@ export const WsSourceControlGetChangeRequestDiffRpc = Rpc.make(
       reference: Schema.String,
     }),
     success: Schema.String,
+    error: Schema.Union([SourceControlProviderError, AuthRpcError]),
+  },
+);
+
+export const WsSourceControlMergeChangeRequestRpc = Rpc.make(
+  WS_METHODS.sourceControlMergeChangeRequest,
+  {
+    payload: SourceControlMergeChangeRequestInput,
+    success: SourceControlMergeChangeRequestResult,
     error: Schema.Union([SourceControlProviderError, AuthRpcError]),
   },
 );
@@ -1609,6 +1621,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlSearchChangeRequestsRpc,
   WsSourceControlGetChangeRequestDetailRpc,
   WsSourceControlGetChangeRequestDiffRpc,
+  WsSourceControlMergeChangeRequestRpc,
   WsSourceControlCreateIssueRpc,
   WsSourceControlAddIssueCommentRpc,
   WsSourceControlAddIssueCommentReactionRpc,

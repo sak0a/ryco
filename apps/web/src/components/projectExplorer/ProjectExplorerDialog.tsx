@@ -344,6 +344,7 @@ export function ProjectExplorerDialog(props: ProjectExplorerDialogProps) {
             onBack={handleBack}
             onSelectLinkedIssue={handleSelectLinkedIssue}
             onSelectLinkedWorkItem={handleSelectLinkedWorkItem}
+            onSelectPullRequest={handleSelectLinkedChangeRequest}
           />
         ) : (
           <WorkItemDetail

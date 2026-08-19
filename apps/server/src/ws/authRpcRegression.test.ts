@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import {
   AuthRpcError,
   AuthSessionId,
@@ -10,6 +10,7 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationGetSnapshotError,
   ProjectId,
+  SourceControlProviderError,
   ThreadId,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
@@ -280,5 +281,30 @@ it.effect("rejects client sessions from source-control change-request listing", 
     expect(error.status).toBe(403);
     expect(error.message).toBe("Only owner sessions can call sourceControl.listChangeRequests.");
     expect(getState()).toEqual({ listCalls: 0, refreshCalls: 0, resolveCalls: 0 });
+  }),
+);
+
+it.effect("returns a provider error when pull request merge is unsupported", () =>
+  Effect.gen(function* () {
+    const provider = { kind: "gitlab" } as SourceControlProviderShape;
+    const ctx = {
+      ...makeAccessGuards("owner"),
+      sourceControlRegistry: { resolve: () => Effect.succeed(provider) },
+      refreshStateForLinkedReference: () => Effect.void,
+      refreshLinkedWorktreeSourceControlStates: () => Effect.void,
+      refreshGitStatus: () => Effect.void,
+    } as unknown as WsRpcContext;
+    const handlers = makeSourceControlHandlers(ctx);
+    const error = yield* handlers[WS_METHODS.sourceControlMergeChangeRequest]({
+      cwd: "/tmp/project",
+      reference: "42",
+      mergeMethod: "merge",
+    }).pipe(Effect.flip, Effect.provide(sourceControlHandlerLayer));
+
+    expect(Schema.is(SourceControlProviderError)(error)).toBe(true);
+    if (Schema.is(SourceControlProviderError)(error)) {
+      expect(error.provider).toBe("gitlab");
+      expect(error.detail).toContain("does not support pull request merges");
+    }
   }),
 );

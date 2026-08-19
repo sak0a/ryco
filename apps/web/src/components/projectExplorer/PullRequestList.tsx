@@ -7,6 +7,7 @@ import { LabelChip } from "./LabelChip";
 import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
 import { changeRequestStateKind, StateBadge } from "./StateBadge";
 import { getPrCheckStatusFromChangeRequest } from "./prCheckStatus";
+import { PullRequestStackPosition } from "./PullRequestStackPosition";
 
 const dateFmt = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
@@ -95,6 +96,9 @@ export const PullRequestList = memo(function PullRequestList(props: {
                   <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
                     #{pr.number}
                   </span>
+                  {pr.provider === "github" && pr.stackSummary ? (
+                    <PullRequestStackPosition stack={pr.stackSummary} />
+                  ) : null}
                   <span className="min-w-0 flex-1 truncate font-medium text-sm">{pr.title}</span>
                   <PrCheckStatusBadge view={checkStatus} mode="compact" />
                 </div>

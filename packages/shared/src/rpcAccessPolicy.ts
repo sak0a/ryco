@@ -130,6 +130,7 @@ export const RPC_ACCESS_POLICY = {
   [WS_METHODS.sourceControlListIssues]: "operator",
   [WS_METHODS.sourceControlListWorkflowRuns]: "operator",
   [WS_METHODS.sourceControlLookupRepository]: "operator",
+  [WS_METHODS.sourceControlMergeChangeRequest]: "operator",
   [WS_METHODS.sourceControlPublishRepository]: "operator",
   [WS_METHODS.sourceControlRerunWorkflow]: "operator",
   [WS_METHODS.sourceControlSearchChangeRequests]: "operator",

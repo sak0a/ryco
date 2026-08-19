@@ -3,6 +3,8 @@ import type {
   VcsStatusRemoteResult,
   VcsStatusStreamEvent,
 } from "@ryco/contracts";
+import { WS_METHODS } from "@ryco/contracts";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 vi.mock("./wsTransport.ts", () => ({
@@ -35,6 +37,35 @@ const baseRemoteStatus: VcsStatusRemoteResult = {
 };
 
 describe("wsRpcClient", () => {
+  it("calls the source-control merge wire method", async () => {
+    const mergeWireMethod = vi.fn(() => Effect.succeed({ outcome: "enqueued" as const }));
+    const transport = {
+      dispose: vi.fn(async () => undefined),
+      isHeartbeatFresh: vi.fn(() => true),
+      reconnect: vi.fn(async () => undefined),
+      request: vi.fn((invoke: (client: unknown) => Effect.Effect<unknown>) =>
+        Effect.runPromise(
+          invoke({ [WS_METHODS.sourceControlMergeChangeRequest]: mergeWireMethod }),
+        ),
+      ),
+      requestStream: vi.fn(),
+      subscribe: vi.fn(() => () => undefined),
+    };
+    const client = createWsRpcClient(transport as unknown as WsTransport);
+    await expect(
+      client.sourceControl.mergeChangeRequest({
+        cwd: "/repo",
+        reference: "42",
+        mergeMethod: "squash",
+      }),
+    ).resolves.toEqual({ outcome: "enqueued" });
+    expect(mergeWireMethod).toHaveBeenCalledWith({
+      cwd: "/repo",
+      reference: "42",
+      mergeMethod: "squash",
+    });
+  });
+
   it("reduces vcs status stream events into flat status snapshots", () => {
     const subscribe = vi.fn(<TValue>(_connect: unknown, listener: (value: TValue) => void) => {
       for (const event of [
