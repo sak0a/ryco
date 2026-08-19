@@ -32,6 +32,10 @@ import {
   removeExternalCredentialFile,
   writeExternalCredentialFile,
 } from "../ExternalMcp/runtimeFiles.ts";
+import {
+  probeExternalMcpCommand,
+  type ExternalMcpProtocolProbeInput,
+} from "../ExternalMcp/probe.ts";
 import { AgentControlMcpInstallationError } from "../Errors.ts";
 import {
   AgentControlExternalInstallationService,
@@ -75,7 +79,16 @@ const clientKindFor = (workspace: McpWorkspace): AgentControlExternalClientKind 
   return "generic-mcp";
 };
 
-export const makeAgentControlExternalInstallation = (registry: ProviderMcpRegistryShape) =>
+export interface AgentControlExternalInstallationIo {
+  readonly probe: (input: ExternalMcpProtocolProbeInput) => Promise<unknown>;
+}
+
+const defaultIo: AgentControlExternalInstallationIo = { probe: probeExternalMcpCommand };
+
+export const makeAgentControlExternalInstallation = (
+  registry: ProviderMcpRegistryShape,
+  io: AgentControlExternalInstallationIo = defaultIo,
+) =>
   Effect.gen(function* () {
     const repository = yield* AgentControlMcpInstallationRepository;
     const integrations = yield* AgentControlExternalIntegrationService;
@@ -183,6 +196,14 @@ export const makeAgentControlExternalInstallation = (registry: ProviderMcpRegist
               installationError("verification", "The external integration did not verify."),
             ),
           );
+        yield* Effect.tryPromise({
+          try: () => io.probe({ command, args, cwd: config.cwd }),
+          catch: () =>
+            installationError(
+              "verification",
+              "The installed Agent Control bridge did not complete the MCP handshake.",
+            ),
+        });
         return inspected.fingerprint;
       });
 
@@ -271,10 +292,15 @@ export const makeAgentControlExternalInstallation = (registry: ProviderMcpRegist
         });
       }).pipe(
         Effect.catch((error) =>
-          markRepairNeeded(
-            initial,
-            Schema.is(AgentControlMcpInstallationError)(error) ? error.detail : REPAIR_MESSAGE,
-          ).pipe(Effect.andThen(Effect.fail(error))),
+          get(initial.installationId).pipe(
+            Effect.flatMap((latest) =>
+              markRepairNeeded(
+                latest,
+                Schema.is(AgentControlMcpInstallationError)(error) ? error.detail : REPAIR_MESSAGE,
+              ),
+            ),
+            Effect.andThen(Effect.fail(error)),
+          ),
         ),
       );
 
@@ -312,7 +338,12 @@ export const makeAgentControlExternalInstallation = (registry: ProviderMcpRegist
         });
         return current;
       }).pipe(
-        Effect.catch((error) => markRepairNeeded(initial).pipe(Effect.andThen(Effect.fail(error)))),
+        Effect.catch((error) =>
+          get(initial.installationId).pipe(
+            Effect.flatMap((latest) => markRepairNeeded(latest)),
+            Effect.andThen(Effect.fail(error)),
+          ),
+        ),
       );
 
     const connectUnlocked = (input: AgentControlMcpInstallationConnectInput) =>
@@ -447,7 +478,10 @@ export const makeAgentControlExternalInstallation = (registry: ProviderMcpRegist
         });
         return yield* run.pipe(
           Effect.catch((error) =>
-            markRepairNeeded(current).pipe(Effect.andThen(Effect.fail(error))),
+            markRepairNeeded(
+              current,
+              Schema.is(AgentControlMcpInstallationError)(error) ? error.detail : REPAIR_MESSAGE,
+            ).pipe(Effect.andThen(Effect.fail(error))),
           ),
         );
       });
@@ -461,6 +495,7 @@ export const makeAgentControlExternalInstallation = (registry: ProviderMcpRegist
               "credential-written",
               "provider-written",
               "verifying",
+              "repair-needed",
               "disconnecting",
             ].includes(entry.state),
           ),

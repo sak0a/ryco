@@ -641,6 +641,7 @@ function InventoryList({ server }: { readonly server: McpServer }) {
 function McpServerCard({
   server,
   capabilities,
+  writable,
   mutating,
   onToggleEnabled,
   onEdit,
@@ -649,6 +650,7 @@ function McpServerCard({
 }: {
   readonly server: McpServer;
   readonly capabilities: McpProviderCapabilities;
+  readonly writable: boolean;
   readonly mutating: boolean;
   readonly onToggleEnabled: (server: McpServer, enabled: boolean) => void;
   readonly onEdit: (server: McpServer) => void;
@@ -708,12 +710,12 @@ function McpServerCard({
               <TooltipPopup>Start OAuth login</TooltipPopup>
             </Tooltip>
           ) : null}
-          {capabilities.upsert === "available" ? (
+          {writable && capabilities.upsert === "available" ? (
             <Button size="sm" variant="outline" onClick={() => onEdit(server)} disabled={mutating}>
               Edit
             </Button>
           ) : null}
-          {capabilities.remove === "available" ? (
+          {writable && capabilities.remove === "available" ? (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -731,7 +733,7 @@ function McpServerCard({
               <TooltipPopup>Remove server</TooltipPopup>
             </Tooltip>
           ) : null}
-          {capabilities.enableDisable === "available" ? (
+          {writable && capabilities.enableDisable === "available" ? (
             <Switch
               checked={server.config.enabled}
               disabled={mutating}
@@ -1096,6 +1098,10 @@ export function McpServersSettings() {
                     automaticAgentControl: "unavailable",
                     scopes: [],
                   }
+                }
+                writable={
+                  server.source === "user" ||
+                  (server.source === "project" && selectedWorkspace?.nativeScope === "project")
                 }
                 mutating={mutatingName === server.name}
                 onToggleEnabled={(target, enabled) => void toggleEnabled(target, enabled)}

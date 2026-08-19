@@ -30,6 +30,8 @@ const capabilities = Schema.decodeSync(McpProviderCapabilities)({
   scopes: ["user"],
 });
 
+const successfulProbe = { probe: async () => ({ toolNames: ["ryco_overview"] }) };
+
 const workspace = Schema.decodeSync(McpWorkspace)({
   id: "codex:dGVzdA",
   driver: "codex",
@@ -153,7 +155,10 @@ describe("AgentControlExternalInstallation", () => {
     try {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const service = yield* makeAgentControlExternalInstallation(fake.registry);
+          const service = yield* makeAgentControlExternalInstallation(
+            fake.registry,
+            successfulProbe,
+          );
           const connected = yield* service.connect({ workspaceId: workspace.id });
           const credential = yield* Effect.promise(() =>
             readExternalCredentialFile(stateDir, connected.installation.integrationId),
@@ -192,7 +197,10 @@ describe("AgentControlExternalInstallation", () => {
     try {
       const result = await Effect.runPromise(
         Effect.gen(function* () {
-          const service = yield* makeAgentControlExternalInstallation(fake.registry);
+          const service = yield* makeAgentControlExternalInstallation(
+            fake.registry,
+            successfulProbe,
+          );
           yield* Effect.flip(service.connect({ workspaceId: McpWorkspaceId.make(workspace.id) }));
           const failed = (yield* service.list()).installations[0]!;
           fake.allowInstall();
@@ -204,6 +212,45 @@ describe("AgentControlExternalInstallation", () => {
       expect(result.failed.state).toBe("repair-needed");
       expect(result.failed.lastError).not.toContain("injected install failure");
       expect(result.repaired.installation.state).toBe("connected");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not connect before a successful MCP handshake and recovers after restart", async () => {
+    const stateDir = await mkdtemp(path.join(os.tmpdir(), "ryco-installation-probe-test-"));
+    const fake = makeFakeRegistry();
+    let probeAvailable = false;
+    const probe = {
+      probe: async () => {
+        if (!probeAvailable) throw new Error("injected secret-bearing probe failure");
+        return { toolNames: ["ryco_overview"] };
+      },
+    };
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          const firstProcess = yield* makeAgentControlExternalInstallation(fake.registry, probe);
+          yield* Effect.flip(firstProcess.connect({ workspaceId: workspace.id }));
+          const failed = (yield* firstProcess.list()).installations[0]!;
+          probeAvailable = true;
+          const restartedProcess = yield* makeAgentControlExternalInstallation(
+            fake.registry,
+            probe,
+          );
+          yield* restartedProcess.recover;
+          const recovered = (yield* restartedProcess.list()).installations[0]!;
+          return { failed, recovered };
+        }).pipe(Effect.provide(testLayer(stateDir)), Effect.scoped),
+      );
+
+      expect(result.failed).toMatchObject({
+        state: "repair-needed",
+        connectedAt: null,
+        lastError: "The installed Agent Control bridge did not complete the MCP handshake.",
+      });
+      expect(JSON.stringify(result.failed)).not.toContain("secret-bearing");
+      expect(result.recovered).toMatchObject({ state: "connected", lastError: null });
     } finally {
       await rm(stateDir, { recursive: true, force: true });
     }
