@@ -108,6 +108,7 @@ export function mcpSupportForDriver(
           health: "available",
           inventory: "available",
           oauth: "available",
+          externalAgentControl: "available",
           automaticAgentControl: "available",
           scopes: ["user"],
         }),

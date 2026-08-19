@@ -115,4 +115,7 @@ export type AgentControlProposalRepositoryError = PersistenceSqlError | Persiste
 export type AgentControlOperationRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 export type AgentControlAuditRepositoryError = PersistenceSqlError | PersistenceDecodeError;
 export type AgentControlExternalRepositoryError = PersistenceSqlError | PersistenceDecodeError;
+export type AgentControlMcpInstallationRepositoryError =
+  | PersistenceSqlError
+  | PersistenceDecodeError;
 export type AgentControlAutomationRepositoryError = PersistenceSqlError | PersistenceDecodeError;

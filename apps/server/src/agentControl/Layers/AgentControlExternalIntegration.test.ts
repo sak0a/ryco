@@ -57,6 +57,34 @@ const reasonOf = (error: unknown): string => {
 };
 
 layer("AgentControlExternalIntegrationService", (it) => {
+  it.effect("issues and rotates a paired credential only through the server-only path", () =>
+    Effect.gen(function* () {
+      const service = yield* AgentControlExternalIntegrationService;
+      const created = yield* service.createPaired(createInput({ displayName: "One-click Codex" }));
+      const first = Redacted.value(created.credential);
+      assert.match(first, /^rycoext_/);
+      assert.strictEqual(created.detail.integration.pairingState, "paired");
+      assert.notInclude(JSON.stringify(created.detail), first);
+      assert.strictEqual(
+        (yield* service.authenticate(`Bearer ${first}`)).integration.displayName,
+        "One-click Codex",
+      );
+
+      const rotated = yield* service.rotateCredential(created.detail.integration.integrationId);
+      const second = Redacted.value(rotated.credential);
+      assert.notStrictEqual(second, first);
+      assert.strictEqual(
+        reasonOf(yield* Effect.flip(service.authenticate(`Bearer ${first}`))),
+        "credential-refused",
+      );
+      assert.strictEqual(
+        (yield* service.authenticate(`Bearer ${second}`)).integration.integrationId,
+        created.detail.integration.integrationId,
+      );
+      assert.notInclude(JSON.stringify(yield* service.list()), second);
+    }),
+  );
+
   it.effect("creates, updates, pairs once, resumes pairing, and revokes immediately", () =>
     Effect.gen(function* () {
       const service = yield* AgentControlExternalIntegrationService;

@@ -303,6 +303,18 @@ export interface WsRpcClient {
     >;
     readonly revokeIntegration: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.revokeIntegration>;
     readonly deleteIntegration: RpcUnaryMethod<typeof AGENT_CONTROL_WS_METHODS.deleteIntegration>;
+    readonly listMcpInstallations: RpcUnaryNoArgMethod<
+      typeof AGENT_CONTROL_WS_METHODS.listMcpInstallations
+    >;
+    readonly connectMcpInstallation: RpcUnaryMethod<
+      typeof AGENT_CONTROL_WS_METHODS.connectMcpInstallation
+    >;
+    readonly repairMcpInstallation: RpcUnaryMethod<
+      typeof AGENT_CONTROL_WS_METHODS.repairMcpInstallation
+    >;
+    readonly disconnectMcpInstallation: RpcUnaryMethod<
+      typeof AGENT_CONTROL_WS_METHODS.disconnectMcpInstallation
+    >;
   };
 }
 
@@ -668,6 +680,20 @@ export function createWsRpcClient(transport: WsTransport, device?: DeviceRpcClie
         transport.request((client) => client[AGENT_CONTROL_WS_METHODS.revokeIntegration](input)),
       deleteIntegration: (input) =>
         transport.request((client) => client[AGENT_CONTROL_WS_METHODS.deleteIntegration](input)),
+      listMcpInstallations: () =>
+        transport.request((client) => client[AGENT_CONTROL_WS_METHODS.listMcpInstallations]({})),
+      connectMcpInstallation: (input) =>
+        transport.request((client) =>
+          client[AGENT_CONTROL_WS_METHODS.connectMcpInstallation](input),
+        ),
+      repairMcpInstallation: (input) =>
+        transport.request((client) =>
+          client[AGENT_CONTROL_WS_METHODS.repairMcpInstallation](input),
+        ),
+      disconnectMcpInstallation: (input) =>
+        transport.request((client) =>
+          client[AGENT_CONTROL_WS_METHODS.disconnectMcpInstallation](input),
+        ),
     },
   };
 }

@@ -636,6 +636,30 @@ describe("Agent Control MCP contracts", () => {
 });
 
 describe("AgentControl external MCP", () => {
+  it("exposes durable installation state without native fingerprints or credentials", async () => {
+    const { AgentControlMcpInstallation } = await import("./agentControl.ts");
+    const decode = Schema.decodeUnknownSync(AgentControlMcpInstallation);
+    const value = decode({
+      installationId: "installation-1",
+      integrationId: "integration-1",
+      workspaceId: "codex:dGVzdA",
+      driver: "codex",
+      serverName: "ryco",
+      state: "connected",
+      revision: 4,
+      lastError: null,
+      ownsNativeConfig: true,
+      preservedUserChanges: false,
+      createdAt: "2026-08-19T00:00:00.000Z",
+      updatedAt: "2026-08-19T00:01:00.000Z",
+      connectedAt: "2026-08-19T00:01:00.000Z",
+      nativeFingerprint: "forbidden",
+      credential: "rycoext_forbidden",
+    });
+    expect(value).not.toHaveProperty("nativeFingerprint");
+    expect(value).not.toHaveProperty("credential");
+  });
+
   it("publishes the scoped task, automation, activity, and diagnostics tools", async () => {
     const { AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES } = await import("./agentControl.ts");
     expect([...AGENT_CONTROL_EXTERNAL_MCP_TOOL_NAMES]).toEqual([

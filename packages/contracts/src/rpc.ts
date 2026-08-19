@@ -21,6 +21,10 @@ import {
   AgentControlExternalIntegrationUpdateInput,
   AgentControlExternalPairingResult,
   AgentControlExternalRpcError,
+  AgentControlMcpInstallationConnectInput,
+  AgentControlMcpInstallationIdInput,
+  AgentControlMcpInstallationListResult,
+  AgentControlMcpInstallationMutationResult,
 } from "./agentControl.ts";
 import { AuthAccessStreamEvent, AuthRpcError } from "./auth.ts";
 import { DiagnosticsError, DiagnosticsSnapshot } from "./diagnostics.ts";
@@ -1534,6 +1538,42 @@ export const WsAgentControlDeleteIntegrationRpc = Rpc.make(
   },
 );
 
+export const WsAgentControlListMcpInstallationsRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.listMcpInstallations,
+  {
+    payload: Schema.Struct({}),
+    success: AgentControlMcpInstallationListResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlConnectMcpInstallationRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.connectMcpInstallation,
+  {
+    payload: AgentControlMcpInstallationConnectInput,
+    success: AgentControlMcpInstallationMutationResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlRepairMcpInstallationRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.repairMcpInstallation,
+  {
+    payload: AgentControlMcpInstallationIdInput,
+    success: AgentControlMcpInstallationMutationResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
+export const WsAgentControlDisconnectMcpInstallationRpc = Rpc.make(
+  AGENT_CONTROL_WS_METHODS.disconnectMcpInstallation,
+  {
+    payload: AgentControlMcpInstallationIdInput,
+    success: AgentControlMcpInstallationMutationResult,
+    error: Schema.Union([AgentControlExternalRpcError, AuthRpcError]),
+  },
+);
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerGetAdvertisedEndpointsRpc,
@@ -1651,6 +1691,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsAgentControlResumeIntegrationPairingRpc,
   WsAgentControlRevokeIntegrationRpc,
   WsAgentControlDeleteIntegrationRpc,
+  WsAgentControlListMcpInstallationsRpc,
+  WsAgentControlConnectMcpInstallationRpc,
+  WsAgentControlRepairMcpInstallationRpc,
+  WsAgentControlDisconnectMcpInstallationRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetWorkflowScriptRpc,
   WsOrchestrationGetTaskOutputRpc,

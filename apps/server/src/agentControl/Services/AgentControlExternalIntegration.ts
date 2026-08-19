@@ -46,6 +46,14 @@ export interface AgentControlExternalIntegrationServiceShape {
     AgentControlExternalPairingResult,
     AgentControlExternalIntegrationServiceError
   >;
+  /** Server-only one-click path. The credential is returned redacted and never enters RPC. */
+  readonly createPaired: (input: AgentControlExternalIntegrationCreateInput) => Effect.Effect<
+    {
+      readonly detail: AgentControlExternalIntegrationDetail;
+      readonly credential: Redacted.Redacted<string>;
+    },
+    AgentControlExternalIntegrationServiceError
+  >;
   readonly update: (
     input: AgentControlExternalIntegrationUpdateInput,
   ) => Effect.Effect<
@@ -74,6 +82,13 @@ export interface AgentControlExternalIntegrationServiceShape {
     readonly integrationId: AgentControlIntegrationId;
     readonly pairingCode: string;
   }) => Effect.Effect<
+    AgentControlExternalPairingExchange,
+    AgentControlExternalIntegrationServiceError
+  >;
+  /** Server-only credential rotation used by repair/recovery. */
+  readonly rotateCredential: (
+    integrationId: AgentControlIntegrationId,
+  ) => Effect.Effect<
     AgentControlExternalPairingExchange,
     AgentControlExternalIntegrationServiceError
   >;

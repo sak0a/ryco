@@ -102,6 +102,7 @@ import { AgentControlOperationRepositoryLive } from "./persistence/Layers/AgentC
 import { AgentControlProposalRepositoryLive } from "./persistence/Layers/AgentControlProposals.ts";
 import { AgentControlExternalRepositoryLive } from "./persistence/Layers/AgentControlExternal.ts";
 import { AgentControlAutomationRepositoryLive } from "./persistence/Layers/AgentControlAutomations.ts";
+import { AgentControlMcpInstallationRepositoryLive } from "./persistence/Layers/AgentControlMcpInstallation.ts";
 import { AgentControlMcpServerLive } from "./agentControl/Layers/AgentControlMcpServer.ts";
 import { AgentControlOperationStoreLive } from "./agentControl/Layers/AgentControlOperationStore.ts";
 import { AgentControlPolicyLive } from "./agentControl/Layers/AgentControlPolicy.ts";
@@ -117,6 +118,7 @@ import { AgentControlExternalTaskServiceLive } from "./agentControl/Layers/Agent
 import { AgentControlExternalMcpServerLive } from "./agentControl/Layers/AgentControlExternalMcpServer.ts";
 import { AgentControlAutomationServiceLive } from "./agentControl/Layers/AgentControlAutomation.ts";
 import { AgentControlDiagnosticsServiceLive } from "./agentControl/Layers/AgentControlDiagnostics.ts";
+import { AgentControlExternalInstallationServiceLive } from "./agentControl/Layers/AgentControlExternalInstallation.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import { OrchestrationCommandApplicationLive } from "./orchestration/Layers/OrchestrationCommandApplication.ts";
 import {
@@ -229,10 +231,16 @@ const AgentControlAutomationLayerLive = AgentControlAutomationServiceLive.pipe(
   Layer.provideMerge(AgentControlExternalIntegrationServiceLive),
 );
 
+const AgentControlExternalInstallationLayerLive = AgentControlExternalInstallationServiceLive.pipe(
+  Layer.provideMerge(AgentControlExternalIntegrationServiceLive),
+  Layer.provideMerge(AgentControlMcpInstallationRepositoryLive),
+);
+
 const AgentControlLayerLive = Layer.mergeAll(
   AgentControlProposalServiceLive,
   AgentControlOperationStoreLive,
   AgentControlAutomationLayerLive,
+  AgentControlExternalInstallationLayerLive,
 ).pipe(
   Layer.provideMerge(AgentControlProposalStoreLive),
   Layer.provideMerge(AgentControlProposalEventsLive),
@@ -242,6 +250,7 @@ const AgentControlLayerLive = Layer.mergeAll(
   Layer.provideMerge(AgentControlAuditRepositoryLive),
   Layer.provideMerge(AgentControlExternalRepositoryLive),
   Layer.provideMerge(AgentControlAutomationRepositoryLive),
+  Layer.provideMerge(AgentControlMcpInstallationRepositoryLive),
 );
 
 // In-memory credential/lease authority for the internal provider-session

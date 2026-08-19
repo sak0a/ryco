@@ -45,6 +45,7 @@ import {
 } from "./orchestration.ts";
 import { ProviderOptionSelections } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
+import { McpServerName, McpWorkspaceId } from "./mcp.ts";
 import { ServerProviderAvailability, ServerProviderState } from "./server.ts";
 import { ThreadEnvMode } from "./settings.ts";
 import { WorktreeId } from "./worktree.ts";
@@ -82,6 +83,11 @@ export const AgentControlExternalTaskId = TrimmedNonEmptyString.check(Schema.isM
   Schema.brand("AgentControlExternalTaskId"),
 );
 export type AgentControlExternalTaskId = typeof AgentControlExternalTaskId.Type;
+
+export const AgentControlMcpInstallationId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(128),
+).pipe(Schema.brand("AgentControlMcpInstallationId"));
+export type AgentControlMcpInstallationId = typeof AgentControlMcpInstallationId.Type;
 
 export const AgentControlAutomationId = TrimmedNonEmptyString.check(Schema.isMaxLength(128)).pipe(
   Schema.brand("AgentControlAutomationId"),
@@ -908,6 +914,10 @@ export const AGENT_CONTROL_WS_METHODS = {
   resumeIntegrationPairing: "agentControl.resumeIntegrationPairing",
   revokeIntegration: "agentControl.revokeIntegration",
   deleteIntegration: "agentControl.deleteIntegration",
+  listMcpInstallations: "agentControl.listMcpInstallations",
+  connectMcpInstallation: "agentControl.connectMcpInstallation",
+  repairMcpInstallation: "agentControl.repairMcpInstallation",
+  disconnectMcpInstallation: "agentControl.disconnectMcpInstallation",
 } as const;
 
 /** Proposals shown in the live approval queue (everything non-terminal). */
@@ -2123,6 +2133,70 @@ export const AgentControlExternalIntegrationDeleteResult = Schema.Struct({
 });
 export type AgentControlExternalIntegrationDeleteResult =
   typeof AgentControlExternalIntegrationDeleteResult.Type;
+
+export const AgentControlMcpInstallationState = Schema.Literals([
+  "planned",
+  "credential-written",
+  "provider-written",
+  "verifying",
+  "connected",
+  "repair-needed",
+  "disconnecting",
+  "disconnected",
+  "revoked",
+]);
+export type AgentControlMcpInstallationState = typeof AgentControlMcpInstallationState.Type;
+
+/** Public durable installation view. Native fingerprints and credentials stay server-side. */
+export const AgentControlMcpInstallation = Schema.Struct({
+  installationId: AgentControlMcpInstallationId,
+  integrationId: AgentControlIntegrationId,
+  workspaceId: McpWorkspaceId,
+  driver: ProviderDriverKind,
+  serverName: McpServerName,
+  state: AgentControlMcpInstallationState,
+  revision: NonNegativeInt,
+  lastError: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(500))),
+  ownsNativeConfig: Schema.Boolean,
+  preservedUserChanges: Schema.Boolean,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+  connectedAt: Schema.NullOr(IsoDateTime),
+});
+export type AgentControlMcpInstallation = typeof AgentControlMcpInstallation.Type;
+
+export const AgentControlMcpInstallationListResult = Schema.Struct({
+  installations: Schema.Array(AgentControlMcpInstallation),
+});
+export type AgentControlMcpInstallationListResult =
+  typeof AgentControlMcpInstallationListResult.Type;
+
+export const AgentControlMcpInstallationConnectInput = Schema.Struct({
+  workspaceId: McpWorkspaceId,
+  displayName: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(120))),
+  projectScope: Schema.optional(AgentControlExternalProjectScope),
+  capabilities: Schema.optional(Schema.Array(AgentControlCapability).check(Schema.isMaxLength(32))),
+  rateLimitPerMinute: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_RATE_LIMIT_MAX)),
+  ),
+  activeTaskLimit: Schema.optional(
+    PositiveInt.check(Schema.isLessThanOrEqualTo(AGENT_CONTROL_EXTERNAL_ACTIVE_TASK_LIMIT_MAX)),
+  ),
+  expiresAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+}).annotate({ parseOptions: { onExcessProperty: "error" } });
+export type AgentControlMcpInstallationConnectInput =
+  typeof AgentControlMcpInstallationConnectInput.Type;
+
+export const AgentControlMcpInstallationIdInput = Schema.Struct({
+  installationId: AgentControlMcpInstallationId,
+});
+export type AgentControlMcpInstallationIdInput = typeof AgentControlMcpInstallationIdInput.Type;
+
+export const AgentControlMcpInstallationMutationResult = Schema.Struct({
+  installation: AgentControlMcpInstallation,
+});
+export type AgentControlMcpInstallationMutationResult =
+  typeof AgentControlMcpInstallationMutationResult.Type;
 
 export const AgentControlExternalRpcErrorCode = Schema.Literals([
   "disabled",

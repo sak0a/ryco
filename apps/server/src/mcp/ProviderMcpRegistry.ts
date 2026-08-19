@@ -16,7 +16,14 @@ import {
 import { Effect, Option, SynchronizedRef } from "effect";
 import * as Semaphore from "effect/Semaphore";
 
-import { type ProviderMcpAdapter, validateProviderMcpAdapter } from "./ProviderMcpAdapter.ts";
+import {
+  type ProviderMcpAdapter,
+  type ProviderMcpExternalAgentControlDesiredEntry,
+  type ProviderMcpExternalAgentControlInstallInput,
+  type ProviderMcpExternalAgentControlInspection,
+  type ProviderMcpExternalAgentControlRemoveInput,
+  validateProviderMcpAdapter,
+} from "./ProviderMcpAdapter.ts";
 
 export interface ProviderMcpRegistryShape {
   readonly listWorkspaces: Effect.Effect<McpListWorkspacesResult, McpSettingsError>;
@@ -38,6 +45,18 @@ export interface ProviderMcpRegistryShape {
   readonly startOauthLogin: (
     input: McpOauthLoginInput,
   ) => Effect.Effect<McpOauthLoginResult, McpSettingsError>;
+  readonly inspectExternalAgentControl: (
+    input: ProviderMcpExternalAgentControlDesiredEntry & { readonly workspaceId: McpWorkspaceId },
+  ) => Effect.Effect<ProviderMcpExternalAgentControlInspection, McpSettingsError>;
+  readonly installExternalAgentControl: (
+    input: ProviderMcpExternalAgentControlInstallInput,
+  ) => Effect.Effect<{ readonly fingerprint: string }, McpSettingsError>;
+  readonly removeExternalAgentControl: (
+    input: ProviderMcpExternalAgentControlRemoveInput,
+  ) => Effect.Effect<
+    { readonly removed: boolean; readonly preservedUserChanges: boolean },
+    McpSettingsError
+  >;
 }
 
 function mcpError(message: string, cause?: unknown): McpSettingsError {
@@ -196,5 +215,11 @@ export const makeProviderMcpRegistry = (
         mutate("reloadServers", input, (adapter) => adapter.reloadServers?.(input)),
       startOauthLogin: (input) =>
         mutate("startOauthLogin", input, (adapter) => adapter.startOauthLogin?.(input)),
+      inspectExternalAgentControl: (input) =>
+        route("listServers", input, (adapter) => adapter.externalAgentControl?.inspect(input)),
+      installExternalAgentControl: (input) =>
+        mutate("upsertServer", input, (adapter) => adapter.externalAgentControl?.install(input)),
+      removeExternalAgentControl: (input) =>
+        mutate("removeServer", input, (adapter) => adapter.externalAgentControl?.remove(input)),
     };
   });

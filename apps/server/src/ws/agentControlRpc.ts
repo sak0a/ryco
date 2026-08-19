@@ -8,6 +8,7 @@ import { Effect, Option, Schema, Stream } from "effect";
 
 import type { AgentControlProposalDecisionError } from "../agentControl/Services/AgentControlProposalService.ts";
 import type { AgentControlExternalIntegrationServiceError } from "../agentControl/Services/AgentControlExternalIntegration.ts";
+import type { AgentControlExternalInstallationServiceError } from "../agentControl/Services/AgentControlExternalInstallation.ts";
 import { observeRpcEffect, observeRpcStreamEffect } from "../observability/RpcInstrumentation.ts";
 import { defineWsHandlers, type WsRpcContext } from "./context.ts";
 
@@ -104,10 +105,44 @@ export const toAgentControlExternalRpcError = (
   });
 };
 
+export const toAgentControlInstallationRpcError = (
+  error: AgentControlExternalInstallationServiceError,
+): AgentControlExternalRpcError => {
+  if (error._tag === "AgentControlMcpInstallationError") {
+    switch (error.reason) {
+      case "not-found":
+        return new AgentControlExternalRpcError({
+          code: "not-found",
+          message: "Agent Control installation was not found.",
+        });
+      case "conflict":
+        return new AgentControlExternalRpcError({ code: "conflict", message: error.detail });
+      case "unsupported":
+        return new AgentControlExternalRpcError({ code: "invalid", message: error.detail });
+      default:
+        return new AgentControlExternalRpcError({
+          code: "invalid",
+          message: "Agent Control installation did not complete.",
+        });
+    }
+  }
+  if (error._tag === "McpSettingsError") {
+    return new AgentControlExternalRpcError({
+      code: "invalid",
+      message: "The provider MCP configuration could not be updated safely.",
+    });
+  }
+  return new AgentControlExternalRpcError({
+    code: "storage",
+    message: "Agent Control installation storage failed.",
+  });
+};
+
 export const makeAgentControlHandlers = (ctx: WsRpcContext) => {
   const {
     agentControlProposals,
     agentControlExternalIntegrations,
+    agentControlExternalInstallations,
     ownerEffect,
     ownerStreamEffect,
   } = ctx;
@@ -139,6 +174,22 @@ export const makeAgentControlHandlers = (ctx: WsRpcContext) => {
           new AgentControlExternalRpcError({
             code: "storage",
             message: "External integrations are unavailable.",
+          }),
+        ),
+      onSome: use,
+    });
+
+  const withInstallationService = <A, E>(
+    use: (
+      service: Option.Option.Value<typeof agentControlExternalInstallations>,
+    ) => Effect.Effect<A, E | AgentControlExternalRpcError>,
+  ) =>
+    Option.match(agentControlExternalInstallations, {
+      onNone: () =>
+        Effect.fail(
+          new AgentControlExternalRpcError({
+            code: "storage",
+            message: "Agent Control installation is unavailable.",
           }),
         ),
       onSome: use,
@@ -253,6 +304,38 @@ export const makeAgentControlHandlers = (ctx: WsRpcContext) => {
         AGENT_CONTROL_WS_METHODS.deleteIntegration,
         withExternalService((service) =>
           service.delete(input.integrationId).pipe(Effect.mapError(toAgentControlExternalRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.listMcpInstallations]: () =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.listMcpInstallations,
+        withInstallationService((service) =>
+          service.list().pipe(Effect.mapError(toAgentControlInstallationRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.connectMcpInstallation]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.connectMcpInstallation,
+        withInstallationService((service) =>
+          service.connect(input).pipe(Effect.mapError(toAgentControlInstallationRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.repairMcpInstallation]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.repairMcpInstallation,
+        withInstallationService((service) =>
+          service
+            .repair(input.installationId)
+            .pipe(Effect.mapError(toAgentControlInstallationRpcError)),
+        ),
+      ),
+    [AGENT_CONTROL_WS_METHODS.disconnectMcpInstallation]: (input) =>
+      ownerEffect(
+        AGENT_CONTROL_WS_METHODS.disconnectMcpInstallation,
+        withInstallationService((service) =>
+          service
+            .disconnect(input.installationId)
+            .pipe(Effect.mapError(toAgentControlInstallationRpcError)),
         ),
       ),
   });

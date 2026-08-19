@@ -221,6 +221,25 @@ export class AgentControlExternalIntegrationError extends Schema.TaggedError<Age
   }
 }
 
+export class AgentControlMcpInstallationError extends Schema.TaggedError<AgentControlMcpInstallationError>()(
+  "AgentControlMcpInstallationError",
+  {
+    reason: Schema.Literals([
+      "not-found",
+      "unsupported",
+      "conflict",
+      "storage",
+      "provider",
+      "verification",
+    ]),
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
 /** Bounded operational read failure; deliberately carries no underlying payload. */
 export class AgentControlDiagnosticsReadError extends Schema.TaggedError<AgentControlDiagnosticsReadError>()(
   "AgentControlDiagnosticsReadError",

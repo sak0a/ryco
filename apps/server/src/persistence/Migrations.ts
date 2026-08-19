@@ -64,6 +64,7 @@ import Migration0047 from "./Migrations/047_ProjectionThreadsGoal.ts";
 import Migration0048 from "./Migrations/048_AgentControl.ts";
 import Migration0049 from "./Migrations/049_AgentControlExternalMcp.ts";
 import Migration0050 from "./Migrations/050_AgentControlAutomations.ts";
+import Migration0051 from "./Migrations/051_AgentControlMcpInstallations.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -126,6 +127,7 @@ export const migrationEntries = [
   [48, "AgentControl", Migration0048],
   [49, "AgentControlExternalMcp", Migration0049],
   [50, "AgentControlAutomations", Migration0050],
+  [51, "AgentControlMcpInstallations", Migration0051],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>

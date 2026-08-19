@@ -181,6 +181,46 @@ const makeAgentControlExternalIntegration = Effect.gen(function* () {
       return { detail: detailFor(stored), pairingCode };
     });
 
+  const createPaired: AgentControlExternalIntegrationServiceShape["createPaired"] = (input) =>
+    Effect.gen(function* () {
+      yield* requireSetupAvailable;
+      yield* validateConfiguration(input);
+      const now = new Date();
+      if (input.expiresAt !== null && input.expiresAt <= now.toISOString()) {
+        return yield* fail("expired");
+      }
+      const integrationId = AgentControlIntegrationId.make(crypto.randomUUID());
+      const rawCredential = generateAgentControlExternalCredential();
+      const stored: StoredAgentControlExternalIntegration = {
+        integrationId,
+        displayName: input.displayName,
+        clientKind: input.clientKind,
+        projectScope: input.projectScope,
+        capabilities: input.capabilities,
+        rateLimitPerMinute: input.rateLimitPerMinute,
+        activeTaskLimit: input.activeTaskLimit,
+        activeTaskCount: 0,
+        expiresAt: input.expiresAt,
+        revokedAt: null,
+        pairingState: "paired",
+        pairingCodeHash: null,
+        pairingCodeExpiresAt: null,
+        pairedAt: now.toISOString(),
+        credentialAudience: AGENT_CONTROL_EXTERNAL_CREDENTIAL_AUDIENCE,
+        credentialHash: hashAgentControlExternalSecret(rawCredential),
+        createdAt: now.toISOString(),
+        updatedAt: now.toISOString(),
+        lastUsedAt: null,
+      };
+      const inserted = yield* repository.insertIntegration(stored);
+      if (!inserted) return yield* fail("storage");
+      yield* PubSub.publish(changes, integrationId);
+      return {
+        detail: detailFor(stored),
+        credential: Redacted.make(rawCredential),
+      };
+    });
+
   const update: AgentControlExternalIntegrationServiceShape["update"] = (input) =>
     Effect.gen(function* () {
       yield* policy.requireEnabled("external integration update");
@@ -299,6 +339,34 @@ const makeAgentControlExternalIntegration = Effect.gen(function* () {
       return { integrationId: input.integrationId, credential: Redacted.make(credential) };
     });
 
+  const rotateCredential: AgentControlExternalIntegrationServiceShape["rotateCredential"] = (
+    integrationId,
+  ) =>
+    Effect.gen(function* () {
+      yield* requireSetupAvailable;
+      const current = yield* getStored(integrationId);
+      if (current.revokedAt !== null) return yield* fail("revoked");
+      if (current.expiresAt !== null && current.expiresAt <= new Date().toISOString()) {
+        return yield* fail("expired");
+      }
+      const credential = generateAgentControlExternalCredential();
+      const now = new Date().toISOString();
+      const next: StoredAgentControlExternalIntegration = {
+        ...current,
+        pairingState: "paired",
+        pairingCodeHash: null,
+        pairingCodeExpiresAt: null,
+        pairedAt: now,
+        credentialAudience: AGENT_CONTROL_EXTERNAL_CREDENTIAL_AUDIENCE,
+        credentialHash: hashAgentControlExternalSecret(credential),
+        updatedAt: now,
+      };
+      const replaced = yield* repository.replaceIntegration(next);
+      if (!replaced) return yield* fail("not-found");
+      yield* PubSub.publish(changes, integrationId);
+      return { integrationId, credential: Redacted.make(credential) };
+    });
+
   const authenticate: AgentControlExternalIntegrationServiceShape["authenticate"] = (header) =>
     Effect.gen(function* () {
       const credential = parseExternalAuthorization(header);
@@ -387,11 +455,13 @@ const makeAgentControlExternalIntegration = Effect.gen(function* () {
   return {
     list,
     create,
+    createPaired,
     update,
     resumePairing,
     revoke,
     delete: deleteIntegration,
     exchangePairing,
+    rotateCredential,
     authenticate,
     revalidate,
     authorizeTool,

@@ -17,12 +17,14 @@ import { RpcGroup } from "effect/unstable/rpc";
 
 import { AgentControlProposalService } from "../agentControl/Services/AgentControlProposalService.ts";
 import { AgentControlExternalIntegrationService } from "../agentControl/Services/AgentControlExternalIntegration.ts";
+import { AgentControlExternalInstallationService } from "../agentControl/Services/AgentControlExternalInstallation.ts";
 import { CheckpointDiffQuery } from "../checkpointing/Services/CheckpointDiffQuery.ts";
 import { resolveManagedWorktreesRoot, ServerConfig } from "../config.ts";
 import { Diagnostics } from "../diagnostics/Services/Diagnostics.ts";
 import { Keybindings } from "../keybindings.ts";
 import { makeCodexMcpService } from "../mcp/CodexMcpService.ts";
 import { makeCodexMcpAdapter } from "../mcp/adapters/CodexMcpAdapter.ts";
+import { makeClaudeMcpAdapter } from "../mcp/adapters/ClaudeMcpAdapter.ts";
 import { makeProviderMcpRegistry } from "../mcp/ProviderMcpRegistry.ts";
 import { Open, resolveAvailableEditors } from "../open.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -118,6 +120,9 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const agentControlExternalIntegrations = yield* Effect.serviceOption(
       AgentControlExternalIntegrationService,
     );
+    const agentControlExternalInstallations = yield* Effect.serviceOption(
+      AgentControlExternalInstallationService,
+    );
     const checkpointDiffQuery = yield* CheckpointDiffQuery;
     const keybindings = yield* Keybindings;
     const open = yield* Open;
@@ -135,7 +140,8 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
     const codexMcp = yield* makeCodexMcpService;
-    const mcpRegistry = yield* makeProviderMcpRegistry([makeCodexMcpAdapter(codexMcp)]);
+    const claudeMcp = yield* makeClaudeMcpAdapter();
+    const mcpRegistry = yield* makeProviderMcpRegistry([makeCodexMcpAdapter(codexMcp), claudeMcp]);
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -673,6 +679,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       contextHandoffInspection,
       agentControlProposals,
       agentControlExternalIntegrations,
+      agentControlExternalInstallations,
       checkpointDiffQuery,
       keybindings,
       open,

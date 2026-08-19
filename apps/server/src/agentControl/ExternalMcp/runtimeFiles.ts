@@ -171,6 +171,9 @@ export const writeExternalCredentialFile = async (
   await writePrivateJson(target, credential);
 };
 
+export const removeExternalCredentialFile = async (stateDir: string, integrationId: string) =>
+  rm(credentialPath(stateDir, integrationId), { force: true });
+
 export const readExternalCredentialFile = async (
   stateDir: string,
   integrationId: string,
