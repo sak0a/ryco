@@ -28,6 +28,12 @@ vi.mock("./IntegrationsSettings", () => ({
   ExternalIntegrationsSettings: () => <div data-testid="external-integrations">External MCP</div>,
 }));
 
+vi.mock("./AgentControlMcpInstallations", () => ({
+  AgentControlMcpInstallations: () => (
+    <div data-testid="agent-control-installations">Provider installation</div>
+  ),
+}));
+
 vi.mock("./McpServersSettings", () => ({
   McpServersSettings: () => <div data-testid="mcp-servers">MCP servers</div>,
 }));
@@ -61,5 +67,16 @@ describe("IntegrationsSettingsPanel", () => {
 
     await expect.element(page.getByLabelText("Enable Agent Control")).toBeDisabled();
     await expect.element(page.getByText("Only an owner can change this setting.")).toBeVisible();
+  });
+
+  it("separates automatic and external setup when Agent Control is enabled", async () => {
+    harness.enabled = true;
+    render(<IntegrationsSettingsPanel />);
+
+    await expect.element(page.getByTestId("agent-control-installations")).toBeVisible();
+    await expect.element(page.getByText("Advanced manual setup")).toBeVisible();
+    await expect
+      .element(page.getByText(/Ryco sessions receive the tools automatically/))
+      .toBeVisible();
   });
 });

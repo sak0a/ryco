@@ -33,7 +33,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
-const CLIENT_LABELS: Record<AgentControlExternalClientKind, string> = {
+export const AGENT_CONTROL_CLIENT_LABELS: Record<AgentControlExternalClientKind, string> = {
   codex: "Codex",
   "claude-code": "Claude Code",
   "claude-desktop": "Claude Desktop",
@@ -92,7 +92,7 @@ const CAPABILITY_OPTIONS: ReadonlyArray<{
   },
 ];
 
-interface IntegrationForm {
+export interface AgentControlIntegrationForm {
   readonly displayName: string;
   readonly clientKind: AgentControlExternalClientKind;
   readonly scopeKind: "all" | "selected";
@@ -103,7 +103,7 @@ interface IntegrationForm {
   readonly activeTaskLimit: string;
 }
 
-const emptyForm = (): IntegrationForm => ({
+export const createAgentControlIntegrationForm = (): AgentControlIntegrationForm => ({
   displayName: "",
   clientKind: "codex",
   scopeKind: "all",
@@ -150,7 +150,9 @@ function statusFor(detail: AgentControlExternalIntegrationDetail): {
   return { label: "Unpaired", variant: "outline" };
 }
 
-function formFromDetail(detail: AgentControlExternalIntegrationDetail): IntegrationForm {
+function formFromDetail(
+  detail: AgentControlExternalIntegrationDetail,
+): AgentControlIntegrationForm {
   const integration = detail.integration;
   return {
     displayName: integration.displayName,
@@ -170,7 +172,9 @@ function formFromDetail(detail: AgentControlExternalIntegrationDetail): Integrat
   };
 }
 
-function parseForm(form: IntegrationForm): AgentControlExternalIntegrationCreateInput {
+export function parseAgentControlIntegrationForm(
+  form: AgentControlIntegrationForm,
+): AgentControlExternalIntegrationCreateInput {
   const projectIds = form.projectIds
     .split(",")
     .map((value) => value.trim())
@@ -201,12 +205,14 @@ function parseForm(form: IntegrationForm): AgentControlExternalIntegrationCreate
   };
 }
 
-function IntegrationFormFields({
+export function AgentControlIntegrationFormFields({
   form,
   onChange,
+  clientLocked = false,
 }: {
-  readonly form: IntegrationForm;
-  readonly onChange: (next: IntegrationForm) => void;
+  readonly form: AgentControlIntegrationForm;
+  readonly onChange: (next: AgentControlIntegrationForm) => void;
+  readonly clientLocked?: boolean;
 }) {
   return (
     <div className="grid gap-4">
@@ -224,6 +230,7 @@ function IntegrationFormFields({
           <select
             className="h-9 rounded-lg border border-input bg-background px-3 text-sm"
             value={form.clientKind}
+            disabled={clientLocked}
             onChange={(event) =>
               onChange({
                 ...form,
@@ -231,7 +238,7 @@ function IntegrationFormFields({
               })
             }
           >
-            {Object.entries(CLIENT_LABELS).map(([value, label]) => (
+            {Object.entries(AGENT_CONTROL_CLIENT_LABELS).map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
               </option>
@@ -340,7 +347,7 @@ function IntegrationFormFields({
 export function ExternalIntegrationsSettings() {
   const environmentId = usePrimaryEnvironmentId();
   const [state, setState] = useState(emptyExternalIntegrationSettingsState);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(createAgentControlIntegrationForm);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -375,9 +382,9 @@ export function ExternalIntegrationsSettings() {
     if (!api) return;
     try {
       setBusyId("new");
-      const result = await api.createIntegration(parseForm(form));
+      const result = await api.createIntegration(parseAgentControlIntegrationForm(form));
       setState((current) => applyExternalIntegrationPairing(current, result));
-      setForm(emptyForm());
+      setForm(createAgentControlIntegrationForm());
       setCreating(false);
     } catch (error) {
       showFailure("Failed to create integration", error);
@@ -390,7 +397,7 @@ export function ExternalIntegrationsSettings() {
     if (!api) return;
     try {
       setBusyId(detail.integration.integrationId);
-      const values = parseForm(form);
+      const values = parseAgentControlIntegrationForm(form);
       await api.updateIntegration({
         integrationId: detail.integration.integrationId,
         ...values,
@@ -475,7 +482,7 @@ export function ExternalIntegrationsSettings() {
               disabled={!api || !state.topology.available}
               onClick={() => {
                 setEditingId(null);
-                setForm(emptyForm());
+                setForm(createAgentControlIntegrationForm());
                 setCreating((value) => !value);
               }}
             >
@@ -500,7 +507,7 @@ export function ExternalIntegrationsSettings() {
 
         {creating ? (
           <div className="grid gap-4 rounded-xl border bg-card p-4">
-            <IntegrationFormFields form={form} onChange={setForm} />
+            <AgentControlIntegrationFormFields form={form} onChange={setForm} />
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setCreating(false)}>
                 Cancel
@@ -538,7 +545,9 @@ export function ExternalIntegrationsSettings() {
                   <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-semibold">{integration.displayName}</h3>
                     <Badge variant={status.variant}>{status.label}</Badge>
-                    <Badge variant="outline">{CLIENT_LABELS[integration.clientKind]}</Badge>
+                    <Badge variant="outline">
+                      {AGENT_CONTROL_CLIENT_LABELS[integration.clientKind]}
+                    </Badge>
                   </div>
                   <p className="mt-1 font-mono text-[11px] text-muted-foreground">
                     {integration.integrationId}
@@ -592,7 +601,7 @@ export function ExternalIntegrationsSettings() {
 
               {isEditing ? (
                 <div className="grid gap-4 border-t pt-4">
-                  <IntegrationFormFields form={form} onChange={setForm} />
+                  <AgentControlIntegrationFormFields form={form} onChange={setForm} />
                   <div className="flex justify-end">
                     <Button
                       disabled={busyId === integration.integrationId}

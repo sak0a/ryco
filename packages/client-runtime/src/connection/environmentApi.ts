@@ -96,6 +96,15 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       readRawPayloadChunk: rpcClient.contextHandoff.readRawPayloadChunk,
       readExportChunk: rpcClient.contextHandoff.readExportChunk,
     },
+    mcp: {
+      listWorkspaces: rpcClient.mcp.listWorkspaces,
+      listServers: rpcClient.mcp.listServers,
+      upsertServer: rpcClient.mcp.upsertServer,
+      setServerEnabled: rpcClient.mcp.setServerEnabled,
+      removeServer: rpcClient.mcp.removeServer,
+      reloadServers: rpcClient.mcp.reloadServers,
+      startOauthLogin: rpcClient.mcp.startOauthLogin,
+    },
     // Conditional like worktrees/threads: older environments (and partial
     // test doubles) predate the Agent Control surface.
     ...(rpcClient.agentControl
@@ -112,6 +121,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
             resumeIntegrationPairing: rpcClient.agentControl.resumeIntegrationPairing,
             revokeIntegration: rpcClient.agentControl.revokeIntegration,
             deleteIntegration: rpcClient.agentControl.deleteIntegration,
+            listMcpInstallations: rpcClient.agentControl.listMcpInstallations,
+            connectMcpInstallation: rpcClient.agentControl.connectMcpInstallation,
+            repairMcpInstallation: rpcClient.agentControl.repairMcpInstallation,
+            disconnectMcpInstallation: rpcClient.agentControl.disconnectMcpInstallation,
           },
         }
       : {}),

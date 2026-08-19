@@ -47,6 +47,10 @@ import type {
   AgentControlExternalIntegrationMutationResult,
   AgentControlExternalIntegrationUpdateInput,
   AgentControlExternalPairingResult,
+  AgentControlMcpInstallationConnectInput,
+  AgentControlMcpInstallationIdInput,
+  AgentControlMcpInstallationListResult,
+  AgentControlMcpInstallationMutationResult,
 } from "./agentControl.ts";
 import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
@@ -796,6 +800,16 @@ export interface EnvironmentApi {
     ) => Promise<ContextHandoffRawPayloadChunk>;
     readExportChunk: (input: ContextHandoffExportChunkInput) => Promise<ContextHandoffExportChunk>;
   };
+  /** Provider-native MCP configuration for this environment. */
+  mcp?: {
+    listWorkspaces: () => Promise<McpListWorkspacesResult>;
+    listServers: (input: McpListServersInput) => Promise<McpListServersResult>;
+    upsertServer: (input: McpServerUpsertInput) => Promise<McpListServersResult>;
+    setServerEnabled: (input: McpServerEnabledInput) => Promise<McpListServersResult>;
+    removeServer: (input: McpServerRemoveInput) => Promise<McpListServersResult>;
+    reloadServers: (input: McpServersReloadInput) => Promise<McpListServersResult>;
+    startOauthLogin: (input: McpOauthLoginInput) => Promise<McpOauthLoginResult>;
+  };
   /**
    * Agent Control approval surface. Optional as a whole so clients can
    * feature-detect against environments predating Agent Control.
@@ -832,5 +846,15 @@ export interface EnvironmentApi {
     deleteIntegration: (
       input: AgentControlExternalIntegrationIdInput,
     ) => Promise<AgentControlExternalIntegrationDeleteResult>;
+    listMcpInstallations: () => Promise<AgentControlMcpInstallationListResult>;
+    connectMcpInstallation: (
+      input: AgentControlMcpInstallationConnectInput,
+    ) => Promise<AgentControlMcpInstallationMutationResult>;
+    repairMcpInstallation: (
+      input: AgentControlMcpInstallationIdInput,
+    ) => Promise<AgentControlMcpInstallationMutationResult>;
+    disconnectMcpInstallation: (
+      input: AgentControlMcpInstallationIdInput,
+    ) => Promise<AgentControlMcpInstallationMutationResult>;
   };
 }
