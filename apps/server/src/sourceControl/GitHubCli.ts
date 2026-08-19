@@ -2,7 +2,11 @@ import { Context, Effect, Layer, Result, Schema, SchemaIssue } from "effect";
 
 import {
   TrimmedNonEmptyString,
+  type SourceControlChangeRequestMergeCapabilities,
+  type SourceControlChangeRequestMergeMethod,
   type SourceControlChangeRequestMergeability,
+  type SourceControlChangeRequestStack,
+  type SourceControlChangeRequestStackSummary,
   type SourceControlCommentReactionContent,
   type SourceControlRepositoryVisibility,
   type VcsError,
@@ -15,6 +19,7 @@ import type { NormalizedGitHubIssueDetail, NormalizedGitHubIssueRecord } from ".
 import * as GitHubActions from "./gitHubActions.ts";
 import { buildGitHubIssueCreateArgv, parseGitHubIssueCreateOutput } from "./gitHubIssueCreate.ts";
 import * as GitHubPullRequests from "./gitHubPullRequests.ts";
+import * as GitHubPullRequestStacks from "./gitHubPullRequestStacks.ts";
 import {
   decodeGitHubReactionGroupsBySubjectJson,
   formatGitHubReactionGroupsDecodeError,
@@ -24,6 +29,8 @@ import {
 } from "./gitHubReactions.ts";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const GITHUB_API_VERSION = "2026-03-10";
+const ASYNC_MERGE_POLL_LIMIT = 300;
 const STATUS_CHECK_ROLLUP_JSON_FIELD = "statusCheckRollup";
 
 const GITHUB_PULL_REQUEST_CORE_JSON_FIELDS = [
@@ -90,6 +97,7 @@ export function withoutStatusCheckRollupJsonField(
 export class GitHubCliError extends Schema.TaggedError<GitHubCliError>()("GitHubCliError", {
   operation: Schema.String,
   detail: Schema.String,
+  reason: Schema.optional(Schema.Literal("async-merge-unavailable")),
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
@@ -179,8 +187,39 @@ export interface GitHubCliShape {
   readonly execute: (input: {
     readonly cwd: string;
     readonly args: ReadonlyArray<string>;
+    readonly stdin?: string;
+    readonly allowNonZeroExit?: boolean;
     readonly timeoutMs?: number;
   }) => Effect.Effect<VcsProcess.VcsProcessOutput, GitHubCliError>;
+
+  readonly getPullRequestStack: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly host: string;
+    readonly number: number;
+  }) => Effect.Effect<SourceControlChangeRequestStack | null, GitHubCliError>;
+
+  readonly getPullRequestStackSummaries: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly host: string;
+    readonly numbers: ReadonlyArray<number>;
+  }) => Effect.Effect<ReadonlyMap<number, SourceControlChangeRequestStackSummary>, GitHubCliError>;
+
+  readonly getRepositoryMergeCapabilities: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly host: string;
+  }) => Effect.Effect<SourceControlChangeRequestMergeCapabilities, GitHubCliError>;
+
+  readonly mergePullRequestAsync: (input: {
+    readonly cwd: string;
+    readonly repository: string;
+    readonly host: string;
+    readonly number: number;
+    readonly mergeMethod: SourceControlChangeRequestMergeMethod;
+    readonly stackMembership: "stacked" | "standalone";
+  }) => Effect.Effect<{ readonly outcome: "merged" | "enqueued" }, GitHubCliError>;
 
   readonly listOpenPullRequests: (input: {
     readonly cwd: string;
@@ -608,6 +647,37 @@ function pullRequestApiReference(reference: string): string {
   return trimmed;
 }
 
+function repositoryParts(
+  repository: string,
+): { readonly owner: string; readonly name: string } | null {
+  const match = /^([^/\s]+)\/([^/\s]+)$/u.exec(repository.trim());
+  return match?.[1] && match[2] ? { owner: match[1], name: match[2] } : null;
+}
+
+function githubApiVersionArgs(): ReadonlyArray<string> {
+  return ["-H", `X-GitHub-Api-Version: ${GITHUB_API_VERSION}`];
+}
+
+function githubResultOrError<A>(
+  result: Result.Result<A, string>,
+  operation: string,
+): Effect.Effect<A, GitHubCliError> {
+  return Result.isSuccess(result)
+    ? Effect.succeed(result.success)
+    : Effect.fail(new GitHubCliError({ operation, detail: result.failure }));
+}
+
+function isAsyncMergeEndpointUnavailable(output: VcsProcess.VcsProcessOutput): boolean {
+  return output.exitCode !== 0 && /\bHTTP\s+404\b/iu.test(`${output.stderr}\n${output.stdout}`);
+}
+
+function nonEmptyProcessDetail(output: VcsProcess.VcsProcessOutput): string {
+  const stderr = output.stderr.trim();
+  if (stderr) return stderr;
+  const stdout = output.stdout.trim();
+  return stdout || `GitHub CLI exited with code ${output.exitCode}.`;
+}
+
 const COMMENT_REACTION_GROUPS_QUERY =
   "query($ids:[ID!]!){nodes(ids:$ids){id ... on Reactable{reactionGroups{content viewerHasReacted reactors{totalCount} users{totalCount}}}}}";
 
@@ -640,6 +710,10 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
         command: "gh",
         args: input.args,
         cwd: input.cwd,
+        ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
+        ...(input.allowNonZeroExit !== undefined
+          ? { allowNonZeroExit: input.allowNonZeroExit }
+          : {}),
         timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       })
       .pipe(Effect.mapError((error) => normalizeGitHubCliError("execute", error)));
@@ -721,8 +795,272 @@ export const make = Effect.fn("makeGitHubCli")(function* () {
     );
   };
 
+  const getPullRequestStack: GitHubCliShape["getPullRequestStack"] = (input) =>
+    Effect.gen(function* () {
+      const parts = repositoryParts(input.repository);
+      if (!parts) {
+        return yield* new GitHubCliError({
+          operation: "getPullRequestStack",
+          detail: "GitHub repository must be in owner/repository form.",
+        });
+      }
+
+      const pages: GitHubPullRequestStacks.DecodedGitHubPullRequestStackPage[] = [];
+      const seenCursors = new Set<string>();
+      let after: string | null = null;
+      while (true) {
+        const result: VcsProcess.VcsProcessOutput = yield* execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "--hostname",
+            input.host,
+            "-f",
+            `query=${GitHubPullRequestStacks.GITHUB_PULL_REQUEST_STACK_QUERY}`,
+            "-f",
+            `owner=${parts.owner}`,
+            "-f",
+            `repo=${parts.name}`,
+            "-F",
+            `number=${input.number}`,
+            "-F",
+            `first=${GitHubPullRequestStacks.GITHUB_STACK_PAGE_SIZE}`,
+            ...(after ? ["-f", `after=${after}`] : []),
+          ],
+        });
+        const page: GitHubPullRequestStacks.DecodedGitHubPullRequestStackPage =
+          yield* githubResultOrError(
+            GitHubPullRequestStacks.decodeGitHubPullRequestStackPageJson(result.stdout.trim()),
+            "getPullRequestStack",
+          );
+        pages.push(page);
+        if (!page.stack?.hasNextPage) break;
+        const cursor: string | null = page.stack.endCursor;
+        if (!cursor || seenCursors.has(cursor)) {
+          return yield* new GitHubCliError({
+            operation: "getPullRequestStack",
+            detail: "GitHub returned an invalid or repeated stack pagination cursor.",
+          });
+        }
+        seenCursors.add(cursor);
+        after = cursor;
+      }
+
+      return yield* githubResultOrError(
+        GitHubPullRequestStacks.normalizeGitHubPullRequestStackPages(pages, input.number),
+        "getPullRequestStack",
+      );
+    });
+
+  const getPullRequestStackSummaries: GitHubCliShape["getPullRequestStackSummaries"] = (input) =>
+    Effect.gen(function* () {
+      const parts = repositoryParts(input.repository);
+      if (!parts) {
+        return yield* new GitHubCliError({
+          operation: "getPullRequestStackSummaries",
+          detail: "GitHub repository must be in owner/repository form.",
+        });
+      }
+      const numbers = [...new Set(input.numbers)].filter(
+        (number) => Number.isSafeInteger(number) && number > 0,
+      );
+      if (numbers.length === 0) return new Map();
+      const batches: number[][] = [];
+      for (
+        let index = 0;
+        index < numbers.length;
+        index += GitHubPullRequestStacks.GITHUB_STACK_SUMMARY_BATCH_SIZE
+      ) {
+        batches.push(
+          numbers.slice(index, index + GitHubPullRequestStacks.GITHUB_STACK_SUMMARY_BATCH_SIZE),
+        );
+      }
+      const results = yield* Effect.forEach(
+        batches,
+        (batch) =>
+          execute({
+            cwd: input.cwd,
+            args: [
+              "api",
+              "graphql",
+              "--hostname",
+              input.host,
+              "-f",
+              `query=${GitHubPullRequestStacks.buildGitHubPullRequestStackSummariesQuery(batch)}`,
+              "-f",
+              `owner=${parts.owner}`,
+              "-f",
+              `repo=${parts.name}`,
+            ],
+          }).pipe(
+            Effect.flatMap((result) =>
+              githubResultOrError(
+                GitHubPullRequestStacks.decodeGitHubPullRequestStackSummariesJson(
+                  result.stdout.trim(),
+                  batch,
+                ),
+                "getPullRequestStackSummaries",
+              ),
+            ),
+          ),
+        { concurrency: 2 },
+      );
+      const summaries = new Map<number, SourceControlChangeRequestStackSummary>();
+      for (const result of results) {
+        for (const [number, summary] of result) summaries.set(number, summary);
+      }
+      return summaries;
+    });
+
+  const getRepositoryMergeCapabilities: GitHubCliShape["getRepositoryMergeCapabilities"] = (
+    input,
+  ) =>
+    execute({
+      cwd: input.cwd,
+      args: [
+        "api",
+        "--hostname",
+        input.host,
+        ...githubApiVersionArgs(),
+        `repos/${input.repository}`,
+      ],
+    }).pipe(
+      Effect.flatMap((result) =>
+        githubResultOrError(
+          GitHubPullRequestStacks.decodeGitHubRepositoryMergeCapabilitiesJson(result.stdout.trim()),
+          "getRepositoryMergeCapabilities",
+        ),
+      ),
+    );
+
+  const mergePullRequestAsync: GitHubCliShape["mergePullRequestAsync"] = (input) =>
+    Effect.gen(function* () {
+      const endpoint = `repos/${input.repository}/pulls/${input.number}/merge-async`;
+      const submission = yield* execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--hostname",
+          input.host,
+          ...githubApiVersionArgs(),
+          "--method",
+          "PUT",
+          endpoint,
+          "--input",
+          "-",
+        ],
+        stdin: JSON.stringify({ merge_method: input.mergeMethod, merge_action: "default" }),
+        allowNonZeroExit: true,
+      });
+
+      if (isAsyncMergeEndpointUnavailable(submission)) {
+        if (input.stackMembership === "stacked") {
+          return yield* new GitHubCliError({
+            operation: "mergePullRequestAsync",
+            detail:
+              "GitHub's asynchronous merge endpoint is unavailable. A known stack cannot be merged through the legacy single-pull-request command.",
+            reason: "async-merge-unavailable",
+          });
+        }
+        const legacy = yield* execute({
+          cwd: input.cwd,
+          args: [
+            "pr",
+            "merge",
+            String(input.number),
+            "--repo",
+            `${input.host}/${input.repository}`,
+            `--${input.mergeMethod}`,
+          ],
+        });
+        return {
+          outcome: /merge queue/iu.test(`${legacy.stdout}\n${legacy.stderr}`)
+            ? "enqueued"
+            : "merged",
+        };
+      }
+
+      const decodeOutput = (output: VcsProcess.VcsProcessOutput) => {
+        const raw = output.stdout.trim();
+        if (!raw) {
+          return Effect.fail(
+            new GitHubCliError({
+              operation: "mergePullRequestAsync",
+              detail: nonEmptyProcessDetail(output),
+            }),
+          );
+        }
+        return githubResultOrError(
+          GitHubPullRequestStacks.decodeGitHubAsyncMergeResultJson(raw),
+          "mergePullRequestAsync",
+        );
+      };
+
+      const awaitMerge = Effect.gen(function* () {
+        let result = yield* decodeOutput(submission);
+        for (let pollCount = 0; ; pollCount += 1) {
+          switch (result.status) {
+            case "merged":
+              return { outcome: "merged" as const };
+            case "enqueued":
+              return { outcome: "enqueued" as const };
+            case "failed":
+              return yield* new GitHubCliError({
+                operation: "mergePullRequestAsync",
+                detail: result.message || "GitHub could not merge the pull request.",
+              });
+            case "pending": {
+              if (!result.uuid) {
+                return yield* new GitHubCliError({
+                  operation: "mergePullRequestAsync",
+                  detail: "GitHub returned a pending merge request without an identifier.",
+                });
+              }
+              if (pollCount >= ASYNC_MERGE_POLL_LIMIT) {
+                return yield* new GitHubCliError({
+                  operation: "mergePullRequestAsync",
+                  detail: "GitHub's asynchronous merge did not finish within five minutes.",
+                });
+              }
+              yield* Effect.sleep("1 second");
+              const poll = yield* execute({
+                cwd: input.cwd,
+                args: [
+                  "api",
+                  "--hostname",
+                  input.host,
+                  ...githubApiVersionArgs(),
+                  `${endpoint}/${result.uuid}`,
+                ],
+                allowNonZeroExit: true,
+              });
+              result = yield* decodeOutput(poll);
+              break;
+            }
+          }
+        }
+      });
+      return yield* awaitMerge.pipe(
+        Effect.timeoutOrElse({
+          duration: "5 minutes",
+          orElse: () =>
+            Effect.fail(
+              new GitHubCliError({
+                operation: "mergePullRequestAsync",
+                detail: "GitHub's asynchronous merge did not finish within five minutes.",
+              }),
+            ),
+        }),
+      );
+    });
+
   return GitHubCli.of({
     execute,
+    getPullRequestStack,
+    getPullRequestStackSummaries,
+    getRepositoryMergeCapabilities,
+    mergePullRequestAsync,
     listOpenPullRequests: (input) =>
       executePrJson({
         cwd: input.cwd,

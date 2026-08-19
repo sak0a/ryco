@@ -12,6 +12,7 @@ const {
   getChangeRequestDetail,
   listWorkflowRuns,
   getWorkflowRunJobs,
+  mergeChangeRequest,
 } = vi.hoisted(() => ({
   listIssues: vi.fn(),
   listChangeRequests: vi.fn(),
@@ -23,6 +24,7 @@ const {
   getChangeRequestDetail: vi.fn(),
   listWorkflowRuns: vi.fn(),
   getWorkflowRunJobs: vi.fn(),
+  mergeChangeRequest: vi.fn(),
 }));
 
 vi.mock("~/environments/runtime", () => ({
@@ -39,6 +41,7 @@ vi.mock("~/environments/runtime", () => ({
         getChangeRequestDetail,
         listWorkflowRuns,
         getWorkflowRunJobs,
+        mergeChangeRequest,
       },
     },
   })),
@@ -54,6 +57,7 @@ import {
   resetSourceControlAtomsForTests,
   workflowRunJobsBinding,
   workflowRunsBinding,
+  mergeSourceControlChangeRequest,
 } from "./sourceControlAtoms";
 
 const ENVIRONMENT_ID = EnvironmentId.make("environment-local");
@@ -288,6 +292,59 @@ describe("sourceControlAtoms — invalidation", () => {
     await flush();
     expect(issueListBinding.snapshotFor(input).data).toBe(freshData);
     release();
+  });
+});
+
+describe("sourceControlAtoms — merge mutation", () => {
+  it("calls the merge RPC and invalidates all source-control reads for the workspace", async () => {
+    listChangeRequests.mockResolvedValue([changeRequest(42)]);
+    getChangeRequestDetail.mockResolvedValue({ number: 42 } as never);
+    mergeChangeRequest.mockResolvedValue({ outcome: "enqueued" });
+    const listInput = { environmentId: ENVIRONMENT_ID, cwd: CWD, state: "open" as const };
+    const release = changeRequestListBinding.watch(listInput);
+    await flush();
+    await fetchSourceControlChangeRequestDetail({
+      environmentId: ENVIRONMENT_ID,
+      cwd: CWD,
+      reference: "42",
+    });
+    listChangeRequests.mockClear();
+
+    await expect(
+      mergeSourceControlChangeRequest({
+        environmentId: ENVIRONMENT_ID,
+        cwd: CWD,
+        reference: "42",
+        mergeMethod: "squash",
+      }),
+    ).resolves.toEqual({ outcome: "enqueued" });
+    await flush();
+
+    expect(mergeChangeRequest).toHaveBeenCalledWith({
+      cwd: CWD,
+      reference: "42",
+      mergeMethod: "squash",
+    });
+    expect(listChangeRequests).toHaveBeenCalledWith({ cwd: CWD, state: "open" });
+    await fetchSourceControlChangeRequestDetail({
+      environmentId: ENVIRONMENT_ID,
+      cwd: CWD,
+      reference: "42",
+    });
+    expect(getChangeRequestDetail).toHaveBeenCalledTimes(2);
+    release();
+  });
+
+  it("fails closed when the merge target is incomplete", async () => {
+    await expect(
+      mergeSourceControlChangeRequest({
+        environmentId: ENVIRONMENT_ID,
+        cwd: null,
+        reference: "42",
+        mergeMethod: "merge",
+      }),
+    ).rejects.toThrow("Pull request merging is unavailable.");
+    expect(mergeChangeRequest).not.toHaveBeenCalled();
   });
 });
 

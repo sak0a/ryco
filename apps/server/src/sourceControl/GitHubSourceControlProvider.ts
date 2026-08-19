@@ -8,6 +8,7 @@ import {
   type ChangeRequest,
   type ChangeRequestState,
   type SourceControlChangeRequestDetail,
+  type SourceControlChangeRequestStackSummary,
   type SourceControlIssueComment,
   type SourceControlIssueDetail,
   type SourceControlIssueSummary,
@@ -21,6 +22,7 @@ import {
 } from "@ryco/contracts";
 import {
   classifySourceControlCommentAuthorRole,
+  parseGitHubRepositoryIdentityFromUrl,
   parseGitHubRepositoryOwnerFromUrl,
 } from "@ryco/shared/sourceControl";
 
@@ -67,7 +69,10 @@ function hasCommentMutationMarker(
   return comments.some((comment) => comment.body.includes(marker));
 }
 
-function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeRequest {
+function toChangeRequest(
+  summary: GitHubCli.GitHubPullRequestSummary,
+  stackSummary?: SourceControlChangeRequestStackSummary,
+): ChangeRequest {
   return {
     provider: "github",
     number: summary.number,
@@ -94,6 +99,7 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
     ...(summary.headSha ? { headSha: summary.headSha } : {}),
     ...(summary.mergeability ? { mergeability: summary.mergeability } : {}),
     ...(summary.checkRollup ? { checkRollup: summary.checkRollup } : {}),
+    ...(stackSummary ? { stackSummary } : {}),
   };
 }
 
@@ -304,6 +310,81 @@ function truncateWorkflowLog(
 export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
   const github = yield* GitHubCli.GitHubCli;
   const fileSystem = yield* FileSystem.FileSystem;
+  const invokeGitHubEffect = <A>(
+    operation: string,
+    invoke: () => Effect.Effect<A, GitHubCli.GitHubCliError>,
+  ): Effect.Effect<A, GitHubCli.GitHubCliError> =>
+    Effect.try({
+      try: invoke,
+      catch: (cause) =>
+        new GitHubCli.GitHubCliError({
+          operation,
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    }).pipe(Effect.flatten);
+
+  const enrichChangeRequestsWithStacks = (input: {
+    readonly cwd: string;
+    readonly items: ReadonlyArray<ChangeRequest>;
+  }): Effect.Effect<ReadonlyArray<ChangeRequest>> =>
+    Effect.gen(function* () {
+      const groups = new Map<
+        string,
+        {
+          readonly host: string;
+          readonly repository: string;
+          readonly numbers: number[];
+        }
+      >();
+      for (const item of input.items) {
+        const identity = parseGitHubRepositoryIdentityFromUrl(item.url);
+        if (!identity) continue;
+        const key = `${identity.host}\u0000${identity.nameWithOwner.toLowerCase()}`;
+        const existing = groups.get(key);
+        if (existing) {
+          existing.numbers.push(item.number);
+        } else {
+          groups.set(key, {
+            host: identity.host,
+            repository: identity.nameWithOwner,
+            numbers: [item.number],
+          });
+        }
+      }
+      if (groups.size === 0) return input.items;
+
+      const groupSummaries = yield* Effect.forEach(
+        groups.entries(),
+        ([key, group]) =>
+          invokeGitHubEffect("getPullRequestStackSummaries", () =>
+            github.getPullRequestStackSummaries({
+              cwd: input.cwd,
+              host: group.host,
+              repository: group.repository,
+              numbers: group.numbers,
+            }),
+          ).pipe(
+            Effect.catch(() => Effect.succeed(new Map())),
+            Effect.map((summaries) => ({ key, summaries })),
+          ),
+        { concurrency: 2 },
+      );
+      const summaries = new Map<string, SourceControlChangeRequestStackSummary>();
+      for (const result of groupSummaries) {
+        for (const [number, summary] of result.summaries) {
+          summaries.set(`${result.key}\u0000${number}`, summary);
+        }
+      }
+      if (summaries.size === 0) return input.items;
+      return input.items.map((item) => {
+        const identity = parseGitHubRepositoryIdentityFromUrl(item.url);
+        if (!identity) return item;
+        const key = `${identity.host}\u0000${identity.nameWithOwner.toLowerCase()}`;
+        const stackSummary = summaries.get(`${key}\u0000${item.number}`);
+        return stackSummary ? { ...item, stackSummary } : item;
+      });
+    }).pipe(Effect.catch(() => Effect.succeed(input.items)));
 
   const withTempBodyFile = <A>(
     input: {
@@ -355,7 +436,8 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
             ...(input.limit !== undefined ? { limit: input.limit } : {}),
           })
           .pipe(
-            Effect.map((items) => items.map(toChangeRequest)),
+            Effect.map((items) => items.map((item) => toChangeRequest(item))),
+            Effect.flatMap((items) => enrichChangeRequestsWithStacks({ cwd: input.cwd, items })),
             Effect.mapError((error) => providerError("listChangeRequests", error)),
           );
       }
@@ -410,6 +492,7 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
             ),
           );
         }),
+        Effect.flatMap((items) => enrichChangeRequestsWithStacks({ cwd: input.cwd, items })),
         Effect.mapError((error) =>
           Schema.is(SourceControlProviderError)(error)
             ? error
@@ -539,15 +622,113 @@ export const make = Effect.fn("makeGitHubSourceControlProvider")(function* () {
           ...(input.limit !== undefined ? { limit: input.limit } : {}),
         })
         .pipe(
-          Effect.map((items) => items.map(toChangeRequest)),
+          Effect.map((items) => items.map((item) => toChangeRequest(item))),
+          Effect.flatMap((items) => enrichChangeRequestsWithStacks({ cwd: input.cwd, items })),
           Effect.mapError((error) => providerError("searchChangeRequests", error)),
         ),
     getChangeRequestDetail: (input) =>
-      github.getPullRequestDetail({ cwd: input.cwd, reference: input.reference }).pipe(
-        Effect.map((raw) =>
-          toChangeRequestDetail(raw, { fullContent: input.fullContent ?? false }),
+      Effect.gen(function* () {
+        const raw = yield* github
+          .getPullRequestDetail({ cwd: input.cwd, reference: input.reference })
+          .pipe(Effect.mapError((error) => providerError("getChangeRequestDetail", error)));
+        const detail = toChangeRequestDetail(raw, { fullContent: input.fullContent ?? false });
+        const identity = parseGitHubRepositoryIdentityFromUrl(raw.url);
+        if (!identity) return { ...detail, stackMetadataIncomplete: true };
+
+        const enhancements = yield* Effect.all(
+          {
+            stack: invokeGitHubEffect("getPullRequestStack", () =>
+              github.getPullRequestStack({
+                cwd: input.cwd,
+                host: identity.host,
+                repository: identity.nameWithOwner,
+                number: raw.number,
+              }),
+            ).pipe(
+              Effect.match({
+                onSuccess: (value) => ({ ok: true as const, value }),
+                onFailure: () => ({ ok: false as const }),
+              }),
+            ),
+            capabilities: invokeGitHubEffect("getRepositoryMergeCapabilities", () =>
+              github.getRepositoryMergeCapabilities({
+                cwd: input.cwd,
+                host: identity.host,
+                repository: identity.nameWithOwner,
+              }),
+            ).pipe(
+              Effect.match({
+                onSuccess: (value) => ({ ok: true as const, value }),
+                onFailure: () => ({ ok: false as const }),
+              }),
+            ),
+          },
+          { concurrency: 2 },
+        );
+        const stack = enhancements.stack.ok ? enhancements.stack.value : null;
+        return {
+          ...detail,
+          ...(stack ? { stack } : {}),
+          stackMetadataIncomplete: !enhancements.stack.ok,
+          ...(enhancements.capabilities.ok
+            ? { mergeCapabilities: enhancements.capabilities.value }
+            : {}),
+        };
+      }),
+    mergeChangeRequest: (input) =>
+      Effect.gen(function* () {
+        const pullRequest = yield* github.getPullRequest({
+          cwd: input.cwd,
+          reference: input.reference,
+        });
+        const identity = parseGitHubRepositoryIdentityFromUrl(pullRequest.url);
+        if (!identity) {
+          return yield* new SourceControlProviderError({
+            provider: "github",
+            operation: "mergeChangeRequest",
+            detail: "Could not verify the pull request's base GitHub repository.",
+          });
+        }
+
+        const { stack, capabilities } = yield* Effect.all(
+          {
+            stack: github.getPullRequestStack({
+              cwd: input.cwd,
+              host: identity.host,
+              repository: identity.nameWithOwner,
+              number: pullRequest.number,
+            }),
+            capabilities: github.getRepositoryMergeCapabilities({
+              cwd: input.cwd,
+              host: identity.host,
+              repository: identity.nameWithOwner,
+            }),
+          },
+          { concurrency: 2 },
+        ).pipe(Effect.mapError((error) => providerError("mergeChangeRequest", error)));
+        if (!capabilities[input.mergeMethod]) {
+          return yield* new SourceControlProviderError({
+            provider: "github",
+            operation: "mergeChangeRequest",
+            detail: `The ${input.mergeMethod} merge method is disabled for this repository.`,
+          });
+        }
+        return yield* github
+          .mergePullRequestAsync({
+            cwd: input.cwd,
+            host: identity.host,
+            repository: identity.nameWithOwner,
+            number: pullRequest.number,
+            mergeMethod: input.mergeMethod,
+            stackMembership: stack ? "stacked" : "standalone",
+          })
+          .pipe(Effect.mapError((error) => providerError("mergeChangeRequest", error)));
+      }).pipe(
+        Effect.mapError((error) =>
+          Schema.is(SourceControlProviderError)(error)
+            ? error
+            : providerError("mergeChangeRequest", error),
         ),
-        Effect.mapError((error) => providerError("getChangeRequestDetail", error)),
       ),
     addChangeRequestComment: (input) =>
       Effect.gen(function* () {

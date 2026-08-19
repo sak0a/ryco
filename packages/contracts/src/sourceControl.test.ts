@@ -5,6 +5,10 @@ import {
   SOURCE_CONTROL_DETAIL_BODY_MAX_BYTES,
   SOURCE_CONTROL_DETAIL_MAX_COMMENTS,
   SourceControlChangeRequestDetail,
+  ChangeRequest,
+  SourceControlChangeRequestStack,
+  SourceControlMergeChangeRequestInput,
+  SourceControlMergeChangeRequestResult,
   SourceControlAddCommentReactionInput,
   SourceControlIssueComment,
   SourceControlAssigneeCandidate,
@@ -14,6 +18,111 @@ import {
   SourceControlWorkflowRunListInput,
   SourceControlWorkflowRerunInput,
 } from "./sourceControl.ts";
+
+const standaloneChangeRequest = {
+  provider: "github",
+  number: 41,
+  title: "Standalone pull request",
+  url: "https://github.com/acme/ryco/pull/41",
+  baseRefName: "main",
+  headRefName: "feature/standalone",
+  state: "open",
+  updatedAt: Option.none(),
+};
+
+const threeEntryStack = {
+  number: 7,
+  size: 3,
+  position: 2,
+  baseRefName: "main",
+  entries: [
+    {
+      position: 1,
+      number: 41,
+      title: "Foundation",
+      url: "https://github.com/acme/ryco/pull/41",
+      headRefName: "stack/foundation",
+      baseRefName: "main",
+      state: "open",
+      isDraft: false,
+      mergeability: "mergeable",
+      mergeStateStatus: "CLEAN",
+    },
+    {
+      position: 2,
+      number: 42,
+      title: "Middle",
+      url: "https://github.com/acme/ryco/pull/42",
+      headRefName: "stack/middle",
+      baseRefName: "stack/foundation",
+      state: "open",
+      isDraft: false,
+      mergeability: "unknown",
+      mergeStateStatus: null,
+    },
+    {
+      position: 3,
+      number: 43,
+      title: "Top",
+      url: "https://github.com/acme/ryco/pull/43",
+      headRefName: "stack/top",
+      baseRefName: "stack/middle",
+      state: "open",
+      isDraft: true,
+      mergeability: "unknown",
+    },
+  ],
+} as const;
+
+describe("stacked change request contracts", () => {
+  it("keeps standalone change requests decodable without stack fields", () => {
+    expect(Schema.decodeUnknownSync(ChangeRequest)(standaloneChangeRequest)).toEqual(
+      standaloneChangeRequest,
+    );
+  });
+
+  it("decodes a valid bottom-to-top three-entry stack", () => {
+    const decoded = Schema.decodeUnknownSync(SourceControlChangeRequestStack)(threeEntryStack);
+    expect(decoded.entries.map((entry) => entry.number)).toEqual([41, 42, 43]);
+    expect(decoded.position).toBe(2);
+  });
+
+  it("rejects zero stack positions and sizes", () => {
+    expect(() =>
+      Schema.decodeUnknownSync(SourceControlChangeRequestStack)({
+        ...threeEntryStack,
+        position: 0,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(SourceControlChangeRequestStack)({
+        ...threeEntryStack,
+        size: 0,
+      }),
+    ).toThrow();
+    expect(() =>
+      Schema.decodeUnknownSync(SourceControlChangeRequestStack)({
+        ...threeEntryStack,
+        entries: [{ ...threeEntryStack.entries[0], position: 0 }],
+      }),
+    ).toThrow();
+  });
+
+  it("decodes merge inputs and both normalized outcomes", () => {
+    const decodeInput = Schema.decodeUnknownSync(SourceControlMergeChangeRequestInput);
+    const decodeResult = Schema.decodeUnknownSync(SourceControlMergeChangeRequestResult);
+    expect(decodeInput({ cwd: "/repo", reference: "42", mergeMethod: "squash" })).toEqual({
+      cwd: "/repo",
+      reference: "42",
+      mergeMethod: "squash",
+    });
+    expect(decodeResult({ outcome: "merged" })).toEqual({ outcome: "merged" });
+    expect(decodeResult({ outcome: "enqueued" })).toEqual({ outcome: "enqueued" });
+    expect(() =>
+      decodeInput({ cwd: "/repo", reference: "42", mergeMethod: "fast-forward" }),
+    ).toThrow();
+  });
+});
 
 describe("truncateSourceControlDetailContent", () => {
   it("returns input unchanged when within caps", () => {

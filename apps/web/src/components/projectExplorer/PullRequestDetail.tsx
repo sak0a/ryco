@@ -4,6 +4,7 @@ import type {
   SourceControlChangeRequestCommit,
   SourceControlChangeRequestDetail,
   SourceControlChangeRequestFile,
+  SourceControlChangeRequestMergeMethod,
 } from "@ryco/contracts";
 import { DateTime, Option } from "effect";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -22,6 +23,7 @@ import {
 import {
   useAddChangeRequestCommentMutation,
   useAddChangeRequestCommentReactionMutation,
+  useMergeChangeRequestMutation,
   useSourceControlChangeRequestDetail,
   useSourceControlChangeRequestDiff,
   useSourceControlWorkflowRuns,
@@ -31,11 +33,23 @@ import { cn } from "~/lib/utils";
 import { useSettings } from "~/hooks/useSettings";
 import { resolveSourceControlRefreshDelay } from "~/rpc/sourceControlRefreshPolicy";
 import { ContextPickerTabs } from "../chat/ContextPickerTabs";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
+import { toastManager } from "../ui/toast";
 import { CommentComposer, CommentItem, type CommentQuoteInsertion } from "./CommentThread";
 import { buildCommentQuoteMarkdown, deriveOriginalPostAuthorRole } from "./CommentThread.logic";
 import { PrCheckStatusBadge } from "./PrCheckStatusBadge";
+import { PullRequestStackPopover } from "./PullRequestStackPopover";
 import {
   SourceControlDetailErrorState,
   SourceControlDetailLayout,
@@ -57,6 +71,12 @@ import {
 } from "./prCheckStatus";
 import { splitUnifiedDiffByFile } from "./unifiedDiffSplit";
 import { usePrCheckPassNotifications } from "./usePrCheckPassNotifications";
+import {
+  assessPullRequestStack,
+  pullRequestMergeBlocker,
+  pullRequestMergeConfirmation,
+  pullRequestMergeSuccessMessage,
+} from "./pullRequestStack.logic";
 import { WorktreeItemSidebar } from "./WorktreeItemSidebar";
 import { WorkflowRunsSection } from "./WorkflowRunsSection";
 
@@ -85,6 +105,7 @@ interface PullRequestDetailProps {
   onBack: () => void;
   onSelectLinkedIssue: (issueNumber: number) => void;
   onSelectLinkedWorkItem?: ((workItemKey: string) => void) | undefined;
+  onSelectPullRequest?: ((number: number) => void) | undefined;
   onAttach?: ((mode: "local" | "worktree") => Promise<void> | void) | undefined;
   attachInProgress?: "local" | "worktree" | null;
 }
@@ -119,6 +140,11 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
     cwd: props.cwd,
     reference,
   });
+  const mergeMutation = useMergeChangeRequestMutation({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    reference,
+  });
 
   const detail = detailQuery.data;
 
@@ -140,6 +166,9 @@ export function PullRequestDetail(props: PullRequestDetailProps) {
             cwd={props.cwd}
             onSelectLinkedIssue={props.onSelectLinkedIssue}
             onSelectLinkedWorkItem={props.onSelectLinkedWorkItem}
+            onSelectPullRequest={props.onSelectPullRequest}
+            mergePending={mergeMutation.isPending}
+            onMerge={(mergeMethod) => mergeMutation.mutateAsync({ mergeMethod })}
             onSubmitComment={
               detail.provider === "github" && props.environmentId !== null && props.cwd !== null
                 ? (input) => addCommentMutation.mutateAsync(input).then(() => undefined)
@@ -188,6 +217,11 @@ function PullRequestDetailBody(props: {
   cwd: string | null;
   onSelectLinkedIssue: (issueNumber: number) => void;
   onSelectLinkedWorkItem?: ((workItemKey: string) => void) | undefined;
+  onSelectPullRequest?: ((number: number) => void) | undefined;
+  mergePending: boolean;
+  onMerge: (
+    mergeMethod: SourceControlChangeRequestMergeMethod,
+  ) => Promise<{ readonly outcome: "merged" | "enqueued" }>;
   onSubmitComment?:
     | ((input: { readonly body: string; readonly clientMutationId: string }) => Promise<void>)
     | undefined;
@@ -198,7 +232,7 @@ function PullRequestDetailBody(props: {
       }) => Promise<void>)
     | undefined;
 }) {
-  const { detail } = props;
+  const { detail, onMerge } = props;
   const [activeTab, setActiveTab] = useState<PullRequestTab>("conversation");
   const [quoteInsertion, setQuoteInsertion] = useState<CommentQuoteInsertion | null>(null);
   const nextQuoteInsertionIdRef = useRef(0);
@@ -236,6 +270,46 @@ function PullRequestDetailBody(props: {
   const onSubmitComment = props.onSubmitComment;
   const canComment = onSubmitComment !== undefined;
   const onAddCommentReaction = props.onAddCommentReaction;
+  const [mergeConfirmationOpen, setMergeConfirmationOpen] = useState(false);
+  const availableMergeMethods = useMemo(
+    () =>
+      (["merge", "squash", "rebase"] as const).filter(
+        (method) => detail.mergeCapabilities?.[method] === true,
+      ),
+    [detail.mergeCapabilities],
+  );
+  const [mergeMethod, setMergeMethod] = useState<SourceControlChangeRequestMergeMethod>("merge");
+  const selectedMergeMethod = availableMergeMethods.includes(mergeMethod)
+    ? mergeMethod
+    : (availableMergeMethods[0] ?? mergeMethod);
+  const githubStack = detail.provider === "github" ? detail.stack : undefined;
+  const stackAssessment = githubStack ? assessPullRequestStack(githubStack) : null;
+  const mergeBlocker = pullRequestMergeBlocker(detail, stackAssessment);
+  const showMergeControls =
+    detail.provider === "github" && detail.state === "open" && availableMergeMethods.length > 0;
+  const mergeConfirmation = pullRequestMergeConfirmation({
+    selectedNumber: detail.number,
+    mergeMethod: selectedMergeMethod,
+    stack: githubStack ?? null,
+  });
+  const confirmMerge = useCallback(async () => {
+    if (mergeBlocker !== null || availableMergeMethods.length === 0) return;
+    try {
+      const result = await onMerge(selectedMergeMethod);
+      const message = pullRequestMergeSuccessMessage({
+        outcome: result.outcome,
+        isStack: githubStack !== undefined,
+      });
+      toastManager.add({ type: "success", ...message });
+      setMergeConfirmationOpen(false);
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: githubStack ? "Could not merge stack" : "Could not merge pull request",
+        description: errorMessage(error, "GitHub rejected the merge request."),
+      });
+    }
+  }, [availableMergeMethods.length, githubStack, mergeBlocker, onMerge, selectedMergeMethod]);
 
   usePrCheckPassNotifications([
     {
@@ -264,6 +338,14 @@ function PullRequestDetailBody(props: {
       }
     >
       <div className="flex min-h-0 flex-col lg:h-full">
+        {detail.provider === "github" && detail.stackMetadataIncomplete === true ? (
+          <div
+            role="status"
+            className="border-amber-500/30 border-b bg-amber-500/8 px-5 py-2 text-amber-700 text-xs dark:text-amber-300 lg:px-6"
+          >
+            Stack details could not be loaded. Refresh before attempting to merge this pull request.
+          </div>
+        ) : null}
         <header className="border-border/60 border-b bg-background/50 px-5 py-4 lg:px-6">
           <div className="flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
@@ -283,6 +365,13 @@ function PullRequestDetailBody(props: {
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {githubStack ? (
+                <PullRequestStackPopover
+                  stack={githubStack}
+                  currentNumber={detail.number}
+                  onSelectPullRequest={props.onSelectPullRequest}
+                />
+              ) : null}
               <DiffStatsBadge additions={additions} deletions={deletions} />
               <PrCheckStatusBadge
                 view={checkStatus}
@@ -295,6 +384,41 @@ function PullRequestDetailBody(props: {
                 }
               />
               <StateBadge kind={changeRequestStateKind(detail.state, detail.isDraft)} />
+              {showMergeControls ? (
+                <div className="flex items-center">
+                  <Select
+                    value={selectedMergeMethod}
+                    onValueChange={(value) => {
+                      if (value === "merge" || value === "squash" || value === "rebase") {
+                        setMergeMethod(value);
+                      }
+                    }}
+                    disabled={props.mergePending}
+                  >
+                    <SelectTrigger size="sm" className="rounded-r-none" aria-label="Merge method">
+                      <SelectValue>{mergeMethodLabel(selectedMergeMethod)}</SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      {availableMergeMethods.map((method) => (
+                        <SelectItem key={method} value={method}>
+                          {mergeMethodLabel(method)}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-l-none border-l-0"
+                    disabled={mergeBlocker !== null || props.mergePending}
+                    title={mergeBlocker ?? undefined}
+                    onClick={() => setMergeConfirmationOpen(true)}
+                  >
+                    {props.mergePending ? <Spinner className="size-3.5" /> : null}
+                    {githubStack ? "Merge stack" : "Merge"}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
         </header>
@@ -461,8 +585,47 @@ function PullRequestDetailBody(props: {
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={mergeConfirmationOpen}
+        onOpenChange={(open) => {
+          if (!props.mergePending) setMergeConfirmationOpen(open);
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{mergeConfirmation.title}</AlertDialogTitle>
+            <AlertDialogDescription>{mergeConfirmation.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />} disabled={props.mergePending}>
+              Cancel
+            </AlertDialogClose>
+            <Button
+              disabled={
+                props.mergePending || mergeBlocker !== null || availableMergeMethods.length === 0
+              }
+              onClick={() => void confirmMerge()}
+            >
+              {props.mergePending ? <Spinner className="size-4" /> : null}
+              {githubStack ? "Merge stack" : "Merge pull request"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
     </SourceControlDetailLayout>
   );
+}
+
+function mergeMethodLabel(method: SourceControlChangeRequestMergeMethod): string {
+  switch (method) {
+    case "merge":
+      return "Merge commit";
+    case "squash":
+      return "Squash and merge";
+    case "rebase":
+      return "Rebase and merge";
+  }
 }
 
 function DiffStatsBadge({ additions, deletions }: { additions: number; deletions: number }) {

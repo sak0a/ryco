@@ -30,6 +30,52 @@ export const SourceControlChangeRequestMergeability = Schema.Literals([
 export type SourceControlChangeRequestMergeability =
   typeof SourceControlChangeRequestMergeability.Type;
 
+/** Compact stack identity used by change-request list rows. */
+export const SourceControlChangeRequestStackSummary = Schema.Struct({
+  number: PositiveInt,
+  size: PositiveInt,
+  position: PositiveInt,
+  baseRefName: TrimmedNonEmptyString,
+});
+export type SourceControlChangeRequestStackSummary =
+  typeof SourceControlChangeRequestStackSummary.Type;
+
+export const SourceControlChangeRequestStackEntry = Schema.Struct({
+  position: PositiveInt,
+  number: PositiveInt,
+  title: TrimmedNonEmptyString,
+  url: TrimmedNonEmptyString,
+  headRefName: TrimmedNonEmptyString,
+  baseRefName: TrimmedNonEmptyString,
+  state: ChangeRequestState,
+  isDraft: Schema.Boolean,
+  mergeability: SourceControlChangeRequestMergeability,
+  mergeStateStatus: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export type SourceControlChangeRequestStackEntry = typeof SourceControlChangeRequestStackEntry.Type;
+
+/**
+ * Entries are normalized from the ultimate base branch upwards. `position`
+ * identifies the selected pull request within that bottom-to-top ordering.
+ */
+export const SourceControlChangeRequestStack = Schema.Struct({
+  ...SourceControlChangeRequestStackSummary.fields,
+  entries: Schema.Array(SourceControlChangeRequestStackEntry),
+});
+export type SourceControlChangeRequestStack = typeof SourceControlChangeRequestStack.Type;
+
+export const SourceControlChangeRequestMergeMethod = Schema.Literals(["merge", "squash", "rebase"]);
+export type SourceControlChangeRequestMergeMethod =
+  typeof SourceControlChangeRequestMergeMethod.Type;
+
+export const SourceControlChangeRequestMergeCapabilities = Schema.Struct({
+  merge: Schema.Boolean,
+  squash: Schema.Boolean,
+  rebase: Schema.Boolean,
+});
+export type SourceControlChangeRequestMergeCapabilities =
+  typeof SourceControlChangeRequestMergeCapabilities.Type;
+
 export const SourceControlCheckRollupItemKind = Schema.Literals([
   "check-run",
   "status-context",
@@ -76,6 +122,7 @@ export const ChangeRequest = Schema.Struct({
   headSha: Schema.optional(TrimmedNonEmptyString),
   mergeability: Schema.optional(SourceControlChangeRequestMergeability),
   checkRollup: Schema.optional(Schema.Array(SourceControlCheckRollupItem)),
+  stackSummary: Schema.optional(SourceControlChangeRequestStackSummary),
 });
 export type ChangeRequest = typeof ChangeRequest.Type;
 
@@ -264,8 +311,24 @@ export const SourceControlChangeRequestDetail = Schema.Struct({
   deletions: Schema.optional(Schema.Number),
   changedFiles: Schema.optional(Schema.Number),
   files: Schema.optional(Schema.Array(SourceControlChangeRequestFile)),
+  stack: Schema.optional(SourceControlChangeRequestStack),
+  stackMetadataIncomplete: Schema.optional(Schema.Boolean),
+  mergeCapabilities: Schema.optional(SourceControlChangeRequestMergeCapabilities),
 });
 export type SourceControlChangeRequestDetail = typeof SourceControlChangeRequestDetail.Type;
+
+export const SourceControlMergeChangeRequestInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  reference: TrimmedNonEmptyString,
+  mergeMethod: SourceControlChangeRequestMergeMethod,
+});
+export type SourceControlMergeChangeRequestInput = typeof SourceControlMergeChangeRequestInput.Type;
+
+export const SourceControlMergeChangeRequestResult = Schema.Struct({
+  outcome: Schema.Literals(["merged", "enqueued"]),
+});
+export type SourceControlMergeChangeRequestResult =
+  typeof SourceControlMergeChangeRequestResult.Type;
 
 export const SOURCE_CONTROL_WORKFLOW_LOG_MAX_BYTES = 200 * 1024; // 200 KB
 

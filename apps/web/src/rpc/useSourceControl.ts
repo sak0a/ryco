@@ -8,6 +8,7 @@ import type {
   SourceControlAddIssueCommentInput,
   SourceControlAssigneeCandidate,
   SourceControlChangeRequestDetail,
+  SourceControlChangeRequestMergeMethod,
   SourceControlCommentReaction,
   SourceControlCommentReactionContent,
   SourceControlCreateIssueInput,
@@ -35,6 +36,7 @@ import {
   issueListBinding,
   issueSearchBinding,
   invalidateSourceControl,
+  mergeSourceControlChangeRequest,
   repositorySearchBinding,
   workflowJobLogBinding,
   workflowRunJobsBinding,
@@ -607,6 +609,22 @@ export function useAddChangeRequestCommentReactionMutation(input: {
   );
 
   return { ...baseMutation, mutateAsync };
+}
+
+export function useMergeChangeRequestMutation(input: {
+  environmentId: EnvironmentId | null;
+  cwd: string | null;
+  reference: string;
+}) {
+  return useSourceControlMutation(
+    (payload: { readonly mergeMethod: SourceControlChangeRequestMergeMethod }) =>
+      mergeSourceControlChangeRequest({
+        environmentId: input.environmentId,
+        cwd: input.cwd,
+        reference: input.reference,
+        mergeMethod: payload.mergeMethod,
+      }),
+  );
 }
 
 export function useRerunWorkflowMutation(input: {
