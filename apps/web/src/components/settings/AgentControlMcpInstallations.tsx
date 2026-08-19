@@ -337,8 +337,8 @@ export function AgentControlMcpInstallations() {
             </div>
           ) : !loading && installableWorkspaces.length === 0 ? (
             <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
-              No installable Codex or Claude profiles were detected. Configure a provider instance
-              first, then refresh.
+              No installable provider profiles were detected. Configure a supported provider
+              instance first, then refresh.
             </div>
           ) : (
             <div className="grid gap-3">

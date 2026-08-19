@@ -1,4 +1,33 @@
-import type { McpSecretMutationMap, McpSecretPresenceMap } from "@ryco/contracts";
+import { createHash } from "node:crypto";
+
+import {
+  McpServerWritableConfig,
+  type McpServerWritableConfig as McpServerWritableConfigType,
+  McpSecretMutationMap,
+  McpSecretPresenceMap,
+} from "@ryco/contracts";
+import { Schema } from "effect";
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .toSorted(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalize(entry)]),
+  );
+}
+
+export function providerMcpConfigFingerprint(config: McpServerWritableConfigType): string {
+  const normalized = Schema.decodeSync(McpServerWritableConfig)(config);
+  return createHash("sha256")
+    .update(
+      JSON.stringify(canonicalize(Schema.encodeSync(McpServerWritableConfig)(normalized))),
+      "utf8",
+    )
+    .digest("base64url");
+}
 
 export function applyProviderMcpSecretMutations(
   existing: Readonly<Record<string, string>>,

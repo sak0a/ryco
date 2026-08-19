@@ -34,6 +34,7 @@ import {
 import type { ProviderMcpAdapter } from "../ProviderMcpAdapter.ts";
 import {
   applyProviderMcpSecretMutations,
+  providerMcpConfigFingerprint,
   providerMcpSecretPresence,
 } from "../ProviderMcpSecrets.ts";
 
@@ -147,28 +148,6 @@ function readClaudeMcpEntries(document: unknown): ReadonlyArray<readonly [string
   const root = record(document);
   const servers = record(root?.mcpServers);
   return servers === null ? [] : Object.entries(servers);
-}
-
-function sortedRecord(input: Readonly<Record<string, string>>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(input).toSorted(([left], [right]) => left.localeCompare(right)),
-  );
-}
-
-export function claudeMcpConfigFingerprint(config: McpServerWritableConfigType): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({
-        transport: config.transport,
-        command: config.command ?? null,
-        args: config.args,
-        url: config.url ?? null,
-        env: sortedRecord(config.env),
-        httpHeaders: sortedRecord(config.httpHeaders),
-      }),
-      "utf8",
-    )
-    .digest("base64url");
 }
 
 function publicClaudeMcpServer(name: string, config: McpServerWritableConfigType) {
@@ -446,7 +425,7 @@ export const makeClaudeMcpAdapter = (io: ClaudeMcpAdapterIo = defaultIo) =>
         const written = readClaudeMcpEntry(yield* readDocument(runtime), input.name);
         if (
           !written ||
-          claudeMcpConfigFingerprint(written) !== claudeMcpConfigFingerprint(desired)
+          providerMcpConfigFingerprint(written) !== providerMcpConfigFingerprint(desired)
         ) {
           return yield* Effect.fail(toMcpError("Claude did not preserve the MCP server update."));
         }

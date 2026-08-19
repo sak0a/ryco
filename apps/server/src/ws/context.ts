@@ -25,6 +25,10 @@ import { Keybindings } from "../keybindings.ts";
 import { makeCodexMcpService } from "../mcp/CodexMcpService.ts";
 import { makeCodexMcpAdapter } from "../mcp/adapters/CodexMcpAdapter.ts";
 import { makeClaudeMcpAdapter } from "../mcp/adapters/ClaudeMcpAdapter.ts";
+import { makeCopilotMcpAdapter } from "../mcp/adapters/CopilotMcpAdapter.ts";
+import { makeCursorMcpAdapter } from "../mcp/adapters/CursorMcpAdapter.ts";
+import { makeGrokMcpAdapter } from "../mcp/adapters/GrokMcpAdapter.ts";
+import { makeOpenCodeMcpAdapter } from "../mcp/adapters/OpenCodeMcpAdapter.ts";
 import { makeProviderMcpRegistry } from "../mcp/ProviderMcpRegistry.ts";
 import { Open, resolveAvailableEditors } from "../open.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -141,7 +145,18 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const serverSettings = yield* ServerSettingsService;
     const codexMcp = yield* makeCodexMcpService;
     const claudeMcp = yield* makeClaudeMcpAdapter();
-    const mcpRegistry = yield* makeProviderMcpRegistry([makeCodexMcpAdapter(codexMcp), claudeMcp]);
+    const copilotMcp = yield* makeCopilotMcpAdapter();
+    const cursorMcp = yield* makeCursorMcpAdapter();
+    const grokMcp = yield* makeGrokMcpAdapter();
+    const openCodeMcp = yield* makeOpenCodeMcpAdapter();
+    const mcpRegistry = yield* makeProviderMcpRegistry([
+      makeCodexMcpAdapter(codexMcp),
+      claudeMcp,
+      copilotMcp,
+      cursorMcp,
+      grokMcp,
+      openCodeMcp,
+    ]);
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;

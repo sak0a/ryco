@@ -25,7 +25,7 @@ export function IntegrationsSettingsPanel() {
               Private tools for every agent
             </h2>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground/80">
-              Ryco sessions receive the tools automatically. Connect standalone Codex and Claude
+              Ryco sessions receive the tools automatically. Connect supported standalone provider
               profiles with one click. Every requested change still waits for explicit approval.
             </p>
             <p className="mt-2 max-w-2xl text-xs leading-relaxed text-muted-foreground">
