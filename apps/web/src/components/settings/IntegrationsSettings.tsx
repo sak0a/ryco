@@ -32,6 +32,7 @@ import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { retryAgentControlStartup } from "./agentControlStartupRetry";
 
 export const AGENT_CONTROL_CLIENT_LABELS: Record<AgentControlExternalClientKind, string> = {
   codex: "Codex",
@@ -361,7 +362,7 @@ export function ExternalIntegrationsSettings() {
   const refresh = useCallback(async () => {
     if (!api) return;
     try {
-      const result = await api.listIntegrations();
+      const result = await retryAgentControlStartup(() => api.listIntegrations());
       setState((current) => applyExternalIntegrationList(current, result));
     } catch (error) {
       showFailure("Failed to load external integrations", error);

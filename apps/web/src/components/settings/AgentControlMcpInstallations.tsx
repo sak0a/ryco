@@ -33,6 +33,7 @@ import {
   parseAgentControlIntegrationForm,
   type AgentControlIntegrationForm,
 } from "./IntegrationsSettings";
+import { retryAgentControlStartup } from "./agentControlStartupRetry";
 import { getDriverOption } from "./providerDriverMeta";
 
 const EMPTY_PROVIDERS: readonly McpProviderSupport[] = [];
@@ -140,11 +141,14 @@ export function AgentControlMcpInstallations() {
       return;
     }
     try {
-      const [workspaceResult, installationResult, integrationResult] = await Promise.all([
-        mcpApi.listWorkspaces(),
-        agentControlApi.listMcpInstallations(),
-        agentControlApi.listIntegrations(),
-      ]);
+      const [workspaceResult, installationResult, integrationResult] =
+        await retryAgentControlStartup(() =>
+          Promise.all([
+            mcpApi.listWorkspaces(),
+            agentControlApi.listMcpInstallations(),
+            agentControlApi.listIntegrations(),
+          ]),
+        );
       setProviders(workspaceResult.providers);
       setWorkspaces(workspaceResult.workspaces);
       setInstallations((current) => applyMcpInstallationList(current, installationResult));
