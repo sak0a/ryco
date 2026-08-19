@@ -9,6 +9,7 @@ import {
   McpListWorkspacesResult,
   McpOauthLoginInput,
   McpOauthLoginResult,
+  McpProviderCapabilities,
   McpProviderSupport,
   McpServer,
   McpServerConfig,
@@ -91,41 +92,65 @@ function workspaceIdFor(sharedHomePath: string): McpWorkspaceId {
 
 export function mcpSupportForDriver(
   driver: ProviderDriverKind,
-): Pick<McpProviderSupport, "status" | "message"> {
+): Pick<McpProviderSupport, "status" | "message" | "capabilities"> {
+  const unavailable = Schema.decodeSync(McpProviderCapabilities)({});
   switch (driver) {
     case CODEX_DRIVER:
       return {
         status: "managed",
         message: "Ryco can list, edit, reload, and start OAuth for Codex MCP servers.",
+        capabilities: Schema.decodeSync(McpProviderCapabilities)({
+          readConfiguration: "available",
+          upsert: "available",
+          remove: "available",
+          enableDisable: "available",
+          reload: "available",
+          health: "available",
+          inventory: "available",
+          oauth: "available",
+          automaticAgentControl: "available",
+          scopes: ["user"],
+        }),
       };
     case COPILOT_DRIVER:
       return {
         status: "external",
         message:
           "GitHub Copilot can emit MCP tool calls, but its MCP server configuration is managed outside this panel.",
+        capabilities: Schema.decodeSync(McpProviderCapabilities)({
+          automaticAgentControl: "available",
+        }),
       };
     case CLAUDE_DRIVER:
       return {
         status: "external",
         message:
           "Claude MCP tool activity can be displayed, but Claude server configuration is managed outside this panel.",
+        capabilities: Schema.decodeSync(McpProviderCapabilities)({
+          automaticAgentControl: "available",
+        }),
       };
     case OPENCODE_DRIVER:
       return {
         status: "external",
         message:
           "OpenCode MCP setup is managed by OpenCode; Ryco only displays reported MCP activity.",
+        capabilities: unavailable,
       };
     case CURSOR_DRIVER:
       return {
         status: "unsupported",
         message:
           "Cursor user-managed MCP configuration is not exposed in this panel; Ryco may separately inject its private internal Agent Control server per session.",
+        capabilities: Schema.decodeSync(McpProviderCapabilities)({
+          automaticAgentControl: "available",
+        }),
       };
     default:
       return {
         status: "unsupported",
         message: "This driver has no MCP management integration registered in Ryco.",
+        capabilities: unavailable,
       };
   }
 }
@@ -146,6 +171,7 @@ function buildProviderSupport(input: {
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     enabled: input.enabled,
     status: support.status,
+    capabilities: support.capabilities,
     ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
     message: input.enabled
       ? support.message
@@ -571,7 +597,17 @@ export const makeCodexMcpService = Effect.gen(function* () {
       groups.set(workspaceId, {
         workspace: {
           id: workspaceId,
+          driver: CODEX_DRIVER,
+          providerDisplayName: "Codex",
           displayPath: layout.sharedHomePath,
+          nativeScope: "user",
+          formatGeneration: "codex-app-server-v2",
+          capabilities: mcpSupportForDriver(CODEX_DRIVER).capabilities,
+          providerMetadata: {
+            sharedHomePath: layout.sharedHomePath,
+            ...(layout.effectiveHomePath ? { effectiveHomePath: layout.effectiveHomePath } : {}),
+            mode: layout.mode,
+          },
           sharedHomePath: layout.sharedHomePath,
           ...(layout.effectiveHomePath ? { effectiveHomePath: layout.effectiveHomePath } : {}),
           mode: layout.mode,

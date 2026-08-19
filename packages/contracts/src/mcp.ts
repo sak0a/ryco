@@ -22,11 +22,74 @@ export const McpProviderInstanceUsage = Schema.Struct({
 });
 export type McpProviderInstanceUsage = typeof McpProviderInstanceUsage.Type;
 
+export const McpCapabilityAvailability = Schema.Literals(["available", "unavailable", "unknown"]);
+export type McpCapabilityAvailability = typeof McpCapabilityAvailability.Type;
+
+export const McpNativeScope = Schema.Literals([
+  "user",
+  "project",
+  "directory",
+  "runtime",
+  "system",
+  "unknown",
+]);
+export type McpNativeScope = typeof McpNativeScope.Type;
+
+const unavailableCapability = () => Effect.succeed("unavailable" as const);
+
+export const McpProviderCapabilities = Schema.Struct({
+  readConfiguration: McpCapabilityAvailability.pipe(
+    Schema.withDecodingDefault(unavailableCapability()),
+  ),
+  upsert: McpCapabilityAvailability.pipe(Schema.withDecodingDefault(unavailableCapability())),
+  remove: McpCapabilityAvailability.pipe(Schema.withDecodingDefault(unavailableCapability())),
+  enableDisable: McpCapabilityAvailability.pipe(
+    Schema.withDecodingDefault(unavailableCapability()),
+  ),
+  reload: McpCapabilityAvailability.pipe(Schema.withDecodingDefault(unavailableCapability())),
+  health: McpCapabilityAvailability.pipe(Schema.withDecodingDefault(unavailableCapability())),
+  inventory: McpCapabilityAvailability.pipe(Schema.withDecodingDefault(unavailableCapability())),
+  oauth: McpCapabilityAvailability.pipe(Schema.withDecodingDefault(unavailableCapability())),
+  externalAgentControl: McpCapabilityAvailability.pipe(
+    Schema.withDecodingDefault(unavailableCapability()),
+  ),
+  automaticAgentControl: McpCapabilityAvailability.pipe(
+    Schema.withDecodingDefault(unavailableCapability()),
+  ),
+  scopes: Schema.Array(McpNativeScope).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+});
+export type McpProviderCapabilities = typeof McpProviderCapabilities.Type;
+
+export const McpWorkspaceProviderMetadataValue = Schema.Union([
+  Schema.String,
+  Schema.Number,
+  Schema.Boolean,
+  Schema.Null,
+]);
+export type McpWorkspaceProviderMetadataValue = typeof McpWorkspaceProviderMetadataValue.Type;
+
+export const McpWorkspaceProviderMetadata = Schema.Record(
+  Schema.String,
+  McpWorkspaceProviderMetadataValue,
+);
+export type McpWorkspaceProviderMetadata = typeof McpWorkspaceProviderMetadata.Type;
+
 export const McpWorkspace = Schema.Struct({
   id: McpWorkspaceId,
+  driver: ProviderDriverKind,
+  providerDisplayName: Schema.optionalKey(TrimmedNonEmptyString),
   displayPath: TrimmedNonEmptyString,
+  nativeScope: McpNativeScope,
+  formatGeneration: TrimmedNonEmptyString,
+  capabilities: McpProviderCapabilities,
+  providerMetadata: McpWorkspaceProviderMetadata.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  /** @deprecated Codex compatibility metadata. Use providerMetadata. */
   sharedHomePath: TrimmedNonEmptyString,
+  /** @deprecated Codex compatibility metadata. Use providerMetadata. */
   effectiveHomePath: Schema.optionalKey(TrimmedNonEmptyString),
+  /** @deprecated Codex compatibility metadata. Use providerMetadata. */
   mode: Schema.Literals(["direct", "authOverlay"]),
   selectedInstanceId: ProviderInstanceId,
   providerInstances: Schema.Array(McpProviderInstanceUsage),
@@ -49,6 +112,7 @@ export const McpProviderSupport = Schema.Struct({
   accentColor: Schema.optionalKey(TrimmedNonEmptyString),
   enabled: Schema.Boolean,
   status: McpProviderSupportStatus,
+  capabilities: McpProviderCapabilities,
   workspaceId: Schema.optionalKey(McpWorkspaceId),
   message: TrimmedNonEmptyString,
 });
@@ -92,6 +156,22 @@ export const McpAuthStatus = Schema.Literals([
 ]);
 export type McpAuthStatus = typeof McpAuthStatus.Type;
 
+export const McpSecretPresence = Schema.Literals(["absent", "present"]);
+export type McpSecretPresence = typeof McpSecretPresence.Type;
+
+export const McpSecretMutation = Schema.Union([
+  Schema.Struct({ action: Schema.Literal("retain") }),
+  Schema.Struct({ action: Schema.Literal("clear") }),
+  Schema.Struct({ action: Schema.Literal("replace"), value: Schema.String }),
+]);
+export type McpSecretMutation = typeof McpSecretMutation.Type;
+
+export const McpSecretPresenceMap = Schema.Record(Schema.String, McpSecretPresence);
+export type McpSecretPresenceMap = typeof McpSecretPresenceMap.Type;
+
+export const McpSecretMutationMap = Schema.Record(Schema.String, McpSecretMutation);
+export type McpSecretMutationMap = typeof McpSecretMutationMap.Type;
+
 export const McpInventoryTool = Schema.Struct({
   name: TrimmedNonEmptyString,
   title: Schema.optionalKey(Schema.NullOr(TrimmedNonEmptyString)),
@@ -120,7 +200,7 @@ export const McpInventoryResourceTemplate = Schema.Struct({
 });
 export type McpInventoryResourceTemplate = typeof McpInventoryResourceTemplate.Type;
 
-export const McpServerConfig = Schema.Struct({
+const McpServerWritableConfigFields = {
   transport: McpTransport,
   command: Schema.optionalKey(TrimmedString),
   args: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
@@ -144,6 +224,14 @@ export const McpServerConfig = Schema.Struct({
   enabledTools: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   disabledTools: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   oauthScopes: Schema.Array(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+} as const;
+
+export const McpServerWritableConfig = Schema.Struct(McpServerWritableConfigFields);
+export type McpServerWritableConfig = typeof McpServerWritableConfig.Type;
+
+export const McpServerConfig = Schema.Struct({
+  ...McpServerWritableConfigFields,
+  secretFields: Schema.optionalKey(McpSecretPresenceMap),
   rawConfig: Schema.optionalKey(Schema.Unknown),
 });
 export type McpServerConfig = typeof McpServerConfig.Type;
@@ -187,7 +275,8 @@ export type McpListServersResult = typeof McpListServersResult.Type;
 export const McpServerUpsertInput = Schema.Struct({
   workspaceId: McpWorkspaceId,
   name: McpServerName,
-  config: McpServerConfig,
+  config: McpServerWritableConfig,
+  secretMutations: Schema.optionalKey(McpSecretMutationMap),
 });
 export type McpServerUpsertInput = typeof McpServerUpsertInput.Type;
 

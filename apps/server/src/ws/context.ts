@@ -22,6 +22,8 @@ import { resolveManagedWorktreesRoot, ServerConfig } from "../config.ts";
 import { Diagnostics } from "../diagnostics/Services/Diagnostics.ts";
 import { Keybindings } from "../keybindings.ts";
 import { makeCodexMcpService } from "../mcp/CodexMcpService.ts";
+import { makeCodexMcpAdapter } from "../mcp/adapters/CodexMcpAdapter.ts";
+import { makeProviderMcpRegistry } from "../mcp/ProviderMcpRegistry.ts";
 import { Open, resolveAvailableEditors } from "../open.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ContextHandoffInspection } from "../orchestration/Services/ContextHandoffInspection.ts";
@@ -133,6 +135,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
     const codexMcp = yield* makeCodexMcpService;
+    const mcpRegistry = yield* makeProviderMcpRegistry([makeCodexMcpAdapter(codexMcp)]);
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -683,7 +686,7 @@ export const makeWsRpcContext = (principal: RpcPrincipal) =>
       config,
       lifecycleEvents,
       serverSettings,
-      codexMcp,
+      mcpRegistry,
       workspaceEntries,
       workspaceFileSystem,
       sourceControlDiscovery,

@@ -28,7 +28,7 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     serverSettings,
     sourceControlDiscovery,
     config,
-    codexMcp,
+    mcpRegistry,
     textGeneration,
     atlassian,
     workItems,
@@ -207,43 +207,43 @@ export const makeProviderHandlers = (ctx: WsRpcContext) => {
     [WS_METHODS.mcpListWorkspaces]: (_input) =>
       observeRpcEffect(
         WS_METHODS.mcpListWorkspaces,
-        ownerEffect(WS_METHODS.mcpListWorkspaces, codexMcp.listWorkspaces),
+        ownerEffect(WS_METHODS.mcpListWorkspaces, mcpRegistry.listWorkspaces),
         { "rpc.aggregate": "mcp" },
       ),
     [WS_METHODS.mcpListServers]: (input) =>
       observeRpcEffect(
         WS_METHODS.mcpListServers,
-        ownerEffect(WS_METHODS.mcpListServers, codexMcp.listServers(input)),
+        ownerEffect(WS_METHODS.mcpListServers, mcpRegistry.listServers(input)),
         { "rpc.aggregate": "mcp" },
       ),
     [WS_METHODS.mcpUpsertServer]: (input) =>
       observeRpcEffect(
         WS_METHODS.mcpUpsertServer,
-        ownerEffect(WS_METHODS.mcpUpsertServer, codexMcp.upsertServer(input)),
+        ownerEffect(WS_METHODS.mcpUpsertServer, mcpRegistry.upsertServer(input)),
         { "rpc.aggregate": "mcp" },
       ),
     [WS_METHODS.mcpSetServerEnabled]: (input) =>
       observeRpcEffect(
         WS_METHODS.mcpSetServerEnabled,
-        ownerEffect(WS_METHODS.mcpSetServerEnabled, codexMcp.setServerEnabled(input)),
+        ownerEffect(WS_METHODS.mcpSetServerEnabled, mcpRegistry.setServerEnabled(input)),
         { "rpc.aggregate": "mcp" },
       ),
     [WS_METHODS.mcpRemoveServer]: (input) =>
       observeRpcEffect(
         WS_METHODS.mcpRemoveServer,
-        ownerEffect(WS_METHODS.mcpRemoveServer, codexMcp.removeServer(input)),
+        ownerEffect(WS_METHODS.mcpRemoveServer, mcpRegistry.removeServer(input)),
         { "rpc.aggregate": "mcp" },
       ),
     [WS_METHODS.mcpReloadServers]: (input) =>
       observeRpcEffect(
         WS_METHODS.mcpReloadServers,
-        ownerEffect(WS_METHODS.mcpReloadServers, codexMcp.reloadServers(input)),
+        ownerEffect(WS_METHODS.mcpReloadServers, mcpRegistry.reloadServers(input)),
         { "rpc.aggregate": "mcp" },
       ),
     [WS_METHODS.mcpStartOauthLogin]: (input) =>
       observeRpcEffect(
         WS_METHODS.mcpStartOauthLogin,
-        ownerEffect(WS_METHODS.mcpStartOauthLogin, codexMcp.startOauthLogin(input)),
+        ownerEffect(WS_METHODS.mcpStartOauthLogin, mcpRegistry.startOauthLogin(input)),
         { "rpc.aggregate": "mcp" },
       ),
     [WS_METHODS.textGenerationGenerateIssueContent]: (input) =>
