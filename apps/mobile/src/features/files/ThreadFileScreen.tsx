@@ -19,7 +19,6 @@ import {
 import { SvgXml } from "react-native-svg";
 import { WebView } from "react-native-webview";
 
-import { getWsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   classifyWorkspaceFilePath,
@@ -41,7 +40,10 @@ import {
 import { useFontFamily } from "../../lib/useFontFamily";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useProjectReadFile, useProjectReadFileBinary } from "../../rpc/useProjectFiles";
-import { useWsConnectionStatusForEnvironment } from "../../rpc/wsConnectionState";
+import {
+  useWsConnectionStatusForEnvironment,
+  wsUiStateForEnvironment,
+} from "../../rpc/wsConnectionState";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import {
   selectEnvironmentState,
@@ -615,7 +617,7 @@ export function ThreadFileScreen(props: {
   // This screen renders one environment's content; its connection banner and
   // gating must track THAT node's socket, not whichever socket wrote the
   // global status last.
-  const connectionUiState = getWsConnectionUiState(
+  const connectionUiState = wsUiStateForEnvironment(
     useWsConnectionStatusForEnvironment(environmentId),
   );
 

@@ -96,3 +96,38 @@ describe("outbox drain gate (two environments)", () => {
     expect(readThreadDeliveryState(queuedFor(ENV_A)).environmentConnected).toBe(false);
   });
 });
+
+describe("wsUiStateForEnvironment (device-offline overlay)", () => {
+  it("reads offline for a never-connected environment when the device is offline", async () => {
+    const { getWsConnectionStatusForEnvironment, setBrowserOnlineStatus } = await import(
+      "@ryco/client-runtime/rpc"
+    );
+    const { wsUiStateForEnvironment } = await import("../rpc/wsConnectionState");
+
+    connectEnvironment(ENV_A, "ws://node-a.local:13773/ws");
+    setBrowserOnlineStatus(false);
+    dropEnvironment(ENV_A);
+
+    // Node A's own slot recorded the disconnect; node B never attempted a
+    // socket this session. Both must read "offline" in airplane mode.
+    expect(wsUiStateForEnvironment(getWsConnectionStatusForEnvironment(ENV_A))).toBe("offline");
+    expect(wsUiStateForEnvironment(getWsConnectionStatusForEnvironment(ENV_B))).toBe("offline");
+
+    setBrowserOnlineStatus(true);
+    expect(wsUiStateForEnvironment(getWsConnectionStatusForEnvironment(ENV_B))).not.toBe(
+      "offline",
+    );
+  });
+
+  it("never masks a live socket", async () => {
+    const { getWsConnectionStatusForEnvironment, setBrowserOnlineStatus } = await import(
+      "@ryco/client-runtime/rpc"
+    );
+    const { wsUiStateForEnvironment } = await import("../rpc/wsConnectionState");
+
+    connectEnvironment(ENV_A, "ws://node-a.local:13773/ws");
+    setBrowserOnlineStatus(false);
+
+    expect(wsUiStateForEnvironment(getWsConnectionStatusForEnvironment(ENV_A))).toBe("connected");
+  });
+});

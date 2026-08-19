@@ -4,7 +4,6 @@ import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/reac
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Pressable, TextInput, View } from "react-native";
 
-import { getWsConnectionUiState } from "@ryco/client-runtime/rpc";
 import { scopeProjectRef, scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   normalizeWorkspaceFileSearchQuery,
@@ -23,7 +22,10 @@ import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { resolveFileSelectionNavigationAction } from "../../lib/adaptive-navigation";
 import { useProjectListEntries, useProjectSearchEntries } from "../../rpc/useProjectFiles";
-import { useWsConnectionStatusForEnvironment } from "../../rpc/wsConnectionState";
+import {
+  useWsConnectionStatusForEnvironment,
+  wsUiStateForEnvironment,
+} from "../../rpc/wsConnectionState";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import {
   selectEnvironmentState,
@@ -216,7 +218,7 @@ export function ThreadFilesScreen(props: {
   // This screen renders one environment's content; its connection banner and
   // gating must track THAT node's socket, not whichever socket wrote the
   // global status last.
-  const connectionUiState = getWsConnectionUiState(
+  const connectionUiState = wsUiStateForEnvironment(
     useWsConnectionStatusForEnvironment(environmentId),
   );
 

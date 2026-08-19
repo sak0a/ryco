@@ -127,7 +127,10 @@ export function useThreadOutboxDrain(): void {
   const openedCount = useWsConnectionOpenedCount();
 
   useEffect(() => {
-    void hydrateThreadOutbox();
+    // Drain once hydration lands: on a cold start the opened-count effect can
+    // fire before the persisted queue exists, and an already-connected
+    // environment would otherwise wait for an unrelated settle tick.
+    void hydrateThreadOutbox().then(() => runOutboxDrain());
   }, []);
 
   useEffect(() => {

@@ -13,7 +13,7 @@ import {
 import { Pressable, ScrollView, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
-import { getWsConnectionUiState, serverConfigAtom } from "@ryco/client-runtime/rpc";
+import { serverConfigAtom } from "@ryco/client-runtime/rpc";
 import {
   getProviderInteractionModeToggle,
   getProviderSupportsAskMode,
@@ -45,7 +45,10 @@ import {
 } from "../../state/agentControlRuntime";
 import { useAgentControlSync } from "../../state/agentControlSync";
 import { useHomeWorkspaceData } from "../../state/homeData";
-import { useWsConnectionStatusForEnvironment } from "../../rpc/wsConnectionState";
+import {
+  useWsConnectionStatusForEnvironment,
+  wsUiStateForEnvironment,
+} from "../../rpc/wsConnectionState";
 import {
   enqueueThreadOutboxMessage,
   listThreadOutboxMessages,
@@ -194,7 +197,7 @@ export function ThreadDetailScreen(props: {
   // This screen renders one environment's content; its connection banner and
   // gating must track THAT node's socket, not whichever socket wrote the
   // global status last.
-  const connectionUiState = getWsConnectionUiState(
+  const connectionUiState = wsUiStateForEnvironment(
     useWsConnectionStatusForEnvironment(environmentId),
   );
 

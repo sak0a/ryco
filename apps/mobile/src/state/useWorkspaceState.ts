@@ -8,7 +8,7 @@ import {
 import type { SavedEnvironmentConnectionState } from "@ryco/client-runtime/connection";
 
 import { useConnectionRegistry } from "../providers/ConnectionRegistryProvider";
-import { useWsConnectionStatus } from "../rpc/wsConnectionState";
+import { useWsConnectionStatus, wsUiStateForEnvironment } from "../rpc/wsConnectionState";
 import { hostedState } from "../features/home/homeEnvironmentModel";
 import { useHostedHubStore } from "../hostedHub/state";
 import {
@@ -86,7 +86,7 @@ export function useWorkspaceState(): WorkspaceState {
     // flapping node must not mark every other node as reconnecting. (The global
     // wsStatus hook above stays subscribed as the re-render trigger; every
     // keyed write also writes the global.)
-    const environmentUiState = getWsConnectionUiState(
+    const environmentUiState = wsUiStateForEnvironment(
       getWsConnectionStatusForEnvironment(record.environmentId),
     );
     const phase: EnvironmentConnectionPhase =

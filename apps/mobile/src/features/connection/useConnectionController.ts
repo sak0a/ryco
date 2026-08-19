@@ -1,9 +1,6 @@
 import { useMemo, useSyncExternalStore } from "react";
 
-import {
-  getWsConnectionStatusForEnvironment,
-  getWsConnectionUiState,
-} from "@ryco/client-runtime/rpc";
+import { getWsConnectionStatusForEnvironment } from "@ryco/client-runtime/rpc";
 import type {
   SavedEnvironmentRecord,
   SavedEnvironmentRuntimeState,
@@ -14,7 +11,7 @@ import {
   type EnvironmentActions,
 } from "../../connection/environmentActions";
 import { useConnectionRegistry } from "../../providers/ConnectionRegistryProvider";
-import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
+import { useWsConnectionStatus, wsUiStateForEnvironment } from "../../rpc/wsConnectionState";
 import { connectionToneForEnvironment } from "./connectionTone";
 import { resolveAppPairingTarget } from "./pairingTarget";
 import type { StatusTone } from "../../components/StatusPill";
@@ -62,7 +59,7 @@ export function useSavedEnvironments(): {
 
   const rows = Object.values(registryState.byId).map((record): ConnectionRow => {
     const runtime = catalog.getRuntime(record.environmentId);
-    const wsUiState = getWsConnectionUiState(
+    const wsUiState = wsUiStateForEnvironment(
       getWsConnectionStatusForEnvironment(record.environmentId),
     );
     const tone = connectionToneForEnvironment(runtime.connectionState, wsUiState);
