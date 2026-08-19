@@ -2,6 +2,11 @@
 
 This guide is for people who want to use more than one Codex account in Ryco.
 
+For persistent MCP servers and one-click standalone Agent Control setup, see
+[Provider MCP management](./mcp.md) and [Agent Control](../agent-control.md). Ryco-managed Codex
+sessions receive Agent Control automatically when the feature is enabled; that path does not modify
+your persistent Codex MCP configuration.
+
 Common reasons:
 
 - use a work account for work projects

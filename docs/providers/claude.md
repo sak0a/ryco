@@ -5,6 +5,11 @@ This guide is for people who want to use more than one Claude setup in Ryco.
 There is no separate root `CLAUDE.md` in this repository. This file is the current Claude provider
 guide.
 
+For user-scoped MCP management and one-click standalone Agent Control setup, see
+[Provider MCP management](./mcp.md) and [Agent Control](../agent-control.md). Ryco-managed Claude
+sessions receive Agent Control automatically when the feature is enabled; the standalone install is
+a separate durable external integration.
+
 Common reasons:
 
 - use separate work and personal Claude accounts

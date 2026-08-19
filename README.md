@@ -61,7 +61,11 @@ It ships as a cross-platform desktop app (macOS, Linux, Windows) and as a local 
 
 ### Integrations & infrastructure
 
-- **MCP server support** — Model Context Protocol built in, with workspace-level configuration
+- **Provider-native MCP management** — manage Codex, Claude, Copilot, Cursor, Grok, and recognized
+  OpenCode MCP profiles from one capability-aware settings surface. See
+  [docs/providers/mcp.md](./docs/providers/mcp.md)
+- **Agent Control** — automatic, ephemeral access for supported Ryco sessions plus verified one-click
+  installation for standalone provider clients. See [docs/agent-control.md](./docs/agent-control.md)
 - **Source-control and work-item providers** — GitHub, GitLab, Forgejo/Codeberg, Azure DevOps, Bitbucket, plus Jira project/work-item workflows. See [docs/source-control-providers.md](./docs/source-control-providers.md)
 - **Remote environments** — saved HTTP/WebSocket environments, pairing links/sessions, SSH utilities, and Tailscale endpoint/Serve helpers
 - **Outbound Hub connector** — optional device-enrolled relay access for nodes behind NAT/CGNAT, with one bounded outbound WebSocket and no additional listener. See [docs/hub-connector.md](./docs/hub-connector.md)

@@ -5,6 +5,11 @@ starts `grok agent stdio` for each active Grok session; it does not call the xAI
 
 Grok support is currently marked Early Access.
 
+Ryco can also manage user MCP servers through the configured `grok mcp` CLI and install the external
+Agent Control bridge for standalone Grok clients. Automatic Agent Control injection into
+Ryco-managed Grok ACP sessions remains disabled pending a separate isolation audit. See
+[Provider MCP management](./mcp.md) and [Agent Control](../agent-control.md).
+
 ## Install and authenticate
 
 Install the Grok CLI on the machine running the Ryco server:
