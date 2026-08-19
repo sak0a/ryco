@@ -1,7 +1,10 @@
 import { useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { getWsConnectionUiState } from "@ryco/client-runtime/rpc";
+import {
+  getWsConnectionStatusForEnvironment,
+  getWsConnectionUiState,
+} from "@ryco/client-runtime/rpc";
 import type { SavedEnvironmentConnectionState } from "@ryco/client-runtime/connection";
 
 import { useConnectionRegistry } from "../providers/ConnectionRegistryProvider";
@@ -21,8 +24,9 @@ import { selectBootstrapCompleteForActiveEnvironment, useStore } from "./threads
 
 // §3-1: synthesize the WorkspaceState upstream read from the atom `state/workspace`
 // from runtime A's building blocks — the saved-environment catalog stores, the
-// single-socket ws UI state, and the active-environment bootstrap flag. Mobile is
-// single-socket/single-active-env, so the ws overlay drives reconnecting/offline.
+// per-environment ws status slots, and the active-environment bootstrap flag.
+// Saved environments multi-connect, so each environment's reconnecting overlay
+// comes from its own slot; only the device-level online/offline signal is global.
 
 function mapConnectionPhase(state: SavedEnvironmentConnectionState): EnvironmentConnectionPhase {
   switch (state) {
@@ -78,9 +82,17 @@ export function useWorkspaceState(): WorkspaceState {
     const basePhase: EnvironmentConnectionPhase = runtime
       ? mapConnectionPhase(runtime.connectionState)
       : "available";
-    // The single socket's reconnecting/offline overlay wins for the active env.
+    // Each environment's own socket drives its reconnecting overlay — one
+    // flapping node must not mark every other node as reconnecting. (The global
+    // wsStatus hook above stays subscribed as the re-render trigger; every
+    // keyed write also writes the global.)
+    const environmentUiState = getWsConnectionUiState(
+      getWsConnectionStatusForEnvironment(record.environmentId),
+    );
     const phase: EnvironmentConnectionPhase =
-      wsUiState === "reconnecting" && basePhase !== "connected" ? "reconnecting" : basePhase;
+      environmentUiState === "reconnecting" && basePhase !== "connected"
+        ? "reconnecting"
+        : basePhase;
     return {
       environmentId: record.environmentId,
       environmentLabel: record.label,

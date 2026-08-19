@@ -23,7 +23,7 @@ import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { resolveFileSelectionNavigationAction } from "../../lib/adaptive-navigation";
 import { useProjectListEntries, useProjectSearchEntries } from "../../rpc/useProjectFiles";
-import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
+import { useWsConnectionStatusForEnvironment } from "../../rpc/wsConnectionState";
 import { useHomeWorkspaceData } from "../../state/homeData";
 import {
   selectEnvironmentState,
@@ -213,7 +213,12 @@ export function ThreadFilesScreen(props: {
     [thread, worktrees],
   );
   const workspaceRoot = useThreadWorkspaceRoot({ thread, worktree, project });
-  const connectionUiState = getWsConnectionUiState(useWsConnectionStatus());
+  // This screen renders one environment's content; its connection banner and
+  // gating must track THAT node's socket, not whichever socket wrote the
+  // global status last.
+  const connectionUiState = getWsConnectionUiState(
+    useWsConnectionStatusForEnvironment(environmentId),
+  );
 
   const [query, setQuery] = useState("");
   const normalizedQuery = normalizeWorkspaceFileSearchQuery(query);

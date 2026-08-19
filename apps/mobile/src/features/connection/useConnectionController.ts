@@ -1,6 +1,9 @@
 import { useMemo, useSyncExternalStore } from "react";
 
-import { getWsConnectionUiState } from "@ryco/client-runtime/rpc";
+import {
+  getWsConnectionStatusForEnvironment,
+  getWsConnectionUiState,
+} from "@ryco/client-runtime/rpc";
 import type {
   SavedEnvironmentRecord,
   SavedEnvironmentRuntimeState,
@@ -49,11 +52,19 @@ export function useSavedEnvironments(): {
     catalog.runtimeStore.getState,
     catalog.runtimeStore.getState,
   );
+  // Subscribed as the re-render trigger only: every per-environment status write
+  // also writes the global atom, so this hook fires whenever any row's keyed
+  // slot changes. Each row's tone must read its OWN environment's status —
+  // saved environments multi-connect, and one node reconnecting must not
+  // repaint every other node's pill.
   const wsStatus = useWsConnectionStatus();
-  const wsUiState = getWsConnectionUiState(wsStatus);
+  void wsStatus;
 
   const rows = Object.values(registryState.byId).map((record): ConnectionRow => {
     const runtime = catalog.getRuntime(record.environmentId);
+    const wsUiState = getWsConnectionUiState(
+      getWsConnectionStatusForEnvironment(record.environmentId),
+    );
     const tone = connectionToneForEnvironment(runtime.connectionState, wsUiState);
     const statusLabel = runtime.authState === "requires-auth" ? "Needs pairing" : tone.label;
     return { record, runtime, tone, statusLabel };

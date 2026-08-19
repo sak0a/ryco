@@ -9,6 +9,7 @@ import type {
 
 import type { KnownEnvironment } from "../knownEnvironment.ts";
 import type { WsRpcClient } from "../rpc/index.ts";
+import { clearWsConnectionStatusForEnvironment } from "../rpc/wsConnectionState.ts";
 import { bindDeviceConnection } from "../state/device/runtime.ts";
 
 export interface PushSequenceMonitor {
@@ -182,6 +183,11 @@ export function createEnvironmentConnection(
     dispose: async () => {
       cleanup();
       await input.client.dispose();
+      // The transport drops close events once a session is inactive, so a
+      // disposed environment's keyed WS status would otherwise stay "connected"
+      // forever (e.g. across a hub node switch). No-op for sockets that never
+      // recorded per-environment status.
+      clearWsConnectionStatusForEnvironment(environmentId);
     },
   };
 }

@@ -57,6 +57,7 @@ export function createHostedPrimaryConnection(
     new WsTransport(() => attemptFactory.nextUrl(), {
       ...attemptFactory.lifecycleHandlers(),
       getConnectionLabel: () => descriptor.label ?? null,
+      getEnvironmentId: () => descriptor.environmentId,
     }),
   );
 

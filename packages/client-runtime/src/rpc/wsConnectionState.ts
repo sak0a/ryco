@@ -1,6 +1,7 @@
-import type { AppLifecycleService } from "../platform/index.ts";
+import type { EnvironmentId } from "@ryco/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
+import type { AppLifecycleService } from "../platform/index.ts";
 import { appAtomRegistry } from "./atomRegistry.ts";
 
 export type WsConnectionUiState = "connected" | "connecting" | "error" | "offline" | "reconnecting";
@@ -55,6 +56,34 @@ export const wsConnectionStatusAtom = Atom.make(INITIAL_WS_CONNECTION_STATUS).pi
   Atom.withLabel("ws-connection-status"),
 );
 
+// Per-environment WS status, written alongside the global whenever a record call
+// carries its owning EnvironmentId. The global atom stays the "most recent
+// writer" view for single-connection consumers; anything deciding on behalf of a
+// SPECIFIC environment (e.g. the mobile outbox drain gate) must read its slot
+// here — with several environments connected the global races and the last
+// writer wins.
+const knownWsConnectionEnvironmentIds = new Set<EnvironmentId>();
+
+export const wsConnectionStatusForEnvironmentAtom = Atom.family((environmentId: EnvironmentId) => {
+  knownWsConnectionEnvironmentIds.add(environmentId);
+  return Atom.make<WsConnectionStatus>({
+    ...INITIAL_WS_CONNECTION_STATUS,
+    // Device-level online state predates the slot; seed it from the global.
+    online: getWsConnectionStatus().online,
+  }).pipe(Atom.keepAlive, Atom.withLabel(`ws-connection-status:${environmentId}`));
+});
+
+/**
+ * Bumped on every socket open, from any environment. The global phase can sit at
+ * "connected" while a second environment's socket opens, so consumers that must
+ * react to EVERY open (the mobile outbox drain) watch this instead of a global
+ * phase edge.
+ */
+export const wsConnectionOpenedCountAtom = Atom.make(0).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("ws-connection-opened-count"),
+);
+
 function isoNow() {
   return new Date().toISOString();
 }
@@ -67,8 +96,19 @@ function updateWsConnectionStatus(
   return nextStatus;
 }
 
+function updateWsConnectionStatusForEnvironment(
+  environmentId: EnvironmentId | null | undefined,
+  updater: (current: WsConnectionStatus) => WsConnectionStatus,
+): void {
+  if (!environmentId) return;
+  const atom = wsConnectionStatusForEnvironmentAtom(environmentId);
+  appAtomRegistry.set(atom, updater(appAtomRegistry.get(atom)));
+}
+
 export interface WsConnectionMetadata {
   readonly connectionLabel?: string | null;
+  /** When present, the record call also writes this environment's keyed slot. */
+  readonly environmentId?: EnvironmentId | null;
   readonly versionMismatchHint?: string | null;
 }
 
@@ -79,6 +119,25 @@ function normalizeConnectionLabel(label: string | null | undefined): string | nu
 
 export function getWsConnectionStatus(): WsConnectionStatus {
   return appAtomRegistry.get(wsConnectionStatusAtom);
+}
+
+export function getWsConnectionStatusForEnvironment(
+  environmentId: EnvironmentId,
+): WsConnectionStatus {
+  return appAtomRegistry.get(wsConnectionStatusForEnvironmentAtom(environmentId));
+}
+
+/**
+ * Forget an environment's keyed slot. Must run when its connection is disposed
+ * for good (node switch, environment removal): the transport drops close events
+ * for inactive sessions, so nothing else would ever move a disposed
+ * environment's slot off "connected".
+ */
+export function clearWsConnectionStatusForEnvironment(environmentId: EnvironmentId): void {
+  updateWsConnectionStatusForEnvironment(environmentId, (current) => ({
+    ...INITIAL_WS_CONNECTION_STATUS,
+    online: current.online,
+  }));
 }
 
 export function getWsConnectionUiState(status: WsConnectionStatus): WsConnectionUiState {
@@ -102,7 +161,7 @@ export function recordWsConnectionAttempt(
   metadata?: WsConnectionMetadata,
 ): WsConnectionStatus {
   const connectionLabel = normalizeConnectionLabel(metadata?.connectionLabel);
-  return updateWsConnectionStatus((current) => ({
+  const transition = (current: WsConnectionStatus): WsConnectionStatus => ({
     ...current,
     attemptCount: current.attemptCount + 1,
     connectionLabel: connectionLabel ?? current.connectionLabel,
@@ -111,12 +170,14 @@ export function recordWsConnectionAttempt(
     reconnectAttemptCount: current.phase === "connected" ? 1 : current.reconnectAttemptCount + 1,
     reconnectPhase: "attempting",
     socketUrl,
-  }));
+  });
+  updateWsConnectionStatusForEnvironment(metadata?.environmentId, transition);
+  return updateWsConnectionStatus(transition);
 }
 
 export function recordWsConnectionOpened(metadata?: WsConnectionMetadata): WsConnectionStatus {
   const connectionLabel = normalizeConnectionLabel(metadata?.connectionLabel);
-  return updateWsConnectionStatus((current) => ({
+  const transition = (current: WsConnectionStatus): WsConnectionStatus => ({
     ...current,
     closeCode: null,
     closeReason: null,
@@ -128,7 +189,13 @@ export function recordWsConnectionOpened(metadata?: WsConnectionMetadata): WsCon
     phase: "connected",
     reconnectAttemptCount: 0,
     reconnectPhase: "idle",
-  }));
+  });
+  updateWsConnectionStatusForEnvironment(metadata?.environmentId, transition);
+  appAtomRegistry.set(
+    wsConnectionOpenedCountAtom,
+    appAtomRegistry.get(wsConnectionOpenedCountAtom) + 1,
+  );
+  return updateWsConnectionStatus(transition);
 }
 
 function appendHint(message: string | null | undefined, hint: string | null | undefined) {
@@ -144,14 +211,15 @@ export function recordWsConnectionErrored(
   message?: string | null,
   metadata?: WsConnectionMetadata,
 ): WsConnectionStatus {
-  return updateWsConnectionStatus((current) =>
+  const transition = (current: WsConnectionStatus): WsConnectionStatus =>
     applyDisconnectState(current, {
       lastError:
         appendHint(message, metadata?.versionMismatchHint) ??
         appendHint(current.lastError, metadata?.versionMismatchHint),
       lastErrorAt: isoNow(),
-    }),
-  );
+    });
+  updateWsConnectionStatusForEnvironment(metadata?.environmentId, transition);
+  return updateWsConnectionStatus(transition);
 }
 
 export function recordWsConnectionClosed(
@@ -162,7 +230,7 @@ export function recordWsConnectionClosed(
   metadata?: WsConnectionMetadata,
 ): WsConnectionStatus {
   const connectionLabel = normalizeConnectionLabel(metadata?.connectionLabel);
-  return updateWsConnectionStatus((current) =>
+  const transition = (current: WsConnectionStatus): WsConnectionStatus =>
     applyDisconnectState(
       current,
       {
@@ -172,11 +240,16 @@ export function recordWsConnectionClosed(
           appendHint(current.closeReason, metadata?.versionMismatchHint),
       },
       connectionLabel === null ? undefined : { connectionLabel },
-    ),
-  );
+    );
+  updateWsConnectionStatusForEnvironment(metadata?.environmentId, transition);
+  return updateWsConnectionStatus(transition);
 }
 
 export function setBrowserOnlineStatus(online: boolean): WsConnectionStatus {
+  // Device-level connectivity applies to every environment's slot alike.
+  for (const environmentId of knownWsConnectionEnvironmentIds) {
+    updateWsConnectionStatusForEnvironment(environmentId, (current) => ({ ...current, online }));
+  }
   return updateWsConnectionStatus((current) => ({
     ...current,
     online,
@@ -194,6 +267,13 @@ export function resetWsReconnectBackoff(): WsConnectionStatus {
 
 export function resetWsConnectionStateForTests(): void {
   appAtomRegistry.set(wsConnectionStatusAtom, INITIAL_WS_CONNECTION_STATUS);
+  appAtomRegistry.set(wsConnectionOpenedCountAtom, 0);
+  for (const environmentId of knownWsConnectionEnvironmentIds) {
+    appAtomRegistry.set(
+      wsConnectionStatusForEnvironmentAtom(environmentId),
+      INITIAL_WS_CONNECTION_STATUS,
+    );
+  }
 }
 
 export function seedWsConnectionOnlineStatus(

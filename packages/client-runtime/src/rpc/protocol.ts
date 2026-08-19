@@ -1,4 +1,5 @@
 import { WsDeviceRpcGroup, WsHostedRpcGroup, WsRpcGroup } from "@ryco/contracts";
+import type { EnvironmentId } from "@ryco/contracts";
 import { Data, Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
@@ -25,6 +26,8 @@ export interface WsProtocolCloseContext {
 
 export interface WsProtocolLifecycleHandlers {
   readonly getConnectionLabel?: () => string | null;
+  /** The environment this socket serves; records status into its keyed slot too. */
+  readonly getEnvironmentId?: () => EnvironmentId | null;
   readonly getVersionMismatchHint?: () => string | null;
   readonly isCloseIntentional?: () => boolean;
   readonly isActive?: () => boolean;
@@ -102,6 +105,7 @@ function resolveWsRpcSocketUrl(rawUrl: string, preservePath = false): string {
 function resolveConnectionMetadata(handlers?: WsProtocolLifecycleHandlers): WsConnectionMetadata {
   return {
     connectionLabel: handlers?.getConnectionLabel?.() ?? null,
+    environmentId: handlers?.getEnvironmentId?.() ?? null,
     versionMismatchHint: handlers?.getVersionMismatchHint?.() ?? null,
   };
 }

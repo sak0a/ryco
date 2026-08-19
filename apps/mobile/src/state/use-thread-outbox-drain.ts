@@ -1,6 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
-import { getWsConnectionStatus, getWsConnectionUiState } from "@ryco/client-runtime/rpc";
+import {
+  getWsConnectionStatusForEnvironment,
+  getWsConnectionUiState,
+} from "@ryco/client-runtime/rpc";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
 import {
   IMAGE_ONLY_BOOTSTRAP_PROMPT,
@@ -18,7 +21,7 @@ import {
   selectThreadByRef,
   useStore,
 } from "./threadsRuntime";
-import { useWsConnectionStatus } from "../rpc/wsConnectionState";
+import { useWsConnectionOpenedCount } from "../rpc/wsConnectionState";
 
 // §3-14: dispatch a queued turn for an EXISTING thread through the runtime send
 // path. The queued item carries its own composer settings (captured at enqueue);
@@ -52,7 +55,8 @@ async function sendQueuedThreadMessage(message: QueuedThreadMessage): Promise<vo
   });
 }
 
-function readThreadDeliveryState(message: QueuedThreadMessage): {
+// Exported for testing: the drain gate's per-message delivery snapshot.
+export function readThreadDeliveryState(message: QueuedThreadMessage): {
   readonly threadExists: boolean;
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
@@ -64,7 +68,13 @@ function readThreadDeliveryState(message: QueuedThreadMessage): {
   const ref = scopeThreadRef(message.environmentId, message.threadId);
   const summary = selectSidebarThreadSummaryByRef(state, ref);
   const thread = selectThreadByRef(state, ref);
-  const connected = getWsConnectionUiState(getWsConnectionStatus()) === "connected";
+  // The gate must consult the MESSAGE's environment: with several nodes
+  // connected, the global status reflects whichever socket wrote last, and a
+  // queued message for an offline node would be judged drainable because a
+  // different node happens to be connected.
+  const connected =
+    getWsConnectionUiState(getWsConnectionStatusForEnvironment(message.environmentId)) ===
+    "connected";
   return {
     threadExists: Boolean(summary ?? thread),
     shellStatus: selectBootstrapCompleteForActiveEnvironment(state) ? "live" : "loading",
@@ -106,24 +116,24 @@ export function subscribeOutboxSettleDrain(runDrain: () => void, debounceMs = 50
 
 /**
  * Mount point (RootStackLayout): hydrate the persisted outbox once, then drain it
- * whenever the socket reaches "connected" OR a thread settles — the offline outbox
- * drains on reconnect AND on turn-settle (spec §Bundling / §3-14). A bound wrapper;
- * no import-time side effects.
+ * whenever ANY environment's socket opens OR a thread settles — the offline outbox
+ * drains on reconnect AND on turn-settle (spec §Bundling / §3-14). The trigger is
+ * the opened counter, not a global phase edge: with one node already connected the
+ * global phase never leaves "connected" when a second node's socket opens, and
+ * that second node's queued messages would wait for an unrelated settle tick.
+ * A bound wrapper; no import-time side effects.
  */
 export function useThreadOutboxDrain(): void {
-  const wsStatus = useWsConnectionStatus();
-  const previousPhaseRef = useRef<string | null>(null);
+  const openedCount = useWsConnectionOpenedCount();
 
   useEffect(() => {
     void hydrateThreadOutbox();
   }, []);
 
   useEffect(() => {
-    const wasConnected = previousPhaseRef.current === "connected";
-    previousPhaseRef.current = wsStatus.phase;
-    if (wsStatus.phase !== "connected" || wasConnected) return;
+    if (openedCount === 0) return;
     runOutboxDrain();
-  }, [wsStatus.phase]);
+  }, [openedCount]);
 
   // Settle-edge: drain when a thread's turn settles while queued messages wait.
   useEffect(() => subscribeOutboxSettleDrain(runOutboxDrain), []);
