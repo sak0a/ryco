@@ -8,9 +8,9 @@ describe("Home mode state", () => {
   it("starts in Inbox with independent empty state for every mode", () => {
     expect(createHomeModeState()).toEqual({
       mode: "inbox",
-      queryByMode: { inbox: "", projects: "", nodes: "" },
-      nodeScopeByMode: { inbox: null, projects: null, nodes: null },
-      scrollOffsetByMode: { inbox: 0, projects: 0, nodes: 0 },
+      queryByMode: { inbox: "", projects: "" },
+      nodeScopeByMode: { inbox: null, projects: null },
+      scrollOffsetByMode: { inbox: 0, projects: 0 },
     });
   });
 
@@ -48,7 +48,7 @@ describe("Home mode state", () => {
     const unchanged = reduceHomeModeState(state, { type: "select-mode", mode: "inbox" });
     const normalized = reduceHomeModeState(state, {
       type: "set-scroll-offset",
-      mode: "nodes",
+      mode: "projects",
       offset: -20,
     });
 

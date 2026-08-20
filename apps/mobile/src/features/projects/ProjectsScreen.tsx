@@ -6,37 +6,32 @@ import { SymbolView } from "../../components/AppSymbol";
 import { EmptyState } from "../../components/EmptyState";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { HOME_LIST_PADDING_BOTTOM } from "../home/homeChromeModel";
-import type { ProjectListRow, ProjectNodeGroup } from "./projectsModel";
+import { NODE_TRUST_UNVERIFIED_LABEL } from "../home/nodeTrustModel";
+import {
+  projectMachineStatusLabel,
+  projectRowAccessibilityLabel,
+  type ProjectListRow,
+  type ProjectRowMachine,
+} from "./projectsModel";
 
-type ProjectListItem =
-  | {
-      readonly kind: "node";
-      readonly key: string;
-      readonly title: string;
-      readonly detail: string;
-    }
-  | { readonly kind: "project"; readonly key: string; readonly row: ProjectListRow };
-
-function flattenGroups(groups: ReadonlyArray<ProjectNodeGroup>): ReadonlyArray<ProjectListItem> {
-  return groups.flatMap((group) => [
-    {
-      kind: "node" as const,
-      key: `node:${group.environmentId}`,
-      title: group.nodeLabel,
-      detail:
-        // Cache-provenance groups carry the Hub-presence "Offline · last seen"
-        // treatment so cached content is visibly last-known, never live.
-        group.staleDetail ??
-        (group.connectionState === "connected"
-          ? "Connected"
-          : group.connectionState === "read-only"
-            ? "Read-only"
-            : group.connectionState === "reconnecting"
-              ? "Reconnecting"
-              : "Offline"),
-    },
-    ...group.rows.map((row) => ({ kind: "project" as const, key: row.key, row })),
-  ]);
+/**
+ * One machine the project lives on. A row carries one of these per contributing
+ * machine instead of sitting under a node header — the machine is provenance on
+ * the row now, so a merged cross-machine row states both of its origins inline.
+ */
+function MachineProvenance(props: { readonly machine: ProjectRowMachine }) {
+  return (
+    <Text className="text-2xs font-ryco-medium text-foreground-muted" numberOfLines={1}>
+      {props.machine.label} · {projectMachineStatusLabel(props.machine)}
+      {props.machine.role === "viewer" ? (
+        <Text className="text-foreground-tertiary"> · Viewer</Text>
+      ) : null}
+      {/* Mandatory §13.1 label, one vocabulary across every surface. */}
+      {props.machine.trust === "unverified" ? (
+        <Text className="text-danger-foreground"> · {NODE_TRUST_UNVERIFIED_LABEL}</Text>
+      ) : null}
+    </Text>
+  );
 }
 
 function ProjectRow(props: { readonly row: ProjectListRow; readonly onPress?: () => void }) {
@@ -62,6 +57,12 @@ function ProjectRow(props: { readonly row: ProjectListRow; readonly onPress?: ()
           {props.row.worktreeCount} worktree{props.row.worktreeCount === 1 ? "" : "s"} ·{" "}
           {props.row.activeThreadCount} active
         </Text>
+        {props.row.machines.map((machine) => (
+          <MachineProvenance
+            key={`${machine.environmentId}:${machine.projectId}`}
+            machine={machine}
+          />
+        ))}
       </View>
       {props.onPress ? (
         <SymbolView
@@ -84,7 +85,7 @@ function ProjectRow(props: { readonly row: ProjectListRow; readonly onPress?: ()
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${props.row.title}, ${props.row.worktreeCount} worktrees, ${props.row.activeThreadCount} active tasks`}
+      accessibilityLabel={projectRowAccessibilityLabel(props.row)}
       onPress={props.onPress}
       className="mx-4 mb-2.5 flex-row items-center gap-3 rounded-2xl bg-card px-4 py-3.5 active:bg-card-alt"
     >
@@ -94,38 +95,25 @@ function ProjectRow(props: { readonly row: ProjectListRow; readonly onPress?: ()
 }
 
 export function ProjectsScreen(props: {
-  readonly groups: ReadonlyArray<ProjectNodeGroup>;
-  readonly hasConnections: boolean;
+  readonly rows: ReadonlyArray<ProjectListRow>;
+  readonly hasMachines: boolean;
   readonly initialScrollOffset?: number;
   readonly onAddProject: () => void;
   readonly onOpenProject?: (row: ProjectListRow) => void;
-  readonly onOpenNodes: () => void;
+  readonly onAddMachine: () => void;
   readonly onScrollOffset?: (offset: number) => void;
 }) {
-  const data = flattenGroups(props.groups);
   const primaryForeground = useThemeColor("--color-primary-foreground");
-  const renderItem = ({ item }: LegendListRenderItemProps<ProjectListItem>) => {
-    if (item.kind === "node") {
-      return (
-        <View className="flex-row items-baseline gap-3 px-5 pt-5 pb-2">
-          <Text className="flex-1 text-sm font-ryco-medium text-foreground-muted">
-            {item.title}
-          </Text>
-          <Text className="text-xs font-ryco-medium text-foreground-tertiary">{item.detail}</Text>
-        </View>
-      );
-    }
-    return (
-      <ProjectRow
-        row={item.row}
-        onPress={props.onOpenProject ? () => props.onOpenProject?.(item.row) : undefined}
-      />
-    );
-  };
+  const renderItem = ({ item }: LegendListRenderItemProps<ProjectListRow>) => (
+    <ProjectRow
+      row={item}
+      onPress={props.onOpenProject ? () => props.onOpenProject?.(item) : undefined}
+    />
+  );
 
   return (
     <LegendList
-      data={data}
+      data={props.rows}
       renderItem={renderItem}
       keyExtractor={(item) => item.key}
       recycleItems
@@ -136,7 +124,7 @@ export function ProjectsScreen(props: {
       contentInsetAdjustmentBehavior="never"
       contentContainerStyle={{ paddingBottom: HOME_LIST_PADDING_BOTTOM }}
       ListHeaderComponent={
-        props.hasConnections && data.length > 0 ? (
+        props.hasMachines && props.rows.length > 0 ? (
           <View className="px-4 pt-4 pb-1">
             <Pressable
               accessibilityRole="button"
@@ -159,14 +147,14 @@ export function ProjectsScreen(props: {
         <View className="px-2 py-14">
           <EmptyState
             variant="plain"
-            title={props.hasConnections ? "No projects yet" : "Connect a node"}
+            title={props.hasMachines ? "No projects yet" : "Add a machine"}
             detail={
-              props.hasConnections
+              props.hasMachines
                 ? "Add a remote workspace on one of your connected nodes to begin."
-                : "Use your Hub or pair a node directly before choosing a project."
+                : "Use your Hub or pair a machine directly before choosing a project."
             }
-            actionLabel={props.hasConnections ? "Add project" : "Open Nodes"}
-            onAction={props.hasConnections ? props.onAddProject : props.onOpenNodes}
+            actionLabel={props.hasMachines ? "Add project" : "Add a machine"}
+            onAction={props.hasMachines ? props.onAddProject : props.onAddMachine}
           />
         </View>
       }

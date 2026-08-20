@@ -6,7 +6,6 @@ import type { HomeMode } from "../features/home/homeMode";
 const MODES: ReadonlyArray<{ readonly mode: HomeMode; readonly label: string }> = [
   { mode: "inbox", label: "Inbox" },
   { mode: "projects", label: "Projects" },
-  { mode: "nodes", label: "Nodes" },
 ];
 
 export function HomeModeControl(props: {

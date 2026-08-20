@@ -1,6 +1,9 @@
 import type { EnvironmentId } from "@ryco/contracts";
 
-export type HomeMode = "inbox" | "projects" | "nodes";
+// A node is an attribute of a row, not a mode the user is in — so Home has two
+// modes and node management lives on the Connections route. `nodeScopeByMode`
+// stays: scoping a list to one node is still a per-mode filter.
+export type HomeMode = "inbox" | "projects";
 
 export interface HomeModeState {
   readonly mode: HomeMode;
@@ -22,9 +25,9 @@ export type HomeModeAction =
 export function createHomeModeState(initialMode: HomeMode = "inbox"): HomeModeState {
   return {
     mode: initialMode,
-    queryByMode: { inbox: "", projects: "", nodes: "" },
-    nodeScopeByMode: { inbox: null, projects: null, nodes: null },
-    scrollOffsetByMode: { inbox: 0, projects: 0, nodes: 0 },
+    queryByMode: { inbox: "", projects: "" },
+    nodeScopeByMode: { inbox: null, projects: null },
+    scrollOffsetByMode: { inbox: 0, projects: 0 },
   };
 }
 
