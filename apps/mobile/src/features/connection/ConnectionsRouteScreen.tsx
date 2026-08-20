@@ -1,10 +1,12 @@
 import { NodesScreen } from "../nodes/NodesScreen";
 
 /**
- * Compatibility route for existing deep links and native pushes.
+ * The Machines surface — the one place a machine is managed rather than
+ * inhabited. Wave 4 removed the Home mode that used to own this list, so this
+ * route is now the surface itself, not a compatibility shim for it.
  *
- * Nodes is now a first-class Home mode, so this route renders the same surface
- * instead of maintaining a second environment browser.
+ * It stays the target of the `connections` deep link and of native pushes, so
+ * the route id and linking path keep their old spelling.
  */
 export function ConnectionsRouteScreen() {
   return <NodesScreen />;

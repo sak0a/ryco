@@ -404,7 +404,7 @@ export function NativeIdentityScreen() {
         if (!active) return;
         setBusy(false);
         setError(
-          "Secure credential storage is unavailable in this build. Pair a device directly or use a correctly signed build.",
+          "Secure credential storage is unavailable in this build. Pair a machine directly or use a correctly signed build.",
         );
         return;
       }
@@ -729,7 +729,7 @@ export function NativeIdentityScreen() {
       setCapability(null);
       setScreen({ name: "entry" });
     } catch {
-      setError("Ryco could not change the Hub safely. Direct connections remain unchanged.");
+      setError("Ryco could not change the Hub safely. Directly paired machines remain unchanged.");
       setBusy(false);
     }
   };
@@ -758,7 +758,7 @@ export function NativeIdentityScreen() {
       setScreen({ name: "entry" });
     } catch {
       setError(
-        "Ryco could not restore the official Hub safely. Direct connections remain unchanged.",
+        "Ryco could not restore the official Hub safely. Directly paired machines remain unchanged.",
       );
       setBusy(false);
     }
@@ -901,7 +901,7 @@ export function NativeIdentityScreen() {
                       onPress={() => setEditorVisible(true)}
                     />
                     <EntryOption
-                      label="Pair a device"
+                      label="Add a machine"
                       onPress={() => navigation.navigate("ConnectionsNew" as never)}
                     />
                   </View>

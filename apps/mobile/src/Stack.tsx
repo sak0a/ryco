@@ -370,12 +370,12 @@ export const ROOT_STACK_SCREENS = {
   Connections: createNativeStackScreen({
     screen: ConnectionsRouteScreen,
     linking: MVP_ROOT_ROUTES.Connections.linking,
-    options: routeOptions("Connections", { title: "Nodes" }),
+    options: routeOptions("Connections", { title: "Machines" }),
   }),
   ConnectionsNew: createNativeStackScreen({
     screen: ConnectionsNewRouteScreen,
     linking: MVP_ROOT_ROUTES.ConnectionsNew.linking,
-    options: routeOptions("ConnectionsNew", { title: "Pair a device" }),
+    options: routeOptions("ConnectionsNew", { title: "Add a machine" }),
   }),
   SettingsSheet: createNativeStackScreen({
     screen: SettingsSheetStack,

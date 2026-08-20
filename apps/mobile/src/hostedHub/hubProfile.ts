@@ -310,7 +310,7 @@ export function buildHubDomainResetPlan(
     confirmation: {
       title: "Change Hub domain?",
       message:
-        "Ryco will sign out of the current Hub, disconnect its relay, and clear Hub-only account and node state. Direct connections stay saved.",
+        "Ryco will sign out of the current Hub, disconnect its relay, and clear Hub-only account and node state. Directly paired machines stay saved.",
       confirmText: "Change Hub",
     },
     orderedSteps: [

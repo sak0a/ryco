@@ -159,9 +159,9 @@ export function AddProjectRouteScreen() {
       >
         <EmptyState
           variant="plain"
-          title="Connect a node first"
-          detail="Projects live on a Ryco node. Connect through your Hub or pair a node directly."
-          actionLabel="Open Nodes"
+          title="Add a machine first"
+          detail="Projects live on one of your machines. Use your Hub or pair a machine directly."
+          actionLabel="Add a machine"
           onAction={() => {
             navigation.goBack();
             navigation.navigate("Connections");

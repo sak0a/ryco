@@ -17,7 +17,7 @@ export function SettingsWorkspaceRouteScreen() {
       <SettingsSection title="Context">
         <SettingsRow
           first
-          label="Preferred node"
+          label="Preferred machine"
           value="Last ready"
           onPress={() => rootNavigation?.navigate("Connections" as never)}
         />

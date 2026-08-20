@@ -31,7 +31,7 @@ export function NodeScopeControl(props: {
           props.selected === null ? "bg-subtle-strong" : "bg-subtle active:bg-subtle-strong"
         }`}
       >
-        <Text className="text-xs font-ryco-bold text-foreground">All nodes</Text>
+        <Text className="text-xs font-ryco-bold text-foreground">All machines</Text>
       </Pressable>
       {props.options.map((option) => {
         const selected = option.environmentId === props.selected;

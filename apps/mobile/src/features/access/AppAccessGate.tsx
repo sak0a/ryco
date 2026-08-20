@@ -26,7 +26,7 @@ const LockedStack = createNativeStackNavigator({
     Access: createNativeStackScreen({ screen: NativeIdentityScreen }),
     ConnectionsNew: createNativeStackScreen({
       screen: ConnectionsNewRouteScreen,
-      options: { headerShown: true, title: "Pair a device", gestureEnabled: true },
+      options: { headerShown: true, title: "Add a machine", gestureEnabled: true },
     }),
   },
 });

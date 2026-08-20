@@ -15,7 +15,7 @@ export const DIRECT_CONNECTION_METHODS: ReadonlyArray<DirectConnectionMethod> = 
   {
     id: "lan",
     title: "LAN host + code",
-    detail: "Connect directly while both devices are on the same network.",
+    detail: "Reach the machine directly while both devices are on the same network.",
   },
   {
     id: "tailscale",

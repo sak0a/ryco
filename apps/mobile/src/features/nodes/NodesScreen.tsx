@@ -60,18 +60,18 @@ function RenameNodeSheet(props: {
             <Text className="text-base font-ryco-medium text-foreground">Cancel</Text>
           </Pressable>
           <Text className="flex-1 text-center text-lg font-ryco-bold text-foreground">
-            Rename node
+            Rename machine
           </Text>
           <View className="h-11 min-w-16" />
         </View>
         <Text className="font-sans text-base text-foreground-muted">
-          Choose the name shown on this device. The node and its credentials do not change.
+          Choose the name shown on this device. The machine and its credentials do not change.
         </Text>
         <TextInput
           autoFocus
           value={props.value}
           onChangeText={props.onChange}
-          placeholder="Node name"
+          placeholder="Machine name"
           placeholderTextColor={placeholderColor as string}
           className="min-h-14 rounded-2xl border border-border bg-card px-4 py-3 font-sans text-base"
           style={{ color: textColor as string }}
@@ -80,7 +80,7 @@ function RenameNodeSheet(props: {
         />
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Save node name"
+          accessibilityLabel="Save machine name"
           disabled={!props.value.trim()}
           onPress={props.onSave}
           className="h-12 items-center justify-center rounded-full bg-primary px-5 active:opacity-80 disabled:opacity-40"
@@ -120,7 +120,7 @@ export function NodesScreen(props: {
     try {
       await run();
     } catch {
-      setActionError("The direct connection could not be updated. Check the node and try again.");
+      setActionError("The direct pairing could not be updated. Check the machine and try again.");
     } finally {
       setBusy(null);
     }
@@ -169,7 +169,7 @@ export function NodesScreen(props: {
           showConfirmDialog({
             title: `Forget ${row.record.label}?`,
             message:
-              "This removes the saved direct connection and its local credential. You can pair the node again later.",
+              "This removes the saved direct pairing and its local credential. You can pair the machine again later.",
             confirmText: "Forget",
             destructive: true,
             onConfirm: () =>
@@ -197,17 +197,15 @@ export function NodesScreen(props: {
         scrollEventThrottle={32}
       >
         {/* Settings moved to the Home header gear — this row is now purely about
-            adding connections, which is what Nodes is for. */}
+            adding machines, which is what this surface is for. */}
         <View className="mx-4 mt-5 flex-row gap-2">
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Add a direct connection"
+            accessibilityLabel="Pair a machine directly"
             onPress={() => navigation.navigate("ConnectionsNew")}
             className="h-12 flex-1 flex-row items-center justify-center rounded-2xl bg-primary px-5 active:opacity-80"
           >
-            <Text className="text-base font-ryco-bold text-primary-foreground">
-              Direct connection
-            </Text>
+            <Text className="text-base font-ryco-bold text-primary-foreground">Pair directly</Text>
           </Pressable>
         </View>
 
@@ -216,17 +214,17 @@ export function NodesScreen(props: {
         <HubNodeSection query={query} />
 
         <Text className="px-5 pt-7 pb-2.5 text-sm font-ryco-medium text-foreground-muted">
-          Direct connections
+          Paired directly
         </Text>
 
         {visibleRows.length === 0 ? (
           <View className="px-5 py-6">
             <EmptyState
               variant="plain"
-              title={query ? "No matching direct nodes" : "No direct nodes"}
+              title={query ? "No matching machines" : "No machines paired directly"}
               detail={
                 query
-                  ? "Change the search to see other direct connections."
+                  ? "Change the search to see other machines."
                   : "Pair with a QR code, pairing URL, LAN address, or Tailscale address."
               }
             />

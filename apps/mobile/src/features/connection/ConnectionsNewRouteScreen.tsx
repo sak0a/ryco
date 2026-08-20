@@ -90,7 +90,8 @@ export function ConnectionsNewRouteScreen() {
       contentContainerStyle={{ padding: 20, paddingBottom: 44, gap: 18 }}
     >
       <Text className="font-sans text-base leading-normal text-foreground-muted">
-        Connect straight to a Ryco node. Direct credentials stay separate from your Hub account.
+        Pair this device straight to one of your machines. Direct credentials stay separate from
+        your Hub account.
       </Text>
       {error ? <ErrorBanner message={error} /> : null}
 
@@ -196,7 +197,7 @@ export function ConnectionsNewRouteScreen() {
         className="items-center rounded-full bg-primary px-5 py-3.5 active:opacity-80 disabled:opacity-40"
       >
         <Text className="text-base font-ryco-bold text-primary-foreground">
-          {pairing ? "Pairing…" : "Pair and connect"}
+          {pairing ? "Pairing…" : "Pair"}
         </Text>
       </Pressable>
     </ScrollView>

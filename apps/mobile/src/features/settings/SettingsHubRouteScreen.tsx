@@ -200,7 +200,7 @@ export function SettingsHubRouteScreen() {
             value={compatibilityLabel(profile, storedProfile === null && buildConfig !== null)}
           />
           <SettingsRow
-            label="Nodes"
+            label="Machines"
             value="Hub relay and direct"
             onPress={() => rootNavigation?.navigate("Connections" as never)}
           />

@@ -386,7 +386,7 @@ function resolveSignInSurface(input: HostedSignInViewInput): HostedSignInSurface
 export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSignInView {
   const { state } = input;
   const surface = resolveSignInSurface(input);
-  const pairDevice = action("pair-device", "Pair a device directly", input.onPairDevice);
+  const pairDevice = action("pair-device", "Add a machine directly", input.onPairDevice);
   const base = {
     surface,
     busy: false,

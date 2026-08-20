@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { HostedHubState } from "@ryco/client-runtime/authorization";
 
-// The Nodes compatibility route. The screen is invoked as a plain
+// The Machines route. The screen is invoked as a plain
 // function with react-native mocked (no React renderer exists in this suite);
 // the hosted section below it renders for real, so the hosted controller spies
-// are a genuine tripwire on device-row interactions.
+// are a genuine tripwire on machine-row interactions.
 
 const navigationMock = vi.hoisted(() => ({ navigate: vi.fn() }));
 const actionsMock = vi.hoisted(() => ({
@@ -175,16 +175,16 @@ beforeEach(() => {
   rowsMock.rows = [savedRow("env-1", "Studio Mac")];
 });
 
-describe("Nodes — direct plane", () => {
+describe("Machines — direct plane", () => {
   it("labels both planes as separate sections", () => {
     const rendered = texts(ConnectionsRouteScreen());
-    expect(rendered).toContain("Direct connections");
+    expect(rendered).toContain("Paired directly");
     expect(rendered).toContain("Hub nodes");
   });
 
-  it("keeps the direct connection CTA", () => {
+  it("keeps the direct pairing CTA", () => {
     buttons(ConnectionsRouteScreen())
-      .find((button) => button.label === "Direct connection")
+      .find((button) => button.label === "Pair directly")
       ?.press();
     expect(navigationMock.navigate).toHaveBeenCalledWith("ConnectionsNew");
   });
@@ -217,28 +217,29 @@ describe("Nodes — direct plane", () => {
   it("still renders the empty state with no saved environments", () => {
     rowsMock.rows = [];
     const rendered = texts(ConnectionsRouteScreen());
-    expect(rendered).toContain("No direct nodes");
-    expect(rendered).toContain("Direct connection");
+    expect(rendered).toContain("No machines paired directly");
+    expect(rendered).toContain("Pair directly");
   });
 });
 
-describe("Nodes — hosted mode absent", () => {
+describe("Machines — hosted mode absent", () => {
   it("keeps direct actions isolated from the unavailable Hub section", () => {
     const tree = ConnectionsRouteScreen();
     expect(texts(tree)).toContain("Studio Mac");
     const labels = buttons(tree).map((button) => button.label);
-    // Settings is no longer here — it moved to the Home header gear.
-    expect(labels).toEqual(["Direct connection", "Use", "Disconnect", "Rename", "Forget"]);
+    // Settings is no longer here — it moved to the Home header gear. The row
+    // verbs stay in the transport register; only the CTA took wave 4's noun.
+    expect(labels).toEqual(["Pair directly", "Use", "Disconnect", "Rename", "Forget"]);
     expect(texts(tree)).toContain("Hub nodes unavailable");
   });
 });
 
 describe("two-plane isolation (direct → hosted)", () => {
-  it("never calls a hosted controller method while using the Devices section", () => {
+  it("never calls a hosted controller method while using the directly paired section", () => {
     for (const available of [false, true]) {
       hostedMock.available = available;
       const tree = ConnectionsRouteScreen();
-      for (const label of ["Direct connection", "Use", "Disconnect", "Forget"]) {
+      for (const label of ["Pair directly", "Use", "Disconnect", "Forget"]) {
         buttons(tree)
           .find((button) => button.label === label)
           ?.press();
