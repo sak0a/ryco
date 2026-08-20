@@ -32,6 +32,23 @@ export interface HostedHomeEnvironmentInput {
   readonly role: "viewer" | "operator" | "owner" | null;
 }
 
+/**
+ * A Hub node known from the persisted roster (wave 2 amendment A): rendered
+ * even with zero sockets open so cached content has a label, role and
+ * last-known presence to hang off. Liveness here is Hub directory presence,
+ * never relay-socket state — wave 1 proved the socket does not track node
+ * reachability.
+ */
+export interface CachedHubNodeHomeEnvironmentInput {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+  readonly role: "viewer" | "operator" | "owner";
+  readonly revokedAt: number | null;
+  readonly presenceOnline: boolean;
+  readonly lastHeartbeatAt: number | null;
+  readonly lastAuthenticatedAt: number | null;
+}
+
 function directState(input: DirectHomeEnvironmentInput): InboxEnvironment["connectionState"] {
   if (input.connectionState === "connected") return "connected";
   if (input.connectionState === "connecting") return "reconnecting";
@@ -58,23 +75,88 @@ export function hostedState(
   return "offline";
 }
 
+function relativeLastSeen(timestamp: number, now: number): string {
+  const deltaMinutes = Math.floor((now - timestamp) / 60_000);
+  if (deltaMinutes < 2) return "just now";
+  if (deltaMinutes < 60) return `${deltaMinutes}m ago`;
+  const deltaHours = Math.floor(deltaMinutes / 60);
+  if (deltaHours < 24) return `${deltaHours}h ago`;
+  return `${Math.floor(deltaHours / 24)}d ago`;
+}
+
+/**
+ * The stale row treatment for a cached Hub node, from directory presence.
+ * `lastHeartbeatAt === null` does not mean never — only a null
+ * `lastAuthenticatedAt` does (same contract caveat the web display documents).
+ */
+export function cachedHubNodeStaleDetail(
+  node: Pick<
+    CachedHubNodeHomeEnvironmentInput,
+    "presenceOnline" | "lastHeartbeatAt" | "lastAuthenticatedAt"
+  >,
+  now: number,
+): string {
+  if (node.presenceOnline) return "Online · cached";
+  const lastSeenAt = node.lastHeartbeatAt ?? node.lastAuthenticatedAt;
+  if (lastSeenAt === null) return "Offline · cached";
+  return `Offline · last seen ${relativeLastSeen(lastSeenAt, now)}`;
+}
+
 export function buildHomeEnvironments(input: {
   readonly direct: ReadonlyArray<DirectHomeEnvironmentInput>;
   readonly hosted: HostedHomeEnvironmentInput | null;
+  readonly cachedHubNodes?: ReadonlyArray<CachedHubNodeHomeEnvironmentInput>;
+  /** Environments whose store rows are cache-provenance (no live snapshot yet). */
+  readonly cacheProvenanceEnvironmentIds?: ReadonlyArray<EnvironmentId>;
+  readonly now?: number;
 }): ReadonlyArray<InboxEnvironment> {
+  const now = input.now ?? Date.now();
+  const cachedIds = new Set(input.cacheProvenanceEnvironmentIds ?? []);
+  // A cached environment that is (re)connected is about to be superseded by a
+  // live snapshot; only offline rows get the stale treatment.
+  const staleFields = (
+    environmentId: EnvironmentId,
+    connectionState: InboxEnvironment["connectionState"],
+    detail: string,
+  ): Pick<InboxEnvironment, "stale" | "staleDetail"> =>
+    cachedIds.has(environmentId) && connectionState === "offline"
+      ? { stale: true, staleDetail: detail }
+      : {};
+
   const environments = new Map<EnvironmentId, InboxEnvironment>();
   for (const direct of input.direct) {
+    const connectionState = directState(direct);
     environments.set(direct.environmentId, {
       environmentId: direct.environmentId,
       label: direct.label,
-      connectionState: directState(direct),
+      connectionState,
+      ...staleFields(direct.environmentId, connectionState, "Offline · cached"),
+    });
+  }
+  for (const node of input.cachedHubNodes ?? []) {
+    if (node.revokedAt !== null) continue;
+    if (environments.has(node.environmentId)) continue;
+    environments.set(node.environmentId, {
+      environmentId: node.environmentId,
+      label: node.label,
+      connectionState: "offline",
+      ...staleFields(node.environmentId, "offline", cachedHubNodeStaleDetail(node, now)),
     });
   }
   if (input.hosted) {
+    const connectionState = hostedState(input.hosted);
+    const rosterNode = (input.cachedHubNodes ?? []).find(
+      (node) => node.environmentId === input.hosted?.environmentId,
+    );
     environments.set(input.hosted.environmentId, {
       environmentId: input.hosted.environmentId,
       label: input.hosted.label,
-      connectionState: hostedState(input.hosted),
+      connectionState,
+      ...staleFields(
+        input.hosted.environmentId,
+        connectionState,
+        rosterNode ? cachedHubNodeStaleDetail(rosterNode, now) : "Offline · cached",
+      ),
     });
   }
   return [...environments.values()];

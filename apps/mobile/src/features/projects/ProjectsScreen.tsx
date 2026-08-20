@@ -24,13 +24,16 @@ function flattenGroups(groups: ReadonlyArray<ProjectNodeGroup>): ReadonlyArray<P
       key: `node:${group.environmentId}`,
       title: group.nodeLabel,
       detail:
-        group.connectionState === "connected"
+        // Cache-provenance groups carry the Hub-presence "Offline · last seen"
+        // treatment so cached content is visibly last-known, never live.
+        group.staleDetail ??
+        (group.connectionState === "connected"
           ? "Connected"
           : group.connectionState === "read-only"
             ? "Read-only"
             : group.connectionState === "reconnecting"
               ? "Reconnecting"
-              : "Offline",
+              : "Offline"),
     },
     ...group.rows.map((row) => ({ kind: "project" as const, key: row.key, row })),
   ]);

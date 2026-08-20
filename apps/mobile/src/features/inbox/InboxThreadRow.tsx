@@ -17,6 +17,7 @@ function statusDotClassName(state: InboxThreadState): string {
       return "bg-accent";
     case "reconnecting":
       return "border-2 border-warning";
+    case "offline":
     case "idle":
       return "border border-foreground-tertiary";
   }
@@ -33,6 +34,7 @@ function statusTextClassName(state: InboxThreadState): string {
     case "working":
     case "connecting":
       return "text-accent-strong";
+    case "offline":
     case "idle":
       return "text-foreground-tertiary";
   }

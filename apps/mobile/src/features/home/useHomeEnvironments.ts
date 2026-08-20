@@ -1,7 +1,12 @@
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import {
+  getCachedHubNodeRoster,
+  subscribeCachedHubNodeRoster,
+} from "../../hostedHub/nodeRoster";
 import { useHostedHubStore } from "../../hostedHub/state";
+import { selectCacheHydratedEnvironmentIds, useStore } from "../../state/threadsRuntime";
 import { useSavedEnvironments } from "../connection/useConnectionController";
 import { buildHomeEnvironments } from "./homeEnvironmentModel";
 
@@ -15,6 +20,11 @@ export function useHomeEnvironments() {
       sessionStatus: state.sessionStatus,
     })),
   );
+  // Wave 2: the persisted Hub node roster puts every known node in the list —
+  // not just the selected one — so cached content always has a label to render
+  // against; cache-provenance ids mark which environments are last-known state.
+  const rosterNodes = useSyncExternalStore(subscribeCachedHubNodeRoster, getCachedHubNodeRoster);
+  const cacheProvenanceEnvironmentIds = useStore(useShallow(selectCacheHydratedEnvironmentIds));
 
   return useMemo(
     () =>
@@ -34,7 +44,17 @@ export function useHomeEnvironments() {
               role: hosted.effectiveRole,
             }
           : null,
+        cachedHubNodes: rosterNodes.map((node) => ({
+          environmentId: node.environmentId,
+          label: node.label,
+          role: node.effectiveRole,
+          revokedAt: node.revokedAt,
+          presenceOnline: node.presenceOnline,
+          lastHeartbeatAt: node.lastHeartbeatAt,
+          lastAuthenticatedAt: node.lastAuthenticatedAt,
+        })),
+        cacheProvenanceEnvironmentIds,
       }),
-    [directRows, hosted],
+    [cacheProvenanceEnvironmentIds, directRows, hosted, rosterNodes],
   );
 }
