@@ -86,7 +86,7 @@ export function newTaskContextLabel(input: {
   readonly worktreeTitle: string | null;
 }): string {
   return [
-    input.environmentLabel ?? "Choose node",
+    input.environmentLabel ?? "Choose machine",
     input.projectTitle ?? "Choose project",
     input.worktreeTitle ?? "Local workspace",
   ].join(" · ");

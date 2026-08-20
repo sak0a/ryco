@@ -186,7 +186,7 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
     const worktree = thread.worktreeId
       ? worktreeById.get(scopedKey(thread.environmentId, thread.worktreeId))
       : undefined;
-    const nodeLabel = environment?.label || "Unknown node";
+    const nodeLabel = environment?.label || "Unknown machine";
     const projectLabel = project?.name || "Unknown project";
     const worktreeLabel = worktree?.title || worktree?.branch || thread.branch || "Local workspace";
     const contextLabel = `${nodeLabel} · ${projectLabel} · ${worktreeLabel}`;

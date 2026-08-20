@@ -464,6 +464,117 @@ describe("Projects rows", () => {
     expect(scoped[0]).toMatchObject({ key: `${NODE_B}:/srv/ryco`, title: "server checkout" });
     expect(scoped[0]?.machines).toHaveLength(1);
   });
+
+  it("never lets a query manufacture a merge the unfiltered view refuses", () => {
+    // Machine A holds TWO checkouts of the repo; machine B one. Unfiltered this
+    // key is ambiguous and refuses to merge. A query that happens to hide one of
+    // A's checkouts must not create the merge — the pairing is no less ambiguous
+    // for being filtered out of sight.
+    const projects = [
+      project({
+        environmentId: NODE_A,
+        id: "project-a1",
+        name: "main checkout",
+        cwd: "/code/ryco",
+        canonicalKey: CANONICAL_KEY,
+      }),
+      project({
+        environmentId: NODE_A,
+        id: "project-a2",
+        name: "review",
+        cwd: "/code/ryco-review",
+        canonicalKey: CANONICAL_KEY,
+      }),
+      project({
+        environmentId: NODE_B,
+        id: "project-b",
+        name: "main deployment",
+        cwd: "/srv/ryco-main",
+        canonicalKey: CANONICAL_KEY,
+      }),
+    ];
+
+    const rows = buildProjectRows({
+      projects,
+      ...EMPTY,
+      environments: [MAC, LINUX],
+      // Matches a1 and b, filtering the second Mac checkout out of sight.
+      query: "main",
+      groupingMode: "repository",
+    });
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.machines).toHaveLength(1);
+    }
+  });
+
+  it("finds a merged row by its rendered repository title", () => {
+    // The merged row renders the repository displayName, which matches neither
+    // member's own name or path — what is on screen must be searchable.
+    const rows = buildProjectRows({
+      projects: [
+        project({
+          environmentId: NODE_A,
+          id: "project-a",
+          name: "backend-checkout",
+          cwd: "/srv/app",
+          canonicalKey: CANONICAL_KEY,
+        }),
+        project({
+          environmentId: NODE_B,
+          id: "project-b",
+          name: "wp",
+          cwd: "/code/wp-vue",
+          canonicalKey: CANONICAL_KEY,
+        }),
+      ],
+      ...EMPTY,
+      environments: [MAC, LINUX],
+      query: "ryco",
+      groupingMode: "repository",
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.title).toBe("Ryco");
+    expect(rows[0]?.machines).toHaveLength(2);
+  });
+
+  it("renders no role or trust markers in the accessible label when none apply", () => {
+    // Negative space for the marker predicates: owner + verified must produce
+    // exactly the bare label, or a wrong predicate (role set at all, trust
+    // "verified") would light markers on every healthy row.
+    const rows = buildProjectRows({
+      projects: [
+        project({
+          environmentId: NODE_A,
+          id: "project-a",
+          name: "ryco",
+          cwd: "/code/ryco",
+          canonicalKey: CANONICAL_KEY,
+        }),
+        project({
+          environmentId: NODE_B,
+          id: "project-b",
+          name: "ryco",
+          cwd: "/srv/ryco",
+          canonicalKey: CANONICAL_KEY,
+        }),
+      ],
+      ...EMPTY,
+      environments: [
+        { ...MAC, role: "owner", trust: "verified" },
+        { ...LINUX, role: "operator", trust: "verified" },
+      ],
+      groupingMode: "repository",
+    });
+
+    // Neither member has a timestamp, so the first member (Mac Studio) is the
+    // representative and leads the machine list.
+    expect(projectRowAccessibilityLabel(rows[0]!)).toBe(
+      "Ryco, 0 worktrees, 0 active tasks, on Mac Studio, Linux box",
+    );
+  });
 });
 
 describe("Project detail", () => {

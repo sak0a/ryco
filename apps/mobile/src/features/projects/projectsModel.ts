@@ -216,6 +216,9 @@ function claimKey(used: Set<string>, preferred: string, fallback: string): strin
  * `nodeScope` and `query` filter MEMBERS, not rows: a scoped or filtered view
  * shows only the machines that survive the filter, so a merged row degrades to a
  * plain single-machine row rather than claiming machines the filter excluded.
+ * Ambiguity is judged on the UNFILTERED catalog: a query that happens to hide
+ * one of two same-machine checkouts must not manufacture a merge the full view
+ * refuses — the pairing is no less ambiguous for being filtered out of sight.
  */
 export function buildProjectRows(input: {
   readonly projects: ReadonlyArray<Project>;
@@ -247,10 +250,28 @@ export function buildProjectRows(input: {
     threadsByProject.set(key, threads);
   }
 
+  const unfilteredCountByKeyAndEnvironment = new Map<string, Map<EnvironmentId, number>>();
+  for (const project of input.projects) {
+    const logicalKey = deriveLogicalProjectKey(project, { groupingMode: input.groupingMode });
+    const byEnvironment =
+      unfilteredCountByKeyAndEnvironment.get(logicalKey) ?? new Map<EnvironmentId, number>();
+    byEnvironment.set(project.environmentId, (byEnvironment.get(project.environmentId) ?? 0) + 1);
+    unfilteredCountByKeyAndEnvironment.set(logicalKey, byEnvironment);
+  }
+  const ambiguousKeys = new Set<string>();
+  for (const [logicalKey, byEnvironment] of unfilteredCountByKeyAndEnvironment) {
+    if ([...byEnvironment.values()].some((count) => count >= 2)) ambiguousKeys.add(logicalKey);
+  }
+
   const membersByLogicalKey = new Map<string, ProjectMember[]>();
   for (const project of input.projects) {
     if (input.nodeScope && project.environmentId !== input.nodeScope) continue;
-    if (query && !`${project.name} ${project.cwd}`.toLocaleLowerCase().includes(query)) continue;
+    // A merged row renders the repository identity as its title, so the title
+    // must be searchable — not only the members' own names and paths.
+    const haystack = `${project.name} ${project.cwd} ${
+      project.repositoryIdentity?.displayName ?? ""
+    } ${project.repositoryIdentity?.name ?? ""}`;
+    if (query && !haystack.toLocaleLowerCase().includes(query)) continue;
 
     const key = scopedKey(project.environmentId, project.id);
     const threads = threadsByProject.get(key) ?? [];
@@ -278,7 +299,10 @@ export function buildProjectRows(input: {
   const rows: ProjectListRow[] = [];
   for (const [logicalKey, members] of membersByLogicalKey) {
     const environmentIds = new Set(members.map((member) => member.project.environmentId));
-    const merges = environmentIds.size >= 2 && environmentIds.size === members.length;
+    const merges =
+      !ambiguousKeys.has(logicalKey) &&
+      environmentIds.size >= 2 &&
+      environmentIds.size === members.length;
     if (!merges) {
       for (const member of members) {
         rows.push({
@@ -335,9 +359,12 @@ export function buildProjectRows(input: {
     });
   }
 
+  // parseTime keeps the comparator total when a row has no timestamp at all —
+  // NaN deltas would make it intransitive and the order permutation-dependent.
   return rows.toSorted((left, right) => {
-    const delta = Date.parse(right.updatedAt ?? "") - Date.parse(left.updatedAt ?? "");
-    if (Number.isFinite(delta) && delta !== 0) return delta;
+    const leftTime = parseTime(left.updatedAt);
+    const rightTime = parseTime(right.updatedAt);
+    if (leftTime !== rightTime) return rightTime > leftTime ? 1 : -1;
     return left.title.localeCompare(right.title);
   });
 }

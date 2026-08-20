@@ -20,17 +20,32 @@ import {
  * the row now, so a merged cross-machine row states both of its origins inline.
  */
 function MachineProvenance(props: { readonly machine: ProjectRowMachine }) {
+  // The markers are siblings of the label text, not nested spans: a single
+  // numberOfLines={1} Text tail-ellipsizes its END, and the end is exactly
+  // where "Not verified" would sit — a long machine label must shorten itself,
+  // never the mandatory §13.1 claim beside it.
   return (
-    <Text className="text-2xs font-ryco-medium text-foreground-muted" numberOfLines={1}>
-      {props.machine.label} · {projectMachineStatusLabel(props.machine)}
+    <View className="flex-row items-center">
+      <Text
+        className="min-w-0 shrink text-2xs font-ryco-medium text-foreground-muted"
+        numberOfLines={1}
+      >
+        {props.machine.label} · {projectMachineStatusLabel(props.machine)}
+      </Text>
       {props.machine.role === "viewer" ? (
-        <Text className="text-foreground-tertiary"> · Viewer</Text>
+        <Text className="shrink-0 text-2xs font-ryco-medium text-foreground-tertiary">
+          {" "}
+          · Viewer
+        </Text>
       ) : null}
       {/* Mandatory §13.1 label, one vocabulary across every surface. */}
       {props.machine.trust === "unverified" ? (
-        <Text className="text-danger-foreground"> · {NODE_TRUST_UNVERIFIED_LABEL}</Text>
+        <Text className="shrink-0 text-2xs font-ryco-medium text-danger-foreground">
+          {" "}
+          · {NODE_TRUST_UNVERIFIED_LABEL}
+        </Text>
       ) : null}
-    </Text>
+    </View>
   );
 }
 
@@ -150,7 +165,7 @@ export function ProjectsScreen(props: {
             title={props.hasMachines ? "No projects yet" : "Add a machine"}
             detail={
               props.hasMachines
-                ? "Add a remote workspace on one of your connected nodes to begin."
+                ? "Add a remote workspace on one of your connected machines to begin."
                 : "Use your Hub or pair a machine directly before choosing a project."
             }
             actionLabel={props.hasMachines ? "Add project" : "Add a machine"}
