@@ -44,10 +44,20 @@ export function InboxThreadRow(props: {
   readonly row: InboxThreadRowModel;
   readonly onPress: () => void;
 }) {
+  // A badge that exists only in pixels is invisible to VoiceOver, so the two
+  // provenance markers join the accessible name in the order they are read.
+  const accessibilityLabel = [
+    props.row.title,
+    props.row.contextLabel,
+    props.row.statusLabel,
+    ...(props.row.roleLabel === null ? [] : [props.row.roleLabel]),
+    ...(props.row.trustLabel === null ? [] : [props.row.trustLabel]),
+  ].join(", ");
+
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${props.row.title}, ${props.row.contextLabel}, ${props.row.statusLabel}`}
+      accessibilityLabel={accessibilityLabel}
       onPress={props.onPress}
       className="mx-4 mb-2.5 flex-row items-start gap-3 rounded-2xl bg-card px-4 py-3.5 active:bg-card-alt"
     >
@@ -74,6 +84,24 @@ export function InboxThreadRow(props: {
           >
             {props.row.statusLabel}
           </Text>
+          {props.row.roleLabel === null ? null : (
+            <Text
+              className="shrink text-xs font-ryco-medium text-foreground-tertiary"
+              numberOfLines={1}
+            >
+              {props.row.roleLabel}
+            </Text>
+          )}
+          {/* The danger tone the same label already carries on the hosted pill —
+              no second guarantee-to-colour mapping is invented here. */}
+          {props.row.trustLabel === null ? null : (
+            <Text
+              className="shrink text-xs font-ryco-medium text-danger-foreground"
+              numberOfLines={1}
+            >
+              {props.row.trustLabel}
+            </Text>
+          )}
           {props.row.changeRequest ? <ChangeRequestBadge badge={props.row.changeRequest} /> : null}
         </View>
       </View>

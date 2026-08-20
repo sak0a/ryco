@@ -6,6 +6,7 @@ import type {
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
 
 import { buildChangeRequestBadge, type ChangeRequestBadge } from "../../lib/changeRequestBadge";
+import { NODE_TRUST_UNVERIFIED_LABEL, type NodeTrust } from "../home/nodeTrustModel";
 
 export type InboxThreadState =
   | "needs-input"
@@ -29,6 +30,19 @@ export interface InboxEnvironment {
    */
   readonly stale?: boolean;
   readonly staleDetail?: string;
+  /**
+   * Wave 4: the effective role on this environment — the hosted/roster role, or
+   * the direct plane's `"client"` / `"owner"`. Absent when the plane reports
+   * none; it is never defaulted, because "no role known" and "viewer" differ in
+   * exactly what the user may do.
+   */
+  readonly role?: "viewer" | "operator" | "owner" | "client";
+  /**
+   * Wave 4: per-node E2EE trust, DISPLAY ONLY (see `nodeTrustModel.ts`). Absent
+   * whenever this device has no evidence to claim from — never defaulted to
+   * `"unverified"`, which would be a fabricated claim.
+   */
+  readonly trust?: NodeTrust;
 }
 
 export interface InboxThreadRow {
@@ -48,6 +62,21 @@ export interface InboxThreadRow {
    * — nothing refreshes it in the background. See changeRequestBadge.ts.
    */
   readonly changeRequest: ChangeRequestBadge | null;
+  /**
+   * Wave 4: the node this row lives on is one the owner has not verified, in
+   * client-runtime's own words. `null` means no claim — either the node is
+   * verified or this device holds no evidence either way. It never replaces
+   * {@link statusLabel}: staleness and trust are independent facts about the
+   * row and compose beside each other.
+   */
+  readonly trustLabel: string | null;
+  /**
+   * Wave 4: a quiet neutral marker, surfaced only for `viewer` — the one role
+   * that changes what the user may do here. Owner and operator render nothing;
+   * a badge on every row would be provenance turned into noise. The word
+   * matches HubNodeSection's `ROLE_LABELS`.
+   */
+  readonly roleLabel: "Viewer" | null;
 }
 
 export interface InboxSection {
@@ -186,6 +215,8 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
         state === "offline" ? (environment?.staleDetail ?? "Offline") : statusLabel(state),
       updatedAt: timestamp(thread),
       changeRequest: buildChangeRequestBadge(worktree),
+      trustLabel: environment?.trust === "unverified" ? NODE_TRUST_UNVERIFIED_LABEL : null,
+      roleLabel: environment?.role === "viewer" ? "Viewer" : null,
     });
   }
 

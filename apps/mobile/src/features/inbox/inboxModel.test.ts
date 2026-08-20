@@ -7,7 +7,8 @@ import type {
 } from "@ryco/client-runtime/state/threads";
 import type { EnvironmentId } from "@ryco/contracts";
 
-import { buildInboxSections, resolveInboxEmptyState } from "./inboxModel";
+import { NODE_TRUST_UNVERIFIED_LABEL } from "../home/nodeTrustModel";
+import { buildInboxSections, resolveInboxEmptyState, type InboxEnvironment } from "./inboxModel";
 
 const NODE_A = "node-a" as EnvironmentId;
 const NODE_B = "node-b" as EnvironmentId;
@@ -254,5 +255,87 @@ describe("inbox change-request badge", () => {
     expect(active?.rows.map((row) => row.threadId)).toEqual(["live-working"]);
     expect(recent?.rows.map((row) => row.state)).toEqual(["offline", "offline"]);
     expect(recent?.rows[0]?.statusLabel).toBe("Offline · last seen 2h ago");
+  });
+});
+
+describe("inbox row provenance", () => {
+  function rowsFor(environment: InboxEnvironment) {
+    return buildInboxSections({
+      projects: [project(environment.environmentId, "project-a", "Ryco")],
+      worktrees: [],
+      threads: [thread(environment.environmentId, "thread-a", "project-a")],
+      environments: [environment],
+    }).flatMap((section) => section.rows);
+  }
+
+  it("labels an unverified node in the runtime's own words", () => {
+    const row = rowsFor({
+      environmentId: NODE_A,
+      label: "Work Mac",
+      connectionState: "connected",
+      trust: "unverified",
+    })[0];
+
+    expect(row?.trustLabel).toBe(NODE_TRUST_UNVERIFIED_LABEL);
+    expect(row?.trustLabel).toBe("Not verified");
+  });
+
+  it("makes no trust claim for a verified node or for one with no evidence", () => {
+    expect(
+      rowsFor({
+        environmentId: NODE_A,
+        label: "Work Mac",
+        connectionState: "connected",
+        trust: "verified",
+      })[0]?.trustLabel,
+    ).toBeNull();
+    expect(
+      rowsFor({ environmentId: NODE_A, label: "Work Mac", connectionState: "connected" })[0]
+        ?.trustLabel,
+    ).toBeNull();
+  });
+
+  it("surfaces the role only when it changes what the user may do", () => {
+    expect(
+      rowsFor({
+        environmentId: NODE_A,
+        label: "Work Mac",
+        connectionState: "read-only",
+        role: "viewer",
+      })[0]?.roleLabel,
+    ).toBe("Viewer");
+    for (const role of ["operator", "owner", "client"] as const) {
+      expect(
+        rowsFor({
+          environmentId: NODE_A,
+          label: "Work Mac",
+          connectionState: "connected",
+          role,
+        })[0]?.roleLabel,
+      ).toBeNull();
+    }
+    expect(
+      rowsFor({ environmentId: NODE_A, label: "Work Mac", connectionState: "connected" })[0]
+        ?.roleLabel,
+    ).toBeNull();
+  });
+
+  it("composes provenance beside wave 2's staleness rather than replacing it", () => {
+    // Staleness and trust are independent facts about the row: the status text
+    // stays the presence-derived phrase, and the trust marker sits next to it.
+    const row = rowsFor({
+      environmentId: NODE_A,
+      label: "Work Mac",
+      connectionState: "offline",
+      stale: true,
+      staleDetail: "Offline · last seen 2h ago",
+      role: "viewer",
+      trust: "unverified",
+    })[0];
+
+    expect(row?.state).toBe("offline");
+    expect(row?.statusLabel).toBe("Offline · last seen 2h ago");
+    expect(row?.roleLabel).toBe("Viewer");
+    expect(row?.trustLabel).toBe("Not verified");
   });
 });
