@@ -83,6 +83,16 @@ vi.mock("../../hostedHub/state", () => ({
   useHostedHubStore: (selector: (state: HostedHubState) => unknown) =>
     selector(hostedState as HostedHubState),
 }));
+// The hosted pill's settling hook owns a `useRef` tracker and this renderer
+// invokes components as plain functions with no dispatcher; pass the derived
+// pair through unchanged (the step machine is covered in
+// settledHostedStatus.test.ts).
+vi.mock("../hostedHub/useSettledHostedStatus", () => ({
+  useSettledHostedStatus: (input: { indicator: unknown; statusText: unknown }) => ({
+    indicator: input.indicator,
+    statusText: input.statusText,
+  }),
+}));
 
 const hostedState: HostedHubState = {
   bootstrapAvailable: false,

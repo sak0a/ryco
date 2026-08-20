@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   deriveHostedConnectionStatusIndicator,
+  HOSTED_CONNECTION_STATUS_INDICATORS,
   type HostedHubNode,
   type HostedE2eeChannelStatus,
   type HostedHubState,
@@ -74,6 +75,22 @@ vi.mock("./useHostedMode", () => ({ useHostedModeAvailable: () => hostedMock.ava
 vi.mock("../e2ee/useMobileE2eeSession", () => ({
   useMobileE2eeChannelStatus: () => hostedMock.e2eeStatus,
 }));
+// The settling seam (`settledHostedStatus`), mocked for the same reason: it
+// owns a `useRef`/`useSyncExternalStore` tracker and this renderer invokes
+// components as plain functions with no dispatcher. The step machine itself is
+// covered in `settledHostedStatus.test.ts`; what matters here is that the
+// section feeds it the derived pair plus the selection identity, and renders
+// whatever it hands back.
+vi.mock("./useSettledHostedStatus", () => ({
+  useSettledHostedStatus: (input: SettledHostedStatusInput) => {
+    settledMock.observed.push(input);
+    return settledMock.settled ?? { indicator: input.indicator, statusText: input.statusText };
+  },
+}));
+const settledMock = vi.hoisted(() => ({
+  observed: [] as Array<{ readonly selectionKey: string | null; readonly statusText: string }>,
+  settled: undefined as SettledHostedStatus | undefined,
+}));
 
 vi.mock("../../connection/catalog", () => {
   const guard = tripwire.trap("connection/catalog");
@@ -106,6 +123,11 @@ import {
   HubNodeSection,
   type HubNodeSectionModel,
 } from "./HubNodeSection";
+import {
+  hostedSelectionKey,
+  type SettledHostedStatus,
+  type SettledHostedStatusInput,
+} from "./settledHostedStatus";
 
 function node(overrides: Partial<HostedHubNode> = {}): HostedHubNode {
   return {
@@ -193,6 +215,8 @@ beforeEach(() => {
   navigationMock.navigate.mockClear();
   mountEffects.length = 0;
   tripwire.hits.length = 0;
+  settledMock.observed.length = 0;
+  settledMock.settled = undefined;
 });
 
 describe("Hub node selection guard", () => {
@@ -294,6 +318,63 @@ describe("Hub node section status text", () => {
     expect(stale.statusLabel).toBe(
       deriveHostedConnectionStatusIndicator({ ...input, browserStatus: "stale" }).shortLabel,
     );
+  });
+
+  /**
+   * Settling is presentation only. Prevents the pill and the selected row from
+   * being settled independently — or from disagreeing with the accessible name
+   * — while a re-target walks the underlying status through its step labels.
+   */
+  it("presents the settled pair, including the selected row's tone, when one is supplied", () => {
+    const live = {
+      browserStatus: "current",
+      sessionStatus: "ready",
+      selectionStatus: "online",
+      transportStatus: "online",
+    } as const;
+    const held: SettledHostedStatus = {
+      statusText: "connecting",
+      indicator: HOSTED_CONNECTION_STATUS_INDICATORS.connecting,
+    };
+
+    const settled = deriveHubNodeSectionModel({
+      state: state({ ...live, selectedNode: node() }),
+      available: true,
+      e2eeStatus: "verified",
+      settledStatus: held,
+      actions: hostedMock.controller,
+      onSignIn: navigationMock.navigate,
+    });
+
+    // The live derivation would say `Encrypted`; the settled pair is what shows.
+    expect(settled.statusText).toBe("connecting");
+    expect(settled.statusLabel).toBe("Connecting");
+    expect(settled.rows[0]?.tone).toBe(settled.statusTone);
+    expect(settled.statusTone.label).toBe("Connecting");
+  });
+
+  /**
+   * Prevents the wiring from feeding the tracker a key that ignores the
+   * environment, which would let a status from the previously selected node be
+   * held over the next one.
+   */
+  it("feeds the tracker the derived pair keyed on the selected node's identity", () => {
+    hostedMock.state = state({
+      selectedNode: node(),
+      sessionStatus: "ready",
+      selectionStatus: "online",
+      transportStatus: "online",
+    });
+    HubNodeSection();
+
+    expect(settledMock.observed).toHaveLength(1);
+    expect(settledMock.observed[0]?.statusText).toBe("Online");
+    expect(settledMock.observed[0]?.selectionKey).toBe(hostedSelectionKey(node()));
+
+    settledMock.observed.length = 0;
+    hostedMock.state = state({ selectedNode: null });
+    HubNodeSection();
+    expect(settledMock.observed[0]?.selectionKey).toBeNull();
   });
 });
 

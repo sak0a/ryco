@@ -17,7 +17,9 @@ import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
 import { useMobileE2eeChannelStatus } from "../e2ee/useMobileE2eeSession";
 import { NodeRow } from "../nodes/NodeRow";
 import { hostedStatusTone } from "./hostedAuthModel";
+import { hostedSelectionKey, type SettledHostedStatus } from "./settledHostedStatus";
 import { useHostedModeAvailable } from "./useHostedMode";
+import { useSettledHostedStatus } from "./useSettledHostedStatus";
 
 /**
  * The hosted plane's half of the environment switcher (plan Task 8).
@@ -131,6 +133,14 @@ export function deriveHubNodeSectionModel(input: {
    * legacy label is mandatory on every surface, and this is one of them.
    */
   readonly e2eeStatus: HostedE2eeChannelStatus;
+  /**
+   * The settled presentation of the pair derived below (`settledHostedStatus`),
+   * when the caller runs one. PRESENTATION ONLY: it never changes which status
+   * this model derives, only which one is on screen, so a re-target cannot
+   * strobe the chip through seven step labels. Absent — every existing caller
+   * and every test — the derived pair is displayed directly.
+   */
+  readonly settledStatus?: SettledHostedStatus;
   readonly actions: HubNodeSectionActions;
   readonly onSignIn: () => void;
   readonly query?: string;
@@ -143,8 +153,10 @@ export function deriveHubNodeSectionModel(input: {
     transportStatus: state.transportStatus,
     e2eeStatus: input.e2eeStatus,
   };
-  const indicator = deriveHostedConnectionStatusIndicator(statusInput);
-  const statusText = deriveHostedConnectionStatusText(statusInput);
+  const indicator =
+    input.settledStatus?.indicator ?? deriveHostedConnectionStatusIndicator(statusInput);
+  const statusText =
+    input.settledStatus?.statusText ?? deriveHostedConnectionStatusText(statusInput);
   const base = {
     statusLabel: indicator.shortLabel,
     statusText,
@@ -326,10 +338,31 @@ export function HubNodeSection(props: { readonly query?: string } = {}) {
   // locked, so a fallen-back channel reads `Legacy` here and not `Online`.
   const e2eeStatus = useMobileE2eeChannelStatus();
 
+  // Settling is applied to the DERIVED pair, not to any input of the
+  // derivation: re-targeting the hosted connection walks the chip through up to
+  // seven step labels in a few hundred milliseconds, and this collapses that
+  // walk without ever changing, delaying, or softening a mandatory claim
+  // (§12.2 `Legacy`, §13.1 `Not verified` are settled states and display at
+  // once). The selected row's tone reads the same settled pair through
+  // `base.statusTone`, so the row and the pill cannot disagree.
+  const statusInput = {
+    browserStatus: state.browserStatus,
+    sessionStatus: state.sessionStatus,
+    selectionStatus: state.selectionStatus,
+    transportStatus: state.transportStatus,
+    e2eeStatus,
+  };
+  const settledStatus = useSettledHostedStatus({
+    indicator: deriveHostedConnectionStatusIndicator(statusInput),
+    statusText: deriveHostedConnectionStatusText(statusInput),
+    selectionKey: hostedSelectionKey(state.selectedNode),
+  });
+
   const model = deriveHubNodeSectionModel({
     state,
     available,
     e2eeStatus,
+    settledStatus,
     actions: hostedHubController,
     // Sign-in uses the same full-screen native identity surface as the root gate.
     onSignIn: () => navigation.navigate("Access"),
