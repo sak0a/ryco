@@ -17,7 +17,13 @@ export interface ThreadHeaderModel {
   readonly nodeLabel: string;
   readonly projectLabel: string;
   readonly worktreeLabel: string;
-  readonly statusLabel: "Ready" | "Running" | "Needs approval" | "Input needed" | "Archived";
+  readonly statusLabel:
+    | "Ready"
+    | "Running"
+    | "Needs approval"
+    | "Input needed"
+    | "Archived"
+    | "Offline";
   readonly contextAccessibilityLabel: string;
   readonly reviewVisible: boolean;
   /**
@@ -65,6 +71,14 @@ export function buildThreadHeaderModel(input: {
   readonly nodeLabel: string | null;
   readonly hasPendingApproval: boolean;
   readonly hasPendingUserInput: boolean;
+  /**
+   * The thread's content is cache provenance, so none of the status this model
+   * would otherwise derive is live. Same precedence the inbox uses for a stale
+   * environment's rows (`inboxModel.ts` `threadState`): staleness outranks
+   * every cached field, because a snapshot captured mid-turn keeps claiming
+   * "Running" long after the node stopped answering.
+   */
+  readonly forcedOffline?: boolean;
 }): ThreadHeaderModel {
   const running =
     input.thread.latestTurn?.state === "running" || input.thread.session?.status === "running";
@@ -75,8 +89,9 @@ export function buildThreadHeaderModel(input: {
     input.worktree?.branch.trim() ||
     input.thread.branch?.trim() ||
     (input.thread.worktreePath ? basename(input.thread.worktreePath) : "Local workspace");
-  const statusLabel =
-    input.thread.archivedAt !== null
+  const statusLabel = input.forcedOffline
+    ? "Offline"
+    : input.thread.archivedAt !== null
       ? "Archived"
       : input.hasPendingApproval
         ? "Needs approval"

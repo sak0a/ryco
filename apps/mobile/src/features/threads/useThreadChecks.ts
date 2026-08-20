@@ -2,6 +2,7 @@ import type { EnvironmentId } from "@ryco/contracts";
 import { useEffect, useState } from "react";
 
 import { readRpcClient } from "../../connection/environmentApi";
+import { useWsConnectionStatusForEnvironment } from "../../rpc/wsConnectionState";
 import { buildCheckSummary, type CheckRollupItemInput, type CheckSummary } from "./prCheckSummary";
 
 // Fetches the CI check rollup for the thread that is currently open, and only
@@ -23,6 +24,12 @@ export function useThreadChecks(input: {
 }): CheckSummary | null {
   const { environmentId, cwd, prNumber } = input;
   const [summary, setSummary] = useState<CheckSummary | null>(null);
+  // Wave 3a: `readRpcClient` is snapshotted once per effect run, and a thread
+  // opened from cache has no client yet — the retarget lands one a moment
+  // later. Without this dep the badge would be stuck on "unknown" for the whole
+  // life of the screen even after the node came live. The environment's own
+  // socket phase flips to "connected" exactly when a client exists to read.
+  const connectionPhase = useWsConnectionStatusForEnvironment(environmentId).phase;
 
   useEffect(() => {
     // No PR means there is nothing to summarise — distinct from a PR whose
@@ -66,7 +73,7 @@ export function useThreadChecks(input: {
     return () => {
       cancelled = true;
     };
-  }, [cwd, environmentId, prNumber]);
+  }, [connectionPhase, cwd, environmentId, prNumber]);
 
   return summary;
 }

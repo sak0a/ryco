@@ -109,6 +109,29 @@ describe("buildThreadHeaderModel", () => {
       moreActions: ["rename", "unarchive", "details"],
     });
   });
+
+  it("reports a cache-provenance thread as offline however busy its snapshot looks", () => {
+    // A snapshot captured mid-turn keeps `latestTurn.state === "running"`
+    // forever. Without this gate the detail header renders "Running" with no
+    // connection behind it, directly contradicting the inbox row for the same
+    // thread, which the stale-environment rule already forces to offline.
+    const model = buildThreadHeaderModel({
+      thread: thread({
+        latestTurn: { state: "running" } as Thread["latestTurn"],
+      }),
+      project: { name: "Ryco" } as Project,
+      worktree: null,
+      nodeLabel: "MacBook",
+      hasPendingApproval: true,
+      hasPendingUserInput: false,
+      forcedOffline: true,
+    });
+
+    expect(model.statusLabel).toBe("Offline");
+    // The status is spoken, not only coloured, so a screen reader user is not
+    // the last to learn the thread is not live.
+    expect(model.contextAccessibilityLabel).toContain("Offline.");
+  });
 });
 
 describe("findThreadWorktree", () => {
