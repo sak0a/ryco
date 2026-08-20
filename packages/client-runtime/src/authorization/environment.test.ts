@@ -178,3 +178,68 @@ describe("hosted node transition queue", () => {
     expect(nodeLifecycle.connectPrimaryEnvironment).toHaveBeenCalledOnce();
   });
 });
+
+/**
+ * The concurrency invariant.
+ *
+ * Wave 3a leaves the thread-open retarget ungated, and the entire basis for
+ * that decision is this: however many node switches the UI dispatches, and
+ * however they interleave, the transition queue keeps exactly one hosted
+ * connection live. A second live connection would mean two relay sessions
+ * writing the single process-global ws-connection atom and two writers of the
+ * primary-environment descriptor, with the last one winning at random.
+ */
+describe("hosted node transition queue concurrency", () => {
+  const environmentA = EnvironmentId.make("env_aaaaaaaaaaaaaaaaaaaaaa");
+  const environmentB = EnvironmentId.make("env_bbbbbbbbbbbbbbbbbbbbbb");
+  const environmentC = EnvironmentId.make("env_cccccccccccccccccccccc");
+
+  function nodeFor(id: string, nodeEnvironmentId: EnvironmentId): HostedHubNode {
+    return { ...node(), id, environmentId: nodeEnvironmentId };
+  }
+
+  it("never lets a second hosted connection be live while another is being torn down", async () => {
+    let live = 0;
+    let maxLive = 0;
+    const activated: EnvironmentId[] = [];
+    const countingLifecycle: HostedNodeLifecycle = {
+      activate: async () => undefined,
+      suspend: async () => undefined,
+      deactivate: async () => undefined,
+      clearNodeScopedState: () => undefined,
+      writePrimaryEnvironmentDescriptor: () => undefined,
+      setActiveEnvironmentId: (id) => {
+        activated.push(id);
+      },
+      connectPrimaryEnvironment: () => {
+        live += 1;
+        maxLive = Math.max(maxLive, live);
+        // Fail loudly at the exact interleaving rather than only in the
+        // aggregate, so a regression names the transition that broke it.
+        if (live > 1) throw new Error(`hosted connections live at once: ${live}`);
+      },
+      disconnectPrimaryEnvironment: async () => {
+        // A real await inside teardown widens the window in which a queued
+        // activation could interleave; without it the queue would be trivially
+        // serial and the assertion would prove nothing.
+        await Promise.resolve();
+        live = Math.max(0, live - 1);
+      },
+    };
+    configureHostedRuntime(
+      { ...fakeRuntime(), nodeLifecycle: countingLifecycle },
+      {} as HostedHubApi,
+    );
+
+    await Promise.all([
+      activateHostedNode(nodeFor("node_a", environmentA), null),
+      activateHostedNode(nodeFor("node_b", environmentB), environmentA),
+      deactivateHostedNode(environmentB),
+      activateHostedNode(nodeFor("node_c", environmentC), environmentB),
+    ]);
+
+    expect(maxLive).toBe(1);
+    expect(live).toBe(1);
+    expect(activated.at(-1)).toBe(environmentC);
+  });
+});
