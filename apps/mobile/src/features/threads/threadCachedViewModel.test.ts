@@ -35,6 +35,7 @@ describe("deriveThreadCachedView", () => {
       banner: null,
       composerDisabled: false,
       actionsDisabled: false,
+      promptsDisabled: false,
       emptyStateDetail: null,
       headerForcedOffline: false,
     });
@@ -51,9 +52,21 @@ describe("deriveThreadCachedView", () => {
       banner: { text: "Online · cached", tone: "info" },
       composerDisabled: false,
       actionsDisabled: true,
+      promptsDisabled: true,
       emptyStateDetail: null,
       headerForcedOffline: true,
     });
+  });
+
+  it("disables the prompt cards whenever the thread is not live", () => {
+    // Approval / user-input / agent-control cards render from activities that
+    // demotion preserves, but answering goes through ensureEnvironmentApi —
+    // which throws without a connection — and an answer given against a cached
+    // snapshot may target a prompt the node already resolved. Every non-live
+    // view closes them; live threads keep them untouched.
+    expect(view({ hydratedFromCacheAt: 1_000 }).promptsDisabled).toBe(true);
+    expect(view({ degradedReason: "revoked" }).promptsDisabled).toBe(true);
+    expect(view().promptsDisabled).toBe(false);
   });
 
   it("reuses the environment row's staleness phrase verbatim as the pending banner", () => {

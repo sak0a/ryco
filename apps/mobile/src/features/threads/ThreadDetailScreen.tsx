@@ -412,7 +412,10 @@ export function ThreadDetailScreen(props: {
       const providerInstanceId = thread?.session?.providerInstanceId ?? activeSelection?.instanceId;
       const provider = providers.find((entry) => entry.instanceId === providerInstanceId);
       return resolveQueuedMessageSteerEligibility({
-        mutationReady: connectionUiState === "connected",
+        // A cache-provenance thread reads `turnRunning` from a snapshot; a
+        // steer dispatched against it targets a turn state the node may have
+        // left long ago. Not mutation-ready until the live snapshot lands.
+        mutationReady: connectionUiState === "connected" && hydratedFromCacheAt === null,
         turnRunning: thread?.latestTurn?.state === "running",
         activeTurnId: thread?.session?.activeTurnId,
         supportsTurnSteering: provider?.supportsTurnSteering === true,
@@ -426,7 +429,7 @@ export function ThreadDetailScreen(props: {
         activeTokenMode: thread?.tokenMode ?? "balanced",
       });
     },
-    [connectionUiState, project?.defaultModelSelection, providers, thread],
+    [connectionUiState, hydratedFromCacheAt, project?.defaultModelSelection, providers, thread],
   );
 
   const getSteerUnavailableReason = useCallback(
@@ -590,7 +593,14 @@ export function ThreadDetailScreen(props: {
 
     const tokenMode = currentThread.tokenMode ?? "balanced";
     const threadBusy = currentThread.latestTurn?.state === "running";
-    const connected = connectionUiState === "connected";
+    // Wave 3a: the socket opens one RTT before the live shell snapshot lands,
+    // and until it does `threadBusy` is read from a CACHED latestTurn — the
+    // same window wave 2's review closed for the outbox drain. A send inside
+    // it must enqueue, never dispatch into a thread whose real turn state is
+    // unknown; read provenance fresh from the store, not from a render.
+    const deliveryReconciled =
+      selectEnvironmentHydratedFromCacheAt(useStore.getState(), environmentId) === null;
+    const connected = connectionUiState === "connected" && deliveryReconciled;
 
     return sendThreadTurn(
       {
@@ -670,8 +680,13 @@ export function ThreadDetailScreen(props: {
     }
   };
 
+  // Gated the same way the header is: a snapshot captured mid-turn preserves a
+  // "running" latestTurn, and a cached thread rendering a live "Working…" fold
+  // would contradict the Offline header two rows above it.
   const runningTurnId =
-    thread?.latestTurn?.state === "running" ? (thread.latestTurn.turnId ?? null) : null;
+    !cachedView.headerForcedOffline && thread?.latestTurn?.state === "running"
+      ? (thread.latestTurn.turnId ?? null)
+      : null;
 
   const timelineRows = useMemo(
     () =>
@@ -786,6 +801,7 @@ export function ThreadDetailScreen(props: {
               environmentId={environmentId}
               threadId={threadId}
               approval={approval}
+              disabled={cachedView.promptsDisabled}
             />
           ))}
           {pendingUserInputs.map((userInput) => (
@@ -794,6 +810,7 @@ export function ThreadDetailScreen(props: {
               environmentId={environmentId}
               threadId={threadId}
               userInput={userInput}
+              disabled={cachedView.promptsDisabled}
             />
           ))}
           {agentControlProposals.map((proposal) => (
@@ -801,6 +818,7 @@ export function ThreadDetailScreen(props: {
               key={proposal.proposalId}
               environmentId={environmentId}
               proposal={proposal}
+              disabled={cachedView.promptsDisabled}
             />
           ))}
         </ScrollView>

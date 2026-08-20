@@ -65,6 +65,7 @@ function hubState(overrides: Partial<HostedHubState> = {}): HostedHubState {
     directoryStatus: "ready",
     browserStatus: "current",
     selectedNode: null,
+    selectionStatus: "none",
     nodes: [],
     ...overrides,
   } as HostedHubState;
@@ -368,6 +369,14 @@ describe("thread connection retarget decision", () => {
     ] as const;
     const nodeShapes = ["present", "absent", "revoked"] as const;
     const selections = ["none", "same-environment", "other-node"] as const;
+    const selectionStatuses = [
+      "none",
+      "online",
+      "offline",
+      "revoked",
+      "authorization-removed",
+      "incompatible",
+    ] as const;
 
     let retargets = 0;
     let cases = 0;
@@ -377,6 +386,7 @@ describe("thread connection retarget decision", () => {
         for (const browserStatus of browserStatuses) {
           for (const nodeShape of nodeShapes) {
             for (const selection of selections) {
+              for (const selectionStatus of selectionStatuses) {
               for (const hasDirectEnvironment of [false, true]) {
                 for (const hostedAvailable of [false, true]) {
                   for (const withRoster of [false, true]) {
@@ -401,6 +411,7 @@ describe("thread connection retarget decision", () => {
                       browserStatus,
                       nodes,
                       selectedNode,
+                      selectionStatus,
                     });
                     const decision = deriveThreadConnectionRetarget({
                       environmentId: ENV_A,
@@ -431,14 +442,135 @@ describe("thread connection retarget decision", () => {
                   }
                 }
               }
+              }
             }
           }
         }
       }
     }
 
-    expect(cases).toBe(10_368);
+    expect(cases).toBe(62_208);
     expect(retargets).toBeGreaterThan(0);
+  });
+
+  /**
+   * Prevents a revoked-but-still-selected node from reading as satisfied. The
+   * relay reports revocation by patching `selectionStatus` while
+   * `selectedNode` stays set until the 20s directory poll tears it down; a
+   * thread opened inside that window owes the user the revoked reason, not a
+   * silent consume of the one-shot intent.
+   */
+  it("falls through a terminally failed selection instead of declaring satisfaction", () => {
+    const base = {
+      environmentId: ENV_A,
+      hasDirectEnvironment: false,
+      hostedAvailable: true,
+      rosterEntry: rosterRecord("node-a", ENV_A),
+    };
+
+    // Directory already agrees the node is revoked: state the reason.
+    expect(
+      deriveThreadConnectionRetarget({
+        ...base,
+        state: hubState({
+          selectedNode: node("node-a", ENV_A),
+          selectionStatus: "revoked",
+          nodes: [node("node-a", ENV_A, { revokedAt: 42 })],
+        }),
+      }),
+    ).toEqual({ kind: "degraded", reason: "revoked" });
+
+    // Directory lists a re-enrolled replacement under a new node id sharing
+    // the environment: retarget it — selectNode's already-selected guard
+    // compares (id, environmentId) and will not no-op on the new id.
+    expect(
+      deriveThreadConnectionRetarget({
+        ...base,
+        state: hubState({
+          selectedNode: node("node-a", ENV_A),
+          selectionStatus: "authorization-removed",
+          nodes: [node("node-a-replacement", ENV_A)],
+        }),
+      }),
+    ).toEqual({ kind: "retarget", nodeId: "node-a-replacement" });
+
+    // Directory still lists the very node that is terminally selected as live:
+    // a contradiction the next poll resolves, and dispatching it would silently
+    // no-op on selectNode's already-selected guard. Wait, do not dispatch.
+    expect(
+      deriveThreadConnectionRetarget({
+        ...base,
+        state: hubState({
+          selectedNode: node("node-a", ENV_A),
+          selectionStatus: "revoked",
+          nodes: [node("node-a", ENV_A)],
+        }),
+      }),
+    ).toEqual({ kind: "wait" });
+
+    // A healthy same-environment selection is still satisfaction.
+    expect(
+      deriveThreadConnectionRetarget({
+        ...base,
+        state: hubState({
+          selectedNode: node("node-a", ENV_A),
+          selectionStatus: "online",
+          nodes: [node("node-a", ENV_A)],
+        }),
+      }),
+    ).toEqual({ kind: "none" });
+  });
+
+  /**
+   * Prevents the cold-start race: at launch the roster hydrates from SQLite
+   * behind fire-and-forget imports and the directory starts empty, so "neither
+   * knows this environment" is not yet evidence of anything. Deciding "none"
+   * there would consume the one-shot intent and strand a deep-linked thread
+   * with no reason and no retarget.
+   */
+  it("waits out an unhydrated roster and empty directory instead of deciding not-our-plane", () => {
+    const unknown = (overrides: Partial<HostedHubState>, hostedAvailable = true) =>
+      deriveThreadConnectionRetarget({
+        environmentId: ENV_A,
+        hasDirectEnvironment: false,
+        hostedAvailable,
+        state: hubState({ nodes: [], ...overrides }),
+        rosterEntry: null,
+      });
+
+    // Cold start: directory has not answered yet.
+    expect(unknown({ directoryStatus: "idle" })).toEqual({ kind: "wait" });
+    expect(unknown({ directoryStatus: "loading" })).toEqual({ kind: "wait" });
+    // A ready directory that does not know the environment is authoritative.
+    expect(unknown({ directoryStatus: "ready" })).toEqual({ kind: "none" });
+    // Sign-in still in flight may yet produce a directory.
+    expect(unknown({ accountStatus: "authenticating" })).toEqual({ kind: "wait" });
+    // Terminal account states cannot prove hub-ness for an unknown environment.
+    expect(unknown({ accountStatus: "signed-out" })).toEqual({ kind: "none" });
+    // A build that can never open hosted sessions has nothing to wait for.
+    expect(unknown({ directoryStatus: "idle" }, false)).toEqual({ kind: "none" });
+  });
+
+  /**
+   * Prevents a list-order dependency: a directory can list a revoked record
+   * alongside its re-enrolled replacement sharing one environment id, and the
+   * decision must find the live one wherever it sits.
+   */
+  it("prefers a live directory record over a revoked one sharing the environment id", () => {
+    for (const nodes of [
+      [node("node-old", ENV_A, { revokedAt: 42 }), node("node-new", ENV_A)],
+      [node("node-new", ENV_A), node("node-old", ENV_A, { revokedAt: 42 })],
+    ]) {
+      expect(
+        deriveThreadConnectionRetarget({
+          environmentId: ENV_A,
+          hasDirectEnvironment: false,
+          hostedAvailable: true,
+          state: hubState({ nodes }),
+          rosterEntry: null,
+        }),
+      ).toEqual({ kind: "retarget", nodeId: "node-new" });
+    }
   });
 });
 
@@ -528,6 +660,46 @@ describe("thread connection retarget engine", () => {
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2);
     expect(selectNode).not.toHaveBeenCalled();
 
+    store.patch({ directoryStatus: "ready", nodes: [node("node-a", ENV_A)] });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(selectNode).toHaveBeenCalledExactlyOnceWith("node-a");
+  });
+
+  /**
+   * Prevents the other cold-start hole: the roster hydrates from SQLite
+   * *outside* the hosted store, so an intent evaluated before hydration sees
+   * neither roster nor directory. The decision waits — and hydration itself
+   * must re-evaluate, because no store notification accompanies it.
+   */
+  it("re-evaluates a pending intent when the roster hydrates, without a store change", async () => {
+    const store = createFakeStore(hubState({ directoryStatus: "idle", nodes: [] }));
+    const selectNode = vi.fn(async () => undefined);
+    let rosterListener: () => void = () => undefined;
+    let hydrated = false;
+    const engine = createEngine({
+      store,
+      selectNode,
+      getRosterEntry: () => (hydrated ? rosterRecord("node-a", ENV_A) : null),
+      subscribeRoster: (listener) => {
+        rosterListener = listener;
+        return () => {
+          rosterListener = () => undefined;
+        };
+      },
+    });
+
+    engine.open(ENV_A);
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 2);
+    // Unknown environment + unanswered directory: parked, not abandoned.
+    expect(selectNode).not.toHaveBeenCalled();
+    expect(engine.readDegradedReason(ENV_A)).toBeNull();
+
+    // Hydration proves hub-ness with no store notification of its own; the
+    // roster subscription is what keeps the intent alive through it.
+    hydrated = true;
+    rosterListener();
+    await vi.advanceTimersByTimeAsync(0);
     store.patch({ directoryStatus: "ready", nodes: [node("node-a", ENV_A)] });
     await vi.advanceTimersByTimeAsync(0);
 

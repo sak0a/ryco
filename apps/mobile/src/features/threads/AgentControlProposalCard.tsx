@@ -17,6 +17,8 @@ import { acceptAgentControlProposal, rejectAgentControlProposal } from "./agentC
 export function AgentControlProposalCard(props: {
   readonly environmentId: EnvironmentId;
   readonly proposal: AgentControlProposal;
+  /** Cached/degraded threads render the proposal but cannot decide it. */
+  readonly disabled?: boolean;
 }) {
   const [pending, setPending] = useState<"accept" | "reject" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,14 +101,14 @@ export function AgentControlProposalCard(props: {
       {model.isPending ? (
         <View className="mt-3 flex-row flex-wrap gap-2">
           <Pressable
-            disabled={pending !== null}
+            disabled={pending !== null || props.disabled === true}
             onPress={() => void decide("accept")}
             className="h-11 min-w-28 flex-1 items-center justify-center rounded-full bg-primary px-4 active:opacity-70 disabled:opacity-50"
           >
             <Text className="text-sm font-ryco-bold text-primary-foreground">Approve</Text>
           </Pressable>
           <Pressable
-            disabled={pending !== null}
+            disabled={pending !== null || props.disabled === true}
             onPress={() => void decide("reject")}
             className="h-11 min-w-28 flex-1 items-center justify-center rounded-full border border-border px-4 active:opacity-70 disabled:opacity-50"
           >

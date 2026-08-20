@@ -18,11 +18,15 @@ export function PendingApprovalCard(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly approval: PendingApproval;
+  /** Cached/degraded threads render the prompt but cannot answer it. */
+  readonly disabled?: boolean;
 }) {
   const [pending, setPending] = useState<ProviderApprovalDecision | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const respond = async (decision: ProviderApprovalDecision) => {
     setPending(decision);
+    setError(null);
     try {
       await respondToThreadApproval({
         api: ensureEnvironmentApi(props.environmentId),
@@ -30,6 +34,12 @@ export function PendingApprovalCard(props: {
         requestId: props.approval.requestId,
         decision,
       });
+    } catch {
+      // `ensureEnvironmentApi` throws synchronously without a connection, and
+      // the RPC itself can reject; without this catch the `void respond(...)`
+      // press handler turned both into a silent unhandled rejection. Bounded
+      // copy: the raw message is an internal string the user cannot act on.
+      setError("The decision could not be delivered. Reconnect and try again.");
     } finally {
       setPending(null);
     }
@@ -48,16 +58,17 @@ export function PendingApprovalCard(props: {
           {props.approval.detail}
         </Text>
       ) : null}
+      {error ? <Text className="mt-2 font-sans text-sm text-danger">{error}</Text> : null}
       <View className="mt-3 flex-row flex-wrap gap-2">
         <Pressable
-          disabled={pending !== null}
+          disabled={pending !== null || props.disabled === true}
           onPress={() => void respond("accept")}
           className="h-11 min-w-28 flex-1 items-center justify-center rounded-full bg-primary px-4 active:opacity-70 disabled:opacity-50"
         >
           <Text className="text-sm font-ryco-bold text-primary-foreground">Allow</Text>
         </Pressable>
         <Pressable
-          disabled={pending !== null}
+          disabled={pending !== null || props.disabled === true}
           onPress={() => void respond("decline")}
           className="h-11 min-w-28 flex-1 items-center justify-center rounded-full border border-border px-4 active:opacity-70 disabled:opacity-50"
         >

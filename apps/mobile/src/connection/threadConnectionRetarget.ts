@@ -2,7 +2,11 @@ import type { HostedHubState } from "@ryco/client-runtime/authorization";
 import { hostedHubController, hostedHubStore } from "@ryco/client-runtime/authorization";
 import type { EnvironmentId } from "@ryco/contracts";
 
-import { getCachedHubNodeRoster, type CachedHubNodeRecord } from "../hostedHub/nodeRoster";
+import {
+  getCachedHubNodeRoster,
+  subscribeCachedHubNodeRoster,
+  type CachedHubNodeRecord,
+} from "../hostedHub/nodeRoster";
 import { isMobileHostedModeAvailable } from "../hostedHub/runtime";
 import { createMobileConnectionRegistry } from "../runtime/bootstrap";
 
@@ -41,7 +45,7 @@ export type ThreadConnectionRetargetDecision =
 
 type RetargetStateInput = Pick<
   HostedHubState,
-  "accountStatus" | "directoryStatus" | "browserStatus" | "selectedNode" | "nodes"
+  "accountStatus" | "directoryStatus" | "browserStatus" | "selectedNode" | "selectionStatus" | "nodes"
 >;
 
 export interface ThreadConnectionRetargetInput {
@@ -73,16 +77,52 @@ export function deriveThreadConnectionRetarget(
   //    socket with no owner. Same guard as hostedHub/nodeLifecycle.ts:36.
   if (hasDirectEnvironment) return { kind: "none" };
 
-  // 2. Already targeted. Also how a landed retarget is recognised — the engine
-  //    consumes its intent here, never on the `selectNode` promise resolving.
-  if (state.selectedNode?.environmentId === environmentId) return { kind: "none" };
+  // 2. Already targeted — unless the selection is terminally dead. The relay
+  //    reports revocation by patching `selectionStatus` while `selectedNode`
+  //    stays set until the next 20s directory poll tears it down; declaring
+  //    satisfaction inside that window would consume the one-shot intent with
+  //    no stated reason. A healthy match is how a landed retarget is
+  //    recognised — the engine consumes its intent here, never on the
+  //    `selectNode` promise resolving. A terminal match falls through so the
+  //    directory rules can name the reason or retarget a re-enrolled
+  //    replacement.
+  const selectionTerminal =
+    state.selectionStatus === "revoked" ||
+    state.selectionStatus === "authorization-removed" ||
+    state.selectionStatus === "incompatible";
+  if (state.selectedNode?.environmentId === environmentId && !selectionTerminal) {
+    return { kind: "none" };
+  }
 
-  // 3. Not our plane. An environment that neither the persisted Hub roster nor
-  //    the live directory knows is a direct/unknown environment; staying silent
-  //    is what keeps this feature from touching non-hosted rows at all.
+  // 3. Plane evidence. The persisted roster and the live directory are the
+  //    only proofs an environment is hub-hosted — but their *absence* is
+  //    authoritative only once someone could have answered. At cold start the
+  //    roster hydrates from SQLite behind fire-and-forget dynamic imports and
+  //    the directory starts empty, and the engine consumes a "none"
+  //    terminally, so deciding "not our plane" from that silence would
+  //    permanently strand a deep-linked thread. Prefer a live (non-revoked)
+  //    directory record so a revoked entry cannot shadow its re-enrolled
+  //    replacement (web's nodeRouteOrchestrator does the same).
   const directoryNode =
-    state.nodes.find((candidate) => candidate.environmentId === environmentId) ?? null;
-  if (!rosterEntry && !directoryNode) return { kind: "none" };
+    state.nodes.find(
+      (candidate) => candidate.environmentId === environmentId && candidate.revokedAt === null,
+    ) ??
+    state.nodes.find((candidate) => candidate.environmentId === environmentId) ??
+    null;
+  if (!rosterEntry && !directoryNode) {
+    // No hosted surface can ever answer on this build; roster hydration is
+    // the only thing that could still prove hub-ness, and the engine
+    // re-evaluates when it does.
+    if (!hostedAvailable) return { kind: "none" };
+    if (state.accountStatus !== "authenticated") {
+      // A sign-in in flight may yet produce a directory; a terminal account
+      // state cannot prove hub-ness for an unknown environment either way.
+      return state.accountStatus === "authenticating" || state.accountStatus === "signing-out"
+        ? { kind: "wait" }
+        : { kind: "none" };
+    }
+    return state.directoryStatus === "ready" ? { kind: "none" } : { kind: "wait" };
+  }
 
   // 4. The roster knows the node, but this build/device cannot open hosted
   //    sessions at all (no hosted config, or no usable hardware key). Fail
@@ -126,6 +166,18 @@ export function deriveThreadConnectionRetarget(
   //    intent, matching web's `interactiveNodeId` path skipping the presence
   //    fail-fast (nodeRouteOrchestrator.ts:261-265). Offline belongs on the row
   //    as provenance, not as a gate on the tap.
+  //
+  //    One exception keeps the guard mirror intact: a terminal selection (rule
+  //    2's fall-through) whose own node the directory still lists as live is a
+  //    contradiction the 20s poll resolves — and `selectNode` would silently
+  //    no-op on its already-selected (id, environmentId) match, so dispatching
+  //    it is forbidden. Wait for the poll.
+  if (
+    state.selectedNode?.id === directoryNode.id &&
+    state.selectedNode.environmentId === directoryNode.environmentId
+  ) {
+    return { kind: "wait" };
+  }
   return { kind: "retarget", nodeId: directoryNode.id };
 }
 
@@ -157,6 +209,12 @@ export interface ThreadConnectionRetargetEngineDeps {
   readonly hasDirectEnvironment: (environmentId: EnvironmentId) => boolean;
   readonly hostedAvailable: () => boolean;
   readonly getRosterEntry: (environmentId: EnvironmentId) => CachedHubNodeRecord | null;
+  /**
+   * Roster change notifications. The roster hydrates from SQLite outside the
+   * hosted store, so a cold-start intent parked on "wait" would otherwise only
+   * re-evaluate when the store happens to move; hydration itself must count.
+   */
+  readonly subscribeRoster?: (listener: () => void) => () => void;
   /** Trailing debounce window. Long enough to swallow an A→B tap-through. */
   readonly debounceMs?: number;
   readonly timers?: ThreadConnectionRetargetTimers;
@@ -207,6 +265,7 @@ export function createThreadConnectionRetargetEngine(
   /** Node id whose `selectNode` dispatch is in flight; enforces single-flight. */
   let inFlightNodeId: string | null = null;
   let storeUnsubscribe: (() => void) | null = null;
+  let rosterUnsubscribe: (() => void) | null = null;
   let evaluateScheduled = false;
   let disposed = false;
 
@@ -245,8 +304,9 @@ export function createThreadConnectionRetargetEngine(
   }
 
   function ensureStoreSubscription(): void {
-    if (storeUnsubscribe || disposed) return;
-    storeUnsubscribe = deps.store.subscribe(scheduleEvaluate);
+    if (disposed) return;
+    storeUnsubscribe ??= deps.store.subscribe(scheduleEvaluate);
+    rosterUnsubscribe ??= deps.subscribeRoster?.(scheduleEvaluate) ?? null;
   }
 
   function clearIntent(): void {
@@ -257,6 +317,8 @@ export function createThreadConnectionRetargetEngine(
     // subscription here would be the "fights the manual selection" bug.
     storeUnsubscribe?.();
     storeUnsubscribe = null;
+    rosterUnsubscribe?.();
+    rosterUnsubscribe = null;
   }
 
   /**
@@ -382,6 +444,8 @@ export function createThreadConnectionRetargetEngine(
       cancelDebounce();
       storeUnsubscribe?.();
       storeUnsubscribe = null;
+      rosterUnsubscribe?.();
+      rosterUnsubscribe = null;
       intent = null;
       dispatchedNodeId = null;
       inFlightNodeId = null;
@@ -416,6 +480,7 @@ export function ensureMobileThreadConnectionRetargetEngine(): ThreadConnectionRe
     hostedAvailable: () => isMobileHostedModeAvailable(),
     getRosterEntry: (environmentId) =>
       getCachedHubNodeRoster().find((record) => record.environmentId === environmentId) ?? null,
+    subscribeRoster: subscribeCachedHubNodeRoster,
   });
   return mobileEngine;
 }

@@ -52,6 +52,13 @@ export interface ThreadCachedView {
   readonly composerDisabled: boolean;
   /** Model picker, session policy sheet, rename / stop / archive. */
   readonly actionsDisabled: boolean;
+  /**
+   * Approval / user-input / agent-control prompt cards. Demotion preserves the
+   * activities these render from, but responding goes through
+   * `ensureEnvironmentApi`, which throws without a connection — and a prompt
+   * answered against a cached snapshot may already be stale on the node.
+   */
+  readonly promptsDisabled: boolean;
   /** Replacement empty-state copy; null keeps the live "No messages yet" line. */
   readonly emptyStateDetail: string | null;
   /** Gate the header status the way the inbox gates a stale row's state. */
@@ -88,6 +95,7 @@ const LIVE_VIEW: ThreadCachedView = {
   banner: null,
   composerDisabled: false,
   actionsDisabled: false,
+  promptsDisabled: false,
   emptyStateDetail: null,
   headerForcedOffline: false,
 };
@@ -117,6 +125,7 @@ export function deriveThreadCachedView(input: ThreadCachedViewInput): ThreadCach
       },
       composerDisabled: false,
       actionsDisabled: true,
+      promptsDisabled: true,
       emptyStateDetail,
       headerForcedOffline: true,
     };
@@ -133,6 +142,7 @@ export function deriveThreadCachedView(input: ThreadCachedViewInput): ThreadCach
     },
     composerDisabled: true,
     actionsDisabled: true,
+    promptsDisabled: true,
     emptyStateDetail,
     headerForcedOffline: true,
   };
