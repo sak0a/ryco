@@ -112,25 +112,24 @@ export function buildHomeEnvironments(input: {
 }): ReadonlyArray<InboxEnvironment> {
   const now = input.now ?? Date.now();
   const cachedIds = new Set(input.cacheProvenanceEnvironmentIds ?? []);
-  // A cached environment that is (re)connected is about to be superseded by a
-  // live snapshot; only offline rows get the stale treatment.
+  // Staleness is cache provenance alone — never gated on the transport state.
+  // Amendment B: relay-socket state provably does not track node reachability,
+  // and a dead node's transport can sit in "reconnecting" indefinitely. Rows
+  // stay marked until a live snapshot clears the provenance stamp, however
+  // hopeful the socket looks.
   const staleFields = (
     environmentId: EnvironmentId,
-    connectionState: InboxEnvironment["connectionState"],
     detail: string,
   ): Pick<InboxEnvironment, "stale" | "staleDetail"> =>
-    cachedIds.has(environmentId) && connectionState === "offline"
-      ? { stale: true, staleDetail: detail }
-      : {};
+    cachedIds.has(environmentId) ? { stale: true, staleDetail: detail } : {};
 
   const environments = new Map<EnvironmentId, InboxEnvironment>();
   for (const direct of input.direct) {
-    const connectionState = directState(direct);
     environments.set(direct.environmentId, {
       environmentId: direct.environmentId,
       label: direct.label,
-      connectionState,
-      ...staleFields(direct.environmentId, connectionState, "Offline · cached"),
+      connectionState: directState(direct),
+      ...staleFields(direct.environmentId, "Offline · cached"),
     });
   }
   for (const node of input.cachedHubNodes ?? []) {
@@ -140,21 +139,19 @@ export function buildHomeEnvironments(input: {
       environmentId: node.environmentId,
       label: node.label,
       connectionState: "offline",
-      ...staleFields(node.environmentId, "offline", cachedHubNodeStaleDetail(node, now)),
+      ...staleFields(node.environmentId, cachedHubNodeStaleDetail(node, now)),
     });
   }
   if (input.hosted) {
-    const connectionState = hostedState(input.hosted);
     const rosterNode = (input.cachedHubNodes ?? []).find(
       (node) => node.environmentId === input.hosted?.environmentId,
     );
     environments.set(input.hosted.environmentId, {
       environmentId: input.hosted.environmentId,
       label: input.hosted.label,
-      connectionState,
+      connectionState: hostedState(input.hosted),
       ...staleFields(
         input.hosted.environmentId,
-        connectionState,
         rosterNode ? cachedHubNodeStaleDetail(rosterNode, now) : "Offline · cached",
       ),
     });

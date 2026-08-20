@@ -319,6 +319,80 @@ describe("environment snapshot persistence", () => {
     runtime.dispose();
   });
 
+  it("purges the roster and every hub environment's cache on explicit sign-out", async () => {
+    const { db, snapshots, getRoster } = createFakeSnapshotDb();
+    const environmentId = env("persist-signout");
+    const node = hubNode({ nodeId: "node-1", environmentId });
+    setCachedHubNodeRoster([rosterRecord(node, 100)]);
+    await db.saveEnvironmentSnapshot({
+      environmentId,
+      schemaVersion: ENVIRONMENT_SNAPSHOT_SCHEMA_VERSION,
+      payload: boundStoredEnvironmentSnapshot(storedRecord(environmentId)).payload,
+      updatedAt: 1,
+    });
+    useStore.getState().hydrateEnvironmentStateFromCache(
+      { capturedAt: 1, projects: [], worktrees: [], threads: [] },
+      environmentId,
+    );
+
+    const hostedStore = createFakeHostedStore({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [node],
+    } as never);
+    const runtime = createSnapshotPersistenceRuntime({
+      db,
+      store: useStore,
+      now: () => 200,
+      hasDirectEnvironment: () => false,
+    });
+    runtime.installHostedRosterMirror(hostedStore);
+
+    // Sign-out teardown patches back to the initial state: signed out, idle
+    // directory, empty node list. The purge must fire on the account edge, not
+    // on the (deliberately ignored) empty directory.
+    hostedStore.patch({ accountStatus: "signed-out", directoryStatus: "idle", nodes: [] } as never);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(snapshots.has(environmentId)).toBe(false);
+    expect(useStore.getState().environmentStateById[environmentId]).toBeUndefined();
+    expect(getCachedHubNodeRoster()).toEqual([]);
+    expect(getRoster()?.payload).toContain('"nodes":[]');
+    runtime.dispose();
+  });
+
+  it("does not purge on session expiry — same account, cache is the point", async () => {
+    const { db, snapshots } = createFakeSnapshotDb();
+    const environmentId = env("persist-expiry");
+    const node = hubNode({ nodeId: "node-1", environmentId });
+    setCachedHubNodeRoster([rosterRecord(node, 100)]);
+    await db.saveEnvironmentSnapshot({
+      environmentId,
+      schemaVersion: ENVIRONMENT_SNAPSHOT_SCHEMA_VERSION,
+      payload: boundStoredEnvironmentSnapshot(storedRecord(environmentId)).payload,
+      updatedAt: 1,
+    });
+
+    const hostedStore = createFakeHostedStore({
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      nodes: [node],
+    } as never);
+    const runtime = createSnapshotPersistenceRuntime({
+      db,
+      store: useStore,
+      now: () => 200,
+      hasDirectEnvironment: () => false,
+    });
+    runtime.installHostedRosterMirror(hostedStore);
+    hostedStore.patch({ accountStatus: "session-expired", directoryStatus: "idle", nodes: [] } as never);
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(snapshots.has(environmentId)).toBe(true);
+    expect(getCachedHubNodeRoster()).toHaveLength(1);
+    runtime.dispose();
+  });
+
   it("evicts the least recently written snapshots beyond the caps", async () => {
     const { db, snapshots } = createFakeSnapshotDb();
     let clock = 1_000;

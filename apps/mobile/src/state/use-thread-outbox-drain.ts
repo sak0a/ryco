@@ -17,6 +17,7 @@ import { buildQueuedThreadMessageAttachments } from "./queuedThreadMessageAttach
 import type { EnvironmentShellStatus, QueuedThreadMessage } from "./threadOutboxModel";
 import {
   selectBootstrapCompleteForActiveEnvironment,
+  selectEnvironmentHydratedFromCacheAt,
   selectSidebarThreadSummaryByRef,
   selectThreadByRef,
   useStore,
@@ -75,13 +76,21 @@ export function readThreadDeliveryState(message: QueuedThreadMessage): {
   const connected =
     getWsConnectionUiState(getWsConnectionStatusForEnvironment(message.environmentId)) ===
     "connected";
+  // Wave 2: rows hydrated from the snapshot cache (or demoted after a
+  // disconnect) are last-known state, not evidence of what the node holds now.
+  // A cached thread must not count as delivery-reconciled — the socket can open
+  // one RTT before the live shell snapshot lands, and in that window a cached
+  // idle row would read as "exists, not busy" and dispatch a queued message
+  // into a thread that is actually mid-turn on the node.
+  const cacheProvenance =
+    selectEnvironmentHydratedFromCacheAt(state, message.environmentId) !== null;
   return {
     threadExists: Boolean(summary ?? thread),
     shellStatus: selectBootstrapCompleteForActiveEnvironment(state) ? "live" : "loading",
     environmentConnected: connected,
     threadBusy: summary?.latestTurn?.state === "running" || thread?.latestTurn?.state === "running",
     alreadyDelivered: thread?.messages.some((entry) => entry.id === message.messageId) ?? false,
-    deliveryReconciled: thread !== undefined,
+    deliveryReconciled: thread !== undefined && !cacheProvenance,
   };
 }
 

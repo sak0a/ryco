@@ -169,9 +169,42 @@ export function createSnapshotPersistenceRuntime(deps: SnapshotPersistenceDeps) 
     }, rosterDebounceMs);
   };
 
+  // Explicit Hub sign-out is a privacy boundary: cached content must not
+  // outlive the account that could read it. Everything the roster names (and
+  // the roster itself) is purged, except environments the direct plane owns.
+  // Session expiry deliberately does not purge — same account, and offline
+  // content across a re-auth is the point of the cache.
+  const purgeHostedCache = (): void => {
+    for (const record of getCachedHubNodeRoster()) {
+      if (deps.hasDirectEnvironment(record.environmentId)) continue;
+      void purgeEnvironment(record.environmentId).catch(warn("could not purge hub environment"));
+      deps.store.getState().removeEnvironmentState(record.environmentId);
+    }
+    setCachedHubNodeRoster([]);
+    if (rosterTimer) {
+      clearTimeout(rosterTimer);
+      rosterTimer = null;
+    }
+    void deps.db
+      .saveHubNodeRoster({
+        schemaVersion: HUB_NODE_ROSTER_SCHEMA_VERSION,
+        payload: encodeStoredHubNodeRoster([]),
+        updatedAt: deps.now(),
+      })
+      .catch(warn("could not persist cleared hub node roster"));
+  };
+
   const installHostedRosterMirror = (hostedStore: HostedStoreLike): void => {
+    let previousAccountStatus = hostedStore.getState().accountStatus;
     const reconcile = () => {
       const state = hostedStore.getState();
+      const accountStatus = state.accountStatus;
+      if (accountStatus === "signed-out" && previousAccountStatus !== "signed-out") {
+        previousAccountStatus = accountStatus;
+        purgeHostedCache();
+        return;
+      }
+      previousAccountStatus = accountStatus;
       // Only a ready directory is authoritative; reconciling against the
       // transient empty list of bootstrap or sign-out teardown would read as
       // every node having been removed.

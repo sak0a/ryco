@@ -144,7 +144,57 @@ describe("Home environments", () => {
     });
   });
 
-  it("never marks a connected environment stale even while its rows reconcile", () => {
+  it("keeps cache-provenance rows stale whatever the transport claims (amendment B)", () => {
+    // A dead node's transport can sit in "reconnecting" indefinitely — the
+    // socket state must never lift the stale treatment; only a live snapshot
+    // (which clears the provenance stamp) does.
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const environments = buildHomeEnvironments({
+      direct: [
+        {
+          environmentId: "direct-a" as EnvironmentId,
+          label: "LAN Mac",
+          connectionState: "connected",
+          role: "owner",
+        },
+      ],
+      hosted: {
+        environmentId: "node-a" as EnvironmentId,
+        label: "Work Mac",
+        transportStatus: "reconnecting",
+        sessionStatus: "synchronizing",
+        role: "owner",
+      },
+      cachedHubNodes: [
+        {
+          environmentId: "node-a" as EnvironmentId,
+          label: "Work Mac",
+          role: "owner",
+          revokedAt: null,
+          presenceOnline: false,
+          lastHeartbeatAt: now - 60 * 60 * 1000,
+          lastAuthenticatedAt: null,
+        },
+      ],
+      cacheProvenanceEnvironmentIds: ["direct-a" as EnvironmentId, "node-a" as EnvironmentId],
+      now,
+    });
+    expect(environments).toEqual([
+      expect.objectContaining({
+        environmentId: "direct-a",
+        connectionState: "connected",
+        stale: true,
+      }),
+      expect.objectContaining({
+        environmentId: "node-a",
+        connectionState: "reconnecting",
+        stale: true,
+        staleDetail: "Offline · last seen 1h ago",
+      }),
+    ]);
+  });
+
+  it("drops the stale treatment once the environment is no longer cache-provenance", () => {
     const environments = buildHomeEnvironments({
       direct: [
         {
@@ -155,7 +205,7 @@ describe("Home environments", () => {
         },
       ],
       hosted: null,
-      cacheProvenanceEnvironmentIds: ["direct-a" as EnvironmentId],
+      cacheProvenanceEnvironmentIds: [],
       now: 0,
     });
     expect(environments[0]?.stale).toBeUndefined();
