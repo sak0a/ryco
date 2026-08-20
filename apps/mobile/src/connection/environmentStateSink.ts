@@ -3,6 +3,7 @@ import type {
   EnvironmentStateSink,
 } from "@ryco/client-runtime/connection";
 import { scopeThreadRef } from "@ryco/client-runtime/scoped";
+import type { EnvironmentId } from "@ryco/contracts";
 
 import { markPromotedDraftThreadByRef, useComposerDraftStore } from "../state/composerDraftStore";
 import { useTerminalStateStore } from "../state/terminalStateStore";
@@ -38,8 +39,14 @@ export function createMobileEnvironmentStateSink(
     // (§6). Default no-ops keep the sink usable standalone (e.g. in tests).
     readonly markProviderInvalidationNeeded?: () => void;
     readonly flushProviderInvalidation?: () => void;
+    // The snapshot-cache persistence seam (wave 2): fired for every projection
+    // write this sink lands in the store, so the persistence layer can capture
+    // the settled state debounced. Mobile-only by design — the client-runtime
+    // sink interface stays untouched so web and desktop see no churn.
+    readonly onEnvironmentProjectionChanged?: (environmentId: EnvironmentId) => void;
   } = {},
 ): EnvironmentStateSink {
+  const projectionChanged = input.onEnvironmentProjectionChanged ?? (() => undefined);
   return {
     // Snapshot the pre-apply thread so afterShellEventApplied can tell a freshly
     // promoted draft (no previous thread) from an existing one.
@@ -56,8 +63,10 @@ export function createMobileEnvironmentStateSink(
         threadRef,
       };
     },
-    applyShellEvent: (environmentId, event) =>
-      useStore.getState().applyShellEvent(event, environmentId),
+    applyShellEvent: (environmentId, event) => {
+      useStore.getState().applyShellEvent(event, environmentId);
+      projectionChanged(environmentId);
+    },
     afterShellEventApplied: (environmentId, event, context) => {
       const { previousThread, threadRef } = context as ShellEventContext;
       switch (event.kind) {
@@ -91,10 +100,14 @@ export function createMobileEnvironmentStateSink(
           return;
       }
     },
-    applyOrchestrationEvents: (environmentId, events) =>
-      useStore.getState().applyOrchestrationEvents(events, environmentId),
-    syncServerShellSnapshot: (environmentId, snapshot) =>
-      useStore.getState().syncServerShellSnapshot(snapshot, environmentId),
+    applyOrchestrationEvents: (environmentId, events) => {
+      useStore.getState().applyOrchestrationEvents(events, environmentId);
+      projectionChanged(environmentId);
+    },
+    syncServerShellSnapshot: (environmentId, snapshot) => {
+      useStore.getState().syncServerShellSnapshot(snapshot, environmentId);
+      projectionChanged(environmentId);
+    },
     // No mobile UI store and terminal GC is deferred (terminals are v1.1) — §3-5.
     reconcileSnapshotDerivedState: () => undefined,
     syncProjects: () => undefined,

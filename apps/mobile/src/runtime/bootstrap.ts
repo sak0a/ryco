@@ -83,6 +83,24 @@ export function initializeMobileRuntime(): MobileConnectionRegistry {
   if (!initialized) {
     initialized = true;
     initializeWsConnectionState();
+    // Wave 2: hydrate the snapshot cache (cached node roster + per-environment
+    // projections) into the stores before any connection produces live data.
+    // Fire-and-forget — hydration is a no-op for any environment that already
+    // has live state, so racing driver.start() is safe. Catalog hydration must
+    // land first or the orphan check would misread direct environments.
+    void (async () => {
+      const { mobileKV } = await import("../platform/kv");
+      const { initializeMobileSnapshotPersistence } = await import(
+        "../persistence/environmentSnapshotPersistence"
+      );
+      await registry.catalog.waitForHydration().catch(() => undefined);
+      await initializeMobileSnapshotPersistence({
+        kv: mobileKV,
+        hasDirectEnvironment: (environmentId) => registry.catalog.get(environmentId) !== null,
+      });
+    })().catch((error: unknown) => {
+      console.warn("[snapshot-cache] cold-start hydration failed", error);
+    });
     registry.driver.start();
   }
   return registry;

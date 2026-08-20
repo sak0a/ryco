@@ -22,6 +22,7 @@ import {
 } from "../state/threadsRuntime";
 import { invalidateAllCheckpointDiffs } from "../rpc/checkpointDiffAtoms";
 import { invalidateProjectFilesState } from "../rpc/projectFilesAtoms";
+import { markEnvironmentSnapshotDirty } from "../persistence/environmentSnapshotPersistence";
 import { createHostedPrimaryConnection } from "../hostedHub/primaryConnection";
 import { subscribeAppStateResume } from "./appStateResume";
 import { createMobileEnvironmentStateSink } from "./environmentStateSink";
@@ -206,6 +207,10 @@ export function createMobileEnvironmentDriver(
         getSupervisor().requestProviderInvalidation();
       },
       flushProviderInvalidation,
+      // Wave 2: every projection write marks its environment dirty for the
+      // debounced snapshot-cache capture (a no-op until persistence is
+      // initialized at app bootstrap).
+      onEnvironmentProjectionChanged: markEnvironmentSnapshotDirty,
     });
   // Recovered/pushed thread-detail events flow through the same batch-effects path
   // as the shell stream (§4).
