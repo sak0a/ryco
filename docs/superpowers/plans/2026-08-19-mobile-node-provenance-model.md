@@ -134,6 +134,35 @@ This is the wave that makes the model's central claim true. "Nodes are just wher
 cannot be true while a sleeping machine's projects vanish from the interface — until this lands,
 the remaining waves are cosmetic.
 
+### Amendments from wave 1 findings (2026-08-20)
+
+Wave 1's simulator QA surfaced two facts this plan did not account for, and a third came out of
+reviewing it. All three are in scope for wave 2.
+
+**A. The Hub node roster must persist locally.** The saved-environment registry
+(`apps/mobile/src/connection/catalog.ts:9`, key `ryco.savedEnvironments.registry`) holds
+direct/saved records only, and `hostedHub/hubProfile.ts` persists the Hub origin and label — not
+the node list. A cold start would therefore have snapshots keyed by `environmentId` and nothing to
+render them against: no label, no role, no presence. Wave 2 must persist the Hub node roster —
+environmentId, label, effective role, revokedAt, last-known presence and when it was observed —
+alongside the snapshots. This also fixes the separately-observed wave 1 bug that Hub node
+selection does not survive an app relaunch.
+
+**B. Row liveness comes from Hub directory presence, not the socket.** Wave 1 QA showed that
+killing a node does not surface at the app's WS layer at all — the socket terminates at the Hub,
+which stays healthy, and the thread banner still read "Ready" ten minutes after node death. Hub
+directory presence *does* update, and is already plumbed:
+`packages/client-runtime/src/authorization/state.ts` maps `node.presence.online` onto
+`selectionStatus` (~lines 1471, 1523, 1633). Cached-row staleness and the "offline · last seen"
+treatment must be wired to presence. The per-environment WS status slots from wave 1 must **not**
+be used for this — they track relay-socket state, which wave 1 proved is a different fact from
+node reachability.
+
+**C. Persistence QA has a rebuild trap.** Rebuilding the RycoDev client wipes app data — logins,
+Hub selection, and any SQLite cache. QA for this wave must be sequenced so the cache write and the
+cold-start read happen without a rebuild in between, or the cold start is tested against an empty
+database without knowing it.
+
 Files:
 
 - new `apps/mobile/src/persistence/` module (expo-sqlite backed; `expo-sqlite` ~57.0.1 is already a
@@ -163,10 +192,13 @@ Steps:
 
 Acceptance:
 
-- Cold start renders every known node's projects, worktrees and threads with zero sockets open.
+- Cold start renders every known node's projects, worktrees and threads with zero sockets open,
+  with correct labels, roles and last-known presence (amendment A).
 - Switching the visible node never blanks the list.
-- Cached-only rows are marked stale and are not presented as live.
+- Cached-only rows are marked stale and are not presented as live — staleness sourced from Hub
+  directory presence, not WS socket status (amendment B).
 - Revoking a node removes its cached content on the next launch.
+- Hub node selection survives an app relaunch (amendment A).
 
 Evidence: simulator screenshots of a cold start showing two nodes' work with **both** node servers
 stopped; a test proving a version bump discards an older record.
