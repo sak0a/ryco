@@ -91,16 +91,13 @@ describe("createMobileEnvironmentStateSink.onEnvironmentProjectionChanged", () =
       onEnvironmentProjectionChanged: projectionChanged,
     });
 
-    sink.syncServerShellSnapshot(
-      ENV_ID,
-      {
-        snapshotSequence: 1,
-        projects: [],
-        worktrees: [],
-        threads: [],
-        updatedAt: "2026-08-20T00:00:00.000Z",
-      } as never,
-    );
+    sink.syncServerShellSnapshot(ENV_ID, {
+      snapshotSequence: 1,
+      projects: [],
+      worktrees: [],
+      threads: [],
+      updatedAt: "2026-08-20T00:00:00.000Z",
+    } as never);
     sink.applyOrchestrationEvents(ENV_ID, []);
     sink.applyShellEvent(ENV_ID, { kind: "noop" } as never);
 

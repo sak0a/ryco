@@ -60,27 +60,27 @@ download → FAQ → final CTA → footer.**
 
 ## Motion devices (mostly GSAP via `useGsapContext`; a few hand-rolled)
 
-| Device                                                                                                                        | Where                                        |
-| ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Hero line clip-reveal + fade + accent underline draw                                                                          | hero                                         |
-| Hero screenshot clip-reveal on load + scroll parallax                                                                         | `heroShotRef`                                |
-| Velocity-reactive marquee (speeds up with scroll, decays back)                                                                | `[data-marquee]`                             |
-| Section heading line-mask reveals                                                                                             | `[data-line-reveal]`                         |
-| **3D agent coverflow** — pinned horizontal scroll; the six providers tilt/scale/dim by distance from centre as they pan past  | `AgentDeck.tsx`                              |
-| **Sticky scrollytelling** — screenshot swaps + step focus + counter                                                           | `[data-shot-step]`, `activeShot`             |
-| Timeline progress draw                                                                                                        | `[data-timeline-progress]`                   |
-| **Bespoke concept step-icons** (CSS loops: trace / bob / pulse / spin)                                                        | `process-icons.tsx`, How-it-works            |
-| **Always-on toolkit feature icons** (CSS loops: pulse / trace / scan / flow / blink)                                          | `feature-icons.tsx`, six grouped features    |
-| **Kinetic terminal** — real commands type in on scroll + blinking caret                                                       | `KineticTerminal`, download                  |
-| Numeric stat count-ups                                                                                                        | `[data-count]`                               |
-| Pillar icon stroke draw-on (on reveal) + re-trace on card hover                                                               | `[data-draw-icon]`                           |
-| **FAQ +/− morph** (a bar rotates a quarter-turn)                                                                              | `FaqRow`                                     |
-| **Magnetic** CTAs (pointer pull, eased return)                                                                                | `[data-magnetic]` via `useMagnetic`          |
-| **Floating nav** — sliding active indicator (scroll-spy), scroll-progress hairline, animated mobile menu                      | `SiteNav.tsx`                                |
-| **Button sheen** — light sweep on hover + press scale                                                                         | `MagneticButton.tsx`                         |
-| **3D card tilt + glare** — hero shot, feature & platform cards lean toward the pointer                                        | `[data-tilt]` / `[data-glare]` via `useTilt` |
-| **3D gallery fly-in** — deep-dive captures swing in from alternating sides (rotateY + depth), scrubbed to scroll              | `Gallery.tsx` (`[data-fly]`)                 |
-| Generic on-scroll reveals                                                                                                     | `[data-reveal]`                              |
+| Device                                                                                                                       | Where                                        |
+| ---------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Hero line clip-reveal + fade + accent underline draw                                                                         | hero                                         |
+| Hero screenshot clip-reveal on load + scroll parallax                                                                        | `heroShotRef`                                |
+| Velocity-reactive marquee (speeds up with scroll, decays back)                                                               | `[data-marquee]`                             |
+| Section heading line-mask reveals                                                                                            | `[data-line-reveal]`                         |
+| **3D agent coverflow** — pinned horizontal scroll; the six providers tilt/scale/dim by distance from centre as they pan past | `AgentDeck.tsx`                              |
+| **Sticky scrollytelling** — screenshot swaps + step focus + counter                                                          | `[data-shot-step]`, `activeShot`             |
+| Timeline progress draw                                                                                                       | `[data-timeline-progress]`                   |
+| **Bespoke concept step-icons** (CSS loops: trace / bob / pulse / spin)                                                       | `process-icons.tsx`, How-it-works            |
+| **Always-on toolkit feature icons** (CSS loops: pulse / trace / scan / flow / blink)                                         | `feature-icons.tsx`, six grouped features    |
+| **Kinetic terminal** — real commands type in on scroll + blinking caret                                                      | `KineticTerminal`, download                  |
+| Numeric stat count-ups                                                                                                       | `[data-count]`                               |
+| Pillar icon stroke draw-on (on reveal) + re-trace on card hover                                                              | `[data-draw-icon]`                           |
+| **FAQ +/− morph** (a bar rotates a quarter-turn)                                                                             | `FaqRow`                                     |
+| **Magnetic** CTAs (pointer pull, eased return)                                                                               | `[data-magnetic]` via `useMagnetic`          |
+| **Floating nav** — sliding active indicator (scroll-spy), scroll-progress hairline, animated mobile menu                     | `SiteNav.tsx`                                |
+| **Button sheen** — light sweep on hover + press scale                                                                        | `MagneticButton.tsx`                         |
+| **3D card tilt + glare** — hero shot, feature & platform cards lean toward the pointer                                       | `[data-tilt]` / `[data-glare]` via `useTilt` |
+| **3D gallery fly-in** — deep-dive captures swing in from alternating sides (rotateY + depth), scrubbed to scroll             | `Gallery.tsx` (`[data-fly]`)                 |
+| Generic on-scroll reveals                                                                                                    | `[data-reveal]`                              |
 
 > A few devices are intentionally **not** GSAP: the terminal (`IntersectionObserver`
 >

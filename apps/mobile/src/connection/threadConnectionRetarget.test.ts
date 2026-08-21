@@ -387,61 +387,61 @@ describe("thread connection retarget decision", () => {
           for (const nodeShape of nodeShapes) {
             for (const selection of selections) {
               for (const selectionStatus of selectionStatuses) {
-              for (const hasDirectEnvironment of [false, true]) {
-                for (const hostedAvailable of [false, true]) {
-                  for (const withRoster of [false, true]) {
-                    cases += 1;
-                    const nodes =
-                      nodeShape === "absent"
-                        ? []
-                        : [
-                            node("node-a", ENV_A, {
-                              revokedAt: nodeShape === "revoked" ? 42 : null,
-                            }),
-                          ];
-                    const selectedNode =
-                      selection === "none"
-                        ? null
-                        : selection === "same-environment"
-                          ? node("node-a", ENV_A)
-                          : node("node-b", ENV_B);
-                    const state = hubState({
-                      accountStatus,
-                      directoryStatus,
-                      browserStatus,
-                      nodes,
-                      selectedNode,
-                      selectionStatus,
-                    });
-                    const decision = deriveThreadConnectionRetarget({
-                      environmentId: ENV_A,
-                      hasDirectEnvironment,
-                      hostedAvailable,
-                      state,
-                      rosterEntry: withRoster ? rosterRecord("node-a", ENV_A) : null,
-                    });
-                    if (decision.kind !== "retarget") continue;
-                    retargets += 1;
+                for (const hasDirectEnvironment of [false, true]) {
+                  for (const hostedAvailable of [false, true]) {
+                    for (const withRoster of [false, true]) {
+                      cases += 1;
+                      const nodes =
+                        nodeShape === "absent"
+                          ? []
+                          : [
+                              node("node-a", ENV_A, {
+                                revokedAt: nodeShape === "revoked" ? 42 : null,
+                              }),
+                            ];
+                      const selectedNode =
+                        selection === "none"
+                          ? null
+                          : selection === "same-environment"
+                            ? node("node-a", ENV_A)
+                            : node("node-b", ENV_B);
+                      const state = hubState({
+                        accountStatus,
+                        directoryStatus,
+                        browserStatus,
+                        nodes,
+                        selectedNode,
+                        selectionStatus,
+                      });
+                      const decision = deriveThreadConnectionRetarget({
+                        environmentId: ENV_A,
+                        hasDirectEnvironment,
+                        hostedAvailable,
+                        state,
+                        rosterEntry: withRoster ? rosterRecord("node-a", ENV_A) : null,
+                      });
+                      if (decision.kind !== "retarget") continue;
+                      retargets += 1;
 
-                    // selectNode's guard set, restated verbatim.
-                    expect(state.directoryStatus).toBe("ready");
-                    expect(state.browserStatus).toBe("current");
-                    const target = state.nodes.find(
-                      (candidate) => candidate.id === decision.nodeId,
-                    );
-                    expect(target).toBeDefined();
-                    expect(target?.revokedAt).toBeNull();
-                    expect(
-                      state.selectedNode?.id === target?.id &&
-                        state.selectedNode?.environmentId === target?.environmentId,
-                    ).toBe(false);
-                    // Plus this model's own preconditions.
-                    expect(state.accountStatus).toBe("authenticated");
-                    expect(hasDirectEnvironment).toBe(false);
-                    expect(hostedAvailable).toBe(true);
+                      // selectNode's guard set, restated verbatim.
+                      expect(state.directoryStatus).toBe("ready");
+                      expect(state.browserStatus).toBe("current");
+                      const target = state.nodes.find(
+                        (candidate) => candidate.id === decision.nodeId,
+                      );
+                      expect(target).toBeDefined();
+                      expect(target?.revokedAt).toBeNull();
+                      expect(
+                        state.selectedNode?.id === target?.id &&
+                          state.selectedNode?.environmentId === target?.environmentId,
+                      ).toBe(false);
+                      // Plus this model's own preconditions.
+                      expect(state.accountStatus).toBe("authenticated");
+                      expect(hasDirectEnvironment).toBe(false);
+                      expect(hostedAvailable).toBe(true);
+                    }
                   }
                 }
-              }
               }
             }
           }

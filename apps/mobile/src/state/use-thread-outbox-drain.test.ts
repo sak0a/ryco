@@ -161,9 +161,8 @@ describe("outbox drain gate (two environments)", () => {
 
 describe("wsUiStateForEnvironment (device-offline overlay)", () => {
   it("reads offline for a never-connected environment when the device is offline", async () => {
-    const { getWsConnectionStatusForEnvironment, setBrowserOnlineStatus } = await import(
-      "@ryco/client-runtime/rpc"
-    );
+    const { getWsConnectionStatusForEnvironment, setBrowserOnlineStatus } =
+      await import("@ryco/client-runtime/rpc");
     const { wsUiStateForEnvironment } = await import("../rpc/wsConnectionState");
 
     connectEnvironment(ENV_A, "ws://node-a.local:13773/ws");
@@ -176,15 +175,12 @@ describe("wsUiStateForEnvironment (device-offline overlay)", () => {
     expect(wsUiStateForEnvironment(getWsConnectionStatusForEnvironment(ENV_B))).toBe("offline");
 
     setBrowserOnlineStatus(true);
-    expect(wsUiStateForEnvironment(getWsConnectionStatusForEnvironment(ENV_B))).not.toBe(
-      "offline",
-    );
+    expect(wsUiStateForEnvironment(getWsConnectionStatusForEnvironment(ENV_B))).not.toBe("offline");
   });
 
   it("never masks a live socket", async () => {
-    const { getWsConnectionStatusForEnvironment, setBrowserOnlineStatus } = await import(
-      "@ryco/client-runtime/rpc"
-    );
+    const { getWsConnectionStatusForEnvironment, setBrowserOnlineStatus } =
+      await import("@ryco/client-runtime/rpc");
     const { wsUiStateForEnvironment } = await import("../rpc/wsConnectionState");
 
     connectEnvironment(ENV_A, "ws://node-a.local:13773/ws");

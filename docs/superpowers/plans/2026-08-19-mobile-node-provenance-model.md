@@ -70,13 +70,13 @@ so do not copy code.
 
 ## Stack shape
 
-| Wave | Branch | Base | Size | Mergeable alone |
-| --- | --- | --- | --- | --- |
-| 1 | `mobile/provenance-1-outbox-per-environment` | `main` | small | yes |
-| 2 | `mobile/provenance-2-snapshot-cache` | wave 1 | large | yes |
-| 3a | `mobile/provenance-3a-connection-retarget` | wave 2 | medium | no — needs 1 and 2 |
-| 3b | `mobile/provenance-3b-demand-driven-connections` | wave 3a | large | no — needs 3a; **capacity-qualified** |
-| 4 | `mobile/provenance-4-node-as-provenance` | wave 3a | medium | no — needs 2 |
+| Wave | Branch                                           | Base    | Size   | Mergeable alone                       |
+| ---- | ------------------------------------------------ | ------- | ------ | ------------------------------------- |
+| 1    | `mobile/provenance-1-outbox-per-environment`     | `main`  | small  | yes                                   |
+| 2    | `mobile/provenance-2-snapshot-cache`             | wave 1  | large  | yes                                   |
+| 3a   | `mobile/provenance-3a-connection-retarget`       | wave 2  | medium | no — needs 1 and 2                    |
+| 3b   | `mobile/provenance-3b-demand-driven-connections` | wave 3a | large  | no — needs 3a; **capacity-qualified** |
+| 4    | `mobile/provenance-4-node-as-provenance`         | wave 3a | medium | no — needs 2                          |
 
 Wave 1 is the stack base even though wave 2 carries more product value. It is roughly fifty lines,
 it repairs a defect that is **already reachable on `main`** (direct multi-connect ships today), it
@@ -152,7 +152,7 @@ selection does not survive an app relaunch.
 **B. Row liveness comes from Hub directory presence, not the socket.** Wave 1 QA showed that
 killing a node does not surface at the app's WS layer at all — the socket terminates at the Hub,
 which stays healthy, and the thread banner still read "Ready" ten minutes after node death. Hub
-directory presence *does* update, and is already plumbed:
+directory presence _does_ update, and is already plumbed:
 `packages/client-runtime/src/authorization/state.ts` maps `node.presence.online` onto
 `selectionStatus` (~lines 1471, 1523, 1633). Cached-row staleness and the "offline · last seen"
 treatment must be wired to presence. The per-environment WS status slots from wave 1 must **not**
@@ -209,7 +209,7 @@ stopped; a test proving a version bump discards an older record.
 ### Amendment (2026-08-20): split into 3a and 3b
 
 Wave 3 as originally scoped was gated on the Hub rollout drill. The actual risk behind that gate
-is narrower: *concurrency* — raising sustained relay connections against a bounded Hub. Most of
+is narrower: _concurrency_ — raising sustained relay connections against a bounded Hub. Most of
 this wave's value needs none: opening a thread can **re-target the one hosted connection** instead
 of adding a second. The wave is therefore split. 3a keeps concurrency at exactly 1 and adds no new
 sustained relay load, so it is ungated; 3b is the remainder — true multi-connect plus scope leases.

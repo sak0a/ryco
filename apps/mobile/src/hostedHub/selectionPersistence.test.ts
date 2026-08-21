@@ -70,12 +70,13 @@ describe("hub selection persistence", () => {
 
   it("waits until the directory is authoritative, then selects the persisted node", () => {
     const persisted = { nodeId: "n1", environmentId: "e1" };
-    expect(
-      deriveHubSelectionRestore(hubState({ directoryStatus: "loading" }), persisted),
-    ).toEqual({ kind: "wait" });
-    expect(
-      deriveHubSelectionRestore(hubState({ nodes: [node("n1", "e1")] }), persisted),
-    ).toEqual({ kind: "select", nodeId: "n1" });
+    expect(deriveHubSelectionRestore(hubState({ directoryStatus: "loading" }), persisted)).toEqual({
+      kind: "wait",
+    });
+    expect(deriveHubSelectionRestore(hubState({ nodes: [node("n1", "e1")] }), persisted)).toEqual({
+      kind: "select",
+      nodeId: "n1",
+    });
   });
 
   it("clears a persisted selection that is revoked or gone", () => {

@@ -1,10 +1,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import {
-  getCachedHubNodeRoster,
-  subscribeCachedHubNodeRoster,
-} from "../../hostedHub/nodeRoster";
+import { getCachedHubNodeRoster, subscribeCachedHubNodeRoster } from "../../hostedHub/nodeRoster";
 import { useHostedHubStore } from "../../hostedHub/state";
 import { selectCacheHydratedEnvironmentIds, useStore } from "../../state/threadsRuntime";
 import { useSavedEnvironments } from "../connection/useConnectionController";

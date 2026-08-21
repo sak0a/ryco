@@ -92,7 +92,10 @@ describe("hub node roster", () => {
 
   it("flags a node that vanished from the directory (authorization removed)", () => {
     const { roster, purgeEnvironmentIds } = reconcileHubNodeRoster(
-      [record({ nodeId: "n1", environmentId: "e1" }), record({ nodeId: "n2", environmentId: "e2" })],
+      [
+        record({ nodeId: "n1", environmentId: "e1" }),
+        record({ nodeId: "n2", environmentId: "e2" }),
+      ],
       [node({ nodeId: "n2", environmentId: "e2" })],
       200,
     );

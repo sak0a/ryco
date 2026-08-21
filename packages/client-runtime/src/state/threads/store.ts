@@ -3140,10 +3140,7 @@ interface AppStore extends AppState {
     cached: CachedEnvironmentShellSnapshot,
     environmentId: EnvironmentId,
   ) => void;
-  demoteEnvironmentStateToCachedSnapshot: (
-    environmentId: EnvironmentId,
-    demotedAt: number,
-  ) => void;
+  demoteEnvironmentStateToCachedSnapshot: (environmentId: EnvironmentId, demotedAt: number) => void;
   syncServerShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
