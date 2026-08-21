@@ -75,7 +75,7 @@ so do not copy code.
 | 1 | `mobile/provenance-1-outbox-per-environment` | `main` | small | yes |
 | 2 | `mobile/provenance-2-snapshot-cache` | wave 1 | large | yes |
 | 3a | `mobile/provenance-3a-connection-retarget` | wave 2 | medium | no — needs 1 and 2 |
-| 3b | `mobile/provenance-3b-demand-driven-connections` | wave 3a | large | no — needs 3a; **gated** |
+| 3b | `mobile/provenance-3b-demand-driven-connections` | wave 3a | large | no — needs 3a; **capacity-qualified** |
 | 4 | `mobile/provenance-4-node-as-provenance` | wave 3a | medium | no — needs 2 |
 
 Wave 1 is the stack base even though wave 2 carries more product value. It is roughly fifty lines,
@@ -208,13 +208,19 @@ stopped; a test proving a version bump discards an older record.
 
 ### Amendment (2026-08-20): split into 3a and 3b
 
-Wave 3 as originally scoped is gated on the Hub rollout drill (`sak0a/ryco-hub` issue #12),
-untouched since 2026-07-21. The gate is about *concurrency* — raising sustained relay
-connections against a single-container Hub — but most of this wave's value needs none: opening
-a thread can **re-target the one hosted connection** instead of adding a second. The wave is
-therefore split. 3a keeps concurrency at exactly 1 and adds no new sustained relay load, so it
-is ungated; 3b is the remainder — true multi-connect plus scope leases — and keeps the gate
-unchanged.
+Wave 3 as originally scoped was gated on the Hub rollout drill. The actual risk behind that gate
+is narrower: *concurrency* — raising sustained relay connections against a bounded Hub. Most of
+this wave's value needs none: opening a thread can **re-target the one hosted connection** instead
+of adding a second. The wave is therefore split. 3a keeps concurrency at exactly 1 and adds no new
+sustained relay load, so it is ungated; 3b is the remainder — true multi-connect plus scope leases.
+
+### Amendment (2026-08-21): measured capacity replaces the rollout-drill gate
+
+The capacity assessment in `docs/relay-capacity-assessment-3b.md` measures that narrower risk and
+discharges the gate for a named maximum of three connections, provided scope leases land first,
+background release remains effective, foreground reconnects are staggered, and the five-node
+fixture asserts the bound. The production recovery drill remains a release-operations gate, not a
+prerequisite for this bounded client-side change.
 
 Wave 2 is what makes 3a safe: before the snapshot cache, retargeting blanked the inbox on every
 switch (captured on device in wave 2's QA); now cached rows survive the switch, so retargeting
@@ -223,9 +229,9 @@ is non-destructive.
 **Amendment (2026-08-20): wave 4 bases on 3a, not 3b.** The stack table's "Mergeable alone"
 column has said all along that wave 4 needs only wave 2; the base column contradicted it. With
 3a landed, opening a cached thread already retargets automatically — which is the only thing
-wave 4 needed from wave 3. Basing wave 4 on 3b would inherit the Hub rollout-drill gate for no
-reason. The gate applies to 3b alone; 3b rebases onto wave 4 (or lands independently) when the
-drill completes.
+wave 4 needed from wave 3. Basing wave 4 on 3b would inherit the larger concurrency change for no
+reason. The capacity conditions apply to 3b alone; 3b rebases onto wave 4 (or lands independently)
+after its implementation and fixture evidence satisfy them.
 
 ### Wave 3a: Opening a thread re-targets the hosted connection
 
@@ -314,10 +320,19 @@ Acceptance:
 Evidence: a connection-count assertion under the five-node fixture; before/after notes on
 foreground reconnect behaviour.
 
-**Gate:** this wave raises relay load on a Hub that is one container in one region and has not run
-its rollout drill (`sak0a/ryco-hub` issue #12). Waves 1, 2, 3a and 4 all land safely against
-today's single-connection Hub. Do not merge wave 3b to `main` until the Hub is deployed and
-observed, even if the code is ready — keep it in the stack.
+**Capacity gate (discharged for a maximum of three):**
+`docs/relay-capacity-assessment-3b.md` measures the connection, channel, upgrade-burst, queue, and
+transfer budgets. The bound fits, but only with the mitigation sequence this wave already requires:
+scope leases before concurrency, a named maximum no greater than three, release of non-retained
+background connections, staggered foreground reconnects, and a five-node fixture asserting the
+bound and absence of a reconnect storm. Connection acquisition must not start unrelated high-volume
+work. The web-hosted screenshot fallback is a separate sustained-transfer risk outside Wave 3b's
+mobile scopes and reaches the default per-channel transfer budget after only a small number of
+measured full-PNG frames.
+
+The rollout recovery drill no longer gates 3b: it measures deployment recovery rather than the
+bounded concurrent-connection risk. Waves 1, 2, 3a and 4 remain independent of 3b's implementation
+and fixture evidence.
 
 ## Wave 4: Demote node in the interface
 
