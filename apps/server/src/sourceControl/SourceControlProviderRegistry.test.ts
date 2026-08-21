@@ -89,7 +89,18 @@ function makeRegistry(input: {
             detail: Option.none(),
           }),
         }),
-        Layer.mock(GitHubCli.GitHubCli)(input.githubCli ?? {}),
+        Layer.mock(GitHubCli.GitHubCli)({
+          getPullRequestStack: () => Effect.succeed(null),
+          getPullRequestStackSummaries: () => Effect.succeed(new Map()),
+          getRepositoryMergeCapabilities: () =>
+            Effect.fail(
+              new GitHubCli.GitHubCliError({
+                operation: "getRepositoryMergeCapabilities",
+                detail: "not configured in this test",
+              }),
+            ),
+          ...input.githubCli,
+        }),
         Layer.mock(GitLabCli.GitLabCli)({}),
         Layer.mock(VcsProcess.VcsProcess)(
           input.process ?? { run: () => Effect.succeed(processOutput("")) },

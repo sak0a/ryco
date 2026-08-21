@@ -116,6 +116,15 @@ const rpcClientMock = {
     readRawPayloadChunk: vi.fn(),
     readExportChunk: vi.fn(),
   },
+  mcp: {
+    listWorkspaces: vi.fn(),
+    listServers: vi.fn(),
+    upsertServer: vi.fn(),
+    setServerEnabled: vi.fn(),
+    removeServer: vi.fn(),
+    reloadServers: vi.fn(),
+    startOauthLogin: vi.fn(),
+  },
 };
 
 vi.mock("./environments/runtime", () => ({
