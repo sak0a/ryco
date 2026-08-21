@@ -14,12 +14,21 @@ export type InboxThreadState =
   | "connecting"
   | "error"
   | "reconnecting"
+  | "offline"
   | "idle";
 
 export interface InboxEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly connectionState: "connected" | "reconnecting" | "offline" | "read-only";
+  /**
+   * Wave 2: set when this environment's rows are cache-provenance — hydrated
+   * from the snapshot cache or demoted after disconnect, with no live snapshot
+   * since. Stale rows render as last-known state, never as live, with
+   * `staleDetail` carrying the Hub-presence-derived "Offline · last seen" text.
+   */
+  readonly stale?: boolean;
+  readonly staleDetail?: string;
 }
 
 export interface InboxThreadRow {
@@ -57,7 +66,7 @@ export interface BuildInboxInput {
   readonly deliveryUnknownThreadIds?: ReadonlySet<string>;
 }
 
-const ACTIVE_PRIORITY: Readonly<Record<Exclude<InboxThreadState, "idle">, number>> = {
+const ACTIVE_PRIORITY: Readonly<Record<Exclude<InboxThreadState, "idle" | "offline">, number>> = {
   "needs-input": 0,
   "delivery-unknown": 1,
   error: 2,
@@ -75,6 +84,10 @@ function threadState(
   environment: InboxEnvironment | undefined,
   deliveryUnknownThreadIds: ReadonlySet<string>,
 ): InboxThreadState {
+  // A stale environment's rows are last-known state: nothing on them may
+  // present as live activity (or as actionable), whatever the cached fields
+  // claim. Sourced from Hub presence via the environment row, not WS status.
+  if (environment?.stale) return "offline";
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "needs-input";
   if (deliveryUnknownThreadIds.has(scopedKey(thread.environmentId, thread.id))) {
     return "delivery-unknown";
@@ -100,6 +113,8 @@ function statusLabel(state: InboxThreadState): string {
       return "Error";
     case "reconnecting":
       return "Reconnecting";
+    case "offline":
+      return "Offline";
     case "idle":
       return "Idle";
   }
@@ -167,21 +182,26 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
       worktreeLabel,
       contextLabel,
       state,
-      statusLabel: statusLabel(state),
+      statusLabel:
+        state === "offline" ? (environment?.staleDetail ?? "Offline") : statusLabel(state),
       updatedAt: timestamp(thread),
       changeRequest: buildChangeRequestBadge(worktree),
     });
   }
 
+  // Stale-environment rows are never "active now" — last-known state sorts
+  // with the recents, however lively its cached fields look.
   const active = rows
-    .filter((row) => row.state !== "idle")
+    .filter((row) => row.state !== "idle" && row.state !== "offline")
     .sort((left, right) => {
       const priority =
-        ACTIVE_PRIORITY[left.state as Exclude<InboxThreadState, "idle">] -
-        ACTIVE_PRIORITY[right.state as Exclude<InboxThreadState, "idle">];
+        ACTIVE_PRIORITY[left.state as Exclude<InboxThreadState, "idle" | "offline">] -
+        ACTIVE_PRIORITY[right.state as Exclude<InboxThreadState, "idle" | "offline">];
       return priority || compareRecent(left, right);
     });
-  const recent = rows.filter((row) => row.state === "idle").sort(compareRecent);
+  const recent = rows
+    .filter((row) => row.state === "idle" || row.state === "offline")
+    .sort(compareRecent);
 
   const sections: InboxSection[] = [];
   if (active.length > 0) sections.push({ key: "active", title: "Active now", rows: active });

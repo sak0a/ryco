@@ -9,6 +9,9 @@ export interface ProjectEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly connectionState: "connected" | "reconnecting" | "offline" | "read-only";
+  /** Wave 2 cache provenance — see InboxEnvironment (structurally identical). */
+  readonly stale?: boolean;
+  readonly staleDetail?: string;
 }
 
 export interface ProjectListRow {
@@ -26,6 +29,8 @@ export interface ProjectNodeGroup {
   readonly environmentId: EnvironmentId;
   readonly nodeLabel: string;
   readonly connectionState: ProjectEnvironment["connectionState"];
+  /** Set for cache-provenance groups: the "Offline · last seen" header detail. */
+  readonly staleDetail?: string;
   readonly rows: ReadonlyArray<ProjectListRow>;
 }
 
@@ -173,6 +178,9 @@ export function buildProjectNodeGroups(input: {
       environmentId: environment.environmentId,
       nodeLabel: environment.label,
       connectionState: environment.connectionState,
+      ...(environment.stale && environment.staleDetail
+        ? { staleDetail: environment.staleDetail }
+        : {}),
       rows: sortedRows,
     });
   }

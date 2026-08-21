@@ -66,4 +66,148 @@ describe("Home environments", () => {
       },
     ]);
   });
+
+  it("renders every cached Hub roster node with presence-derived stale detail", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const environments = buildHomeEnvironments({
+      direct: [],
+      hosted: null,
+      cachedHubNodes: [
+        {
+          environmentId: "node-a" as EnvironmentId,
+          label: "Work Mac",
+          role: "operator",
+          revokedAt: null,
+          presenceOnline: false,
+          lastHeartbeatAt: now - 2 * 60 * 60 * 1000,
+          lastAuthenticatedAt: now - 3 * 60 * 60 * 1000,
+        },
+        {
+          environmentId: "node-b" as EnvironmentId,
+          label: "Build node",
+          role: "owner",
+          revokedAt: null,
+          presenceOnline: true,
+          lastHeartbeatAt: now,
+          lastAuthenticatedAt: now,
+        },
+        {
+          environmentId: "node-c" as EnvironmentId,
+          label: "Revoked node",
+          role: "viewer",
+          revokedAt: 1,
+          presenceOnline: false,
+          lastHeartbeatAt: null,
+          lastAuthenticatedAt: null,
+        },
+      ],
+      cacheProvenanceEnvironmentIds: ["node-a" as EnvironmentId, "node-b" as EnvironmentId],
+      now,
+    });
+
+    expect(environments).toEqual([
+      {
+        environmentId: "node-a",
+        label: "Work Mac",
+        connectionState: "offline",
+        stale: true,
+        staleDetail: "Offline · last seen 2h ago",
+      },
+      {
+        environmentId: "node-b",
+        label: "Build node",
+        connectionState: "offline",
+        stale: true,
+        staleDetail: "Online · cached",
+      },
+    ]);
+  });
+
+  it("marks an offline direct environment with cached rows as stale", () => {
+    const environments = buildHomeEnvironments({
+      direct: [
+        {
+          environmentId: "direct-a" as EnvironmentId,
+          label: "LAN Mac",
+          connectionState: "disconnected",
+          role: "owner",
+        },
+      ],
+      hosted: null,
+      cacheProvenanceEnvironmentIds: ["direct-a" as EnvironmentId],
+      now: 0,
+    });
+    expect(environments[0]).toMatchObject({
+      connectionState: "offline",
+      stale: true,
+      staleDetail: "Offline · cached",
+    });
+  });
+
+  it("keeps cache-provenance rows stale whatever the transport claims (amendment B)", () => {
+    // A dead node's transport can sit in "reconnecting" indefinitely — the
+    // socket state must never lift the stale treatment; only a live snapshot
+    // (which clears the provenance stamp) does.
+    const now = Date.parse("2026-08-20T12:00:00.000Z");
+    const environments = buildHomeEnvironments({
+      direct: [
+        {
+          environmentId: "direct-a" as EnvironmentId,
+          label: "LAN Mac",
+          connectionState: "connected",
+          role: "owner",
+        },
+      ],
+      hosted: {
+        environmentId: "node-a" as EnvironmentId,
+        label: "Work Mac",
+        transportStatus: "reconnecting",
+        sessionStatus: "synchronizing",
+        role: "owner",
+      },
+      cachedHubNodes: [
+        {
+          environmentId: "node-a" as EnvironmentId,
+          label: "Work Mac",
+          role: "owner",
+          revokedAt: null,
+          presenceOnline: false,
+          lastHeartbeatAt: now - 60 * 60 * 1000,
+          lastAuthenticatedAt: null,
+        },
+      ],
+      cacheProvenanceEnvironmentIds: ["direct-a" as EnvironmentId, "node-a" as EnvironmentId],
+      now,
+    });
+    expect(environments).toEqual([
+      expect.objectContaining({
+        environmentId: "direct-a",
+        connectionState: "connected",
+        stale: true,
+      }),
+      expect.objectContaining({
+        environmentId: "node-a",
+        connectionState: "reconnecting",
+        stale: true,
+        staleDetail: "Offline · last seen 1h ago",
+      }),
+    ]);
+  });
+
+  it("drops the stale treatment once the environment is no longer cache-provenance", () => {
+    const environments = buildHomeEnvironments({
+      direct: [
+        {
+          environmentId: "direct-a" as EnvironmentId,
+          label: "LAN Mac",
+          connectionState: "connected",
+          role: "owner",
+        },
+      ],
+      hosted: null,
+      cacheProvenanceEnvironmentIds: [],
+      now: 0,
+    });
+    expect(environments[0]?.stale).toBeUndefined();
+  });
 });

@@ -3,6 +3,7 @@ import type { SavedEnvironmentRecord } from "@ryco/client-runtime/connection";
 
 import { useStore } from "../state/threadsRuntime";
 import { clearProjectFilesStateForEnvironment } from "../rpc/projectFilesAtoms";
+import { purgeEnvironmentSnapshot } from "../persistence/environmentSnapshotPersistence";
 import { mobileE2eeTrustStore, type MobileE2eeTrustStore } from "../platform/e2eeTrustStore";
 import type { MobileConnectionRegistry } from "../runtime/bootstrap";
 
@@ -119,6 +120,9 @@ export function createEnvironmentActions(deps: EnvironmentActionsDeps) {
     registry.catalog.registryStore.getState().remove(environmentId);
     registry.catalog.runtimeStore.getState().clear(environmentId);
     useStore.getState().removeEnvironmentState(environmentId);
+    // Forgetting a node also forgets its persisted snapshot — cached content
+    // must not outlive the environment it belongs to (wave 2, plan step 5).
+    purgeEnvironmentSnapshot(environmentId);
     // Keyed-query caches are not part of the threads store: the workspace
     // listings and file contents this node handed us are memory-only and scoped
     // to its environment id, so forgetting the node drops them here or not at

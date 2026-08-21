@@ -21,6 +21,7 @@ vi.mock("react", async (importOriginal) => {
       initializer: ((input: T) => unknown) | undefined,
     ) => [initializer ? initializer(initial) : initial, dispatchMock] as const,
     useState: <T>(initial: T) => [initial, vi.fn()] as const,
+    useSyncExternalStore: <T>(_subscribe: unknown, getSnapshot: () => T) => getSnapshot(),
   };
 });
 vi.mock("@react-navigation/native", () => ({ useNavigation: () => navigationMock }));
@@ -53,9 +54,10 @@ vi.mock("../../state/homeData", () => ({
   useHomeWorkspaceData: () => ({ projects: [], worktrees: [], threads: [] }),
 }));
 vi.mock("../../state/threadsRuntime", () => ({
-  useStore: Object.assign(() => undefined, {
+  useStore: Object.assign((selector?: (state: unknown) => unknown) => selector?.({}), {
     getState: () => ({ setActiveEnvironmentId: () => undefined }),
   }),
+  selectCacheHydratedEnvironmentIds: () => [],
 }));
 
 import { HomeScreen } from "./HomeScreen";

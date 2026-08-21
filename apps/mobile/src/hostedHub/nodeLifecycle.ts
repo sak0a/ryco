@@ -35,7 +35,12 @@ function clearNodeScopedState(environmentId: EnvironmentId): void {
   const registry = createMobileConnectionRegistry();
   if (registry.catalog.get(environmentId)) return;
   registry.driver.supervisor.disposeThreadDetailSubscriptionsForEnvironment(environmentId);
-  useStore.getState().removeEnvironmentState(environmentId);
+  // Wave 2: demote instead of remove. A hosted node switch used to blank the
+  // switched-away node's rows; they now stay rendered as last-known state
+  // (sessions and liveness dropped, cache-provenance stamped). Revocation and
+  // authorization removal purge fully via the roster mirror in
+  // persistence/environmentSnapshotPersistence.ts.
+  useStore.getState().demoteEnvironmentStateToCachedSnapshot(environmentId, Date.now());
   clearCheckpointDiffState();
 }
 

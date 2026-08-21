@@ -107,6 +107,14 @@ export interface EnvironmentState {
   sidebarThreadSummaryById: Record<ThreadId, SidebarThreadSummary>;
 
   bootstrapComplete: boolean;
+
+  // ---------------------------------------------------------------------------
+  // Cache provenance — set when this environment's rows came from a persisted
+  // snapshot (cold-start hydration) or were demoted after its connection was
+  // disposed, cleared the moment a live shell snapshot is applied. While set,
+  // rows must be presented as last-known state, never as live.
+  // ---------------------------------------------------------------------------
+  hydratedFromCacheAt?: number | undefined;
 }
 
 export interface AppState {
@@ -138,6 +146,7 @@ const initialEnvironmentState: EnvironmentState = {
   threadHistoryLoadByThreadId: {},
   sidebarThreadSummaryById: {},
   bootstrapComplete: false,
+  hydratedFromCacheAt: undefined,
 };
 
 const initialState: AppState = {
@@ -1729,6 +1738,9 @@ function syncEnvironmentShellSnapshot(
       nextThreadIds,
     ),
     bootstrapComplete: true,
+    // A live snapshot supersedes any cache-hydrated rows; the environment is
+    // no longer presenting last-known state.
+    hydratedFromCacheAt: undefined,
   };
 
   for (const thread of snapshot.threads) {
@@ -2667,6 +2679,25 @@ export function selectSidebarWorktreesAcrossEnvironments(
   );
 }
 
+/**
+ * Environments whose rows are cache-provenance (hydrated or demoted, no live
+ * snapshot applied since). Sorted so shallow-comparing consumers get a stable
+ * value while the set is unchanged.
+ */
+export function selectCacheHydratedEnvironmentIds(state: AppState): EnvironmentId[] {
+  return getEnvironmentEntries(state)
+    .filter(([, environmentState]) => environmentState.hydratedFromCacheAt !== undefined)
+    .map(([environmentId]) => environmentId)
+    .toSorted();
+}
+
+export function selectEnvironmentHydratedFromCacheAt(
+  state: AppState,
+  environmentId: EnvironmentId | null | undefined,
+): number | null {
+  return selectEnvironmentState(state, environmentId).hydratedFromCacheAt ?? null;
+}
+
 export function selectSidebarWorktreesForProjectRef(
   state: AppState,
   ref: ScopedProjectRef | null | undefined,
@@ -2857,6 +2888,105 @@ export function removeEnvironmentState(state: AppState, environmentId: Environme
   };
 }
 
+/**
+ * The persisted form of an environment's shell projection: the settled rows a
+ * client cached while it was live, replayed on cold start so the environment
+ * renders before (or without) any connection. Thread rows carry the shell and
+ * the sidebar summary; sessions and background liveness are deliberately
+ * absent — a cached row must never claim live activity.
+ */
+export interface CachedEnvironmentShellSnapshot {
+  readonly capturedAt: number;
+  readonly projects: ReadonlyArray<Project>;
+  readonly worktrees: ReadonlyArray<SidebarWorktreeSummary>;
+  readonly threads: ReadonlyArray<{
+    readonly shell: ThreadShell;
+    readonly summary: SidebarThreadSummary;
+  }>;
+}
+
+/**
+ * Populate an environment from a persisted snapshot. A no-op whenever the
+ * environment already has state — live data (or an earlier hydration) always
+ * wins, which makes hydration safe to race against connection startup. Leaves
+ * `bootstrapComplete` false so every "is this environment synced" consumer
+ * keeps treating it as not live, and stamps `hydratedFromCacheAt` so rows can
+ * be presented as last-known state.
+ */
+export function hydrateEnvironmentStateFromCache(
+  state: AppState,
+  cached: CachedEnvironmentShellSnapshot,
+  environmentId: EnvironmentId,
+): AppState {
+  if (state.environmentStateById[environmentId]) {
+    return state;
+  }
+
+  let environmentState: EnvironmentState = {
+    ...initialEnvironmentState,
+    ...buildProjectState(
+      cached.projects.filter((project) => project.environmentId === environmentId),
+    ),
+    ...buildWorktreeState(
+      cached.worktrees.filter((worktree) => worktree.environmentId === environmentId),
+    ),
+    hydratedFromCacheAt: cached.capturedAt,
+  };
+  for (const thread of cached.threads) {
+    if (
+      thread.shell.environmentId !== environmentId ||
+      thread.summary.environmentId !== environmentId
+    ) {
+      continue;
+    }
+    environmentState = writeThreadShellState(environmentState, {
+      shell: thread.shell,
+      session: null,
+      turnState: {
+        latestTurn: thread.summary.latestTurn,
+        pendingSourceProposedPlan: thread.summary.latestTurn?.sourceProposedPlan,
+      },
+      summary: { ...thread.summary, session: null, backgroundLiveness: null },
+    });
+  }
+  return commitEnvironmentState(state, environmentId, environmentState);
+}
+
+/**
+ * Demote a live environment to last-known state when its connection is
+ * disposed without the environment being forgotten (e.g. switching the
+ * selected Hub node). Rows stay rendered — the alternative is the
+ * blank-then-refill the snapshot cache exists to remove — but sessions and
+ * liveness are dropped and the cache-provenance stamp is set.
+ */
+export function demoteEnvironmentStateToCachedSnapshot(
+  state: AppState,
+  environmentId: EnvironmentId,
+  demotedAt: number,
+): AppState {
+  const environmentState = state.environmentStateById[environmentId];
+  if (!environmentState) {
+    return state;
+  }
+
+  const threadSessionById = Object.fromEntries(
+    Object.keys(environmentState.threadSessionById).map((threadId) => [threadId, null]),
+  ) as Record<ThreadId, ThreadSession | null>;
+  const sidebarThreadSummaryById = Object.fromEntries(
+    Object.entries(environmentState.sidebarThreadSummaryById).map(([threadId, summary]) => [
+      threadId,
+      { ...summary, session: null, backgroundLiveness: null },
+    ]),
+  ) as Record<ThreadId, SidebarThreadSummary>;
+  return commitEnvironmentState(state, environmentId, {
+    ...environmentState,
+    threadSessionById,
+    sidebarThreadSummaryById,
+    bootstrapComplete: false,
+    hydratedFromCacheAt: demotedAt,
+  });
+}
+
 export function setThreadBranch(
   state: AppState,
   threadRef: ScopedThreadRef,
@@ -3006,6 +3136,14 @@ export function createShellEventCoalescer(deps: ShellEventCoalescerDeps): ShellE
 interface AppStore extends AppState {
   setActiveEnvironmentId: (environmentId: EnvironmentId) => void;
   removeEnvironmentState: (environmentId: EnvironmentId) => void;
+  hydrateEnvironmentStateFromCache: (
+    cached: CachedEnvironmentShellSnapshot,
+    environmentId: EnvironmentId,
+  ) => void;
+  demoteEnvironmentStateToCachedSnapshot: (
+    environmentId: EnvironmentId,
+    demotedAt: number,
+  ) => void;
   syncServerShellSnapshot: (
     snapshot: OrchestrationShellSnapshot,
     environmentId: EnvironmentId,
@@ -3064,6 +3202,14 @@ export const useStore = create<AppStore>((set, get) => {
     removeEnvironmentState: (environmentId) => {
       shellCoalescer.flush();
       set((state) => removeEnvironmentState(state, environmentId));
+    },
+    hydrateEnvironmentStateFromCache: (cached, environmentId) => {
+      shellCoalescer.flush();
+      set((state) => hydrateEnvironmentStateFromCache(state, cached, environmentId));
+    },
+    demoteEnvironmentStateToCachedSnapshot: (environmentId, demotedAt) => {
+      shellCoalescer.flush();
+      set((state) => demoteEnvironmentStateToCachedSnapshot(state, environmentId, demotedAt));
     },
     syncServerShellSnapshot: (snapshot, environmentId) => {
       shellCoalescer.flush();

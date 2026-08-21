@@ -83,3 +83,31 @@ describe("createMobileEnvironmentStateSink.afterShellEventApplied", () => {
     removeTerminal.mockRestore();
   });
 });
+
+describe("createMobileEnvironmentStateSink.onEnvironmentProjectionChanged", () => {
+  it("marks the environment on every projection write path", async () => {
+    const projectionChanged = vi.fn();
+    const sink = createMobileEnvironmentStateSink({
+      onEnvironmentProjectionChanged: projectionChanged,
+    });
+
+    sink.syncServerShellSnapshot(
+      ENV_ID,
+      {
+        snapshotSequence: 1,
+        projects: [],
+        worktrees: [],
+        threads: [],
+        updatedAt: "2026-08-20T00:00:00.000Z",
+      } as never,
+    );
+    sink.applyOrchestrationEvents(ENV_ID, []);
+    sink.applyShellEvent(ENV_ID, { kind: "noop" } as never);
+
+    expect(projectionChanged).toHaveBeenCalledTimes(3);
+    expect(projectionChanged).toHaveBeenCalledWith(ENV_ID);
+
+    const { useStore } = await import("../state/threadsRuntime");
+    useStore.getState().removeEnvironmentState(ENV_ID);
+  });
+});

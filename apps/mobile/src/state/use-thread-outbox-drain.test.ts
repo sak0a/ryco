@@ -90,6 +90,68 @@ describe("outbox drain gate (two environments)", () => {
     expect(readThreadDeliveryState(queuedFor(ENV_B)).environmentConnected).toBe(true);
   });
 
+  it("never treats a cache-hydrated thread row as delivery-reconciled (wave 2)", async () => {
+    const { useStore } = await import("./threadsRuntime");
+    const { resolveThreadOutboxDeliveryAction } = await import("./threadOutboxModel");
+    // Cold start: node A's rows come from the snapshot cache; its socket then
+    // opens one RTT before the live shell snapshot lands. The cached idle row
+    // must not read as "exists, not busy" — the message waits for the live
+    // snapshot to clear the provenance stamp.
+    useStore.getState().hydrateEnvironmentStateFromCache(
+      {
+        capturedAt: 1,
+        projects: [],
+        worktrees: [],
+        threads: [
+          {
+            shell: {
+              id: "t1",
+              environmentId: ENV_A,
+              codexThreadId: null,
+              projectId: "p1",
+              title: "cached",
+              modelSelection: { model: "claude" },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              error: null,
+              createdAt: "2026-08-19T00:00:00.000Z",
+              archivedAt: null,
+              branch: null,
+              worktreePath: null,
+            },
+            summary: {
+              id: "t1",
+              environmentId: ENV_A,
+              projectId: "p1",
+              title: "cached",
+              interactionMode: "default",
+              session: null,
+              createdAt: "2026-08-19T00:00:00.000Z",
+              archivedAt: null,
+              latestTurn: null,
+              branch: null,
+              worktreePath: null,
+              latestUserMessageAt: null,
+              hasPendingApprovals: false,
+              hasPendingUserInput: false,
+              hasActionableProposedPlan: false,
+            },
+          },
+        ],
+      } as never,
+      ENV_A,
+    );
+    connectEnvironment(ENV_A, "ws://node-a.local:13773/ws");
+
+    const delivery = readThreadDeliveryState(queuedFor(ENV_A));
+    expect(delivery.threadExists).toBe(true);
+    expect(delivery.environmentConnected).toBe(true);
+    expect(delivery.deliveryReconciled).toBe(false);
+    expect(resolveThreadOutboxDeliveryAction(delivery)).toBe("wait");
+
+    useStore.getState().removeEnvironmentState(ENV_A);
+  });
+
   it("treats an environment with no recorded socket as not connected", () => {
     connectEnvironment(ENV_B, "ws://node-b.local:13774/ws");
 

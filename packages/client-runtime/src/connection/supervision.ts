@@ -13,6 +13,7 @@ import type {
 import { scopedThreadKey, scopeThreadRef } from "../scoped.ts";
 import type { EnvironmentConnection } from "./connection.ts";
 import type { EnvironmentStateSink } from "./environmentStateSink.ts";
+import { planEvictionsToCapacity } from "./evictionPolicy.ts";
 import {
   classifyProjectionSnapshot,
   createProjectionTracker,
@@ -378,30 +379,19 @@ export function createEnvironmentConnectionSupervisor<
     return true;
   };
   const evictToCapacity = () => {
-    let estimatedBytes = [...threadDetailSubscriptions.values()].reduce(
-      (total, entry) => total + entry.estimatedRetainedBytes,
-      0,
+    const planned = planEvictionsToCapacity(
+      [...threadDetailSubscriptions.entries()].map(([key, entry]) => ({
+        key,
+        lastAccessedAt: entry.lastAccessedAt,
+        retainedBytes: entry.estimatedRetainedBytes,
+        evictable: shouldEvict(entry),
+      })),
+      {
+        maxEntries: MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS,
+        maxBytes: MAX_CACHED_THREAD_DETAIL_ESTIMATED_BYTES,
+      },
     );
-    if (
-      threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS &&
-      estimatedBytes <= MAX_CACHED_THREAD_DETAIL_ESTIMATED_BYTES
-    ) {
-      return;
-    }
-    const idle = [...threadDetailSubscriptions.entries()]
-      .filter(([, entry]) => shouldEvict(entry))
-      .toSorted(([, left], [, right]) => left.lastAccessedAt - right.lastAccessedAt);
-    for (const [key] of idle) {
-      if (
-        threadDetailSubscriptions.size <= MAX_CACHED_THREAD_DETAIL_SUBSCRIPTIONS &&
-        estimatedBytes <= MAX_CACHED_THREAD_DETAIL_ESTIMATED_BYTES
-      ) {
-        return;
-      }
-      const retainedBytes = threadDetailSubscriptions.get(key)?.estimatedRetainedBytes ?? 0;
-      disposeByKey(key);
-      estimatedBytes = Math.max(0, estimatedBytes - retainedBytes);
-    }
+    for (const key of planned) disposeByKey(key);
   };
   const reconcileEntry = (entry: ThreadDetailSubscriptionEntry) => {
     clearEviction(entry);

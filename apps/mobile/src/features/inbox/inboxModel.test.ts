@@ -222,4 +222,37 @@ describe("inbox change-request badge", () => {
     });
     expect(sections.flatMap((section) => section.rows)[0]?.changeRequest).toBeNull();
   });
+
+  it("presents a stale environment's rows as offline, never as live or actionable", () => {
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco"), project(NODE_B, "project-b", "Hub")],
+      worktrees: [],
+      environments: [
+        {
+          environmentId: NODE_A,
+          label: "Work Mac",
+          connectionState: "offline",
+          stale: true,
+          staleDetail: "Offline · last seen 2h ago",
+        },
+        { environmentId: NODE_B, label: "Build node", connectionState: "connected" },
+      ],
+      threads: [
+        // Cached fields that would otherwise read as live or actionable.
+        thread(NODE_A, "cached-running", "project-a", {
+          latestTurn: { state: "running" } as never,
+        }),
+        thread(NODE_A, "cached-approval", "project-a", { hasPendingApprovals: true }),
+        thread(NODE_B, "live-working", "project-b", {
+          latestTurn: { state: "running" } as never,
+        }),
+      ],
+    });
+
+    const active = sections.find((section) => section.key === "active");
+    const recent = sections.find((section) => section.key === "recent");
+    expect(active?.rows.map((row) => row.threadId)).toEqual(["live-working"]);
+    expect(recent?.rows.map((row) => row.state)).toEqual(["offline", "offline"]);
+    expect(recent?.rows[0]?.statusLabel).toBe("Offline · last seen 2h ago");
+  });
 });
