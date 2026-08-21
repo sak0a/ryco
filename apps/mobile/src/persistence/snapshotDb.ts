@@ -22,10 +22,7 @@ export interface SnapshotDbHandle {
   // Mutable arrays on purpose: expo-sqlite's SQLiteBindParams is mutable, so a
   // readonly parameter type would reject the real SQLiteDatabase.
   readonly runAsync: (source: string, params: Array<string | number | null>) => Promise<unknown>;
-  readonly getAllAsync: <T>(
-    source: string,
-    params: Array<string | number | null>,
-  ) => Promise<T[]>;
+  readonly getAllAsync: <T>(source: string, params: Array<string | number | null>) => Promise<T[]>;
   readonly getFirstAsync: <T>(
     source: string,
     params: Array<string | number | null>,

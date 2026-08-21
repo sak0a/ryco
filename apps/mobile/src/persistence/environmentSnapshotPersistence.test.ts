@@ -37,7 +37,10 @@ import { createSnapshotPersistenceRuntime } from "./environmentSnapshotPersisten
 import { payloadByteLength, type SnapshotDb } from "./snapshotDb";
 
 function createFakeSnapshotDb() {
-  const snapshots = new Map<string, { schemaVersion: number; payload: string; updatedAt: number }>();
+  const snapshots = new Map<
+    string,
+    { schemaVersion: number; payload: string; updatedAt: number }
+  >();
   let roster: { schemaVersion: number; payload: string } | null = null;
   const db: SnapshotDb = {
     loadEnvironmentSnapshot: async (environmentId) => {
@@ -211,10 +214,12 @@ describe("environment snapshot persistence", () => {
       hasDirectEnvironment: () => true,
     });
     const hydratedId = env("persist-hydrated");
-    useStore.getState().hydrateEnvironmentStateFromCache(
-      { capturedAt: 1, projects: [], worktrees: [], threads: [] },
-      hydratedId,
-    );
+    useStore
+      .getState()
+      .hydrateEnvironmentStateFromCache(
+        { capturedAt: 1, projects: [], worktrees: [], threads: [] },
+        hydratedId,
+      );
     const unknownId = env("persist-unknown");
 
     runtime.markDirty(hydratedId);
@@ -294,10 +299,12 @@ describe("environment snapshot persistence", () => {
       payload: boundStoredEnvironmentSnapshot(storedRecord(environmentId)).payload,
       updatedAt: 1,
     });
-    useStore.getState().hydrateEnvironmentStateFromCache(
-      { capturedAt: 1, projects: [], worktrees: [], threads: [] },
-      environmentId,
-    );
+    useStore
+      .getState()
+      .hydrateEnvironmentStateFromCache(
+        { capturedAt: 1, projects: [], worktrees: [], threads: [] },
+        environmentId,
+      );
 
     const hostedStore = createFakeHostedStore({ directoryStatus: "ready", nodes: [node] });
     const runtime = createSnapshotPersistenceRuntime({
@@ -330,10 +337,12 @@ describe("environment snapshot persistence", () => {
       payload: boundStoredEnvironmentSnapshot(storedRecord(environmentId)).payload,
       updatedAt: 1,
     });
-    useStore.getState().hydrateEnvironmentStateFromCache(
-      { capturedAt: 1, projects: [], worktrees: [], threads: [] },
-      environmentId,
-    );
+    useStore
+      .getState()
+      .hydrateEnvironmentStateFromCache(
+        { capturedAt: 1, projects: [], worktrees: [], threads: [] },
+        environmentId,
+      );
 
     const hostedStore = createFakeHostedStore({
       accountStatus: "authenticated",
@@ -385,7 +394,11 @@ describe("environment snapshot persistence", () => {
       hasDirectEnvironment: () => false,
     });
     runtime.installHostedRosterMirror(hostedStore);
-    hostedStore.patch({ accountStatus: "session-expired", directoryStatus: "idle", nodes: [] } as never);
+    hostedStore.patch({
+      accountStatus: "session-expired",
+      directoryStatus: "idle",
+      nodes: [],
+    } as never);
     await vi.advanceTimersByTimeAsync(10);
 
     expect(snapshots.has(environmentId)).toBe(true);

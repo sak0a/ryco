@@ -45,7 +45,12 @@ export type ThreadConnectionRetargetDecision =
 
 type RetargetStateInput = Pick<
   HostedHubState,
-  "accountStatus" | "directoryStatus" | "browserStatus" | "selectedNode" | "selectionStatus" | "nodes"
+  | "accountStatus"
+  | "directoryStatus"
+  | "browserStatus"
+  | "selectedNode"
+  | "selectionStatus"
+  | "nodes"
 >;
 
 export interface ThreadConnectionRetargetInput {

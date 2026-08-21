@@ -276,7 +276,10 @@ export function createSnapshotPersistenceRuntime(deps: SnapshotPersistenceDeps) 
         }
         deps.store
           .getState()
-          .hydrateEnvironmentStateFromCache(toCachedEnvironmentShellSnapshot(record), environmentId);
+          .hydrateEnvironmentStateFromCache(
+            toCachedEnvironmentShellSnapshot(record),
+            environmentId,
+          );
       } catch (error) {
         warn("could not hydrate environment snapshot")(error);
       }

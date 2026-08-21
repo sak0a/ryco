@@ -90,9 +90,8 @@ export function initializeMobileRuntime(): MobileConnectionRegistry {
     // land first or the orphan check would misread direct environments.
     void (async () => {
       const { mobileKV } = await import("../platform/kv");
-      const { initializeMobileSnapshotPersistence } = await import(
-        "../persistence/environmentSnapshotPersistence"
-      );
+      const { initializeMobileSnapshotPersistence } =
+        await import("../persistence/environmentSnapshotPersistence");
       await registry.catalog.waitForHydration().catch(() => undefined);
       await initializeMobileSnapshotPersistence({
         kv: mobileKV,

@@ -45,13 +45,13 @@ has to know which machine something is on before they can see it, it is wrong." 
 explicit by design: E2EE first contact (one deliberate verification per node, ever), role
 (viewer/operator/owner), and machine sleep as a row fact, never a mode.
 
-| Wave | PR | State | What it does |
-| --- | --- | --- | --- |
-| 1 | #387 | open | Outbox drain gates on the message's own environment; per-environment WS status slots beside the unchanged global. |
-| 2 | #388 | open | Per-environment SQLite snapshot cache + persisted Hub node roster: a sleeping machine's projects, worktrees and threads stay rendered, visibly stale from Hub directory presence. Hub selection survives relaunch. Explicit sign-out purges cached content; session expiry deliberately does not. |
-| 3a | #390 | open | Opening a thread re-targets the single hosted connection to its node (debounced, cancel-safe, concurrency pinned at 1). Unselectable nodes open read-only from cache with one of five bounded reasons; the E2EE status pill settles transients behind a 500 ms threshold with "Not verified"/"Legacy" always breaking through. |
-| 4 | this branch | in progress | Demotes node out of the interface: no "Nodes" home mode, projects group by project with machines as row provenance, same-repo rows can merge across machines behind the repository-grouping preference (never merging ambiguously), per-row role and trust markers, and "connect" vocabulary retired for machine vocabulary. |
-| 3b | — | not started, **gated** | True demand-driven multi-connect: scope leases before any concurrency raise, `selectedNodes`, bounded connection lifetime, background release without foreground reconnect storms, per-row `delivery-unknown`. Gated on the Hub rollout drill (`sak0a/ryco-hub` issue #12, open since 2026-07-21); wave 4 was rebased onto 3a (plan amendment 2026-08-20) precisely so the gate holds back only 3b. |
+| Wave | PR          | State                  | What it does                                                                                                                                                                                                                                                                                                                                                                                        |
+| ---- | ----------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | #387        | open                   | Outbox drain gates on the message's own environment; per-environment WS status slots beside the unchanged global.                                                                                                                                                                                                                                                                                   |
+| 2    | #388        | open                   | Per-environment SQLite snapshot cache + persisted Hub node roster: a sleeping machine's projects, worktrees and threads stay rendered, visibly stale from Hub directory presence. Hub selection survives relaunch. Explicit sign-out purges cached content; session expiry deliberately does not.                                                                                                   |
+| 3a   | #390        | open                   | Opening a thread re-targets the single hosted connection to its node (debounced, cancel-safe, concurrency pinned at 1). Unselectable nodes open read-only from cache with one of five bounded reasons; the E2EE status pill settles transients behind a 500 ms threshold with "Not verified"/"Legacy" always breaking through.                                                                      |
+| 4    | this branch | in progress            | Demotes node out of the interface: no "Nodes" home mode, projects group by project with machines as row provenance, same-repo rows can merge across machines behind the repository-grouping preference (never merging ambiguously), per-row role and trust markers, and "connect" vocabulary retired for machine vocabulary.                                                                        |
+| 3b   | —           | not started, **gated** | True demand-driven multi-connect: scope leases before any concurrency raise, `selectedNodes`, bounded connection lifetime, background release without foreground reconnect storms, per-row `delivery-unknown`. Gated on the Hub rollout drill (`sak0a/ryco-hub` issue #12, open since 2026-07-21); wave 4 was rebased onto 3a (plan amendment 2026-08-20) precisely so the gate holds back only 3b. |
 
 Two facts the series established that any future work must respect:
 
@@ -67,17 +67,17 @@ Two facts the series established that any future work must respect:
 
 ## Open delivery slices
 
-| Slice                                 | Repository state              | What remains                                                                                                       |
-| ------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| General thread inspector              | Not on `main`                 | Land the shared files/review/source-control/terminal container before treating those surfaces as one architecture. |
-| Mobile source control                 | Not on `main`                 | Branch/status/actions and the full native review workflow need a scoped PR and current validation.                 |
-| Mobile terminal                       | Not on `main`                 | Only `terminalPreferences` exists; the bounded renderer and focused workspace need a scoped PR plus native QA.     |
-| Agent notifications and Live Activity | Not on `main`                 | Client runtime, native lifecycle, Hub push-token support, permissions UX, device QA — under the contentless-push constraint above. |
-| Durable offline inbox                 | In review (#388, stacked)     | Land the provenance stack. Retention/privacy semantics are now defined: sign-out purges, expiry keeps, revocation invalidates. |
-| Demand-driven multi-connect           | Not started, gated            | Wave 3b, blocked on the Hub rollout drill (`sak0a/ryco-hub` #12).                                                  |
-| Tablet inspector                      | Delivered for files only      | Generalize the regular-width split layout across workspace tools. Home surfaces are width-neutral single columns.  |
-| Android                               | Unqualified                   | Exercise image/SVG/HTML preview, WebView isolation, navigation, native modules, and relay lifecycle on Android.    |
-| Store distribution                    | Not complete                  | Apple Developer/App Store Connect/TestFlight work remains separate from simulator and Personal Team development.   |
+| Slice                                 | Repository state          | What remains                                                                                                                       |
+| ------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| General thread inspector              | Not on `main`             | Land the shared files/review/source-control/terminal container before treating those surfaces as one architecture.                 |
+| Mobile source control                 | Not on `main`             | Branch/status/actions and the full native review workflow need a scoped PR and current validation.                                 |
+| Mobile terminal                       | Not on `main`             | Only `terminalPreferences` exists; the bounded renderer and focused workspace need a scoped PR plus native QA.                     |
+| Agent notifications and Live Activity | Not on `main`             | Client runtime, native lifecycle, Hub push-token support, permissions UX, device QA — under the contentless-push constraint above. |
+| Durable offline inbox                 | In review (#388, stacked) | Land the provenance stack. Retention/privacy semantics are now defined: sign-out purges, expiry keeps, revocation invalidates.     |
+| Demand-driven multi-connect           | Not started, gated        | Wave 3b, blocked on the Hub rollout drill (`sak0a/ryco-hub` #12).                                                                  |
+| Tablet inspector                      | Delivered for files only  | Generalize the regular-width split layout across workspace tools. Home surfaces are width-neutral single columns.                  |
+| Android                               | Unqualified               | Exercise image/SVG/HTML preview, WebView isolation, navigation, native modules, and relay lifecycle on Android.                    |
+| Store distribution                    | Not complete              | Apple Developer/App Store Connect/TestFlight work remains separate from simulator and Personal Team development.                   |
 
 ## File-browser acceptance still open (from PR #330)
 
