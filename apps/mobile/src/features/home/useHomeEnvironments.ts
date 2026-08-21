@@ -9,6 +9,7 @@ import { useHostedHubStore } from "../../hostedHub/state";
 import { selectCacheHydratedEnvironmentIds, useStore } from "../../state/threadsRuntime";
 import { useSavedEnvironments } from "../connection/useConnectionController";
 import { buildHomeEnvironments } from "./homeEnvironmentModel";
+import { useNodeTrust } from "./useNodeTrust";
 
 export function useHomeEnvironments() {
   const { rows: directRows } = useSavedEnvironments();
@@ -25,6 +26,11 @@ export function useHomeEnvironments() {
   // against; cache-provenance ids mark which environments are last-known state.
   const rosterNodes = useSyncExternalStore(subscribeCachedHubNodeRoster, getCachedHubNodeRoster);
   const cacheProvenanceEnvironmentIds = useStore(useShallow(selectCacheHydratedEnvironmentIds));
+  // Wave 4: trust is keyed by the roster's Hub-minted node id, which is why the
+  // roster records go in whole rather than the environment ids alone. The store
+  // snapshot is a stable reference between commits, so this does not re-derive
+  // per render.
+  const trustByEnvironmentId = useNodeTrust(rosterNodes);
 
   return useMemo(
     () =>
@@ -54,7 +60,8 @@ export function useHomeEnvironments() {
           lastAuthenticatedAt: node.lastAuthenticatedAt,
         })),
         cacheProvenanceEnvironmentIds,
+        trustByEnvironmentId,
       }),
-    [cacheProvenanceEnvironmentIds, directRows, hosted, rosterNodes],
+    [cacheProvenanceEnvironmentIds, directRows, hosted, rosterNodes, trustByEnvironmentId],
   );
 }

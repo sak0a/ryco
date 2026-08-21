@@ -341,9 +341,9 @@ export function NewTaskRouteScreen(props: NewTaskRouteScreenProps) {
       >
         <EmptyState
           variant="plain"
-          title="Connect a node first"
-          detail="A task needs a mutation-ready node, project, and workspace."
-          actionLabel="Open Nodes"
+          title="Add a machine first"
+          detail="A task needs a ready machine, project, and workspace."
+          actionLabel="Add a machine"
           onAction={() => navigation.navigate("Connections")}
         />
       </ScrollView>

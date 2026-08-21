@@ -3,12 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { buildHomeChromeModel, HOME_LIST_PADDING_BOTTOM, HOME_MODE_TITLE } from "./homeChromeModel";
 import type { HomeMode } from "./homeMode";
 
-const MODES: ReadonlyArray<HomeMode> = ["inbox", "projects", "nodes"];
+const MODES: ReadonlyArray<HomeMode> = ["inbox", "projects"];
 
 describe("home chrome", () => {
   it("titles each mode", () => {
     expect(MODES.map((mode) => buildHomeChromeModel({ mode, searchVisible: false }).title)).toEqual(
-      ["Inbox", "Projects", "Nodes"],
+      ["Inbox", "Projects"],
     );
   });
 

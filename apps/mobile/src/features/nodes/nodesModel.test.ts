@@ -35,6 +35,9 @@ describe("Nodes model", () => {
     });
 
     expect(sections.map((section) => section.key)).toEqual(["hub", "direct"]);
+    // The headers are the machines surface's own copy; pin them so the model
+    // cannot drift away from what NodesScreen renders.
+    expect(sections.map((section) => section.title)).toEqual(["Hub nodes", "Paired directly"]);
     expect(sections[0]?.rows[0]?.label).toBe("Studio");
     expect(sections[1]?.rows[0]?.transportLabel).toBe("Tailscale");
   });

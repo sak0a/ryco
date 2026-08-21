@@ -16,7 +16,12 @@ export interface NodeModelInput {
 
 export interface NodeSectionModel {
   readonly key: NodePlane;
-  readonly title: "Hub nodes" | "Direct connections";
+  /**
+   * Bounded to the two headers the machines surface renders. The literal union
+   * is the guard that keeps this model from drifting away from
+   * `NodesScreen`/`HubNodeSection` copy while `buildNodeSections` is unused.
+   */
+  readonly title: "Hub nodes" | "Paired directly";
   readonly rows: ReadonlyArray<NodeModelInput>;
 }
 
@@ -78,7 +83,7 @@ export function buildNodeSections(input: {
     sections.push({ key: "hub", title: "Hub nodes", rows: hubRows });
   }
   if (directRows.length > 0) {
-    sections.push({ key: "direct", title: "Direct connections", rows: directRows });
+    sections.push({ key: "direct", title: "Paired directly", rows: directRows });
   }
   return sections;
 }

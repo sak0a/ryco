@@ -1,6 +1,7 @@
 import type { EnvironmentId } from "@ryco/contracts";
 
 import type { InboxEnvironment } from "../inbox/inboxModel";
+import type { NodeTrust } from "./nodeTrustModel";
 
 export interface DirectHomeEnvironmentInput {
   readonly environmentId: EnvironmentId;
@@ -108,6 +109,13 @@ export function buildHomeEnvironments(input: {
   readonly cachedHubNodes?: ReadonlyArray<CachedHubNodeHomeEnvironmentInput>;
   /** Environments whose store rows are cache-provenance (no live snapshot yet). */
   readonly cacheProvenanceEnvironmentIds?: ReadonlyArray<EnvironmentId>;
+  /**
+   * Wave 4: per-environment E2EE trust, display only (see `nodeTrustModel.ts`).
+   * `null` or absent means this device has no evidence to render a claim from —
+   * an unobtainable marker, or no hosted scope at all — and every row is then
+   * left unmarked rather than marked unverified.
+   */
+  readonly trustByEnvironmentId?: ReadonlyMap<string, NodeTrust> | null;
   readonly now?: number;
 }): ReadonlyArray<InboxEnvironment> {
   const now = input.now ?? Date.now();
@@ -123,12 +131,25 @@ export function buildHomeEnvironments(input: {
   ): Pick<InboxEnvironment, "stale" | "staleDetail"> =>
     cachedIds.has(environmentId) ? { stale: true, staleDetail: detail } : {};
 
+  // Role and trust are ADDITIVE: neither feeds `connectionState`, whose
+  // derivation (including the viewer -> "read-only" mapping) is unchanged. A row
+  // that carried no role before carries none now — absent, not a default.
+  const roleFields = (
+    role: NonNullable<InboxEnvironment["role"]> | null,
+  ): Pick<InboxEnvironment, "role"> => (role === null ? {} : { role });
+  const trustFields = (environmentId: EnvironmentId): Pick<InboxEnvironment, "trust"> => {
+    const trust = input.trustByEnvironmentId?.get(environmentId);
+    return trust === undefined ? {} : { trust };
+  };
+
   const environments = new Map<EnvironmentId, InboxEnvironment>();
   for (const direct of input.direct) {
     environments.set(direct.environmentId, {
       environmentId: direct.environmentId,
       label: direct.label,
       connectionState: directState(direct),
+      ...roleFields(direct.role),
+      ...trustFields(direct.environmentId),
       ...staleFields(direct.environmentId, "Offline · cached"),
     });
   }
@@ -139,6 +160,8 @@ export function buildHomeEnvironments(input: {
       environmentId: node.environmentId,
       label: node.label,
       connectionState: "offline",
+      ...roleFields(node.role),
+      ...trustFields(node.environmentId),
       ...staleFields(node.environmentId, cachedHubNodeStaleDetail(node, now)),
     });
   }
@@ -150,6 +173,8 @@ export function buildHomeEnvironments(input: {
       environmentId: input.hosted.environmentId,
       label: input.hosted.label,
       connectionState: hostedState(input.hosted),
+      ...roleFields(input.hosted.role),
+      ...trustFields(input.hosted.environmentId),
       ...staleFields(
         input.hosted.environmentId,
         rosterNode ? cachedHubNodeStaleDetail(rosterNode, now) : "Offline · cached",

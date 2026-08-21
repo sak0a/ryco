@@ -36,8 +36,12 @@ vi.mock("../../components/NewTaskFab", () => ({ NewTaskFab: "NewTaskFab" }));
 vi.mock("../../components/HomeModeControl", () => ({ HomeModeControl: "HomeModeControl" }));
 vi.mock("../../components/NodeScopeControl", () => ({ NodeScopeControl: "NodeScopeControl" }));
 vi.mock("../inbox/InboxScreen", () => ({ InboxScreen: "InboxScreen" }));
-vi.mock("../nodes/NodesScreen", () => ({ NodesScreen: "NodesScreen" }));
 vi.mock("../projects/ProjectsScreen", () => ({ ProjectsScreen: "ProjectsScreen" }));
+// useNodeTrust reaches the E2EE trust store singleton and the hosted runtime
+// config at module scope; preferencesStore reaches expo-sqlite's KV store.
+// Both must stop at the module boundary in the node test environment.
+vi.mock("./useNodeTrust", () => ({ useNodeTrust: () => null }));
+vi.mock("../../state/preferencesStore", () => ({ usePreferences: () => ({}) }));
 vi.mock("../connection/useConnectionController", () => ({
   useSavedEnvironments: () => ({ rows: [], isLoading: false }),
 }));
@@ -132,7 +136,7 @@ describe("C1 Home header", () => {
     expect(navigationMock.navigate).not.toHaveBeenCalled();
   });
 
-  it("opens Settings straight from the header instead of routing through Nodes", () => {
+  it("opens Settings straight from the header", () => {
     const element = renderHeaderOptions().headerRight?.() as ReactElement<{
       children: ReadonlyArray<ReactElement<{ onPress: () => void }>>;
     }>;

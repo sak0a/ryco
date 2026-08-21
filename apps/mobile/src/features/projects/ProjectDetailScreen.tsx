@@ -113,7 +113,7 @@ export function ProjectDetailScreen(props: {
     if (!visiblePendingWorktree) return;
     const timeout = setTimeout(() => {
       setPendingWorktree(null);
-      setActionError("The node did not confirm the worktree. Check Nodes, then try again.");
+      setActionError("The machine did not confirm the worktree. Check Machines, then try again.");
     }, 15_000);
     return () => clearTimeout(timeout);
   }, [visiblePendingWorktree]);

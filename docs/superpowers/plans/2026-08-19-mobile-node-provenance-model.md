@@ -76,7 +76,7 @@ so do not copy code.
 | 2 | `mobile/provenance-2-snapshot-cache` | wave 1 | large | yes |
 | 3a | `mobile/provenance-3a-connection-retarget` | wave 2 | medium | no — needs 1 and 2 |
 | 3b | `mobile/provenance-3b-demand-driven-connections` | wave 3a | large | no — needs 3a; **gated** |
-| 4 | `mobile/provenance-4-node-as-provenance` | wave 3b | medium | no — needs 2 |
+| 4 | `mobile/provenance-4-node-as-provenance` | wave 3a | medium | no — needs 2 |
 
 Wave 1 is the stack base even though wave 2 carries more product value. It is roughly fifty lines,
 it repairs a defect that is **already reachable on `main`** (direct multi-connect ships today), it
@@ -218,8 +218,14 @@ unchanged.
 
 Wave 2 is what makes 3a safe: before the snapshot cache, retargeting blanked the inbox on every
 switch (captured on device in wave 2's QA); now cached rows survive the switch, so retargeting
-is non-destructive. Wave 4 stays stacked on 3b per the original order; if the drill outlasts
-wave 4's readiness it can be rebased onto 3a, which per the stack table is all it needs.
+is non-destructive.
+
+**Amendment (2026-08-20): wave 4 bases on 3a, not 3b.** The stack table's "Mergeable alone"
+column has said all along that wave 4 needs only wave 2; the base column contradicted it. With
+3a landed, opening a cached thread already retargets automatically — which is the only thing
+wave 4 needed from wave 3. Basing wave 4 on 3b would inherit the Hub rollout-drill gate for no
+reason. The gate applies to 3b alone; 3b rebases onto wave 4 (or lands independently) when the
+drill completes.
 
 ### Wave 3a: Opening a thread re-targets the hosted connection
 
@@ -315,7 +321,7 @@ observed, even if the code is ready — keep it in the stack.
 
 ## Wave 4: Demote node in the interface
 
-Branch `mobile/provenance-4-node-as-provenance`, based on wave 3.
+Branch `mobile/provenance-4-node-as-provenance`, based on wave 3a. **Ungated.**
 
 Files:
 

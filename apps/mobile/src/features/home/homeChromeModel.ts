@@ -8,7 +8,6 @@ import type { HomeMode } from "./homeMode";
 export const HOME_MODE_TITLE: Readonly<Record<HomeMode, string>> = {
   inbox: "Inbox",
   projects: "Projects",
-  nodes: "Nodes",
 };
 
 /**

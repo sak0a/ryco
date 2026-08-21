@@ -12,11 +12,12 @@ import { RycoWordmark } from "../../components/RycoWordmark";
 import { SymbolView } from "../../components/AppSymbol";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useHomeWorkspaceData } from "../../state/homeData";
+import { resolveHomeGroupingMode } from "../../state/homeGrouping";
+import { usePreferences } from "../../state/preferencesStore";
 import { useStore } from "../../state/threadsRuntime";
 import { buildInboxSections, resolveInboxEmptyState } from "../inbox/inboxModel";
 import { InboxScreen } from "../inbox/InboxScreen";
-import { NodesScreen } from "../nodes/NodesScreen";
-import { buildProjectNodeGroups } from "../projects/projectsModel";
+import { buildProjectRows } from "../projects/projectsModel";
 import { ProjectsScreen } from "../projects/ProjectsScreen";
 import { buildHomeChromeModel } from "./homeChromeModel";
 import { createHomeModeState, reduceHomeModeState, type HomeMode } from "./homeMode";
@@ -32,6 +33,8 @@ export function HomeScreen() {
   const textColor = useThemeColor("--color-foreground");
   const { projects, worktrees, threads } = useHomeWorkspaceData();
   const environments = useHomeEnvironments();
+  const preferences = usePreferences();
+  const groupingMode = resolveHomeGroupingMode(preferences.projectGroupingEnabled);
 
   const currentQuery = home.queryByMode[home.mode];
   const currentNodeScope = home.nodeScopeByMode[home.mode];
@@ -54,18 +57,20 @@ export function HomeScreen() {
       worktrees,
     ],
   );
-  const projectGroups = useMemo(
+  const projectRows = useMemo(
     () =>
-      buildProjectNodeGroups({
+      buildProjectRows({
         projects,
         worktrees,
         threads,
         environments,
         query: home.queryByMode.projects,
         nodeScope: home.nodeScopeByMode.projects,
+        groupingMode,
       }),
     [
       environments,
+      groupingMode,
       home.nodeScopeByMode.projects,
       home.queryByMode.projects,
       projects,
@@ -80,6 +85,8 @@ export function HomeScreen() {
     navigation.navigate("NewTask", {
       environmentId: currentNodeScope ?? undefined,
     });
+
+  const openMachines = () => navigation.navigate("Connections");
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -184,7 +191,10 @@ export function HomeScreen() {
           ) : null}
         </View>
       ) : null}
-      {home.mode !== "nodes" ? (
+      {/* Wave 4 demotes the machine filter out of the primary chrome: it rides
+          with search. An ACTIVE scope keeps it visible even with search closed —
+          a filter the user cannot see or dismiss would silently hide work. */}
+      {searchVisible || currentNodeScope !== null ? (
         <NodeScopeControl
           options={environments}
           selected={currentNodeScope}
@@ -209,7 +219,7 @@ export function HomeScreen() {
             onOpenThread={(row) => openThread(row)}
             onEmptyAction={(state) => {
               if (state === "connect-node") {
-                selectMode("nodes");
+                openMachines();
               } else if (state === "clear-filter") {
                 clearFilters();
               } else {
@@ -217,10 +227,10 @@ export function HomeScreen() {
               }
             }}
           />
-        ) : home.mode === "projects" ? (
+        ) : (
           <ProjectsScreen
-            groups={projectGroups}
-            hasConnections={environments.length > 0}
+            rows={projectRows}
+            hasMachines={environments.length > 0}
             initialScrollOffset={home.scrollOffsetByMode.projects}
             onScrollOffset={(offset) =>
               dispatch({ type: "set-scroll-offset", mode: "projects", offset })
@@ -228,19 +238,11 @@ export function HomeScreen() {
             onAddProject={() => navigation.navigate("AddProject")}
             onOpenProject={(row) =>
               navigation.navigate("Project", {
-                environmentId: row.environmentId,
-                projectId: row.projectId,
+                environmentId: row.open.environmentId,
+                projectId: row.open.projectId,
               })
             }
-            onOpenNodes={() => selectMode("nodes")}
-          />
-        ) : (
-          <NodesScreen
-            query={home.queryByMode.nodes}
-            initialScrollOffset={home.scrollOffsetByMode.nodes}
-            onScrollOffset={(offset) =>
-              dispatch({ type: "set-scroll-offset", mode: "nodes", offset })
-            }
+            onAddMachine={openMachines}
           />
         )}
       </View>

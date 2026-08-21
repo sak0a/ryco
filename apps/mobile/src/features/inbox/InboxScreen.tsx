@@ -25,14 +25,15 @@ const EMPTY_COPY: Readonly<
     { readonly title: string; readonly detail: string; readonly actionLabel: string }
   >
 > = {
+  // The internal id stays `connect-node`; only the copy moves off the noun.
   "connect-node": {
-    title: "Connect a node",
-    detail: "Use your Hub or pair a node directly to bring its work into Ryco.",
-    actionLabel: "Open Nodes",
+    title: "Add a machine",
+    detail: "Use your Hub or pair a machine directly to bring its work into Ryco.",
+    actionLabel: "Add a machine",
   },
   "add-project": {
     title: "No projects yet",
-    detail: "Add a remote workspace on a connected node to start working.",
+    detail: "Add a remote workspace on a connected machine to start working.",
     actionLabel: "Open Projects",
   },
   "new-task": {
@@ -42,7 +43,7 @@ const EMPTY_COPY: Readonly<
   },
   "clear-filter": {
     title: "Nothing matches",
-    detail: "Change the search or return to all nodes.",
+    detail: "Change the search or return to all machines.",
     actionLabel: "Clear filters",
   },
 };

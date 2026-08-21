@@ -49,11 +49,11 @@ routes; the custom scheme remains for verified-email and reset links.
    `ryco-dev://hosted/complete`; no paid Apple Developer membership is required
    for development.
 3. **Start Metro** (if not already running): `bun run --cwd apps/mobile dev:client`.
-4. **Start a Ryco node** on the LAN/tailnet and open its **Pair a device**
-   screen to produce a pairing URL (`ryco://pair?host=…#token=…`, or an
+4. **Start a Ryco node** on the LAN/tailnet and open its pairing screen to
+   produce a pairing URL (`ryco://pair?host=…#token=…`, or an
    `https://…/pair` link). The token is single-use.
-5. **Pair** in the app: paste the pairing URL and tap **Pair and connect**. The
-   app exchanges the credential for a bearer session token
+5. **Pair** in the app: open **Add a machine**, paste the pairing URL, and tap
+   **Pair**. The app exchanges the credential for a bearer session token
    (`/api/auth/bootstrap/bearer`), stores it in the iOS Keychain (SecureStore),
    and upserts the environment into the catalog. That upsert fires the
    environment-connection driver: the supervisor opens the live WebSocket with a
