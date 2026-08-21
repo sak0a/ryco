@@ -1,5 +1,10 @@
 import { Effect, Exit, Queue, Scope } from "effect";
-import { ORCHESTRATION_WS_METHODS, WS_METHODS, WsRpcGroup } from "@ryco/contracts";
+import {
+  AGENT_CONTROL_WS_METHODS,
+  ORCHESTRATION_WS_METHODS,
+  WS_METHODS,
+  WsRpcGroup,
+} from "@ryco/contracts";
 import { RpcMessage, RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 type BrowserWsClient = {
@@ -28,10 +33,14 @@ interface BrowserWsRpcHarnessOptions {
   ) => ReadonlyArray<unknown> | undefined;
 }
 
+// RpcGroup does not expose stream metadata through its request keys. Every
+// streaming method must be listed here or the harness will return a unary
+// response into the stream and trigger the client's reconnect path.
 const STREAM_METHODS = new Set<string>([
   ORCHESTRATION_WS_METHODS.subscribeShell,
   ORCHESTRATION_WS_METHODS.subscribeThread,
   ORCHESTRATION_WS_METHODS.subscribeThreadWindow,
+  AGENT_CONTROL_WS_METHODS.subscribeProposals,
   WS_METHODS.gitRunStackedAction,
   WS_METHODS.subscribeVcsStatus,
   WS_METHODS.subscribeTerminalEvents,
