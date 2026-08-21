@@ -42,8 +42,10 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            if (context.repo.owner !== "sak0a" || context.repo.repo !== "ryco") {
-              core.info(`Skipping validation outside sak0a/ryco: ${context.repo.owner}/${context.repo.repo}`);
+            const canonicalRepository = "saka-gg/ryco";
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            if (repository !== canonicalRepository) {
+              core.info(`Skipping validation outside ${canonicalRepository}: ${repository}`);
               core.setOutput("should-validate", "false");
               return;
             }
@@ -61,7 +63,7 @@ jobs:
               repo: context.repo.repo,
               pull_number: prNumber,
             });
-            if (pullRequest.base.repo?.full_name !== "sak0a/ryco") {
+            if (pullRequest.base.repo?.full_name !== canonicalRepository) {
               core.info(`Skipping PR #${prNumber}; base repository is ${pullRequest.base.repo?.full_name ?? "unknown"}.`);
               core.setOutput("should-validate", "false");
               return;
