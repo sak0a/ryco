@@ -36,6 +36,7 @@ import {
   loadOlderThreadMessages,
   retainThreadDetailSubscription,
 } from "../../connection/threadDetail";
+import { useThreadConnectionRetarget } from "../../connection/useThreadConnectionRetarget";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { newCommandId, newMessageId } from "../../lib/ids";
 import { useThemeColor } from "../../lib/useThemeColor";
@@ -58,7 +59,12 @@ import {
 import { buildQueuedThreadMessageAttachments } from "../../state/queuedThreadMessageAttachments";
 import type { QueuedThreadMessage } from "../../state/threadOutboxModel";
 import { useThreadTimeline } from "../../state/threadTimeline";
-import { selectProjectByRef, selectThreadByRef, useStore } from "../../state/threadsRuntime";
+import {
+  selectEnvironmentHydratedFromCacheAt,
+  selectProjectByRef,
+  selectThreadByRef,
+  useStore,
+} from "../../state/threadsRuntime";
 import { useHomeEnvironments } from "../home/useHomeEnvironments";
 import { AgentControlProposalCard } from "./AgentControlProposalCard";
 import { executeSendTurn } from "./executeSendTurn";
@@ -86,6 +92,7 @@ import { buildSessionPolicyModel, resolveSessionPolicySelection } from "./sessio
 import { SessionPolicySheet } from "./SessionPolicySheet";
 import { ThreadActionsSheet } from "./ThreadActionsSheet";
 import { ThreadComposer } from "./ThreadComposer";
+import { deriveThreadCachedView } from "./threadCachedViewModel";
 import { ThreadQueuedMessages } from "./ThreadQueuedMessages";
 import { ThreadContextBar } from "./ThreadContextBar";
 import {
@@ -130,6 +137,30 @@ function TimelineRow(props: { readonly entry: TimelineEntry }) {
   // Work entries never reach here — buildThreadTimelineRows folds them before
   // the list sees them. This is the remaining unknown-kind fallback.
   return null;
+}
+
+/**
+ * The cached / degraded strip. Sits with ErrorBanner between the context bar
+ * and the timeline, and carries the context bar's `mx-4` so the three read as
+ * one column. Copy and tone are decided in threadCachedViewModel.ts.
+ */
+function ThreadCachedBanner(props: { readonly text: string; readonly tone: "info" | "warning" }) {
+  const warning = props.tone === "warning";
+  return (
+    <View
+      accessibilityRole="alert"
+      testID="thread-cached-banner"
+      className={`mx-4 mb-1 rounded-2xl border px-3.5 py-3 ${
+        warning ? "border-warning-border bg-warning-bg" : "border-border bg-card-translucent"
+      }`}
+    >
+      <Text
+        className={`font-ryco-medium text-sm ${warning ? "text-warning" : "text-foreground-muted"}`}
+      >
+        {props.text}
+      </Text>
+    </View>
+  );
 }
 
 function HeaderActions(props: {
@@ -208,6 +239,18 @@ export function ThreadDetailScreen(props: {
     return retainThreadDetailSubscription(environmentId, threadId);
   }, [environmentId, threadId]);
 
+  // Wave 3a: opening a thread is the ONLY thing in the app that re-targets the
+  // hosted connection. Not scroll, not inbox rendering, not prefetch — so this
+  // call must stay the single caller of the hook. It returns the engine's
+  // stated reason when the node cannot become the selection.
+  const degradedReason = useThreadConnectionRetarget(environmentId);
+  // Cache provenance for this environment. Deliberately NOT `connectionUiState`:
+  // a demoted environment's socket slot is reset on dispose and then reads
+  // "connecting" forever, which would render cached content as merely slow.
+  const hydratedFromCacheAt = useStore((state) =>
+    selectEnvironmentHydratedFromCacheAt(state, environmentId),
+  );
+
   const built = useThreadTimeline(environmentId, threadId);
   const thread = useStore((state) =>
     selectThreadByRef(state, scopeThreadRef(environmentId, threadId)),
@@ -234,11 +277,20 @@ export function ThreadDetailScreen(props: {
   );
   const loadOlderMessages = useCallback(() => {
     if (!messageHistory?.hasMoreBefore || messageHistoryLoad?.status === "loading") return;
-    void loadOlderThreadMessages({
-      environmentId,
-      threadId,
-      page: messageHistory,
-    }).catch(() => undefined);
+    try {
+      void loadOlderThreadMessages({
+        environmentId,
+        threadId,
+        page: messageHistory,
+      }).catch(() => undefined);
+    } catch {
+      // Demotion preserves `threadHistoryByThreadId`, so a cached thread still
+      // advertises `hasMoreBefore` and the list happily calls this on scroll —
+      // but with no client the pagination request throws SYNCHRONOUSLY, before
+      // any promise exists for the `.catch` above to intercept. Scrolling a
+      // cached thread to the top would crash the screen. There is nothing to
+      // report: the banner already says the content is cached.
+    }
   }, [environmentId, messageHistory, messageHistoryLoad?.status, threadId]);
   const project = useStore((state) =>
     thread
@@ -267,8 +319,21 @@ export function ThreadDetailScreen(props: {
     () => (thread ? findThreadWorktree(thread, worktrees) : null),
     [thread, worktrees],
   );
-  const nodeLabel =
-    environments.find((environment) => environment.environmentId === environmentId)?.label ?? null;
+  const environmentRow =
+    environments.find((environment) => environment.environmentId === environmentId) ?? null;
+  const nodeLabel = environmentRow?.label ?? null;
+  const cachedView = useMemo(
+    () =>
+      deriveThreadCachedView({
+        hydratedFromCacheAt,
+        degradedReason,
+        // Wave 2's presence-sourced phrase, reused verbatim so the same node is
+        // not described two ways on two screens.
+        staleDetail: environmentRow?.staleDetail ?? null,
+        hasMessages: (built?.timeline.length ?? 0) > 0,
+      }),
+    [built?.timeline.length, degradedReason, environmentRow?.staleDetail, hydratedFromCacheAt],
+  );
   const headerModel = useMemo(
     () =>
       thread
@@ -279,9 +344,18 @@ export function ThreadDetailScreen(props: {
             nodeLabel,
             hasPendingApproval: pendingApprovals.length > 0,
             hasPendingUserInput: pendingUserInputs.length > 0,
+            forcedOffline: cachedView.headerForcedOffline,
           })
         : null,
-    [nodeLabel, pendingApprovals.length, pendingUserInputs.length, project, thread, worktree],
+    [
+      cachedView.headerForcedOffline,
+      nodeLabel,
+      pendingApprovals.length,
+      pendingUserInputs.length,
+      project,
+      thread,
+      worktree,
+    ],
   );
 
   // The capability gates key off the DRIVER, not the instance id, so resolve the
@@ -338,7 +412,10 @@ export function ThreadDetailScreen(props: {
       const providerInstanceId = thread?.session?.providerInstanceId ?? activeSelection?.instanceId;
       const provider = providers.find((entry) => entry.instanceId === providerInstanceId);
       return resolveQueuedMessageSteerEligibility({
-        mutationReady: connectionUiState === "connected",
+        // A cache-provenance thread reads `turnRunning` from a snapshot; a
+        // steer dispatched against it targets a turn state the node may have
+        // left long ago. Not mutation-ready until the live snapshot lands.
+        mutationReady: connectionUiState === "connected" && hydratedFromCacheAt === null,
         turnRunning: thread?.latestTurn?.state === "running",
         activeTurnId: thread?.session?.activeTurnId,
         supportsTurnSteering: provider?.supportsTurnSteering === true,
@@ -352,7 +429,7 @@ export function ThreadDetailScreen(props: {
         activeTokenMode: thread?.tokenMode ?? "balanced",
       });
     },
-    [connectionUiState, project?.defaultModelSelection, providers, thread],
+    [connectionUiState, hydratedFromCacheAt, project?.defaultModelSelection, providers, thread],
   );
 
   const getSteerUnavailableReason = useCallback(
@@ -516,7 +593,14 @@ export function ThreadDetailScreen(props: {
 
     const tokenMode = currentThread.tokenMode ?? "balanced";
     const threadBusy = currentThread.latestTurn?.state === "running";
-    const connected = connectionUiState === "connected";
+    // Wave 3a: the socket opens one RTT before the live shell snapshot lands,
+    // and until it does `threadBusy` is read from a CACHED latestTurn — the
+    // same window wave 2's review closed for the outbox drain. A send inside
+    // it must enqueue, never dispatch into a thread whose real turn state is
+    // unknown; read provenance fresh from the store, not from a render.
+    const deliveryReconciled =
+      selectEnvironmentHydratedFromCacheAt(useStore.getState(), environmentId) === null;
+    const connected = connectionUiState === "connected" && deliveryReconciled;
 
     return sendThreadTurn(
       {
@@ -596,8 +680,13 @@ export function ThreadDetailScreen(props: {
     }
   };
 
+  // Gated the same way the header is: a snapshot captured mid-turn preserves a
+  // "running" latestTurn, and a cached thread rendering a live "Working…" fold
+  // would contradict the Offline header two rows above it.
   const runningTurnId =
-    thread?.latestTurn?.state === "running" ? (thread.latestTurn.turnId ?? null) : null;
+    !cachedView.headerForcedOffline && thread?.latestTurn?.state === "running"
+      ? (thread.latestTurn.turnId ?? null)
+      : null;
 
   const timelineRows = useMemo(
     () =>
@@ -643,6 +732,9 @@ export function ThreadDetailScreen(props: {
           }}
         />
       ) : null}
+      {cachedView.banner ? (
+        <ThreadCachedBanner text={cachedView.banner.text} tone={cachedView.banner.tone} />
+      ) : null}
       {visibleError ? <ErrorBanner message={visibleError} /> : null}
 
       <LegendList
@@ -686,9 +778,10 @@ export function ThreadDetailScreen(props: {
               variant="plain"
               title={built ? (thread?.title ?? "Task") : "Loading task"}
               detail={
-                built
+                cachedView.emptyStateDetail ??
+                (built
                   ? "No messages yet. Send one to get started."
-                  : "Syncing the conversation from the node."
+                  : "Syncing the conversation from the node.")
               }
             />
           </View>
@@ -708,6 +801,7 @@ export function ThreadDetailScreen(props: {
               environmentId={environmentId}
               threadId={threadId}
               approval={approval}
+              disabled={cachedView.promptsDisabled}
             />
           ))}
           {pendingUserInputs.map((userInput) => (
@@ -716,6 +810,7 @@ export function ThreadDetailScreen(props: {
               environmentId={environmentId}
               threadId={threadId}
               userInput={userInput}
+              disabled={cachedView.promptsDisabled}
             />
           ))}
           {agentControlProposals.map((proposal) => (
@@ -723,6 +818,7 @@ export function ThreadDetailScreen(props: {
               key={proposal.proposalId}
               environmentId={environmentId}
               proposal={proposal}
+              disabled={cachedView.promptsDisabled}
             />
           ))}
         </ScrollView>
@@ -746,11 +842,18 @@ export function ThreadDetailScreen(props: {
 
       <ThreadComposer
         onSend={onSend}
+        disabled={cachedView.composerDisabled}
         policyLabel={policyModel?.pillLabel}
         policyIcon={policyModel?.pillIcon}
         policyCaution={policyModel?.pillTone === "caution"}
         policyAccessibilityLabel={policyModel?.pillAccessibilityLabel}
-        policyDisabled={policyBusy}
+        // `policyDisabled` gates both rail pills. The labels stay readable —
+        // they are the thread's own configuration — but neither sheet can be
+        // opened, because every write behind them goes through
+        // ensureEnvironmentApi, which THROWS when the environment has no
+        // connection. Disabling the pressables is the fix; catching the throw
+        // would only turn a crash into an internal error string.
+        policyDisabled={policyBusy || cachedView.actionsDisabled}
         onOpenPolicy={policyModel ? () => setPolicyVisible(true) : undefined}
         modelLabel={modelPicker?.pillLabel}
         modelProviderDriver={modelPicker?.pillProviderDriver}
@@ -822,7 +925,14 @@ export function ThreadDetailScreen(props: {
         <ThreadActionsSheet
           visible={actionsVisible}
           model={headerModel}
-          busy={actionBusy}
+          // Rename / stop / archive all call ensureEnvironmentApi, which throws
+          // without a connection, so the sheet's rows are disabled rather than
+          // left to surface an internal error. The sheet still opens: node,
+          // project and worktree stay readable on a cached thread. `busy` is
+          // the existing seam for that; it over-gates "Review changes" by one
+          // row, which is acceptable — the review screen needs the same
+          // connection this thread does not have.
+          busy={actionBusy || cachedView.actionsDisabled}
           error={actionError}
           onClose={() => setActionsVisible(false)}
           onRename={(title) =>

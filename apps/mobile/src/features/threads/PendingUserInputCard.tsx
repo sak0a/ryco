@@ -19,9 +19,12 @@ export function PendingUserInputCard(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly userInput: PendingUserInput;
+  /** Cached/degraded threads render the prompt but cannot answer it. */
+  readonly disabled?: boolean;
 }) {
   const [drafts, setDrafts] = useState<Record<string, PendingUserInputDraftAnswer>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const toggle = (questionId: string, optionLabel: string) => {
     setDrafts((current) => {
@@ -42,11 +45,12 @@ export function PendingUserInputCard(props: {
     Boolean(drafts[questionId]?.selectedOptionLabels?.includes(optionLabel));
 
   const answers = buildPendingUserInputAnswers(props.userInput.questions, drafts);
-  const canSubmit = answers !== null && !submitting;
+  const canSubmit = answers !== null && !submitting && props.disabled !== true;
 
   const submit = async () => {
     if (!answers) return;
     setSubmitting(true);
+    setError(null);
     try {
       await respondToThreadUserInput({
         api: ensureEnvironmentApi(props.environmentId),
@@ -54,6 +58,12 @@ export function PendingUserInputCard(props: {
         requestId: props.userInput.requestId,
         answers,
       });
+    } catch {
+      // `ensureEnvironmentApi` throws synchronously without a connection, and
+      // the RPC itself can reject; without this catch the `void submit()`
+      // press handler turned both into a silent unhandled rejection. Bounded
+      // copy: the raw message is an internal string the user cannot act on.
+      setError("The answers could not be delivered. Reconnect and try again.");
     } finally {
       setSubmitting(false);
     }
@@ -84,6 +94,7 @@ export function PendingUserInputCard(props: {
           </View>
         </View>
       ))}
+      {error ? <Text className="mt-2 font-sans text-sm text-danger">{error}</Text> : null}
       <Pressable
         disabled={!canSubmit}
         onPress={() => void submit()}

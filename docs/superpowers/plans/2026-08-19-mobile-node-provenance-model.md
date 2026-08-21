@@ -74,8 +74,9 @@ so do not copy code.
 | --- | --- | --- | --- | --- |
 | 1 | `mobile/provenance-1-outbox-per-environment` | `main` | small | yes |
 | 2 | `mobile/provenance-2-snapshot-cache` | wave 1 | large | yes |
-| 3 | `mobile/provenance-3-demand-driven-connections` | wave 2 | large | no — needs 1 and 2 |
-| 4 | `mobile/provenance-4-node-as-provenance` | wave 3 | medium | no — needs 2 |
+| 3a | `mobile/provenance-3a-connection-retarget` | wave 2 | medium | no — needs 1 and 2 |
+| 3b | `mobile/provenance-3b-demand-driven-connections` | wave 3a | large | no — needs 3a; **gated** |
+| 4 | `mobile/provenance-4-node-as-provenance` | wave 3b | medium | no — needs 2 |
 
 Wave 1 is the stack base even though wave 2 carries more product value. It is roughly fifty lines,
 it repairs a defect that is **already reachable on `main`** (direct multi-connect ships today), it
@@ -205,7 +206,73 @@ stopped; a test proving a version bump discards an older record.
 
 ## Wave 3: Connection follows navigation
 
-Branch `mobile/provenance-3-demand-driven-connections`, based on wave 2.
+### Amendment (2026-08-20): split into 3a and 3b
+
+Wave 3 as originally scoped is gated on the Hub rollout drill (`sak0a/ryco-hub` issue #12),
+untouched since 2026-07-21. The gate is about *concurrency* — raising sustained relay
+connections against a single-container Hub — but most of this wave's value needs none: opening
+a thread can **re-target the one hosted connection** instead of adding a second. The wave is
+therefore split. 3a keeps concurrency at exactly 1 and adds no new sustained relay load, so it
+is ungated; 3b is the remainder — true multi-connect plus scope leases — and keeps the gate
+unchanged.
+
+Wave 2 is what makes 3a safe: before the snapshot cache, retargeting blanked the inbox on every
+switch (captured on device in wave 2's QA); now cached rows survive the switch, so retargeting
+is non-destructive. Wave 4 stays stacked on 3b per the original order; if the drill outlasts
+wave 4's readiness it can be rebased onto 3a, which per the stack table is all it needs.
+
+### Wave 3a: Opening a thread re-targets the hosted connection
+
+Branch `mobile/provenance-3a-connection-retarget`, based on wave 2. **Ungated.**
+
+Files:
+
+- new retarget module under `apps/mobile/src/connection/` (pure decision model plus a
+  debounced, cancel-safe engine)
+- `apps/mobile/src/features/threads/ThreadDetailScreen.tsx` (open trigger plus the degraded
+  read-only treatment)
+- E2EE status surfaces as needed for settling the verification transient
+- colocated tests
+
+Steps:
+
+1. On thread open, if the thread's environment is a hosted node that is not the current
+   selection, re-target the hosted connection to it through the controller's own guarded
+   `selectNode`. Nothing else triggers a retarget — **not** scroll, **not** inbox rendering,
+   **not** prefetch.
+2. Respect the fail-closed selection guard (`authorization/state.ts` `selectNode`, mirrored in
+   `HubNodeSection.tsx`'s `canSelectHubNode`). A node that cannot be selected degrades to a
+   clear read-only cached view with a reason, never a spinner that hangs.
+3. Debounce and make the retarget cancel-safe: opening thread A then immediately thread B on a
+   third node ends with exactly one connection, to B, and no orphaned handshake.
+4. While the retarget is in flight, render the thread from cache using wave 2's
+   presence-sourced stale treatment — never blank, and never presented as live. No second
+   staleness vocabulary.
+5. Keep the manual selection affordance working; this wave makes selection automatic, wave 4
+   removes the control.
+6. Settle the E2EE "Verifying" transient so rapid back-and-forth cannot strobe verification
+   states — settle the UI or suppress the transient below a threshold, and record the choice
+   in the PR.
+
+Acceptance:
+
+- Tapping a cached thread on a non-selected hosted node opens it and it goes live, with no
+  user action beyond the tap.
+- Opening A then immediately B leaves exactly one connection, to B.
+- Concurrency never exceeds 1 — asserted in a test, since it is the basis for this wave being
+  ungated.
+- A revoked or unselectable node's thread opens read-only from cache with a stated reason, and
+  does not hang.
+- The inbox never blanks during a retarget; no retarget fires from scrolling or rendering the
+  inbox.
+
+Evidence: unit tests over the retarget decision, the cancel-safe race, the concurrency-of-1
+assertion and the unselectable-node degradation; two-node simulator run of a cached thread on
+the non-selected node going live from the tap alone, then the A→B race.
+
+### Wave 3b: Demand-driven multi-connect
+
+Branch `mobile/provenance-3b-demand-driven-connections`, based on wave 3a.
 
 Files:
 
@@ -225,7 +292,8 @@ Steps:
    limit. `useHomeEnvironments` must accept a list where it currently accepts one or null.
 3. Make connection lifetime the union of retained scopes plus LRU recency, bounded — start at two
    or three concurrent and make the bound a named constant, not a literal.
-4. Acquire an environment's connection when a thread on it is opened. Nothing else acquires.
+4. Acquire an environment's connection when a thread on it is opened — 3a's retarget trigger
+   becomes an acquisition. Nothing else acquires.
 5. Release non-retained connections on background; do not reconnect them all on foreground.
    Stagger wake-up reconnects.
 6. Surface `delivery-unknown` per row, per environment. A global banner would be a lie once
@@ -233,18 +301,17 @@ Steps:
 
 Acceptance:
 
-- Opening a thread on a node with no live connection connects it without any user action.
 - The concurrency bound holds under a five-node fixture.
 - Backgrounding releases non-retained connections; foregrounding produces no reconnect storm.
 - No path remains where the user must pick a node before seeing or opening work.
 
-Evidence: simulator recording of open-thread-on-cold-node; a connection-count assertion under the
-five-node fixture; before/after notes on foreground reconnect behaviour.
+Evidence: a connection-count assertion under the five-node fixture; before/after notes on
+foreground reconnect behaviour.
 
 **Gate:** this wave raises relay load on a Hub that is one container in one region and has not run
-its rollout drill (`sak0a/ryco-hub` issue #12). Waves 1, 2 and 4 all land safely against today's
-single-connection Hub. Do not merge wave 3 to `main` until the Hub is deployed and observed, even
-if the code is ready — keep it in the stack.
+its rollout drill (`sak0a/ryco-hub` issue #12). Waves 1, 2, 3a and 4 all land safely against
+today's single-connection Hub. Do not merge wave 3b to `main` until the Hub is deployed and
+observed, even if the code is ready — keep it in the stack.
 
 ## Wave 4: Demote node in the interface
 
@@ -324,8 +391,8 @@ Enroll with `hub enroll` (device code plus fingerprint; the owner approves in th
 `project` CLI call against the dev state directory needs `--dev-url`, or it opens the wrong SQLite
 database and fails on migrations. Fixtures live in `~/.ryco/dev/qa-workspace`.
 
-Waves 1, 3 and 4 need **two** nodes. Run a second `serve` with its own `--base-dir`, `--port` and
-`--hub-node-name`, and enroll it separately.
+Waves 1, 3a, 3b and 4 need **two** nodes. Run a second `serve` with its own `--base-dir`,
+`--port` and `--hub-node-name`, and enroll it separately.
 
 Simulator work uses Ryco's own device control (verified available 2026-08-19: `devices.control`
 granted; framebuffer, HID, accessibility and encoder all OK; Xcode 26.6 on macOS 26.6.1). Read
