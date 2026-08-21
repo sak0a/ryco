@@ -4,6 +4,7 @@ import { hostedHubStore } from "@ryco/client-runtime/authorization";
 
 import { getMobileHostedConnectionCoordinator } from "../connection/hostedConnectionCoordinator";
 import { createMobileConnectionRegistry } from "../runtime/bootstrap";
+import { mobileRuntimeStartupBarrier } from "../runtime/startupBarrier";
 import { useStore } from "../state/threadsRuntime";
 import { demoteMobileHostedEnvironmentState } from "./nodeStateCleanup";
 import { writePrimaryEnvironmentDescriptor } from "./primaryEnvironment";
@@ -57,23 +58,30 @@ export const mobileHostedNodeLifecycle: HostedNodeLifecycle = {
   clearNodeScopedState,
   writePrimaryEnvironmentDescriptor,
   connectPrimaryEnvironment: () => {
-    const state = hostedHubStore.getState();
-    const node = state.selectedNode;
-    if (!node) return;
-    const coordinator = getMobileHostedConnectionCoordinator();
-    if (!coordinator.shouldActivate(node.environmentId)) return;
-    const record = coordinator.ensureRecord(node);
-    const existing = supervisor().read(node.environmentId);
-    if (!existing) {
-      supervisor().connectPrimary();
-      return;
-    }
-    // A retained healthy channel is the whole point of multi-connect. A stale
-    // retained channel is allowed to reconnect only after selection has moved
-    // back to it, so its E2EE preparation and relay ticket remain node-bound.
-    if (record.transportStatus !== "online" || record.sessionStatus !== "ready") {
-      void existing.reconnect().catch(() => undefined);
-    }
+    mobileRuntimeStartupBarrier.runAfterHydration(
+      () => {
+        const state = hostedHubStore.getState();
+        const node = state.selectedNode;
+        if (!node) return;
+        const coordinator = getMobileHostedConnectionCoordinator();
+        if (!coordinator.shouldActivate(node.environmentId)) return;
+        const record = coordinator.ensureRecord(node);
+        const existing = supervisor().read(node.environmentId);
+        if (!existing) {
+          supervisor().connectPrimary();
+          return;
+        }
+        // A retained healthy channel is the whole point of multi-connect. A stale
+        // retained channel is allowed to reconnect only after selection has moved
+        // back to it, so its E2EE preparation and relay ticket remain node-bound.
+        if (record.transportStatus !== "online" || record.sessionStatus !== "ready") {
+          void existing.reconnect().catch(() => undefined);
+        }
+      },
+      (error: unknown) => {
+        console.warn("[connection] hosted startup failed", error);
+      },
+    );
   },
   // Selection changes no longer own connection lifetime. Scope leases + LRU
   // do, via the mobile coordinator; sign-out and background release call it
