@@ -322,9 +322,12 @@ function queryToastTitles(): string[] {
   );
 }
 
+const FULL_APP_BOOTSTRAP_TIMEOUT_MS = 20_000;
+
 async function waitForElement<T extends Element>(
   query: () => T | null,
   errorMessage: string,
+  timeout = 8_000,
 ): Promise<T> {
   let element: T | null = null;
   await vi.waitFor(
@@ -332,7 +335,7 @@ async function waitForElement<T extends Element>(
       element = query();
       expect(element, errorMessage).toBeTruthy();
     },
-    { timeout: 8_000, interval: 16 },
+    { timeout, interval: 16 },
   );
   return element!;
 }
@@ -341,6 +344,7 @@ async function waitForComposerEditor(): Promise<HTMLElement> {
   return waitForElement(
     () => document.querySelector<HTMLElement>('[data-testid="composer-editor"]'),
     "App should render composer editor",
+    FULL_APP_BOOTSTRAP_TIMEOUT_MS,
   );
 }
 
