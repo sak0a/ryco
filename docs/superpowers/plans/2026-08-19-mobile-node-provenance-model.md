@@ -396,21 +396,22 @@ an unverified node and a viewer-role node.
 
 ## QA environment
 
-Hub-enrolled test node — the dev-runner strips `RYCO_HUB_*` from the environment through turbo
-passthrough, so pass CLI flags:
+Use non-production Hub-enrolled test nodes. The dev-runner strips `RYCO_HUB_*` from the environment
+through turbo passthrough, so pass CLI flags:
 
 ```sh
 node apps/server/dist/bin.mjs serve \
-  --base-dir ~/.ryco/dev --dev-url http://<LAN-IP>:8081 \
-  --port 13773 --host 0.0.0.0 \
-  --hub-connector-enabled --hub-origin https://staging.ryco.space \
-  --hub-node-name provenance-qa-node
+  --base-dir <qa-node-data-dir> --dev-url http://<development-client-host>:<metro-port> \
+  --port <qa-node-port> --host 0.0.0.0 \
+  --hub-connector-enabled --hub-origin <non-production-hub-origin> \
+  --hub-node-name <qa-node-name>
 ```
 
-Enroll with `hub enroll` (device code plus fingerprint; the owner approves in the staging Hub UI).
-`hub` subcommands are status, enroll, pending, cancel, resume, leave. Any `hub`, `auth` or
-`project` CLI call against the dev state directory needs `--dev-url`, or it opens the wrong SQLite
-database and fails on migrations. Fixtures live in `~/.ryco/dev/qa-workspace`.
+Enroll with `hub enroll` (device code plus fingerprint; the owner approves in the corresponding
+non-production Hub UI). `hub` subcommands are status, enroll, pending, cancel, resume, leave. Any
+`hub`, `auth` or `project` CLI call against the test state directory needs the same `--dev-url`, or
+it opens the wrong SQLite database and fails on migrations. Keep fixtures inside that isolated
+test state directory.
 
 Waves 1, 3a, 3b and 4 need **two** nodes. Run a second `serve` with its own `--base-dir`,
 `--port` and `--hub-node-name`, and enroll it separately.
