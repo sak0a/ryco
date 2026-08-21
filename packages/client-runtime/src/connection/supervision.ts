@@ -115,7 +115,7 @@ export interface EnvironmentConnectionSupervisor {
   readonly register: (connection: EnvironmentConnection) => EnvironmentConnection;
   readonly remove: (environmentId: EnvironmentId) => Promise<boolean>;
   readonly connectPrimary: () => EnvironmentConnection | null;
-  readonly disconnectPrimary: () => Promise<void>;
+  readonly disconnectPrimary: (environmentId?: EnvironmentId) => Promise<void>;
   readonly ensureSavedEnvironmentConnection: (
     record: { readonly environmentId: EnvironmentId },
     connect: (isCancelled: () => boolean) => Promise<EnvironmentConnection>,
@@ -493,11 +493,22 @@ export function createEnvironmentConnectionSupervisor<
   };
   const connectPrimary = () => {
     const connection = input.createPrimaryConnection();
-    if (!connection || read(connection.environmentId) === connection) return connection;
+    if (!connection) return null;
+    const existing = read(connection.environmentId);
+    if (existing) {
+      // Multi-primary callers can revisit an already-retained environment. The
+      // factory has already built the candidate (and its subscriptions), so it
+      // still has to be disposed; returning it leaked a second live client.
+      if (existing !== connection) void connection.dispose().catch(NOOP);
+      return existing;
+    }
     return register(connection);
   };
-  const disconnectPrimary = async () => {
-    const connection = [...connections.values()].find((entry) => entry.kind === "primary");
+  const disconnectPrimary = async (environmentId?: EnvironmentId) => {
+    const connection = environmentId
+      ? connections.get(environmentId)
+      : [...connections.values()].find((entry) => entry.kind === "primary");
+    if (connection?.kind !== "primary") return;
     if (connection) await remove(connection.environmentId).catch(() => false);
   };
   const ensureSavedEnvironmentConnection = (

@@ -46,13 +46,8 @@ vi.mock("../connection/useConnectionController", () => ({
   useSavedEnvironments: () => ({ rows: [], isLoading: false }),
 }));
 vi.mock("../../hostedHub/state", () => ({
-  useHostedHubStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      selectedNode: null,
-      effectiveRole: null,
-      transportStatus: "idle",
-      sessionStatus: "closed",
-    }),
+  useMobileHostedConnectionsStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    selector({ selectedNodes: [], deliveryUnknownEnvironmentIds: [] }),
 }));
 vi.mock("../../state/homeData", () => ({
   useHomeWorkspaceData: () => ({ projects: [], worktrees: [], threads: [] }),

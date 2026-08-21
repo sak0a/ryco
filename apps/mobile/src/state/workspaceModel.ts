@@ -132,7 +132,7 @@ export function hostedWorkspacePhase(state: HostedConnectionState): EnvironmentC
 }
 
 /**
- * Merge the hosted environment into the direct list.
+ * Merge the hosted environments into the direct list.
  *
  * A node can be reachable on BOTH planes at once — paired directly and also
  * enrolled in the Hub — and the Hub descriptor reuses the same environment id.
@@ -141,9 +141,10 @@ export function hostedWorkspacePhase(state: HostedConnectionState): EnvironmentC
  */
 export function mergeWorkspaceEnvironments(
   direct: ReadonlyArray<WorkspaceEnvironment>,
-  hosted: WorkspaceEnvironment | null,
+  hosted: ReadonlyArray<WorkspaceEnvironment>,
 ): ReadonlyArray<WorkspaceEnvironment> {
-  if (!hosted) return direct;
-  const merged = direct.filter((environment) => environment.environmentId !== hosted.environmentId);
-  return [...merged, hosted];
+  if (hosted.length === 0) return direct;
+  const hostedIds = new Set(hosted.map((environment) => environment.environmentId));
+  const merged = direct.filter((environment) => !hostedIds.has(environment.environmentId));
+  return [...merged, ...hosted];
 }

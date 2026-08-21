@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { mobileAppLifecycle } from "../platform/appLifecycle";
+import { getMobileHostedConnectionCoordinator } from "../connection/hostedConnectionCoordinator";
 import { hostedHubController, useHostedHubStore } from "./state";
 
 /**
@@ -19,14 +20,19 @@ export function useHostedAppLifecycle(): void {
     return mobileAppLifecycle.subscribe((event) => {
       switch (event) {
         case "background":
-          hostedHubController.suspendBrowser("hidden");
+          void (async () => {
+            await getMobileHostedConnectionCoordinator().releaseNonRetainedForBackground();
+            hostedHubController.suspendBrowser("hidden");
+          })();
           return;
         case "offline":
           hostedHubController.suspendBrowser("offline");
           return;
         case "foreground":
         case "online":
-          void hostedHubController.resumeBrowser();
+          void hostedHubController
+            .resumeBrowser()
+            .then(() => getMobileHostedConnectionCoordinator().reconnectRetainedAfterForeground());
           return;
         default:
           // "resume" is emitted alongside "foreground"; the resume above covers it.

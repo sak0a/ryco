@@ -98,10 +98,15 @@ function createFakeCatalog() {
 
 function fakeConnection(
   environmentId: EnvironmentId,
-  overrides?: { reconnect?: () => Promise<void>; heartbeatFresh?: boolean },
+  overrides?: {
+    reconnect?: () => Promise<void>;
+    heartbeatFresh?: boolean;
+    kind?: EnvironmentConnection["kind"];
+    dispose?: () => Promise<void>;
+  },
 ): EnvironmentConnection {
   return {
-    kind: "saved",
+    kind: overrides?.kind ?? "saved",
     environmentId,
     knownEnvironment: {
       id: environmentId,
@@ -117,7 +122,7 @@ function fakeConnection(
     } as EnvironmentConnection["client"],
     ensureBootstrapped: async () => {},
     reconnect: overrides?.reconnect ?? (async () => {}),
-    dispose: async () => {},
+    dispose: overrides?.dispose ?? (async () => {}),
   };
 }
 
@@ -198,6 +203,30 @@ describe("mobile environment driver", () => {
     resumeListener!("appstate-active");
 
     await vi.waitFor(() => expect(reconnect).toHaveBeenCalledTimes(1));
+  });
+
+  it("disconnects the requested primary without tearing down another hosted node", async () => {
+    const fake = createFakeCatalog();
+    const driver = createMobileEnvironmentDriver({
+      catalog: fake.catalog,
+      remoteApi: noopRemoteApi,
+      subscribeResume: () => () => {},
+    });
+    const firstId = "hosted-a" as EnvironmentId;
+    const secondId = "hosted-b" as EnvironmentId;
+    const disposeFirst = vi.fn(async () => undefined);
+    const disposeSecond = vi.fn(async () => undefined);
+    driver.supervisor.register(fakeConnection(firstId, { kind: "primary", dispose: disposeFirst }));
+    driver.supervisor.register(
+      fakeConnection(secondId, { kind: "primary", dispose: disposeSecond }),
+    );
+
+    await driver.supervisor.disconnectPrimary(secondId);
+
+    expect(driver.supervisor.read(firstId)).not.toBeNull();
+    expect(driver.supervisor.read(secondId)).toBeNull();
+    expect(disposeFirst).not.toHaveBeenCalled();
+    expect(disposeSecond).toHaveBeenCalledOnce();
   });
 
   it("routes a thread-stream snapshot/event from the state sink into state/threads", () => {

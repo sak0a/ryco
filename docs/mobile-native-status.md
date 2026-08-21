@@ -1,19 +1,19 @@
 # Native mobile delivery status
 
-**Current as of 2026-08-21, written on `mobile/provenance-4-node-as-provenance`.** This is the
+**Current as of 2026-08-21, written on `mobile/provenance-3b-demand-driven-connections`.** This is the
 concise delivery ledger for the native app. Older design specifications and implementation plans
 remain useful as historical records, but this file is authoritative when their status language
-disagrees. Facts below are labelled either **on `main`** or **in review** (open stacked PRs); the
+disagrees. Facts below are labelled either **on `main`** or **in review**; the
 distinction is load-bearing.
 
 ## Delivered on `main`
 
 - A dedicated Expo/React Native app with native navigation, thread/inbox surfaces, composer,
   approvals, settings, project selection, and the baseline review/diff flow.
-- Direct-node and hosted-Hub connection planes over the shared client runtime. The planes are
-  asymmetric: direct/saved nodes multi-connect through the supervision map with a concurrency
-  queue, while the hosted plane holds exactly one relay connection to one selected node. The
-  native client does not construct direct node HTTP URLs for hosted operation.
+- Direct-node and hosted-Hub connection planes over the shared client runtime. On `main`,
+  direct/saved nodes multi-connect through the supervision map while the hosted plane holds one
+  relay connection to one selected node. Wave 3b below removes that remaining asymmetry without
+  constructing direct node HTTP URLs for hosted operation.
 - **Native identity v2 is merged**, not on a blocker branch. `6ff51502c` landed 2026-08-13 via
   PRs #352/#353 (polish in #354 the next day): additive v2 contracts, DPoP-mint transport, and
   the full-screen access gate — the workspace navigator mounts only after a revalidated native
@@ -37,7 +37,7 @@ distinction is load-bearing.
 - iOS-first simulator/development-client workflows. Android code exists in several platform
   seams, but Android product QA is not complete.
 
-## Node-provenance series (in review — open stacked PRs, none on `main`)
+## Node-provenance series
 
 Plan: `docs/superpowers/plans/2026-08-19-mobile-node-provenance-model.md`. The objective: a node
 stops being a mode the user is in and becomes an attribute of a row — the test is "if the user
@@ -45,13 +45,13 @@ has to know which machine something is on before they can see it, it is wrong." 
 explicit by design: E2EE first contact (one deliberate verification per node, ever), role
 (viewer/operator/owner), and machine sleep as a row fact, never a mode.
 
-| Wave | PR          | State                  | What it does                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---- | ----------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | #387        | open                   | Outbox drain gates on the message's own environment; per-environment WS status slots beside the unchanged global.                                                                                                                                                                                                                                                                                   |
-| 2    | #388        | open                   | Per-environment SQLite snapshot cache + persisted Hub node roster: a sleeping machine's projects, worktrees and threads stay rendered, visibly stale from Hub directory presence. Hub selection survives relaunch. Explicit sign-out purges cached content; session expiry deliberately does not.                                                                                                   |
-| 3a   | #390        | open                   | Opening a thread re-targets the single hosted connection to its node (debounced, cancel-safe, concurrency pinned at 1). Unselectable nodes open read-only from cache with one of five bounded reasons; the E2EE status pill settles transients behind a 500 ms threshold with "Not verified"/"Legacy" always breaking through.                                                                      |
-| 4    | this branch | in progress            | Demotes node out of the interface: no "Nodes" home mode, projects group by project with machines as row provenance, same-repo rows can merge across machines behind the repository-grouping preference (never merging ambiguously), per-row role and trust markers, and "connect" vocabulary retired for machine vocabulary.                                                                        |
-| 3b   | —           | not started, **gated** | True demand-driven multi-connect: scope leases before any concurrency raise, `selectedNodes`, bounded connection lifetime, background release without foreground reconnect storms, per-row `delivery-unknown`. Gated on the Hub rollout drill (`sak0a/ryco-hub` issue #12, open since 2026-07-21); wave 4 was rebased onto 3a (plan amendment 2026-08-20) precisely so the gate holds back only 3b. |
+| Wave | PR          | State     | What it does                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---- | ----------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | #387        | on `main` | Outbox drain gates on the message's own environment; per-environment WS status slots beside the unchanged global.                                                                                                                                                                                                                                                                                          |
+| 2    | #388        | on `main` | Per-environment SQLite snapshot cache + persisted Hub node roster: a sleeping machine's projects, worktrees and threads stay rendered, visibly stale from Hub directory presence. Explicit sign-out purges cached content; session expiry deliberately does not.                                                                                                                                           |
+| 3a   | #390        | on `main` | Opening a thread re-targets the single hosted connection to its node (debounced and cancel-safe). Unselectable nodes open read-only from cache with one of five bounded reasons; the E2EE status pill settles transients behind a 500 ms threshold with "Not verified"/"Legacy" always breaking through.                                                                                                   |
+| 4    | #391        | on `main` | Demotes node out of the interface: no "Nodes" home mode, projects group by project with machines as row provenance, same-repo rows can merge across machines behind the repository-grouping preference, and per-row role/trust markers use the established vocabulary.                                                                                                                                     |
+| 3b   | this branch | in review | Demand-driven hosted multi-connect: mounted thread/provider/VCS scopes are refcounted, connection lifetime is retained scopes plus LRU under a named maximum of three, non-retained background connections are released, wake-up is staggered, and `delivery-unknown` stays per environment and appears on its own rows. #392's capacity assessment discharged the gate for this exact bound and sequence. |
 
 Two facts the series established that any future work must respect:
 
@@ -67,17 +67,16 @@ Two facts the series established that any future work must respect:
 
 ## Open delivery slices
 
-| Slice                                 | Repository state          | What remains                                                                                                                       |
-| ------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| General thread inspector              | Not on `main`             | Land the shared files/review/source-control/terminal container before treating those surfaces as one architecture.                 |
-| Mobile source control                 | Not on `main`             | Branch/status/actions and the full native review workflow need a scoped PR and current validation.                                 |
-| Mobile terminal                       | Not on `main`             | Only `terminalPreferences` exists; the bounded renderer and focused workspace need a scoped PR plus native QA.                     |
-| Agent notifications and Live Activity | Not on `main`             | Client runtime, native lifecycle, Hub push-token support, permissions UX, device QA — under the contentless-push constraint above. |
-| Durable offline inbox                 | In review (#388, stacked) | Land the provenance stack. Retention/privacy semantics are now defined: sign-out purges, expiry keeps, revocation invalidates.     |
-| Demand-driven multi-connect           | Not started, gated        | Wave 3b, blocked on the Hub rollout drill (`sak0a/ryco-hub` #12).                                                                  |
-| Tablet inspector                      | Delivered for files only  | Generalize the regular-width split layout across workspace tools. Home surfaces are width-neutral single columns.                  |
-| Android                               | Unqualified               | Exercise image/SVG/HTML preview, WebView isolation, navigation, native modules, and relay lifecycle on Android.                    |
-| Store distribution                    | Not complete              | Apple Developer/App Store Connect/TestFlight work remains separate from simulator and Personal Team development.                   |
+| Slice                                 | Repository state         | What remains                                                                                                                           |
+| ------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| General thread inspector              | Not on `main`            | Land the shared files/review/source-control/terminal container before treating those surfaces as one architecture.                     |
+| Mobile source control                 | Not on `main`            | Branch/status/actions and the full native review workflow need a scoped PR and current validation.                                     |
+| Mobile terminal                       | Not on `main`            | Only `terminalPreferences` exists; the bounded renderer and focused workspace need a scoped PR plus native QA.                         |
+| Agent notifications and Live Activity | Not on `main`            | Client runtime, native lifecycle, Hub push-token support, permissions UX, device QA — under the contentless-push constraint above.     |
+| Demand-driven multi-connect           | In review                | Five-node model coverage and two-node simulator QA now pin the bound, automatic acquisition, background release, and quiet foreground. |
+| Tablet inspector                      | Delivered for files only | Generalize the regular-width split layout across workspace tools. Home surfaces are width-neutral single columns.                      |
+| Android                               | Unqualified              | Exercise image/SVG/HTML preview, WebView isolation, navigation, native modules, and relay lifecycle on Android.                        |
+| Store distribution                    | Not complete             | Apple Developer/App Store Connect/TestFlight work remains separate from simulator and Personal Team development.                       |
 
 ## File-browser acceptance still open (from PR #330)
 

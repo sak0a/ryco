@@ -197,6 +197,22 @@ describe("thread connection retarget decision", () => {
     ).toEqual({ kind: "none" });
   });
 
+  it("reacquires a selected environment whose bounded connection was released", () => {
+    expect(
+      deriveThreadConnectionRetarget({
+        environmentId: ENV_A,
+        hasDirectEnvironment: false,
+        hasHostedConnection: false,
+        hostedAvailable: true,
+        state: hubState({
+          nodes: [node("node-a", ENV_A)],
+          selectedNode: node("node-a", ENV_A),
+        }),
+        rosterEntry: rosterRecord("node-a", ENV_A),
+      }),
+    ).toEqual({ kind: "retarget", nodeId: "node-a" });
+  });
+
   /**
    * Prevents this feature from touching non-hosted rows: opening a thread on a
    * plain direct or unknown environment must not publish a degraded reason.

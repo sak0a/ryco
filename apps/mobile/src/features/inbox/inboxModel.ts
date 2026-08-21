@@ -43,6 +43,8 @@ export interface InboxEnvironment {
    * `"unverified"`, which would be a fabricated claim.
    */
   readonly trust?: NodeTrust;
+  /** Wave 3b: this environment, not the whole app, has an unconfirmed send. */
+  readonly deliveryUnknown?: boolean;
 }
 
 export interface InboxThreadRow {
@@ -118,7 +120,10 @@ function threadState(
   // claim. Sourced from Hub presence via the environment row, not WS status.
   if (environment?.stale) return "offline";
   if (thread.hasPendingApprovals || thread.hasPendingUserInput) return "needs-input";
-  if (deliveryUnknownThreadIds.has(scopedKey(thread.environmentId, thread.id))) {
+  if (
+    environment?.deliveryUnknown === true ||
+    deliveryUnknownThreadIds.has(scopedKey(thread.environmentId, thread.id))
+  ) {
     return "delivery-unknown";
   }
   if (thread.latestTurn?.state === "running") return "working";
@@ -224,7 +229,7 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
   // with the recents, however lively its cached fields look.
   const active = rows
     .filter((row) => row.state !== "idle" && row.state !== "offline")
-    .sort((left, right) => {
+    .toSorted((left, right) => {
       const priority =
         ACTIVE_PRIORITY[left.state as Exclude<InboxThreadState, "idle" | "offline">] -
         ACTIVE_PRIORITY[right.state as Exclude<InboxThreadState, "idle" | "offline">];
@@ -232,7 +237,7 @@ export function buildInboxSections(input: BuildInboxInput): ReadonlyArray<InboxS
     });
   const recent = rows
     .filter((row) => row.state === "idle" || row.state === "offline")
-    .sort(compareRecent);
+    .toSorted(compareRecent);
 
   const sections: InboxSection[] = [];
   if (active.length > 0) sections.push({ key: "active", title: "Active now", rows: active });

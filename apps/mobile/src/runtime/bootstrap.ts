@@ -10,6 +10,17 @@ import {
 } from "../connection/environmentDriver";
 import { createMobileRemoteEnvironmentApi } from "../connection/remoteApi";
 import { initializeWsConnectionState } from "../rpc/wsConnectionState";
+import {
+  configureMobileHostedConnectionCoordinator,
+  resetMobileHostedConnectionCoordinatorForTests,
+} from "../connection/hostedConnectionCoordinator";
+import {
+  mobileHostedConnectionScopes,
+  recordMobileHostedScopeLeaseReport,
+} from "../connection/hostedConnectionScopes";
+import { hostedHubController, hostedHubStore } from "@ryco/client-runtime/authorization";
+import { demoteMobileHostedEnvironmentState } from "../hostedHub/nodeStateCleanup";
+import { useStore } from "../state/threadsRuntime";
 
 type Catalog = ReturnType<typeof createMobileSavedEnvironmentCatalog>;
 type RemoteApi = ReturnType<typeof createMobileRemoteEnvironmentApi>;
@@ -71,6 +82,8 @@ export function createMobileConnectionRegistry(overrides?: {
 }
 
 let initialized = false;
+let stopHostedScopeReporter: (() => void) | null = null;
+let stopHostedAccountWatch: (() => void) | null = null;
 
 /**
  * One-time runtime initialization run from the app root. Seeds the ws
@@ -100,6 +113,53 @@ export function initializeMobileRuntime(): MobileConnectionRegistry {
     })().catch((error: unknown) => {
       console.warn("[snapshot-cache] cold-start hydration failed", error);
     });
+    const hostedCoordinator = configureMobileHostedConnectionCoordinator({
+      scopes: mobileHostedConnectionScopes,
+      now: () => Date.now(),
+      setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+      clearTimeout: (timer) => globalThis.clearTimeout(timer as ReturnType<typeof setTimeout>),
+      nodeForId: (nodeId) =>
+        hostedHubStore.getState().nodes.find((node) => node.id === nodeId) ?? null,
+      selectedEnvironmentId: () => hostedHubStore.getState().selectedNode?.environmentId ?? null,
+      selectNode: (nodeId) => hostedHubController.selectNode(nodeId),
+      connectSelectedEnvironment: () => {
+        registry.driver.supervisor.connectPrimary();
+      },
+      clearSelectedEnvironment: () => hostedHubController.returnToDirectory(),
+      markSelectedDeliveryUnknown: () =>
+        hostedHubController.markDeliveryUnknown(hostedHubStore.getState().generation),
+      listConnections: () => registry.driver.supervisor.list(),
+      readConnection: (environmentId) => registry.driver.supervisor.read(environmentId),
+      removeConnection: (environmentId) => registry.driver.supervisor.remove(environmentId),
+      demoteEnvironment: demoteMobileHostedEnvironmentState,
+      restoreActiveEnvironment: (environmentId) =>
+        useStore.getState().setActiveEnvironmentId(environmentId),
+    });
+    // A local lease report uses the same 25s/45s cadence as the reference
+    // design. Connection ownership consumes the live refcounts immediately;
+    // the periodic report is the bounded observability/TTL contract and never
+    // carries payload content or high-cardinality logs.
+    stopHostedScopeReporter = mobileHostedConnectionScopes.startReporter({
+      report: recordMobileHostedScopeLeaseReport,
+    });
+    let previousHostedState = hostedHubStore.getState();
+    stopHostedAccountWatch = hostedHubStore.subscribe(() => {
+      const currentHostedState = hostedHubStore.getState();
+      if (
+        previousHostedState.accountStatus === "authenticated" &&
+        currentHostedState.accountStatus !== "authenticated"
+      ) {
+        void hostedCoordinator.releaseAll();
+      }
+      if (
+        previousHostedState.sessionStatus === "delivery-unknown" &&
+        currentHostedState.sessionStatus === "ready" &&
+        currentHostedState.selectedNode !== null
+      ) {
+        hostedCoordinator.acknowledgeDeliveryUnknown(currentHostedState.selectedNode.environmentId);
+      }
+      previousHostedState = currentHostedState;
+    });
     registry.driver.start();
   }
   return registry;
@@ -111,4 +171,10 @@ export function resetMobileRuntimeInitForTests(): void {
   appCatalog = null;
   appRemoteApi = null;
   appDriver = null;
+  stopHostedScopeReporter?.();
+  stopHostedScopeReporter = null;
+  stopHostedAccountWatch?.();
+  stopHostedAccountWatch = null;
+  mobileHostedConnectionScopes.reset();
+  resetMobileHostedConnectionCoordinatorForTests();
 }

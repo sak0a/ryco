@@ -10,7 +10,7 @@ import type { SavedEnvironmentConnectionState } from "@ryco/client-runtime/conne
 import { useConnectionRegistry } from "../providers/ConnectionRegistryProvider";
 import { useWsConnectionStatus, wsUiStateForEnvironment } from "../rpc/wsConnectionState";
 import { hostedState } from "../features/home/homeEnvironmentModel";
-import { useHostedHubStore } from "../hostedHub/state";
+import { useMobileHostedConnectionsStore } from "../hostedHub/state";
 import {
   hostedWorkspacePhase,
   mergeWorkspaceEnvironments,
@@ -55,23 +55,9 @@ export function useWorkspaceState(): WorkspaceState {
   );
   const wsStatus = useWsConnectionStatus();
   const bootstrapComplete = useStore(selectBootstrapCompleteForActiveEnvironment);
-  const hostedSnapshot = useHostedHubStore(
-    useShallow((state) => ({
-      selectedNode: state.selectedNode,
-      effectiveRole: state.effectiveRole,
-      transportStatus: state.transportStatus,
-      sessionStatus: state.sessionStatus,
-    })),
+  const hostedConnections = useMobileHostedConnectionsStore(
+    useShallow((state) => state.selectedNodes),
   );
-  const hosted = hostedSnapshot.selectedNode
-    ? {
-        environmentId: hostedSnapshot.selectedNode.environmentId,
-        label: hostedSnapshot.selectedNode.label,
-        transportStatus: hostedSnapshot.transportStatus,
-        sessionStatus: hostedSnapshot.sessionStatus,
-        role: hostedSnapshot.effectiveRole,
-      }
-    : null;
 
   const wsUiState = getWsConnectionUiState(wsStatus);
   const networkStatus: NetworkStatus = wsUiState === "offline" ? "offline" : "online";
@@ -104,15 +90,21 @@ export function useWorkspaceState(): WorkspaceState {
   // The hosted plane keeps its own stores and never writes to the catalog above,
   // so without this the workspace sees no environments at all on a Hub-relay-only
   // setup and reports "Not connected" over a live relay.
-  const hostedEnvironment: WorkspaceEnvironment | null = hosted
-    ? {
+  const hostedEnvironments: WorkspaceEnvironment[] = hostedConnections.map((hosted) => ({
+    environmentId: hosted.environmentId,
+    environmentLabel: hosted.label,
+    connectionState: hostedWorkspacePhase(
+      hostedState({
         environmentId: hosted.environmentId,
-        environmentLabel: hosted.label,
-        connectionState: hostedWorkspacePhase(hostedState(hosted)),
-        connectionError: null,
-      }
-    : null;
-  const allEnvironments = mergeWorkspaceEnvironments(environments, hostedEnvironment);
+        label: hosted.label,
+        transportStatus: hosted.transportStatus,
+        sessionStatus: hosted.sessionStatus,
+        role: hosted.effectiveRole,
+      }),
+    ),
+    connectionError: null,
+  }));
+  const allEnvironments = mergeWorkspaceEnvironments(environments, hostedEnvironments);
 
   return projectWorkspaceState({
     isReady,

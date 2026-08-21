@@ -6,6 +6,7 @@ import {
 } from "@ryco/client-runtime/connection";
 import {
   hostedHubStore,
+  hostedHubController,
   markHostedSessionReady,
   markHostedSessionReplaying,
   reportHostedShellSnapshotFailure,
@@ -14,12 +15,18 @@ import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,
 } from "@ryco/client-runtime/knownEnvironment";
-import { getHostedRelayAttemptFactory } from "@ryco/client-runtime/relay";
+import {
+  authorizeHostedRequestForState,
+  HostedRelayAttemptFactory,
+  type RelayE2eeProvider,
+} from "@ryco/client-runtime/relay";
 import { createWsRpcClient } from "@ryco/client-runtime/rpc";
 
 import { WsTransport } from "../rpc/wsTransport";
+import { getMobileHostedConnectionCoordinator } from "../connection/hostedConnectionCoordinator";
+import { prepareMobileRelayE2eeAttempt, resolveMobileRelayE2eeProvider } from "./e2eeAttempt";
 import { readPrimaryEnvironmentDescriptor } from "./primaryEnvironment";
-import { mobileHostedRelayUrl } from "./relaySocket";
+import { MobileHostedRelaySocket, mobileHostedRelayUrl } from "./relaySocket";
 import { getMobileHostedConfig } from "./runtimeConfig";
 
 /**
@@ -49,10 +56,110 @@ export function createHostedPrimaryConnection(
 ): EnvironmentConnection | null {
   const descriptor = readPrimaryEnvironmentDescriptor();
   if (descriptor === null) return null;
-  const hostedGeneration = hostedHubStore.getState().generation;
-  const acceptsEvent = () => hostedHubStore.getState().generation === hostedGeneration;
+  const selectedState = hostedHubStore.getState();
+  const node = selectedState.selectedNode;
+  if (!node || node.environmentId !== descriptor.environmentId) return null;
+  const coordinator = getMobileHostedConnectionCoordinator();
+  if (!coordinator.shouldActivate(descriptor.environmentId)) return null;
+  const connectionState = coordinator.ensureRecord(node);
+  const connectionGeneration = connectionState.generation;
+  const acceptsEvent = () =>
+    coordinator.isCurrentGeneration(descriptor.environmentId, connectionGeneration);
+  const sharedSelectionGeneration = (): number | null => {
+    const state = hostedHubStore.getState();
+    return state.selectedNode?.environmentId === descriptor.environmentId ? state.generation : null;
+  };
 
-  const attemptFactory = getHostedRelayAttemptFactory();
+  const attemptFactory = new HostedRelayAttemptFactory({
+    nodeId: () => node.id,
+    generation: () => connectionGeneration,
+    isAuthenticated: () => hostedHubStore.getState().accountStatus === "authenticated",
+    isCurrent: (generation) =>
+      coordinator.isCurrentGeneration(descriptor.environmentId, generation),
+    prepareSocketContext: async () => {
+      const before = hostedHubStore.getState();
+      if (
+        before.accountStatus !== "authenticated" ||
+        before.selectedNode?.environmentId !== descriptor.environmentId
+      ) {
+        throw new Error("Hosted environment is not the current reconnect target.");
+      }
+      await prepareMobileRelayE2eeAttempt();
+      const after = hostedHubStore.getState();
+      if (
+        after.accountStatus !== "authenticated" ||
+        after.selectedNode?.environmentId !== descriptor.environmentId
+      ) {
+        throw new Error("Hosted environment changed during E2EE preparation.");
+      }
+      return resolveMobileRelayE2eeProvider();
+    },
+    relayUrl: mobileHostedRelayUrl,
+    createRelaySocket: (input) =>
+      new MobileHostedRelaySocket({
+        ...input,
+        e2ee: input.preparedSocketContext as RelayE2eeProvider | undefined,
+      }),
+    authorizeRequest: (info) => {
+      const shared = hostedHubStore.getState();
+      const current = coordinator.read(descriptor.environmentId);
+      if (!current || current.generation !== connectionGeneration) return false;
+      return authorizeHostedRequestForState(
+        {
+          effectiveRole: current.effectiveRole,
+          directoryStatus: shared.directoryStatus,
+          transportStatus: current.transportStatus,
+          browserStatus: shared.browserStatus,
+          sessionStatus: current.sessionStatus,
+        },
+        info,
+      );
+    },
+    shouldReconnect: (generation) => {
+      const shared = hostedHubStore.getState();
+      const current = coordinator.read(descriptor.environmentId);
+      return (
+        current?.generation === generation &&
+        shared.accountStatus === "authenticated" &&
+        shared.selectedNode?.environmentId === descriptor.environmentId &&
+        (shared.browserStatus === "current" || shared.browserStatus === "synchronizing") &&
+        current.transportStatus !== "terminal-failure"
+      );
+    },
+    transportStatus: (generation, status) => {
+      coordinator.transportStatus(descriptor.environmentId, generation, status);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null) hostedHubController.transportStatus(sharedGeneration, status);
+    },
+    sessionStatus: (generation, status) => {
+      coordinator.sessionStatus(descriptor.environmentId, generation, status);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null) hostedHubController.sessionStatus(sharedGeneration, status);
+    },
+    role: (generation, role) => {
+      coordinator.role(descriptor.environmentId, generation, role);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null) hostedHubController.role(sharedGeneration, role);
+    },
+    failure: (generation, failure) => {
+      coordinator.failure(descriptor.environmentId, generation, failure);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null) hostedHubController.failure(sharedGeneration, failure);
+    },
+    markDeliveryUnknown: (generation) => {
+      coordinator.markDeliveryUnknown(descriptor.environmentId, generation);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null) hostedHubController.markDeliveryUnknown(sharedGeneration);
+    },
+    connectionClosed: (generation) => {
+      coordinator.connectionClosed(descriptor.environmentId, generation);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null) hostedHubController.connectionClosed(sharedGeneration);
+    },
+  });
+  coordinator.registerPendingRequestReader(descriptor.environmentId, connectionGeneration, () =>
+    attemptFactory.hasPendingRequests(),
+  );
   const client = createWsRpcClient(
     new WsTransport(() => attemptFactory.nextUrl(), {
       ...attemptFactory.lifecycleHandlers(),
@@ -83,9 +190,17 @@ export function createHostedPrimaryConnection(
     knownEnvironment,
     client,
     pushSequenceMonitor: deps.pushSequenceMonitor,
-    onResubscribe: (environmentId) => markHostedSessionReplaying(environmentId, hostedGeneration),
-    onShellError: (environmentId) =>
-      reportHostedShellSnapshotFailure(environmentId, hostedGeneration),
+    onResubscribe: (environmentId) => {
+      coordinator.markSessionReplaying(environmentId, connectionGeneration);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null) markHostedSessionReplaying(environmentId, sharedGeneration);
+    },
+    onShellError: (environmentId) => {
+      coordinator.reportShellSnapshotFailure(environmentId, connectionGeneration);
+      const sharedGeneration = sharedSelectionGeneration();
+      if (sharedGeneration !== null)
+        reportHostedShellSnapshotFailure(environmentId, sharedGeneration);
+    },
     applyShellEvent: (event, environmentId) => {
       if (!acceptsEvent()) return;
       deps.applyShellEvent(event, environmentId);
@@ -93,8 +208,16 @@ export function createHostedPrimaryConnection(
     syncShellSnapshot: (snapshot, environmentId) => {
       if (!acceptsEvent()) return;
       deps.syncShellSnapshot(snapshot, environmentId, {
-        onCurrent: () => markHostedSessionReady(environmentId, hostedGeneration),
-        onReady: () => markHostedSessionReady(environmentId, hostedGeneration),
+        onCurrent: () => {
+          coordinator.markSessionReady(environmentId, connectionGeneration);
+          const sharedGeneration = sharedSelectionGeneration();
+          if (sharedGeneration !== null) markHostedSessionReady(environmentId, sharedGeneration);
+        },
+        onReady: () => {
+          coordinator.markSessionReady(environmentId, connectionGeneration);
+          const sharedGeneration = sharedSelectionGeneration();
+          if (sharedGeneration !== null) markHostedSessionReady(environmentId, sharedGeneration);
+        },
       });
     },
     // Terminal streaming is deferred, matching the direct plane.
