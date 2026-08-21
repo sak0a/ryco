@@ -16,6 +16,7 @@ interface PendingTicket {
   readonly ticket: string;
   readonly expiresAt: number;
   readonly generation: number;
+  readonly preparedSocketContext: unknown;
   used: boolean;
 }
 
@@ -34,8 +35,15 @@ const HOSTED_READ_ONLY_STREAMS = new Set<string>([
   WS_METHODS.subscribeAuthAccess,
 ]);
 
-function authorizeHostedRequest(info: { readonly tag: string; readonly stream: boolean }): boolean {
-  const state = hostedHubStore.getState();
+type HostedRequestAuthorizationState = Pick<
+  ReturnType<typeof hostedHubStore.getState>,
+  "effectiveRole" | "directoryStatus" | "transportStatus" | "browserStatus" | "sessionStatus"
+>;
+
+export function authorizeHostedRequestForState(
+  state: HostedRequestAuthorizationState,
+  info: { readonly tag: string; readonly stream: boolean },
+): boolean {
   if (!hostedRoleAllows(state.effectiveRole, info.tag, state.directoryStatus === "ready")) {
     return false;
   }
@@ -56,6 +64,10 @@ function authorizeHostedRequest(info: { readonly tag: string; readonly stream: b
       state.sessionStatus === "closed") &&
     HOSTED_SESSION_SYNC_SUBSCRIPTIONS.has(info.tag)
   );
+}
+
+function authorizeHostedRequest(info: { readonly tag: string; readonly stream: boolean }): boolean {
+  return authorizeHostedRequestForState(hostedHubStore.getState(), info);
 }
 
 export function ticketFailure(error: HostedHubApiError): HostedRelayFailure {
@@ -90,42 +102,112 @@ export function ticketFailure(error: HostedHubApiError): HostedRelayFailure {
   }
 }
 
+/**
+ * Per-connection lifecycle binding. Web and single-selection clients omit it
+ * and retain the package-owned hosted store/controller behavior. Mobile Wave
+ * 3b binds one factory to one environment so a retained socket can neither buy
+ * a reconnect ticket for a later selection nor publish delivery state into a
+ * different environment's row.
+ */
+export interface HostedRelayAttemptBinding {
+  readonly nodeId: () => string | null;
+  readonly generation: () => number | null;
+  readonly isAuthenticated: () => boolean;
+  readonly isCurrent: (generation: number) => boolean;
+  readonly prepareSocketContext?: () => Promise<unknown>;
+  readonly relayUrl?: () => string;
+  readonly createRelaySocket?: (input: {
+    readonly url: string;
+    readonly ticket: string;
+    readonly ticketExpiresAt: number;
+    readonly callbacks: {
+      readonly onTransportStatus: (status: HostedRelayTransportStatus) => void;
+      readonly onSessionStatus: (status: HostedRycoSessionStatus) => void;
+      readonly onRole: (role: RelayEffectiveRole | null) => void;
+      readonly onFailure: (failure: HostedRelayFailure) => void;
+    };
+    readonly preparedSocketContext: unknown;
+  }) => unknown;
+  readonly authorizeRequest: (info: { readonly tag: string; readonly stream: boolean }) => boolean;
+  readonly shouldReconnect: (generation: number) => boolean;
+  readonly transportStatus: (generation: number, status: HostedRelayTransportStatus) => void;
+  readonly sessionStatus: (generation: number, status: HostedRycoSessionStatus) => void;
+  readonly role: (generation: number, role: RelayEffectiveRole | null) => void;
+  readonly failure: (generation: number, failure: HostedRelayFailure) => void;
+  readonly markDeliveryUnknown: (generation: number) => void;
+  readonly connectionClosed: (generation: number) => void;
+}
+
+function defaultBinding(): HostedRelayAttemptBinding {
+  return {
+    nodeId: () => hostedHubStore.getState().selectedNode?.id ?? null,
+    generation: () => hostedHubStore.getState().generation,
+    isAuthenticated: () => hostedHubStore.getState().accountStatus === "authenticated",
+    isCurrent: (generation) => hostedHubStore.getState().generation === generation,
+    authorizeRequest: authorizeHostedRequest,
+    shouldReconnect: (generation) => {
+      const state = hostedHubStore.getState();
+      return (
+        generation === state.generation &&
+        state.accountStatus === "authenticated" &&
+        state.selectedNode !== null &&
+        (state.browserStatus === "current" || state.browserStatus === "synchronizing") &&
+        state.transportStatus !== "terminal-failure"
+      );
+    },
+    transportStatus: (generation, status) =>
+      hostedHubController.transportStatus(generation, status),
+    sessionStatus: (generation, status) => hostedHubController.sessionStatus(generation, status),
+    role: (generation, role) => hostedHubController.role(generation, role),
+    failure: (generation, failure) => hostedHubController.failure(generation, failure),
+    markDeliveryUnknown: (generation) => hostedHubController.markDeliveryUnknown(generation),
+    connectionClosed: (generation) => hostedHubController.connectionClosed(generation),
+  };
+}
+
 export class HostedRelayAttemptFactory {
+  readonly #binding: HostedRelayAttemptBinding;
   readonly #reconnect = new HostedReconnectPolicy();
   readonly #pendingRequests = new Map<string, "first-chunk" | "exit">();
   #pendingTicket: PendingTicket | null = null;
   #lastRetryAfterMs: number | undefined;
   #activeGeneration: number | null = null;
 
+  constructor(binding: HostedRelayAttemptBinding = defaultBinding()) {
+    this.#binding = binding;
+  }
+
   async nextUrl(): Promise<string> {
-    const state = hostedHubStore.getState();
-    const node = state.selectedNode;
-    if (!node || state.accountStatus !== "authenticated") {
+    const nodeId = this.#binding.nodeId();
+    const generation = this.#binding.generation();
+    if (!nodeId || generation === null || !this.#binding.isAuthenticated()) {
       throw new Error("No authorized hosted node is selected.");
     }
-    const generation = state.generation;
     this.#activeGeneration = generation;
-    hostedHubController.transportStatus(generation, "requesting-ticket");
+    this.#binding.transportStatus(generation, "requesting-ticket");
     this.#pendingTicket = null;
     try {
-      const issued = await getHostedHubApi().issueRelayTicket(node.id);
-      if (hostedHubStore.getState().generation !== generation) {
+      const preparedSocketContext = await this.#binding.prepareSocketContext?.();
+      if (!this.#binding.isCurrent(generation)) throw new Error("Hosted node selection changed.");
+      const issued = await getHostedHubApi().issueRelayTicket(nodeId);
+      if (!this.#binding.isCurrent(generation)) {
         throw new Error("Hosted node selection changed.");
       }
       this.#pendingTicket = {
         ticket: issued.ticket,
         expiresAt: issued.expiresAt,
         generation,
+        preparedSocketContext,
         used: false,
       };
-      return getHostedRuntimeConfiguration().relayUrl();
+      return this.#binding.relayUrl?.() ?? getHostedRuntimeConfiguration().relayUrl();
     } catch (error) {
       if (error instanceof HostedHubApiError && error.status === 401) {
         void hostedHubController.expireSession();
       } else if (error instanceof HostedHubApiError) {
         const failure = ticketFailure(error);
         this.#lastRetryAfterMs = failure.retryAfterMs;
-        hostedHubController.failure(generation, failure);
+        this.#binding.failure(generation, failure);
       }
       throw error;
     }
@@ -147,28 +229,36 @@ export class HostedRelayAttemptFactory {
     const ticketExpiresAt = pending.expiresAt;
     const callbacks = {
       onTransportStatus: (status: HostedRelayTransportStatus) =>
-        hostedHubController.transportStatus(generation, status),
+        this.#binding.transportStatus(generation, status),
       onSessionStatus: (status: HostedRycoSessionStatus) =>
-        hostedHubController.sessionStatus(generation, status),
-      onRole: (role: RelayEffectiveRole | null) => hostedHubController.role(generation, role),
+        this.#binding.sessionStatus(generation, status),
+      onRole: (role: RelayEffectiveRole | null) => this.#binding.role(generation, role),
       onFailure: (failure: HostedRelayFailure) => {
         this.#lastRetryAfterMs = failure.retryAfterMs;
         this.#reconnect.closed();
         if (this.#pendingRequests.size > 0) {
-          hostedHubController.markDeliveryUnknown(generation);
+          this.#binding.markDeliveryUnknown(generation);
           this.#pendingRequests.clear();
         }
-        hostedHubController.failure(generation, failure);
+        this.#binding.failure(generation, failure);
       },
     };
     this.#activeGeneration = generation;
     try {
-      return getHostedRuntimeConfiguration().createRelaySocket({
-        url,
-        ticket,
-        ticketExpiresAt,
-        callbacks,
-      });
+      return this.#binding.createRelaySocket
+        ? this.#binding.createRelaySocket({
+            url,
+            ticket,
+            ticketExpiresAt,
+            callbacks,
+            preparedSocketContext: pending.preparedSocketContext,
+          })
+        : getHostedRuntimeConfiguration().createRelaySocket({
+            url,
+            ticket,
+            ticketExpiresAt,
+            callbacks,
+          });
     } catch (error) {
       if (this.#activeGeneration === generation) this.#activeGeneration = null;
       throw error;
@@ -181,17 +271,9 @@ export class HostedRelayAttemptFactory {
       preserveSocketPath: true,
       retryTransientErrors: false,
       reconnectMaxRetries: 1_000_000,
-      shouldReconnect: () => {
-        const state = hostedHubStore.getState();
-        return (
-          this.#activeGeneration === state.generation &&
-          state.accountStatus === "authenticated" &&
-          state.selectedNode !== null &&
-          (state.browserStatus === "current" || state.browserStatus === "synchronizing") &&
-          state.transportStatus !== "terminal-failure"
-        );
-      },
-      authorizeRequest: authorizeHostedRequest,
+      shouldReconnect: () =>
+        this.#activeGeneration !== null && this.#binding.shouldReconnect(this.#activeGeneration),
+      authorizeRequest: (info) => this.#binding.authorizeRequest(info),
       getReconnectDelayMs: () => {
         const delay = this.#reconnect.nextDelay(this.#lastRetryAfterMs);
         this.#lastRetryAfterMs = undefined;
@@ -203,7 +285,7 @@ export class HostedRelayAttemptFactory {
         const generation = this.#activeGeneration;
         if (generation === null) return;
         this.#reconnect.closed();
-        hostedHubController.connectionClosed(generation);
+        this.#binding.connectionClosed(generation);
       },
       onRequestStart: (info) => {
         if (info.stream && HOSTED_READ_ONLY_STREAMS.has(info.tag)) return;

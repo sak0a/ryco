@@ -48,13 +48,13 @@ describe("hostedWorkspacePhase", () => {
 describe("mergeWorkspaceEnvironments", () => {
   it("returns the direct list untouched when no hosted node is selected", () => {
     const direct = [environment(DIRECT, "connected")];
-    expect(mergeWorkspaceEnvironments(direct, null)).toBe(direct);
+    expect(mergeWorkspaceEnvironments(direct, [])).toBe(direct);
   });
 
   it("adds the hosted node when it is not already a direct one", () => {
     const merged = mergeWorkspaceEnvironments(
       [environment(DIRECT, "offline")],
-      environment(NODE, "connected"),
+      [environment(NODE, "connected")],
     );
     expect(merged.map((e) => e.environmentId)).toEqual([DIRECT, NODE]);
   });
@@ -65,7 +65,7 @@ describe("mergeWorkspaceEnvironments", () => {
     // two derivations cannot disagree about one node.
     const merged = mergeWorkspaceEnvironments(
       [environment(NODE, "offline")],
-      environment(NODE, "connected"),
+      [environment(NODE, "connected")],
     );
     expect(merged).toHaveLength(1);
     expect(merged[0]?.connectionState).toBe("connected");
@@ -107,7 +107,7 @@ describe("the Not-connected regression", () => {
     const state = projectWorkspaceState({
       isReady: true,
       networkStatus: "online",
-      environments: mergeWorkspaceEnvironments([], hosted),
+      environments: mergeWorkspaceEnvironments([], [hosted]),
       shellSummary: {
         hasSnapshot: true,
         hasSynchronizingShell: false,
@@ -130,7 +130,7 @@ describe("the Not-connected regression", () => {
     const state = projectWorkspaceState({
       isReady: true,
       networkStatus: "online",
-      environments: mergeWorkspaceEnvironments([], hosted),
+      environments: mergeWorkspaceEnvironments([], [hosted]),
       shellSummary: {
         hasSnapshot: true,
         hasSynchronizingShell: false,
@@ -148,7 +148,7 @@ describe("the Not-connected regression", () => {
     const state = projectWorkspaceState({
       isReady: true,
       networkStatus: "offline",
-      environments: mergeWorkspaceEnvironments([], hosted),
+      environments: mergeWorkspaceEnvironments([], [hosted]),
       shellSummary: {
         hasSnapshot: true,
         hasSynchronizingShell: false,

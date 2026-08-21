@@ -1,9 +1,11 @@
 import type { HostedNodeLifecycle } from "@ryco/client-runtime/authorization";
 import type { EnvironmentId } from "@ryco/contracts";
+import { hostedHubStore } from "@ryco/client-runtime/authorization";
 
-import { clearCheckpointDiffState } from "../rpc/checkpointDiffAtoms";
+import { getMobileHostedConnectionCoordinator } from "../connection/hostedConnectionCoordinator";
 import { createMobileConnectionRegistry } from "../runtime/bootstrap";
 import { useStore } from "../state/threadsRuntime";
+import { demoteMobileHostedEnvironmentState } from "./nodeStateCleanup";
 import { writePrimaryEnvironmentDescriptor } from "./primaryEnvironment";
 
 /**
@@ -34,14 +36,18 @@ function clearNodeScopedState(environmentId: EnvironmentId): void {
   // its catalog, so leave that alone.
   const registry = createMobileConnectionRegistry();
   if (registry.catalog.get(environmentId)) return;
+  // Wave 3b retains non-selected hosted connections. The shared selection
+  // transition still invokes this legacy teardown callback while moving its
+  // cursor, but a registered connection proves the environment is alive and
+  // must not be demoted. The coordinator calls this again after real removal.
+  if (registry.driver.supervisor.read(environmentId)) return;
   registry.driver.supervisor.disposeThreadDetailSubscriptionsForEnvironment(environmentId);
   // Wave 2: demote instead of remove. A hosted node switch used to blank the
   // switched-away node's rows; they now stay rendered as last-known state
   // (sessions and liveness dropped, cache-provenance stamped). Revocation and
   // authorization removal purge fully via the roster mirror in
   // persistence/environmentSnapshotPersistence.ts.
-  useStore.getState().demoteEnvironmentStateToCachedSnapshot(environmentId, Date.now());
-  clearCheckpointDiffState();
+  demoteMobileHostedEnvironmentState(environmentId);
 }
 
 export const mobileHostedNodeLifecycle: HostedNodeLifecycle = {
@@ -51,11 +57,29 @@ export const mobileHostedNodeLifecycle: HostedNodeLifecycle = {
   clearNodeScopedState,
   writePrimaryEnvironmentDescriptor,
   connectPrimaryEnvironment: () => {
-    supervisor().connectPrimary();
+    const state = hostedHubStore.getState();
+    const node = state.selectedNode;
+    if (!node) return;
+    const coordinator = getMobileHostedConnectionCoordinator();
+    if (!coordinator.shouldActivate(node.environmentId)) return;
+    const record = coordinator.ensureRecord(node);
+    const existing = supervisor().read(node.environmentId);
+    if (!existing) {
+      supervisor().connectPrimary();
+      return;
+    }
+    // A retained healthy channel is the whole point of multi-connect. A stale
+    // retained channel is allowed to reconnect only after selection has moved
+    // back to it, so its E2EE preparation and relay ticket remain node-bound.
+    if (record.transportStatus !== "online" || record.sessionStatus !== "ready") {
+      void existing.reconnect().catch(() => undefined);
+    }
   },
-  disconnectPrimaryEnvironment: async () => {
-    await supervisor().disconnectPrimary();
-  },
+  // Selection changes no longer own connection lifetime. Scope leases + LRU
+  // do, via the mobile coordinator; sign-out and background release call it
+  // explicitly. Keeping this callback inert prevents the shared cursor from
+  // tearing down a live environment just because another thread was opened.
+  disconnectPrimaryEnvironment: async () => undefined,
   setActiveEnvironmentId: (environmentId) => {
     useStore.getState().setActiveEnvironmentId(environmentId);
   },

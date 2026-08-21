@@ -11,8 +11,13 @@ import {
   type HostedHubState,
 } from "@ryco/client-runtime/authorization";
 import { useStore } from "zustand";
+import type { EnvironmentId } from "@ryco/contracts";
 
 import { ensureMobileHostedSession } from "./runtime";
+import {
+  mobileHostedConnectionsStore,
+  type MobileHostedConnectionState,
+} from "../connection/hostedConnectionCoordinator";
 
 /**
  * Register the mobile wiring as a lazy configurator rather than running it at
@@ -68,3 +73,21 @@ export const useHostedAccountStore = Object.assign(
     useStore(hostedAccountStore as never, selector as never) as T,
   hostedAccountStore,
 );
+
+type MobileHostedConnectionsSelector<T> = (state: {
+  readonly selectedNodes: ReadonlyArray<MobileHostedConnectionState>;
+  readonly deliveryUnknownEnvironmentIds: ReadonlyArray<EnvironmentId>;
+}) => T;
+
+/**
+ * Wave 3b's selected-node set and per-environment relay/session projection.
+ * The package store's singular `selectedNode` remains only the serialized
+ * activation/reconnect cursor; mounted UI reads this bounded live set.
+ */
+export const useMobileHostedConnectionsStore = Object.assign(
+  <T>(selector: MobileHostedConnectionsSelector<T>): T =>
+    useStore(mobileHostedConnectionsStore as never, selector as never) as T,
+  mobileHostedConnectionsStore,
+);
+
+export type { MobileHostedConnectionState };

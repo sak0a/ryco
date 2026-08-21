@@ -2,6 +2,7 @@ import type { EnvironmentId } from "@ryco/contracts";
 import { useEffect, useState } from "react";
 
 import { readRpcClient } from "../../connection/environmentApi";
+import { mobileHostedConnectionScopes } from "../../connection/hostedConnectionScopes";
 import { useWsConnectionStatusForEnvironment } from "../../rpc/wsConnectionState";
 import { buildCheckSummary, type CheckRollupItemInput, type CheckSummary } from "./prCheckSummary";
 
@@ -40,10 +41,14 @@ export function useThreadChecks(input: {
     }
 
     let cancelled = false;
+    const releaseVcsScope = mobileHostedConnectionScopes.retain(environmentId, {
+      type: "vcs-status",
+      cwd,
+    });
     const client = readRpcClient(environmentId);
     if (!client) {
       setSummary(buildCheckSummary({ available: false }));
-      return;
+      return releaseVcsScope;
     }
 
     void (async () => {
@@ -72,6 +77,7 @@ export function useThreadChecks(input: {
 
     return () => {
       cancelled = true;
+      releaseVcsScope();
     };
   }, [connectionPhase, cwd, environmentId, prNumber]);
 

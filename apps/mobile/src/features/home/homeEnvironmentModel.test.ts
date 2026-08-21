@@ -17,13 +17,15 @@ describe("Home environments", () => {
           role: "owner",
         },
       ],
-      hosted: {
-        environmentId: "hosted-a" as EnvironmentId,
-        label: "Studio",
-        transportStatus: "online",
-        sessionStatus: "ready",
-        role: "viewer",
-      },
+      hosted: [
+        {
+          environmentId: "hosted-a" as EnvironmentId,
+          label: "Studio",
+          transportStatus: "online",
+          sessionStatus: "ready",
+          role: "viewer",
+        },
+      ],
     });
 
     expect(environments).toEqual([
@@ -53,13 +55,15 @@ describe("Home environments", () => {
           role: "owner",
         },
       ],
-      hosted: {
-        environmentId,
-        label: "Studio",
-        transportStatus: "reconnecting",
-        sessionStatus: "stale",
-        role: "owner",
-      },
+      hosted: [
+        {
+          environmentId,
+          label: "Studio",
+          transportStatus: "reconnecting",
+          sessionStatus: "stale",
+          role: "owner",
+        },
+      ],
     });
 
     expect(environments).toEqual([
@@ -72,11 +76,40 @@ describe("Home environments", () => {
     ]);
   });
 
+  it("projects several live hosted environments without a global selected-node row", () => {
+    const environments = buildHomeEnvironments({
+      direct: [],
+      hosted: [
+        {
+          environmentId: "hosted-a" as EnvironmentId,
+          label: "Studio",
+          transportStatus: "online",
+          sessionStatus: "ready",
+          role: "owner",
+        },
+        {
+          environmentId: "hosted-b" as EnvironmentId,
+          label: "Laptop",
+          transportStatus: "online",
+          sessionStatus: "delivery-unknown",
+          role: "operator",
+        },
+      ],
+    });
+
+    expect(environments.map((environment) => environment.environmentId)).toEqual([
+      "hosted-a",
+      "hosted-b",
+    ]);
+    expect(environments[0]?.deliveryUnknown).toBeUndefined();
+    expect(environments[1]?.deliveryUnknown).toBe(true);
+  });
+
   it("renders every cached Hub roster node with presence-derived stale detail", () => {
     const now = Date.parse("2026-08-20T12:00:00.000Z");
     const environments = buildHomeEnvironments({
       direct: [],
-      hosted: null,
+      hosted: [],
       cachedHubNodes: [
         {
           environmentId: "node-a" as EnvironmentId,
@@ -140,7 +173,7 @@ describe("Home environments", () => {
           role: "owner",
         },
       ],
-      hosted: null,
+      hosted: [],
       cacheProvenanceEnvironmentIds: ["direct-a" as EnvironmentId],
       now: 0,
     });
@@ -165,13 +198,15 @@ describe("Home environments", () => {
           role: "owner",
         },
       ],
-      hosted: {
-        environmentId: "node-a" as EnvironmentId,
-        label: "Work Mac",
-        transportStatus: "reconnecting",
-        sessionStatus: "synchronizing",
-        role: "owner",
-      },
+      hosted: [
+        {
+          environmentId: "node-a" as EnvironmentId,
+          label: "Work Mac",
+          transportStatus: "reconnecting",
+          sessionStatus: "synchronizing",
+          role: "owner",
+        },
+      ],
       cachedHubNodes: [
         {
           environmentId: "node-a" as EnvironmentId,
@@ -211,7 +246,7 @@ describe("Home environments", () => {
           role: "owner",
         },
       ],
-      hosted: null,
+      hosted: [],
       cacheProvenanceEnvironmentIds: [],
       now: 0,
     });
@@ -236,13 +271,15 @@ describe("Home environment provenance (wave 4)", () => {
           role: "client",
         },
       ],
-      hosted: {
-        environmentId: HOSTED,
-        label: "Studio",
-        transportStatus: "online",
-        sessionStatus: "ready",
-        role: "operator",
-      },
+      hosted: [
+        {
+          environmentId: HOSTED,
+          label: "Studio",
+          transportStatus: "online",
+          sessionStatus: "ready",
+          role: "operator",
+        },
+      ],
       cachedHubNodes: [
         {
           environmentId: ROSTER_ONLY,
@@ -280,13 +317,15 @@ describe("Home environment provenance (wave 4)", () => {
           role: null,
         },
       ],
-      hosted: {
-        environmentId: HOSTED,
-        label: "Studio",
-        transportStatus: "online",
-        sessionStatus: "ready",
-        role: null,
-      },
+      hosted: [
+        {
+          environmentId: HOSTED,
+          label: "Studio",
+          transportStatus: "online",
+          sessionStatus: "ready",
+          role: null,
+        },
+      ],
     });
 
     expect(environments[0]).not.toHaveProperty("role");

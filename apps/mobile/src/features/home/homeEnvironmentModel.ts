@@ -105,10 +105,11 @@ export function cachedHubNodeStaleDetail(
 
 export function buildHomeEnvironments(input: {
   readonly direct: ReadonlyArray<DirectHomeEnvironmentInput>;
-  readonly hosted: HostedHomeEnvironmentInput | null;
+  readonly hosted: ReadonlyArray<HostedHomeEnvironmentInput>;
   readonly cachedHubNodes?: ReadonlyArray<CachedHubNodeHomeEnvironmentInput>;
   /** Environments whose store rows are cache-provenance (no live snapshot yet). */
   readonly cacheProvenanceEnvironmentIds?: ReadonlyArray<EnvironmentId>;
+  readonly deliveryUnknownEnvironmentIds?: ReadonlyArray<EnvironmentId>;
   /**
    * Wave 4: per-environment E2EE trust, display only (see `nodeTrustModel.ts`).
    * `null` or absent means this device has no evidence to render a claim from —
@@ -120,6 +121,7 @@ export function buildHomeEnvironments(input: {
 }): ReadonlyArray<InboxEnvironment> {
   const now = input.now ?? Date.now();
   const cachedIds = new Set(input.cacheProvenanceEnvironmentIds ?? []);
+  const deliveryUnknownIds = new Set(input.deliveryUnknownEnvironmentIds ?? []);
   // Staleness is cache provenance alone — never gated on the transport state.
   // Amendment B: relay-socket state provably does not track node reachability,
   // and a dead node's transport can sit in "reconnecting" indefinitely. Rows
@@ -150,6 +152,7 @@ export function buildHomeEnvironments(input: {
       connectionState: directState(direct),
       ...roleFields(direct.role),
       ...trustFields(direct.environmentId),
+      ...(deliveryUnknownIds.has(direct.environmentId) ? { deliveryUnknown: true } : {}),
       ...staleFields(direct.environmentId, "Offline · cached"),
     });
   }
@@ -162,21 +165,26 @@ export function buildHomeEnvironments(input: {
       connectionState: "offline",
       ...roleFields(node.role),
       ...trustFields(node.environmentId),
+      ...(deliveryUnknownIds.has(node.environmentId) ? { deliveryUnknown: true } : {}),
       ...staleFields(node.environmentId, cachedHubNodeStaleDetail(node, now)),
     });
   }
-  if (input.hosted) {
+  for (const hosted of input.hosted) {
     const rosterNode = (input.cachedHubNodes ?? []).find(
-      (node) => node.environmentId === input.hosted?.environmentId,
+      (node) => node.environmentId === hosted.environmentId,
     );
-    environments.set(input.hosted.environmentId, {
-      environmentId: input.hosted.environmentId,
-      label: input.hosted.label,
-      connectionState: hostedState(input.hosted),
-      ...roleFields(input.hosted.role),
-      ...trustFields(input.hosted.environmentId),
+    environments.set(hosted.environmentId, {
+      environmentId: hosted.environmentId,
+      label: hosted.label,
+      connectionState: hostedState(hosted),
+      ...(hosted.sessionStatus === "delivery-unknown" ||
+      deliveryUnknownIds.has(hosted.environmentId)
+        ? { deliveryUnknown: true }
+        : {}),
+      ...roleFields(hosted.role),
+      ...trustFields(hosted.environmentId),
       ...staleFields(
-        input.hosted.environmentId,
+        hosted.environmentId,
         rosterNode ? cachedHubNodeStaleDetail(rosterNode, now) : "Offline · cached",
       ),
     });

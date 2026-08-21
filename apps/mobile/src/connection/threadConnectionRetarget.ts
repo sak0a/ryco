@@ -1,5 +1,5 @@
 import type { HostedHubState } from "@ryco/client-runtime/authorization";
-import { hostedHubController, hostedHubStore } from "@ryco/client-runtime/authorization";
+import { hostedHubStore } from "@ryco/client-runtime/authorization";
 import type { EnvironmentId } from "@ryco/contracts";
 
 import {
@@ -9,6 +9,7 @@ import {
 } from "../hostedHub/nodeRoster";
 import { isMobileHostedModeAvailable } from "../hostedHub/runtime";
 import { createMobileConnectionRegistry } from "../runtime/bootstrap";
+import { getMobileHostedConnectionCoordinator } from "./hostedConnectionCoordinator";
 
 /**
  * Wave 3a: opening a thread re-targets the hosted connection to the node that
@@ -56,6 +57,8 @@ type RetargetStateInput = Pick<
 export interface ThreadConnectionRetargetInput {
   readonly environmentId: EnvironmentId;
   readonly hasDirectEnvironment: boolean;
+  /** Omitted by legacy fixtures; false means the selected cursor was evicted. */
+  readonly hasHostedConnection?: boolean;
   readonly hostedAvailable: boolean;
   readonly state: RetargetStateInput;
   readonly rosterEntry: CachedHubNodeRecord | null;
@@ -95,7 +98,11 @@ export function deriveThreadConnectionRetarget(
     state.selectionStatus === "revoked" ||
     state.selectionStatus === "authorization-removed" ||
     state.selectionStatus === "incompatible";
-  if (state.selectedNode?.environmentId === environmentId && !selectionTerminal) {
+  if (
+    state.selectedNode?.environmentId === environmentId &&
+    !selectionTerminal &&
+    input.hasHostedConnection !== false
+  ) {
     return { kind: "none" };
   }
 
@@ -179,7 +186,8 @@ export function deriveThreadConnectionRetarget(
   //    it is forbidden. Wait for the poll.
   if (
     state.selectedNode?.id === directoryNode.id &&
-    state.selectedNode.environmentId === directoryNode.environmentId
+    state.selectedNode.environmentId === directoryNode.environmentId &&
+    input.hasHostedConnection !== false
   ) {
     return { kind: "wait" };
   }
@@ -212,6 +220,7 @@ export interface ThreadConnectionRetargetEngineDeps {
   readonly store: RetargetStoreLike;
   readonly selectNode: (nodeId: string) => Promise<void>;
   readonly hasDirectEnvironment: (environmentId: EnvironmentId) => boolean;
+  readonly hasHostedConnection?: (environmentId: EnvironmentId) => boolean;
   readonly hostedAvailable: () => boolean;
   readonly getRosterEntry: (environmentId: EnvironmentId) => CachedHubNodeRecord | null;
   /**
@@ -351,6 +360,9 @@ export function createThreadConnectionRetargetEngine(
     const decision = deriveThreadConnectionRetarget({
       environmentId,
       hasDirectEnvironment: deps.hasDirectEnvironment(environmentId),
+      ...(deps.hasHostedConnection
+        ? { hasHostedConnection: deps.hasHostedConnection(environmentId) }
+        : {}),
       hostedAvailable: deps.hostedAvailable(),
       state: deps.store.getState(),
       rosterEntry: deps.getRosterEntry(environmentId),
@@ -479,9 +491,13 @@ export function ensureMobileThreadConnectionRetargetEngine(): ThreadConnectionRe
   if (mobileEngine) return mobileEngine;
   mobileEngine = createThreadConnectionRetargetEngine({
     store: hostedHubStore,
-    selectNode: (nodeId) => hostedHubController.selectNode(nodeId),
+    // Wave 3b preserves 3a's decision model and replaces only its actuator:
+    // the same retarget decision now acquires/touches a bounded connection.
+    selectNode: (nodeId) => getMobileHostedConnectionCoordinator().acquireNode(nodeId),
     hasDirectEnvironment: (environmentId) =>
       createMobileConnectionRegistry().catalog.get(environmentId) !== null,
+    hasHostedConnection: (environmentId) =>
+      createMobileConnectionRegistry().driver.supervisor.read(environmentId)?.kind === "primary",
     hostedAvailable: () => isMobileHostedModeAvailable(),
     getRosterEntry: (environmentId) =>
       getCachedHubNodeRoster().find((record) => record.environmentId === environmentId) ?? null,

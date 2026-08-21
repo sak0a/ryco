@@ -2,7 +2,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { getCachedHubNodeRoster, subscribeCachedHubNodeRoster } from "../../hostedHub/nodeRoster";
-import { useHostedHubStore } from "../../hostedHub/state";
+import { useMobileHostedConnectionsStore } from "../../hostedHub/state";
 import { selectCacheHydratedEnvironmentIds, useStore } from "../../state/threadsRuntime";
 import { useSavedEnvironments } from "../connection/useConnectionController";
 import { buildHomeEnvironments } from "./homeEnvironmentModel";
@@ -10,12 +10,10 @@ import { useNodeTrust } from "./useNodeTrust";
 
 export function useHomeEnvironments() {
   const { rows: directRows } = useSavedEnvironments();
-  const hosted = useHostedHubStore(
+  const hosted = useMobileHostedConnectionsStore(
     useShallow((state) => ({
-      selectedNode: state.selectedNode,
-      effectiveRole: state.effectiveRole,
-      transportStatus: state.transportStatus,
-      sessionStatus: state.sessionStatus,
+      selectedNodes: state.selectedNodes,
+      deliveryUnknownEnvironmentIds: state.deliveryUnknownEnvironmentIds,
     })),
   );
   // Wave 2: the persisted Hub node roster puts every known node in the list —
@@ -38,15 +36,13 @@ export function useHomeEnvironments() {
           connectionState: row.runtime.connectionState,
           role: row.runtime.role,
         })),
-        hosted: hosted.selectedNode
-          ? {
-              environmentId: hosted.selectedNode.environmentId,
-              label: hosted.selectedNode.label,
-              transportStatus: hosted.transportStatus,
-              sessionStatus: hosted.sessionStatus,
-              role: hosted.effectiveRole,
-            }
-          : null,
+        hosted: hosted.selectedNodes.map((connection) => ({
+          environmentId: connection.environmentId,
+          label: connection.label,
+          transportStatus: connection.transportStatus,
+          sessionStatus: connection.sessionStatus,
+          role: connection.effectiveRole,
+        })),
         cachedHubNodes: rosterNodes.map((node) => ({
           environmentId: node.environmentId,
           label: node.label,
@@ -57,6 +53,7 @@ export function useHomeEnvironments() {
           lastAuthenticatedAt: node.lastAuthenticatedAt,
         })),
         cacheProvenanceEnvironmentIds,
+        deliveryUnknownEnvironmentIds: hosted.deliveryUnknownEnvironmentIds,
         trustByEnvironmentId,
       }),
     [cacheProvenanceEnvironmentIds, directRows, hosted, rosterNodes, trustByEnvironmentId],

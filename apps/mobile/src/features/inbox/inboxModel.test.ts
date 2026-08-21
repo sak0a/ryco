@@ -120,6 +120,28 @@ describe("Inbox model", () => {
     expect(sections[1]?.rows.map((row) => row.threadId)).toEqual(["idle"]);
   });
 
+  it("surfaces delivery unknown only on rows from the affected environment", () => {
+    const sections = buildInboxSections({
+      projects: [project(NODE_A, "project-a", "Ryco"), project(NODE_B, "project-b", "Hub")],
+      worktrees: [],
+      environments: [
+        {
+          environmentId: NODE_A,
+          label: "Mac Studio",
+          connectionState: "offline",
+          deliveryUnknown: true,
+        },
+        { environmentId: NODE_B, label: "Build node", connectionState: "connected" },
+      ],
+      threads: [thread(NODE_A, "uncertain", "project-a"), thread(NODE_B, "safe", "project-b")],
+    });
+
+    const rows = sections.flatMap((section) => section.rows);
+    expect(rows.find((row) => row.threadId === "uncertain")?.state).toBe("delivery-unknown");
+    expect(rows.find((row) => row.threadId === "uncertain")?.statusLabel).toBe("Check delivery");
+    expect(rows.find((row) => row.threadId === "safe")?.state).toBe("idle");
+  });
+
   it("builds the complete node, project, and worktree context and filters it", () => {
     const sections = buildInboxSections({
       projects: [project(NODE_A, "project-a", "Ryco")],

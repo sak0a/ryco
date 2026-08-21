@@ -10,15 +10,64 @@ const hostedLifecycle = vi.hoisted(() => ({
 const connectionFactory = vi.hoisted(() => ({
   input: null as Record<string, unknown> | null,
 }));
+const coordinator = vi.hoisted(() => ({
+  current: true,
+  generation: 3,
+  markReady: vi.fn(),
+  markReplaying: vi.fn(),
+  reportFailure: vi.fn(),
+}));
 
 vi.mock("@ryco/client-runtime/authorization", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   hostedHubStore: {
-    getState: () => ({ generation: hostedLifecycle.generation }),
+    getState: () => ({
+      generation: hostedLifecycle.generation,
+      accountStatus: "authenticated",
+      directoryStatus: "ready",
+      browserStatus: "current",
+      selectedNode: {
+        id: "node-hosted-1",
+        environmentId: "env-hosted-1",
+        label: "Studio",
+        effectiveRole: "owner",
+      },
+    }),
   },
+  hostedHubController: {},
   markHostedSessionReady: hostedLifecycle.markReady,
   markHostedSessionReplaying: hostedLifecycle.markReplaying,
   reportHostedShellSnapshotFailure: hostedLifecycle.reportFailure,
+}));
+vi.mock("../connection/hostedConnectionCoordinator", () => ({
+  getMobileHostedConnectionCoordinator: () => ({
+    ensureRecord: () => ({
+      generation: coordinator.generation,
+      transportStatus: "idle",
+      sessionStatus: "synchronizing",
+      effectiveRole: "owner",
+    }),
+    shouldActivate: () => true,
+    isCurrentGeneration: () => coordinator.current,
+    registerPendingRequestReader: vi.fn(),
+    read: () => ({
+      generation: coordinator.generation,
+      transportStatus: "online",
+      sessionStatus: "ready",
+      effectiveRole: "owner",
+    }),
+    markAttemptPrepared: vi.fn(),
+    transportStatus: vi.fn(),
+    sessionStatus: vi.fn(),
+    role: vi.fn(),
+    failure: vi.fn(),
+    markDeliveryUnknown: vi.fn(),
+    acknowledgeDeliveryUnknown: vi.fn(),
+    connectionClosed: vi.fn(),
+    markSessionReady: coordinator.markReady,
+    markSessionReplaying: coordinator.markReplaying,
+    reportShellSnapshotFailure: coordinator.reportFailure,
+  }),
 }));
 vi.mock("@ryco/client-runtime/connection", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -92,6 +141,10 @@ beforeEach(() => {
   hostedLifecycle.markReady.mockReset();
   hostedLifecycle.markReplaying.mockReset();
   hostedLifecycle.reportFailure.mockReset();
+  coordinator.current = true;
+  coordinator.markReady.mockReset();
+  coordinator.markReplaying.mockReset();
+  coordinator.reportFailure.mockReset();
   connectionFactory.input = null;
   resetPrimaryEnvironmentForTests();
   resetMobileHostedRuntimeConfigForTests();
@@ -176,7 +229,7 @@ describe("hosted primary connection", () => {
     expect(hostedLifecycle.reportFailure).toHaveBeenCalledWith("env-hosted-1", 7);
   });
 
-  it("drops shell data from a superseded hosted generation", () => {
+  it("keeps retained shell data across selection generations and drops it after eviction", () => {
     writePrimaryEnvironmentDescriptor(descriptor);
     const input = deps();
 
@@ -187,9 +240,13 @@ describe("hosted primary connection", () => {
       syncShellSnapshot: (snapshot: unknown, environmentId: string) => void;
     };
     connectionInput.applyShellEvent({ sequence: 1 }, "env-hosted-1");
+    expect(input.applyShellEvent).toHaveBeenCalledOnce();
+
+    coordinator.current = false;
+    connectionInput.applyShellEvent({ sequence: 2 }, "env-hosted-1");
     connectionInput.syncShellSnapshot({ snapshotSequence: 1 }, "env-hosted-1");
 
-    expect(input.applyShellEvent).not.toHaveBeenCalled();
+    expect(input.applyShellEvent).toHaveBeenCalledOnce();
     expect(input.syncShellSnapshot).not.toHaveBeenCalled();
     expect(hostedLifecycle.markReady).not.toHaveBeenCalled();
   });
