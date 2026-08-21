@@ -21,6 +21,7 @@ import {
 import { hostedHubController, hostedHubStore } from "@ryco/client-runtime/authorization";
 import { demoteMobileHostedEnvironmentState } from "../hostedHub/nodeStateCleanup";
 import { useStore } from "../state/threadsRuntime";
+import { mobileRuntimeStartupBarrier } from "./startupBarrier";
 
 type Catalog = ReturnType<typeof createMobileSavedEnvironmentCatalog>;
 type RemoteApi = ReturnType<typeof createMobileRemoteEnvironmentApi>;
@@ -82,6 +83,7 @@ export function createMobileConnectionRegistry(overrides?: {
 }
 
 let initialized = false;
+let stopEnvironmentDriver: (() => void) | null = null;
 let stopHostedScopeReporter: (() => void) | null = null;
 let stopHostedAccountWatch: (() => void) | null = null;
 
@@ -97,22 +99,24 @@ export function initializeMobileRuntime(): MobileConnectionRegistry {
     initialized = true;
     initializeWsConnectionState();
     // Wave 2: hydrate the snapshot cache (cached node roster + per-environment
-    // projections) into the stores before any connection produces live data.
-    // Fire-and-forget — hydration is a no-op for any environment that already
-    // has live state, so racing driver.start() is safe. Catalog hydration must
-    // land first or the orphan check would misread direct environments.
-    void (async () => {
-      const { mobileKV } = await import("../platform/kv");
-      const { initializeMobileSnapshotPersistence } =
-        await import("../persistence/environmentSnapshotPersistence");
-      await registry.catalog.waitForHydration().catch(() => undefined);
-      await initializeMobileSnapshotPersistence({
-        kv: mobileKV,
-        hasDirectEnvironment: (environmentId) => registry.catalog.get(environmentId) !== null,
-      });
-    })().catch((error: unknown) => {
-      console.warn("[snapshot-cache] cold-start hydration failed", error);
-    });
+    // projections) before either the direct supervisor or hosted lifecycle can
+    // attempt a connection. Catalog hydration must land first or the orphan
+    // check would misread direct environments.
+    void mobileRuntimeStartupBarrier.beginHydration(
+      async () => {
+        const { mobileKV } = await import("../platform/kv");
+        const { initializeMobileSnapshotPersistence } =
+          await import("../persistence/environmentSnapshotPersistence");
+        await registry.catalog.waitForHydration();
+        await initializeMobileSnapshotPersistence({
+          kv: mobileKV,
+          hasDirectEnvironment: (environmentId) => registry.catalog.get(environmentId) !== null,
+        });
+      },
+      (error: unknown) => {
+        console.warn("[snapshot-cache] cold-start hydration failed", error);
+      },
+    );
     const hostedCoordinator = configureMobileHostedConnectionCoordinator({
       scopes: mobileHostedConnectionScopes,
       now: () => Date.now(),
@@ -160,7 +164,14 @@ export function initializeMobileRuntime(): MobileConnectionRegistry {
       }
       previousHostedState = currentHostedState;
     });
-    registry.driver.start();
+    mobileRuntimeStartupBarrier.runAfterHydration(
+      () => {
+        stopEnvironmentDriver = registry.driver.start();
+      },
+      (error: unknown) => {
+        console.warn("[connection] mobile runtime startup failed", error);
+      },
+    );
   }
   return registry;
 }
@@ -168,6 +179,9 @@ export function initializeMobileRuntime(): MobileConnectionRegistry {
 /** Test seam: drop the app singletons and init flag. */
 export function resetMobileRuntimeInitForTests(): void {
   initialized = false;
+  mobileRuntimeStartupBarrier.reset();
+  stopEnvironmentDriver?.();
+  stopEnvironmentDriver = null;
   appCatalog = null;
   appRemoteApi = null;
   appDriver = null;
