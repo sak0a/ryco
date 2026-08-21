@@ -13,7 +13,7 @@ import {
 import { Pressable, ScrollView, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
-import { getWsConnectionUiState, serverConfigAtom } from "@ryco/client-runtime/rpc";
+import { serverConfigAtom } from "@ryco/client-runtime/rpc";
 import {
   getProviderInteractionModeToggle,
   getProviderSupportsAskMode,
@@ -45,7 +45,10 @@ import {
 } from "../../state/agentControlRuntime";
 import { useAgentControlSync } from "../../state/agentControlSync";
 import { useHomeWorkspaceData } from "../../state/homeData";
-import { useWsConnectionStatus } from "../../rpc/wsConnectionState";
+import {
+  useWsConnectionStatusForEnvironment,
+  wsUiStateForEnvironment,
+} from "../../rpc/wsConnectionState";
 import {
   enqueueThreadOutboxMessage,
   listThreadOutboxMessages,
@@ -191,7 +194,12 @@ export function ThreadDetailScreen(props: {
   );
   const [expandedFoldIds, setExpandedFoldIds] = useState<ReadonlySet<string>>(() => new Set());
   const serverConfig = useAtomValue(serverConfigAtom);
-  const connectionUiState = getWsConnectionUiState(useWsConnectionStatus());
+  // This screen renders one environment's content; its connection banner and
+  // gating must track THAT node's socket, not whichever socket wrote the
+  // global status last.
+  const connectionUiState = wsUiStateForEnvironment(
+    useWsConnectionStatusForEnvironment(environmentId),
+  );
 
   // Retain the supervisor's thread-detail subscription while mounted, and make
   // this node authoritative for the active task.

@@ -268,6 +268,7 @@ export function createMobileEnvironmentDriver(
         },
         {
           getConnectionLabel: () => catalog.get(environmentId)?.label ?? null,
+          getEnvironmentId: () => environmentId,
           onAttempt: () => setRuntimeConnecting(environmentId),
           onOpen: () => setRuntimeConnected(environmentId),
           onError: (message) => setRuntimeError(environmentId, new Error(message)),

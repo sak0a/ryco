@@ -1,7 +1,11 @@
+import type { EnvironmentId } from "@ryco/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { appAtomRegistry } from "./atomRegistry.ts";
 import {
+  clearWsConnectionStatusForEnvironment,
   getWsConnectionStatus,
+  getWsConnectionStatusForEnvironment,
   getWsReconnectDelayMsForRetry,
   getWsConnectionUiState,
   recordWsConnectionAttempt,
@@ -11,6 +15,7 @@ import {
   resetWsConnectionStateForTests,
   setBrowserOnlineStatus,
   WS_RECONNECT_MAX_ATTEMPTS,
+  wsConnectionOpenedCountAtom,
 } from "./wsConnectionState.ts";
 
 describe("wsConnectionState", () => {
@@ -103,5 +108,97 @@ describe("wsConnectionState", () => {
       reconnectAttemptCount: WS_RECONNECT_MAX_ATTEMPTS,
       reconnectPhase: "exhausted",
     });
+  });
+});
+
+describe("per-environment wsConnectionState", () => {
+  const ENV_A = "environment-a" as EnvironmentId;
+  const ENV_B = "environment-b" as EnvironmentId;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-03T20:30:00.000Z"));
+    resetWsConnectionStateForTests();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps two environments' statuses independent — neither clobbers the other", () => {
+    recordWsConnectionAttempt("ws://node-a:13773/ws", { environmentId: ENV_A });
+    recordWsConnectionOpened({ environmentId: ENV_A });
+    recordWsConnectionAttempt("ws://node-b:13774/ws", { environmentId: ENV_B });
+    recordWsConnectionOpened({ environmentId: ENV_B });
+    recordWsConnectionClosed({ code: 1006, reason: "server stopped" }, { environmentId: ENV_B });
+
+    expect(getWsConnectionStatusForEnvironment(ENV_A)).toMatchObject({
+      phase: "connected",
+      socketUrl: "ws://node-a:13773/ws",
+    });
+    expect(getWsConnectionStatusForEnvironment(ENV_B)).toMatchObject({
+      phase: "disconnected",
+      closeCode: 1006,
+    });
+  });
+
+  it("keeps the global status writing exactly as before (last writer wins)", () => {
+    recordWsConnectionAttempt("ws://node-a:13773/ws", { environmentId: ENV_A });
+    recordWsConnectionOpened({ environmentId: ENV_A });
+    recordWsConnectionAttempt("ws://node-b:13774/ws", { environmentId: ENV_B });
+
+    expect(getWsConnectionStatus()).toMatchObject({
+      phase: "connecting",
+      socketUrl: "ws://node-b:13774/ws",
+    });
+  });
+
+  it("treats an environment that never recorded as not connected", () => {
+    recordWsConnectionAttempt("ws://node-b:13774/ws", { environmentId: ENV_B });
+    recordWsConnectionOpened({ environmentId: ENV_B });
+
+    expect(getWsConnectionStatusForEnvironment(ENV_A).phase).toBe("idle");
+    expect(getWsConnectionUiState(getWsConnectionStatusForEnvironment(ENV_A))).not.toBe(
+      "connected",
+    );
+  });
+
+  it("clears a disposed environment's slot so it cannot linger connected", () => {
+    recordWsConnectionAttempt("ws://node-a:13773/ws", { environmentId: ENV_A });
+    recordWsConnectionOpened({ environmentId: ENV_A });
+    expect(getWsConnectionStatusForEnvironment(ENV_A).phase).toBe("connected");
+
+    clearWsConnectionStatusForEnvironment(ENV_A);
+
+    expect(getWsConnectionStatusForEnvironment(ENV_A).phase).toBe("idle");
+  });
+
+  it("bumps the opened counter on every open, from any environment", () => {
+    recordWsConnectionAttempt("ws://node-a:13773/ws", { environmentId: ENV_A });
+    recordWsConnectionOpened({ environmentId: ENV_A });
+    recordWsConnectionAttempt("ws://node-b:13774/ws", { environmentId: ENV_B });
+    recordWsConnectionOpened({ environmentId: ENV_B });
+
+    expect(appAtomRegistry.get(wsConnectionOpenedCountAtom)).toBe(2);
+  });
+
+  it("propagates device-level online status into every environment slot", () => {
+    recordWsConnectionAttempt("ws://node-a:13773/ws", { environmentId: ENV_A });
+    recordWsConnectionOpened({ environmentId: ENV_A });
+    recordWsConnectionClosed({ code: 1006, reason: "offline" }, { environmentId: ENV_A });
+    setBrowserOnlineStatus(false);
+
+    expect(getWsConnectionStatusForEnvironment(ENV_A).online).toBe(false);
+    expect(getWsConnectionUiState(getWsConnectionStatusForEnvironment(ENV_A))).toBe("offline");
+  });
+
+  it("records without an environmentId leave keyed slots untouched", () => {
+    recordWsConnectionAttempt("ws://node-a:13773/ws", { environmentId: ENV_A });
+    recordWsConnectionOpened({ environmentId: ENV_A });
+    // A legacy single-connection socket (web/desktop) records globally only.
+    recordWsConnectionAttempt("ws://localhost:3020/ws");
+    recordWsConnectionClosed({ code: 1006, reason: "gone" });
+
+    expect(getWsConnectionStatusForEnvironment(ENV_A).phase).toBe("connected");
   });
 });
