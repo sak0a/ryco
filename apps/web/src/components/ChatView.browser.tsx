@@ -8677,8 +8677,6 @@ describe("ChatView timeline estimator parity (full app)", () => {
         );
         await waitForLayout();
         expect(Math.abs(scrollContainer!.scrollTop - targetScrollTop)).toBeLessThan(50);
-      });
-      await vi.waitFor(() => {
         expect(findScrollToBottomButton()).not.toBeNull();
       });
       // Confirm the position holds without further re-assertion.
