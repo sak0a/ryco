@@ -1,5 +1,9 @@
 import * as Crypto from "node:crypto";
 
+import type {
+  DesktopHostedIdentityActionResult,
+  DesktopHostedIdentityState,
+} from "@ryco/contracts";
 import { HostedHubApi, HostedHubApiError } from "@ryco/client-runtime/authorization";
 import type {
   HttpClientService,
@@ -73,6 +77,7 @@ export type DesktopHostedIdentityStatus =
       readonly accountId: string;
       readonly nodeId: string;
       readonly localNodeHandle: string;
+      readonly github?: NonNullable<DesktopHostedIdentityState["github"]>;
     }
   | { readonly status: "unavailable" };
 
@@ -80,6 +85,12 @@ export type DesktopHostedIdentitySetup = (input: { readonly accountId: string })
   readonly nodeId: string;
   readonly localNodeHandle: string;
 }>;
+
+export interface DesktopHostedGitHubActionResult {
+  readonly outcome: DesktopHostedIdentityActionResult["outcome"];
+  readonly github?: NonNullable<DesktopHostedIdentityState["github"]>;
+  readonly signedOut: boolean;
+}
 
 export class DesktopHostedIdentityCoordinator {
   readonly #origin: string;
@@ -154,6 +165,62 @@ export class DesktopHostedIdentityCoordinator {
     await this.#credentials.clear();
   }
 
+  async connectGitHub(input?: {
+    readonly totpCode?: string;
+  }): Promise<DesktopHostedGitHubActionResult> {
+    await this.#operation?.catch(() => undefined);
+    if (!this.#api.hasSessionMaterial) {
+      return { outcome: "unavailable", signedOut: true };
+    }
+    try {
+      const identity = await this.#api.connectExternalIdentity("github", input);
+      return {
+        outcome: "committed",
+        github: (await this.#readGitHubState()) ?? { linkAvailable: true, identity },
+        signedOut: false,
+      };
+    } catch (cause) {
+      const github = await this.#readGitHubState();
+      return {
+        outcome: desktopGitHubActionOutcome(cause),
+        ...(github === undefined ? {} : { github }),
+        signedOut: false,
+      };
+    }
+  }
+
+  async disconnectGitHub(input?: {
+    readonly totpCode?: string;
+  }): Promise<DesktopHostedGitHubActionResult> {
+    await this.#operation?.catch(() => undefined);
+    if (!this.#api.hasSessionMaterial) {
+      return { outcome: "unavailable", signedOut: true };
+    }
+    try {
+      const result = await this.#api.disconnectExternalIdentity("github", input);
+      if (result.signedOut) {
+        await this.#credentials.clear();
+        return { outcome: "committed", signedOut: true };
+      }
+      return {
+        outcome: "committed",
+        github: (await this.#readGitHubState()) ?? { linkAvailable: true, identity: null },
+        signedOut: false,
+      };
+    } catch (cause) {
+      const github = await this.#readGitHubState();
+      return {
+        outcome: desktopGitHubActionOutcome(cause),
+        ...(github === undefined ? {} : { github }),
+        signedOut: false,
+      };
+    }
+  }
+
+  cancelGitHubConnection(): void {
+    this.#api.cancelExternalIdentityConnection("github");
+  }
+
   #serialize(interactive: boolean): Promise<DesktopHostedIdentityStatus> {
     const current = this.#operation;
     if (current !== undefined) {
@@ -205,14 +272,43 @@ export class DesktopHostedIdentityCoordinator {
 
     try {
       const setup = await this.#setup({ accountId: session.account.id });
+      const github = await this.#readGitHubState();
       return {
         status: "ready",
         accountId: session.account.id,
         nodeId: setup.nodeId,
         localNodeHandle: setup.localNodeHandle,
+        ...(github === undefined ? {} : { github }),
       };
     } catch {
       return { status: "unavailable" };
     }
   }
+
+  async #readGitHubState(): Promise<NonNullable<DesktopHostedIdentityState["github"]> | undefined> {
+    try {
+      const [configuration, security] = await Promise.all([
+        this.#api.getExternalIdentityConfiguration(),
+        this.#api.getAccountSecurity(),
+      ]);
+      const policy =
+        configuration.providers.find((provider) => provider.provider === "github") ?? null;
+      const identity =
+        security.externalIdentities.find((entry) => entry.provider === "github") ?? null;
+      if (policy === null && identity === null) return undefined;
+      return { linkAvailable: policy?.link === true, identity };
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+function desktopGitHubActionOutcome(cause: unknown): DesktopHostedIdentityActionResult["outcome"] {
+  if (cause instanceof HostedHubApiError) {
+    if (cause.code === "step_up_required") return "step-up-required";
+    if (cause.code === "last_primary_credential") return "last-primary-credential";
+    if (cause.code === "external_authorization_cancelled") return "cancelled";
+  }
+  if (cause instanceof Error && cause.name === "AbortError") return "cancelled";
+  return "unavailable";
 }

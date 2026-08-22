@@ -99,6 +99,8 @@ function hubState(overrides: Partial<HostedHubState> = {}): HostedHubState {
 
 function accountState(overrides: Partial<HostedAccountState> = {}): HostedAccountState {
   return {
+    externalIdentityConfiguration: { version: 1, providers: [] },
+    externalIdentityConfigurationStatus: "ready",
     passkeys: [passkey()],
     passkeysStatus: "ready",
     security: {
@@ -106,6 +108,7 @@ function accountState(overrides: Partial<HostedAccountState> = {}): HostedAccoun
       totpEnrolled: false,
       emailDeliveryConfigured: false,
       email: null,
+      externalIdentities: [],
     },
     securityStatus: "ready",
     actionStatus: "idle",
@@ -127,6 +130,8 @@ const PROMPT_IDS: ReadonlyArray<HostedAccountPromptId> = [
   "enroll-totp",
   "revoke-totp",
   "verify-email",
+  "connect-github",
+  "disconnect-github",
 ];
 
 interface Harness {
@@ -186,6 +191,7 @@ function harness(initial?: {
   const actions = {
     refreshPasskeys: vi.fn(),
     refreshAccountSecurity: vi.fn(),
+    refreshExternalIdentityConfiguration: vi.fn(),
     addPasskey: vi.fn(async () => commit()),
     revokePasskey: vi.fn(async () => commit()),
     regenerateRecoveryCodes: vi.fn(async () => commit()),
@@ -212,6 +218,9 @@ function harness(initial?: {
     }),
     revokeTotp: vi.fn(async () => commit()),
     requestEmailVerification: vi.fn(async () => commit()),
+    connectExternalIdentity: vi.fn(async () => commit()),
+    disconnectExternalIdentity: vi.fn(async () => commit()),
+    cancelExternalIdentityConnection: vi.fn(),
     dismissTotpEnrollment: vi.fn(() => {
       hub = { ...hub, totpEnrollment: null };
     }),
@@ -326,6 +335,7 @@ describe("hosted account management surface", () => {
           totpEnrolled: true,
           emailDeliveryConfigured: false,
           email: { address: "ada@example.test", verified: true },
+          externalIdentities: [],
         },
       },
     }).view();
@@ -361,6 +371,95 @@ describe("hosted account management surface", () => {
     const stale = test.view();
     expect(stale.securityMessage).toContain("could not be loaded");
     stale.securityRetry?.run();
+    expect(test.actions.refreshAccountSecurity).toHaveBeenCalledWith({ force: true });
+  });
+
+  it("hides GitHub actions without policy and shows only bounded connected metadata", () => {
+    const absent = harness().view();
+    expect(absent.sections.find((section) => section.id === "external-identities")).toBeUndefined();
+
+    const connected = harness({
+      account: {
+        externalIdentityConfiguration: null,
+        security: {
+          ...accountState().security!,
+          externalIdentities: [
+            {
+              provider: "github",
+              login: "octocat",
+              displayName: "The Octocat",
+              connectedAt: NOW - DAY,
+              lastUsedAt: NOW - HOUR,
+            },
+          ],
+        },
+      },
+    }).view();
+    const section = connected.sections.find((candidate) => candidate.id === "external-identities");
+    expect(section?.status).toBe("@octocat");
+    expect(section?.footnote).toContain("The Octocat");
+    expect(section?.footnote).toContain("Repository access remains separate");
+    expect(section?.rows).toEqual([]);
+  });
+
+  it("offers policy-gated GitHub connect and disconnect prompts", async () => {
+    const policy = {
+      version: 1 as const,
+      providers: [{ provider: "github" as const, login: true, signup: true, link: true }],
+    } as const;
+    const connect = harness({ account: { externalIdentityConfiguration: policy } });
+    const connectSection = connect
+      .view()
+      .sections.find((section) => section.id === "external-identities");
+    expect(connectSection?.status).toBe("Not connected");
+    expect(connectSection?.rows.map((row) => row.id)).toEqual(["connect-github"]);
+    connectSection?.rows[0]?.run();
+    expect(connect.prompt().message).toContain("system browser");
+    connect.prompt().submit?.run();
+    await flush();
+    expect(connect.actions.connectExternalIdentity).toHaveBeenCalledWith("github", {});
+
+    const disconnect = harness({
+      account: {
+        externalIdentityConfiguration: policy,
+        security: {
+          ...accountState().security!,
+          externalIdentities: [
+            {
+              provider: "github",
+              login: "octocat",
+              displayName: null,
+              connectedAt: NOW - DAY,
+              lastUsedAt: null,
+            },
+          ],
+        },
+      },
+    });
+    const disconnectRow = disconnect
+      .view()
+      .sections.find((section) => section.id === "external-identities")?.rows[0];
+    expect(disconnectRow?.id).toBe("disconnect-github");
+    expect(disconnectRow?.destructive).toBe(true);
+    disconnectRow?.run();
+    expect(disconnect.prompt().message).toContain("only primary sign-in method");
+    disconnect.prompt().submit?.run();
+    await flush();
+    expect(disconnect.actions.disconnectExternalIdentity).toHaveBeenCalledWith("github", {});
+  });
+
+  it("retries stale provider policy without exposing a connect action", () => {
+    const test = harness({
+      account: {
+        externalIdentityConfiguration: null,
+        externalIdentityConfigurationStatus: "stale",
+      },
+    });
+    const view = test.view();
+    expect(view.externalIdentityMessage).toContain("could not be loaded");
+    expect(view.sections.find((section) => section.id === "external-identities")).toBeUndefined();
+    view.externalIdentityRetry?.run();
+    expect(test.actions.refreshExternalIdentityConfiguration).toHaveBeenCalledWith({ force: true });
     expect(test.actions.refreshAccountSecurity).toHaveBeenCalledWith({ force: true });
   });
 
@@ -763,6 +862,36 @@ describe("TOTP step-up", () => {
     test.prompt().submit?.run();
     await flush();
     expect(test.actions.removePassword).toHaveBeenLastCalledWith({ totpCode: "123456" });
+  });
+
+  it("retries a pending GitHub link with TOTP without inventing a second action", async () => {
+    const test = harness();
+    test.open("connect-github");
+    test.nextOutcome(STEP_UP_MESSAGE);
+    test.prompt().submit?.run();
+    await flush();
+    expect(test.actions.connectExternalIdentity).toHaveBeenCalledWith("github", {});
+
+    test.type({ stepUpCode: "123456" });
+    test.prompt().submit?.run();
+    await flush();
+    expect(test.actions.connectExternalIdentity).toHaveBeenLastCalledWith("github", {
+      totpCode: "123456",
+    });
+    expect(test.actions.connectExternalIdentity).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards the staged GitHub link when the step-up prompt is cancelled", async () => {
+    const test = harness();
+    test.open("connect-github");
+    test.nextOutcome(STEP_UP_MESSAGE);
+    test.prompt().submit?.run();
+    await flush();
+
+    test.prompt().dismiss.run();
+
+    expect(test.actions.cancelExternalIdentityConnection).toHaveBeenCalledWith("github");
+    expect(test.draft()).toBeNull();
   });
 
   it("clears a rejected code and keeps the refusal visible", async () => {
@@ -1305,6 +1434,7 @@ describe("email verification", () => {
           totpEnrolled: false,
           emailDeliveryConfigured: true,
           email: null,
+          externalIdentities: [],
         },
       },
     });
@@ -1595,5 +1725,33 @@ describe("no unexpected secret material reaches a view model", () => {
     ].join(" ");
     expect(copy).not.toContain("correct horse battery");
     expect(keys.filter((key) => key === "password")).toEqual([]);
+  });
+
+  it("never projects a provider token or subject into mobile props or diagnostics", () => {
+    const canaryToken = "github_token_canary_9f42";
+    const canarySubject = "github_subject_canary_18492";
+    const state = accountState({
+      externalIdentityConfiguration: {
+        version: 1,
+        providers: [{ provider: "github", login: true, signup: true, link: true }],
+        providerToken: canaryToken,
+      } as never,
+      security: {
+        ...accountState().security!,
+        externalIdentities: [
+          {
+            provider: "github",
+            login: "octocat",
+            displayName: null,
+            connectedAt: NOW,
+            lastUsedAt: null,
+            providerSubject: canarySubject,
+          } as never,
+        ],
+      },
+    });
+    const rendered = JSON.stringify(harness({ account: state }).view());
+    expect(rendered).not.toContain(canaryToken);
+    expect(rendered).not.toContain(canarySubject);
   });
 });

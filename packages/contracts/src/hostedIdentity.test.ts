@@ -4,6 +4,24 @@ import { Schema } from "effect";
 import {
   ACTIVE_SPACE_SWITCH_PATH,
   ActiveSpaceSwitchResponse,
+  EXTERNAL_IDENTITY_CONFIG_PATH,
+  EXTERNAL_IDENTITY_GITHUB_CALLBACK_PATH,
+  EXTERNAL_IDENTITY_PENDING_PATH,
+  EXTERNAL_IDENTITY_PROTOCOL_VERSION,
+  EXTERNAL_IDENTITY_SIGNUP_FINISH_PATH,
+  EXTERNAL_IDENTITY_START_PATH,
+  ExternalIdentityAuthorizationStartRequest,
+  ExternalIdentityAuthorizationStartResponse,
+  ExternalIdentityConfigResponse,
+  ExternalIdentityPendingResponse,
+  ExternalIdentitySignupFinishRequest,
+  GITHUB_EXTERNAL_IDENTITY_CONNECT_PATH,
+  GITHUB_EXTERNAL_IDENTITY_DISCONNECT_PATH,
+  HostedAccountSecurityResponse,
+  BrowserExternalIdentityConnectRequest,
+  BrowserExternalIdentityConnectResponse,
+  ExternalIdentityDisconnectRequest,
+  ExternalIdentityDisconnectResponse,
   HOSTED_IDENTITY_PROTOCOL_VERSION,
   HubBrowserSessionResponse,
   HubNormalizedEmail,
@@ -163,6 +181,13 @@ describe("hosted identity route and version constants", () => {
       NATIVE_IDENTITY_PASSWORD_RESET_VERIFY_PATH,
       NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH,
       NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH,
+      EXTERNAL_IDENTITY_CONFIG_PATH,
+      EXTERNAL_IDENTITY_START_PATH,
+      EXTERNAL_IDENTITY_PENDING_PATH,
+      EXTERNAL_IDENTITY_SIGNUP_FINISH_PATH,
+      GITHUB_EXTERNAL_IDENTITY_CONNECT_PATH,
+      GITHUB_EXTERNAL_IDENTITY_DISCONNECT_PATH,
+      EXTERNAL_IDENTITY_GITHUB_CALLBACK_PATH,
     }).toEqual({
       PUBLIC_SIGNUP_START_PATH: "/api/public-signup/start",
       PUBLIC_SIGNUP_CONFIG_PATH: "/api/public-signup/config",
@@ -194,10 +219,239 @@ describe("hosted identity route and version constants", () => {
       NATIVE_IDENTITY_PASSWORD_RESET_VERIFY_PATH: "/api/auth/native/identity/password-reset/verify",
       NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH: "/api/auth/native/identity/password-reset/finish",
       NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH: "/api/auth/native/identity/attempt/cancel",
+      EXTERNAL_IDENTITY_CONFIG_PATH: "/api/auth/external/config",
+      EXTERNAL_IDENTITY_START_PATH: "/api/auth/external/start",
+      EXTERNAL_IDENTITY_PENDING_PATH: "/api/auth/external/pending",
+      EXTERNAL_IDENTITY_SIGNUP_FINISH_PATH: "/api/auth/external/signup/finish",
+      GITHUB_EXTERNAL_IDENTITY_CONNECT_PATH: "/api/account/external-identities/github/connect",
+      GITHUB_EXTERNAL_IDENTITY_DISCONNECT_PATH:
+        "/api/account/external-identities/github/disconnect",
+      EXTERNAL_IDENTITY_GITHUB_CALLBACK_PATH: "/api/auth/external/github/callback",
     });
     expect(HOSTED_IDENTITY_PROTOCOL_VERSION).toBe(1);
     expect(NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION).toBe(1);
     expect(NATIVE_IDENTITY_PROTOCOL_VERSION).toBe(2);
+    expect(EXTERNAL_IDENTITY_PROTOCOL_VERSION).toBe(1);
+  });
+});
+
+describe("external identity contracts", () => {
+  const summary = {
+    provider: "github",
+    login: "octocat",
+    displayName: "The Octocat",
+    connectedAt: issuedAt,
+    lastUsedAt: issuedAt + 1_000,
+  } as const;
+
+  it("accepts a versioned empty or GitHub-only provider policy", () => {
+    expect(strictDecode(ExternalIdentityConfigResponse, { version: 1, providers: [] })).toEqual({
+      version: 1,
+      providers: [],
+    });
+    expect(
+      strictDecode(ExternalIdentityConfigResponse, {
+        version: 1,
+        providers: [{ provider: "github", login: true, signup: false, link: true }],
+      }),
+    ).toBeTruthy();
+
+    for (const invalid of [
+      { version: 2, providers: [] },
+      {
+        version: 1,
+        providers: [{ provider: "gitlab", login: true, signup: true, link: true }],
+      },
+      {
+        version: 1,
+        providers: [
+          { provider: "github", login: true, signup: true, link: true },
+          { provider: "github", login: true, signup: true, link: true },
+        ],
+      },
+      {
+        version: 1,
+        providers: [
+          {
+            provider: "github",
+            login: true,
+            signup: true,
+            link: true,
+            scopes: ["repo"],
+          },
+        ],
+      },
+    ]) {
+      expect(() => strictDecode(ExternalIdentityConfigResponse, invalid)).toThrow();
+    }
+  });
+
+  it("strictly bounds browser authorization and pending signup presentation", () => {
+    const start = {
+      provider: "github",
+      intent: "authenticate",
+      returnTo: "/account?source=github",
+    } as const;
+    expect(strictDecode(ExternalIdentityAuthorizationStartRequest, start)).toEqual(start);
+    expect(
+      strictDecode(ExternalIdentityAuthorizationStartResponse, {
+        authorizationUrl:
+          "https://github.com/login/oauth/authorize?client_id=client&state=state&code_challenge=challenge&code_challenge_method=S256&prompt=select_account",
+        expiresAt,
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(ExternalIdentityPendingResponse, {
+        status: "signup",
+        provider: "github",
+        suggestedUsername: "octocat",
+        displayName: "The Octocat",
+        expiresAt,
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(ExternalIdentityPendingResponse, {
+        status: "error",
+        provider: "github",
+        code: "external_identity_email_conflict",
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(ExternalIdentitySignupFinishRequest, {
+        provider: "github",
+        username: "octocat",
+        antiBotAssertion: "turnstile-assertion",
+        idempotencyKey: opaque,
+      }),
+    ).toBeTruthy();
+
+    for (const invalid of [
+      { ...start, provider: "gitlab" },
+      { ...start, returnTo: "https://evil.test/account" },
+      { ...start, returnTo: "//evil.test/account" },
+      { ...start, returnTo: "/account#secret" },
+      { ...start, clientSecret: "must-not-survive" },
+    ]) {
+      expect(() => strictDecode(ExternalIdentityAuthorizationStartRequest, invalid)).toThrow();
+    }
+
+    for (const invalidPending of [
+      { status: "error", provider: "github", code: "provider_body_said_no" },
+      {
+        status: "error",
+        provider: "github",
+        code: "external_authorization_rejected",
+        description: "provider-sensitive-canary",
+      },
+    ]) {
+      expect(() => strictDecode(ExternalIdentityPendingResponse, invalidPending)).toThrow();
+    }
+
+    for (const authorizationUrl of [
+      "http://github.com/login/oauth/authorize?state=x",
+      "https://evil.test/login/oauth/authorize?state=x",
+      "https://user:pass@github.com/login/oauth/authorize?state=x",
+      "https://github.com/login/oauth/authorize#token",
+      "https://github.com/settings/apps",
+    ]) {
+      expect(() =>
+        strictDecode(ExternalIdentityAuthorizationStartResponse, {
+          authorizationUrl,
+          expiresAt,
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("exposes only bounded external identity presentation metadata", () => {
+    expect(
+      strictDecode(HostedAccountSecurityResponse, {
+        passwordConfigured: true,
+        totpEnrolled: false,
+        emailDeliveryConfigured: true,
+        email: { address: "ada@example.test", verified: true },
+        externalIdentities: [summary],
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(HostedAccountSecurityResponse, {
+        passwordConfigured: false,
+        totpEnrolled: false,
+        emailDeliveryConfigured: false,
+        email: null,
+        externalIdentities: [],
+      }),
+    ).toBeTruthy();
+
+    for (const extra of [
+      { subject: "12345" },
+      { accessToken: "github-sensitive-canary" },
+      { email: "octocat@example.test" },
+      { scopes: ["repo"] },
+      { internalLinkId: "link-sensitive-canary" },
+    ]) {
+      expect(() =>
+        strictDecode(HostedAccountSecurityResponse, {
+          passwordConfigured: true,
+          totpEnrolled: false,
+          emailDeliveryConfigured: true,
+          email: null,
+          externalIdentities: [{ ...summary, ...extra }],
+        }),
+      ).toThrow();
+    }
+
+    for (const invalidSummary of [
+      { ...summary, provider: "gitlab" },
+      { ...summary, login: "" },
+      { ...summary, login: "x".repeat(101) },
+      { ...summary, displayName: "x".repeat(201) },
+      { ...summary, connectedAt: -1 },
+      { ...summary, lastUsedAt: summary.connectedAt - 1 },
+    ]) {
+      expect(() =>
+        strictDecode(HostedAccountSecurityResponse, {
+          passwordConfigured: true,
+          totpEnrolled: false,
+          emailDeliveryConfigured: true,
+          email: null,
+          externalIdentities: [invalidSummary],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("keeps connect and disconnect outcomes token-free and typed", () => {
+    expect(strictDecode(BrowserExternalIdentityConnectRequest, {})).toEqual({});
+    expect(strictDecode(BrowserExternalIdentityConnectRequest, { totpCode: "123456" })).toEqual({
+      totpCode: "123456",
+    });
+    expect(
+      strictDecode(BrowserExternalIdentityConnectResponse, {
+        status: "connected",
+        externalIdentity: summary,
+      }),
+    ).toBeTruthy();
+    expect(strictDecode(ExternalIdentityDisconnectRequest, {})).toEqual({});
+    expect(
+      strictDecode(ExternalIdentityDisconnectResponse, {
+        status: "disconnected",
+        signedOut: true,
+      }),
+    ).toBeTruthy();
+
+    expect(() =>
+      strictDecode(BrowserExternalIdentityConnectResponse, {
+        status: "connected",
+        externalIdentity: { ...summary, token: "must-not-survive" },
+      }),
+    ).toThrow();
+    expect(() =>
+      strictDecode(ExternalIdentityDisconnectResponse, {
+        status: "connected",
+        signedOut: false,
+      }),
+    ).toThrow();
   });
 });
 

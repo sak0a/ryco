@@ -32,7 +32,12 @@ import {
 } from "../../hostedHub/hubProfile";
 import { invalidateMobileHostedRuntime } from "../../hostedHub/runtime";
 import { getMobileHostedHttpClient } from "../../hostedHub/runtimeConfig";
-import { ensureMobileHostedSession, hostedHubController } from "../../hostedHub/state";
+import {
+  ensureMobileHostedSession,
+  hostedHubController,
+  hostedHubStore,
+  useHostedAccountStore,
+} from "../../hostedHub/state";
 import { cn } from "../../lib/cn";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { mobileNativeAuthorization } from "../../platform/nativeAuthorization";
@@ -44,6 +49,7 @@ import {
   mobileSessionCredentials,
 } from "../../platform/sessionCredentials";
 import { HubDomainEditor } from "../settings/HubDomainEditor";
+import { deriveHostedProviderSignInActions } from "../hostedHub/hostedAuthModel";
 import {
   createNativeIdentityCompletionJournal,
   type NativeIdentityCompletionJournal,
@@ -336,6 +342,10 @@ export function NativeIdentityScreen() {
               })
             : null));
   });
+  const externalIdentityConfiguration = useHostedAccountStore(
+    (state) => state.externalIdentityConfiguration,
+  );
+  const externalProviderActions = deriveHostedProviderSignInActions(externalIdentityConfiguration);
 
   const origin = profile?.origin ?? buildConfig?.hubOrigin ?? null;
   const nativePolicy = capability?.nativeIdentity;
@@ -355,6 +365,9 @@ export function NativeIdentityScreen() {
       // so never let that independent restore keep the blocker inert forever.
       await waitForSessionSetup();
       if (issued !== capabilityGeneration.current) return;
+      // Provider policy is additive. A slow/old external-identity endpoint must
+      // never hold the established passkey/password/recovery surface hostage.
+      void hostedHubController.refreshExternalIdentityConfiguration({ force: true });
       if (requestedOrigin === null) throw new Error("missing origin");
       const http = getMobileHostedHttpClient();
       if (http === null) throw new Error("missing client");
@@ -856,6 +869,21 @@ export function NativeIdentityScreen() {
                   }
                   onPress={start}
                 />
+                {externalProviderActions.map((providerAction) => (
+                  <Action
+                    key={providerAction.id}
+                    label={providerAction.label}
+                    quiet
+                    disabled={busy || providerAction.disabled}
+                    onPress={() =>
+                      void run(async () => {
+                        await providerAction.run();
+                        const hostedError = hostedHubStore.getState().errorMessage;
+                        if (hostedError) setError(hostedError);
+                      })
+                    }
+                  />
+                ))}
                 {!busy && capability === null ? (
                   <Action
                     label="Retry Hub connection"

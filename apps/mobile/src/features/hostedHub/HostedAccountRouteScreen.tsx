@@ -75,6 +75,7 @@ export function HostedAccountRouteScreen() {
     if (!hostedModeAvailable || !signedIn) return;
     void hostedHubController.refreshPasskeys();
     void hostedHubController.refreshAccountSecurity();
+    void hostedHubController.refreshExternalIdentityConfiguration();
   }, [hostedModeAvailable, signedIn]);
 
   // This screen displays the account's one-time recovery codes, and saying so
@@ -176,6 +177,25 @@ export function HostedAccountRouteScreen() {
                   label={management.securityRetry.label}
                   disabled={management.securityRetry.disabled}
                   onPress={management.securityRetry.run}
+                />
+              </SettingsSection>
+            ) : null}
+
+            {management.externalIdentityMessage ? (
+              <View className="mx-5 mt-4 rounded-2xl border border-border bg-card px-4 py-3">
+                <Text className="font-sans text-xs leading-relaxed text-foreground-muted">
+                  {management.externalIdentityMessage}
+                </Text>
+              </View>
+            ) : null}
+
+            {management.externalIdentityRetry ? (
+              <SettingsSection title="Connected accounts">
+                <SettingsRow
+                  first
+                  label={management.externalIdentityRetry.label}
+                  disabled={management.externalIdentityRetry.disabled}
+                  onPress={management.externalIdentityRetry.run}
                 />
               </SettingsSection>
             ) : null}

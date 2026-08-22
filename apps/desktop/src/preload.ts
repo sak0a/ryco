@@ -46,6 +46,9 @@ const VALIDATE_HUB_ORIGIN_CHANNEL = "desktop:validate-hub-origin";
 const GET_HOSTED_IDENTITY_STATUS_CHANNEL = "desktop:get-hosted-identity-status";
 const CONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:connect-hosted-identity";
 const DISCONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:disconnect-hosted-identity";
+const CONNECT_HOSTED_GITHUB_CHANNEL = "desktop:connect-hosted-github";
+const DISCONNECT_HOSTED_GITHUB_CHANNEL = "desktop:disconnect-hosted-github";
+const CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL = "desktop:cancel-hosted-github-connection";
 const PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL = "desktop:prepare-native-e2ee-attempt";
 const START_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:start-native-e2ee-handshake";
 const FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:finish-native-e2ee-handshake";
@@ -133,6 +136,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   getHostedIdentityState: () => ipcRenderer.invoke(GET_HOSTED_IDENTITY_STATUS_CHANNEL),
   connectHostedIdentity: () => ipcRenderer.invoke(CONNECT_HOSTED_IDENTITY_CHANNEL),
   disconnectHostedIdentity: () => ipcRenderer.invoke(DISCONNECT_HOSTED_IDENTITY_CHANNEL),
+  connectHostedGitHub: (input) => ipcRenderer.invoke(CONNECT_HOSTED_GITHUB_CHANNEL, input),
+  disconnectHostedGitHub: (input) => ipcRenderer.invoke(DISCONNECT_HOSTED_GITHUB_CHANNEL, input),
+  cancelHostedGitHubConnection: () => ipcRenderer.invoke(CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL),
   prepareNativeE2eeAttempt: (input) =>
     ipcRenderer.invoke(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL, input),
   startNativeE2eeHandshake: (attemptHandle, input) =>

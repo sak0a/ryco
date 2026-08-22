@@ -1,5 +1,7 @@
 import { Schema } from "effect";
 
+import { ExternalIdentityProvider, ExternalIdentitySummary } from "./hostedIdentity.ts";
+
 export const NATIVE_HANDOFF_CAPABILITY_PATH = "/.well-known/ryco-hub" as const;
 export const NATIVE_HANDOFF_PROTOCOL_VERSION = 1 as const;
 export const NATIVE_HANDOFF_VERSION = 1 as const;
@@ -237,6 +239,29 @@ export const NativeHandoffCapability = strict(
 );
 export type NativeHandoffCapability = typeof NativeHandoffCapability.Type;
 
+export const NativeHandoffSignInPurpose = strict(
+  Schema.Struct({
+    kind: Schema.Literal("sign_in"),
+    providerHint: Schema.optionalKey(ExternalIdentityProvider),
+  }),
+);
+export type NativeHandoffSignInPurpose = typeof NativeHandoffSignInPurpose.Type;
+
+export const NativeHandoffConnectExternalIdentityPurpose = strict(
+  Schema.Struct({
+    kind: Schema.Literal("connect_external_identity"),
+    provider: ExternalIdentityProvider,
+  }),
+);
+export type NativeHandoffConnectExternalIdentityPurpose =
+  typeof NativeHandoffConnectExternalIdentityPurpose.Type;
+
+export const NativeHandoffPurpose = Schema.Union([
+  NativeHandoffSignInPurpose,
+  NativeHandoffConnectExternalIdentityPurpose,
+]);
+export type NativeHandoffPurpose = typeof NativeHandoffPurpose.Type;
+
 export const NativeHandoffStartRequest = strict(
   Schema.Struct({
     redirectUri: NativeHandoffCallbackUri,
@@ -244,6 +269,7 @@ export const NativeHandoffStartRequest = strict(
     codeChallengeMethod: Schema.Literal("S256"),
     state: NativeHandoffState,
     deviceLabel: BoundedDeviceLabel,
+    purpose: Schema.optionalKey(NativeHandoffPurpose),
   }),
 );
 export type NativeHandoffStartRequest = typeof NativeHandoffStartRequest.Type;
@@ -284,6 +310,17 @@ export const NativeHandoffRedeemRequest = strict(
   }),
 );
 export type NativeHandoffRedeemRequest = typeof NativeHandoffRedeemRequest.Type;
+
+export const NativeHandoffConnectRedeemRequest = strict(
+  Schema.Struct({
+    handoffId: NativeHandoffId,
+    code: NativeHandoffCode,
+    codeVerifier: NativeHandoffCodeVerifier,
+    purpose: NativeHandoffConnectExternalIdentityPurpose,
+    totpCode: Schema.optionalKey(Schema.String.check(Schema.isPattern(/^[0-9]{6}$/))),
+  }),
+);
+export type NativeHandoffConnectRedeemRequest = typeof NativeHandoffConnectRedeemRequest.Type;
 
 const AccountId = Schema.String.check(
   Schema.isPattern(/^acct_[A-Za-z0-9_-]{22,43}$/),
@@ -349,3 +386,12 @@ export const NativeHandoffRedeemResponse = strict(
   ),
 );
 export type NativeHandoffRedeemResponse = typeof NativeHandoffRedeemResponse.Type;
+
+export const NativeHandoffConnectRedeemResponse = strict(
+  Schema.Struct({
+    status: Schema.Literal("connected"),
+    purpose: NativeHandoffConnectExternalIdentityPurpose,
+    externalIdentity: ExternalIdentitySummary,
+  }),
+);
+export type NativeHandoffConnectRedeemResponse = typeof NativeHandoffConnectRedeemResponse.Type;

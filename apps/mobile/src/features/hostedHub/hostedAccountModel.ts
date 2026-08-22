@@ -75,6 +75,8 @@ const ACCOUNT_INTENTS = {
   "revoke-passkey": true,
   "add-passkey": true,
   "regenerate-recovery-codes": true,
+  "connect-external-identity": true,
+  "disconnect-external-identity": true,
 } satisfies Record<HostedAccountIntent, true>;
 
 export const HOSTED_ACCOUNT_INTENTS = Object.keys(
@@ -145,6 +147,9 @@ export const isHostedPasskeySessionMessage = createHostedRefusalMatcher(
 export interface HostedAccountActions {
   readonly refreshPasskeys: (options?: { readonly force?: boolean }) => unknown;
   readonly refreshAccountSecurity: (options?: { readonly force?: boolean }) => unknown;
+  readonly refreshExternalIdentityConfiguration: (options?: {
+    readonly force?: boolean;
+  }) => unknown;
   readonly addPasskey: (input: {
     readonly passkeyLabel: string | null;
     readonly totpCode?: string;
@@ -163,6 +168,15 @@ export interface HostedAccountActions {
     readonly email: string;
     readonly totpCode?: string;
   }) => unknown;
+  readonly connectExternalIdentity: (
+    provider: "github",
+    input?: { readonly totpCode?: string },
+  ) => unknown;
+  readonly disconnectExternalIdentity: (
+    provider: "github",
+    input?: { readonly totpCode?: string },
+  ) => unknown;
+  readonly cancelExternalIdentityConnection: (provider: "github") => void;
   readonly dismissTotpEnrollment: () => void;
   readonly cancelAccountAction: () => void;
 }
@@ -342,7 +356,9 @@ export type HostedAccountPromptId =
   | "remove-password"
   | "enroll-totp"
   | "revoke-totp"
-  | "verify-email";
+  | "verify-email"
+  | "connect-github"
+  | "disconnect-github";
 
 /**
  * Everything the surface holds for an open prompt. Deliberately flat so a test
@@ -467,7 +483,8 @@ export type HostedAccountSectionId =
   | "recovery-codes"
   | "password"
   | "two-factor"
-  | "email";
+  | "email"
+  | "external-identities";
 
 export interface HostedAccountActionRow {
   readonly id: HostedAccountPromptId;
@@ -493,6 +510,8 @@ export interface HostedAccountManagementView {
   readonly sections: ReadonlyArray<HostedAccountSection>;
   readonly securityMessage: string | null;
   readonly securityRetry: HostedAccountButton | null;
+  readonly externalIdentityMessage: string | null;
+  readonly externalIdentityRetry: HostedAccountButton | null;
   /** The account store's own message — never re-worded, and never duplicated
    *  onto the screen while the prompt that produced it is still open. */
   readonly errorMessage: string | null;
@@ -597,6 +616,8 @@ export function deriveHostedAccountManagementView(
       sections: [],
       securityMessage: null,
       securityRetry: null,
+      externalIdentityMessage: null,
+      externalIdentityRetry: null,
       errorMessage: null,
       busy: false,
       prompt: null,
@@ -664,8 +685,52 @@ export function deriveHostedAccountManagementView(
     security === null
       ? EMAIL_DISABLED_FOOTNOTE
       : `${security.email === null ? "" : `${security.email.verified ? "Verified" : "Verification pending"} for ${security.email.address}. `}${security.emailDeliveryConfigured ? EMAIL_CONFIGURED_FOOTNOTE : EMAIL_DISABLED_FOOTNOTE}`;
+  const githubPolicy =
+    accountState.externalIdentityConfiguration?.providers.find(
+      (provider) => provider.provider === "github",
+    ) ?? null;
+  const githubIdentity =
+    security?.externalIdentities.find((identity) => identity.provider === "github") ?? null;
+  const externalIdentityStale = accountState.externalIdentityConfigurationStatus === "stale";
+  const externalIdentityMessage =
+    accountState.externalIdentityConfigurationStatus === "loading" ||
+    accountState.externalIdentityConfigurationStatus === "idle"
+      ? "Checking which connected accounts this Hub supports."
+      : externalIdentityStale
+        ? githubIdentity === null
+          ? "Connected-account support could not be loaded."
+          : "This connected-account status may be out of date."
+        : null;
+  const externalIdentityRetry = externalIdentityStale
+    ? button("Retry connected accounts", () => {
+        void input.actions.refreshExternalIdentityConfiguration({ force: true });
+        void input.actions.refreshAccountSecurity({ force: true });
+      })
+    : null;
+
+  const externalIdentitySections: ReadonlyArray<HostedAccountSection> =
+    githubIdentity !== null || githubPolicy?.link === true
+      ? [
+          {
+            id: "external-identities",
+            title: "GitHub",
+            status: githubIdentity === null ? "Not connected" : `@${githubIdentity.login}`,
+            footnote:
+              githubIdentity === null
+                ? "Connect GitHub as another way to sign in. Repository access remains separate."
+                : `${githubIdentity.displayName ? `${githubIdentity.displayName}. ` : ""}Connected ${ageLabel(githubIdentity.connectedAt, now) ?? "previously"}${githubIdentity.lastUsedAt === null ? "" : ` · last used ${ageLabel(githubIdentity.lastUsedAt, now) ?? "previously"}`}. Repository access remains separate.`,
+            rows:
+              githubPolicy?.link !== true
+                ? []
+                : githubIdentity === null
+                  ? [row("connect-github", "Connect GitHub")]
+                  : [row("disconnect-github", "Disconnect GitHub", { destructive: true })],
+          },
+        ]
+      : [];
 
   const sections: ReadonlyArray<HostedAccountSection> = [
+    ...externalIdentitySections,
     {
       id: "passkeys",
       title: "Passkeys",
@@ -752,6 +817,8 @@ export function deriveHostedAccountManagementView(
     sections,
     securityMessage,
     securityRetry,
+    externalIdentityMessage,
+    externalIdentityRetry,
     // An open prompt owns its own error. Publishing it twice makes a single
     // refusal read as two separate failures.
     errorMessage: draft === null ? accountState.errorMessage : null,
@@ -833,6 +900,7 @@ function derivePrompt(
     // runtime would not clear on its own: backing out of the enrolment screen
     // must not leave the account's shared key sitting in a store.
     if (draft.id === "enroll-totp") actions.dismissTotpEnrollment();
+    if (draft.id === "connect-github") actions.cancelExternalIdentityConnection("github");
     input.onDraftChange(null);
   };
 
@@ -845,6 +913,7 @@ function derivePrompt(
   const abandonAttempt = () => {
     const current = live();
     if (current === null) return;
+    if (draft.id === "connect-github") actions.cancelExternalIdentityConnection("github");
     input.onDraftChange({ ...current, attempt: current.attempt + 1 });
   };
 
@@ -1171,5 +1240,39 @@ function promptSpec(
         },
       };
     }
+
+    case "connect-github":
+      return {
+        title: "Connect GitHub?",
+        message:
+          "Ryco opens your system browser for GitHub authorization, then returns here. This adds a sign-in method and requests no repository access.",
+        notice: null,
+        destructive: false,
+        submitLabel: "Continue with GitHub",
+        completionMessage: null,
+        fields: withStepUp([]),
+        incomplete: false,
+        enrollment: null,
+        perform: async () => {
+          await actions.connectExternalIdentity("github", stepUp);
+        },
+      };
+
+    case "disconnect-github":
+      return {
+        title: "Disconnect GitHub?",
+        message:
+          "GitHub stops working as a Ryco sign-in method. Your Hub refuses this change when GitHub is the only primary sign-in method left.",
+        notice: "Repository access is separate and is not changed here.",
+        destructive: true,
+        submitLabel: "Disconnect GitHub",
+        completionMessage: null,
+        fields: withStepUp([]),
+        incomplete: false,
+        enrollment: null,
+        perform: async () => {
+          await actions.disconnectExternalIdentity("github", stepUp);
+        },
+      };
   }
 }

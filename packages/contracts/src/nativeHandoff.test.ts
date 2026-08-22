@@ -12,6 +12,9 @@ import {
   NativeHandoffCapability,
   NativeHandoffCancelResponse,
   NativeHandoffPresentation,
+  NativeHandoffConnectRedeemRequest,
+  NativeHandoffConnectRedeemResponse,
+  NativeHandoffPurpose,
   NativeHandoffRedeemRequest,
   NativeHandoffRedeemResponse,
   NativeHandoffStartRequest,
@@ -169,6 +172,77 @@ describe("native handoff request and response schemas", () => {
         codeVerifier: opaque,
       }),
     ).toBeTruthy();
+  });
+
+  it("adds typed GitHub sign-in hints and connect purposes without changing old sign-in bytes", () => {
+    expect(strictDecode(NativeHandoffStartRequest, start)).toEqual(start);
+    expect(
+      strictDecode(NativeHandoffStartRequest, {
+        ...start,
+        purpose: { kind: "sign_in", providerHint: "github" },
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeHandoffStartRequest, {
+        ...start,
+        purpose: { kind: "connect_external_identity", provider: "github" },
+      }),
+    ).toBeTruthy();
+    expect(
+      strictDecode(NativeHandoffPurpose, {
+        kind: "connect_external_identity",
+        provider: "github",
+      }),
+    ).toBeTruthy();
+
+    for (const purpose of [
+      { kind: "sign_in", providerHint: "gitlab" },
+      { kind: "connect_external_identity", provider: "gitlab" },
+      { kind: "connect_external_identity", provider: "github", token: "must-not-survive" },
+      { kind: "unknown", provider: "github" },
+    ]) {
+      expect(() => strictDecode(NativeHandoffStartRequest, { ...start, purpose })).toThrow();
+    }
+  });
+
+  it("keeps link redemption separate from session redemption", () => {
+    const connectRequest = {
+      handoffId: opaque,
+      code: opaque,
+      codeVerifier: opaque,
+      purpose: { kind: "connect_external_identity", provider: "github" },
+      totpCode: "123456",
+    } as const;
+    const connectResponse = {
+      status: "connected",
+      purpose: { kind: "connect_external_identity", provider: "github" },
+      externalIdentity: {
+        provider: "github",
+        login: "octocat",
+        displayName: "The Octocat",
+        connectedAt: 1_752_710_400_000,
+        lastUsedAt: null,
+      },
+    } as const;
+
+    expect(strictDecode(NativeHandoffConnectRedeemRequest, connectRequest)).toEqual(connectRequest);
+    expect(strictDecode(NativeHandoffConnectRedeemResponse, connectResponse)).toEqual(
+      connectResponse,
+    );
+    expect(() => strictDecode(NativeHandoffRedeemRequest, connectRequest)).toThrow();
+    expect(() => strictDecode(NativeHandoffRedeemResponse, connectResponse)).toThrow();
+    expect(() =>
+      strictDecode(NativeHandoffConnectRedeemResponse, {
+        ...connectResponse,
+        account: { id: "acct_aaaaaaaaaaaaaaaaaaaaaa" },
+      }),
+    ).toThrow();
+    expect(() =>
+      strictDecode(NativeHandoffConnectRedeemRequest, {
+        ...connectRequest,
+        purpose: { kind: "sign_in", providerHint: "github" },
+      }),
+    ).toThrow();
   });
 
   it("rejects callback aliases, malformed secrets, unsafe authorization URLs, and extras", () => {

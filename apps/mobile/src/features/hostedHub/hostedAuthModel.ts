@@ -1,4 +1,5 @@
 import { ORCHESTRATION_WS_METHODS } from "@ryco/contracts";
+import type { ExternalIdentityConfigResponse } from "@ryco/contracts/hosted-identity";
 import {
   deriveHostedConnectionStatusIndicator,
   deriveHostedConnectionStatusText,
@@ -62,6 +63,7 @@ export type HostedSignInSurface =
 
 export type HostedAuthActionId =
   | "sign-in"
+  | "sign-in-github"
   | "cancel-authentication"
   | "retry-hub"
   | "pair-device"
@@ -83,7 +85,7 @@ export interface HostedAuthAction {
   readonly label: string;
   readonly disabled: boolean;
   readonly confirm?: HostedAuthConfirmation;
-  readonly run: () => void;
+  readonly run: () => void | Promise<void>;
 }
 
 /**
@@ -113,6 +115,8 @@ export interface HostedSignInView {
   readonly recoveryCodes: ReadonlyArray<string>;
   readonly primaryAction: HostedAuthAction | null;
   readonly secondaryAction: HostedAuthAction | null;
+  /** Provider-specific entry points advertised by the Hub, in policy order. */
+  readonly providerActions: ReadonlyArray<HostedAuthAction>;
   readonly deliveryUnknown: HostedDeliveryUnknownView | null;
 }
 
@@ -163,6 +167,7 @@ export interface HostedAccountView {
 
 export interface HostedSignInViewInput {
   readonly state: HostedHubState;
+  readonly externalIdentityConfiguration: ExternalIdentityConfigResponse | null;
   /** `isMobileHostedModeAvailable()` — hosted config plus a usable hardware key. */
   readonly hostedModeAvailable: boolean;
   /**
@@ -206,7 +211,7 @@ const DELIVERY_UNKNOWN_MESSAGE =
 function action(
   id: HostedAuthActionId,
   label: string,
-  run: () => void,
+  run: () => void | Promise<void>,
   options?: { readonly disabled?: boolean; readonly confirm?: HostedAuthConfirmation },
 ): HostedAuthAction {
   const disabled = options?.disabled ?? false;
@@ -225,6 +230,21 @@ function action(
 
 const signInAction = (label: string): HostedAuthAction =>
   action("sign-in", label, () => void hostedHubController.signIn());
+
+/** Provider-specific native handoffs. Policy absence means no affordance. */
+export function deriveHostedProviderSignInActions(
+  configuration: ExternalIdentityConfigResponse | null,
+): ReadonlyArray<HostedAuthAction> {
+  const github =
+    configuration?.providers.find((provider) => provider.provider === "github") ?? null;
+  return github?.login === true
+    ? [
+        action("sign-in-github", "Continue with GitHub", () =>
+          hostedHubController.signInWithExternalProvider("github"),
+        ),
+      ]
+    : [];
+}
 
 function statusOf(
   state: HostedHubState,
@@ -396,6 +416,7 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
     recoveryCodes: [] as ReadonlyArray<string>,
     primaryAction: null,
     secondaryAction: null,
+    providerActions: [] as ReadonlyArray<HostedAuthAction>,
     deliveryUnknown: null,
   } satisfies Omit<HostedSignInView, "title" | "detail">;
 
@@ -442,6 +463,7 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
         title: "Your session expired",
         detail: "Continue in your browser to reconnect this device to your Hub.",
         primaryAction: signInAction("Continue in browser"),
+        providerActions: deriveHostedProviderSignInActions(input.externalIdentityConfiguration),
       };
     case "first-run":
       return {
@@ -450,6 +472,7 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
         detail:
           "This Hub has no account yet. Continue in your browser to create the first owner, then approve this device.",
         primaryAction: signInAction("Continue in browser"),
+        providerActions: deriveHostedProviderSignInActions(input.externalIdentityConfiguration),
       };
     case "recovery-codes":
       return {
@@ -483,6 +506,7 @@ export function deriveHostedSignInView(input: HostedSignInViewInput): HostedSign
         detail:
           "Continue in your browser, choose any sign-in method your Hub supports, then approve this device.",
         primaryAction: signInAction("Continue in browser"),
+        providerActions: deriveHostedProviderSignInActions(input.externalIdentityConfiguration),
       };
   }
 }

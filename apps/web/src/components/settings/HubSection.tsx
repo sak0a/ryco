@@ -93,6 +93,13 @@ export function HubSection({
   const [hostedIdentity, setHostedIdentity] = useState<DesktopHostedIdentityState | null>(null);
   const [hostedIdentityPending, setHostedIdentityPending] = useState(false);
   const [hostedIdentityError, setHostedIdentityError] = useState<string | null>(null);
+  const [hostedGitHubPending, setHostedGitHubPending] = useState(false);
+  const [hostedGitHubError, setHostedGitHubError] = useState<string | null>(null);
+  const [hostedGitHubDisconnectOpen, setHostedGitHubDisconnectOpen] = useState(false);
+  const [hostedGitHubStepUp, setHostedGitHubStepUp] = useState<"connect" | "disconnect" | null>(
+    null,
+  );
+  const [hostedGitHubTotpCode, setHostedGitHubTotpCode] = useState("");
   const mountedRef = useRef(true);
   const pollerRef = useRef<VisibilityAwarePoller | null>(null);
   const { copyToClipboard } = useCopyToClipboard();
@@ -201,6 +208,43 @@ export function HubSection({
         );
       } finally {
         if (mountedRef.current) setHostedIdentityPending(false);
+      }
+    },
+    [desktopBridge],
+  );
+
+  const runHostedGitHubAction = useCallback(
+    async (action: "connect" | "disconnect", totpCode?: string) => {
+      const invoke =
+        action === "connect"
+          ? desktopBridge?.connectHostedGitHub
+          : desktopBridge?.disconnectHostedGitHub;
+      if (!invoke) return;
+      setHostedGitHubPending(true);
+      setHostedGitHubError(null);
+      try {
+        const result = await invoke(totpCode ? { totpCode } : undefined);
+        if (!mountedRef.current) return;
+        setHostedIdentity(result.state);
+        if (result.outcome === "step-up-required") {
+          setHostedGitHubStepUp(action);
+          setHostedGitHubTotpCode("");
+        } else {
+          setHostedGitHubStepUp(null);
+          setHostedGitHubTotpCode("");
+          setHostedGitHubDisconnectOpen(false);
+          if (result.outcome === "last-primary-credential") {
+            setHostedGitHubError("Add another primary sign-in method before disconnecting GitHub.");
+          } else if (result.outcome === "unavailable") {
+            setHostedGitHubError("GitHub account access is temporarily unavailable.");
+          }
+        }
+      } catch {
+        if (mountedRef.current) {
+          setHostedGitHubError("GitHub account access is temporarily unavailable.");
+        }
+      } finally {
+        if (mountedRef.current) setHostedGitHubPending(false);
       }
     },
     [desktopBridge],
@@ -563,6 +607,49 @@ export function HubSection({
         />
       ) : null}
 
+      {hostedIdentity?.status === "ready" && hostedIdentity.github !== undefined ? (
+        <SettingsRow
+          title={
+            hostedIdentity.github.identity
+              ? `GitHub · @${hostedIdentity.github.identity.login}`
+              : "GitHub"
+          }
+          description={
+            hostedIdentity.github.identity
+              ? "Use this GitHub identity to sign in to Ryco. Repository access remains separate."
+              : "Connect GitHub as another way to sign in. Ryco requests no repository access."
+          }
+          status={
+            hostedGitHubError ? (
+              <span className="block text-destructive">{hostedGitHubError}</span>
+            ) : hostedIdentity.github.identity?.displayName ? (
+              hostedIdentity.github.identity.displayName
+            ) : null
+          }
+          control={
+            !hostedIdentity.github.linkAvailable ? null : hostedIdentity.github.identity ? (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={hostedGitHubPending || !desktopBridge?.disconnectHostedGitHub}
+                onClick={() => setHostedGitHubDisconnectOpen(true)}
+              >
+                {hostedGitHubPending ? "Working…" : "Disconnect"}
+              </Button>
+            ) : (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={hostedGitHubPending || !desktopBridge?.connectHostedGitHub}
+                onClick={() => void runHostedGitHubAction("connect")}
+              >
+                {hostedGitHubPending ? "Opening browser…" : "Connect GitHub"}
+              </Button>
+            )
+          }
+        />
+      ) : null}
+
       <SettingsRow
         title="Hub address"
         description={
@@ -692,6 +779,74 @@ export function HubSection({
               }}
             >
               Erase this machine&apos;s key
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+
+      <AlertDialog open={hostedGitHubDisconnectOpen} onOpenChange={setHostedGitHubDisconnectOpen}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect GitHub?</AlertDialogTitle>
+            <AlertDialogDescription>
+              GitHub stops working as a Ryco sign-in method. Ryco refuses this change when it is
+              your only primary sign-in method. Repository access is separate.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose>Cancel</AlertDialogClose>
+            <Button
+              variant="destructive"
+              disabled={hostedGitHubPending}
+              onClick={() => void runHostedGitHubAction("disconnect")}
+            >
+              Disconnect GitHub
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+
+      <AlertDialog
+        open={hostedGitHubStepUp !== null}
+        onOpenChange={(open) => {
+          if (!open && !hostedGitHubPending) {
+            if (hostedGitHubStepUp === "connect") {
+              void desktopBridge?.cancelHostedGitHubConnection?.();
+            }
+            setHostedGitHubStepUp(null);
+            setHostedGitHubTotpCode("");
+          }
+        }}
+      >
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm this account change</AlertDialogTitle>
+            <AlertDialogDescription>
+              Enter a current code from your authenticator app. The pending GitHub authorization is
+              reused; Ryco does not reopen the browser.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            aria-label="Authenticator code"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={16}
+            value={hostedGitHubTotpCode}
+            onChange={(event) =>
+              setHostedGitHubTotpCode(event.currentTarget.value.replace(/\D/gu, ""))
+            }
+          />
+          <AlertDialogFooter>
+            <AlertDialogClose>Cancel</AlertDialogClose>
+            <Button
+              disabled={hostedGitHubPending || hostedGitHubTotpCode.length < 6}
+              onClick={() => {
+                if (hostedGitHubStepUp !== null) {
+                  void runHostedGitHubAction(hostedGitHubStepUp, hostedGitHubTotpCode);
+                }
+              }}
+            >
+              Confirm
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

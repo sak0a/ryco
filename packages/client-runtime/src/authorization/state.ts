@@ -89,6 +89,7 @@ const initialState: HostedHubState = {
 
 export type HostedPasskeyDirectoryStatus = "idle" | "loading" | "ready" | "stale";
 export type HostedAccountSecurityStatus = "idle" | "loading" | "ready" | "stale";
+export type HostedExternalIdentityConfigurationStatus = "idle" | "loading" | "ready" | "stale";
 
 export type HostedAccountActionStatus =
   | "idle"
@@ -100,7 +101,9 @@ export type HostedAccountActionStatus =
   | "enrolling-totp"
   | "confirming-totp"
   | "revoking-totp"
-  | "requesting-email-verification";
+  | "requesting-email-verification"
+  | "connecting-external-identity"
+  | "disconnecting-external-identity";
 
 /**
  * Account-management surface state. Kept in its own store rather than widened
@@ -117,6 +120,8 @@ export type HostedAccountActionStatus =
  * runtime holds them until dismissed and cannot enforce a single display.
  */
 export interface HostedAccountState {
+  readonly externalIdentityConfiguration: HostedIdentity.ExternalIdentityConfigResponse | null;
+  readonly externalIdentityConfigurationStatus: HostedExternalIdentityConfigurationStatus;
   readonly passkeys: ReadonlyArray<HostedHubPasskey>;
   readonly passkeysStatus: HostedPasskeyDirectoryStatus;
   readonly security: HostedAccountSecurity | null;
@@ -147,6 +152,8 @@ export interface HostedAccountState {
 }
 
 const initialAccountState: HostedAccountState = {
+  externalIdentityConfiguration: null,
+  externalIdentityConfigurationStatus: "idle",
   passkeys: [],
   passkeysStatus: "idle",
   security: null,
@@ -410,6 +417,9 @@ class HostedHubController {
   #passkeysPromise: Promise<void> | null = null;
   #securityOperation: AbortController | null = null;
   #securityPromise: Promise<void> | null = null;
+  #externalIdentityConfigurationOperation: AbortController | null = null;
+  #externalIdentityConfigurationPromise: Promise<void> | null = null;
+  #externalIdentityConfigurationGeneration = 0;
   #accountOperation: AbortController | null = null;
 
   bootstrap(): Promise<void> {
@@ -473,6 +483,32 @@ class HostedHubController {
     });
     try {
       const result = await getHostedHubApi().signIn(operation.signal);
+      patchState({
+        accountStatus: "authenticated",
+        account: result.account,
+        session: result.session,
+      });
+      await this.refreshDirectory();
+    } catch (error) {
+      if (operation.signal.aborted) return;
+      patchState({ accountStatus: "signed-out", errorMessage: errorMessage(error) || null });
+    } finally {
+      if (this.#operation === operation) this.#operation = null;
+    }
+  }
+
+  async signInWithExternalProvider(
+    provider: HostedIdentity.ExternalIdentityProvider,
+  ): Promise<void> {
+    const operation = this.#replaceOperation();
+    patchState({
+      accountStatus: "authenticating",
+      errorMessage: null,
+      recoveryCodes: [],
+      totpEnrollment: null,
+    });
+    try {
+      const result = await getHostedHubApi().signInWithExternalProvider(provider, operation.signal);
       patchState({
         accountStatus: "authenticated",
         account: result.account,
@@ -785,6 +821,56 @@ class HostedHubController {
    */
   #discardStalePasskeys(): void {
     patchAccountState({ passkeys: [], passkeysStatus: "idle" });
+  }
+
+  refreshExternalIdentityConfiguration(options?: { readonly force?: boolean }): Promise<void> {
+    const force = options?.force === true;
+    if (this.#externalIdentityConfigurationPromise && !force) {
+      return this.#externalIdentityConfigurationPromise;
+    }
+    if (force) {
+      this.#externalIdentityConfigurationOperation?.abort();
+      this.#externalIdentityConfigurationPromise = null;
+    }
+    const generation = this.#externalIdentityConfigurationGeneration;
+    const operation = new AbortController();
+    this.#externalIdentityConfigurationOperation = operation;
+    if (hostedAccountStore.getState().externalIdentityConfiguration === null) {
+      patchAccountState({ externalIdentityConfigurationStatus: "loading" });
+    }
+    const promise = getHostedHubApi()
+      .getExternalIdentityConfiguration(operation.signal)
+      .then((configuration) => {
+        if (
+          operation.signal.aborted ||
+          generation !== this.#externalIdentityConfigurationGeneration
+        ) {
+          return;
+        }
+        patchAccountState({
+          externalIdentityConfiguration: configuration,
+          externalIdentityConfigurationStatus: "ready",
+        });
+      })
+      .catch(() => {
+        if (
+          operation.signal.aborted ||
+          generation !== this.#externalIdentityConfigurationGeneration
+        ) {
+          return;
+        }
+        patchAccountState({ externalIdentityConfigurationStatus: "stale" });
+      })
+      .finally(() => {
+        if (this.#externalIdentityConfigurationOperation === operation) {
+          this.#externalIdentityConfigurationOperation = null;
+        }
+        if (this.#externalIdentityConfigurationPromise === promise) {
+          this.#externalIdentityConfigurationPromise = null;
+        }
+      });
+    this.#externalIdentityConfigurationPromise = promise;
+    return promise;
   }
 
   /**
@@ -1119,6 +1205,59 @@ class HostedHubController {
     return outcome;
   }
 
+  async connectExternalIdentity(
+    provider: HostedIdentity.ExternalIdentityProvider,
+    input?: HostedAccountStepUp,
+  ): Promise<HostedAccountOutcome> {
+    const outcome = await this.#accountAction("connecting-external-identity", async (signal) => {
+      await getHostedHubApi().connectExternalIdentity(provider, input, signal);
+      return () => undefined;
+    });
+    if (outcome.status === "committed") {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
+  }
+
+  cancelExternalIdentityConnection(provider: HostedIdentity.ExternalIdentityProvider): void {
+    this.cancelAccountAction();
+    getHostedHubApi().cancelExternalIdentityConnection(provider);
+  }
+
+  async finishBrowserExternalIdentityConnection(
+    provider: HostedIdentity.ExternalIdentityProvider,
+    input?: HostedAccountStepUp,
+  ): Promise<HostedAccountOutcome> {
+    const outcome = await this.#accountAction("connecting-external-identity", async (signal) => {
+      await getHostedHubApi().finishBrowserExternalIdentityConnection(provider, input, signal);
+      return () => undefined;
+    });
+    if (outcome.status === "committed") {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
+  }
+
+  async disconnectExternalIdentity(
+    provider: HostedIdentity.ExternalIdentityProvider,
+    input?: HostedAccountStepUp,
+  ): Promise<HostedAccountOutcome> {
+    let signedOut = false;
+    const outcome = await this.#accountAction("disconnecting-external-identity", async (signal) => {
+      const result = await getHostedHubApi().disconnectExternalIdentity(provider, input, signal);
+      return () => {
+        signedOut = result.signedOut;
+      };
+    });
+    if (outcome.status !== "committed") return outcome;
+    if (signedOut) {
+      await this.clearAccount("signed-out");
+    } else {
+      await this.refreshAccountSecurity({ force: true });
+    }
+    return outcome;
+  }
+
   /**
    * Abandon an account action that will not finish on its own. A platform
    * passkey sheet the user leaves open never returns and never rejects, so
@@ -1229,6 +1368,10 @@ class HostedHubController {
   }
 
   #clearAccountSurface(): void {
+    this.#externalIdentityConfigurationGeneration += 1;
+    this.#externalIdentityConfigurationOperation?.abort();
+    this.#externalIdentityConfigurationOperation = null;
+    this.#externalIdentityConfigurationPromise = null;
     this.#totpEnrollmentFence.bump();
     // The account is going away and `initialState` takes the codes with it, so
     // a rotation still in flight must not repopulate the slot behind the

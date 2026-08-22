@@ -307,7 +307,9 @@ export type AccountStepUpAction =
   | "revoke-totp"
   | "request-email-verification"
   | "add-passkey"
-  | "regenerate-recovery-codes";
+  | "regenerate-recovery-codes"
+  | "connect-github"
+  | "disconnect-github";
 
 const STEP_UP_ACTION_TITLES: Record<AccountStepUpAction, string> = {
   "set-password": "Confirm the password change",
@@ -316,6 +318,8 @@ const STEP_UP_ACTION_TITLES: Record<AccountStepUpAction, string> = {
   "request-email-verification": "Confirm the email change",
   "add-passkey": "Confirm adding a passkey",
   "regenerate-recovery-codes": "Confirm new recovery codes",
+  "connect-github": "Confirm connecting GitHub",
+  "disconnect-github": "Confirm disconnecting GitHub",
 };
 
 export function stepUpTitle(action: AccountStepUpAction): string {

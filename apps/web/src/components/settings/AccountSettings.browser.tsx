@@ -54,6 +54,7 @@ import {
   hostedRecoveryCodeDisplayStore,
 } from "../../hostedHub/state";
 import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
+import { hostedHubApi } from "../../hostedHub/api";
 import { AccountSettingsPanel } from "./AccountSettings";
 import {
   STEP_UP_INFERRED_ATTEMPT_LIMIT,
@@ -336,6 +337,7 @@ describe("AccountSettingsPanel", () => {
           totpEnrolled: false,
           emailDeliveryConfigured: false,
           email: null,
+          externalIdentities: [],
         },
         securityStatus: "ready",
       },
@@ -345,6 +347,8 @@ describe("AccountSettingsPanel", () => {
     // in a test about mutations.
     vi.spyOn(hostedHubController, "refreshPasskeys").mockResolvedValue();
     vi.spyOn(hostedHubController, "refreshAccountSecurity").mockResolvedValue();
+    vi.spyOn(hostedHubController, "refreshExternalIdentityConfiguration").mockResolvedValue();
+    vi.spyOn(hostedHubApi, "getPendingExternalIdentity").mockResolvedValue({ status: "none" });
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: {
@@ -363,6 +367,76 @@ describe("AccountSettingsPanel", () => {
   });
 
   /* --------------------------------------------------- the tools themselves */
+
+  it("shows a bounded GitHub connection row and confirms disconnect", async () => {
+    const externalIdentity = {
+      provider: "github",
+      login: "octocat",
+      displayName: "The Octocat",
+      connectedAt: 1_700_000_000_000,
+      lastUsedAt: null,
+    } as const;
+    hostedAccountStore.setState({
+      externalIdentityConfiguration: {
+        version: 1,
+        providers: [{ provider: "github", login: true, signup: true, link: true }],
+      },
+      externalIdentityConfigurationStatus: "ready",
+      security: {
+        ...hostedAccountStore.getState().security!,
+        externalIdentities: [externalIdentity],
+      },
+    });
+    const disconnect = vi
+      .spyOn(hostedHubController, "disconnectExternalIdentity")
+      .mockResolvedValue({ status: "committed" });
+
+    await mount();
+    await expect.element(page.getByText("GitHub · @octocat")).toBeVisible();
+    await expect
+      .element(page.getByText("Repository access remains separate.", { exact: false }))
+      .toBeVisible();
+    await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+    expect(disconnect).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Disconnect GitHub", exact: true }).click();
+    expect(disconnect).toHaveBeenCalledWith("github", {});
+  });
+
+  it("finishes a staged browser GitHub link and hides actions without provider policy", async () => {
+    const externalIdentity = {
+      provider: "github",
+      login: "octocat",
+      displayName: null,
+      connectedAt: 1_700_000_000_000,
+      lastUsedAt: null,
+    } as const;
+    hostedAccountStore.setState({
+      externalIdentityConfiguration: null,
+      externalIdentityConfigurationStatus: "ready",
+      security: {
+        ...hostedAccountStore.getState().security!,
+        externalIdentities: [externalIdentity],
+      },
+    });
+    vi.mocked(hostedHubApi.getPendingExternalIdentity).mockResolvedValue({
+      status: "link",
+      externalIdentity,
+      expiresAt: 1_800_000_000_000,
+    });
+    const finish = vi
+      .spyOn(hostedHubController, "finishBrowserExternalIdentityConnection")
+      .mockResolvedValue({ status: "committed" });
+
+    await mount();
+    await vi.waitFor(() => expect(finish).toHaveBeenCalledWith("github", {}));
+    await expect.element(page.getByText("GitHub · @octocat")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "Disconnect", exact: true }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Connect GitHub", exact: true }))
+      .not.toBeInTheDocument();
+  });
 
   it("has a persistence snapshot that can actually see every store a secret could reach", async () => {
     const canary = "canary-3f9c2a";
@@ -436,6 +510,7 @@ describe("AccountSettingsPanel", () => {
         totpEnrolled: true,
         emailDeliveryConfigured: false,
         email: { address: "ada@example.com", verified: true },
+        externalIdentities: [],
       },
       securityStatus: "ready",
     });
@@ -482,6 +557,7 @@ describe("AccountSettingsPanel", () => {
         totpEnrolled: false,
         emailDeliveryConfigured: false,
         email: null,
+        externalIdentities: [],
       },
       securityStatus: "stale",
     });
@@ -741,6 +817,7 @@ describe("AccountSettingsPanel", () => {
         totpEnrolled: true,
         emailDeliveryConfigured: false,
         email: null,
+        externalIdentities: [],
       },
       securityStatus: "ready",
     });
@@ -1300,6 +1377,7 @@ describe("AccountSettingsPanel", () => {
         totpEnrolled: false,
         emailDeliveryConfigured: true,
         email: null,
+        externalIdentities: [],
       },
       securityStatus: "ready",
     });

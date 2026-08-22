@@ -36,6 +36,7 @@ import type {
   HostedAccountOutcome,
   HostedAccountSecurity,
   HostedAccountStepUp,
+  HostedExternalIdentity,
   HostedHubPasskey,
 } from "@ryco/client-runtime/authorization";
 
@@ -45,6 +46,7 @@ import {
   useHostedAccountStore,
   useHostedHubStore,
 } from "../../hostedHub/state";
+import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import {
   AlertDialog,
@@ -69,6 +71,7 @@ import {
 import { Input, TOUCH_INPUT_CLASS_NAME } from "../ui/input";
 import { Label } from "../ui/label";
 import { QRCodeSvg } from "../ui/qr-code";
+import { GitHubIcon } from "../Icons";
 import { Spinner } from "../ui/spinner";
 import {
   accountPosture,
@@ -97,6 +100,11 @@ import {
   type AccountStepUpAction,
 } from "./AccountSettings.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  beginGitHubAuthorization,
+  externalIdentityPendingErrorMessage,
+  githubProviderPolicy,
+} from "../hostedHub/ExternalIdentityWeb.logic";
 
 const timestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -329,20 +337,73 @@ export function AccountSettingsPanel() {
   const passkeysStatus = useHostedAccountStore((state) => state.passkeysStatus);
   const security = useHostedAccountStore((state) => state.security);
   const securityStatus = useHostedAccountStore((state) => state.securityStatus);
+  const externalIdentityConfiguration = useHostedAccountStore(
+    (state) => state.externalIdentityConfiguration,
+  );
   const actionStatus = useHostedAccountStore((state) => state.actionStatus);
   const errorMessage = useHostedAccountStore((state) => state.errorMessage);
   const errorCode = useHostedAccountStore((state) => state.errorCode ?? null);
   const recoveryCodes = useHostedHubStore((state) => state.recoveryCodes);
   const totpEnrollment = useHostedHubStore((state) => state.totpEnrollment ?? null);
+  const [externalIdentityPending, setExternalIdentityPending] = useState(false);
+  const [externalIdentityError, setExternalIdentityError] = useState<string | null>(null);
+  const pendingExternalIdentityChecked = useRef(false);
 
   const action = useAccountAction();
+  const runAccountAction = action.run;
   useRecoveryCodeDisplayLease();
   const busy = actionStatus !== "idle";
+  const githubPolicy = githubProviderPolicy(externalIdentityConfiguration);
+  const githubIdentity =
+    security?.externalIdentities.find((identity) => identity.provider === "github") ?? null;
+
+  const startGitHubConnection = async () => {
+    if (externalIdentityPending) return;
+    setExternalIdentityPending(true);
+    setExternalIdentityError(null);
+    try {
+      await beginGitHubAuthorization({
+        intent: "link",
+        returnTo: "/account/security",
+        start: (request) => hostedHubApi.startExternalIdentityAuthorization(request),
+        navigate: (authorizationUrl) => window.location.assign(authorizationUrl),
+      });
+    } catch (cause) {
+      setExternalIdentityError(
+        cause instanceof HostedHubApiError
+          ? cause.message
+          : "GitHub connection is temporarily unavailable.",
+      );
+      setExternalIdentityPending(false);
+    }
+  };
 
   useEffect(() => {
     void hostedHubController.refreshPasskeys();
     void hostedHubController.refreshAccountSecurity();
+    void hostedHubController.refreshExternalIdentityConfiguration();
   }, []);
+
+  useEffect(() => {
+    if (accountStatus !== "authenticated" || pendingExternalIdentityChecked.current) return;
+    pendingExternalIdentityChecked.current = true;
+    const operation = new AbortController();
+    void hostedHubApi
+      .getPendingExternalIdentity(operation.signal)
+      .then((pending) => {
+        if (pending.status === "link") {
+          return runAccountAction("connect-github", (stepUp) =>
+            hostedHubController.finishBrowserExternalIdentityConnection("github", stepUp),
+          );
+        }
+        if (pending.status === "error") {
+          setExternalIdentityError(externalIdentityPendingErrorMessage(pending.code));
+        }
+        return undefined;
+      })
+      .catch(() => undefined);
+    return () => operation.abort();
+  }, [accountStatus, runAccountAction]);
 
   if (accountStatus !== "authenticated") {
     return (
@@ -379,6 +440,14 @@ export function AccountSettingsPanel() {
           <TriangleAlertIcon aria-hidden />
           <AlertTitle>{passkeySessionGate ? "Passkey needed" : "That did not work"}</AlertTitle>
           <AlertDescription>{inlineError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {externalIdentityError ? (
+        <Alert variant="warning" aria-live="polite">
+          <TriangleAlertIcon aria-hidden />
+          <AlertTitle>GitHub connection did not complete</AlertTitle>
+          <AlertDescription>{externalIdentityError}</AlertDescription>
         </Alert>
       ) : null}
 
@@ -448,6 +517,17 @@ export function AccountSettingsPanel() {
         />
       </SettingsSection>
 
+      {githubIdentity || githubPolicy?.link ? (
+        <ExternalIdentitySection
+          identity={githubIdentity}
+          actionsAvailable={githubPolicy?.link === true}
+          busy={busy || externalIdentityPending}
+          actionStatus={actionStatus}
+          onConnect={() => void startGitHubConnection()}
+          run={runAccountAction}
+        />
+      ) : null}
+
       <PasskeysSection
         passkeys={passkeys}
         loading={passkeysStatus === "loading"}
@@ -508,6 +588,92 @@ type RunAccountAction = (
 
 /** Abandon the action in flight, aborting it in the runtime. */
 type CancelAccountAction = () => void;
+
+function ExternalIdentitySection({
+  identity,
+  actionsAvailable,
+  busy,
+  actionStatus,
+  onConnect,
+  run,
+}: {
+  readonly identity: HostedExternalIdentity | null;
+  readonly actionsAvailable: boolean;
+  readonly busy: boolean;
+  readonly actionStatus: string;
+  readonly onConnect: () => void;
+  readonly run: RunAccountAction;
+}) {
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const connecting = actionStatus === "connecting-external-identity";
+  const disconnecting = actionStatus === "disconnecting-external-identity";
+
+  const disconnect = async () => {
+    await run(
+      "disconnect-github",
+      (stepUp) => hostedHubController.disconnectExternalIdentity("github", stepUp),
+      { onCommitted: () => setDisconnectOpen(false) },
+    );
+  };
+
+  return (
+    <SettingsSection
+      title="Connected accounts"
+      icon={<GitHubIcon aria-hidden className="size-3.5" />}
+    >
+      <SettingsRow
+        title={identity ? `GitHub · @${identity.login}` : "GitHub"}
+        description={
+          identity
+            ? "Use this GitHub identity to sign in to Ryco. Repository access remains separate."
+            : "Connect GitHub as another way to sign in. Ryco requests no repository access."
+        }
+        status={
+          identity
+            ? `Connected ${formatEpoch(identity.connectedAt) ?? "at an unknown time"}${
+                identity.lastUsedAt === null
+                  ? ""
+                  : ` · last used ${formatEpoch(identity.lastUsedAt) ?? "at an unknown time"}`
+              }`
+            : null
+        }
+        control={
+          !actionsAvailable ? null : identity ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setDisconnectOpen(true)}
+            >
+              <ActionLabel busy={disconnecting}>Disconnect</ActionLabel>
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" disabled={busy} onClick={onConnect}>
+              <ActionLabel busy={connecting}>Connect GitHub</ActionLabel>
+            </Button>
+          )
+        }
+      />
+      <AlertDialog open={disconnectOpen} onOpenChange={setDisconnectOpen}>
+        <AlertDialogPopup>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect GitHub?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You will no longer be able to sign in with GitHub. Ryco refuses this change if GitHub
+              is your only remaining sign-in method.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <Button disabled={busy} onClick={() => void disconnect()}>
+              <ActionLabel busy={disconnecting}>Disconnect GitHub</ActionLabel>
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
+    </SettingsSection>
+  );
+}
 
 /* ------------------------------------------------------------------ passkeys */
 
