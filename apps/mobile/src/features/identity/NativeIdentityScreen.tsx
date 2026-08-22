@@ -284,35 +284,14 @@ function Action(props: {
   );
 }
 
-function EntryOption(props: {
-  readonly label: string;
-  readonly detail?: string;
-  readonly first?: boolean;
-  readonly onPress: () => void;
-}) {
-  const chevronColor = useThemeColor("--color-icon-subtle");
+function EntryOption(props: { readonly label: string; readonly onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={props.detail ? `${props.label}. ${props.detail}` : props.label}
       onPress={props.onPress}
-      className={cn(
-        "min-h-12 flex-row items-center gap-3 px-4 py-3 active:bg-subtle",
-        props.first ? "" : "border-t border-border-subtle",
-      )}
+      className="min-h-11 justify-center active:opacity-60"
     >
-      <Text className="min-w-0 flex-1 text-sm font-ryco-medium text-foreground">{props.label}</Text>
-      {props.detail ? (
-        <Text numberOfLines={1} className="max-w-[44%] text-right text-xs text-foreground-muted">
-          {props.detail}
-        </Text>
-      ) : null}
-      <SymbolView
-        name={{ ios: "chevron.right", android: "chevron_right" }}
-        size={15}
-        tintColor={chevronColor}
-        type="monochrome"
-      />
+      <Text className="text-[13px] font-ryco-medium text-foreground-muted">{props.label}</Text>
     </Pressable>
   );
 }
@@ -933,24 +912,18 @@ export function NativeIdentityScreen() {
                     })
                   }
                 />
-                <View className="mt-1 gap-2">
-                  <Text className="px-1 text-xs font-ryco-medium text-foreground-muted">
+                <View className="mt-0.5">
+                  <Text className="text-[11px] font-ryco-medium text-foreground-muted">
                     Other options
                   </Text>
-                  <View className="overflow-hidden rounded-2xl border border-border bg-card">
+                  <View className="flex-row flex-wrap items-center gap-x-5">
                     {nativePolicy?.login.methods.includes("recovery_code") ? (
                       <EntryOption
-                        first
-                        label="Use a recovery code"
+                        label="Recovery code"
                         onPress={() => setScreen({ name: "recovery" })}
                       />
                     ) : null}
-                    <EntryOption
-                      first={!nativePolicy?.login.methods.includes("recovery_code")}
-                      label="Different Hub"
-                      detail={profile?.label ?? "Ryco Hub"}
-                      onPress={() => setEditorVisible(true)}
-                    />
+                    <EntryOption label="Different Hub" onPress={() => setEditorVisible(true)} />
                     <EntryOption
                       label="Add a machine"
                       onPress={() => navigation.navigate("ConnectionsNew" as never)}
