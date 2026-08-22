@@ -1,4 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
+import type { ExternalIdentityPendingResponse } from "@ryco/contracts/hosted-identity";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -44,10 +45,11 @@ import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import {
   HOSTED_SESSION_SYNC_FAILURE_MESSAGE,
   hostedHubController,
+  useHostedAccountStore,
   useHostedHubStore,
   useHostedRecoveryCodeDisplayStore,
 } from "../../hostedHub/state";
-import { hostedHubApi } from "../../hostedHub/api";
+import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import {
   consumeHostedIdentityLink,
   type HostedIdentityLink,
@@ -64,6 +66,7 @@ import type { HostedHubNode } from "../../hostedHub/types";
 import { useHostedBrowserLifecycle } from "../../hostedHub/useHostedBrowserLifecycle";
 import { usePresentationTier } from "../../hooks/usePresentationTier";
 import { PHONE_ANCHORED_ACTIONS_CLASS_NAME } from "../mobile/phoneAnchoredActions";
+import { GitHubIcon } from "../Icons";
 import {
   HostedConnectionControl,
   NodePresence,
@@ -85,12 +88,18 @@ import { HostedNodeEnrollmentFlow } from "./HostedNodeEnrollment";
 import { hostedNodeRevokedNotice, HOSTED_NODE_REVOKE_REASON_CODE } from "./HostedNodeRevoke.logic";
 import { HostedPwaControls } from "./HostedPwaControls";
 import {
+  ExternalIdentitySignupFlow,
   PasswordLoginFlow,
   PasswordResetFlow,
   PublicSignupFlow,
   RecoveryCodeFlow,
   usePublicSignupConfiguration,
 } from "./PublicAccountFlows";
+import {
+  beginGitHubAuthorization,
+  externalIdentityPendingErrorMessage,
+  githubProviderPolicy,
+} from "./ExternalIdentityWeb.logic";
 import { HostedRelayTrustNotice } from "./HostedRelayTrustNotice";
 
 // Browser suites and callers keep importing the menu from the hosted root.
@@ -496,6 +505,15 @@ export function HostedAuthenticationSurface({
   );
   const clearIdentityLink = useCallback(() => setIdentityLink(null), []);
   const { config: publicSignupConfig } = usePublicSignupConfiguration();
+  const externalIdentityConfiguration = useHostedAccountStore(
+    (state) => state.externalIdentityConfiguration,
+  );
+  const githubIdentityPolicy = githubProviderPolicy(externalIdentityConfiguration);
+  const [externalAuthorizationPending, setExternalAuthorizationPending] = useState(false);
+  const [externalAuthorizationError, setExternalAuthorizationError] = useState<string | null>(null);
+  const [externalPending, setExternalPending] = useState<
+    ExternalIdentityPendingResponse | undefined
+  >(undefined);
   // Which ceremony is on screen comes from the URL, not from local state.
   //
   // These were two `useState` discriminators, so every signed-out screen lived
@@ -547,6 +565,49 @@ export function HostedAuthenticationSurface({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const registrationInputRef = useRef<HTMLInputElement>(null);
   const surfaceScrollRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    void hostedHubController.refreshExternalIdentityConfiguration();
+  }, []);
+
+  useEffect(() => {
+    if (registrationMode !== "public") {
+      setExternalPending(undefined);
+      return;
+    }
+    const operation = new AbortController();
+    setExternalPending(undefined);
+    void hostedHubApi
+      .getPendingExternalIdentity(operation.signal)
+      .then((pending) => {
+        if (!operation.signal.aborted) setExternalPending(pending);
+      })
+      .catch(() => {
+        if (!operation.signal.aborted) setExternalPending({ status: "none" });
+      });
+    return () => operation.abort();
+  }, [registrationMode]);
+
+  const startGitHubSignIn = async () => {
+    if (externalAuthorizationPending) return;
+    setExternalAuthorizationPending(true);
+    setExternalAuthorizationError(null);
+    try {
+      await beginGitHubAuthorization({
+        intent: "authenticate",
+        returnTo: context === "native-authorization" ? window.location.pathname : "/nodes",
+        start: (request) => hostedHubApi.startExternalIdentityAuthorization(request),
+        navigate: (authorizationUrl) => window.location.assign(authorizationUrl),
+      });
+    } catch (cause) {
+      setExternalAuthorizationError(
+        cause instanceof HostedHubApiError
+          ? cause.message
+          : "GitHub sign-in is temporarily unavailable.",
+      );
+      setExternalAuthorizationPending(false);
+    }
+  };
 
   useEffect(() => {
     // `preventScroll`: both targets sit at the top of a surface that owns its
@@ -618,6 +679,25 @@ export function HostedAuthenticationSurface({
     registrationMode || fallbackMode ? null : (
       <div className={`phone:mt-auto ${PHONE_ANCHORED_ACTIONS_CLASS_NAME}`}>
         <div className="mt-6 flex flex-col gap-3">
+          {githubIdentityPolicy?.login ? (
+            <Button
+              size="lg"
+              className="phone:min-h-11"
+              disabled={
+                externalAuthorizationPending ||
+                status === "authenticating" ||
+                status === "signing-out"
+              }
+              onClick={() => void startGitHubSignIn()}
+            >
+              {externalAuthorizationPending ? (
+                <Loader2Icon aria-hidden className="animate-spin" />
+              ) : (
+                <GitHubIcon aria-hidden />
+              )}
+              {externalAuthorizationPending ? "Opening GitHub…" : "Continue with GitHub"}
+            </Button>
+          ) : null}
           <Button
             size="lg"
             className="phone:min-h-11"
@@ -705,12 +785,13 @@ export function HostedAuthenticationSurface({
   // Mounted on every page of the gateway, not only the landing one. An
   // authentication error is a property of the account state, and each ceremony
   // below can produce one.
-  const authError = error ? (
+  const visibleAuthenticationError = externalAuthorizationError ?? error;
+  const authError = visibleAuthenticationError ? (
     <div className="mt-4">
       <Alert variant="error">
         <TriangleAlertIcon aria-hidden />
         <AlertTitle>Sign-in did not complete</AlertTitle>
-        <AlertDescription>{error}</AlertDescription>
+        <AlertDescription>{visibleAuthenticationError}</AlertDescription>
       </Alert>
     </div>
   ) : null;
@@ -728,6 +809,8 @@ export function HostedAuthenticationSurface({
   // invitation and bootstrap drive `accountStatus` to `authenticating` exactly
   // as sign-in does.
   if (registrationMode === "public") {
+    const externalSignup = externalPending?.status === "signup" ? externalPending : null;
+    const externalFailure = externalPending?.status === "error" ? externalPending : null;
     return (
       <HubGateway
         title="Create your account"
@@ -737,15 +820,38 @@ export function HostedAuthenticationSurface({
         titleRef={headingRef}
       >
         {authError}
-        <PublicSignupFlow
-          config={publicSignupConfig?.status === "enabled" ? publicSignupConfig : null}
-          initialLink={identityLink}
-          onConsumeLink={clearIdentityLink}
-          onCancel={() => {
-            clearIdentityLink();
-            setRegistrationMode(null);
-          }}
-        />
+        {externalPending === undefined ? (
+          <Skeleton className="h-64 w-full rounded-2xl" />
+        ) : externalSignup ? (
+          <ExternalIdentitySignupFlow
+            pendingSignup={externalSignup}
+            config={publicSignupConfig?.status === "enabled" ? publicSignupConfig : null}
+            onCancel={() => setRegistrationMode(null)}
+          />
+        ) : externalFailure ? (
+          <div className="space-y-4">
+            <Alert variant="warning">
+              <TriangleAlertIcon aria-hidden />
+              <AlertTitle>GitHub signup did not continue</AlertTitle>
+              <AlertDescription>
+                {externalIdentityPendingErrorMessage(externalFailure.code)}
+              </AlertDescription>
+            </Alert>
+            <Button variant="outline" onClick={() => setRegistrationMode(null)}>
+              Back to sign in
+            </Button>
+          </div>
+        ) : (
+          <PublicSignupFlow
+            config={publicSignupConfig?.status === "enabled" ? publicSignupConfig : null}
+            initialLink={identityLink}
+            onConsumeLink={clearIdentityLink}
+            onCancel={() => {
+              clearIdentityLink();
+              setRegistrationMode(null);
+            }}
+          />
+        )}
       </HubGateway>
     );
   }

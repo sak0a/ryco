@@ -27,7 +27,11 @@ vi.mock("../../env", async (importOriginal) => ({
   isHostedHubMode: () => true,
 }));
 
-import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import {
+  hostedHubController,
+  useHostedAccountStore,
+  useHostedHubStore,
+} from "../../hostedHub/state";
 import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
 import { hostedHubApi, HostedHubApiError } from "../../hostedHub/api";
 import type { HostedHubNode } from "../../hostedHub/types";
@@ -100,6 +104,8 @@ beforeEach(() => {
   vi.spyOn(hostedHubApi, "getPublicSignupConfiguration").mockResolvedValue({
     status: "disabled",
   });
+  vi.spyOn(hostedHubApi, "getPendingExternalIdentity").mockResolvedValue({ status: "none" });
+  vi.spyOn(hostedHubController, "refreshExternalIdentityConfiguration").mockResolvedValue();
 });
 
 afterEach(async () => {
@@ -128,6 +134,61 @@ function userScrollableAncestor(element: HTMLElement): HTMLElement | null {
 }
 
 describe("HostedHubRoot accessibility and responsive flows", () => {
+  it("shows GitHub sign-in only when the provider policy advertises it", async () => {
+    mounted = await render(<HostedHubRoot />);
+    await expect
+      .element(page.getByRole("button", { name: "Continue with GitHub" }))
+      .not.toBeInTheDocument();
+    await mounted.unmount();
+
+    useHostedAccountStore.setState({
+      externalIdentityConfiguration: {
+        version: 1,
+        providers: [{ provider: "github", login: true, signup: true, link: true }],
+      },
+      externalIdentityConfigurationStatus: "ready",
+    });
+    mounted = await render(<HostedHubRoot />);
+    await expect.element(page.getByRole("button", { name: "Continue with GitHub" })).toBeVisible();
+  });
+
+  it("confirms a GitHub-backed signup before creating the Ryco account", async () => {
+    window.history.replaceState(null, "", "/sign-up");
+    vi.mocked(hostedHubApi.getPublicSignupConfiguration).mockResolvedValue({
+      status: "enabled",
+      antiBot: { provider: "bypass" },
+    });
+    vi.mocked(hostedHubApi.getPendingExternalIdentity).mockResolvedValue({
+      status: "signup",
+      provider: "github",
+      suggestedUsername: "octocat",
+      displayName: "The Octocat",
+      expiresAt: 2,
+    } as never);
+    const finish = vi.spyOn(hostedHubApi, "finishExternalIdentitySignup").mockResolvedValue({
+      status: "complete",
+      identity: publicIdentity,
+      recoveryCodes: ["recovery-one", "recovery-two"],
+    });
+    const adopt = vi.spyOn(hostedHubController, "adoptPublicBrowserIdentity").mockResolvedValue();
+
+    mounted = await render(<HostedHubRoot />);
+    await expect.element(page.getByText("GitHub verified")).toBeVisible();
+    await expect.element(page.getByLabelText("Username")).toHaveValue("octocat");
+    await page.getByLabelText("Username").fill("octo_ryco");
+    await page.getByRole("button", { name: "Create account with GitHub" }).click();
+
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "github",
+        username: "octo_ryco",
+        antiBotAssertion: "development",
+        idempotencyKey: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      }),
+    );
+    expect(adopt).toHaveBeenCalledWith(publicIdentity, ["recovery-one", "recovery-two"]);
+  });
+
   it("contains hosted admission and node selection at 320 CSS pixels", async () => {
     await page.viewport(320, 568);
     try {

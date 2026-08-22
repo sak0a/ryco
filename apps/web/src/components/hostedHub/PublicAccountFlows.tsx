@@ -3,6 +3,7 @@ import {
   HOSTED_IDENTITY_MAX_PASSWORD_CHARS,
   HOSTED_IDENTITY_MIN_PASSWORD_CHARS,
   HUB_USERNAME_MAX_CHARS,
+  type ExternalIdentityPendingResponse,
   type PasswordLoginStartResponse,
   type PasswordResetVerifyResponse,
   type PublicSignupConfigResponse,
@@ -25,6 +26,10 @@ import { HubStepIndicator } from "./shell/HubStepIndicator";
 import { TurnstileWidget } from "./TurnstileWidget";
 
 type EnabledSignupConfig = Extract<PublicSignupConfigResponse, { readonly status: "enabled" }>;
+export type ExternalIdentityPendingSignup = Extract<
+  ExternalIdentityPendingResponse,
+  { readonly status: "signup" }
+>;
 type SignupLinkToken = Extract<
   PublicSignupVerifyRequest["proof"],
   { readonly kind: "link_token" }
@@ -423,6 +428,94 @@ export function PublicSignupFlow({
         </div>
       )}
     </div>
+  );
+}
+
+export function ExternalIdentitySignupFlow({
+  pendingSignup,
+  config,
+  onCancel,
+}: {
+  readonly pendingSignup: ExternalIdentityPendingSignup;
+  readonly config: EnabledSignupConfig | null;
+  readonly onCancel: () => void;
+}) {
+  const [username, setUsername] = useState(pendingSignup.suggestedUsername ?? "");
+  const [antiBotToken, setAntiBotToken] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const finish = async (event: FormEvent) => {
+    event.preventDefault();
+    if (pending || config === null) return;
+    const assertion = config.antiBot.provider === "bypass" ? "development" : (antiBotToken ?? "");
+    if (!assertion) {
+      setError("Complete the anti-bot check before continuing.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      const completed = await hostedHubApi.finishExternalIdentitySignup({
+        provider: "github",
+        username: username.trim().toLowerCase() as Parameters<
+          typeof hostedHubApi.finishExternalIdentitySignup
+        >[0]["username"],
+        antiBotAssertion: assertion,
+        idempotencyKey: freshIdempotencyKey(),
+      });
+      await hostedHubController.adoptPublicBrowserIdentity(
+        completed.identity,
+        completed.recoveryCodes,
+      );
+    } catch (cause) {
+      setError(identityError(cause, "GitHub signup did not complete."));
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <form className="flex flex-1 flex-col space-y-4" onSubmit={(event) => void finish(event)}>
+      <HubStepIndicator step={1} total={1} label="Confirm your Ryco username" />
+      <div className="rounded-xl border border-border bg-background/60 p-4">
+        <ShieldCheckIcon aria-hidden className="size-5 text-primary" />
+        <p className="mt-2 text-sm font-medium">GitHub verified</p>
+        <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+          {pendingSignup.displayName
+            ? `${pendingSignup.displayName} authorized Ryco through GitHub. `
+            : "GitHub authorized this account. "}
+          Choose the public username Ryco should use. Nothing is created until you confirm.
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="hub-external-signup-username">Username</Label>
+        <Input
+          id="hub-external-signup-username"
+          autoCapitalize="none"
+          autoComplete="username"
+          maxLength={HUB_USERNAME_MAX_CHARS}
+          pattern="[A-Za-z0-9_]+"
+          required
+          value={username}
+          className={TOUCH_INPUT_CLASS_NAME}
+          onChange={(event) => setUsername(event.currentTarget.value.toLowerCase())}
+        />
+        <p className="text-xs text-muted-foreground">
+          GitHub suggested this name. You can change it before creating the account.
+        </p>
+      </div>
+      {config?.antiBot.provider === "turnstile" ? (
+        <TurnstileWidget siteKey={config.antiBot.siteKey} onToken={setAntiBotToken} />
+      ) : null}
+      <FlowError value={error} />
+      <FlowActions
+        onCancel={onCancel}
+        pending={pending}
+        submitLabel="Create account with GitHub"
+        submitDisabled={config === null}
+      />
+    </form>
   );
 }
 
