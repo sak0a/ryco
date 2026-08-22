@@ -51,6 +51,65 @@ afterEach(async () => {
 });
 
 describe("HostedNativeAuthorizationRoute", () => {
+  it("finishes an unlinked GitHub signup without leaving native authorization", async () => {
+    window.history.replaceState(null, "", `/native/authorize/${handoffId}`);
+    useHostedHubStore.setState({
+      accountStatus: "signed-out",
+      account: null,
+      session: null,
+    });
+    vi.spyOn(hostedHubApi, "getNativeHandoffPresentation").mockResolvedValue({
+      status: "pending",
+      deviceLabel: "Laurin’s iPhone",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.spyOn(hostedHubApi, "getPublicSignupConfiguration").mockResolvedValue({
+      status: "enabled",
+      antiBot: { provider: "bypass" },
+    });
+    vi.spyOn(hostedHubApi, "getPendingExternalIdentity").mockResolvedValue({
+      status: "signup",
+      provider: "github",
+      suggestedUsername: "octocat",
+      displayName: "The Octocat",
+      expiresAt: Date.now() + 60_000,
+    } as never);
+    vi.spyOn(hostedHubController, "refreshExternalIdentityConfiguration").mockResolvedValue();
+    const finish = vi.spyOn(hostedHubApi, "finishExternalIdentitySignup").mockResolvedValue({
+      status: "complete",
+      identity: {
+        account: { ...account, username: "octocat" },
+        session: { ...session, activeSpaceId: "space_aaaaaaaaaaaaaaaaaaaaaa" },
+        activeSpace: {
+          id: "space_aaaaaaaaaaaaaaaaaaaaaa",
+          kind: "personal",
+          displayName: "Octocat's space",
+          role: "owner",
+        },
+        spaces: [],
+        csrfToken: "csrf-native-signup",
+      } as never,
+      recoveryCodes: ["recovery-one"],
+    });
+    const adopt = vi.spyOn(hostedHubController, "adoptPublicBrowserIdentity").mockResolvedValue();
+
+    mounted = await render(<HostedNativeAuthorizationRoute handoffId={handoffId} />);
+
+    await expect.element(page.getByText("GitHub verified")).toBeVisible();
+    await expect.element(page.getByLabelText("Username")).toHaveValue("octocat");
+    await page.getByRole("button", { name: "Create account with GitHub" }).click();
+
+    expect(finish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "github",
+        username: "octocat",
+        antiBotAssertion: "development",
+      }),
+    );
+    expect(adopt).toHaveBeenCalledOnce();
+    expect(window.location.pathname).toBe(`/native/authorize/${handoffId}`);
+  });
+
   it("requires explicit consent and shows the exact account and requesting device", async () => {
     vi.spyOn(hostedHubApi, "getNativeHandoffPresentation").mockResolvedValue({
       status: "pending",
