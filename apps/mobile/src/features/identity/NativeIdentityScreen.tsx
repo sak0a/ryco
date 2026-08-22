@@ -933,20 +933,6 @@ export function NativeIdentityScreen() {
                     })
                   }
                 />
-                <Action
-                  label="Continue with a passkey"
-                  quiet
-                  disabled={busy || !nativePolicy?.login.methods.includes("passkey")}
-                  onPress={() =>
-                    void run(async () => {
-                      const result = await getHostedHubApi().signInWithNativePasskey();
-                      if (!(await mobileSessionCredentials.commitBearerToken(result.token))) {
-                        throw new Error("credential persistence failed");
-                      }
-                      await hostedHubController.bootstrap();
-                    })
-                  }
-                />
                 <View className="mt-1 gap-2">
                   <Text className="px-1 text-xs font-ryco-medium text-foreground-muted">
                     Other options
