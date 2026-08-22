@@ -64,12 +64,17 @@ const hostedHubApi = {
   restoreSession: vi.fn(),
   getBootstrapAvailability: vi.fn(),
   signIn: vi.fn(),
+  signInWithExternalProvider: vi.fn(),
   signOut: vi.fn(),
   bootstrapOwner: vi.fn(),
   redeemInvitation: vi.fn(),
   listNodes: vi.fn(),
   listPasskeys: vi.fn(),
   getAccountSecurity: vi.fn(),
+  getExternalIdentityConfiguration: vi.fn(),
+  connectExternalIdentity: vi.fn(),
+  finishBrowserExternalIdentityConnection: vi.fn(),
+  disconnectExternalIdentity: vi.fn(),
   addPasskey: vi.fn(),
   revokePasskey: vi.fn(),
   regenerateRecoveryCodes: vi.fn(),
@@ -166,6 +171,7 @@ const emptySecurity = {
   totpEnrolled: false,
   emailDeliveryConfigured: false,
   email: null,
+  externalIdentities: [],
 } as const;
 
 function node(
@@ -329,6 +335,41 @@ describe("hosted account state", () => {
     const replacement = hostedHubController.signIn();
     await Promise.all([first, replacement]);
     expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
+  });
+
+  it("loads one bounded external-provider policy for concurrent signed-out surfaces", async () => {
+    const configuration = {
+      version: 1,
+      providers: [{ provider: "github", login: true, signup: true, link: true }],
+    } as const;
+    const read = vi
+      .spyOn(hostedHubApi, "getExternalIdentityConfiguration")
+      .mockResolvedValue(configuration);
+
+    await Promise.all([
+      hostedHubController.refreshExternalIdentityConfiguration(),
+      hostedHubController.refreshExternalIdentityConfiguration(),
+    ]);
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(hostedAccountStore.getState()).toMatchObject({
+      externalIdentityConfiguration: configuration,
+      externalIdentityConfigurationStatus: "ready",
+    });
+  });
+
+  it("signs in through the shared external-provider action without publishing provider secrets", async () => {
+    vi.spyOn(hostedHubApi, "signInWithExternalProvider").mockResolvedValue(sessionResponse);
+    vi.spyOn(hostedHubApi, "listNodes").mockResolvedValue([]);
+
+    await hostedHubController.signInWithExternalProvider("github");
+
+    expect(hostedHubApi.signInWithExternalProvider).toHaveBeenCalledWith(
+      "github",
+      expect.any(AbortSignal),
+    );
+    expect(hostedHubStore.getState().accountStatus).toBe("authenticated");
+    expect(JSON.stringify(hostedHubStore.getState())).not.toContain("github-sensitive-canary");
   });
 });
 
@@ -1339,9 +1380,7 @@ describe("hosted account management state", () => {
 
   it("loads account security once for concurrent callers without inventing an empty posture", async () => {
     await authenticate();
-    let resolveSecurity:
-      | ((value: { passwordConfigured: boolean; totpEnrolled: boolean; email: null }) => void)
-      | null = null;
+    let resolveSecurity: ((value: typeof emptySecurity) => void) | null = null;
     const getAccountSecurity = vi.spyOn(hostedHubApi, "getAccountSecurity").mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -1372,6 +1411,7 @@ describe("hosted account management state", () => {
       totpEnrolled: true,
       emailDeliveryConfigured: true,
       email: { address: "ada@example.test", verified: true },
+      externalIdentities: [],
     } as const;
     vi.spyOn(hostedHubApi, "getAccountSecurity").mockResolvedValueOnce(configured);
     await hostedHubController.refreshAccountSecurity();
@@ -1385,6 +1425,56 @@ describe("hosted account management state", () => {
     expect(hostedAccountStore.getState()).toMatchObject({
       security: configured,
       securityStatus: "stale",
+    });
+  });
+
+  it("connects and disconnects GitHub through the account mutex and refreshes its summary", async () => {
+    await authenticate();
+    const externalIdentity = {
+      provider: "github",
+      login: "octocat",
+      displayName: "The Octocat",
+      connectedAt: 10,
+      lastUsedAt: null,
+    } as const;
+    vi.spyOn(hostedHubApi, "connectExternalIdentity").mockResolvedValue(externalIdentity);
+    vi.spyOn(hostedHubApi, "disconnectExternalIdentity").mockResolvedValue({
+      status: "disconnected",
+      signedOut: false,
+    });
+    vi.spyOn(hostedHubApi, "getAccountSecurity")
+      .mockResolvedValueOnce({ ...emptySecurity, externalIdentities: [externalIdentity] })
+      .mockResolvedValueOnce(emptySecurity);
+
+    await expect(
+      hostedHubController.connectExternalIdentity("github", { totpCode: "123456" }),
+    ).resolves.toEqual({ status: "committed" });
+    expect(hostedHubApi.connectExternalIdentity).toHaveBeenCalledWith(
+      "github",
+      { totpCode: "123456" },
+      expect.any(AbortSignal),
+    );
+    expect(hostedAccountStore.getState().security?.externalIdentities).toEqual([externalIdentity]);
+
+    await expect(hostedHubController.disconnectExternalIdentity("github")).resolves.toEqual({
+      status: "committed",
+    });
+    expect(hostedAccountStore.getState().security?.externalIdentities).toEqual([]);
+  });
+
+  it("keeps the existing step-up vocabulary for an external-identity connection", async () => {
+    await authenticate();
+    vi.spyOn(hostedHubApi, "connectExternalIdentity").mockRejectedValue(
+      new HostedHubApiError(STEP_UP_REQUIRED_CODE, 403, undefined, "connect-external-identity"),
+    );
+
+    await expect(hostedHubController.connectExternalIdentity("github")).resolves.toMatchObject({
+      status: "refused",
+      errorCode: STEP_UP_REQUIRED_CODE,
+    });
+    expect(hostedAccountStore.getState()).toMatchObject({
+      actionStatus: "idle",
+      errorCode: STEP_UP_REQUIRED_CODE,
     });
   });
 

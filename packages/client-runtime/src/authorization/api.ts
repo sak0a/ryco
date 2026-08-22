@@ -1,5 +1,6 @@
 import { EnvironmentId, RelayNodeId } from "@ryco/contracts";
 import {
+  NATIVE_HANDOFF_CODE_LIFETIME_MS,
   NATIVE_HANDOFF_APPROVE_PATH_SUFFIX,
   NATIVE_HANDOFF_CANCEL_PATH_SUFFIX,
   NATIVE_HANDOFF_PRESENTATION_PATH_PREFIX,
@@ -7,6 +8,8 @@ import {
   NATIVE_HANDOFF_START_PATH,
   NativeHandoffApproveResponse,
   NativeHandoffCancelResponse,
+  NativeHandoffConnectRedeemRequest,
+  NativeHandoffConnectRedeemResponse,
   NativeHandoffId,
   NativeHandoffPresentation,
   NativeHandoffRedeemRequest,
@@ -15,6 +18,8 @@ import {
   NativeHandoffStartResponse,
   type NativeHandoffApproveResponse as NativeHandoffApproveResponseType,
   type NativeHandoffCancelResponse as NativeHandoffCancelResponseType,
+  type NativeHandoffConnectRedeemRequest as NativeHandoffConnectRedeemRequestType,
+  type NativeHandoffConnectRedeemResponse as NativeHandoffConnectRedeemResponseType,
   type NativeHandoffPresentation as NativeHandoffPresentationType,
   type NativeHandoffRedeemRequest as NativeHandoffRedeemRequestType,
   type NativeHandoffRedeemResponse as NativeHandoffRedeemResponseType,
@@ -48,7 +53,7 @@ import {
   validatePasskeyAuthenticationOptions,
   validatePasskeyRegistrationOptions,
 } from "../relay/webauthn.ts";
-import { runNativeHandoff } from "./nativeHandoff.ts";
+import { runNativeHandoff, runTypedNativeHandoff } from "./nativeHandoff.ts";
 
 const JSON_HEADERS = { accept: "application/json", "content-type": "application/json" } as const;
 
@@ -114,13 +119,6 @@ const MAX_AUTH_PASSWORD_LENGTH = 256;
 const MAX_AUTH_TOTP_LENGTH = 16;
 const MAX_AUTH_RECOVERY_CODE_LENGTH = 128;
 const AUTH_EMAIL_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const ACCOUNT_SECURITY_KEYS = new Set([
-  "passwordConfigured",
-  "totpEnrolled",
-  "emailDeliveryConfigured",
-  "email",
-]);
-const ACCOUNT_SECURITY_EMAIL_KEYS = new Set(["address", "verified"]);
 
 /**
  * The provisioning URI is an `otpauth://` key URI (RFC-style, what authenticator
@@ -181,7 +179,9 @@ export type HostedAccountIntent =
   | "request-email-verification"
   | "revoke-passkey"
   | "add-passkey"
-  | "regenerate-recovery-codes";
+  | "regenerate-recovery-codes"
+  | "connect-external-identity"
+  | "disconnect-external-identity";
 
 /**
  * The operations where a `403` is *most likely* the fallback-session step-up
@@ -202,6 +202,8 @@ const STEP_UP_INTENTS: ReadonlySet<HostedAccountIntent> = new Set([
   "request-email-verification",
   "add-passkey",
   "regenerate-recovery-codes",
+  "connect-external-identity",
+  "disconnect-external-identity",
 ]);
 
 /** The operations where a `403` is most likely "this needs a passkey session". */
@@ -335,12 +337,20 @@ function intentMessage(code: string, intent: HostedAccountIntent): string | null
         return "This setup is no longer in progress. Start again.";
       case "request-email-verification":
         return "That email address is already in use.";
+      case "disconnect-external-identity":
+        return "GitHub is the only sign-in method on this account. Add another before disconnecting it.";
       default:
         return null;
     }
   }
   if (code === "authentication_failed" && intent === "confirm-totp-enrollment") {
     // The generic text names a passkey; this route only ever rejects a code.
+    return "That code is not correct. Check your authenticator app and try again.";
+  }
+  if (
+    code === "authentication_failed" &&
+    (intent === "connect-external-identity" || intent === "disconnect-external-identity")
+  ) {
     return "That code is not correct. Check your authenticator app and try again.";
   }
   if (code === "not_found" && intent === "revoke-passkey") {
@@ -359,6 +369,28 @@ function messageForCode(code: string, intent?: HostedAccountIntent): string {
       return "Sign in with a passkey on this device to change two-factor settings.";
     case "invalid_credential_id":
       return "That passkey could not be identified.";
+    case "external_provider_unavailable":
+      return "GitHub sign-in is temporarily unavailable.";
+    case "external_authorization_cancelled":
+      return "GitHub authorization was cancelled.";
+    case "external_authorization_expired":
+      return "GitHub authorization expired. Try again.";
+    case "external_authorization_rejected":
+      return "GitHub could not authorize this request.";
+    case "external_identity_already_linked":
+      return "That GitHub account is already connected.";
+    case "external_identity_email_conflict":
+      return "Sign in another way, then connect GitHub from account settings.";
+    case "external_identity_verified_email_required":
+      return "GitHub must have a verified primary email to create an account.";
+    case "signup_disabled":
+      return "New account signup is currently closed.";
+    case "username_unavailable":
+      return "That username is unavailable.";
+    case "last_primary_credential":
+      return "Add another sign-in method before disconnecting GitHub.";
+    case "native_authorization_unavailable":
+      return "Secure browser authorization is unavailable on this device.";
     case "timeout":
       return "The request took too long. Check your connection and try again.";
     case "authentication_failed":
@@ -523,49 +555,13 @@ function passkeyValue(value: unknown): HostedHubPasskey | null {
  * credential metadata can never reach a surface by accident.
  */
 function accountSecurityValue(value: unknown): HostedAccountSecurity | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record);
-  if (
-    keys.length !== ACCOUNT_SECURITY_KEYS.size ||
-    keys.some((key) => !ACCOUNT_SECURITY_KEYS.has(key))
-  ) {
+  try {
+    return Schema.decodeUnknownSync(
+      HostedIdentity.HostedAccountSecurityResponse as unknown as Schema.Decoder<HostedAccountSecurity>,
+    )(value, { onExcessProperty: "error" });
+  } catch {
     return null;
   }
-  if (
-    typeof record.passwordConfigured !== "boolean" ||
-    typeof record.totpEnrolled !== "boolean" ||
-    typeof record.emailDeliveryConfigured !== "boolean"
-  ) {
-    return null;
-  }
-  if (record.email === null) {
-    return {
-      passwordConfigured: record.passwordConfigured,
-      totpEnrolled: record.totpEnrolled,
-      emailDeliveryConfigured: record.emailDeliveryConfigured,
-      email: null,
-    };
-  }
-  if (typeof record.email !== "object" || Array.isArray(record.email)) return null;
-  const email = record.email as Record<string, unknown>;
-  const emailKeys = Object.keys(email);
-  if (
-    emailKeys.length !== ACCOUNT_SECURITY_EMAIL_KEYS.size ||
-    emailKeys.some((key) => !ACCOUNT_SECURITY_EMAIL_KEYS.has(key)) ||
-    typeof email.address !== "string" ||
-    email.address.length === 0 ||
-    email.address.length > MAX_AUTH_EMAIL_LENGTH ||
-    typeof email.verified !== "boolean"
-  ) {
-    return null;
-  }
-  return {
-    passwordConfigured: record.passwordConfigured,
-    totpEnrolled: record.totpEnrolled,
-    emailDeliveryConfigured: record.emailDeliveryConfigured,
-    email: { address: email.address, verified: email.verified },
-  };
 }
 
 /**
@@ -694,6 +690,12 @@ export interface HostedHubApiDependencies {
   readonly nativeAuthorization?: NativeAuthorizationService;
 }
 
+interface PendingNativeExternalIdentityConnection {
+  readonly provider: HostedIdentity.ExternalIdentityProvider;
+  readonly request: NativeHandoffConnectRedeemRequestType;
+  readonly expiresAt: number;
+}
+
 export class HostedHubApi {
   readonly #endpoint: EndpointService;
   readonly #httpClient: HttpClientService;
@@ -701,6 +703,7 @@ export class HostedHubApi {
   readonly #sessionCredentials: SessionCredentialsService;
   readonly #dpopSigner: DpopSignerService | undefined;
   readonly #nativeAuthorization: NativeAuthorizationService | undefined;
+  #pendingNativeExternalIdentityConnection: PendingNativeExternalIdentityConnection | null = null;
 
   constructor(dependencies: HostedHubApiDependencies) {
     this.#endpoint = dependencies.endpoint;
@@ -744,6 +747,7 @@ export class HostedHubApi {
   }
 
   clearSessionMaterial(): void {
+    this.#pendingNativeExternalIdentityConnection = null;
     if (this.#isBearer) this.#writeBearerToken(null);
     else this.#sessionCredentials.writeCsrfToken(null);
   }
@@ -768,6 +772,77 @@ export class HostedHubApi {
       await this.#request(HostedIdentity.PUBLIC_SIGNUP_CONFIG_PATH, signal ? { signal } : {}),
       "invalid_response",
     );
+  }
+
+  async getExternalIdentityConfiguration(
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.ExternalIdentityConfigResponse> {
+    return decodeContract(
+      HostedIdentity.ExternalIdentityConfigResponse,
+      await this.#request(HostedIdentity.EXTERNAL_IDENTITY_CONFIG_PATH, {
+        ...(this.#isBearer ? { dpop: "mint" as const } : {}),
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async startExternalIdentityAuthorization(
+    request: HostedIdentity.ExternalIdentityAuthorizationStartRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.ExternalIdentityAuthorizationStartResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.ExternalIdentityAuthorizationStartRequest,
+      request,
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.ExternalIdentityAuthorizationStartResponse,
+      await this.#request(HostedIdentity.EXTERNAL_IDENTITY_START_PATH, {
+        method: "POST",
+        body,
+        ...(body.intent === "link"
+          ? { csrf: true, intent: "connect-external-identity" as const }
+          : {}),
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async getPendingExternalIdentity(
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.ExternalIdentityPendingResponse> {
+    this.#requireCookieTransport();
+    return decodeContract(
+      HostedIdentity.ExternalIdentityPendingResponse,
+      await this.#request(HostedIdentity.EXTERNAL_IDENTITY_PENDING_PATH, signal ? { signal } : {}),
+      "invalid_response",
+    );
+  }
+
+  async finishExternalIdentitySignup(
+    request: HostedIdentity.ExternalIdentitySignupFinishRequest,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.ExternalIdentitySignupFinishResponse> {
+    this.#requireCookieTransport();
+    const body = decodeContract(
+      HostedIdentity.ExternalIdentitySignupFinishRequest,
+      request,
+      "invalid_request",
+    );
+    const result = decodeContract(
+      HostedIdentity.ExternalIdentitySignupFinishResponse,
+      await this.#request(HostedIdentity.EXTERNAL_IDENTITY_SIGNUP_FINISH_PATH, {
+        method: "POST",
+        body,
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+    this.#sessionCredentials.writeCsrfToken(result.identity.csrfToken);
+    return result;
   }
 
   async restoreSession(signal?: AbortSignal): Promise<HostedHubSessionResponse> {
@@ -815,6 +890,106 @@ export class HostedHubApi {
         ...(signal ? { signal } : {}),
       }),
     );
+  }
+
+  async signInWithExternalProvider(
+    provider: HostedIdentity.ExternalIdentityProvider,
+    signal?: AbortSignal,
+  ): Promise<HostedHubSessionResponse> {
+    this.#requireBearerTransport();
+    const boundedProvider = decodeContract(
+      HostedIdentity.ExternalIdentityProvider,
+      provider,
+      "invalid_request",
+    );
+    const platform = this.#nativeAuthorization;
+    if (!platform) throw new HostedHubApiError("native_authorization_unavailable", 400);
+    const redeemed = await runTypedNativeHandoff({
+      origin: this.#endpoint.origin(),
+      platform,
+      purpose: { kind: "sign_in", providerHint: boundedProvider },
+      redeemRequestSchema: NativeHandoffRedeemRequest,
+      redeemResponseSchema: NativeHandoffRedeemResponse,
+      buildRedeemRequest: (base) => base,
+      ...(signal ? { signal } : {}),
+      start: (request, handoffSignal) =>
+        this.#startNativeHandoff(request, handoffSignal) as Promise<unknown>,
+      redeem: (request, handoffSignal) =>
+        this.#redeemNativeHandoff(request, handoffSignal) as Promise<unknown>,
+    });
+    const response = this.#accountAndSession(redeemed as unknown as Record<string, unknown>);
+    this.#writeBearerToken(redeemed.token);
+    return response;
+  }
+
+  async connectExternalIdentity(
+    provider: HostedIdentity.ExternalIdentityProvider,
+    input?: HostedAccountStepUp,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.ExternalIdentitySummary> {
+    this.#requireBearerTransport();
+    const boundedProvider = decodeContract(
+      HostedIdentity.ExternalIdentityProvider,
+      provider,
+      "invalid_request",
+    );
+    const platform = this.#nativeAuthorization;
+    if (!platform) throw new HostedHubApiError("native_authorization_unavailable", 400);
+
+    const pending = this.#pendingNativeExternalIdentityConnection;
+    if (pending && pending.expiresAt < Date.now()) {
+      this.#pendingNativeExternalIdentityConnection = null;
+    } else if (pending?.provider === boundedProvider) {
+      const request = decodeContract(
+        NativeHandoffConnectRedeemRequest,
+        { ...pending.request, ...stepUpBody(input) },
+        "invalid_request",
+      );
+      try {
+        const result = await this.#redeemNativeExternalIdentity(request, signal);
+        this.#pendingNativeExternalIdentityConnection = null;
+        return result.externalIdentity;
+      } catch (error) {
+        if (!this.#retainsPendingExternalIdentityConnection(error)) {
+          this.#pendingNativeExternalIdentityConnection = null;
+        }
+        throw error;
+      }
+    }
+
+    let capturedRequest: NativeHandoffConnectRedeemRequestType | null = null;
+    try {
+      const result = await runTypedNativeHandoff({
+        origin: this.#endpoint.origin(),
+        coordinatorKey: `${this.#endpoint.origin()}:connect:${boundedProvider}`,
+        platform,
+        purpose: { kind: "connect_external_identity", provider: boundedProvider },
+        redeemRequestSchema: NativeHandoffConnectRedeemRequest,
+        redeemResponseSchema: NativeHandoffConnectRedeemResponse,
+        buildRedeemRequest: (base) => ({
+          ...base,
+          purpose: { kind: "connect_external_identity" as const, provider: boundedProvider },
+          ...stepUpBody(input),
+        }),
+        ...(signal ? { signal } : {}),
+        start: (request, handoffSignal) =>
+          this.#startNativeHandoff(request, handoffSignal) as Promise<unknown>,
+        redeem: (request, handoffSignal) => {
+          capturedRequest = request;
+          return this.#redeemNativeExternalIdentity(request, handoffSignal) as Promise<unknown>;
+        },
+      });
+      return result.externalIdentity;
+    } catch (error) {
+      if (capturedRequest && this.#retainsPendingExternalIdentityConnection(error)) {
+        this.#pendingNativeExternalIdentityConnection = {
+          provider: boundedProvider,
+          request: capturedRequest,
+          expiresAt: Date.now() + NATIVE_HANDOFF_CODE_LIFETIME_MS,
+        };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1415,12 +1590,14 @@ export class HostedHubApi {
   ): Promise<NativeHandoffStartResponseType> {
     if (!this.#isBearer) throw new HostedHubApiError("browser_only_transport", 400);
     const body = decodeContract(NativeHandoffStartRequest, request, "invalid_request");
+    const isExternalIdentityConnection = body.purpose?.kind === "connect_external_identity";
     return decodeContract(
       NativeHandoffStartResponse,
       await this.#request(NATIVE_HANDOFF_START_PATH, {
         method: "POST",
         body,
-        dpop: "mint",
+        dpop: isExternalIdentityConnection ? "session" : "mint",
+        ...(isExternalIdentityConnection ? { intent: "connect-external-identity" as const } : {}),
         ...(signal ? { signal } : {}),
       }),
       "invalid_response",
@@ -1452,6 +1629,34 @@ export class HostedHubApi {
         ...(signal ? { signal } : {}),
       }),
       "invalid_response",
+    );
+  }
+
+  async #redeemNativeExternalIdentity(
+    request: NativeHandoffConnectRedeemRequestType,
+    signal?: AbortSignal,
+  ): Promise<NativeHandoffConnectRedeemResponseType> {
+    this.#requireBearerTransport();
+    const body = decodeContract(NativeHandoffConnectRedeemRequest, request, "invalid_request");
+    return decodeContract(
+      NativeHandoffConnectRedeemResponse,
+      await this.#request(NATIVE_HANDOFF_REDEEM_PATH, {
+        method: "POST",
+        body,
+        dpop: "session",
+        intent: "connect-external-identity",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  #retainsPendingExternalIdentityConnection(error: unknown): boolean {
+    return (
+      error instanceof HostedHubApiError &&
+      (error.code === STEP_UP_REQUIRED_CODE ||
+        error.code === "authentication_failed" ||
+        error.code === "forbidden")
     );
   }
 
@@ -1618,6 +1823,57 @@ export class HostedHubApi {
       await this.#request("/api/account/security", signal ? { signal } : {}),
     );
     if (!result) throw new HostedHubApiError("invalid_response", 502);
+    return result;
+  }
+
+  async finishBrowserExternalIdentityConnection(
+    provider: HostedIdentity.ExternalIdentityProvider,
+    input?: HostedAccountStepUp,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.BrowserExternalIdentityConnectResponse> {
+    this.#requireCookieTransport();
+    decodeContract(HostedIdentity.ExternalIdentityProvider, provider, "invalid_request");
+    const body = decodeContract(
+      HostedIdentity.BrowserExternalIdentityConnectRequest,
+      stepUpBody(input),
+      "invalid_request",
+    );
+    return decodeContract(
+      HostedIdentity.BrowserExternalIdentityConnectResponse,
+      await this.#request(HostedIdentity.GITHUB_EXTERNAL_IDENTITY_CONNECT_PATH, {
+        method: "POST",
+        body,
+        csrf: true,
+        intent: "connect-external-identity",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+  }
+
+  async disconnectExternalIdentity(
+    provider: HostedIdentity.ExternalIdentityProvider,
+    input?: HostedAccountStepUp,
+    signal?: AbortSignal,
+  ): Promise<HostedIdentity.ExternalIdentityDisconnectResponse> {
+    decodeContract(HostedIdentity.ExternalIdentityProvider, provider, "invalid_request");
+    const body = decodeContract(
+      HostedIdentity.ExternalIdentityDisconnectRequest,
+      stepUpBody(input),
+      "invalid_request",
+    );
+    const result = decodeContract(
+      HostedIdentity.ExternalIdentityDisconnectResponse,
+      await this.#request(HostedIdentity.GITHUB_EXTERNAL_IDENTITY_DISCONNECT_PATH, {
+        method: "POST",
+        body,
+        csrf: true,
+        intent: "disconnect-external-identity",
+        ...(signal ? { signal } : {}),
+      }),
+      "invalid_response",
+    );
+    if (result.signedOut) this.clearSessionMaterial();
     return result;
   }
 

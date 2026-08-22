@@ -1,6 +1,8 @@
 import {
   NATIVE_HANDOFF_CALLBACK_URIS,
   NATIVE_HANDOFF_TRANSACTION_LIFETIME_MS,
+  NativeHandoffConnectRedeemRequest,
+  NativeHandoffConnectRedeemResponse,
   type NativeHandoffRedeemResponse,
   type NativeHandoffStartRequest,
 } from "@ryco/contracts/native-handoff";
@@ -11,6 +13,7 @@ import {
   NativeHandoffClientError,
   createNativeHandoffAttempt,
   runNativeHandoff,
+  runTypedNativeHandoff,
 } from "./nativeHandoff.ts";
 
 const OPAQUE_A = "A".repeat(43);
@@ -133,6 +136,59 @@ describe("runNativeHandoff", () => {
       expect.any(AbortSignal),
     );
     expect(result).toEqual(redeemed);
+  });
+
+  it("runs a typed GitHub connect without allowing its result to become a session", async () => {
+    const service = platform();
+    const connect = {
+      status: "connected",
+      purpose: { kind: "connect_external_identity", provider: "github" },
+      externalIdentity: {
+        provider: "github",
+        login: "octocat",
+        displayName: "The Octocat",
+        connectedAt: NOW,
+        lastUsedAt: null,
+      },
+    } as const;
+    const redeem = vi.fn(async () => connect);
+
+    await expect(
+      runTypedNativeHandoff({
+        origin: ORIGIN,
+        platform: service,
+        now: () => NOW,
+        purpose: { kind: "connect_external_identity", provider: "github" },
+        redeemRequestSchema: NativeHandoffConnectRedeemRequest,
+        redeemResponseSchema: NativeHandoffConnectRedeemResponse,
+        buildRedeemRequest: (base) => ({
+          ...base,
+          purpose: { kind: "connect_external_identity", provider: "github" },
+        }),
+        start: async (request) => {
+          expect(request.purpose).toEqual({
+            kind: "connect_external_identity",
+            provider: "github",
+          });
+          return {
+            handoffId: OPAQUE_A,
+            authorizationUrl: `${ORIGIN}/native/authorize/${OPAQUE_A}`,
+            expiresAt: NOW + 60_000,
+          };
+        },
+        redeem,
+      }),
+    ).resolves.toEqual(connect);
+    expect(redeem).toHaveBeenCalledWith(
+      {
+        handoffId: OPAQUE_A,
+        code: OPAQUE_B,
+        codeVerifier: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        purpose: { kind: "connect_external_identity", provider: "github" },
+      },
+      expect.any(AbortSignal),
+    );
+    expect(JSON.stringify(redeem.mock.calls)).not.toContain("token");
   });
 
   it("fails closed on cross-origin authorization, callback mismatch, expiry, and cancellation", async () => {

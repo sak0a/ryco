@@ -82,6 +82,7 @@ export type HostedPublicAccount = HostedIdentity.HubPublicAccount;
 export type HostedActiveSpace = HostedIdentity.HubActiveSpaceSummary;
 export type HostedBrowserIdentity = HostedIdentity.HubBrowserSessionResponse;
 export type HostedPasswordLoginFactor = HostedIdentity.PasswordLoginFactor;
+export type HostedExternalIdentity = HostedIdentity.ExternalIdentitySummary;
 
 /** Safe-to-publish identity metadata with the CSRF credential removed. */
 export interface HostedPublishedIdentity {
@@ -189,6 +190,7 @@ export interface HostedAccountSecurity {
     readonly address: string;
     readonly verified: boolean;
   } | null;
+  readonly externalIdentities: ReadonlyArray<HostedExternalIdentity>;
 }
 
 /**

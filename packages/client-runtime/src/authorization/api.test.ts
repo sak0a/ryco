@@ -644,6 +644,15 @@ describe("HostedHubApi", () => {
             totpEnrolled: false,
             emailDeliveryConfigured: true,
             email: { address: "ada@example.test", verified: true },
+            externalIdentities: [
+              {
+                provider: "github",
+                login: "octocat",
+                displayName: "The Octocat",
+                connectedAt: 10,
+                lastUsedAt: null,
+              },
+            ],
           });
     });
     const api = createApi();
@@ -654,6 +663,15 @@ describe("HostedHubApi", () => {
       totpEnrolled: false,
       emailDeliveryConfigured: true,
       email: { address: "ada@example.test", verified: true },
+      externalIdentities: [
+        {
+          provider: "github",
+          login: "octocat",
+          displayName: "The Octocat",
+          connectedAt: 10,
+          lastUsedAt: null,
+        },
+      ],
     });
     expect(requests[1]?.input).toBe("/api/account/security");
     expect(requests[1]?.init).toMatchObject({
@@ -1879,6 +1897,7 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
           totpEnrolled: true,
           emailDeliveryConfigured: true,
           email: null,
+          externalIdentities: [],
         });
       }
       return response({
@@ -1906,6 +1925,7 @@ describe("HostedHubApi bearer (native/DPoP) transport", () => {
       totpEnrolled: true,
       emailDeliveryConfigured: true,
       email: null,
+      externalIdentities: [],
     });
     await expect(api.regenerateRecoveryCodes()).resolves.toEqual(["recovery-sensitive-canary"]);
 
@@ -2203,6 +2223,108 @@ describe("HostedHubApi native system-browser handoff", () => {
     expect(result).toMatchObject({ account: session.account, session: session.session });
   });
 
+  it("uses typed GitHub handoffs and retries native link step-up without reopening GitHub", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const { service } = recordingDpopSigner();
+    const credentials = inMemoryBearerCredentials();
+    let randomCall = 0;
+    const authorization: NativeAuthorizationService = {
+      callbackUri: () => "ryco-dev://hosted/complete",
+      deviceLabel: () => "Laurin’s iPhone",
+      randomBytes: vi.fn(async () => {
+        randomCall += 1;
+        return new Uint8Array(32).fill(randomCall % 2 === 1 ? 0 : 4);
+      }),
+      sha256: vi.fn(async () => new Uint8Array(32).fill(8)),
+      openSystemBrowser: vi.fn(async () => ({
+        type: "success",
+        url: `ryco-dev://hosted/complete?code=${code}&state=${state}&handoff_id=${handoffId}`,
+      })),
+    };
+    const externalIdentity = {
+      provider: "github",
+      login: "octocat",
+      displayName: "The Octocat",
+      connectedAt: now,
+      lastUsedAt: null,
+    } as const;
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      if (requests.length === 1 || requests.length === 3) {
+        return response({
+          handoffId,
+          authorizationUrl: `https://hub.example.test/native/authorize/${handoffId}`,
+          expiresAt: now + 60_000,
+        });
+      }
+      if (requests.length === 2) {
+        return response({
+          account: session.account,
+          session: {
+            ...session.session,
+            familyId: "sfam_aaaaaaaaaaaaaaaaaaaaaa",
+            clientLabel: "Laurin’s iPhone",
+            kind: "native",
+            replacedBySessionId: null,
+          },
+          token,
+        });
+      }
+      if (requests.length === 4) return response({ error: "step_up_required" }, 403);
+      return response({
+        status: "connected",
+        purpose: { kind: "connect_external_identity", provider: "github" },
+        externalIdentity,
+      });
+    });
+    const api = new HostedHubApi({
+      endpoint: fakeEndpoint,
+      httpClient: fakeHttpClient,
+      sessionCredentials: credentials,
+      dpopSigner: service,
+      nativeAuthorization: authorization,
+      passkeyCeremony: { authenticate: vi.fn(), register: vi.fn() },
+    });
+
+    await expect(api.signInWithExternalProvider("github")).resolves.toMatchObject({
+      account: session.account,
+    });
+    await expect(api.connectExternalIdentity("github")).rejects.toMatchObject({
+      code: "step_up_required",
+    });
+    expect(authorization.openSystemBrowser).toHaveBeenCalledTimes(2);
+    await expect(api.connectExternalIdentity("github", { totpCode: "123456" })).resolves.toEqual(
+      externalIdentity,
+    );
+    expect(authorization.openSystemBrowser).toHaveBeenCalledTimes(2);
+
+    expect(requests.map((request) => new URL(request.input).pathname)).toEqual([
+      "/api/auth/native/handoff/start",
+      "/api/auth/native/handoff/redeem",
+      "/api/auth/native/handoff/start",
+      "/api/auth/native/handoff/redeem",
+      "/api/auth/native/handoff/redeem",
+    ]);
+    expect(JSON.parse(String(requests[0]?.init?.body)).purpose).toEqual({
+      kind: "sign_in",
+      providerHint: "github",
+    });
+    expect(JSON.parse(String(requests[2]?.init?.body)).purpose).toEqual({
+      kind: "connect_external_identity",
+      provider: "github",
+    });
+    expect(JSON.parse(String(requests[4]?.init?.body))).toMatchObject({
+      purpose: { kind: "connect_external_identity", provider: "github" },
+      totpCode: "123456",
+    });
+    for (const index of [2, 3, 4]) {
+      const headers = headersOf(requests[index]?.init);
+      expect(headers.get("Authorization")).toBe(`DPoP ${token}`);
+      expect(headers.get("DPoP")).toMatch(/:ath$/);
+    }
+  });
+
   it("does not replace existing credentials when the full redeem response is malformed", async () => {
     vi.spyOn(Date, "now").mockReturnValue(now);
     const { service } = recordingDpopSigner();
@@ -2426,6 +2548,124 @@ describe("HostedHubApi public hosted identity contracts", () => {
       expect.objectContaining({ credentials: "same-origin", cache: "no-store" }),
     );
     expect(api.hasSessionMaterial).toBe(false);
+  });
+
+  it("runs strict browser GitHub policy, signup, link, and disconnect requests", async () => {
+    const externalIdentity = {
+      provider: "github",
+      login: "octocat",
+      displayName: "The Octocat",
+      connectedAt: issuedAt,
+      lastUsedAt: null,
+    } as const;
+    const requests: Array<{ input: string; init?: RequestInit }> = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input: String(input), ...(init ? { init } : {}) });
+      switch (requests.length) {
+        case 1:
+          return response({
+            version: 1,
+            providers: [{ provider: "github", login: true, signup: true, link: true }],
+          });
+        case 2:
+        case 5:
+          return response({
+            authorizationUrl:
+              "https://github.com/login/oauth/authorize?client_id=client&state=state&code_challenge=challenge&code_challenge_method=S256&prompt=select_account",
+            expiresAt,
+          });
+        case 3:
+          return response({
+            status: "signup",
+            provider: "github",
+            suggestedUsername: "octocat",
+            displayName: "The Octocat",
+            expiresAt,
+          });
+        case 4:
+          return response({
+            status: "complete",
+            identity,
+            recoveryCodes: ["recovery-sensitive-canary"],
+          });
+        case 6:
+          return response({ status: "connected", externalIdentity });
+        default:
+          return response({ status: "disconnected", signedOut: false });
+      }
+    });
+    const api = createApi();
+
+    await expect(api.getExternalIdentityConfiguration()).resolves.toMatchObject({ version: 1 });
+    await api.startExternalIdentityAuthorization({
+      provider: "github",
+      intent: "authenticate",
+      returnTo: "/account",
+    });
+    await expect(api.getPendingExternalIdentity()).resolves.toMatchObject({ status: "signup" });
+    await expect(
+      api.finishExternalIdentitySignup({
+        provider: "github",
+        username: "octocat",
+        antiBotAssertion: "anti-bot-sensitive-canary",
+        idempotencyKey: opaque,
+      } as never),
+    ).resolves.toMatchObject({ status: "complete" });
+    await api.startExternalIdentityAuthorization({
+      provider: "github",
+      intent: "link",
+      returnTo: "/account",
+    });
+    await expect(api.finishBrowserExternalIdentityConnection("github")).resolves.toEqual({
+      status: "connected",
+      externalIdentity,
+    });
+    await expect(api.disconnectExternalIdentity("github")).resolves.toEqual({
+      status: "disconnected",
+      signedOut: false,
+    });
+
+    expect(requests.map((request) => request.input)).toEqual([
+      "/api/auth/external/config",
+      "/api/auth/external/start",
+      "/api/auth/external/pending",
+      "/api/auth/external/signup/finish",
+      "/api/auth/external/start",
+      "/api/account/external-identities/github/connect",
+      "/api/account/external-identities/github/disconnect",
+    ]);
+    expect(headersOf(requests[1]?.init).get("X-Ryco-CSRF")).toBeNull();
+    for (const index of [4, 5, 6]) {
+      expect(headersOf(requests[index]?.init).get("X-Ryco-CSRF")).toBe(
+        "public-csrf-sensitive-canary",
+      );
+    }
+  });
+
+  it("rejects widened external policy and provider navigation responses", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        version: 1,
+        providers: [
+          { provider: "github", login: true, signup: true, link: true, scopes: ["repo"] },
+        ],
+      }),
+    );
+    await expect(api.getExternalIdentityConfiguration()).rejects.toMatchObject({
+      code: "invalid_response",
+    });
+
+    globalThis.fetch = vi.fn(async () =>
+      response({ authorizationUrl: "https://evil.test/oauth", expiresAt }),
+    );
+    await expect(
+      api.startExternalIdentityAuthorization({
+        provider: "github",
+        intent: "authenticate",
+        returnTo: "/account",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_response" });
   });
 
   it("strictly decodes signup legs and adopts session material only after completion", async () => {

@@ -8,6 +8,7 @@ import {
   NativeHandoffStartRequest,
   NativeHandoffStartResponse,
   type NativeHandoffCallbackUri as NativeHandoffCallbackUriType,
+  type NativeHandoffPurpose as NativeHandoffPurposeType,
   type NativeHandoffRedeemRequest as NativeHandoffRedeemRequestType,
   type NativeHandoffRedeemResponse as NativeHandoffRedeemResponseType,
   type NativeHandoffStartRequest as NativeHandoffStartRequestType,
@@ -72,6 +73,25 @@ export interface RunNativeHandoffInput extends NativeHandoffTransport {
    * Attempts with the same key supersede one another. HostedHubApi passes its
    * Hub origin; tests may provide an isolated key.
    */
+  readonly coordinatorKey?: string;
+}
+
+export interface RunTypedNativeHandoffInput<
+  RedeemRequestSchema extends Schema.Top,
+  RedeemResponseSchema extends Schema.Top,
+> {
+  readonly origin: string;
+  readonly platform: NativeAuthorizationService;
+  readonly purpose?: NativeHandoffPurposeType;
+  readonly redeemRequestSchema: RedeemRequestSchema;
+  readonly redeemResponseSchema: RedeemResponseSchema;
+  readonly buildRedeemRequest: (
+    base: NativeHandoffRedeemRequestType,
+  ) => RedeemRequestSchema["Type"];
+  readonly start: (request: NativeHandoffStartRequestType, signal: AbortSignal) => Promise<unknown>;
+  readonly redeem: (request: RedeemRequestSchema["Type"], signal: AbortSignal) => Promise<unknown>;
+  readonly now?: () => number;
+  readonly signal?: AbortSignal;
   readonly coordinatorKey?: string;
 }
 
@@ -261,9 +281,12 @@ export async function createNativeHandoffAttempt(
  * browser attempt is fenced before redemption, and the full redemption payload
  * is decoded before it can reach a credential writer.
  */
-export async function runNativeHandoff(
-  input: RunNativeHandoffInput,
-): Promise<NativeHandoffRedeemResponseType> {
+export async function runTypedNativeHandoff<
+  RedeemRequestSchema extends Schema.Top,
+  RedeemResponseSchema extends Schema.Top,
+>(
+  input: RunTypedNativeHandoffInput<RedeemRequestSchema, RedeemResponseSchema>,
+): Promise<RedeemResponseSchema["Type"]> {
   const key = input.coordinatorKey ?? input.origin;
   const { active, isCurrent, cleanup } = beginAttempt(key, input.signal);
   const now = input.now ?? Date.now;
@@ -277,6 +300,7 @@ export async function runNativeHandoff(
       codeChallengeMethod: "S256",
       state: attempt.state,
       deviceLabel: attempt.deviceLabel,
+      ...(input.purpose ? { purpose: input.purpose } : {}),
     });
     let start: typeof NativeHandoffStartResponse.Type;
     try {
@@ -318,16 +342,21 @@ export async function runNativeHandoff(
       handoffId: start.handoffId,
     });
     assertCurrent(active, isCurrent);
-    let redeemed: NativeHandoffRedeemResponseType;
+    let redeemed: RedeemResponseSchema["Type"];
     try {
       redeemed = decodeStrict(
-        NativeHandoffRedeemResponse,
+        input.redeemResponseSchema,
         await input.redeem(
-          decodeStrict(NativeHandoffRedeemRequest, {
-            handoffId: start.handoffId,
-            code,
-            codeVerifier: attempt.codeVerifier,
-          }),
+          decodeStrict(
+            input.redeemRequestSchema,
+            input.buildRedeemRequest(
+              decodeStrict(NativeHandoffRedeemRequest, {
+                handoffId: start.handoffId,
+                code,
+                codeVerifier: attempt.codeVerifier,
+              }),
+            ),
+          ),
           active.controller.signal,
         ),
       );
@@ -340,4 +369,15 @@ export async function runNativeHandoff(
   } finally {
     cleanup();
   }
+}
+
+export async function runNativeHandoff(
+  input: RunNativeHandoffInput,
+): Promise<NativeHandoffRedeemResponseType> {
+  return runTypedNativeHandoff({
+    ...input,
+    redeemRequestSchema: NativeHandoffRedeemRequest,
+    redeemResponseSchema: NativeHandoffRedeemResponse,
+    buildRedeemRequest: (base) => base,
+  });
 }
