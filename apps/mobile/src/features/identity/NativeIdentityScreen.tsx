@@ -912,11 +912,11 @@ export function NativeIdentityScreen() {
                     })
                   }
                 />
-                <View className="mt-0.5">
+                <View className="mt-0.5 items-center">
                   <Text className="text-[11px] font-ryco-medium text-foreground-muted">
                     Other options
                   </Text>
-                  <View className="flex-row flex-wrap items-center gap-x-5">
+                  <View className="flex-row flex-wrap items-center justify-center gap-x-5">
                     {nativePolicy?.login.methods.includes("recovery_code") ? (
                       <EntryOption
                         label="Recovery code"
