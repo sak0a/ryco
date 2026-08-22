@@ -8,6 +8,7 @@ interface TurnstileApi {
     container: HTMLElement,
     options: {
       readonly sitekey: string;
+      readonly action: "external_signup" | "public_signup";
       readonly theme: "auto" | "dark" | "light";
       readonly callback: (token: string) => void;
       readonly "expired-callback": () => void;
@@ -55,9 +56,11 @@ function loadTurnstile(): Promise<TurnstileApi> {
 
 export function TurnstileWidget({
   siteKey,
+  action,
   onToken,
 }: {
   readonly siteKey: string;
+  readonly action: "external_signup" | "public_signup";
   readonly onToken: (token: string | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -73,6 +76,7 @@ export function TurnstileWidget({
         if (disposed || containerRef.current === null) return;
         const id = api.render(containerRef.current, {
           sitekey: siteKey,
+          action,
           // The app's resolved scheme, not `"auto"`. Turnstile's `auto` follows
           // the OS `prefers-color-scheme`, while Ryco's is chosen in-app and
           // applied as a `dark` class on the root — so a light OS with a dark
@@ -102,7 +106,7 @@ export function TurnstileWidget({
       onToken(null);
       if (widget) widget.api.remove(widget.id);
     };
-  }, [onToken, siteKey]);
+  }, [action, onToken, siteKey]);
 
   return (
     <div className="space-y-2">

@@ -301,7 +301,11 @@ export function PublicSignupFlow({
             />
           </div>
           {config?.antiBot.provider === "turnstile" ? (
-            <TurnstileWidget siteKey={config.antiBot.siteKey} onToken={setAntiBotToken} />
+            <TurnstileWidget
+              siteKey={config.antiBot.siteKey}
+              action="public_signup"
+              onToken={setAntiBotToken}
+            />
           ) : null}
           <FlowError value={error} />
           <FlowActions
@@ -506,7 +510,11 @@ export function ExternalIdentitySignupFlow({
         </p>
       </div>
       {config?.antiBot.provider === "turnstile" ? (
-        <TurnstileWidget siteKey={config.antiBot.siteKey} onToken={setAntiBotToken} />
+        <TurnstileWidget
+          siteKey={config.antiBot.siteKey}
+          action="external_signup"
+          onToken={setAntiBotToken}
+        />
       ) : null}
       <FlowError value={error} />
       <FlowActions

@@ -571,7 +571,7 @@ export function HostedAuthenticationSurface({
   }, []);
 
   useEffect(() => {
-    if (registrationMode !== "public") {
+    if (registrationMode !== "public" && context !== "native-authorization") {
       setExternalPending(undefined);
       return;
     }
@@ -586,7 +586,7 @@ export function HostedAuthenticationSurface({
         if (!operation.signal.aborted) setExternalPending({ status: "none" });
       });
     return () => operation.abort();
-  }, [registrationMode]);
+  }, [context, registrationMode]);
 
   const startGitHubSignIn = async () => {
     if (externalAuthorizationPending) return;
@@ -808,13 +808,25 @@ export function HostedAuthenticationSurface({
   // polite live region must be mounted while a WebAuthn ceremony runs, and
   // invitation and bootstrap drive `accountStatus` to `authenticating` exactly
   // as sign-in does.
-  if (registrationMode === "public") {
-    const externalSignup = externalPending?.status === "signup" ? externalPending : null;
-    const externalFailure = externalPending?.status === "error" ? externalPending : null;
+  const externalSignup = externalPending?.status === "signup" ? externalPending : null;
+  const externalFailure = externalPending?.status === "error" ? externalPending : null;
+  const nativeExternalSignup = context === "native-authorization" && registrationMode !== "public";
+  if (
+    registrationMode === "public" ||
+    (nativeExternalSignup && (externalSignup !== null || externalFailure !== null))
+  ) {
+    const cancelExternalFlow = () => {
+      if (nativeExternalSignup) setExternalPending({ status: "none" });
+      else setRegistrationMode(null);
+    };
     return (
       <HubGateway
         title="Create your account"
-        description="Pick a username and confirm your email. You choose a passkey or a password at the end."
+        description={
+          nativeExternalSignup
+            ? "Choose your Ryco username, then return to approving this device."
+            : "Pick a username and confirm your email. You choose a passkey or a password at the end."
+        }
         trailing={signInTrailing}
         scrollRef={surfaceScrollRef}
         titleRef={headingRef}
@@ -826,7 +838,7 @@ export function HostedAuthenticationSurface({
           <ExternalIdentitySignupFlow
             pendingSignup={externalSignup}
             config={publicSignupConfig?.status === "enabled" ? publicSignupConfig : null}
-            onCancel={() => setRegistrationMode(null)}
+            onCancel={cancelExternalFlow}
           />
         ) : externalFailure ? (
           <div className="space-y-4">
@@ -837,7 +849,7 @@ export function HostedAuthenticationSurface({
                 {externalIdentityPendingErrorMessage(externalFailure.code)}
               </AlertDescription>
             </Alert>
-            <Button variant="outline" onClick={() => setRegistrationMode(null)}>
+            <Button variant="outline" onClick={cancelExternalFlow}>
               Back to sign in
             </Button>
           </div>
