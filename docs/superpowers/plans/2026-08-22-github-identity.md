@@ -41,7 +41,7 @@ guards move together in their own private commit.
 
 ## Invariants
 
-- Use Bun 1.3.14 everywhere.
+- Use Bun 1.4.0 everywhere.
 - In public Ryco, never run `bun test`; use package `bun run ... test` scripts.
 - Run `bun install --frozen-lockfile` before implementation validation in each checkout.
 - Use strict Effect schemas in `packages/contracts`; put no runtime logic there.
@@ -113,8 +113,8 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 run --cwd packages/contracts test -- hostedIdentity nativeHandoff
-    npx -y bun@1.3.14 run --cwd packages/contracts typecheck
+    npx -y bun@1.4.0 run --cwd packages/contracts test -- hostedIdentity nativeHandoff
+    npx -y bun@1.4.0 run --cwd packages/contracts typecheck
 
 Commit: `feat(contracts): define GitHub external identity flows`
 
@@ -152,8 +152,8 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 run --cwd packages/client-runtime test -- authorization
-    npx -y bun@1.3.14 run --cwd packages/client-runtime typecheck
+    npx -y bun@1.4.0 run --cwd packages/client-runtime test -- authorization
+    npx -y bun@1.4.0 run --cwd packages/client-runtime typecheck
 
 Commit: `feat(client-runtime): add external identity authorization`
 
@@ -186,9 +186,9 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 run --cwd apps/web test -- PublicAccountFlows HubAccountPage
-    npx -y bun@1.3.14 run --cwd apps/web typecheck
-    npx -y bun@1.3.14 run build --filter=@ryco/web
+    npx -y bun@1.4.0 run --cwd apps/web test -- PublicAccountFlows HubAccountPage
+    npx -y bun@1.4.0 run --cwd apps/web typecheck
+    npx -y bun@1.4.0 run build --filter=@ryco/web
 
 Commit: `feat(web): add GitHub identity surfaces`
 
@@ -224,10 +224,10 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 run --cwd apps/desktop test -- desktopHostedIdentity nativeAuthorization
-    npx -y bun@1.3.14 run --cwd apps/desktop typecheck
-    npx -y bun@1.3.14 run --cwd apps/mobile test -- hostedAuthModel hostedAccountModel
-    npx -y bun@1.3.14 run --cwd apps/mobile typecheck
+    npx -y bun@1.4.0 run --cwd apps/desktop test -- desktopHostedIdentity nativeAuthorization
+    npx -y bun@1.4.0 run --cwd apps/desktop typecheck
+    npx -y bun@1.4.0 run --cwd apps/mobile test -- hostedAuthModel hostedAccountModel
+    npx -y bun@1.4.0 run --cwd apps/mobile typecheck
 
 Commit: `feat(native): add GitHub identity actions`
 
@@ -282,8 +282,8 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 test --parallel=1 tests/persistence tests/typecheck
-    npx -y bun@1.3.14 run typecheck
+    npx -y bun@1.4.0 test --parallel=1 tests/persistence tests/typecheck
+    npx -y bun@1.4.0 run typecheck
 
 Commit: `feat(identity): persist external identities`
 
@@ -316,8 +316,8 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 test --parallel=1 tests/config tests/auth/externalIdentityCrypto.test.ts tests/auth/githubIdentityProvider.test.ts
-    npx -y bun@1.3.14 run typecheck
+    npx -y bun@1.4.0 test --parallel=1 tests/config tests/auth/externalIdentityCrypto.test.ts tests/auth/githubIdentityProvider.test.ts
+    npx -y bun@1.4.0 run typecheck
 
 Commit: `feat(identity): add bounded GitHub provider`
 
@@ -349,7 +349,7 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 test --parallel=1 tests/auth/githubIdentity.test.ts tests/http/external-identity.integration.test.ts tests/auth/concurrency.integration.test.ts
+    npx -y bun@1.4.0 test --parallel=1 tests/auth/githubIdentity.test.ts tests/http/external-identity.integration.test.ts tests/auth/concurrency.integration.test.ts
 
 Commit: `feat(identity): add GitHub login and signup`
 
@@ -379,7 +379,7 @@ Steps:
 
 Focused validation:
 
-    npx -y bun@1.3.14 test --parallel=1 tests/auth/native-handoff.test.ts tests/http/native-handoff.integration.test.ts tests/auth/fallback-credentials.test.ts tests/http/external-identity.integration.test.ts
+    npx -y bun@1.4.0 test --parallel=1 tests/auth/native-handoff.test.ts tests/http/native-handoff.integration.test.ts tests/auth/fallback-credentials.test.ts tests/http/external-identity.integration.test.ts
 
 Commit: `feat(identity): connect GitHub across native sessions`
 
@@ -387,25 +387,25 @@ Commit: `feat(identity): connect GitHub across native sessions`
 
 ### Public full gate
 
-    npx -y bun@1.3.14 run fmt
-    npx -y bun@1.3.14 run fmt:check
-    npx -y bun@1.3.14 run lint
-    npx -y bun@1.3.14 run typecheck
-    npx -y bun@1.3.14 run test
-    npx -y bun@1.3.14 run build
-    npx -y bun@1.3.14 run build --filter=@ryco/web
-    npx -y bun@1.3.14 run --cwd apps/web test:browser
+    npx -y bun@1.4.0 run fmt
+    npx -y bun@1.4.0 run fmt:check
+    npx -y bun@1.4.0 run lint
+    npx -y bun@1.4.0 run typecheck
+    npx -y bun@1.4.0 run test
+    npx -y bun@1.4.0 run build
+    npx -y bun@1.4.0 run build --filter=@ryco/web
+    npx -y bun@1.4.0 run --cwd apps/web test:browser
 
 Install the pinned Playwright runtime first only when missing.
 
 ### Private Hub full gate
 
-    npx -y bun@1.3.14 run fmt
-    npx -y bun@1.3.14 run fmt:check
-    npx -y bun@1.3.14 run lint
-    npx -y bun@1.3.14 run typecheck
-    npx -y bun@1.3.14 run test
-    npx -y bun@1.3.14 run build
+    npx -y bun@1.4.0 run fmt
+    npx -y bun@1.4.0 run fmt:check
+    npx -y bun@1.4.0 run lint
+    npx -y bun@1.4.0 run typecheck
+    npx -y bun@1.4.0 run test
+    npx -y bun@1.4.0 run build
 
 Run pin guards, migration/backup checks, and the repository's security/leak tests.
 
