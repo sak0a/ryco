@@ -41,10 +41,20 @@ export const NATIVE_IDENTITY_PASSWORD_RESET_FINISH_PATH =
   "/api/auth/native/identity/password-reset/finish" as const;
 export const NATIVE_IDENTITY_ATTEMPT_CANCEL_PATH =
   "/api/auth/native/identity/attempt/cancel" as const;
+export const EXTERNAL_IDENTITY_CONFIG_PATH = "/api/auth/external/config" as const;
+export const EXTERNAL_IDENTITY_START_PATH = "/api/auth/external/start" as const;
+export const EXTERNAL_IDENTITY_PENDING_PATH = "/api/auth/external/pending" as const;
+export const EXTERNAL_IDENTITY_SIGNUP_FINISH_PATH = "/api/auth/external/signup/finish" as const;
+export const GITHUB_EXTERNAL_IDENTITY_CONNECT_PATH =
+  "/api/account/external-identities/github/connect" as const;
+export const GITHUB_EXTERNAL_IDENTITY_DISCONNECT_PATH =
+  "/api/account/external-identities/github/disconnect" as const;
+export const EXTERNAL_IDENTITY_GITHUB_CALLBACK_PATH = "/api/auth/external/github/callback" as const;
 
 export const HOSTED_IDENTITY_PROTOCOL_VERSION = 1 as const;
 export const NATIVE_NODE_CLAIM_TRANSCRIPT_VERSION = 1 as const;
 export const NATIVE_IDENTITY_PROTOCOL_VERSION = 2 as const;
+export const EXTERNAL_IDENTITY_PROTOCOL_VERSION = 1 as const;
 
 export const HUB_USERNAME_MIN_CHARS = 3;
 export const HUB_USERNAME_MAX_CHARS = 32;
@@ -193,6 +203,209 @@ export const PublicSignupConfigResponse = Schema.Union([
   ),
 ]);
 export type PublicSignupConfigResponse = typeof PublicSignupConfigResponse.Type;
+
+export const ExternalIdentityProvider = Schema.Literal("github");
+export type ExternalIdentityProvider = typeof ExternalIdentityProvider.Type;
+
+const ExternalIdentityLogin = Schema.Trim.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(100),
+  Schema.isPattern(/^[A-Za-z0-9-]+$/),
+);
+
+export const ExternalIdentitySummary = strict(
+  Schema.Struct({
+    provider: ExternalIdentityProvider,
+    login: ExternalIdentityLogin,
+    displayName: Schema.NullOr(BoundedDisplayName),
+    connectedAt: EpochMs,
+    lastUsedAt: Schema.NullOr(EpochMs),
+  }).check(
+    Schema.makeFilter((value) =>
+      value.lastUsedAt === null || value.lastUsedAt >= value.connectedAt
+        ? undefined
+        : "lastUsedAt must not precede connectedAt",
+    ),
+  ),
+);
+export type ExternalIdentitySummary = typeof ExternalIdentitySummary.Type;
+
+export const ExternalIdentityProviderPolicy = strict(
+  Schema.Struct({
+    provider: ExternalIdentityProvider,
+    login: Schema.Literal(true),
+    signup: Schema.Boolean,
+    link: Schema.Literal(true),
+  }),
+);
+export type ExternalIdentityProviderPolicy = typeof ExternalIdentityProviderPolicy.Type;
+
+const ExternalIdentityProviders = Schema.Array(ExternalIdentityProviderPolicy).check(
+  Schema.isMaxLength(1),
+  Schema.makeFilter((providers) =>
+    new Set(providers.map((provider) => provider.provider)).size === providers.length
+      ? undefined
+      : "external identity providers must be unique",
+  ),
+);
+
+export const ExternalIdentityConfigResponse = strict(
+  Schema.Struct({
+    version: Schema.Literal(EXTERNAL_IDENTITY_PROTOCOL_VERSION),
+    providers: ExternalIdentityProviders,
+  }),
+);
+export type ExternalIdentityConfigResponse = typeof ExternalIdentityConfigResponse.Type;
+
+const ExternalIdentityReturnPath = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
+    if (
+      !value.startsWith("/") ||
+      value.startsWith("//") ||
+      value.includes("\\") ||
+      value.includes("#")
+    ) {
+      return "return path must be an unambiguous same-origin path without a fragment";
+    }
+    try {
+      const resolved = new URL(value, "https://hub.invalid");
+      return resolved.origin === "https://hub.invalid"
+        ? undefined
+        : "return path must be same-origin";
+    } catch {
+      return "return path must be valid";
+    }
+  }),
+);
+
+const GitHubAuthorizationUrl = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" &&
+        url.hostname === "github.com" &&
+        url.port === "" &&
+        url.username === "" &&
+        url.password === "" &&
+        url.pathname === "/login/oauth/authorize" &&
+        url.search.length > 1 &&
+        url.hash === ""
+        ? undefined
+        : "authorization URL must be the canonical GitHub authorization endpoint";
+    } catch {
+      return "authorization URL must be absolute";
+    }
+  }),
+);
+
+export const ExternalIdentityAuthorizationStartRequest = strict(
+  Schema.Struct({
+    provider: ExternalIdentityProvider,
+    intent: Schema.Literals(["authenticate", "link"]),
+    returnTo: Schema.optionalKey(ExternalIdentityReturnPath),
+  }),
+);
+export type ExternalIdentityAuthorizationStartRequest =
+  typeof ExternalIdentityAuthorizationStartRequest.Type;
+
+export const ExternalIdentityAuthorizationStartResponse = strict(
+  Schema.Struct({
+    authorizationUrl: GitHubAuthorizationUrl,
+    expiresAt: EpochMs,
+  }),
+);
+export type ExternalIdentityAuthorizationStartResponse =
+  typeof ExternalIdentityAuthorizationStartResponse.Type;
+
+export const ExternalIdentityPendingResponse = Schema.Union([
+  strict(Schema.Struct({ status: Schema.Literal("none") })),
+  strict(
+    Schema.Struct({
+      status: Schema.Literal("signup"),
+      provider: ExternalIdentityProvider,
+      suggestedUsername: Schema.NullOr(HubUsername),
+      displayName: Schema.NullOr(BoundedDisplayName),
+      expiresAt: EpochMs,
+    }),
+  ),
+  strict(
+    Schema.Struct({
+      status: Schema.Literal("link"),
+      externalIdentity: ExternalIdentitySummary,
+      expiresAt: EpochMs,
+    }),
+  ),
+]);
+export type ExternalIdentityPendingResponse = typeof ExternalIdentityPendingResponse.Type;
+
+export const ExternalIdentitySignupFinishRequest = strict(
+  Schema.Struct({
+    provider: ExternalIdentityProvider,
+    username: HubUsername,
+    antiBotAssertion: AntiBotAssertion,
+    idempotencyKey: IdempotencyKey,
+  }),
+);
+export type ExternalIdentitySignupFinishRequest = typeof ExternalIdentitySignupFinishRequest.Type;
+
+export const BrowserExternalIdentityConnectRequest = strict(
+  Schema.Struct({ totpCode: Schema.optionalKey(TotpCode) }),
+);
+export type BrowserExternalIdentityConnectRequest =
+  typeof BrowserExternalIdentityConnectRequest.Type;
+
+export const BrowserExternalIdentityConnectResponse = strict(
+  Schema.Struct({
+    status: Schema.Literal("connected"),
+    externalIdentity: ExternalIdentitySummary,
+  }),
+);
+export type BrowserExternalIdentityConnectResponse =
+  typeof BrowserExternalIdentityConnectResponse.Type;
+
+export const ExternalIdentityDisconnectRequest = strict(
+  Schema.Struct({ totpCode: Schema.optionalKey(TotpCode) }),
+);
+export type ExternalIdentityDisconnectRequest = typeof ExternalIdentityDisconnectRequest.Type;
+
+export const ExternalIdentityDisconnectResponse = strict(
+  Schema.Struct({
+    status: Schema.Literal("disconnected"),
+    signedOut: Schema.Boolean,
+  }),
+);
+export type ExternalIdentityDisconnectResponse = typeof ExternalIdentityDisconnectResponse.Type;
+
+const ExternalIdentitySummaries = Schema.Array(ExternalIdentitySummary).check(
+  Schema.isMaxLength(1),
+  Schema.makeFilter((identities) =>
+    new Set(identities.map((identity) => identity.provider)).size === identities.length
+      ? undefined
+      : "external identity providers must be unique",
+  ),
+);
+
+export const HostedAccountSecurityResponse = strict(
+  Schema.Struct({
+    passwordConfigured: Schema.Boolean,
+    totpEnrolled: Schema.Boolean,
+    emailDeliveryConfigured: Schema.Boolean,
+    email: Schema.NullOr(
+      strict(
+        Schema.Struct({
+          address: HubNormalizedEmail,
+          verified: Schema.Boolean,
+        }),
+      ),
+    ),
+    externalIdentities: ExternalIdentitySummaries,
+  }),
+);
+export type HostedAccountSecurityResponse = typeof HostedAccountSecurityResponse.Type;
 
 export const HubActiveSpaceSummary = strict(
   Schema.Struct({
@@ -645,6 +858,11 @@ export const PublicSignupFinishResponse = strict(
   }),
 );
 export type PublicSignupFinishResponse = typeof PublicSignupFinishResponse.Type;
+
+// GitHub-backed signup creates the same Ryco browser session and one-time
+// recovery-code handoff as the existing verified-email signup flow.
+export const ExternalIdentitySignupFinishResponse = PublicSignupFinishResponse;
+export type ExternalIdentitySignupFinishResponse = typeof ExternalIdentitySignupFinishResponse.Type;
 
 export const PasswordLoginAttemptId = Schema.String.check(
   Schema.isPattern(/^login_[A-Za-z0-9_-]{22,43}$/),
