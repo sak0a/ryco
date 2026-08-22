@@ -153,8 +153,9 @@ describe("native handoff request and response schemas", () => {
         status: "pending",
         deviceLabel: start.deviceLabel,
         expiresAt: 1_752_710_700_000,
+        providerHint: "github",
       }),
-    ).toMatchObject({ status: "pending" });
+    ).toMatchObject({ status: "pending", providerHint: "github" });
     expect(
       strictDecode(NativeHandoffApproveResponse, {
         redirectUri: `${callback}?code=${opaque}&state=${opaque}&handoff_id=${opaque}`,

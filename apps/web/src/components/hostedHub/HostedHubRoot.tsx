@@ -504,8 +504,10 @@ function NewToThisHubDisclosure({
 
 export function HostedAuthenticationSurface({
   context = "hub",
+  autoExternalProvider = null,
 }: {
   readonly context?: "hub" | "native-authorization";
+  readonly autoExternalProvider?: "github" | null;
 } = {}) {
   const status = useHostedHubStore((state) => state.accountStatus);
   const error = useHostedHubStore((state) => state.errorMessage);
@@ -525,6 +527,7 @@ export function HostedAuthenticationSurface({
   const githubIdentityPolicy = githubProviderPolicy(externalIdentityConfiguration);
   const [externalAuthorizationPending, setExternalAuthorizationPending] = useState(false);
   const [externalAuthorizationError, setExternalAuthorizationError] = useState<string | null>(null);
+  const autoExternalAuthorizationStartedRef = useRef(false);
   const [externalPending, setExternalPending] = useState<
     ExternalIdentityPendingResponse | undefined
   >(undefined);
@@ -602,7 +605,7 @@ export function HostedAuthenticationSurface({
     return () => operation.abort();
   }, [context, registrationMode]);
 
-  const startGitHubSignIn = async () => {
+  const startGitHubSignIn = useCallback(async () => {
     if (externalAuthorizationPending) return;
     setExternalAuthorizationPending(true);
     setExternalAuthorizationError(null);
@@ -624,7 +627,29 @@ export function HostedAuthenticationSurface({
       );
       setExternalAuthorizationPending(false);
     }
-  };
+  }, [context, externalAuthorizationPending]);
+
+  useEffect(() => {
+    if (
+      context !== "native-authorization" ||
+      autoExternalProvider !== "github" ||
+      status !== "signed-out" ||
+      githubIdentityPolicy?.login !== true ||
+      externalPending?.status !== "none" ||
+      autoExternalAuthorizationStartedRef.current
+    ) {
+      return;
+    }
+    autoExternalAuthorizationStartedRef.current = true;
+    void startGitHubSignIn();
+  }, [
+    autoExternalProvider,
+    context,
+    externalPending?.status,
+    githubIdentityPolicy?.login,
+    startGitHubSignIn,
+    status,
+  ]);
 
   useEffect(() => {
     // `preventScroll`: both targets sit at the top of a surface that owns its

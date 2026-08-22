@@ -4,7 +4,7 @@ import type * as HostedIdentity from "@ryco/contracts/hosted-identity";
 import { Image } from "expo-image";
 import * as Linking from "expo-linking";
 import { useNavigation } from "@react-navigation/native";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
   AppState,
@@ -18,6 +18,7 @@ import {
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text, AppTextInput } from "../../components/AppText";
 import { ErrorBanner } from "../../components/ErrorBanner";
+import { SourceControlIcon } from "../../components/SourceControlIcon";
 import {
   checkHubCapabilityWithTimeout,
   createHubCapabilityClient,
@@ -254,6 +255,7 @@ function Action(props: {
   readonly onPress: () => void;
   readonly disabled?: boolean;
   readonly quiet?: boolean;
+  readonly icon?: ReactNode;
 }) {
   return (
     <Pressable
@@ -262,10 +264,11 @@ function Action(props: {
       disabled={props.disabled}
       onPress={props.onPress}
       className={cn(
-        "min-h-13.5 items-center justify-center rounded-full px-5 active:scale-[0.985] disabled:opacity-40",
+        "min-h-13.5 flex-row items-center justify-center gap-2.5 rounded-full px-5 active:scale-[0.985] disabled:opacity-40",
         props.quiet ? "border border-border bg-card" : "bg-primary",
       )}
     >
+      {props.icon}
       <Text
         className={cn(
           "text-base font-ryco-bold",
@@ -314,6 +317,7 @@ function EntryOption(props: {
 export function NativeIdentityScreen() {
   const navigation = useNavigation();
   const logoColor = useThemeColor("--color-foreground");
+  const providerIconColor = useThemeColor("--color-foreground");
   const buildConfig = useMemo(readMobileHostedConfig, []);
   const development = isMobileDevelopmentBuild();
   const [screen, setScreen] = useState<Screen>({ name: "entry" });
@@ -874,6 +878,15 @@ export function NativeIdentityScreen() {
                     key={providerAction.id}
                     label={providerAction.label}
                     quiet
+                    icon={
+                      providerAction.id === "sign-in-github" ? (
+                        <SourceControlIcon
+                          kind="github"
+                          size={20}
+                          color={providerIconColor as string}
+                        />
+                      ) : undefined
+                    }
                     disabled={busy || providerAction.disabled}
                     onPress={() =>
                       void run(async () => {
