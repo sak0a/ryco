@@ -5,8 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { render } from "vitest-browser-react";
 
 import { hostedHubApi } from "../../hostedHub/api";
-import { hostedHubController, useHostedHubStore } from "../../hostedHub/state";
+import {
+  hostedHubController,
+  useHostedAccountStore,
+  useHostedHubStore,
+} from "../../hostedHub/state";
 import { resetHubRoutesForTests } from "../../hostedHub/hubRoutes";
+import { HostedAuthenticationSurface } from "./HostedHubRoot";
 import { HostedNativeAuthorizationRoute } from "./HostedNativeAuthorizationRoute";
 
 const account = {
@@ -51,6 +56,39 @@ afterEach(async () => {
 });
 
 describe("HostedNativeAuthorizationRoute", () => {
+  it("automatically starts a hinted GitHub sign-in from the same-origin handoff route", async () => {
+    window.history.replaceState(null, "", `/native/authorize/${handoffId}`);
+    useHostedHubStore.setState({
+      accountStatus: "signed-out",
+      account: null,
+      session: null,
+    });
+    useHostedAccountStore.setState({
+      externalIdentityConfiguration: {
+        version: 1,
+        providers: [{ provider: "github", login: true, signup: true, link: true }],
+      },
+      externalIdentityConfigurationStatus: "ready",
+    });
+    vi.spyOn(hostedHubApi, "getPendingExternalIdentity").mockResolvedValue({ status: "none" });
+    vi.spyOn(hostedHubController, "refreshExternalIdentityConfiguration").mockResolvedValue();
+    const start = vi
+      .spyOn(hostedHubApi, "startExternalIdentityAuthorization")
+      .mockImplementation(() => new Promise(() => {}));
+
+    mounted = await render(
+      <HostedAuthenticationSurface context="native-authorization" autoExternalProvider="github" />,
+    );
+
+    await vi.waitFor(() => {
+      expect(start).toHaveBeenCalledWith({
+        provider: "github",
+        intent: "authenticate",
+        returnTo: `/native/authorize/${handoffId}`,
+      });
+    });
+  });
+
   it("finishes an unlinked GitHub signup without leaving native authorization", async () => {
     window.history.replaceState(null, "", `/native/authorize/${handoffId}`);
     useHostedHubStore.setState({

@@ -288,6 +288,7 @@ export const NativeHandoffPresentation = strict(
     status: Schema.Literal("pending"),
     deviceLabel: BoundedDeviceLabel,
     expiresAt: EpochMs,
+    providerHint: Schema.optionalKey(ExternalIdentityProvider),
   }),
 );
 export type NativeHandoffPresentation = typeof NativeHandoffPresentation.Type;

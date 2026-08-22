@@ -73,7 +73,10 @@ export function HostedNativeAuthorizationRoute({
   if (accountStatus !== "authenticated" || !account) {
     return (
       <Suspense fallback={null}>
-        <HostedAuthenticationSurface context="native-authorization" />
+        <HostedAuthenticationSurface
+          context="native-authorization"
+          autoExternalProvider={presentation?.providerHint ?? null}
+        />
       </Suspense>
     );
   }
