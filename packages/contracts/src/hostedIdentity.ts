@@ -321,6 +321,18 @@ export const ExternalIdentityAuthorizationStartResponse = strict(
 export type ExternalIdentityAuthorizationStartResponse =
   typeof ExternalIdentityAuthorizationStartResponse.Type;
 
+export const ExternalIdentityPendingErrorCode = Schema.Literals([
+  "external_provider_unavailable",
+  "external_authorization_cancelled",
+  "external_authorization_expired",
+  "external_authorization_rejected",
+  "external_identity_email_conflict",
+  "external_identity_verified_email_required",
+  "signup_disabled",
+  "username_unavailable",
+]);
+export type ExternalIdentityPendingErrorCode = typeof ExternalIdentityPendingErrorCode.Type;
+
 export const ExternalIdentityPendingResponse = Schema.Union([
   strict(Schema.Struct({ status: Schema.Literal("none") })),
   strict(
@@ -337,6 +349,13 @@ export const ExternalIdentityPendingResponse = Schema.Union([
       status: Schema.Literal("link"),
       externalIdentity: ExternalIdentitySummary,
       expiresAt: EpochMs,
+    }),
+  ),
+  strict(
+    Schema.Struct({
+      status: Schema.Literal("error"),
+      provider: ExternalIdentityProvider,
+      code: ExternalIdentityPendingErrorCode,
     }),
   ),
 ]);

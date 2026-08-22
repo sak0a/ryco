@@ -310,6 +310,13 @@ describe("external identity contracts", () => {
       }),
     ).toBeTruthy();
     expect(
+      strictDecode(ExternalIdentityPendingResponse, {
+        status: "error",
+        provider: "github",
+        code: "external_identity_email_conflict",
+      }),
+    ).toBeTruthy();
+    expect(
       strictDecode(ExternalIdentitySignupFinishRequest, {
         provider: "github",
         username: "octocat",
@@ -326,6 +333,18 @@ describe("external identity contracts", () => {
       { ...start, clientSecret: "must-not-survive" },
     ]) {
       expect(() => strictDecode(ExternalIdentityAuthorizationStartRequest, invalid)).toThrow();
+    }
+
+    for (const invalidPending of [
+      { status: "error", provider: "github", code: "provider_body_said_no" },
+      {
+        status: "error",
+        provider: "github",
+        code: "external_authorization_rejected",
+        description: "provider-sensitive-canary",
+      },
+    ]) {
+      expect(() => strictDecode(ExternalIdentityPendingResponse, invalidPending)).toThrow();
     }
 
     for (const authorizationUrl of [
