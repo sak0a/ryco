@@ -50,7 +50,10 @@ import {
   mobileSessionCredentials,
 } from "../../platform/sessionCredentials";
 import { HubDomainEditor } from "../settings/HubDomainEditor";
-import { deriveHostedProviderSignInActions } from "../hostedHub/hostedAuthModel";
+import {
+  deriveHostedBrowserSignInAction,
+  deriveHostedProviderSignInActions,
+} from "../hostedHub/hostedAuthModel";
 import {
   createNativeIdentityCompletionJournal,
   type NativeIdentityCompletionJournal,
@@ -349,6 +352,7 @@ export function NativeIdentityScreen() {
   const externalIdentityConfiguration = useHostedAccountStore(
     (state) => state.externalIdentityConfiguration,
   );
+  const browserSignInAction = deriveHostedBrowserSignInAction();
   const externalProviderActions = deriveHostedProviderSignInActions(externalIdentityConfiguration);
 
   const origin = profile?.origin ?? buildConfig?.hubOrigin ?? null;
@@ -873,6 +877,18 @@ export function NativeIdentityScreen() {
                   }
                   onPress={start}
                 />
+                {!busy && capability === null ? (
+                  <Action
+                    label="Retry Hub connection"
+                    quiet
+                    onPress={() => void refreshCapability()}
+                  />
+                ) : null}
+                <View className="my-1 flex-row items-center gap-3">
+                  <View className="h-px flex-1 bg-border" />
+                  <Text className="text-xs text-foreground-muted">or</Text>
+                  <View className="h-px flex-1 bg-border" />
+                </View>
                 {externalProviderActions.map((providerAction) => (
                   <Action
                     key={providerAction.id}
@@ -897,18 +913,26 @@ export function NativeIdentityScreen() {
                     }
                   />
                 ))}
-                {!busy && capability === null ? (
-                  <Action
-                    label="Retry Hub connection"
-                    quiet
-                    onPress={() => void refreshCapability()}
-                  />
-                ) : null}
-                <View className="my-1 flex-row items-center gap-3">
-                  <View className="h-px flex-1 bg-border" />
-                  <Text className="text-xs text-foreground-muted">or</Text>
-                  <View className="h-px flex-1 bg-border" />
-                </View>
+                <Action
+                  label={browserSignInAction.label}
+                  quiet
+                  icon={
+                    <SymbolView
+                      name={{ ios: "safari", android: "language" }}
+                      size={19}
+                      tintColor={providerIconColor as string}
+                      type="monochrome"
+                    />
+                  }
+                  disabled={busy || capability === null || browserSignInAction.disabled}
+                  onPress={() =>
+                    void run(async () => {
+                      await browserSignInAction.run();
+                      const hostedError = hostedHubStore.getState().errorMessage;
+                      if (hostedError) setError(hostedError);
+                    })
+                  }
+                />
                 <Action
                   label="Continue with a passkey"
                   quiet

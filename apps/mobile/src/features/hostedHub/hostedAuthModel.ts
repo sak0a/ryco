@@ -229,7 +229,11 @@ function action(
 }
 
 const signInAction = (label: string): HostedAuthAction =>
-  action("sign-in", label, () => void hostedHubController.signIn());
+  action("sign-in", label, () => hostedHubController.signIn());
+
+/** Generic system-browser handoff for native surfaces that also offer direct credentials. */
+export const deriveHostedBrowserSignInAction = (): HostedAuthAction =>
+  signInAction("Continue in browser");
 
 /** Provider-specific native handoffs. Policy absence means no affordance. */
 export function deriveHostedProviderSignInActions(
