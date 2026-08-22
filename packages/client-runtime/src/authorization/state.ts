@@ -1219,6 +1219,11 @@ class HostedHubController {
     return outcome;
   }
 
+  cancelExternalIdentityConnection(provider: HostedIdentity.ExternalIdentityProvider): void {
+    this.cancelAccountAction();
+    getHostedHubApi().cancelExternalIdentityConnection(provider);
+  }
+
   async finishBrowserExternalIdentityConnection(
     provider: HostedIdentity.ExternalIdentityProvider,
     input?: HostedAccountStepUp,

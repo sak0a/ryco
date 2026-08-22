@@ -12,6 +12,7 @@ import type {
   WorktreesSetManualPositionInput,
   EmptyRpcResult,
 } from "./rpc.ts";
+import type { ExternalIdentitySummary } from "./hostedIdentity.ts";
 import type {
   VcsSwitchRefInput,
   VcsSwitchRefResult,
@@ -346,6 +347,21 @@ export interface DesktopHubLaunchConfig {
 /** Secret-free projection of Desktop main's native Hub identity workflow. */
 export interface DesktopHostedIdentityState {
   readonly status: "signed-out" | "ready" | "unavailable";
+  /** Present only after a current Hub has returned strict external-identity policy and metadata. */
+  readonly github?: {
+    readonly linkAvailable: boolean;
+    readonly identity: ExternalIdentitySummary | null;
+  };
+}
+
+export interface DesktopHostedIdentityActionResult {
+  readonly outcome:
+    | "committed"
+    | "cancelled"
+    | "step-up-required"
+    | "last-primary-credential"
+    | "unavailable";
+  readonly state: DesktopHostedIdentityState;
 }
 
 export type DesktopNativeE2eePreparation =
@@ -488,6 +504,13 @@ export interface DesktopBridge {
   getHostedIdentityState?: () => Promise<DesktopHostedIdentityState>;
   connectHostedIdentity?: () => Promise<DesktopHostedIdentityState>;
   disconnectHostedIdentity?: () => Promise<DesktopHostedIdentityState>;
+  connectHostedGitHub?: (input?: {
+    readonly totpCode?: string;
+  }) => Promise<DesktopHostedIdentityActionResult>;
+  disconnectHostedGitHub?: (input?: {
+    readonly totpCode?: string;
+  }) => Promise<DesktopHostedIdentityActionResult>;
+  cancelHostedGitHubConnection?: () => Promise<void>;
   prepareNativeE2eeAttempt?: (input: {
     readonly accountId: string;
     readonly nodeId: string;

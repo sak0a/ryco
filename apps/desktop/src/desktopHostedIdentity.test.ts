@@ -1,4 +1,5 @@
 import type { HostedHubApi } from "@ryco/client-runtime/authorization";
+import { HostedHubApiError } from "@ryco/client-runtime/authorization";
 
 import type { DesktopHubControlClient } from "./desktopHubControl.ts";
 import { DesktopHostedIdentityCoordinator } from "./desktopHostedIdentity.ts";
@@ -108,5 +109,102 @@ describe("Desktop hosted identity coordinator", () => {
     await disconnected;
     expect(clearSessionMaterial).toHaveBeenCalledOnce();
     expect(clear).toHaveBeenCalledOnce();
+  });
+
+  it("projects only bounded GitHub policy and display metadata", async () => {
+    const identity = coordinator({
+      api: {
+        hasSessionMaterial: true,
+        restoreSession: vi.fn().mockResolvedValue({ account: { id: "account-1" } }),
+        getExternalIdentityConfiguration: vi.fn().mockResolvedValue({
+          version: 1,
+          providers: [{ provider: "github", login: true, signup: true, link: true }],
+        }),
+        getAccountSecurity: vi.fn().mockResolvedValue({
+          passwordConfigured: true,
+          totpEnrolled: false,
+          emailDeliveryConfigured: false,
+          email: null,
+          externalIdentities: [
+            {
+              provider: "github",
+              login: "octocat",
+              displayName: "The Octocat",
+              connectedAt: 1_700_000_000_000,
+              lastUsedAt: null,
+            },
+          ],
+        }),
+      },
+      setup: vi.fn().mockResolvedValue({ nodeId: "node-1", localNodeHandle: "local-node-1" }),
+    });
+
+    const status = await identity.resume();
+    expect(status).toMatchObject({
+      status: "ready",
+      github: {
+        linkAvailable: true,
+        identity: { provider: "github", login: "octocat", displayName: "The Octocat" },
+      },
+    });
+    expect(JSON.stringify(status)).not.toContain("providerSubject");
+    expect(JSON.stringify(status)).not.toContain("accessToken");
+  });
+
+  it("retries a staged GitHub connection with TOTP without reopening a separate flow", async () => {
+    const connectExternalIdentity = vi
+      .fn()
+      .mockRejectedValueOnce(new HostedHubApiError("step_up_required", 403))
+      .mockResolvedValueOnce({
+        provider: "github",
+        login: "octocat",
+        displayName: null,
+        connectedAt: 1_700_000_000_000,
+        lastUsedAt: null,
+      });
+    const identity = coordinator({
+      api: { hasSessionMaterial: true, connectExternalIdentity },
+    });
+
+    await expect(identity.connectGitHub()).resolves.toMatchObject({
+      outcome: "step-up-required",
+      signedOut: false,
+    });
+    await expect(identity.connectGitHub({ totpCode: "123456" })).resolves.toMatchObject({
+      outcome: "committed",
+      signedOut: false,
+      github: { identity: { login: "octocat" } },
+    });
+    expect(connectExternalIdentity).toHaveBeenNthCalledWith(1, "github", undefined);
+    expect(connectExternalIdentity).toHaveBeenNthCalledWith(2, "github", {
+      totpCode: "123456",
+    });
+  });
+
+  it("returns a bounded last-primary result when disconnect is refused", async () => {
+    const identity = coordinator({
+      api: {
+        hasSessionMaterial: true,
+        disconnectExternalIdentity: vi
+          .fn()
+          .mockRejectedValue(new HostedHubApiError("last_primary_credential", 409)),
+      },
+    });
+
+    await expect(identity.disconnectGitHub()).resolves.toMatchObject({
+      outcome: "last-primary-credential",
+      signedOut: false,
+    });
+  });
+
+  it("forgets a staged GitHub connection when Desktop cancels step-up", () => {
+    const cancelExternalIdentityConnection = vi.fn();
+    const identity = coordinator({
+      api: { cancelExternalIdentityConnection },
+    });
+
+    identity.cancelGitHubConnection();
+
+    expect(cancelExternalIdentityConnection).toHaveBeenCalledWith("github");
   });
 });

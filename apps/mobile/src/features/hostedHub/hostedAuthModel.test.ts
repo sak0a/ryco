@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const controller = vi.hoisted(() => ({
   signIn: vi.fn(async () => undefined),
+  signInWithExternalProvider: vi.fn(async () => undefined),
   signOut: vi.fn(async () => undefined),
   bootstrap: vi.fn(async () => undefined),
   cancelAuthentication: vi.fn(),
@@ -111,10 +112,18 @@ function signInView(
   options: {
     readonly hostedModeAvailable?: boolean;
     readonly e2eeStatus?: HostedE2eeChannelStatus;
+    readonly github?: boolean;
   } = {},
 ): HostedSignInView {
   return deriveHostedSignInView({
     state: hostedState(overrides),
+    externalIdentityConfiguration: {
+      version: 1,
+      providers:
+        options.github === true
+          ? [{ provider: "github", login: true, signup: true, link: true }]
+          : [],
+    },
     hostedModeAvailable: options.hostedModeAvailable ?? true,
     e2eeStatus: options.e2eeStatus ?? "unavailable",
     onPairDevice: vi.fn(),
@@ -152,6 +161,18 @@ describe("hosted sign-in surface", () => {
     expect(view.secondaryAction).toBeNull();
     view.primaryAction?.run();
     expect(controller.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the typed GitHub handoff only when provider policy advertises login", () => {
+    expect(signInView().providerActions).toEqual([]);
+
+    const view = signInView({}, { github: true });
+    expect(view.providerActions.map((provider) => [provider.id, provider.label])).toEqual([
+      ["sign-in-github", "Continue with GitHub"],
+    ]);
+    view.providerActions[0]?.run();
+    expect(controller.signInWithExternalProvider).toHaveBeenCalledWith("github");
+    expect(controller.signIn).not.toHaveBeenCalled();
   });
 
   it("routes first run through the same browser handoff", () => {
@@ -193,6 +214,7 @@ describe("hosted sign-in surface", () => {
     const onPairDevice = vi.fn();
     const view = deriveHostedSignInView({
       state: hostedState({ accountStatus: "authenticated", ...AUTHENTICATED }),
+      externalIdentityConfiguration: null,
       hostedModeAvailable: false,
       e2eeStatus: "unavailable",
       onPairDevice,

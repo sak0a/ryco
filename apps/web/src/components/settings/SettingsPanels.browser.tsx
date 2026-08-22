@@ -361,6 +361,11 @@ const createDesktopBridgeStub = (overrides?: {
   readonly getHostedIdentityState?: NonNullable<DesktopBridge["getHostedIdentityState"]>;
   readonly connectHostedIdentity?: NonNullable<DesktopBridge["connectHostedIdentity"]>;
   readonly disconnectHostedIdentity?: NonNullable<DesktopBridge["disconnectHostedIdentity"]>;
+  readonly connectHostedGitHub?: NonNullable<DesktopBridge["connectHostedGitHub"]>;
+  readonly disconnectHostedGitHub?: NonNullable<DesktopBridge["disconnectHostedGitHub"]>;
+  readonly cancelHostedGitHubConnection?: NonNullable<
+    DesktopBridge["cancelHostedGitHubConnection"]
+  >;
   readonly confirm?: DesktopBridge["confirm"];
   readonly openExternal?: DesktopBridge["openExternal"];
 }): DesktopBridge => {
@@ -401,6 +406,15 @@ const createDesktopBridgeStub = (overrides?: {
     ...(overrides?.disconnectHostedIdentity === undefined
       ? {}
       : { disconnectHostedIdentity: overrides.disconnectHostedIdentity }),
+    ...(overrides?.connectHostedGitHub === undefined
+      ? {}
+      : { connectHostedGitHub: overrides.connectHostedGitHub }),
+    ...(overrides?.disconnectHostedGitHub === undefined
+      ? {}
+      : { disconnectHostedGitHub: overrides.disconnectHostedGitHub }),
+    ...(overrides?.cancelHostedGitHubConnection === undefined
+      ? {}
+      : { cancelHostedGitHubConnection: overrides.cancelHostedGitHubConnection }),
     validateHubOrigin: async () => ({ ok: false as const, reason: "empty" as const }),
     getAppBranding: vi.fn().mockReturnValue(null),
     getLocalEnvironmentBootstrap: () => ({
@@ -1742,6 +1756,85 @@ describe("ConnectionsSettings Hub section", () => {
     expect(connectHostedIdentity).toHaveBeenCalledOnce();
     expect(document.body.textContent).not.toContain("account-");
     expect(document.body.textContent).not.toContain("node-");
+  });
+
+  it("connects and disconnects GitHub through bounded Desktop outcomes", async () => {
+    const disconnected = {
+      status: "ready" as const,
+      github: { linkAvailable: true, identity: null },
+    };
+    const connected = {
+      status: "ready" as const,
+      github: {
+        linkAvailable: true,
+        identity: {
+          provider: "github" as const,
+          login: "octocat",
+          displayName: "The Octocat",
+          connectedAt: 1_700_000_000_000,
+          lastUsedAt: null,
+        },
+      },
+    };
+    const connectHostedGitHub = vi.fn().mockResolvedValue({
+      outcome: "committed" as const,
+      state: connected,
+    });
+    const disconnectHostedGitHub = vi.fn().mockResolvedValue({
+      outcome: "committed" as const,
+      state: disconnected,
+    });
+    stubHubFetch({
+      status: { ...baseStatus, state: "online" },
+      identity: { enrolled: "active" },
+    });
+    await renderHub(
+      { enabled: true, origin: "https://hub.example.com" },
+      {
+        getHostedIdentityState: vi.fn().mockResolvedValue(disconnected),
+        connectHostedGitHub,
+        disconnectHostedGitHub,
+      },
+    );
+
+    await page.getByRole("button", { name: "Connect GitHub" }).click();
+    await expect.element(page.getByText("GitHub · @octocat")).toBeVisible();
+    expect(connectHostedGitHub).toHaveBeenCalledWith(undefined);
+    await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+    expect(disconnectHostedGitHub).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: "Disconnect GitHub", exact: true }).click();
+    await expect.element(page.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    expect(disconnectHostedGitHub).toHaveBeenCalledWith(undefined);
+    expect(document.body.textContent).not.toContain("providerSubject");
+    expect(document.body.textContent).not.toContain("accessToken");
+  });
+
+  it("discards the Desktop staged GitHub link when step-up is cancelled", async () => {
+    const state = {
+      status: "ready" as const,
+      github: { linkAvailable: true, identity: null },
+    };
+    const cancelHostedGitHubConnection = vi.fn().mockResolvedValue(undefined);
+    stubHubFetch({
+      status: { ...baseStatus, state: "online" },
+      identity: { enrolled: "active" },
+    });
+    await renderHub(
+      { enabled: true, origin: "https://hub.example.com" },
+      {
+        getHostedIdentityState: vi.fn().mockResolvedValue(state),
+        connectHostedGitHub: vi.fn().mockResolvedValue({
+          outcome: "step-up-required",
+          state,
+        }),
+        cancelHostedGitHubConnection,
+      },
+    );
+
+    await page.getByRole("button", { name: "Connect GitHub" }).click();
+    await expect.element(page.getByLabelText("Authenticator code")).toBeVisible();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await vi.waitFor(() => expect(cancelHostedGitHubConnection).toHaveBeenCalledOnce());
   });
 
   it("saves a trimmed pre-enrollment node name", async () => {

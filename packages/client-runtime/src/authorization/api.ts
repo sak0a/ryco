@@ -992,6 +992,18 @@ export class HostedHubApi {
     }
   }
 
+  /** Discard a staged native provider result after the user abandons step-up. */
+  cancelExternalIdentityConnection(provider: HostedIdentity.ExternalIdentityProvider): void {
+    const boundedProvider = decodeContract(
+      HostedIdentity.ExternalIdentityProvider,
+      provider,
+      "invalid_request",
+    );
+    if (this.#pendingNativeExternalIdentityConnection?.provider === boundedProvider) {
+      this.#pendingNativeExternalIdentityConnection = null;
+    }
+  }
+
   /**
    * Identifierless passkey login for a native identity surface. Unlike
    * `signIn()`, this never opens the compatibility system-browser handoff.

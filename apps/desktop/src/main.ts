@@ -25,6 +25,8 @@ import type {
   ClientSettings,
   DesktopTheme,
   DesktopAppBranding,
+  DesktopHostedIdentityActionResult,
+  DesktopHostedIdentityState,
   DesktopServerExposureMode,
   DesktopServerExposureState,
   DesktopUpdateChannel,
@@ -137,6 +139,7 @@ import { createDesktopHubControlClient } from "./desktopHubControl.ts";
 import {
   createDesktopHostedHubApi,
   DesktopHostedIdentityCoordinator,
+  type DesktopHostedGitHubActionResult,
   type DesktopHostedIdentityStatus,
 } from "./desktopHostedIdentity.ts";
 import { DesktopE2eeTrustStore } from "./desktopE2eeTrust.ts";
@@ -180,6 +183,9 @@ const NOTIFY_TURN_COMPLETE_CHANNEL = "desktop:notify-turn-complete";
 const GET_HOSTED_IDENTITY_STATUS_CHANNEL = "desktop:get-hosted-identity-status";
 const CONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:connect-hosted-identity";
 const DISCONNECT_HOSTED_IDENTITY_CHANNEL = "desktop:disconnect-hosted-identity";
+const CONNECT_HOSTED_GITHUB_CHANNEL = "desktop:connect-hosted-github";
+const DISCONNECT_HOSTED_GITHUB_CHANNEL = "desktop:disconnect-hosted-github";
+const CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL = "desktop:cancel-hosted-github-connection";
 const PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL = "desktop:prepare-native-e2ee-attempt";
 const START_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:start-native-e2ee-handshake";
 const FINISH_NATIVE_E2EE_HANDSHAKE_CHANNEL = "desktop:finish-native-e2ee-handshake";
@@ -2531,7 +2537,35 @@ function registerIpcHandlers(): void {
     fileSecretStoreFallbackSupported: isDesktopHubFileSecretStoreSupported(process.platform),
   }));
 
-  const hostedIdentityView = () => ({ status: desktopHostedIdentityStatus.status });
+  const hostedIdentityView = (): DesktopHostedIdentityState =>
+    desktopHostedIdentityStatus.status === "ready" && desktopHostedIdentityStatus.github
+      ? { status: desktopHostedIdentityStatus.status, github: desktopHostedIdentityStatus.github }
+      : { status: desktopHostedIdentityStatus.status };
+  const hostedIdentityStepUp = (rawInput: unknown): { readonly totpCode?: string } => {
+    if (rawInput === undefined || rawInput === null) return {};
+    if (typeof rawInput !== "object" || Array.isArray(rawInput)) {
+      throw new Error("Desktop hosted account action is unavailable.");
+    }
+    const totpCode = (rawInput as { readonly totpCode?: unknown }).totpCode;
+    if (totpCode === undefined) return {};
+    if (typeof totpCode !== "string" || !/^\d{6,16}$/u.test(totpCode)) {
+      throw new Error("Desktop hosted account action is unavailable.");
+    }
+    return { totpCode };
+  };
+  const adoptHostedGitHubAction = (
+    result: DesktopHostedGitHubActionResult,
+  ): DesktopHostedIdentityActionResult => {
+    if (result.signedOut) {
+      desktopHostedIdentityStatus = { status: "signed-out" };
+    } else if (desktopHostedIdentityStatus.status === "ready" && result.github !== undefined) {
+      desktopHostedIdentityStatus = {
+        ...desktopHostedIdentityStatus,
+        github: result.github,
+      };
+    }
+    return { outcome: result.outcome, state: hostedIdentityView() };
+  };
   ipcMain.removeHandler(GET_HOSTED_IDENTITY_STATUS_CHANNEL);
   ipcMain.handle(GET_HOSTED_IDENTITY_STATUS_CHANNEL, hostedIdentityView);
   ipcMain.removeHandler(CONNECT_HOSTED_IDENTITY_CHANNEL);
@@ -2545,6 +2579,22 @@ function registerIpcHandlers(): void {
     await desktopHostedIdentityCoordinator?.disconnect().catch(() => undefined);
     desktopHostedIdentityStatus = { status: "signed-out" };
     return hostedIdentityView();
+  });
+  ipcMain.removeHandler(CONNECT_HOSTED_GITHUB_CHANNEL);
+  ipcMain.handle(CONNECT_HOSTED_GITHUB_CHANNEL, async (_event, rawInput: unknown) => {
+    const coordinator = await ensureDesktopHostedIdentityCoordinator();
+    return adoptHostedGitHubAction(await coordinator.connectGitHub(hostedIdentityStepUp(rawInput)));
+  });
+  ipcMain.removeHandler(DISCONNECT_HOSTED_GITHUB_CHANNEL);
+  ipcMain.handle(DISCONNECT_HOSTED_GITHUB_CHANNEL, async (_event, rawInput: unknown) => {
+    const coordinator = await ensureDesktopHostedIdentityCoordinator();
+    return adoptHostedGitHubAction(
+      await coordinator.disconnectGitHub(hostedIdentityStepUp(rawInput)),
+    );
+  });
+  ipcMain.removeHandler(CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL);
+  ipcMain.handle(CANCEL_HOSTED_GITHUB_CONNECTION_CHANNEL, async () => {
+    desktopHostedIdentityCoordinator?.cancelGitHubConnection();
   });
 
   ipcMain.removeHandler(PREPARE_NATIVE_E2EE_ATTEMPT_CHANNEL);

@@ -73,6 +73,7 @@ const hostedHubApi = {
   getAccountSecurity: vi.fn(),
   getExternalIdentityConfiguration: vi.fn(),
   connectExternalIdentity: vi.fn(),
+  cancelExternalIdentityConnection: vi.fn(),
   finishBrowserExternalIdentityConnection: vi.fn(),
   disconnectExternalIdentity: vi.fn(),
   addPasskey: vi.fn(),
@@ -1476,6 +1477,16 @@ describe("hosted account management state", () => {
       actionStatus: "idle",
       errorCode: STEP_UP_REQUIRED_CODE,
     });
+  });
+
+  it("explicitly discards a staged external identity when the user cancels step-up", async () => {
+    await authenticate();
+    const cancel = vi.spyOn(hostedHubApi, "cancelExternalIdentityConnection");
+
+    hostedHubController.cancelExternalIdentityConnection("github");
+
+    expect(cancel).toHaveBeenCalledWith("github");
+    expect(hostedAccountStore.getState().actionStatus).toBe("idle");
   });
 
   it("expires the session when the account-security read is unauthenticated", async () => {
