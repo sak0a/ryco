@@ -25,6 +25,7 @@ vi.mock("../../hostedHub/state", () => ({ hostedHubController: controller }));
 
 import {
   deriveHostedAccountView,
+  deriveHostedBrowserSignInAction,
   deriveHostedSignInView,
   hostedStatusTone,
   type HostedAccountView,
@@ -153,6 +154,18 @@ beforeEach(() => {
 });
 
 describe("hosted sign-in surface", () => {
+  it("exposes the generic browser handoff for native credential surfaces", async () => {
+    const action = deriveHostedBrowserSignInAction();
+
+    expect([action.id, action.label, action.disabled]).toEqual([
+      "sign-in",
+      "Continue in browser",
+      false,
+    ]);
+    await action.run();
+    expect(controller.signIn).toHaveBeenCalledTimes(1);
+  });
+
   it("offers one browser sign-in when signed out, and calls signIn()", () => {
     const view = signInView();
     expect(view.surface).toBe("signed-out");
