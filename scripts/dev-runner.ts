@@ -107,10 +107,7 @@ export function resolveOffset(config: {
   return { offset, source: `hashed RYCO_DEV_INSTANCE=${seed}` };
 }
 
-function resolveBaseDir(
-  mode: DevMode,
-  baseDir: string | undefined,
-): Effect.Effect<string, never, Path.Path> {
+function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, never, Path.Path> {
   return Effect.gen(function* () {
     const path = yield* Path.Path;
     const configured = baseDir?.trim();
@@ -119,10 +116,7 @@ function resolveBaseDir(
       return path.resolve(configured);
     }
 
-    const defaultBaseDir = yield* DEFAULT_RYCO_HOME;
-    // Desktop Dev owns a native node identity and fallback counters. Sharing
-    // ~/.ryco with an installed Ryco/MCP process makes those stores contend.
-    return mode === "dev:desktop" ? path.join(defaultBaseDir, "desktop-dev") : defaultBaseDir;
+    return yield* DEFAULT_RYCO_HOME;
   });
 }
 
@@ -156,7 +150,7 @@ export function createDevRunnerEnv({
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
-    const resolvedBaseDir = yield* resolveBaseDir(mode, rycoHome);
+    const resolvedBaseDir = yield* resolveBaseDir(rycoHome);
     const isDesktopMode = mode === "dev:desktop";
 
     const output: NodeJS.ProcessEnv = {

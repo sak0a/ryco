@@ -73,7 +73,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
       }),
     );
 
-    it.effect("isolates Desktop Dev state from installed Ryco processes", () =>
+    it.effect("keeps Desktop Dev on the existing local backend catalog", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const env = yield* createDevRunnerEnv({
@@ -90,7 +90,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.RYCO_HOME, path.resolve(NodeOS.homedir(), ".ryco", "desktop-dev"));
+        assert.equal(env.RYCO_HOME, path.resolve(NodeOS.homedir(), ".ryco"));
       }),
     );
 
