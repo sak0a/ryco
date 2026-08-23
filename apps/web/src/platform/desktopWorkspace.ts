@@ -1,15 +1,10 @@
 import {
   EnvironmentId,
   ThreadId,
-  WorktreeId,
   type DesktopWorkspaceScopeProjection,
   type DesktopWorkspaceConnectionCommand,
   type DesktopWorkspaceStateProjection,
 } from "@ryco/contracts";
-import {
-  isWorkspaceMetadataSnapshot,
-  type WorkspaceMetadataSnapshot,
-} from "@ryco/client-runtime/state/workspace";
 import { useSyncExternalStore } from "react";
 
 import {
@@ -19,6 +14,7 @@ import {
   readEnvironmentConnection,
 } from "../environments/runtime";
 import { useStore } from "../store";
+import { readWorkspaceMetadataSnapshot } from "../workspaceMetadataProjection";
 
 const SIGNED_OUT: DesktopWorkspaceStateProjection = {
   status: "signed-out",
@@ -116,77 +112,6 @@ function adopt(state: DesktopWorkspaceStateProjection): void {
   for (const listener of listeners) listener();
 }
 
-function metadataSnapshot(environmentId: EnvironmentId): WorkspaceMetadataSnapshot | null {
-  const environment = useStore.getState().environmentStateById[environmentId];
-  if (!environment?.bootstrapComplete) return null;
-  const snapshot: WorkspaceMetadataSnapshot = {
-    schemaVersion: 1,
-    environmentId,
-    capturedAt: Date.now(),
-    projects: environment.projectIds.flatMap((projectId) => {
-      const project = environment.projectById[projectId];
-      return project
-        ? [
-            {
-              environmentId,
-              id: project.id,
-              name: project.name,
-              cwd: project.cwd,
-              repositoryIdentity: project.repositoryIdentity ?? null,
-              createdAt: project.createdAt ?? null,
-              updatedAt: project.updatedAt ?? null,
-            },
-          ]
-        : [];
-    }),
-    worktrees: (environment.worktreeIds ?? []).flatMap((worktreeId) => {
-      const worktree = environment.worktreeById?.[worktreeId];
-      return worktree
-        ? [
-            {
-              environmentId,
-              id: worktree.id,
-              projectId: worktree.projectId,
-              title: worktree.title ?? null,
-              branch: worktree.branch,
-              worktreePath: worktree.worktreePath,
-              workItemLabel:
-                worktree.workItemKey ?? worktree.prTitle ?? worktree.issueTitle ?? null,
-              pullRequestNumber: worktree.prNumber,
-              archivedAt: worktree.archivedAt,
-              updatedAt: worktree.updatedAt,
-            },
-          ]
-        : [];
-    }),
-    threads: environment.threadIds.flatMap((threadId) => {
-      const thread = environment.sidebarThreadSummaryById[threadId];
-      return thread
-        ? [
-            {
-              environmentId,
-              id: thread.id,
-              projectId: thread.projectId,
-              worktreeId: thread.worktreeId ? WorktreeId.make(thread.worktreeId) : null,
-              title: thread.title,
-              createdAt: thread.createdAt,
-              updatedAt: thread.updatedAt ?? null,
-              archivedAt: thread.archivedAt,
-              modelSelection: thread.modelSelection ?? null,
-              providerDriver: thread.providerDriver ?? null,
-              branch: thread.branch,
-              hasPendingApprovals: thread.hasPendingApprovals,
-              hasPendingUserInput: thread.hasPendingUserInput,
-              hasActionableProposedPlan: thread.hasActionableProposedPlan,
-              deliveryUnknown: false,
-            },
-          ]
-        : [];
-    }),
-  };
-  return isWorkspaceMetadataSnapshot(snapshot, environmentId) ? snapshot : null;
-}
-
 async function applyConnectionCommand(command: DesktopWorkspaceConnectionCommand): Promise<void> {
   let connection = readEnvironmentConnection(command.environmentId);
   if (command.action === "connect") {
@@ -252,7 +177,7 @@ export function startDesktopWorkspaceBridge(): () => void {
       if (!publish || disposed) return;
       for (const machine of current.machines) {
         if (!machine.canReadMetadata) continue;
-        const snapshot = metadataSnapshot(machine.environmentId);
+        const snapshot = readWorkspaceMetadataSnapshot(machine.environmentId);
         if (snapshot) void publish(snapshot).catch(() => undefined);
       }
     }, 100);

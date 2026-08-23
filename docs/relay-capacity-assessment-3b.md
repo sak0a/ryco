@@ -272,3 +272,28 @@ Wave 3b may be built and reviewed against this gate:
 Passing those checks discharges the concurrency risk that was previously represented by the Hub
 rollout-drill gate. Production recovery qualification remains valuable for release operations, but
 it measures a different risk and is not a prerequisite for the bounded client-side change.
+
+## Wave 4 hosted-Web qualification
+
+Hosted Web deliberately starts below the native ceiling. Its named maximum is one because the
+browser can add a sustained full-PNG preview to the ordinary thread, VCS, and provider streams.
+The adaptive sampler uses the measured base64 payload, schedules only after completion, retains the
+750 ms floor, and suspends when either the document or preview is hidden.
+
+For the measured 3,053,100-byte phone frame, the deterministic qualification calculation is:
+
+| Retained environments | Active Web connections | Queued demand | Effective PNG interval | Screenshot bytes/s per visible stream | Counterfactual unbounded aggregate |
+| --------------------: | ---------------------: | ------------: | ---------------------: | ------------------------------------: | ---------------------------------: |
+|                     1 |                      1 |             0 |               5,824 ms |                               524,228 |                            524,228 |
+|                     2 |                      1 |             1 |               5,824 ms |                               524,228 |                          1,048,456 |
+|                     3 |                      1 |             2 |               5,824 ms |                               524,228 |                          1,572,684 |
+
+The two- and three-stream aggregates are counterfactual load calculations, not approved Web
+bounds: the platform ceiling prevents them. Thread/VCS/provider payload rates were not available
+from a public aggregate metric, so they are not silently treated as zero. An unleased catalog
+starts zero relay streams and zero connections; mounted thread detail, VCS, and provider scopes
+are refcounted and are the only inputs that can acquire an environment. Under the five-node fixture
+one environment connects and four wait. Backgrounding releases non-retained LRU connections;
+foregrounding restores only retained demand, so the one-connection Web bound produces at most one
+reconnect attempt and cannot form a reconnect storm. Raising the bound requires measured aggregate
+scope traffic in the same change.

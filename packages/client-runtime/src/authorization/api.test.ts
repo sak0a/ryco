@@ -392,6 +392,37 @@ describe("HostedHubApi", () => {
     expect(JSON.stringify(nodes)).not.toContain("directory-sensitive-canary");
   });
 
+  it("accepts optional browser-eligibility capabilities and rejects partial capability records", async () => {
+    const api = createApi();
+    globalThis.fetch = vi.fn(async () => response(session));
+    await api.restoreSession();
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        nodes: [
+          {
+            ...hostedNode("node_aaaaaaaaaaaaaaaaaaaaaa"),
+            capabilities: { repositoryIdentity: true, nativeClientRequired: true },
+          },
+        ],
+      }),
+    );
+    await expect(api.listNodes()).resolves.toMatchObject([
+      { capabilities: { repositoryIdentity: true, nativeClientRequired: true } },
+    ]);
+
+    globalThis.fetch = vi.fn(async () =>
+      response({
+        nodes: [
+          {
+            ...hostedNode("node_aaaaaaaaaaaaaaaaaaaaaa"),
+            capabilities: { nativeClientRequired: true },
+          },
+        ],
+      }),
+    );
+    await expect(api.listNodes()).rejects.toMatchObject({ code: "invalid_response" });
+  });
+
   it("renames a node with a trimmed bounded body and session-bound CSRF", async () => {
     const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

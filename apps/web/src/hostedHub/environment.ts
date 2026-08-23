@@ -14,8 +14,8 @@ import { clearKeyedQueriesForEnvironment } from "../rpc/keyedQuery";
 import { clearProjectAtomState } from "../rpc/projectAtoms";
 import { clearGitAtomState } from "../rpc/gitAtoms";
 import { clearCheckpointDiffState } from "../rpc/providerAtoms";
-import { defaultQueryClient } from "../rpc/queryClient";
 import { clearServerState } from "../rpc/serverState";
+import { defaultQueryClient } from "../rpc/queryClient";
 import { useSettingsDialogStore } from "../settingsDialogStore";
 import { clearShortcutModifierState } from "../shortcutModifierState";
 import { useStore } from "../store";
@@ -46,7 +46,18 @@ export function clearWebHostedNodeScopedState(environmentId: EnvironmentId): voi
   clearProjectAtomState();
   clearGitAtomState();
   clearCheckpointDiffState();
-  useStore.getState().removeEnvironmentState(environmentId);
+  // A hosted node switch is a transport disposal, not account teardown. Keep
+  // list-safe rows and environment-keyed drafts/UI while stripping live
+  // sessions and liveness from only the environment that lost its channel.
+  useStore.getState().demoteEnvironmentStateToCachedSnapshot(environmentId, Date.now());
+  clearServerState();
+}
+
+/** Account-session teardown. Unlike a node switch, this may clear every environment-keyed UI. */
+export function clearWebHostedAccountScopedState(): void {
+  for (const environmentId of Object.keys(useStore.getState().environmentStateById)) {
+    useStore.getState().removeEnvironmentState(environmentId as EnvironmentId);
+  }
   useComposerDraftStore.setState({
     draftsByThreadKey: {},
     draftThreadsByThreadKey: {},

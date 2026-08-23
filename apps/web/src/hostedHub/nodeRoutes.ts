@@ -3,6 +3,7 @@ import {
   type HistoryLocation,
   type RouterHistory,
 } from "@tanstack/react-router";
+import type { EnvironmentId } from "@ryco/contracts";
 
 /**
  * Stable hosted node routes.
@@ -114,6 +115,29 @@ const HUB_ROUTE_TOP_SEGMENT_SET: ReadonlySet<string> = new Set([
   "account",
 ]);
 
+let nodeIdForEnvironment: (environmentId: EnvironmentId) => string | null = () => null;
+
+/** Install the authorized-directory resolver used by logical cross-node links. */
+export function setHostedNodeRouteEnvironmentResolver(
+  resolver: (environmentId: EnvironmentId) => string | null,
+): () => void {
+  nodeIdForEnvironment = resolver;
+  return () => {
+    if (nodeIdForEnvironment === resolver) nodeIdForEnvironment = () => null;
+  };
+}
+
+function logicalEnvironmentId(pathname: string): EnvironmentId | null {
+  const match = /^\/([^/]+)\/[^/]+\/?$/u.exec(pathname);
+  const raw = match?.[1];
+  if (!raw || HUB_ROUTE_TOP_SEGMENT_SET.has(raw) || raw === "draft" || raw === "node") return null;
+  try {
+    return decodeURIComponent(raw) as EnvironmentId;
+  } catch {
+    return raw as EnvironmentId;
+  }
+}
+
 function isHubRoutePathname(pathname: string): boolean {
   if (!pathname.startsWith("/")) return false;
   const segment = pathname.slice(1).split("/", 1)[0] ?? "";
@@ -130,13 +154,17 @@ function isHubRoutePathname(pathname: string): boolean {
  * Hub page at all.
  */
 export function buildHostedNodeHref(logicalHref: string, nodeId: string | null): string {
-  if (nodeId === null || !isValidHostedNodeRouteSegment(nodeId)) return logicalHref;
   const { pathname, suffix } = splitHref(logicalHref);
   if (isHubRoutePathname(pathname)) return logicalHref;
+  const routeEnvironmentId = logicalEnvironmentId(pathname);
+  const resolvedNodeId = routeEnvironmentId
+    ? (nodeIdForEnvironment(routeEnvironmentId) ?? nodeId)
+    : nodeId;
+  if (resolvedNodeId === null || !isValidHostedNodeRouteSegment(resolvedNodeId)) return logicalHref;
   const scopedPathname =
     pathname === "" || pathname === "/"
-      ? `${HOSTED_NODE_ROUTE_PREFIX}/${nodeId}`
-      : `${HOSTED_NODE_ROUTE_PREFIX}/${nodeId}${pathname}`;
+      ? `${HOSTED_NODE_ROUTE_PREFIX}/${resolvedNodeId}`
+      : `${HOSTED_NODE_ROUTE_PREFIX}/${resolvedNodeId}${pathname}`;
   return `${scopedPathname}${suffix}`;
 }
 
@@ -256,6 +284,15 @@ export function leaveHostedNodeRoute(): boolean {
   return true;
 }
 
+/** User-facing node catalog navigation; unlike route demand release, this chooses the Hub page. */
+export function leaveHostedNodeRouteToHubDirectory(): boolean {
+  const history = installedHistory;
+  if (!history) return false;
+  publishRoutedHostedNode({ nodeId: null, malformed: false, logicalPathname: "/nodes" });
+  history.push("/nodes");
+  return true;
+}
+
 /** Fail closed: replace the current entry with the plain node directory. */
 export function clearHostedNodeRoute(): void {
   const history = installedHistory;
@@ -270,4 +307,5 @@ export function resetHostedNodeRoutesForTests(): void {
   // Subscribers are intentionally retained: mounted hooks re-read the reset
   // value instead of being silently detached.
   publishRoutedHostedNode(NO_ROUTED_NODE);
+  nodeIdForEnvironment = () => null;
 }

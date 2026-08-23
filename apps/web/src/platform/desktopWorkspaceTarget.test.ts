@@ -2,7 +2,10 @@ import { EnvironmentId, ProjectId, type DesktopWorkspaceStateProjection } from "
 import type { Project } from "@ryco/client-runtime/state/threads";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resolveDesktopDefaultProjectRef } from "./desktopWorkspaceTarget";
+import {
+  resolveDesktopDefaultProjectRef,
+  resolveWorkspaceDefaultProjectRef,
+} from "./desktopWorkspaceTarget";
 
 function project(environment: string): Project {
   return {
@@ -71,12 +74,13 @@ describe("Desktop new-work target", () => {
     const unavailable = {
       ...state(),
       localEnvironmentId: null,
-      machines: state().machines.map((machine) => ({
-        ...machine,
-        online: false,
-        canConnect: false,
-        canMutate: false,
-      })),
+      machines: state().machines.map((machine) =>
+        Object.assign({}, machine, {
+          online: false,
+          canConnect: false,
+          canMutate: false,
+        }),
+      ),
     } satisfies DesktopWorkspaceStateProjection;
     expect(
       resolveDesktopDefaultProjectRef({
@@ -85,5 +89,51 @@ describe("Desktop new-work target", () => {
         logicalKey: () => "logical-ryco",
       }),
     ).toBeNull();
+  });
+});
+
+describe("Hosted Web new-work target", () => {
+  it("selects only the eligible variant and never a locked, offline, or unrelated machine", () => {
+    const eligible = project("eligible");
+    const locked = project("locked");
+    const offline = project("offline");
+    expect(
+      resolveWorkspaceDefaultProjectRef({
+        orderedProjects: [locked, offline, eligible],
+        ready: true,
+        localEnvironmentId: null,
+        logicalKey: () => "logical-ryco",
+        machines: [
+          {
+            environmentId: locked.environmentId,
+            label: "Native only",
+            online: true,
+            canMutate: false,
+            nativeTrust: "not-required",
+          },
+          {
+            environmentId: offline.environmentId,
+            label: "Offline",
+            online: false,
+            canMutate: false,
+            nativeTrust: "not-required",
+          },
+          {
+            environmentId: eligible.environmentId,
+            label: "Browser eligible",
+            online: true,
+            canMutate: true,
+            nativeTrust: "not-required",
+          },
+          {
+            environmentId: EnvironmentId.make("unrelated"),
+            label: "Unrelated",
+            online: true,
+            canMutate: true,
+            nativeTrust: "not-required",
+          },
+        ],
+      }),
+    ).toEqual({ environmentId: eligible.environmentId, projectId: eligible.id });
   });
 });

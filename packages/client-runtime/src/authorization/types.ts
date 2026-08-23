@@ -351,6 +351,11 @@ export interface HostedHubNode {
   readonly grant: { readonly id: string; readonly role: RelayEffectiveRole };
   readonly effectiveRole: RelayEffectiveRole;
   readonly presence: { readonly online: boolean; readonly lastHeartbeatAt: number | null };
+  /** Optional during Hub rollout; absent capabilities preserve current browser eligibility. */
+  readonly capabilities?: {
+    readonly repositoryIdentity: boolean;
+    readonly nativeClientRequired: boolean;
+  };
 }
 
 export interface HostedRelayTicket {

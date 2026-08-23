@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { hostedHubController, useHostedHubStore } from "./state";
+import { setHostedWorkspaceBackgrounded } from "./hostedConnectionCoordinator";
 
 /**
  * The single hosted browser lifecycle wiring: visibilitychange / offline /
@@ -18,14 +19,19 @@ export function useHostedBrowserLifecycle(): void {
     if (accountStatus !== "authenticated") return;
     const resumeIfVisible = () => {
       if (document.visibilityState === "visible" && navigator.onLine) {
-        void hostedHubController.resumeBrowser();
+        void hostedHubController.resumeBrowser().then(() => setHostedWorkspaceBackgrounded(false));
       }
     };
     const onVisibility = () => {
-      if (document.visibilityState === "hidden") hostedHubController.suspendBrowser("hidden");
-      else resumeIfVisible();
+      if (document.visibilityState === "hidden") {
+        void setHostedWorkspaceBackgrounded(true);
+        hostedHubController.suspendBrowser("hidden");
+      } else resumeIfVisible();
     };
-    const onOffline = () => hostedHubController.suspendBrowser("offline");
+    const onOffline = () => {
+      void setHostedWorkspaceBackgrounded(true);
+      hostedHubController.suspendBrowser("offline");
+    };
     const onOnline = () => resumeIfVisible();
     const onPageShow = () => resumeIfVisible();
     document.addEventListener("visibilitychange", onVisibility);

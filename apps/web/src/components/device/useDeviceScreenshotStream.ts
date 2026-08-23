@@ -27,6 +27,23 @@ export function hostedScreenshotDelayMs(base64PayloadBytes: number): number {
   );
 }
 
+export function hostedScreenshotLoad(
+  base64PayloadBytes: number,
+  visibleStreams: number,
+): {
+  readonly intervalMs: number;
+  readonly bytesPerSecondPerStream: number;
+  readonly aggregateBytesPerSecond: number;
+} {
+  const intervalMs = hostedScreenshotDelayMs(base64PayloadBytes);
+  const bytesPerSecondPerStream = Math.ceil((Math.max(0, base64PayloadBytes) * 1_000) / intervalMs);
+  return {
+    intervalMs,
+    bytesPerSecondPerStream,
+    aggregateBytesPerSecond: bytesPerSecondPerStream * Math.max(0, Math.floor(visibleStreams)),
+  };
+}
+
 function decodeBase64(value: string): Uint8Array {
   const decoded = atob(value);
   const bytes = new Uint8Array(decoded.length);

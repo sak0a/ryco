@@ -53,12 +53,13 @@ import { ServerStateBootstrap } from "./ServerStateBootstrap";
 
 export interface RootAppShellProps {
   readonly authGateState: {
-    readonly status: "authenticated" | "hosted-static" | "hosted-hub";
+    readonly status: "authenticated" | "hosted-static" | "hosted-hub" | "hosted-cached";
   };
 }
 
 export function RootAppShell({ authGateState }: RootAppShellProps) {
-  const primaryEnvironmentAuthenticated = authGateState.status !== "hosted-static";
+  const primaryEnvironmentAuthenticated =
+    authGateState.status === "authenticated" || authGateState.status === "hosted-hub";
   const localTracingAllowed = authGateState.status === "authenticated";
   // The presentation-tier seam lives inside `AppSidebarLayout`: the provider
   // and the route subtree stay mounted identically for both tiers (a tier

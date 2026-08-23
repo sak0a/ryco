@@ -2286,6 +2286,7 @@ export class HostedHubApi {
       const node = objectValue(value);
       const grant = objectValue(node.grant);
       const presence = objectValue(node.presence);
+      const capabilities = node.capabilities === undefined ? null : objectValue(node.capabilities);
       const nodeId = decodeContract(RelayNodeId, node.id, "invalid_response");
       if (
         typeof node.environmentId !== "string" ||
@@ -2304,11 +2305,14 @@ export class HostedHubApi {
         !roleValue(grant.role) ||
         !roleValue(node.effectiveRole) ||
         typeof presence.online !== "boolean" ||
-        !nullableNumber(presence.lastHeartbeatAt)
+        !nullableNumber(presence.lastHeartbeatAt) ||
+        (capabilities !== null &&
+          (typeof capabilities.repositoryIdentity !== "boolean" ||
+            typeof capabilities.nativeClientRequired !== "boolean"))
       ) {
         throw new HostedHubApiError("invalid_response", 502);
       }
-      return {
+      const decodedNode = {
         id: nodeId,
         environmentId: EnvironmentId.make(node.environmentId),
         label: node.label,
@@ -2327,6 +2331,14 @@ export class HostedHubApi {
           lastHeartbeatAt: presence.lastHeartbeatAt,
         },
       } as unknown as HostedHubNode;
+      return capabilities
+        ? Object.assign(decodedNode, {
+            capabilities: {
+              repositoryIdentity: capabilities.repositoryIdentity as boolean,
+              nativeClientRequired: capabilities.nativeClientRequired as boolean,
+            },
+          })
+        : decodedNode;
     });
   }
 

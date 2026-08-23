@@ -251,7 +251,7 @@ describe("user-facing return to the node directory (All nodes)", () => {
     expect(state.nodes).toHaveLength(1);
     expect(state.nodes[0]).toMatchObject({ id: routedNode.id, revokedAt: null });
     expect(state.nodes[0]!.presence.online).toBe(true);
-    expect(win.location.pathname).toBe("/");
+    expect(win.location.pathname).toBe("/nodes");
 
     // A second tap mid- or post-teardown is a handled no-op: no duplicate
     // "/" history entry is pushed.
@@ -260,7 +260,7 @@ describe("user-facing return to the node directory (All nodes)", () => {
     expect(leaveHostedNodeRouteToDirectory()).toBe(true);
     history.flush();
     expect(win.entries().length).toBe(entryCountAfterLeave);
-    expect(win.location.pathname).toBe("/");
+    expect(win.location.pathname).toBe("/nodes");
 
     // No sensitive material reached the URL or history entries.
     const serialized = JSON.stringify(win.entries());

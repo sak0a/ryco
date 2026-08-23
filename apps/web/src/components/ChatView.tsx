@@ -258,6 +258,12 @@ import {
   retainDesktopWorkspaceVcsScope,
   useDesktopWorkspaceState,
 } from "../platform/desktopWorkspace";
+import {
+  retainHostedWorkspaceProviderScope,
+  retainHostedWorkspaceThreadScope,
+  retainHostedWorkspaceVcsScope,
+} from "../hostedHub/hostedConnectionScopes";
+import { useHostedWorkspaceState } from "../hostedHub/hostedConnectionCoordinator";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { Button } from "./ui/button";
 import {
@@ -471,6 +477,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const settings = useSettings();
   const desktopWorkspace = useDesktopWorkspaceState();
+  const hostedWorkspace = useHostedWorkspaceState();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -977,12 +984,14 @@ export default function ChatView(props: ChatViewProps) {
   });
 
   useEffect(() => {
+    const releaseHostedDemand = retainHostedWorkspaceThreadScope(environmentId, threadId);
     if (routeKind !== "server") {
-      return;
+      return releaseHostedDemand;
     }
     const releaseSubscription = retainThreadDetailSubscription(environmentId, threadId);
     const releaseDesktopDemand = retainDesktopWorkspaceThreadScope(environmentId, threadId);
     return () => {
+      releaseHostedDemand();
       releaseDesktopDemand();
       releaseSubscription();
     };
@@ -1093,8 +1102,13 @@ export default function ChatView(props: ChatViewProps) {
       const desktopMachine = desktopWorkspace.machines.find(
         (machine) => machine.environmentId === p.environmentId,
       );
+      const hostedMachine = hostedWorkspace.machines.find(
+        (machine) => machine.environmentId === p.environmentId,
+      );
+      const workspaceMachine =
+        hostedWorkspace.status === "signed-out" ? desktopMachine : hostedMachine;
       const label =
-        desktopMachine?.label ??
+        workspaceMachine?.label ??
         resolveEnvironmentOptionLabel({
           isPrimary,
           environmentId: p.environmentId,
@@ -1106,8 +1120,8 @@ export default function ChatView(props: ChatViewProps) {
         projectId: p.id,
         label,
         isPrimary,
-        ...(desktopWorkspace.status === "ready"
-          ? { disabled: desktopMachine?.canMutate !== true }
+        ...(desktopWorkspace.status === "ready" || hostedWorkspace.status === "ready"
+          ? { disabled: workspaceMachine?.canMutate !== true }
           : {}),
       });
     }
@@ -1121,6 +1135,7 @@ export default function ChatView(props: ChatViewProps) {
     activeProject,
     allProjects,
     desktopWorkspace,
+    hostedWorkspace,
     projectGroupingSettings,
     primaryEnvironmentId,
     savedEnvironmentRegistry,
@@ -1945,12 +1960,28 @@ export default function ChatView(props: ChatViewProps) {
 
   useEffect(() => {
     if (routeKind !== "server" || !gitCwd) return;
-    return retainDesktopWorkspaceVcsScope(environmentId, gitCwd);
+    const releaseDesktop = retainDesktopWorkspaceVcsScope(environmentId, gitCwd);
+    const releaseHosted = retainHostedWorkspaceVcsScope(environmentId, gitCwd);
+    return () => {
+      releaseHosted();
+      releaseDesktop();
+    };
   }, [environmentId, gitCwd, routeKind]);
 
   useEffect(() => {
     if (routeKind !== "server") return;
-    return retainDesktopWorkspaceProviderScope(environmentId, activeProviderStatus?.instanceId);
+    const releaseDesktop = retainDesktopWorkspaceProviderScope(
+      environmentId,
+      activeProviderStatus?.instanceId,
+    );
+    const releaseHosted = retainHostedWorkspaceProviderScope(
+      environmentId,
+      activeProviderStatus?.instanceId,
+    );
+    return () => {
+      releaseHosted();
+      releaseDesktop();
+    };
   }, [activeProviderStatus?.instanceId, environmentId, routeKind]);
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
@@ -2036,11 +2067,14 @@ export default function ChatView(props: ChatViewProps) {
     },
     [draftId, envLocked, logicalProjectEnvironments, setDraftThreadContext],
   );
-  const desktopExecutionTargetUnavailable =
+  const executionTargetMachine =
+    hostedWorkspace.status === "signed-out"
+      ? desktopWorkspace.machines.find((machine) => machine.environmentId === environmentId)
+      : hostedWorkspace.machines.find((machine) => machine.environmentId === environmentId);
+  const workspaceExecutionTargetUnavailable =
     routeKind === "draft" &&
-    desktopWorkspace.status === "ready" &&
-    desktopWorkspace.machines.find((machine) => machine.environmentId === environmentId)
-      ?.canMutate !== true;
+    (desktopWorkspace.status === "ready" || hostedWorkspace.status === "ready") &&
+    executionTargetMachine?.canMutate !== true;
 
   const activeTerminalGroup =
     terminalState.terminalGroups.find(
@@ -4404,7 +4438,7 @@ export default function ChatView(props: ChatViewProps) {
                   phase={phase}
                   isConnecting={isConnecting}
                   isSendBusy={
-                    isSendBusy || !dispatchCapability.allowed || desktopExecutionTargetUnavailable
+                    isSendBusy || !dispatchCapability.allowed || workspaceExecutionTargetUnavailable
                   }
                   isPreparingWorktree={isPreparingWorktree}
                   environmentUnavailable={activeEnvironmentUnavailableState}

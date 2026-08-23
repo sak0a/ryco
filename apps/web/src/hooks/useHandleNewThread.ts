@@ -1,4 +1,4 @@
-import { scopedProjectKey, scopeProjectRef } from "@ryco/client-runtime/scoped";
+import { scopedProjectKey } from "@ryco/client-runtime/scoped";
 import {
   DEFAULT_AGENT_TOKEN_MODE,
   DEFAULT_RUNTIME_MODE,
@@ -21,7 +21,12 @@ import { resolveThreadRouteTarget } from "../threadRoutes";
 import { useUiStateStore } from "../uiStateStore";
 import { useSettings } from "./useSettings";
 import { useDesktopWorkspaceState } from "../platform/desktopWorkspace";
-import { resolveDesktopDefaultProjectRef } from "../platform/desktopWorkspaceTarget";
+import { resolveWorkspaceDefaultProjectRef } from "../platform/desktopWorkspaceTarget";
+import {
+  nodeIdForHostedEnvironment,
+  useHostedWorkspaceState,
+} from "../hostedHub/hostedConnectionCoordinator";
+import { adoptRoutedHostedNode } from "../hostedHub/nodeRoutes";
 
 function useNewThreadState() {
   const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
@@ -31,6 +36,10 @@ function useNewThreadState() {
     defaultAgentTokenMode: settings.defaultAgentTokenMode,
   }));
   const router = useRouter();
+  const adoptHostedTarget = useCallback((environmentId: ScopedProjectRef["environmentId"]) => {
+    const nodeId = nodeIdForHostedEnvironment(environmentId);
+    if (nodeId) adoptRoutedHostedNode(nodeId);
+  }, []);
   const getCurrentRouteTarget = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
     return resolveThreadRouteTarget(currentRouteParams);
@@ -89,6 +98,7 @@ function useNewThreadState() {
           ) {
             return;
           }
+          adoptHostedTarget(projectRef.environmentId);
           await router.navigate({
             to: "/draft/$draftId",
             params: { draftId: storedDraftThread.draftId },
@@ -137,13 +147,14 @@ function useNewThreadState() {
         });
         applyStickyState(draftId);
 
+        adoptHostedTarget(projectRef.environmentId);
         await router.navigate({
           to: "/draft/$draftId",
           params: { draftId },
         });
       })();
     },
-    [getCurrentRouteTarget, projectGroupingSettings, router, projects],
+    [adoptHostedTarget, getCurrentRouteTarget, projectGroupingSettings, router, projects],
   );
 }
 
@@ -187,15 +198,34 @@ export function useHandleNewThread() {
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadState();
   const desktopWorkspace = useDesktopWorkspaceState();
+  const hostedWorkspace = useHostedWorkspaceState();
+  const workspace = useMemo(
+    () =>
+      hostedWorkspace.status === "signed-out"
+        ? {
+            machines: desktopWorkspace.machines,
+            ready: desktopWorkspace.status === "ready",
+            localEnvironmentId: desktopWorkspace.localEnvironmentId,
+          }
+        : {
+            machines: hostedWorkspace.machines.map((machine) => ({
+              ...machine,
+              online: machine.presence.online,
+            })),
+            ready: hostedWorkspace.status === "ready",
+            localEnvironmentId: null,
+          },
+    [desktopWorkspace, hostedWorkspace],
+  );
   const defaultProjectRef = useMemo(
     () =>
-      resolveDesktopDefaultProjectRef({
+      resolveWorkspaceDefaultProjectRef({
         orderedProjects,
-        workspace: desktopWorkspace,
+        ...workspace,
         logicalKey: (project) =>
           deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings),
       }),
-    [desktopWorkspace, orderedProjects, projectGroupingSettings],
+    [orderedProjects, projectGroupingSettings, workspace],
   );
 
   return {

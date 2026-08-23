@@ -43,6 +43,7 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
 }));
 
 import { hostedHubController, useHostedHubStore } from "../hostedHub/state";
+import { installHostedNodeHistory, resetHostedNodeRoutesForTests } from "../hostedHub/nodeRoutes";
 import { resetHubRoutesForTests } from "../hostedHub/hubRoutes";
 import type { HostedHubNode } from "../hostedHub/types";
 import { syncDocumentPresentationTier } from "../lib/presentationTier";
@@ -188,6 +189,8 @@ const ENTRY_SURFACES: readonly EntrySurface[] = [
   {
     name: "connecting",
     seed: () => {
+      window.history.replaceState(window.history.state, "", `/node/${selectedNode.id}`);
+      installHostedNodeHistory();
       useHostedHubStore.setState({
         accountStatus: "authenticated",
         account,
@@ -204,6 +207,8 @@ const ENTRY_SURFACES: readonly EntrySurface[] = [
   {
     name: "failure",
     seed: () => {
+      window.history.replaceState(window.history.state, "", `/node/${selectedNode.id}`);
+      installHostedNodeHistory();
       useHostedHubStore.setState({
         accountStatus: "authenticated",
         account,
@@ -243,6 +248,7 @@ async function sweepEntrySurfaces(options: {
   expect(surfaces.length).toBeGreaterThan(0);
   for (const surface of surfaces) {
     hostedHubController.resetForTests();
+    resetHostedNodeRoutesForTests();
     resetHubRoutesForTests();
     surface.seed();
     mounted = await render(<HostedHubRoot />);
@@ -298,6 +304,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     localStorage.clear();
     sessionStorage.clear();
     hostedHubController.resetForTests();
+    resetHostedNodeRoutesForTests();
     resetHubRoutesForTests();
     navigate.mockClear();
   });
@@ -306,6 +313,7 @@ describe("acceptance matrix — hosted entry surfaces and connection controls", 
     await mounted?.unmount();
     mounted = null;
     hostedHubController.resetForTests();
+    resetHostedNodeRoutesForTests();
     resetHubRoutesForTests();
     vi.restoreAllMocks();
     document.body.innerHTML = "";

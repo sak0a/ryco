@@ -164,6 +164,27 @@ describe("hosted node route surfaces", () => {
     expect(fakeWindow!.location.pathname).toBe("/");
   });
 
+  it("rejects a colliding thread id when the node segment does not own its environment", async () => {
+    const first = node("node_aaaaaaaaaaaaaaaaaaaaaa");
+    const second = node("node_bbbbbbbbbbbbbbbbbbbbbb");
+    installRoute(`/node/${first.id}/${second.environmentId}/same_thread`);
+    const selectNode = vi.spyOn(hostedHubController, "selectNode").mockResolvedValue();
+    useHostedHubStore.setState({
+      accountStatus: "authenticated",
+      account,
+      session,
+      directoryStatus: "ready",
+      nodes: [first, second],
+    });
+    mounted = await render(<HostedHubRoot />);
+
+    await expect.element(page.getByRole("heading", { name: /^Your nodes?$/ })).toBeVisible();
+    await expect
+      .element(page.getByRole("alert"))
+      .toHaveTextContent(/not in your authorized node directory/);
+    expect(selectNode).not.toHaveBeenCalled();
+  });
+
   it("normalizes a malformed node route to the directory with a bounded explanation", async () => {
     installRoute("/node/a%20b/env_a/t_1");
     useHostedHubStore.setState({
@@ -242,8 +263,8 @@ describe("hosted node route surfaces", () => {
 
     fakeWindow!.history.back();
     await expect.element(page.getByRole("heading", { name: /^Your nodes?$/ })).toBeVisible();
-    await vi.waitFor(() => expect(useHostedHubStore.getState().selectedNode).toBeNull());
-    expect(useHostedHubStore.getState().selectionStatus).toBe("none");
+    expect(useHostedHubStore.getState().selectedNode?.id).toBe(target.id);
+    expect(useHostedHubStore.getState().selectionStatus).toBe("online");
     expect(fakeWindow!.location.pathname).toBe("/");
   });
 
