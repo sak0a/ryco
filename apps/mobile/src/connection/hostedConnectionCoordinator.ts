@@ -5,6 +5,7 @@ import type {
   HostedRycoSessionStatus,
 } from "@ryco/client-runtime/authorization";
 import type { EnvironmentConnection } from "@ryco/client-runtime/connection";
+import { UNIFIED_WORKSPACE_MAX_CONNECTIONS } from "@ryco/client-runtime/state/workspace";
 import type { EnvironmentId, RelayEffectiveRole } from "@ryco/contracts";
 
 import type { MobileHostedScopeLeaseStore } from "./hostedConnectionScopes";
@@ -15,7 +16,7 @@ import type { MobileHostedScopeLeaseStore } from "./hostedConnectionScopes";
  * 15% of one peer's 20-token upgrade burst per client), with scope leases,
  * background release, staggered wake-up, and a five-node bound assertion.
  */
-export const MAX_MOBILE_HOSTED_CONNECTIONS = 3;
+export const MAX_MOBILE_HOSTED_CONNECTIONS = UNIFIED_WORKSPACE_MAX_CONNECTIONS;
 export const MOBILE_HOSTED_WAKE_STAGGER_MS = 750;
 
 export interface MobileHostedConnectionState {

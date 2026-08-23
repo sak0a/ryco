@@ -1,4 +1,5 @@
 import type { EnvironmentId, ThreadId } from "@ryco/contracts";
+import { UNIFIED_WORKSPACE_SCOPE_LEASE_TTL_MS } from "@ryco/client-runtime/state/workspace";
 
 /**
  * Mounted mobile work that makes a hosted environment non-evictable.
@@ -20,7 +21,7 @@ export interface RetainedMobileHostedConnectionScope {
 }
 
 export const MOBILE_SCOPE_REPORT_INTERVAL_MS = 25_000;
-export const MOBILE_SCOPE_LEASE_TTL_MS = 45_000;
+export const MOBILE_SCOPE_LEASE_TTL_MS = UNIFIED_WORKSPACE_SCOPE_LEASE_TTL_MS;
 
 export interface MobileHostedScopeLeaseReport {
   readonly observedAt: number;

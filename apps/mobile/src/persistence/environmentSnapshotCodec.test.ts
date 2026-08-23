@@ -13,6 +13,7 @@ import {
   captureEnvironmentSnapshotRecord,
   decodeStoredEnvironmentSnapshot,
   ENVIRONMENT_SNAPSHOT_SCHEMA_VERSION,
+  toWorkspaceMetadataSnapshot,
 } from "./environmentSnapshotCodec";
 
 const ENV = "env-codec" as EnvironmentId;
@@ -123,6 +124,27 @@ describe("environment snapshot codec", () => {
     const record = captureEnvironmentSnapshotRecord(environmentState(["thread-1"]), ENV, 123);
     const { payload } = boundStoredEnvironmentSnapshot(record);
     expect(decodeStoredEnvironmentSnapshot(payload, ENV)).toEqual(record);
+  });
+
+  it("projects the byte-compatible mobile record into shared metadata", () => {
+    const record = captureEnvironmentSnapshotRecord(environmentState(["thread-1"]), ENV, 123);
+    const shared = toWorkspaceMetadataSnapshot(record);
+    expect(shared).toMatchObject({
+      schemaVersion: 1,
+      environmentId: ENV,
+      capturedAt: 123,
+      projects: [{ environmentId: ENV, id: "project-1" }],
+      threads: [
+        {
+          environmentId: ENV,
+          id: "thread-1",
+          projectId: "project-1",
+          deliveryUnknown: false,
+        },
+      ],
+    });
+    expect(shared).not.toHaveProperty("messages");
+    expect(shared.threads[0]).not.toHaveProperty("session");
   });
 
   it("discards a record whose schemaVersion literal does not match — a bump in either direction", () => {

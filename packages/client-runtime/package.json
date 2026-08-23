@@ -87,6 +87,10 @@
     "./state/device": {
       "types": "./src/state/device/index.ts",
       "import": "./src/state/device/index.ts"
+    },
+    "./state/workspace": {
+      "types": "./src/state/workspace/index.ts",
+      "import": "./src/state/workspace/index.ts"
     }
   },
   "scripts": {
