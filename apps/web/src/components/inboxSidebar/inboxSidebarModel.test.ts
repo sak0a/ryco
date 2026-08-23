@@ -14,6 +14,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildInboxSidebarSections,
+  buildPrimaryInboxSidebarEnvironment,
   type InboxSidebarEnvironment,
   type InboxSidebarFilters,
 } from "./inboxSidebarModel";
@@ -76,6 +77,41 @@ const ALL_FILTERS: InboxSidebarFilters = {
   environmentId: null,
   status: "all",
 };
+
+describe("buildPrimaryInboxSidebarEnvironment", () => {
+  it("identifies a connected primary environment as This device", () => {
+    expect(
+      buildPrimaryInboxSidebarEnvironment({
+        environmentId: ENV_A,
+        connectionState: "connected",
+        hydratedFromCache: false,
+      }),
+    ).toEqual({
+      environmentId: ENV_A,
+      label: "This device",
+      connectionState: "connected",
+      stale: false,
+      role: "owner",
+      trust: "not-required",
+      deliveryUnknown: false,
+    });
+  });
+
+  it("keeps an actually cached primary environment visibly stale", () => {
+    expect(
+      buildPrimaryInboxSidebarEnvironment({
+        environmentId: ENV_A,
+        connectionState: "offline",
+        hydratedFromCache: true,
+      }),
+    ).toMatchObject({
+      label: "This device",
+      connectionState: "offline",
+      stale: true,
+      staleDetail: "Offline · last known",
+    });
+  });
+});
 
 function build(input: {
   threads: ReadonlyArray<SidebarThreadSummary>;
